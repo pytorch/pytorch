@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
     parametrize,
+    instantiate_parametrized_tests,
     xfailIfTorchDynamo,
     skipIfXpu,
 )
@@ -2286,7 +2287,54 @@ class TestMetaKernelConv(TestCase):
 
 
 
+@instantiate_parametrized_tests
 class TestMetaKernelRegistrations(TestCase):
+    @parametrize("shift", ["lshift", "rshift"])
+    @parametrize("other_kind", ["Scalar", "Tensor"])
+    def test_shift_out_symbolic_fake_tensor(self, shift, other_kind):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        op_packet = getattr(torch.ops.aten, f"__{shift}__")
+        functional = getattr(op_packet, other_kind)
+        out_op = getattr(op_packet, f"{other_kind}_out")
+        with FakeTensorMode(shape_env=shape_env):
+            size = shape_env.create_unbacked_symint()
+            inp = torch.empty(size, dtype=torch.int32)
+            out = torch.empty(size, dtype=torch.int32)
+            other = (
+                16
+                if other_kind == "Scalar"
+                else torch.empty(size, dtype=torch.int32)
+            )
+
+            functional_result = functional(inp, other)
+            result = out_op(inp, other, out=out)
+
+        self.assertIs(result, out)
+        self.assertEqual(result.shape, functional_result.shape)
+        self.assertEqual(result.stride(), functional_result.stride())
+        self.assertEqual(result.dtype, functional_result.dtype)
+        self.assertEqual(result.layout, functional_result.layout)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("shift", ["lshift", "rshift"])
+    @parametrize("other_kind", ["Scalar", "Tensor"])
+    def test_shift_out_dtype_mismatch(self, shift, other_kind):
+        op_packet = getattr(torch.ops.aten, f"__{shift}__")
+        op = getattr(op_packet, f"{other_kind}_out")
+        inp = torch.empty(3, dtype=torch.int32, device="meta")
+        out = torch.empty(0, dtype=torch.float32, device="meta")
+        other = (
+            1
+            if other_kind == "Scalar"
+            else torch.empty(3, dtype=torch.int32, device="meta")
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            op(inp, other, out=out)
+
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_aminmax_out_dtype_mismatch(self):
         inp = torch.rand(10, 10, device="meta")
