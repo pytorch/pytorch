@@ -1,0 +1,347 @@
+import contextlib
+import os
+import threading
+
+import torch
+
+from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+    build_flex_attn_bwd_module,
+)
+
+
+{{gen_defines()}}
+
+
+_launcher = None
+_launcher_lock = threading.Lock()
+_compiled_dispatchers = {}
+_compiled_dispatchers_lock = threading.Lock()
+
+
+def _get_launcher():
+    global _launcher
+    launcher = _launcher
+    if launcher is None:
+        with _launcher_lock:
+            launcher = _launcher
+            if launcher is None:
+                launcher = build_flex_attn_bwd_module(
+                    BATCH_SIZE,
+                    NUM_HEADS,
+                    SEQ_LEN,
+                    QK_HEAD_DIM,
+                    V_HEAD_DIM,
+                    "bf16",
+                    SPARSE_Q_BLOCK_SIZE,
+                    SPARSE_KV_BLOCK_SIZE,
+                    scale=float(SM_SCALE),
+                    max_partial_blocks=MAX_PARTIAL_BLOCKS,
+                    max_full_blocks=MAX_FULL_BLOCKS,
+                    block_mask_batch=BLOCK_MASK_BATCH,
+                    block_mask_heads=BLOCK_MASK_HEADS,
+                    causal_partial_blocks=CAUSAL_PARTIAL_BLOCKS,
+                    mask_program=MASK_PROGRAM,
+                    mask_program_output=MASK_PROGRAM_OUTPUT,
+                    mask_buffer_shapes=MASK_BUFFER_SHAPES,
+                    mask_buffer_strides=MASK_BUFFER_STRIDES,
+                    q_stride=Q_STRIDE,
+                    k_stride=K_STRIDE,
+                    v_stride=V_STRIDE,
+                    out_stride=OUT_STRIDE,
+                    do_stride=DO_STRIDE,
+                    dq_stride=DQ_STRIDE,
+                    dk_stride=DK_STRIDE,
+                    dv_stride=DV_STRIDE,
+                    lse_in_log2=True,
+                )
+                _launcher = launcher
+    return launcher
+
+
+def _inductor_tensor_arg(tensor):
+    return flyc.from_torch_tensor(tensor).mark_layout_dynamic()
+
+
+def _run_compiled(launcher, compile_args, dispatch_args):
+    device = getattr(dispatch_args[0], "device", None)
+    device_index = getattr(device, "index", None)
+    compiled = _compiled_dispatchers.get(device_index)
+    if compiled is not None:
+        compiled(*dispatch_args)
+        return
+
+    dispatch_after_wait = False
+    with _compiled_dispatchers_lock:
+        compiled = _compiled_dispatchers.get(device_index)
+        if compiled is None:
+            compiled = flyc.compile(launcher, *compile_args)
+            _compiled_dispatchers[device_index] = compiled
+        else:
+            dispatch_after_wait = True
+
+    if dispatch_after_wait:
+        compiled(*dispatch_args)
+
+
+@contextlib.contextmanager
+def _temporary_env(updates):
+    old_values = {key: os.environ.get(key) for key in updates}
+    os.environ.update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
+    try:
+        yield
+    finally:
+        for key, old_value in old_values.items():
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
+def _run_flydsl_backward(
+    Q,
+    K,
+    V,
+    OUT,
+    D_OUT,
+    LSE,
+    DK,
+    DV,
+    KV_NUM_BLKS,
+    KV_IDX,
+    FULL_KV_NUM_BLKS,
+    FULL_KV_IDX,
+    DELTA,
+    CP_Q,
+    IP_Q,
+    CF_Q,
+    IF_Q,
+    CP_K,
+    IP_K,
+    CF_K,
+    IF_K,
+{% for index in range(MASK_BUFFER_COUNT) %}
+    MASK_BUFFER_{{index}},
+{% endfor %}
+    DQ,
+    stream,
+):
+    launcher = _get_launcher()
+{% for index in range(MASK_BUFFER_COUNT, 4) %}
+    MASK_BUFFER_{{index}} = KV_NUM_BLKS
+{% endfor %}
+    compile_args = (
+        _inductor_tensor_arg(Q),
+        _inductor_tensor_arg(K),
+        _inductor_tensor_arg(V),
+        _inductor_tensor_arg(OUT),
+        _inductor_tensor_arg(LSE),
+        _inductor_tensor_arg(D_OUT),
+        _inductor_tensor_arg(DQ),
+        _inductor_tensor_arg(DK),
+        _inductor_tensor_arg(DV),
+        _inductor_tensor_arg(KV_NUM_BLKS),
+        _inductor_tensor_arg(KV_IDX),
+        _inductor_tensor_arg(FULL_KV_NUM_BLKS),
+        _inductor_tensor_arg(FULL_KV_IDX),
+        _inductor_tensor_arg(DELTA),
+        _inductor_tensor_arg(CP_Q),
+        _inductor_tensor_arg(IP_Q),
+        _inductor_tensor_arg(CF_Q),
+        _inductor_tensor_arg(IF_Q),
+        _inductor_tensor_arg(CP_K),
+        _inductor_tensor_arg(IP_K),
+        _inductor_tensor_arg(CF_K),
+        _inductor_tensor_arg(IF_K),
+        _inductor_tensor_arg(MASK_BUFFER_0),
+        _inductor_tensor_arg(MASK_BUFFER_1),
+        _inductor_tensor_arg(MASK_BUFFER_2),
+        _inductor_tensor_arg(MASK_BUFFER_3),
+        stream,
+    )
+    dispatch_args = (
+        Q,
+        K,
+        V,
+        OUT,
+        LSE,
+        D_OUT,
+        DQ,
+        DK,
+        DV,
+        KV_NUM_BLKS,
+        KV_IDX,
+        FULL_KV_NUM_BLKS,
+        FULL_KV_IDX,
+        DELTA,
+        CP_Q,
+        IP_Q,
+        CF_Q,
+        IF_Q,
+        CP_K,
+        IP_K,
+        CF_K,
+        IF_K,
+        MASK_BUFFER_0,
+        MASK_BUFFER_1,
+        MASK_BUFFER_2,
+        MASK_BUFFER_3,
+        stream,
+    )
+    if os.environ.get("FLYDSL_COMPILE_ONLY") == "1":
+        flyc.compile(launcher, *compile_args)
+    else:
+        _run_compiled(launcher, compile_args, dispatch_args)
+    return DQ
+
+
+{% if MASK_BUFFER_COUNT == 1 %}
+{{def_kernel(
+    "Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV",
+    "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX",
+    "DELTA", "CP_Q", "IP_Q", "CF_Q", "IF_Q",
+    "CP_K", "IP_K", "CF_K", "IF_K", "MASK_BUFFER_0",
+)}}
+{% elif MASK_BUFFER_COUNT == 2 %}
+{{def_kernel(
+    "Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV",
+    "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX",
+    "DELTA", "CP_Q", "IP_Q", "CF_Q", "IF_Q",
+    "CP_K", "IP_K", "CF_K", "IF_K", "MASK_BUFFER_0", "MASK_BUFFER_1",
+)}}
+{% elif MASK_BUFFER_COUNT == 3 %}
+{{def_kernel(
+    "Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV",
+    "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX",
+    "DELTA", "CP_Q", "IP_Q", "CF_Q", "IF_Q",
+    "CP_K", "IP_K", "CF_K", "IF_K",
+    "MASK_BUFFER_0", "MASK_BUFFER_1", "MASK_BUFFER_2",
+)}}
+{% elif MASK_BUFFER_COUNT == 4 %}
+{{def_kernel(
+    "Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV",
+    "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX",
+    "DELTA", "CP_Q", "IP_Q", "CF_Q", "IF_Q",
+    "CP_K", "IP_K", "CF_K", "IF_K",
+    "MASK_BUFFER_0", "MASK_BUFFER_1", "MASK_BUFFER_2", "MASK_BUFFER_3",
+)}}
+{% else %}
+{{def_kernel(
+    "Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV",
+    "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX",
+    "DELTA", "CP_Q", "IP_Q", "CF_Q", "IF_Q",
+    "CP_K", "IP_K", "CF_K", "IF_K",
+)}}
+{% endif %}
+    DQ = {{get_output()}}
+    return _run_flydsl_backward(
+        Q,
+        K,
+        V,
+        OUT,
+        D_OUT,
+        LSE,
+        DK,
+        DV,
+        KV_NUM_BLKS,
+        KV_IDX,
+        FULL_KV_NUM_BLKS,
+        FULL_KV_IDX,
+        DELTA,
+        CP_Q,
+        IP_Q,
+        CF_Q,
+        IF_Q,
+        CP_K,
+        IP_K,
+        CF_K,
+        IF_K,
+{% for index in range(MASK_BUFFER_COUNT) %}
+        MASK_BUFFER_{{index}},
+{% endfor %}
+        DQ,
+        stream,
+    )
+
+
+def {{kernel_name}}_precompile(
+    precompile_shapes,
+    precompile_strides,
+    precompile_dtypes,
+    device_index=0,
+    device_capability=None,
+    flydsl_gpu_arch=None,
+):
+    """Warm FlyDSL's disk cache using metadata-only fake tensors."""
+    del device_index, device_capability
+
+    def _fake_proxy(name):
+        return torch.empty_strided(
+            tuple(precompile_shapes[name]),
+            tuple(precompile_strides[name]),
+            dtype=getattr(torch, precompile_dtypes[name]),
+            device="cpu",
+        )
+
+    env_updates = {"FLYDSL_COMPILE_ONLY": "1"}
+    if flydsl_gpu_arch is not None:
+        env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
+
+    with _temporary_env(env_updates):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            Q = _fake_proxy("Q")
+            K = _fake_proxy("K")
+            V = _fake_proxy("V")
+            OUT = _fake_proxy("OUT")
+            D_OUT = _fake_proxy("D_OUT")
+            LSE = _fake_proxy("LSE")
+            DK = _fake_proxy("DK")
+            DV = _fake_proxy("DV")
+            KV_NUM_BLKS = _fake_proxy("KV_NUM_BLKS")
+            KV_IDX = _fake_proxy("KV_IDX")
+            FULL_KV_NUM_BLKS = _fake_proxy("FULL_KV_NUM_BLKS")
+            FULL_KV_IDX = _fake_proxy("FULL_KV_IDX")
+            DELTA = _fake_proxy("DELTA")
+            CP_Q = _fake_proxy("CP_Q")
+            IP_Q = _fake_proxy("IP_Q")
+            CF_Q = _fake_proxy("CF_Q")
+            IF_Q = _fake_proxy("IF_Q")
+            CP_K = _fake_proxy("CP_K")
+            IP_K = _fake_proxy("IP_K")
+            CF_K = _fake_proxy("CF_K")
+            IF_K = _fake_proxy("IF_K")
+{% for index in range(MASK_BUFFER_COUNT) %}
+            MASK_BUFFER_{{index}} = _fake_proxy("MASK_BUFFER_{{index}}")
+{% endfor %}
+            DQ = _fake_proxy("output")
+            {{kernel_name}}_main(
+                Q,
+                K,
+                V,
+                OUT,
+                D_OUT,
+                LSE,
+                DK,
+                DV,
+                KV_NUM_BLKS,
+                KV_IDX,
+                FULL_KV_NUM_BLKS,
+                FULL_KV_IDX,
+                DELTA,
+                CP_Q,
+                IP_Q,
+                CF_Q,
+                IF_Q,
+                CP_K,
+                IP_K,
+                CF_K,
+                IF_K,
+{% for index in range(MASK_BUFFER_COUNT) %}
+                MASK_BUFFER_{{index}},
+{% endfor %}
+                DQ,
+                stream=0,
+            )
