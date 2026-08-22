@@ -998,7 +998,10 @@ class _TorchDynamoContext:
                         self._package.initialize(
                             fn_key, result.dynamo, ignore_inlined_sources=False
                         )
-                        self._package.install(result.backends)
+                        self._package.install(
+                            result.backends,
+                            isolate_recompiles_id=self._isolate_recompiles_id,
+                        )
                     except RuntimeError:
                         log.warning(
                             "Failed to load entry from dynamo cache", exc_info=True
