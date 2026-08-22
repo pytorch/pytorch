@@ -214,7 +214,7 @@ class _CommModeModuleTracker(ModTracker):
         for handle in self.register_forward_hook_handles.values():
             handle.remove()
 
-    def print_paramater_info(self):
+    def print_parameter_info(self):
         print(self.module_parameters_dict)
 
     def print_sharding_info(self):
