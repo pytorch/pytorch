@@ -232,6 +232,16 @@ def register_error(
     return register_force_test(op, ordered_impl)
 
 
+def write_complex_out(
+    out: ComplexTensor,
+    result: ComplexTensor,
+) -> ComplexTensor:
+    re, im = split_complex_arg(result)
+    out.re.copy_(re)
+    out.im.copy_(im)
+    return out
+
+
 def register_binary_nonlinear(
     op: OpType,
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
@@ -241,12 +251,16 @@ def register_binary_nonlinear(
     def impl(
         a: ComplexTensor, b: ComplexTensor, *args: Any, **kwargs: Any
     ) -> ComplexTensor:
+        out = kwargs.pop("out", None)
         out_dt, (a, b) = promote_tensors(a, b)
         a_r, a_i = split_complex_arg(a)
         b_r, b_i = split_complex_arg(b)
         real = op(a_r, b_r, *args, **kwargs) - op(a_i, b_i, *args, **kwargs)
         imag = op(a_r, b_i, *args, **kwargs) + op(a_i, b_r, *args, **kwargs)
-        return ComplexTensor(real, imag).to(out_dt)  # type: ignore[bad-return]
+        result = ComplexTensor(real, imag).to(out_dt)  # type: ignore[bad-return]
+        if out is not None:
+            return write_complex_out(out, result)
+        return result
 
     func_name = _get_func_name(op)
     impl.__name__ = func_name
@@ -263,6 +277,7 @@ def register_simple(
     def impl(
         self: ComplexTensor, *args: Any, dtype: torch.dtype | None = None, **kwargs: Any
     ) -> ComplexTensor:
+        out = kwargs.pop("out", None)
         x, y = split_complex_tensor(self)
         if dtype is not None and dtype not in COMPLEX_TO_REAL:
             raise RuntimeError(
@@ -284,7 +299,16 @@ def register_simple(
         out_flat = [
             ComplexTensor(ui, vi) for ui, vi in zip(u_flat, v_flat, strict=False)
         ]
-        return tree_unflatten(out_flat, u_spec)
+        result = tree_unflatten(out_flat, u_spec)
+        if out is not None:
+            outputs = out if isinstance(out, (tuple, list)) else [out]
+            results = result if isinstance(result, (tuple, list)) else [result]
+
+            for output, computed in zip(outputs, results, strict=True):
+                write_complex_out(output, computed)
+
+            return out
+        return result
 
     func_name = _get_func_name(op)
     impl.__name__ = func_name
