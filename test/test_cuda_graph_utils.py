@@ -2,6 +2,9 @@
 
 """Tests for CUDA graph utilities: kernel annotations and graph introspection."""
 
+import json
+import subprocess
+import sys
 import unittest
 
 import torch
@@ -2177,6 +2180,161 @@ class TestCuptiAnnotationBackend(TestCase):
             torch.cuda.graph(
                 torch.cuda.CUDAGraph(), annotation_config={"backend_name": "cupti"}
             )
+
+
+def _kernel_capture_available():
+    """Whether cubin capture can be exercised: cupti-python present, the generated
+    CUPTI stubs built, and CUPTI able to subscribe."""
+    try:
+        from torch.cuda import _graph_kernel_capture
+    except ImportError:
+        return False
+    return _graph_kernel_capture.is_available()
+
+
+@skipIfRocm
+@requires_cuda
+@requires_cuda_python_bindings
+@unittest.skipIf(
+    not _kernel_capture_available(), "requires cupti-python and a usable CUPTI"
+)
+class TestGraphKernelCapture(TestCase):
+    """Cubins are copied as CUPTI announces each module load, so a captured graph's
+    kernels can be recovered by name without the driver ever handing back an image."""
+
+    def setUp(self):
+        from torch.cuda import _graph_kernel_capture
+
+        _graph_kernel_capture.clear()
+        self.addCleanup(_graph_kernel_capture.clear)
+        self.addCleanup(_graph_kernel_capture.stop)
+
+    def test_captured_image_is_compiled_not_source(self):
+        """CUPTI reports the module image after the driver has compiled it.
+
+        The whole scheme leans on this: because the bytes are post-JIT, the load
+        options the original module was built with are already baked into them and
+        do not have to be recorded or replayed. If this ever regressed to reporting
+        source, PTX modules would stop being captured at all.
+        """
+        from cuda.bindings import driver
+
+        from torch.cuda import _graph_kernel_capture
+
+        torch.empty(1, device="cuda")
+        torch.cuda.synchronize()
+        major, minor = torch.cuda.get_device_capability()
+        ptx = f""".version 8.7
+.target sm_{major}{minor}
+.address_size 64
+.visible .entry cupti_probe(.param .u64 p) {{ ret; }}
+""".encode()
+
+        self.assertTrue(_graph_kernel_capture.start())
+        before = set(_graph_kernel_capture.captured_modules())
+        err, _module = driver.cuModuleLoadData(ptx)
+        self.assertEqual(err, driver.CUresult.CUDA_SUCCESS)
+        new = set(_graph_kernel_capture.captured_modules()) - before
+        self.assertEqual(len(new), 1)
+
+        image = _graph_kernel_capture.captured_modules()[new.pop()]
+        self.assertTrue(image.startswith(b"\x7fELF"), "expected a compiled cubin")
+        self.assertGreater(len(image), len(ptx))
+        # and it is usable with no load options of its own
+        err, library = driver.cuLibraryLoadData(image, [], [], 0, [], [], 0)
+        self.assertEqual(err, driver.CUresult.CUDA_SUCCESS)
+        try:
+            found, _kernel = driver.cuLibraryGetKernel(library, b"cupti_probe")
+            self.assertEqual(found, driver.CUresult.CUDA_SUCCESS)
+        finally:
+            driver.cuLibraryUnload(library)
+
+    def test_start_is_idempotent_and_stop_releases(self):
+        from torch.cuda import _graph_kernel_capture as cap
+
+        self.assertTrue(cap.start())
+        self.assertTrue(cap.is_started())
+        self.assertTrue(cap.start())
+        cap.stop()
+        self.assertFalse(cap.is_started())
+        cap.stop()
+
+    def test_captures_elf_images_while_armed(self):
+        from torch.cuda import _graph_kernel_capture as cap
+
+        self.assertTrue(cap.start())
+        # matrix_exp pulls in modules that a plain elementwise op would not
+        torch.linalg.matrix_exp(torch.randn(64, 64, device="cuda"))
+        torch.cuda.synchronize()
+        modules = cap.captured_modules()
+        self.assertGreater(len(modules), 0)
+        for image in modules.values():
+            self.assertEqual(image[:4], b"\x7fELF")
+
+        cap.stop()
+        before = len(cap.captured_modules())
+        torch.linalg.matrix_exp(torch.randn(96, 96, device="cuda"))
+        torch.cuda.synchronize()
+        self.assertEqual(len(cap.captured_modules()), before)
+
+    # Modules load lazily and are announced once, so capture must be armed before
+    # any CUDA work. That cannot hold inside a shared test process -- earlier tests
+    # have already loaded the modules a graph would use -- so this runs standalone.
+    _RESOLVE_SCRIPT = """
+import json
+import torch
+from cuda.bindings import driver
+from torch.cuda._utils import _check_cuda_bindings_driver as chk
+from torch.cuda import _graph_kernel_capture as cap
+
+assert cap.start(), "could not arm cubin capture"
+
+a = torch.randn(512, 512, device="cuda")
+big = torch.randn(1 << 16, device="cuda")
+
+def work():
+    return torch.nn.functional.gelu(a @ a).sum() + torch.sum(big)
+
+stream = torch.cuda.Stream()
+stream.wait_stream(torch.cuda.current_stream())
+with torch.cuda.stream(stream):
+    for _ in range(3):
+        work()
+torch.cuda.current_stream().wait_stream(stream)
+graph = torch.cuda.CUDAGraph(keep_graph=True)
+with torch.cuda.graph(graph):
+    work()
+
+raw = graph.raw_cuda_graph()
+*_, count = chk(driver.cuGraphGetNodes(raw, 0))
+nodes, *_ = chk(driver.cuGraphGetNodes(raw, count))
+wanted = set()
+for node in nodes:
+    if chk(driver.cuGraphNodeGetType(node)) != driver.CUgraphNodeType.CU_GRAPH_NODE_TYPE_KERNEL:
+        continue
+    params = chk(driver.cuGraphKernelNodeGetParams(node))
+    wanted.add(chk(driver.cuFuncGetName(params.func)).decode())
+
+found = set()
+for image in cap.captured_modules().values():
+    err, lib = driver.cuLibraryLoadData(image, [], [], 0, [], [], 0)
+    if err != driver.CUresult.CUDA_SUCCESS:
+        continue
+    for name in wanted - found:
+        if driver.cuLibraryGetKernel(lib, name.encode())[0] == driver.CUresult.CUDA_SUCCESS:
+            found.add(name)
+
+print(json.dumps({"wanted": sorted(wanted), "found": sorted(found)}))
+"""
+
+    def test_graph_kernels_resolve_from_captured_images(self):
+        out = subprocess.check_output([sys.executable, "-c", self._RESOLVE_SCRIPT])
+        result = json.loads(out.decode().strip().splitlines()[-1])
+        self.assertGreater(len(result["wanted"]), 0)
+        # Every kernel the graph launches is recoverable by name from the images
+        # captured on the way in -- including any the driver JIT-generated, which
+        # exist in no file on disk.
+        self.assertEqual(result["found"], result["wanted"])
 
 
 if __name__ == "__main__":

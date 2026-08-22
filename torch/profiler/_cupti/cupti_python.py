@@ -244,6 +244,68 @@ class _UDActivityConfig(ctypes.Structure):
     ]
 
 
+# --- resource-callback ctypes structs -------------------------------------
+class _ResourceData(ctypes.Structure):
+    """Mirror of CUpti_ResourceData (cupti_callbacks.h), the cbdata a
+    CUPTI_CB_DOMAIN_RESOURCE callback receives. Member order/types must match
+    CUPTI. The per-resource payload hangs off resourceDescriptor."""
+
+    _fields_ = [
+        ("context", ctypes.c_void_p),
+        # union { CUstream stream; } -- one pointer member
+        ("resourceHandle", ctypes.c_void_p),
+        ("resourceDescriptor", ctypes.c_void_p),
+    ]
+
+
+class _ModuleResourceData(ctypes.Structure):
+    """Mirror of CUpti_ModuleResourceData (cupti_callbacks.h), the payload of a
+    MODULE_LOADED resource callback. Member order/types must match CUPTI; ctypes
+    supplies the same padding after moduleId that the C compiler does."""
+
+    _fields_ = [
+        ("moduleId", ctypes.c_uint32),
+        ("cubinSize", ctypes.c_size_t),
+        ("pCubin", ctypes.c_void_p),
+    ]
+
+
+def read_module_resource(cbdata: int) -> tuple[int, bytes] | None:
+    """``(module id, cubin image)`` for a RESOURCE / MODULE_LOADED callback, or
+    None when the module was announced without a usable image.
+
+    ``cbdata`` is a ``CUpti_ResourceData*``; the module payload hangs off its
+    ``resourceDescriptor`` -- reading the callback data as a
+    ``CUpti_ModuleResourceData`` directly instead yields a zero size and a
+    garbage id. Copies the image, since CUPTI only guarantees the pointer for the
+    duration of the callback, and checks the ELF magic so a future ABI change
+    surfaces as "no image" rather than as garbage bytes.
+
+    Requiring ELF costs nothing, because the callback reports the image *after* the
+    driver has compiled it: handing cuModuleLoadData 102 bytes of PTX produces a
+    ~5 KB ELF cubin here. That is also why the JIT options of the original load do
+    not have to be recorded -- their effect is already in these bytes. Compiling one
+    PTX source twice under different CU_JIT_MAX_REGISTERS yields two different
+    images, each of which reloads with no options at all.
+
+    Read through these mirrors rather than cupti-python's ModuleResourceData
+    because that binding decodes pCubin as a NUL-terminated C string, truncating
+    a binary image at its first zero byte.
+    """
+    resource = _ResourceData.from_address(cbdata)
+    if not resource.resourceDescriptor:
+        return None
+    module = _ModuleResourceData.from_address(int(resource.resourceDescriptor))
+    size = int(module.cubinSize)
+    ptr = int(module.pCubin or 0)
+    if not ptr or size <= 0:
+        return None
+    image = ctypes.string_at(ptr, size)
+    if not image.startswith(b"\x7fELF"):
+        return None
+    return int(module.moduleId), image
+
+
 # cuptiSubscribe requires a valid CUpti_CallbackFunc, but the monitor drives
 # collection through the activity API, not callbacks -- a no-op suffices. Kept
 # alive process-wide so the ctypes trampoline isn't garbage-collected.

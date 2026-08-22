@@ -171,5 +171,82 @@ class TestPyLibCupti(TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
 
+@unittest.skipIf(not TEST_CUPTI, "requires cupti-python")
+class TestResourceCallbackStructs(TestCase):
+    """The ctypes mirrors of CUpti_ResourceData / CUpti_ModuleResourceData that
+    read_module_resource() uses. No GPU needed: the callback data is synthesized,
+    which is also the only way to cover the rejection paths."""
+
+    def _structs(self):
+        from torch.profiler._cupti.cupti_python import (
+            _ModuleResourceData,
+            _ResourceData,
+        )
+
+        return _ResourceData, _ModuleResourceData
+
+    def test_layout_matches_the_abi(self):
+        _ResourceData, _ModuleResourceData = self._structs()
+        # CUpti_ResourceData: context, resourceHandle union, resourceDescriptor
+        self.assertEqual(
+            ctypes.sizeof(_ResourceData), 3 * ctypes.sizeof(ctypes.c_void_p)
+        )
+        self.assertEqual(_ResourceData.resourceDescriptor.offset, 16)
+        # CUpti_ModuleResourceData: uint32 then two 8-byte members, so the
+        # compiler's padding after moduleId must be reproduced.
+        self.assertEqual(_ModuleResourceData.moduleId.offset, 0)
+        self.assertEqual(_ModuleResourceData.cubinSize.offset, 8)
+        self.assertEqual(_ModuleResourceData.pCubin.offset, 16)
+
+    def _make_callback_data(self, image, *, module_id=7, with_descriptor=True):
+        """A CUpti_ResourceData pointing at a CUpti_ModuleResourceData for `image`."""
+        _ResourceData, _ModuleResourceData = self._structs()
+        buf = ctypes.create_string_buffer(image, len(image)) if image else None
+        module = _ModuleResourceData(
+            moduleId=module_id,
+            cubinSize=len(image) if image else 0,
+            pCubin=ctypes.cast(buf, ctypes.c_void_p) if buf else None,
+        )
+        resource = _ResourceData(
+            context=None,
+            resourceHandle=None,
+            resourceDescriptor=(
+                ctypes.cast(ctypes.byref(module), ctypes.c_void_p)
+                if with_descriptor
+                else None
+            ),
+        )
+        # keep the buffers alive for the caller's use of the address
+        return ctypes.addressof(resource), (resource, module, buf)
+
+    def test_reads_the_image_through_the_descriptor(self):
+        from torch.profiler._cupti.cupti_python import read_module_resource
+
+        image = b"\x7fELF" + bytes(range(256)) + b"\x00" * 16 + b"tail"
+        cbdata, keep = self._make_callback_data(image, module_id=11)
+        got = read_module_resource(cbdata)
+        self.assertIsNotNone(got)
+        module_id, recovered = got
+        self.assertEqual(module_id, 11)
+        # the whole image, not truncated at the embedded NUL bytes
+        self.assertEqual(recovered, image)
+        del keep
+
+    def test_rejects_missing_descriptor_and_non_elf(self):
+        from torch.profiler._cupti.cupti_python import read_module_resource
+
+        cbdata, keep = self._make_callback_data(b"\x7fELFxx", with_descriptor=False)
+        self.assertIsNone(read_module_resource(cbdata))
+        del keep
+
+        cbdata, keep = self._make_callback_data(b"not-an-elf")
+        self.assertIsNone(read_module_resource(cbdata))
+        del keep
+
+        cbdata, keep = self._make_callback_data(b"")
+        self.assertIsNone(read_module_resource(cbdata))
+        del keep
+
+
 if __name__ == "__main__":
     run_tests()
