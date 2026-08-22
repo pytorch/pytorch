@@ -458,6 +458,10 @@ class TestOptimRenewed(TestCase):
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable", "fused")
         )
+        # This test intentionally uses CPU parameters regardless of the device suite.
+        all_optim_inputs = [
+            i for i in all_optim_inputs if not i.kwargs.get("capturable", False)
+        ]
         kwarg_updates, schedulers_constructors = optim_info.metadata_for_sparse
 
         if with_lrsched and len(schedulers_constructors) == 0:
@@ -1323,8 +1327,8 @@ class TestOptimRenewed(TestCase):
         # would look like, which is basically CPU tensors with fused/capturable flag = True.
         optim_cls = optim_info.optim_cls
         opt_name = optim_cls.__name__
-        if opt_name in ("SGD", "Adagrad") and impl == "capturable":
-            # Capturable SGD/Adagrad does not exist
+        if opt_name == "SGD" and impl == "capturable":
+            # Capturable SGD does not exist
             self.skipTest(f"{opt_name} does not currently support capturable")
         if _get_device_type(device) == "cpu":
             self.skipTest("Test is only for non-cpu devices")
