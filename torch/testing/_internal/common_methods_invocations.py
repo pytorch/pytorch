@@ -2051,8 +2051,12 @@ def sample_inputs_multinomial(self, device, dtype, requires_grad, **kwargs):
     ]
 
     for shape, num_samples, kwargs in cases:
+        # Use low=1 so no weight rounds to exactly 0 in low-precision dtypes
+        # (e.g. bfloat16). The replacement=False cases draw num_samples equal to
+        # the category count, so any zero-probability category would make the
+        # draw impossible without replacement.
         t = make_tensor(shape, dtype=dtype, device=device,
-                        low=0, high=None,
+                        low=1, high=None,
                         requires_grad=requires_grad)
         yield SampleInput(t, num_samples, **kwargs)
 
