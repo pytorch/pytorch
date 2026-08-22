@@ -3,8 +3,8 @@ import unittest
 
 import torch
 from torch._inductor import config
-from torch._inductor.template_heuristics.registry import _HEURISTIC_CACHE
-from torch._inductor.template_heuristics.triton import (
+from torch._inductor.heuristics.registry import _HEURISTIC_CACHE
+from torch._inductor.heuristics.template.triton import (
     BlackwellGPUGemmConfig,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
@@ -31,7 +31,20 @@ def has_tlx() -> bool:
         return False
 
 
-torch.set_float32_matmul_precision("high")
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("high")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
 
 
 @instantiate_parametrized_tests
@@ -364,7 +377,7 @@ class TestBlackwellTMAStoreFusion(TestCase):
 
         test_config = self._make_tma_store_test_config(epilogue_subtile)
         # Ensure the heuristic cache is populated, then patch mm_configs.
-        from torch._inductor.template_heuristics.registry import get_template_heuristic
+        from torch._inductor.heuristics.template.registry import get_template_heuristic
 
         _cache_keys = [
             ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
@@ -421,7 +434,7 @@ class TestBlackwellTMAStoreFusion(TestCase):
 
         test_config = self._make_tma_store_test_config(epilogue_subtile)
         # Ensure the heuristic cache is populated, then patch mm_configs.
-        from torch._inductor.template_heuristics.registry import get_template_heuristic
+        from torch._inductor.heuristics.template.registry import get_template_heuristic
 
         _cache_keys = [
             ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
@@ -494,7 +507,7 @@ class TestBlackwellTMALoadFusion(TestCase):
         W = torch.randn(N, K, dtype=torch.bfloat16, device=GPU_TYPE)
 
         test_config = self._make_tma_load_test_config(epilogue_subtile=epilogue_subtile)
-        from torch._inductor.template_heuristics.registry import get_template_heuristic
+        from torch._inductor.heuristics.template.registry import get_template_heuristic
 
         _cache_keys = [
             ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
@@ -550,7 +563,7 @@ class TestBlackwellTMALoadFusion(TestCase):
         bias = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE)
 
         test_config = self._make_tma_load_test_config(epilogue_subtile=epilogue_subtile)
-        from torch._inductor.template_heuristics.registry import get_template_heuristic
+        from torch._inductor.heuristics.template.registry import get_template_heuristic
 
         _cache_keys = [
             ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),
@@ -605,7 +618,7 @@ class TestBlackwellTMALoadFusion(TestCase):
         bias = torch.randn(N, dtype=torch.bfloat16, device=GPU_TYPE)
 
         test_config = self._make_tma_load_test_config(epilogue_subtile=epilogue_subtile)
-        from torch._inductor.template_heuristics.registry import get_template_heuristic
+        from torch._inductor.heuristics.template.registry import get_template_heuristic
 
         _cache_keys = [
             ("triton::blackwell_ws_persistent_device_tma", "cuda", "mm"),

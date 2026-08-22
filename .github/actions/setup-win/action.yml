@@ -59,7 +59,8 @@ runs:
         set -x
 
         # Create new py_tmp env with python-version
-        ${CONDA} create -y -n py_tmp python=${PYTHON_VERSION} intel-openmp libuv
+        # Pin openssl=3.5.6: 3.5.7 breaks Windows cert-store parsing (ASN1: NOT_ENOUGH_DATA)
+        ${CONDA} create -y -n py_tmp python=${PYTHON_VERSION} intel-openmp libuv "openssl=3.5.6"
 
         PYTHON3=$(${CONDA_RUN} -n py_tmp which python3)
         EXIT_CODE=$?

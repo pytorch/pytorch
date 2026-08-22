@@ -3,6 +3,7 @@
 import re
 import sys
 import unittest
+from types import SimpleNamespace
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
@@ -23,6 +24,12 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    skipIfRocm,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
+)
 
 
 try:
@@ -31,6 +38,70 @@ except ImportError:
     from test_aot_inductor import (  # @manual=fbcode//caffe2/test/inductor:test_aot_inductor-library
         AOTIRunnerUtil,
     )
+
+
+class TestMemoryPlanningOutputGroups(TestCase):
+    class FakeBuffer:
+        def __init__(self, name):
+            self._name = name
+
+        def get_name(self):
+            return self._name
+
+    class FakeOutputNode:
+        def get_name(self):
+            return "OUTPUT"
+
+    @staticmethod
+    def make_line(cls, *args):
+        line = object.__new__(cls)
+        line.wrapper = None
+        if cls.__name__ == "AllocateLine":
+            (line.node,) = args
+            line.comm_buffer = False
+        else:
+            line.node, line.reused_as = args
+            line.delete_old = True
+            line.comm_buffer = False
+        return line
+
+    def compute_single_group(self, *, graph_outputs=(), scheduler_buffers=None):
+        from torch._inductor.codegen.memory_planning import MemoryPlanner
+        from torch._inductor.codegen.wrapper import AllocateLine, ReuseLine
+        from torch._inductor.virtualized import V
+
+        old = self.FakeBuffer("buf16")
+        alias = self.FakeBuffer("buf48")
+        fake_graph = SimpleNamespace(
+            get_output_names=lambda: list(graph_outputs),
+            scheduler=SimpleNamespace(name_to_buf=scheduler_buffers or {}),
+        )
+
+        planner = MemoryPlanner(wrapper=None)
+        lines = [
+            self.make_line(AllocateLine, old),
+            self.make_line(ReuseLine, old, alias),
+        ]
+        with V.set_graph_handler(fake_graph):
+            planner.compute_buffer_groups(lines)
+
+        self.assertEqual(len(planner.buffer_groups), 1)
+        return planner.buffer_groups[0]
+
+    def test_reused_graph_output_group_is_output(self):
+        group = self.compute_single_group(graph_outputs=("buf48",))
+        self.assertEqual(group.names, ["buf16", "buf48"])
+        self.assertTrue(group.is_output)
+
+    def test_reused_scheduler_output_user_group_is_output(self):
+        scheduler_buffers = {
+            "buf48": SimpleNamespace(
+                users=[SimpleNamespace(node=self.FakeOutputNode())],
+            )
+        }
+        group = self.compute_single_group(scheduler_buffers=scheduler_buffers)
+        self.assertEqual(group.names, ["buf16", "buf48"])
+        self.assertTrue(group.is_output)
 
 
 @requires_gpu()
@@ -70,6 +141,7 @@ class TestMemoryPlanning(TestCase):
         ).check("buf1 = alloc_from_pool(pool1, align(4*s77*s77),").run(code)
         self.assertTrue(same(f(*args), result))
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180122")
     def test_cpp_wrapper(self):
         f, args = self._generate(device=GPU_TYPE)
         compiled = torch.compile(f, dynamic=True)
@@ -104,6 +176,10 @@ class TestMemoryPlanning(TestCase):
         ).check_next("aoti_torch__alloc_from_pool(pool1, 0").run(code)
         self.assertTrue(same(f(*args), result))
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/168171",
+    )
     @config.patch({"triton.autotune_at_compile_time": False})
     def test_unbacked_symint(self):
         # when allocation's size has unbacked symints
