@@ -14,7 +14,7 @@ import torch
 from torch.utils._ordered_set import OrderedSet
 
 from . import ir
-from .exc import SubgraphLoweringException
+from .exc import SubgraphBufferCreationException, SubgraphLoweringException
 from .graph import GraphLowering
 from .ops_handler import OpsHandler, SimpleCSEHandler
 from .virtualized import ops, V, WrapperHandler
@@ -92,7 +92,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
             name = self.root_graph.register_buffer(buffer, set_name=set_name)
             return name
         else:
-            raise SubgraphLoweringException(
+            raise SubgraphBufferCreationException(
                 "Buffers cannot be created while lowering a pointwise subgraph. "
                 "This could be for a good reason (e.g. you're calling an op we can't codegen as a pointwise op), "
                 "but it could also be a bug. Please file a bug report if you think this should be supportable."
@@ -131,6 +131,56 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     def output(self, target: str, args: tuple[Any], kwargs: dict[str, Any]) -> None:  # type: ignore[override]
         if len(args) != 1:
             raise AssertionError(f"expected exactly one output arg, got {len(args)}")
+        self.graph_outputs = args[0]
+
+
+class FallbackSubgraphLowering(torch.fx.Interpreter):
+    """
+    Lowers a subgraph containing non-pointwise ops (e.g. mm) by delegating
+    buffer creation to the root graph. Used as fallback in foreach_map when
+    PointwiseSubgraphLowering raises SubgraphLoweringException.
+    """
+
+    graph_outputs: list[ir.IRNode] | None
+    root_graph: GraphLowering
+
+    def __init__(
+        self,
+        gm: torch.fx.GraphModule,
+        root_graph_lowering: GraphLowering,
+    ) -> None:
+        super().__init__(gm)
+        self.graph_outputs = None
+        self.root_graph = root_graph_lowering
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.root_graph, name)
+
+    def register_buffer(self, buffer: ir.Buffer, *, set_name: bool = False) -> str:
+        return self.root_graph.register_buffer(buffer, set_name=set_name)
+
+    def mark_buffer_mutated(self, name: str) -> None:
+        self.root_graph.mark_buffer_mutated(name)
+
+    def call_function(
+        self,
+        target: TargetType,
+        args: Any,
+        kwargs: dict[str, Any],
+    ) -> Any:
+        from .lowering import lowerings
+
+        if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
+            return super().call_function(target, args, kwargs)
+
+        if target not in lowerings:
+            raise SubgraphLoweringException(
+                f"{target} not supported in subgraph, (missing lowering)"
+            )
+        return lowerings[target](*args, **kwargs)
+
+    def output(self, target: str, args: tuple[Any], kwargs: dict[str, Any]) -> None:  # type: ignore[override]
+        assert len(args) == 1
         self.graph_outputs = args[0]
 
 
