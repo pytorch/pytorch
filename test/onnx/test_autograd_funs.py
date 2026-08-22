@@ -9,6 +9,8 @@ from torch.testing._internal import common_utils
 
 
 class TestAutogradFuns(pytorch_test_common.ExportTestCase):
+    hw_classification = common_utils.HardwareClassification.GENERIC
+
     opset_version = 20
     keep_initializers_as_inputs = False
     onnx_shape_inference = True
