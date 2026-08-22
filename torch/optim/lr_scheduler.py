@@ -300,6 +300,37 @@ class LRScheduler:
             self.optimizer, "lr"
         )
 
+    def _extra_repr(self) -> str:
+        """Return the scheduler-specific part of :meth:`__repr__`.
+
+        Subclasses re-implement this to name the settings that define their
+        schedule. Both single-line and multi-line strings are accepted.
+        """
+        return ""
+
+    def __repr__(self) -> str:
+        """Return a readable summary of the scheduler and its settings."""
+        lines = [f"{self.__class__.__name__} ("]
+
+        extra = self._extra_repr()
+        if extra:
+            lines += [f"    {line}" for line in extra.split("\n")]
+
+        # ``ChainedScheduler`` never sets ``last_epoch``, and neither it,
+        # ``SequentialLR`` nor ``ReduceLROnPlateau`` sets ``base_lrs``, so
+        # both are reported only when the subclass actually has them.
+        if hasattr(self, "last_epoch"):
+            lines.append(f"    last_epoch: {self.last_epoch}")
+        if hasattr(self, "base_lrs"):
+            base_lrs = ", ".join(
+                f"{lr.item()}" if isinstance(lr, Tensor) else f"{lr}"
+                for lr in self.base_lrs
+            )
+            lines.append(f"    base_lrs: [{base_lrs}]")
+
+        lines.append(")")
+        return "\n".join(lines)
+
 
 def _warn_get_lr_called_within_step(lr_scheduler: LRScheduler) -> None:
     if not lr_scheduler._get_lr_called_within_step:
@@ -465,6 +496,10 @@ class LambdaLR(LRScheduler):
             for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs, strict=True)
         ]
 
+    @override
+    def _extra_repr(self) -> str:
+        return f"lr_lambdas: {self.lr_lambdas}"
+
 
 class MultiplicativeLR(LRScheduler):
     """Multiply the learning rate of each parameter group by the factor given in the specified function.
@@ -588,6 +623,10 @@ class MultiplicativeLR(LRScheduler):
         else:
             return _param_groups_val_list(self.optimizer, "lr")
 
+    @override
+    def _extra_repr(self) -> str:
+        return f"lr_lambdas: {self.lr_lambdas}"
+
 
 class StepLR(LRScheduler):
     """Decays the learning rate of each parameter group by gamma every step_size epochs.
@@ -674,6 +713,10 @@ class StepLR(LRScheduler):
             base_lr * self.gamma ** (self.last_epoch // self.step_size)
             for base_lr in self.base_lrs
         ]
+
+    @override
+    def _extra_repr(self) -> str:
+        return f"step_size: {self.step_size}\ngamma: {self.gamma}"
 
 
 class MultiStepLR(LRScheduler):
@@ -768,6 +811,11 @@ class MultiStepLR(LRScheduler):
             base_lr * self.gamma ** bisect_right(milestones, self.last_epoch)
             for base_lr in self.base_lrs
         ]
+
+    @override
+    def _extra_repr(self) -> str:
+        milestones = list(self.milestones.elements())
+        return f"milestones: {milestones}\ngamma: {self.gamma}"
 
 
 class ConstantLR(LRScheduler):
@@ -872,6 +920,10 @@ class ConstantLR(LRScheduler):
             * (self.factor + (self.last_epoch >= self.total_iters) * (1 - self.factor))
             for base_lr in self.base_lrs
         ]
+
+    @override
+    def _extra_repr(self) -> str:
+        return f"factor: {self.factor}\ntotal_iters: {self.total_iters}"
 
 
 class LinearLR(LRScheduler):
@@ -1003,6 +1055,14 @@ class LinearLR(LRScheduler):
             for base_lr in self.base_lrs
         ]
 
+    @override
+    def _extra_repr(self) -> str:
+        return (
+            f"start_factor: {self.start_factor}\n"
+            f"end_factor: {self.end_factor}\n"
+            f"total_iters: {self.total_iters}"
+        )
+
 
 class ExponentialLR(LRScheduler):
     """Decays the learning rate of each parameter group by gamma every epoch.
@@ -1077,6 +1137,10 @@ class ExponentialLR(LRScheduler):
             same types as their current ``group["lr"]``\s.
         """
         return [base_lr * self.gamma**self.last_epoch for base_lr in self.base_lrs]
+
+    @override
+    def _extra_repr(self) -> str:
+        return f"gamma: {self.gamma}"
 
 
 class SequentialLR(LRScheduler):
@@ -1233,6 +1297,10 @@ class SequentialLR(LRScheduler):
         for idx, s in enumerate(_schedulers):
             self._schedulers[idx].load_state_dict(s)
 
+    @override
+    def _extra_repr(self) -> str:
+        return f"milestones: {self._milestones}\nschedulers: {self._schedulers}"
+
 
 class PolynomialLR(LRScheduler):
     """Decays the learning rate of each parameter group using a polynomial function in the given total_iters.
@@ -1333,6 +1401,10 @@ class PolynomialLR(LRScheduler):
             )
             for base_lr in self.base_lrs
         ]
+
+    @override
+    def _extra_repr(self) -> str:
+        return f"total_iters: {self.total_iters}\npower: {self.power}"
 
 
 class CosineAnnealingLR(LRScheduler):
@@ -1474,6 +1546,10 @@ class CosineAnnealingLR(LRScheduler):
             for base_lr in self.base_lrs
         ]
 
+    @override
+    def _extra_repr(self) -> str:
+        return f"T_max: {self.T_max}\neta_min: {self.eta_min}"
+
 
 class ChainedScheduler(LRScheduler):
     """Chains a list of learning rate schedulers.
@@ -1579,6 +1655,10 @@ class ChainedScheduler(LRScheduler):
 
         for idx, s in enumerate(_schedulers):
             self._schedulers[idx].load_state_dict(s)
+
+    @override
+    def _extra_repr(self) -> str:
+        return f"schedulers: {self._schedulers}"
 
 
 class ReduceLROnPlateau(LRScheduler):
@@ -1782,6 +1862,19 @@ class ReduceLROnPlateau(LRScheduler):
         self.__dict__.update(state_dict)
         self._init_is_better(
             mode=self.mode, threshold=self.threshold, threshold_mode=self.threshold_mode
+        )
+
+    @override
+    def _extra_repr(self) -> str:
+        return (
+            f"mode: {self.mode}\n"
+            f"factor: {self.factor}\n"
+            f"patience: {self.patience}\n"
+            f"threshold: {self.threshold}\n"
+            f"threshold_mode: {self.threshold_mode}\n"
+            f"cooldown: {self.cooldown}\n"
+            f"min_lrs: {self.min_lrs}\n"
+            f"eps: {self.eps}"
         )
 
 
@@ -2101,6 +2194,24 @@ class CyclicLR(LRScheduler):
             self._scale_fn_custom.__dict__.update(fn)
         self._init_scale_fn()
 
+    @override
+    def _extra_repr(self) -> str:
+        extra = (
+            f"max_lrs: {self.max_lrs}\n"
+            f"total_size: {self.total_size}\n"
+            f"step_ratio: {self.step_ratio}\n"
+            f"mode: {self.mode}\n"
+            f"gamma: {self.gamma}\n"
+            f"scale_mode: {self.scale_mode}\n"
+            f"cycle_momentum: {self.cycle_momentum}"
+        )
+        if self.cycle_momentum:
+            extra += (
+                f"\nbase_momentums: {self.base_momentums}\n"
+                f"max_momentums: {self.max_momentums}"
+            )
+        return extra
+
 
 class CosineAnnealingWarmRestarts(LRScheduler):
     r"""Set the learning rate of each parameter group using a cosine annealing schedule.
@@ -2272,6 +2383,10 @@ class CosineAnnealingWarmRestarts(LRScheduler):
                 _update_param_group_val(param_group, "lr", lr)
 
         self._last_lr = _param_groups_val_list(self.optimizer, "lr")
+
+    @override
+    def _extra_repr(self) -> str:
+        return f"T_0: {self.T_0}\nT_mult: {self.T_mult}\neta_min: {self.eta_min}"
 
 
 class _SchedulePhase(TypedDict):
@@ -2604,3 +2719,7 @@ class OneCycleLR(LRScheduler):
                     group["momentum"] = computed_momentum  # type: ignore[possibly-undefined]
 
         return lrs
+
+    @override
+    def _extra_repr(self) -> str:
+        return f"total_steps: {self.total_steps}\ncycle_momentum: {self.cycle_momentum}"
