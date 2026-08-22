@@ -121,6 +121,20 @@ class NoTritonConfigsError(RuntimeError):
     pass
 
 
+def kernel_dsl_name(fn) -> str:
+    """Name of the DSL a kernel is written in, for diagnostics.
+
+    Gluon kernels compile through Triton and share this autotuning
+    path, but reporting them as Triton kernels misdirects debugging.
+    Matched by class name to avoid importing triton.experimental.
+    """
+    return (
+        "gluon"
+        if any(cls.__name__ == "GluonJITFunction" for cls in type(fn).__mro__)
+        else "triton"
+    )
+
+
 def _should_enable_triton_debug_asserts(inductor_meta: InductorMeta) -> bool:
     """
     Enable Triton debug asserts whenever indirect indexing asserts are on,
@@ -817,8 +831,9 @@ class CachingAutotuner(KernelInterface):
             return
         if self.launchers:
             raise AssertionError("launchers already populated before precompile")
+        dsl = kernel_dsl_name(self.fn)
         if not self.configs:
-            raise NoTritonConfigsError("No triton configs are available")
+            raise NoTritonConfigsError(f"No {dsl} configs are available")
 
         compile_results = []
         exc = None
@@ -829,7 +844,7 @@ class CachingAutotuner(KernelInterface):
                 exc = e
         if len(compile_results) == 0:
             raise NoTritonConfigsError(
-                f"No valid triton configs. {type(exc).__name__}: {exc}"
+                f"No valid {dsl} configs. {type(exc).__name__}: {exc}"
             )
         self.compile_results = compile_results
         self.configs = None
@@ -1090,7 +1105,8 @@ class CachingAutotuner(KernelInterface):
                         self.launchers = [self.compile_by_disabling_pipelining(config)]
                         return
                     raise RuntimeError(
-                        f"No valid triton configs. {type(exc).__name__}: {exc}"
+                        f"No valid {kernel_dsl_name(self.fn)} configs. "
+                        f"{type(exc).__name__}: {exc}"
                     )
             self.launchers = launchers
         finally:
@@ -1380,8 +1396,21 @@ class CachingAutotuner(KernelInterface):
         if not ASTSource:
             raise RuntimeError("Installed triton version too old, please upgrade")
 
+        # Gluon needs its own ASTSource for the extended IR builder.
+        ast_source_class = ASTSource
+        try:
+            from triton.experimental.gluon._runtime import (
+                GluonASTSource,
+                GluonJITFunction,
+            )
+        except ImportError:
+            pass
+        else:
+            if isinstance(self.fn, GluonJITFunction):
+                ast_source_class = GluonASTSource
+
         compile_args = (
-            ASTSource(
+            ast_source_class(
                 self.fn,
                 compile_meta["signature"],
                 compile_meta["constants"],

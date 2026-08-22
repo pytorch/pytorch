@@ -95,7 +95,7 @@ if TYPE_CHECKING:
     from torch.fx.node import Node
     from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 
-    from .codegen.common import WorkspaceArg
+    from .codegen.common import BackendFeature, WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
     from .dependencies import Dep
     from .graph import GraphLowering
@@ -1917,14 +1917,15 @@ def _use_conv_bwd_input_autotune_backend(backend: str) -> bool:
     ]
 
 
-def use_triton_template(
+def _use_template_backend(
     layout: Layout,
-    *,
+    backend: str,
+    template_feature: BackendFeature,
     enable_int32: bool = False,
     enable_float8: bool = False,
     check_max_autotune: bool = True,
 ) -> bool:
-    from .codegen.common import BackendFeature, has_backend_feature
+    from .codegen.common import has_backend_feature
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
@@ -1941,8 +1942,46 @@ def use_triton_template(
         )
         # some callers handle max-autotune checking externally
         and (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
-        and _use_autotune_backend("TRITON")
-        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
+        and _use_autotune_backend(backend)
+        and has_backend_feature(layout.device, template_feature)
+    )
+
+
+def use_triton_template(
+    layout: Layout,
+    *,
+    enable_int32: bool = False,
+    enable_float8: bool = False,
+    check_max_autotune: bool = True,
+) -> bool:
+    from .codegen.common import BackendFeature
+
+    return _use_template_backend(
+        layout,
+        "TRITON",
+        BackendFeature.TRITON_TEMPLATES,
+        enable_int32=enable_int32,
+        enable_float8=enable_float8,
+        check_max_autotune=check_max_autotune,
+    )
+
+
+def use_gluon_template(
+    layout: Layout,
+    *,
+    enable_int32: bool = False,
+    enable_float8: bool = False,
+    check_max_autotune: bool = True,
+) -> bool:
+    from .codegen.common import BackendFeature
+
+    return _use_template_backend(
+        layout,
+        "GLUON",
+        BackendFeature.GLUON_TEMPLATES,
+        enable_int32=enable_int32,
+        enable_float8=enable_float8,
+        check_max_autotune=check_max_autotune,
     )
 
 
@@ -4715,17 +4754,27 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
 
 
 # Make sure to also include your jinja templates within torch_package_data in setup.py, or this function won't be able to find them
-def load_template(name: str, template_dir: Path) -> str:
-    """Load a template file and return its content."""
-    path = template_dir / f"{name}.py.jinja"
-    try:
-        with open(path, encoding="utf-8") as f:
-            return f.read()
-    except UnicodeDecodeError as e:
-        # Name the offending file: a bare UnicodeDecodeError hides which
-        # template is malformed, which is easy to misdiagnose when it surfaces
-        # deep inside kernel lowering.
-        raise ValueError(f"Template {path} is not valid UTF-8: {e}") from e
+def load_template(
+    name: str, template_dir: Path, helpers: list[str] | None = None
+) -> str:
+    """Load a template file and prepend optional helpers."""
+
+    def read(path: Path) -> str:
+        try:
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+        except UnicodeDecodeError as e:
+            # Name the offending file: a bare UnicodeDecodeError hides
+            # which template is malformed, and surfaces deep inside
+            # kernel lowering.
+            raise ValueError(f"Template {path} is not valid UTF-8: {e}") from e
+
+    content_parts = []
+    for helper_name in helpers or []:
+        content_parts.append(read(template_dir / f"{helper_name}.py.jinja"))
+    content_parts.append(read(template_dir / f"{name}.py.jinja"))
+
+    return "\n".join(content_parts)
 
 
 def should_fallback_by_default(node: torch.fx.Node) -> bool:

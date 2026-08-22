@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     serialTest,
     skipIfRocm,
     skipIfRocmArch,
+    subtest,
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
@@ -745,13 +746,29 @@ class TestMatmulCuda(InductorTestCase):
 
     # TODO(future PR): enable compile for torch.nn.functional.grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    @parametrize(
+        "config",
+        [
+            subtest(("TRITON", False), name="no_max_autotune"),
+            subtest(("TRITON", True), name="triton_max_autotune"),
+            subtest(("GLUON", True), name="gluon_max_autotune"),
+        ],
+    )
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    @parametrize("max_autotune", [False, True])
-    def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major, max_autotune):
+    @parametrize("dtype_AB", [torch.bfloat16, torch.float16])
+    def test_grouped_gemm_compiled(
+        self, config, op, a_row_major, b_row_major, dtype_AB
+    ):
+        backend, max_autotune = config
+
+        if backend == "GLUON":
+            major, minor = torch.cuda.get_device_capability()
+            if not (major == 10 and minor in [0, 3]):
+                self.skipTest("Supported only on CC 10.0 and 10.3")
+
         device = "cuda"
-        dtype_AB = torch.bfloat16
         dtype_offset = torch.int32
 
         align = 16 // dtype_AB.itemsize
@@ -763,7 +780,7 @@ class TestMatmulCuda(InductorTestCase):
             options.update(
                 {
                     "max_autotune": True,
-                    "max_autotune_gemm_backends": "TRITON",
+                    "max_autotune_gemm_backends": backend,
                 }
             )
         f = torch.compile(
@@ -854,7 +871,13 @@ class TestMatmulCuda(InductorTestCase):
         else:
             raise AssertionError(f"Invalid op: {op}")
 
-        C_ref = f_ref(A, B.transpose(-2, -1), offs=offs)
+        unsupported_dtype = "cuBLASLt grouped GEMM support"
+        try:
+            C_ref = f_ref(A, B.transpose(-2, -1), offs=offs)
+        except RuntimeError as e:
+            if unsupported_dtype not in str(e):
+                raise
+            self.skipTest(f"grouped_mm rejects {dtype_AB} on this platform: {e}")
         if TEST_WITH_ROCM:
             # Inductor's ROCm extern layout for grouped_mm must match ATen,
             # which returns contiguous outputs on ROCm rather than CUDA's
@@ -865,7 +888,12 @@ class TestMatmulCuda(InductorTestCase):
             with self.assertRaisesRegex(torch._inductor.exc.InductorError, "NoValidChoicesError"):
                 C = f(A, B.transpose(-2, -1), offs=offs)
         else:
-            C = f(A, B.transpose(-2, -1), offs=offs)
+            try:
+                C = f(A, B.transpose(-2, -1), offs=offs)
+            except Exception as e:
+                if unsupported_dtype not in str(e):
+                    raise
+                self.skipTest(f"grouped_mm rejects {dtype_AB} under compile: {e}")
             self.assertEqual(C, C_ref)
 
     def grouped_gemm_cublaslt_common(self, op, jagged_size, a_row_major, b_row_major, dtype):
