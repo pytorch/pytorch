@@ -2392,7 +2392,7 @@ namespace {
       }
     }
 #endif
-#if !defined(CPU_CAPABILITY_SVE256)
+#if !(defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_RVV))
     TYPED_TEST(VecMaskTests, Cast) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;
