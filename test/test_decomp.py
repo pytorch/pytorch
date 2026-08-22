@@ -1217,6 +1217,32 @@ class DecompOneOffTests(TestCase):
         self.assertEqual(exp, exp_ref)
         self.assertFalse(exp.isinf().any())
 
+    @onlyNativeDeviceTypes
+    def test_linspace_integer_endpoints_match_eager(self, device):
+        # Integer linspace must truncate the endpoints like eager; see
+        # https://github.com/pytorch/pytorch/issues/137546
+        dtypes = (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8)
+        for start, end, steps in ((4.9, 3, 5), (-2.5, 2, 5), (4.9, 3, 1)):
+            for dtype in dtypes:
+                if dtype == torch.uint8 and (start < 0 or end < 0):
+                    continue
+                eager = torch.linspace(start, end, steps, dtype=dtype, device=device)
+                msg = f"linspace({start}, {end}, {steps}, dtype={dtype})"
+                ref = torch._refs.linspace(
+                    start, end, steps, dtype=dtype, device=device
+                )
+                self.assertEqual(ref, eager, exact_dtype=True, msg=f"scalar {msg}")
+                ref_tensor = torch._refs.linspace(
+                    torch.tensor(start, device=device),
+                    torch.tensor(end, device=device),
+                    steps,
+                    dtype=dtype,
+                    device=device,
+                )
+                self.assertEqual(
+                    ref_tensor, eager, exact_dtype=True, msg=f"tensor {msg}"
+                )
+
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @onlyCUDA
