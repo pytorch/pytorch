@@ -1543,6 +1543,8 @@ class TritonTemplateKernel(TritonKernel):
                         lookup_output = range_tree.lookup(sympy.S.One, lengths[i])
                         old_symbol = lookup_output.symbol()
                         lookup_output.set_name(name)
+                        V.kernel.range_tree_nodes.pop(old_name, None)
+                        V.kernel.range_tree_nodes[symbol] = lookup_output
                         # Update var_list and var_range
                         range_tree.var_list[range_tree.var_list.index(old_symbol)] = (
                             symbol
