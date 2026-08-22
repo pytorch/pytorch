@@ -275,7 +275,6 @@ def _get_flydsl_flex_attention_forward_config(
         if mask_program is None:
             return None, f"unsupported mask_mod: {mask_reason}"
 
-    decode = sq in (4, 8)
     common_reason = _check_flydsl_common_compatibility(
         query=query,
         key=key,
@@ -284,14 +283,14 @@ def _get_flydsl_flex_attention_forward_config(
         score_mod_other_buffers=score_mod_other_buffers,
         mask_mod_other_buffers=mask_mod_other_buffers,
         allow_mask_mod_buffers=mask_program is not None,
-        allow_strided_bhsd=not decode,
+        allow_strided_bhsd=True,
     )
     if common_reason:
         return None, common_reason
 
-    q_stride = _get_supported_bhsd_stride(query, allow_strided=not decode)
-    k_stride = _get_supported_bhsd_stride(key, allow_strided=not decode)
-    v_stride = _get_supported_bhsd_stride(value, allow_strided=not decode)
+    q_stride = _get_supported_bhsd_stride(query, allow_strided=True)
+    k_stride = _get_supported_bhsd_stride(key, allow_strided=True)
+    v_stride = _get_supported_bhsd_stride(value, allow_strided=True)
     if q_stride is None or k_stride is None or v_stride is None:
         return None, "requires supported Q/K/V BHSD strides"
 
@@ -328,19 +327,9 @@ def _get_flydsl_flex_attention_forward_config(
             return None, "requires matching full BlockMask count/index dimensions"
         max_full_blocks = full_index_shape[-1]
 
-    gqa_group_size = hq // hkv
-    packed_decode_rows = gqa_group_size * sq
     candidate_blocks = 2 * (max_full_blocks + index_shape[-1])
     supports_prefill = (
         sq % 256 == 0 and candidate_blocks <= 512 and mask_shape[2] == sq // 128
-    )
-    supports_decode = (
-        sq in (4, 8)
-        and mask_shape[1] in (1, hkv)
-        and mask_shape[2] == 1
-        and packed_decode_rows % 32 == 0
-        and packed_decode_rows <= 256
-        and max_full_blocks + index_shape[-1] <= 64
     )
     if sk % 128 != 0:
         return None, "requires Sk divisible by 128"
@@ -348,12 +337,11 @@ def _get_flydsl_flex_attention_forward_config(
         return None, "requires sparse Q/KV block sizes of 128"
     if not has_full_blocks or max_full_blocks <= 0 or index_shape[-1] <= 0:
         return None, "requires non-empty partial and full BlockMask storage"
-    if not (supports_prefill or supports_decode):
+    if not supports_prefill:
         return (
             None,
-            "requires prefill Sq divisible by 256 or decode Sq=4/8 with "
-            "(Hq/Hkv)*Sq a multiple of 32 and no greater than 256; "
-            "prefill supports at most 512 stored candidate blocks per CTA",
+            "requires prefill Sq divisible by 256 with matching BlockMask rows "
+            "and at most 512 stored candidate blocks per CTA",
         )
 
     return (
