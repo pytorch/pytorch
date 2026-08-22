@@ -1030,6 +1030,40 @@ def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, tra
     ]
 
 
+def module_error_inputs_torch_nn_Conv2d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(4, 8, kernel_size=3, bias=False),
+                forward_input=FunctionInput(make_input((3, 3))),  # 2D instead of 3D/4D
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d",
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(4, 8, kernel_size=3, bias=False),
+                forward_input=FunctionInput(make_input((2, 6, 8, 8))),  # 6 channels, expects 4
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"channels, but got \d+ channels instead",
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(4, 5, kernel_size=3, groups=3),  # 4 not divisible by 3
+                forward_input=FunctionInput(make_input((2, 4, 8, 8))),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="in_channels must be divisible by groups",
+        ),
+    ]
+
+
 def module_inputs_torch_nn_CosineEmbeddingLoss(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
@@ -4287,6 +4321,7 @@ module_db: list[ModuleInfo] = [
                )),
     ModuleInfo(torch.nn.Conv2d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False),
+               module_error_inputs_func=module_error_inputs_torch_nn_Conv2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                skips=(
