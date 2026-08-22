@@ -5,6 +5,7 @@ from torch import quantize_per_tensor
 from torch.ao.quantization.observer import MinMaxObserver
 from torch.ao.quantization.experimental.observer import APoTObserver
 from torch.ao.quantization.experimental.quantizer import APoTQuantizer, quantize_APoT, dequantize_APoT
+from torch.testing._internal.common_utils import HardwareClassification
 import unittest
 import random
 
@@ -17,6 +18,9 @@ class TestQuantizer(unittest.TestCase):
         * b: 8
         * k: 1
     """
+
+    hw_classification = HardwareClassification.GENERIC
+
     def test_quantize_APoT_rand_k1(self):
         # generate random size of tensor2quantize between 1 -> 20
         size = random.randint(1, 20)
