@@ -186,6 +186,7 @@ from .variables.lists import (
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .variables.misc import (
@@ -510,10 +511,6 @@ class BlockStackEntry:
         ) or not is_graph_break:
             return self.with_context.exit(tx)  # type: ignore[arg-type]
         return None
-
-
-# Called once per frame per fx node created, so keep it out of the hot path.
-_NN_MODULES_FILENAME_RE = re.compile(r".*torch/nn/modules.*")
 
 
 class SpeculationLogDivergence(AssertionError):
@@ -5206,7 +5203,8 @@ class InstructionTranslatorBase(
 
     def is_co_filename_from_nn_modules(self) -> bool:
         filename = getattr(self.f_code, "co_filename", "<unknown>")
-        return _NN_MODULES_FILENAME_RE.match(filename) is not None
+        nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
+        return nn_modules_pattern.match(filename) is not None
 
     def store_global_weakref_by_id(self, prefix: str, value: object) -> str:
         global_name = self.output.install_global_by_id(prefix, weakref.ref(value))
@@ -6560,8 +6558,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        # tuple iterators subclass ListIteratorVariable; deque is a sibling
-        if not isinstance(tos, (ListIteratorVariable, DequeIteratorVariable)):
+        iter_vts = (ListIteratorVariable, TupleIteratorVariable, DequeIteratorVariable)
+        if not isinstance(tos, iter_vts):
             self.pop()
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
