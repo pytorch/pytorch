@@ -50,7 +50,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *example_inputs, backend="inductor", tracer="make_fx", decompositions=None)
+.. py:function:: precompile(fn, *, example_inputs, backend="inductor", tracer="make_fx", decompositions=None)
 
    Ahead-of-time precompile ``fn`` against example inputs, returning a self-contained,
    runnable Python source string plus an acceleration cache as ``(python_code, cache)``.
@@ -62,8 +62,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    .. note::
 
-      With the default ``make_fx`` tracer, capture is non-strict. Control flow is
-      specialized to the example inputs, and shapes are static -- each size is baked in.
+      With the default ``make_fx`` tracer, ``example_inputs`` must contain exactly one
+      positional-argument tuple and capture is non-strict. Control flow is specialized
+      to that example, and shapes are static -- each size is baked in.
       The exception is a tensor dim explicitly marked unbacked (inductor backend only)
       with ``torch._dynamo.decorators.mark_unbacked`` on the inputs before the call; such
       a dim is captured as an unbacked symint, so one artifact serves any runtime size of
@@ -73,26 +74,47 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       model] in ``torch/_precompile.py``. ``torch.compiler.precompile`` is distinct from
       ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` caching mode).
 
-   If ``fn`` runs a backward, the artifact re-runs the whole forward and backward and
-   scatters the resulting parameter gradients onto the runtime model's ``parameters()``
-   ``.grad`` fields, accumulating (``p.grad += g``) exactly like eager ``.backward()`` --
-   so keep your usual ``zero_grad()`` / ``optimizer.step()`` loop. Which params receive a
-   grad is fixed at capture time (frozen or non-contributing params stay ``.grad = None``).
-   The artifact returns ``fn``'s own result (``None`` for a bare ``.backward()`` step), not
-   the gradients.
+      With ``tracer="dynamo"``, every tuple in ``example_inputs`` is executed during
+      capture. Recompilations become guarded variants in the artifact, including
+      automatically dynamic graphs produced when dimensions vary across examples. The
+      artifact drops a serialized guard record only when doing so preserves how every
+      example matches the captured variants. This filtering is at guard-record
+      granularity, so a retained composite record can still contain invariant leaf
+      checks. Conditions removed from the dispatch guards become unchecked caller
+      assumptions; changing one from all capture examples can silently miscompute. The
+      loaded artifact raises only when a call fails every retained guard set, and never
+      compiles a new variant. Graph breaks are not supported yet. Compiled graphs and
+      kernels remain Python source; guard trees and transformed Dynamo bytecode are
+      stored as opaque inline data because they have no Python-source representation.
+      This initial path accepts a Python function with tensor/scalar arguments; closures
+      and ``nn.Module`` arguments are not supported yet because their identity guards
+      are not serializable.
+
+   With ``tracer="make_fx"``, if ``fn`` runs a backward, the artifact re-runs the whole
+   forward and backward and scatters the resulting parameter gradients onto the runtime
+   model's ``parameters()`` ``.grad`` fields, accumulating (``p.grad += g``) exactly like
+   eager ``.backward()`` -- so keep your usual ``zero_grad()`` / ``optimizer.step()``
+   loop. Which params receive a grad is fixed at capture time (frozen or
+   non-contributing params stay ``.grad = None``). The artifact returns ``fn``'s own
+   result (``None`` for a bare ``.backward()`` step), not the gradients.
 
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
        as positional arguments.
-   :param example_inputs: Example positional arguments to ``fn``; the ``nn.Module``
-       arguments are lifted and the rest are the runtime inputs.
+   :param example_inputs: A sequence of positional-argument tuples for ``fn``. The
+       ``make_fx`` tracer requires exactly one tuple. The ``dynamo`` tracer accepts one
+       or more tuples and records the guarded recompilations they exercise. With
+       ``make_fx``, ``nn.Module`` arguments within the tuple are lifted and the rest are
+       runtime inputs.
    :param backend: ``"inductor"`` (default) lowers through AOTAutograd + Inductor;
        ``"eager"`` keeps the captured ATen graph (layout-flexible, no kernels; shapes
        are still specialized to the example).
    :param tracer: capture front-end. ``"make_fx"`` (default) is a non-strict make_fx
-       trace and the only tracer implemented today; ``"dynamo"`` is planned and raises
-       ``NotImplementedError`` for now.
+       trace. ``"dynamo"`` captures guarded specializations and recompilations from a
+       Python function; it currently requires one full graph, rejects graph breaks, and
+       does not yet support closures or ``nn.Module`` arguments.
    :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
-       decomposition function) forwarded to ``make_fx``; defaults to ``None``.
+       decomposition function) forwarded to ``make_fx``; defaults to ``None`` and is not
+       yet supported with ``tracer="dynamo"``.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string (the
        single source of truth for the calling convention) and a binary acceleration
        cache (no weights, no calling-convention metadata; it carries a small
@@ -102,9 +124,20 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    Example::
 
-       python_code, cache = torch.compiler.precompile(lambda m, x: m(x), model, x)
+       python_code, cache = torch.compiler.precompile(
+           lambda m, x: m(x), example_inputs=[(model, x)]
+       )
        f = torch.compiler.precompile.load(python_code, cache)
        out = f(model, x)   # pass the model again at runtime
+
+   Dynamo recompilation and automatic dynamic shapes::
+
+       examples = [(torch.randn(2, 4),), (torch.randn(3, 4),)]
+       python_code, cache = torch.compiler.precompile(
+           fn, example_inputs=examples, tracer="dynamo"
+       )
+       f = torch.compiler.precompile.load(python_code, cache)
+       out = f(torch.randn(7, 4))  # served by the captured dynamic variant
 ```
 
 ```{eval-rst}
