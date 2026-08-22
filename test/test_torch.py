@@ -5418,6 +5418,42 @@ class TestTorchDeviceType(TestCase):
             self._test_memory_format_transformations(
                 device, get_generator(mf, shape), transformation_fn, mf, default_is_preserve=True)
 
+    def test_memory_format_to_non_contiguous(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/132020
+        # and https://github.com/pytorch/pytorch/issues/62027
+        # .to(memory_format=...) must force a copy for non-contiguous tensors
+        # even when dtype/device are unchanged.
+
+        # test #1: expand() produces stride-0 tensor (non-contiguous)
+        x = torch.ones(1, device=device).expand(2)
+        self.assertFalse(x.is_contiguous())
+        y = x.to(memory_format=torch.contiguous_format)
+        self.assertTrue(
+            y.is_contiguous(memory_format=torch.contiguous_format),
+            "expand() tensor must be contiguous after .to(memory_format=contiguous_format)"
+        )
+
+        # test #2: transpose() produces permuted-stride tensor (non-contiguous)
+        x = torch.empty(10, 3, 32, 32, device=device).transpose(0, 1)
+        self.assertFalse(x.is_contiguous())
+        y = x.to(memory_format=torch.contiguous_format)
+        self.assertTrue(
+            y.is_contiguous(memory_format=torch.contiguous_format),
+            "transposed tensor must be contiguous after .to(memory_format=contiguous_format)"
+        )
+
+        # sanity: already-contiguous tensor must not trigger a copy
+        x = torch.empty(10, 3, 32, 32, device=device)
+        self.assertTrue(x.is_contiguous())
+        y = x.to(memory_format=torch.contiguous_format)
+        self.assertEqual(x.data_ptr(), y.data_ptr(), msg="no copy expected for already-contiguous tensor")
+
+        # sanity: channels-last tensor requesting channels-last must not copy
+        x = torch.empty(10, 3, 32, 32, device=device).to(memory_format=torch.channels_last)
+        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
+        y = x.to(memory_format=torch.channels_last)
+        self.assertEqual(x.data_ptr(), y.data_ptr(), msg="no copy expected for already channels-last tensor")
+
     def test_memory_format_type(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):
