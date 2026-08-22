@@ -602,9 +602,21 @@ class CachingAutotuner(KernelInterface):
         self.reset_to_zero_arg_names = (
             [] if reset_to_zero_arg_names is None else reset_to_zero_arg_names
         )
-        self.optimize_mem = optimize_mem
         cached_config = lookup_autotune_config(size_hints, fn)
-        self.configs = [cached_config] if cached_config else configs
+        is_autotune_at_compile_time = (
+            self.inductor_meta.get("autotune_at_compile_time")
+            or inductor_triton_config.autotune_at_compile_time
+        )
+        is_unsafe_kernel = (
+            self.inductor_meta.get("has_indirect_indexing")
+            or self.inductor_meta.get("has_device_assert")
+        )
+        if cached_config:
+            self.configs = [cached_config]
+        elif is_autotune_at_compile_time and is_unsafe_kernel and configs:
+            self.configs = [configs[0]]
+        else:
+            self.configs = configs
 
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
@@ -806,6 +818,19 @@ class CachingAutotuner(KernelInterface):
                 TritonBundler.put_static_autotuner(static_triton_bundle_key, self)
             self._make_launchers()
             self._dynamic_scale_rblock()
+            if (
+                len(self.launchers) == 1
+                and not self.cuda_kernel_saved
+                and (
+                    self.inductor_meta.get("autotune_at_compile_time")
+                    or inductor_triton_config.autotune_at_compile_time
+                )
+            ):
+                if self.device_props.type == "cpu":
+                    if not self.cpu_kernel_saved:
+                        self.save_cpu_kernel(self.launchers[0])
+                else:
+                    self.save_gpu_kernel(None, self.launchers[0])
 
     def _precompile_worker(self):
         if self.compile_results:

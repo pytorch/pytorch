@@ -2308,12 +2308,21 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         # Set minimum number of elements processed per thread.
         self.min_elem_per_thread = 1
         self.kernel_name: str | None = None
+        self.has_indirect_indexing: bool = False
+        self.has_device_assert: bool = False
 
     @contextlib.contextmanager
     def set_current_node(self, node: SchedulerNode) -> Iterator[None]:
         prior = self.current_node
         self.current_node = node
         self.node_to_bounds = node._body.bounds().get_bounds()
+        if hasattr(node, "_body") and node._body is not None:
+            if getattr(node._body, "indirect_vars", None) or node._body.has_op(
+                "indirect_indexing"
+            ):
+                self.has_indirect_indexing = True
+            if node._body.has_op("device_assert_async"):
+                self.has_device_assert = True
         try:
             yield
         finally:
@@ -2982,6 +2991,7 @@ class CSEProxy(DefaultHandler):
                 shape=var.shape,
             )
 
+        self.kernel.has_indirect_indexing = True
         sympy_var = self.parent_handler.indirect_indexing(var, size, check)
         if generate_assert(check):
             assert_lower = not (var.bounds.lower >= 0)
@@ -3035,6 +3045,7 @@ class CSEProxy(DefaultHandler):
         self.kernel.record_op_trace("store", (name, index, value, mode), {})
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        self.kernel.has_device_assert = True
         self.kernel.device_assert_async(cond, msg)
         self.kernel.record_op_trace("device_assert_async", (cond, msg), {})
 

@@ -593,12 +593,49 @@ class TestTritonHeuristics(TestCase):
                 fake_benchmark_all_configs,
             ),
         ):
-            compiled = torch.compile(fn, backend="inductor")
             self.assertEqual(compiled(x), fn(x))
             self.assertEqual(len(benchmark_calls), 1)
 
             self.assertEqual(compiled(x), fn(x))
             self.assertEqual(len(benchmark_calls), 1)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_compile_time_autotune_skips_unsafe_indirect_indexing(self):
+        def fn_unsafe(x, idx):
+            return x[idx]
+
+        x = torch.randn(100, 10, device=GPU_TYPE)
+        idx = torch.tensor([1, 5, 2], device=GPU_TYPE)
+
+        benchmark_calls = []
+
+        def fake_benchmark_all_configs(autotuner, *args, **kwargs):
+            benchmark_calls.append(autotuner.inductor_meta.get("kernel_name"))
+            return {
+                launcher: float(idx) for idx, launcher in enumerate(autotuner.launchers)
+            }
+
+        torch._dynamo.reset()
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "triton.autotune_at_compile_time": True,
+                    "max_autotune_pointwise": True,
+                    "compile_threads": 1,
+                }
+            ),
+            patch.object(
+                CachingAutotuner,
+                "benchmark_all_configs",
+                fake_benchmark_all_configs,
+            ),
+        ):
+            compiled = torch.compile(fn_unsafe, backend="inductor")
+            result = compiled(x, idx)
+            self.assertEqual(result, fn_unsafe(x, idx))
+            # Unsafe indirect indexing kernel should skip benchmark_all_configs
+            self.assertEqual(len(benchmark_calls), 0)
 
 
 _PLUGIN_FACTORY_PATH = (
