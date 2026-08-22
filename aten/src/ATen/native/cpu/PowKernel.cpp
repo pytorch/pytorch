@@ -94,12 +94,35 @@ static void pow_tensor_scalar_kernel(
 
   if (dtype == ScalarType::Float || dtype == ScalarType::Double ||
       dtype == kBFloat16 || isComplexType(dtype)) {
-    // Dispatch to fast specialization for sqrt, rsqrt and reciprocal
+    // Adding zero before sqrt/rsqrt cancels the sign of -0.0 so
+    // pow(-0.0, +/-0.5) returns a positive result per IEEE-754.
     if (exp_scalar.equal(.5)) {
-      sqrt_kernel(iter);
+      if (isComplexType(dtype)) {
+        sqrt_kernel(iter);
+      } else {
+        AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, dtype, "pow_half", [&]() {
+          using Vec = Vectorized<scalar_t>;
+          cpu_kernel_vec(iter,
+              [](scalar_t base) -> scalar_t {
+                return std::sqrt(base + scalar_t(0));
+              },
+              [](Vec base) -> Vec { return (base + Vec(scalar_t(0))).sqrt(); });
+        });
+      }
       return;
     } else if (exp_scalar.equal(-0.5)) {
-      rsqrt_kernel(iter);
+      if (isComplexType(dtype)) {
+        rsqrt_kernel(iter);
+      } else {
+        AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, dtype, "pow_neg_half", [&]() {
+          using Vec = Vectorized<scalar_t>;
+          cpu_kernel_vec(iter,
+              [](scalar_t base) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+                return scalar_t(1) / std::sqrt(base + scalar_t(0));
+              },
+              [](Vec base) -> Vec { return (base + Vec(scalar_t(0))).rsqrt(); });
+        });
+      }
       return;
     } else if (exp_scalar.equal(-1.0)) {
       reciprocal_kernel(iter);
