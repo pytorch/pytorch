@@ -820,6 +820,9 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
         ]:
             raise RuntimeError(f"Backend {backend} not supported!")
 
+        if not dist.is_backend_available(backend):
+            sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
+
         device_id = None
         if requires_gpu:
             # set device for accelerator pg for collectives (nccl/xccl/hccl)
