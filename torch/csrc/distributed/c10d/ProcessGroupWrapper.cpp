@@ -7,11 +7,17 @@
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
+#include <chrono>
 #include <optional>
 #include <stdexcept>
 #include <utility>
 
 namespace c10d {
+
+gc_count_getter_t& get_gc_count_getter() {
+  static gc_count_getter_t getter = nullptr;
+  return getter;
+}
 
 namespace {
 // A container for information about a particular collective, including optype
@@ -28,6 +34,9 @@ struct CollectiveFingerPrint {
   // input tensor sizes
   std::vector<std::vector<int64_t>> tensor_sizes_;
   uint64_t sequence_number_;
+  // Local-only debug context; not included in serialize_fingerprint().
+  std::optional<std::array<int64_t, 3>> python_gc_counts_;
+  std::optional<int64_t> steady_clock_time_ms_;
 
   CollectiveFingerPrint(
       OpType op_type,
@@ -35,7 +44,18 @@ struct CollectiveFingerPrint {
       uint64_t sequence_number)
       : op_type_(op_type),
         num_tensors_(input_tensors.size()),
-        sequence_number_(sequence_number) {
+        sequence_number_(sequence_number),
+        steady_clock_time_ms_(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count()) {
+    if (auto getter = get_gc_count_getter()) {
+      try {
+        python_gc_counts_ = (*getter)();
+      } catch (...) {
+        // Optional diagnostics must not fail the collective.
+      }
+    }
     tensor_dtypes_.reserve(num_tensors_);
     tensor_device_types_.reserve(num_tensors_);
     tensor_sizes_.reserve(num_tensors_);
@@ -332,6 +352,18 @@ std::ostream& operator<<(
     const CollectiveFingerPrint& collective_fingerprint) {
   std::string collectiveInfo;
   auto op_type_str = opTypeToString(collective_fingerprint.op_type_);
+  std::string debug_info;
+  if (collective_fingerprint.python_gc_counts_.has_value()) {
+    const auto& gc = *collective_fingerprint.python_gc_counts_;
+    debug_info = c10::str(
+        ", PythonGcCounts=[", gc[0], ", ", gc[1], ", ", gc[2], "]");
+  }
+  if (collective_fingerprint.steady_clock_time_ms_.has_value()) {
+    debug_info = c10::str(
+        debug_info,
+        ", SteadyClockTimeMs=",
+        *collective_fingerprint.steady_clock_time_ms_);
+  }
   if (collective_fingerprint.num_tensors_ != 0) {
     // Convert dtype and device type info to string.
     std::vector<std::string> dtype_strs =
@@ -353,14 +385,16 @@ std::ostream& operator<<(
         dtype_strs,
         ", TensorDeviceTypes=",
         device_type_strs,
+        debug_info,
         ")");
   } else {
     collectiveInfo = c10::str(
         "CollectiveFingerPrint(",
         "SequenceNumber=",
         collective_fingerprint.sequence_number_,
-        "OpType=",
+        ", OpType=",
         op_type_str,
+        debug_info,
         ")");
   }
   return output << collectiveInfo;
