@@ -2046,6 +2046,19 @@ class TestSDPAFailureModes(NNTestCase):
             value = torch.randn(shape, dtype=torch.float16, device=device)
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
+    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    def test_invalid_inputs_different_kv_seq_lengths(self, device, kernel: SDPBackend):
+        with sdpa_kernel(backends=[kernel]):
+            # Key and value have to describe the same positions. The CPU flash
+            # kernel takes the number of keys from the value and then walks the
+            # key pointer that far, so a longer value reads past the key.
+            query = torch.randn(1, 1, 3, 8, dtype=torch.float32, device=device)
+            key = torch.randn(1, 1, 5, 8, dtype=torch.float32, device=device)
+            value = torch.randn(1, 1, 6, 8, dtype=torch.float32, device=device)
+            self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
+            # and with the longer one as the key
+            self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, value, key))
+
     @onlyCUDA
     @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_inputs_different_devices(self, device, kernel: SDPBackend):
