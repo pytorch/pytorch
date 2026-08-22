@@ -1200,6 +1200,48 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertTrue(o.is_contiguous(memory_format=torch.channels_last))
         o.sum().backward()
 
+    @dtypes(torch.float, torch.double)
+    def test_conv_backward_channels_last_1x1(self, device, dtype):
+        def run(input_shape, weight_shape, stride, padding, input_cl, weight_cl):
+            input = torch.randn(
+                input_shape, dtype=dtype, device=device
+            ).requires_grad_()
+            weight = torch.randn(
+                weight_shape, dtype=dtype, device=device
+            ).requires_grad_()
+            grad = torch.randn(
+                torch.conv2d(input, weight, None, stride, padding).shape,
+                dtype=dtype,
+                device=device,
+            )
+
+            ref_out = torch.conv2d(input, weight, None, stride, padding)
+            ref_out.backward(grad)
+            ref_input_grad, ref_weight_grad = input.grad.clone(), weight.grad.clone()
+            input.grad = weight.grad = None
+
+            cl_input = (
+                input.detach().to(memory_format=torch.channels_last)
+                if input_cl
+                else input.detach()
+            ).requires_grad_()
+            cl_weight = (
+                weight.detach().to(memory_format=torch.channels_last)
+                if weight_cl
+                else weight.detach()
+            ).requires_grad_()
+            cl_grad = grad.to(memory_format=torch.channels_last) if input_cl else grad
+            cl_out = torch.conv2d(cl_input, cl_weight, None, stride, padding)
+            cl_out.backward(cl_grad)
+
+            self.assertEqual(cl_input.grad, ref_input_grad)
+            self.assertEqual(cl_weight.grad, ref_weight_grad)
+
+        # backward_weights: 1x1-spatial activation, channels-last 3x3 weight.
+        run((8, 16, 1, 1), (16, 16, 3, 3), (1, 1), (1, 1), False, True)
+        # backward_data: 1x1 stride-2 downsample, channels-last activation.
+        run((8, 16, 8, 8), (32, 16, 1, 1), (2, 2), (0, 0), True, False)
+
     @dtypes(torch.float)
     def test_conv2d_no_grad(self, device, dtype):
         for batch in [1, 2, 3]:
