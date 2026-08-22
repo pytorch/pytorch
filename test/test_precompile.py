@@ -92,6 +92,54 @@ def _precompile_dynamo_dict_order(x, values):
     return x
 
 
+def _precompile_eager_cond(x):
+    return torch.cond(x.sum() > 0, lambda t: t.sin(), lambda t: t.cos(), (x,))
+
+
+def _precompile_eager_while_loop(x):
+    return torch._higher_order_ops.while_loop(
+        lambda i, t: i < 3,
+        lambda i, t: (i + 1, t + 1.0),
+        (torch.tensor(0), x),
+    )[1]
+
+
+def _precompile_eager_checkpoint(x):
+    return torch.utils.checkpoint.checkpoint(
+        lambda t: t.sin().cos(), x, use_reentrant=False
+    )
+
+
+def _precompile_eager_vmap(x):
+    return torch.vmap(lambda t: t * 2.0)(x)
+
+
+def _precompile_eager_autocast(x):
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        return x @ x
+
+
+def _precompile_eager_no_grad(x):
+    y = x * 2.0
+    with torch.no_grad():
+        return y.sin()
+
+
+_PRECOMPILE_EAGER_ROUND_TRIP = {
+    "autocast": _precompile_eager_autocast,
+    "checkpoint": _precompile_eager_checkpoint,
+    "cond": _precompile_eager_cond,
+    "vmap": _precompile_eager_vmap,
+    "while_loop": _precompile_eager_while_loop,
+}
+
+
+def _precompile_eager_graph_break(key, x):
+    y = x * 2.0
+    torch._dynamo.graph_break()
+    return _PRECOMPILE_EAGER_ROUND_TRIP[key](y)
+
+
 class _PrecompileWeakValue:
     pass
 
@@ -1594,6 +1642,147 @@ class TestPrecompile(TestCase):
                 self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
             with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
                 loaded(torch.randn(1, 4))
+
+    @parametrize("construct", sorted(_PRECOMPILE_EAGER_ROUND_TRIP))
+    @parametrize("graph_break", (False, True))
+    def test_tracer_dynamo_eager_higher_order_graph(self, construct, graph_break):
+        entry = (
+            _precompile_eager_graph_break
+            if graph_break
+            else _PRECOMPILE_EAGER_ROUND_TRIP[construct]
+        )
+        args = (construct,) if graph_break else ()
+        x = torch.randn(4, 4)
+        with torch.no_grad():
+            expected = torch.compile(entry, backend="eager")(*args, x)
+        torch._dynamo.reset()
+        code, cache = torch.compiler.precompile(
+            entry,
+            example_inputs=[(*args, x)],
+            tracer="dynamo",
+            backend="eager",
+            dynamic=False,
+            require_no_risky_drops=False,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        try:
+            with torch.no_grad():
+                self.assertEqual(loaded(*args, x), expected)
+        finally:
+            if hasattr(loaded, "unload"):
+                loaded.unload()
+
+    def test_tracer_dynamo_eager_preserves_no_grad_region(self):
+        x = torch.randn(4, requires_grad=True)
+        with torch.enable_grad():
+            expected = torch.compile(_precompile_eager_no_grad, backend="eager")(x)
+            code, cache = torch.compiler.precompile(
+                _precompile_eager_no_grad,
+                example_inputs=[(x,)],
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+                training=True,
+            )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.enable_grad():
+            actual = loaded(x)
+        self.assertFalse(actual.requires_grad)
+        self.assertEqual(actual, expected)
+
+    def test_tracer_dynamo_eager_higher_order_source_runs_in_fresh_process(self):
+        from unittest import mock
+
+        x = torch.ones(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_eager_cond,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+            dynamic=False,
+        )
+        self.assertIn("def _graph_forward", code)
+        self.assertIn("def _eager_subgraph_0", code)
+        self.assertIn("_EAGER_GRAPH_BODY", code)
+        with mock.patch.object(
+            torch.fx.Tracer,
+            "trace",
+            side_effect=AssertionError("load must not symbolically retrace"),
+        ):
+            loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x), _precompile_eager_cond(x))
+
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as artifact:
+            artifact.write(code)
+            artifact_path = artifact.name
+        try:
+            subprocess.check_call(
+                [
+                    sys.executable,
+                    "-c",
+                    textwrap.dedent(
+                        """
+                        import runpy
+                        import sys
+                        import torch
+
+                        forward = runpy.run_path(sys.argv[1])["forward"]
+                        for x in (torch.ones(4), -torch.ones(4)):
+                            expected = x.sin() if x.sum() > 0 else x.cos()
+                            torch.testing.assert_close(forward(x), expected)
+                        """
+                    ),
+                    artifact_path,
+                ]
+            )
+        finally:
+            os.unlink(artifact_path)
+
+    @parametrize("graph_break", (False, True))
+    def test_tracer_dynamo_eager_checkpoint_training(self, graph_break):
+        entry = (
+            _precompile_eager_graph_break
+            if graph_break
+            else _precompile_eager_checkpoint
+        )
+        args = ("checkpoint",) if graph_break else ()
+        x = torch.randn(4, requires_grad=True)
+        reference_input = x.detach().clone().requires_grad_()
+        expected = entry(*args, reference_input)
+        expected.sum().backward()
+        code, cache = torch.compiler.precompile(
+            entry,
+            example_inputs=[(*args, x)],
+            tracer="dynamo",
+            backend="eager",
+            dynamic=False,
+            training=True,
+            require_no_risky_drops=False,
+        )
+        actual_input = x.detach().clone().requires_grad_()
+        loaded = torch.compiler.precompile.load(code, cache)
+        try:
+            actual = loaded(*args, actual_input)
+            actual.sum().backward()
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual_input.grad, reference_input.grad)
+        finally:
+            if hasattr(loaded, "unload"):
+                loaded.unload()
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_tracer_dynamo_eager_higher_order_dynamic_shapes(self):
+        code, cache = torch.compiler.precompile(
+            _precompile_eager_cond,
+            example_inputs=[(torch.ones(2),), (torch.ones(3),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        for x in (torch.ones(5), -torch.ones(7)):
+            self.assertEqual(loaded(x), _precompile_eager_cond(x))
 
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True

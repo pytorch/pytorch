@@ -1390,28 +1390,124 @@ class _DynamoPythonBackend:
 
 def _build_dynamo_eager_graph_source(gm: torch.fx.GraphModule) -> str:
     """Render one Dynamo FX graph as standalone eager Python source."""
-    get_attrs = list(gm.graph.find_nodes(op="get_attr"))
-    if get_attrs:
-        raise PrecompileError(
-            "precompile tracer='dynamo' with backend='eager' does not yet support "
-            "FX get_attr nodes; use backend='inductor'."
+    import base64
+    import pickle
+
+    from torch.fx._graph_pickler import GraphPickler, Options
+    from torch.fx._lazy_graph_module import _LazyGraphModule
+    from torch.fx.graph_module import _format_import_block
+    from torch.package import sys_importer
+
+    def recompile(module: torch.fx.GraphModule) -> Any:
+        return (
+            module._real_recompile()
+            if isinstance(module, _LazyGraphModule)
+            else module.recompile()
         )
+
+    options = Options(
+        ops_filter=None,
+        node_metadata_key_filter=lambda key: key
+        not in (
+            "example_value",
+            "tensor_dict",
+            "source_fn_stack",
+            "nn_module_stack",
+            "fwd_source_fn_stack",
+        ),
+    )
+    python_code = recompile(gm)
+    readable_subgraphs: list[tuple[str, str, str]] = []
+
+    def collect_subgraphs(module: torch.fx.GraphModule, prefix: str = "") -> None:
+        for name, child in module._modules.items():
+            if not isinstance(child, torch.fx.GraphModule):
+                continue
+            path = f"{prefix}.{name}" if prefix else name
+            child_code = recompile(child)
+            readable_subgraphs.append(
+                (
+                    path,
+                    _format_import_block(child_code.globals, sys_importer),
+                    child.code,
+                )
+            )
+            collect_subgraphs(child, path)
+
+    collect_subgraphs(gm)
+    body = gm.__dict__.copy()
+    body.pop("_graph", None)
+    marker = "torch.compiler.precompile.eager_subgraph"
+    body["_modules"] = {
+        name: (marker, GraphPickler.dumps(module, options))
+        if isinstance(module, torch.fx.GraphModule)
+        else module
+        for name, module in body.get("_modules", {}).items()
+    }
+    encoded_body = base64.b64encode(pickle.dumps(body)).decode("ascii")
+    import_block = _format_import_block(python_code.globals, sys_importer)
 
     from torch.fx.graph import _custom_builtins
 
     parts = [
         "# Dynamo captured graph (eager backend).",
+        "import base64",
+        "import pickle",
+        "import torch",
+        "from torch._subclasses import FakeTensorMode",
+        "from torch.fx._graph_pickler import GraphPickler",
+        "from torch.fx.experimental.symbolic_shapes import ShapeEnv",
         *(_cb.import_str for _cb in _custom_builtins.values()),
-        gm.code.replace("def forward(", "def _graph_forward(", 1),
-        "",
-        "class _GraphSelf:",
-        "    pass",
-        "",
-        "",
-        "def call(args):",
-        "    return _graph_forward(_GraphSelf(), *args)",
-        "",
+        import_block,
     ]
+    for index, (path, imports, source) in enumerate(readable_subgraphs):
+        parts.extend(
+            [
+                f"# Nested FX graph {path!r}; executable structure is restored below.",
+                imports,
+                source.replace("def forward(", f"def _eager_subgraph_{index}(", 1),
+                "",
+            ]
+        )
+    parts.extend(
+        [
+            gm.code.replace("def forward(", "def _graph_forward(", 1),
+            "",
+            "# Opaque FX state: eager HOPs require real Graph objects at runtime.",
+            f"_EAGER_GRAPH_BODY = {encoded_body!r}",
+            f"_EAGER_SUBGRAPH_MARKER = {marker!r}",
+            "",
+            "",
+            "def _load_eager_subgraph(value):",
+            "    if not (isinstance(value, tuple) and len(value) == 2 and",
+            "            value[0] == _EAGER_SUBGRAPH_MARKER):",
+            "        return value",
+            "    graph = GraphPickler.loads(",
+            "        value[1], FakeTensorMode(shape_env=ShapeEnv())",
+            "    )",
+            "    graph.recompile()",
+            "    return graph",
+            "",
+            "",
+            "class _GraphSelf(torch.nn.Module):",
+            "    def __init__(self):",
+            "        super().__init__()",
+            "        body = pickle.loads(base64.b64decode(_EAGER_GRAPH_BODY))",
+            "        body['_modules'] = {",
+            "            name: _load_eager_subgraph(value)",
+            "            for name, value in body.get('_modules', {}).items()",
+            "        }",
+            "        self.__dict__.update(body)",
+            "",
+            "",
+            "_GRAPH_SELF = _GraphSelf()",
+            "",
+            "",
+            "def call(args):",
+            "    return _graph_forward(_GRAPH_SELF, *args)",
+            "",
+        ]
+    )
     return "\n".join(parts)
 
 
@@ -2085,9 +2181,9 @@ def _build_dynamo_python_source(
     parts = [
         '# Generated by torch.compiler.precompile (tracer="dynamo") -- do not edit.',
         "#",
-        "# The compiled graphs and kernels below are ordinary Python source. Dynamo's",
-        "# guard trees and required code objects have no source form, so section 2",
-        "# stores minimized dispatch guards and bytecode as base64-encoded pickle data.",
+        "# Graph entry points and kernels below are ordinary Python source. Nested FX",
+        "# graph structure used by eager higher-order ops, Dynamo guard trees, and",
+        "# required code objects are stored as labelled base64-encoded pickle data.",
         *serving_description,
         "",
         "# " + "=" * 70,
@@ -2633,6 +2729,11 @@ def _precompile_dynamo(
             # input closure belong to the caller-promised invariant environment.
             environment_assumptions = [
                 guard.guard_type in _DYNAMO_ENVIRONMENT_GUARD_TYPES
+                or (
+                    guard.has_value
+                    and id(guard.value) not in input_object_ids
+                    and importable_global(guard.value) is not None
+                )
                 or (
                     guard.source_root_id is not None
                     and guard.source_root_id not in input_object_ids
