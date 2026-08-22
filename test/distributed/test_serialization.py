@@ -125,6 +125,26 @@ class TestSerialization(TestCase):
         torch.testing.assert_close(result.to_local(), state_dict.to_local())
         self.assertEqual(result._spec, state_dict._spec)
 
+    def test_dtensor_unpickle_without_pgs(self) -> None:
+        # Regression test for #182102: unpickling a DTensor in a process
+        # where the original PGs don't exist (e.g., the async checkpoint
+        # subprocess) must not emit warnings.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo", rank=0, world_size=1, store=dist.HashStore()
+            )
+
+        device_mesh = DeviceMesh("cpu", 1)
+        dtensor = distribute_tensor(torch.randn(4, 4), device_mesh, [])
+        file = BytesIO()
+        _streaming_save(dtensor, file)
+        file.seek(0)
+        dist.destroy_process_group()
+
+        with self.assertNoLogs("torch.distributed.device_mesh", level="WARNING"):
+            result = cast(DTensor, _streaming_load(file))
+        self.assertEqual(result.device_mesh._pg_registry, {})
+
     def test_python_object(self) -> None:
         state_dict = {
             "obj": MyClass(42),
