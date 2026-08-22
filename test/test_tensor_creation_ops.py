@@ -1346,6 +1346,26 @@ class TestTensorCreation(TestCase):
         y = torch.repeat_interleave(x, x)
         self.assertEqual(y, x)
 
+    def test_repeat_interleave_preserves_memory_format(self, device):
+        for memory_format in [torch.channels_last, torch.channels_last_3d]:
+            ndim = 4 if memory_format == torch.channels_last else 5
+            shape = [2] * ndim
+            a = torch.empty(shape, device=device).contiguous(memory_format=memory_format)
+
+            # int repeats with dim
+            for dim in range(ndim):
+                b = torch.repeat_interleave(a, 2, dim=dim)
+                self.assertTrue(b.is_contiguous(memory_format=memory_format))
+
+            # tensor repeats with dim
+            for dim in range(ndim):
+                b = torch.repeat_interleave(a, torch.tensor([2, 3], device=device), dim=dim)
+                self.assertTrue(b.is_contiguous(memory_format=memory_format))
+
+            # without dim, output is 1D so memory format is not preserved (expected)
+            b = torch.repeat_interleave(a, 2)
+            self.assertTrue(b.is_contiguous())
+
     def test_new_methods_requires_grad(self, device):
         size = (10,)
         test_cases = [
