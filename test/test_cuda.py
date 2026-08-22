@@ -5452,6 +5452,54 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC or EXPANDABLE_SEGMENTS,
+        "requires the native allocator without expandable segments",
+    )
+    def test_cuda_graph_conditional_transfer_inactive_segments(self):
+        state = torch.zeros(300_000, device="cuda")
+        pred = torch.ones((), dtype=torch.bool, device="cuda")
+        graph = torch.cuda.CUDAGraph()
+
+        def temporary_work():
+            _ = state + 1
+
+        def capture_nested_if(depth):
+            if depth == 0:
+                return
+            graph._begin_capture_to_if_node_with_memory_reuse(pred)
+            try:
+                capture_nested_if(depth - 1)
+                state.copy_(state + 1)
+            finally:
+                graph._end_capture_to_conditional_node_with_memory_reuse()
+
+        with torch.cuda.graph(graph):
+            temporary_work()
+            capture_nested_if(4)
+            temporary_work()
+
+        segments = torch.cuda.memory_snapshot(
+            mempool_id=graph.pool(), include_traces=False
+        )
+        self.assertEqual(sum(s["total_size"] for s in segments), 20 * 1024 * 1024)
+
+        graph.replay()
+        self.assertEqual(state, torch.full_like(state, 4))
+        state.zero_()
+        pred.zero_()
+        graph.replay()
+        self.assertEqual(state, torch.zeros_like(state))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_cuda_graph_tensor_item_not_allowed(self):
         test_script = """\
 import torch
