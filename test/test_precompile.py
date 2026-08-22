@@ -358,6 +358,13 @@ def _precompile_drift_entry(x):
     return _DRIFT_MODULE.scaled(x).sum()
 
 
+_LUT_MODULE = None
+
+
+def _precompile_reads_module_global(x):
+    return x * _LUT_MODULE.LUT.sum()
+
+
 def _precompile_reads_flag(x):
     return x * getattr(x, "my_flag", 1)
 
@@ -3119,24 +3126,17 @@ class TestPrecompile(TestCase):
         # it IS the inspection build and its builder answers the same questions.
         from torch._dynamo.guards import CheckFunctionManager
 
-        builds = 0
-        managers = 0
+        # Per manager, not in total: the capture also rebuilds guards to
+        # validate them, and those builds are deliberate.
+        builds: dict[int, int] = {}
         real_build = CheckFunctionManager.build_guards
-        real_init = CheckFunctionManager.__init__
 
         def count_build(self, *args, **kwargs):
-            nonlocal builds
-            builds += 1
+            builds[id(self)] = builds.get(id(self), 0) + 1
             return real_build(self, *args, **kwargs)
-
-        def count_init(self, *args, **kwargs):
-            nonlocal managers
-            managers += 1
-            return real_init(self, *args, **kwargs)
 
         with (
             mock.patch.object(CheckFunctionManager, "build_guards", count_build),
-            mock.patch.object(CheckFunctionManager, "__init__", count_init),
             torch.no_grad(),
         ):
             torch.compiler.precompile(
@@ -3148,7 +3148,8 @@ class TestPrecompile(TestCase):
                     (torch.nn.Linear(8, 4).eval(), torch.randn(n, 8)) for n in (3, 5)
                 ],
             )
-        self.assertEqual(builds, 2 * managers)
+        self.assertTrue(builds)
+        self.assertEqual(max(builds.values()), 2)
 
     def test_standalone_artifact_refuses_a_foreign_torch(self):
         # A dynamo artifact carries Dynamo internals in its opaque blobs, so it
@@ -3266,6 +3267,48 @@ class TestPrecompile(TestCase):
                     example_inputs=[(model, x)],
                 )
         self.assertTrue(any("_cpu_copy" in payload for _, payload in drift))
+
+    def test_guard_on_a_module_global_tensor_round_trips(self):
+        # A TENSOR_MATCH carries its own subject inside its create_fn partial.
+        # When the source root round-trips by ALIAS -- a module global comes
+        # back live -- that carried copy is a different object from the one the
+        # source walk reaches, so id-keyed value pruning replaced a KEPT guard's
+        # own subject with the _Missing sentinel and load died in
+        # _dispatch_keys. Any model reading a module-global tensor hits it.
+        import importlib.util
+
+        def import_from_path(name, path):
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+            return module
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "lut.py")
+            with open(path, "w") as f:
+                f.write("import torch\n\nLUT = torch.tensor([0.0, 0.5, 1.0])\n")
+            global _LUT_MODULE
+            _LUT_MODULE = import_from_path("torch.test_precompile_lut", path)
+            x = torch.randn(4)
+            with torch.no_grad():
+                want = _precompile_reads_module_global(x)
+                code, cache = torch.compiler.precompile(
+                    _precompile_reads_module_global,
+                    backend="eager",
+                    dynamic=False,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                    example_inputs=[(x,)],
+                )
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load(code, cache)
+            with _maybe_scoped(loaded), torch.no_grad():
+                self.assertEqual(loaded(x), want)
+                # Keeping the guard is only worth anything if it still checks.
+                _LUT_MODULE.LUT = _LUT_MODULE.LUT.double()
+                with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                    loaded(x)
 
     def test_capture_runs_each_example_once(self):
         # Learning the guard policy from a throwaway first capture would run
