@@ -1,1 +1,0 @@
-result = "subpackage_0"

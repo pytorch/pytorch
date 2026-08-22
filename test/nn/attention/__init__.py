@@ -1,1 +1,0 @@
-# Owner(s): ["module: sdpa"]

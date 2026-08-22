@@ -1,3 +1,0 @@
-[
-    { include: ["<bits/chrono.h>", private, "<chrono>", public ] },
-]
