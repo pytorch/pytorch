@@ -3,6 +3,7 @@ import sys
 from benchmark_base import BenchmarkBase
 
 import torch
+import torch._dynamo.config
 import torch.nn as nn
 from torch._inductor.utils import fresh_cache
 
@@ -39,10 +40,12 @@ class Benchmark(BenchmarkBase):
         backend="eager",
         is_gpu=False,
         dynamic=False,
+        record_call_hierarchy=False,
     ):
         self.ModuleClass = ModuleClass
         self._name = ModuleClass.__name__
         self._is_gpu = is_gpu
+        self._record_call_hierarchy = record_call_hierarchy
 
         super().__init__(
             category="basic",
@@ -53,6 +56,8 @@ class Benchmark(BenchmarkBase):
 
     def name(self):
         prefix = f"{self.category()}_{self._name}_{self.backend()}"
+        if self._record_call_hierarchy:
+            prefix += "_call_hierarchy"
         return prefix
 
     def _prepare_once(self):
@@ -68,6 +73,9 @@ class Benchmark(BenchmarkBase):
         # Keep using False value for consistency.
         with (
             fresh_cache(),
+            torch._dynamo.config.patch(
+                record_call_hierarchy=self._record_call_hierarchy
+            ),
         ):
             opt_m = torch.compile(backend=self.backend(), dynamic=self.is_dynamic())(
                 self.m.cuda() if self._is_gpu else self.m
@@ -79,6 +87,7 @@ def main():
     result_path = sys.argv[1]
     benchmarks = [
         Benchmark(NestedModule),
+        Benchmark(NestedModule, record_call_hierarchy=True),
     ]
     for b in benchmarks:
         b.enable_compile_time_instruction_count().collect_all().append_results(
