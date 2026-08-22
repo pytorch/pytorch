@@ -1062,6 +1062,8 @@
   ],
   "torch.utils.data": [
     "_DatasetKind",
+    "SharedDict",
+    "SharedList",
     "argument_validation",
     "default_collate",
     "default_convert",
@@ -2670,5 +2672,7 @@
   ],
   "torch.utils.hipify.hipify_python": [
     "TrieNode"
-  ]
+  ],
+  "SharedTensor": {},
+  "to_shared_dataset": {}
 }
