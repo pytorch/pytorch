@@ -7271,6 +7271,31 @@ def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     # eps > 0.5 exercises the branch where lo > hi; see issue #177839.
     yield SampleInput(make_arg((S, S, S)), 0.6)
 
+def sample_inputs_frexp(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad, **kwargs)
+
+    # Subnormals and signed zero. A frexp built on a float-valued library call
+    # loses these wherever the backend flushes subnormals to zero, which the
+    # generated samples never exercise. float64 is left out because gradcheck
+    # runs there, and the derivative at a float64 subnormal is 2**1074, which
+    # overflows to inf while the numerical estimate stays finite.
+    bits_dtype = {
+        torch.float32: torch.int32,
+        torch.float16: torch.int16,
+        torch.bfloat16: torch.int16,
+    }.get(dtype)
+    if bits_dtype is None:
+        return
+    # every value below is subnormal in all three formats
+    subnormals = torch.tensor([1, 2, 3, 7, 127], dtype=bits_dtype, device=device).view(dtype)
+    yield SampleInput(subnormals.detach().requires_grad_(requires_grad))
+
+    # NaN is omitted: check_alias_annotation deep-compares inputs by value to
+    # prove the op did not mutate them, and NaN never equals itself.
+    specials = torch.tensor([0.0, -0.0, float('inf'), float('-inf')], dtype=dtype, device=device)
+    yield SampleInput(specials.detach().requires_grad_(requires_grad))
+
+
 def sample_inputs_isin(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     # isin has two paths based on the size of elements and test_elements.
@@ -13954,6 +13979,7 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo('frexp',
                    op=torch.frexp,
                    ref=np.frexp,
+                   sample_inputs_func=sample_inputs_frexp,
                    dtypes=floating_types_and(torch.half, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                    # skip testing torch.frexp as it is not supported by ROCm platform yet
@@ -13979,8 +14005,6 @@ op_db: list[OpInfo] = [
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     active_if=IS_WINDOWS),
-                       # Error: The operator 'aten::frexp.Tensor_out' is not currently implemented for the MPS device
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
                    )),
     UnaryUfuncInfo('log1p',
                    ref=np.log1p,
@@ -23960,8 +23984,6 @@ python_ref_db = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                          active_if=IS_WINDOWS),
-            # The operator 'aten::frexp.Tensor_out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(

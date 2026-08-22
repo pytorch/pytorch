@@ -98,6 +98,57 @@ static void nan_to_num_kernel_mps(TensorIteratorBase& iter,
   });
 }
 
+// frexp writes two outputs, so it cannot use the shared exec_unary_kernel path.
+static void frexp_kernel_mps(TensorIteratorBase& iter) {
+  if (iter.numel() == 0) {
+    return;
+  }
+  // Bounds every operand's offsets to int32, the width FrexpParams stores.
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto&& sub_iter : iter.with_32bit_indexing()) {
+      frexp_kernel_mps(sub_iter);
+    }
+    return;
+  }
+
+  const bool is_dense = iter.is_contiguous();
+  // dtype(0) is the mantissa's, which frexp_out pins to the input's dtype.
+  const auto kernel_name =
+      fmt::format("frexp_{}_{}", is_dense ? "dense" : "strided", mps::scalarToMetalTypeString(iter.dtype(0)));
+  auto pipelineState = lib.getPipelineStateForFunc(kernel_name);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+
+      getMPSProfiler().beginProfileKernel(pipelineState, kernel_name, /*isGraph=*/false, stream);
+
+      [computeEncoder setComputePipelineState:pipelineState];
+      mps::bind_iter_tensors(computeEncoder, iter);
+      if (!is_dense) {
+        // The kernel indexes typed pointers, so convert the iterator's byte
+        // strides to element strides; compute_strides() builds them as
+        // stride * element_size, so the division is exact. They must come from
+        // the iterator and not the tensors, since reorder_dimensions() and
+        // coalesce_dimensions() leave iter.shape() in a different order from
+        // the operands' own.
+        FrexpParams params{};
+        params.ndim = static_cast<int32_t>(iter.ndim());
+        for (const auto i : c10::irange(iter.ndim())) {
+          params.sizes[i] = static_cast<int32_t>(iter.shape()[i]);
+          params.mantissa_strides[i] = static_cast<int32_t>(iter.strides(0)[i] / iter.element_size(0));
+          params.exponent_strides[i] = static_cast<int32_t>(iter.strides(1)[i] / iter.element_size(1));
+          params.input_strides[i] = static_cast<int32_t>(iter.strides(2)[i] / iter.element_size(2));
+        }
+        mps::mtl_setArgs<3>(computeEncoder, params);
+      }
+      mps::mtl_dispatch1DJob(computeEncoder, pipelineState, iter.numel());
+
+      getMPSProfiler().endProfileKernel(pipelineState, stream);
+    }
+  });
+}
+
 REGISTER_UNARY_TI_DISPATCH(exp);
 REGISTER_UNARY_TI_DISPATCH(expm1);
 REGISTER_UNARY_TI_DISPATCH(erf);
@@ -129,6 +180,7 @@ REGISTER_UNARY_TI_DISPATCH(digamma);
 REGISTER_UNARY_TI_DISPATCH(bitwise_not);
 REGISTER_UNARY_TI_DISPATCH(round);
 REGISTER_UNARY_TI_DISPATCH(sigmoid);
+REGISTER_DISPATCH(frexp_stub, frexp_kernel_mps);
 REGISTER_DISPATCH(logical_not_stub, logical_not_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, erfcx_kernel);
 REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
