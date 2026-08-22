@@ -4,10 +4,16 @@ import unittest.mock as mock
 
 from torch.distributed.checkpoint._experimental.barriers import TCPStoreBarrier
 from torch.distributed.checkpoint._experimental.types import RankInfo
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestBarriers(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @mock.patch("torch.distributed.TCPStore")
     @mock.patch("torch.distributed.elastic.utils.store.barrier")
     def test_tcpstore_barrier_initialization(self, _, mock_tcpstore):
