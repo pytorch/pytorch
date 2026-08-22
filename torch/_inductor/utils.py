@@ -3010,6 +3010,14 @@ def parallel_num_threads() -> int:
     return threads
 
 
+def fp32_matmul_precision_key() -> str:
+    # Read per-backend fp32 precision instead of
+    # torch.get_float32_matmul_precision(), which raises if the legacy and
+    # per-backend APIs have been mixed.
+    getter = torch._C._get_fp32_precision_getter
+    return f"cuda:{getter('cuda', 'matmul')},mkldnn:{getter('mkldnn', 'matmul')}"
+
+
 @functools.cache
 def get_backend_num_stages() -> int:
     from .runtime.triton_helpers import get_backend_options
