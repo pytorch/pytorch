@@ -233,20 +233,27 @@ static const Tensor& _resize_(
     ArrayRef<T> size,
     std::optional<MemoryFormat> optional_memory_format) {
   auto* self_ = self.unsafeGetTensorImpl();
-  int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().sym_nbytes().maybe_as_int().value_or(-1) : 0;
+  auto maybe_old_storage_nbytes_to_fill_resize = [&]() -> std::optional<int64_t> {
+    if (!at::globalContext().deterministicAlgorithms() ||
+        !at::globalContext().deterministicFillUninitializedMemory()) {
+      return std::nullopt;
+    }
+    if (!self_->unsafe_storage()) {
+      return 0;
+    }
+    return self_->unsafe_storage().sym_nbytes().maybe_as_int();
+  }();
   _resize_impl_<T>(self_, size, /*stride=*/std::nullopt, true);
   if (optional_memory_format.has_value()) {
-    auto memory_format =
-        optional_memory_format.value();
+    auto memory_format = optional_memory_format.value();
     TORCH_CHECK(
         memory_format != MemoryFormat::Preserve,
         "Unsupported memory format",
         memory_format);
     self_->empty_tensor_restride(memory_format);
   }
-  // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory() && old_storage_nbytes != -1)) {
-    at::native::fill_resize_deterministic_(self, old_storage_nbytes);
+  if (C10_UNLIKELY(maybe_old_storage_nbytes_to_fill_resize.has_value())) {
+    at::native::fill_resize_deterministic_(self, *maybe_old_storage_nbytes_to_fill_resize);
   }
   return self;
 }
