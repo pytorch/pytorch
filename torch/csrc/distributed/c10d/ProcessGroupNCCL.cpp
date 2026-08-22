@@ -34,6 +34,7 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_cache.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/torch.h>
 #include <optional>
@@ -1613,11 +1614,12 @@ void ProcessGroupNCCL::shutdown() {
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-  // Drop our entry from each per-device NCCLDevCommManager. Skip aborted
-  // comms -- a successor PG may have already re-registered under the same
-  // group_uid (e.g. restart-after-error), and unconditionally clearing
-  // would silently wipe the successor's entry.
+#ifdef NCCL_HAS_SYMMEM_SUPPORT
+  // Drop our entry from each per-device NCCLDevCommManager. The
+  // identity-safe overload only erases when the entry still holds OUR comm,
+  // so a stale destructor (e.g. after restart-after-error, where a successor
+  // PG re-registered under the same group name) becomes a no-op instead of
+  // silently wiping the successor's entry.
   {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& [_, ncclComm] : devNCCLCommMap_) {
@@ -1625,8 +1627,14 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
         continue;
       }
       c10::Device device(at::kCUDA, ncclComm->getDeviceIndex());
+      const std::string symmMemGroupName =
+          options_->group_name.empty() ? "0" : options_->group_name;
       c10d::symmetric_memory::NCCLDevCommManager::get(device).unregister_comm(
-          getGroupUid());
+          symmMemGroupName, ncclComm->getNcclComm());
+      // Drop any device communicators the symm-mem ops created for this
+      // group so a successor group under the same name starts clean.
+      c10d::symmetric_memory::release_nccl_devcomms_for_group(
+          device, symmMemGroupName);
     }
   }
 #endif
@@ -3305,16 +3313,18 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
       ncclCommMemPoolMap.emplace(ncclComm, MemPoolSet{});
     }
 
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#ifdef NCCL_HAS_SYMMEM_SUPPORT
     // Publish the host ncclComm so NCCLSymmetricMemory can find it by
     // group name, avoiding dynamic_cast back to ProcessGroupNCCL.
     // Other producers (e.g. torchcomms' TorchCommNCCLX) populate the same
     // registry, giving symm_mem a uniform group_name -> ncclComm_t lookup
-    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-    // (excludes ROCm) since the registry has no other consumer there.
+    // regardless of backend. Gated on NCCL_HAS_SYMMEM_SUPPORT so host-side
+    // symmetric-memory users on CUDA and ROCm can consume the entry.
     // Unregistered in ~ProcessGroupNCCL.
+    const std::string symmMemGroupName =
+        options_->group_name.empty() ? "0" : options_->group_name;
     c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
-        getGroupUid(), ncclComm->getNcclComm());
+        symmMemGroupName, ncclComm->getNcclComm());
 #endif
   }
 

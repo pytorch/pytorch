@@ -16,14 +16,137 @@
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
 #include <mutex>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
 
+// <nccl_device.h> when available (CUDA >= 2.28 device API, or RCCL >= 2.29.7
+// together with the HIP compatibility shims its content requires). Self-gated:
+// expands to nothing on intermediate versions that lack the device header.
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_device_shims.hpp>
+
+#ifndef NCCL_WIN_REQUIRED_ALIGNMENT
+#define NCCL_WIN_REQUIRED_ALIGNMENT 4096
+#endif
+
 namespace c10d {
 namespace symmetric_memory {
+
+#ifdef USE_ROCM
+// Byte budget for the ROCm free-block cache (see NCCLSymmetricMemoryAllocator).
+constexpr size_t kFreeCacheByteBudget = 128UL * 1024 * 1024;
+#endif
+
+#if defined(NCCL_HAS_DEVCOMM_STORAGE)
+namespace {
+
+// Device communicators are owned here rather than in NCCLDevCommManager
+// because this is the only TU that can name ncclDevComm on ROCm (RCCL's
+// device header does not survive host-only compiles). Keyed by
+// (device, group, key); entries die with the owning process group via
+// release_nccl_devcomms_for_group, so a recreated group can never observe
+// a communicator built for its predecessor. Survivors are destroyed at
+// process exit, mirroring ~NCCLDevCommManager.
+struct NcclDevCommCache {
+  struct Entry {
+    ncclDevComm devcomm{};
+    ncclComm_t owner{nullptr};
+  };
+  ska::flat_hash_map<
+      int,
+      ska::flat_hash_map<std::string, ska::flat_hash_map<std::string, Entry>>>
+      by_device;
+  std::mutex mutex;
+
+  ~NcclDevCommCache() {
+    if (is_finalizing()) {
+      return;
+    }
+    for (auto& [dev_idx, groups] : by_device) {
+      try {
+        c10::cuda::CUDAGuard guard(static_cast<c10::DeviceIndex>(dev_idx));
+        // No kernel may still be using a communicator when it is destroyed.
+        C10_CUDA_CHECK(cudaDeviceSynchronize());
+        for (auto& [group, keys] : groups) {
+          for (auto& [key, entry] : keys) {
+            ncclDevCommDestroy(entry.owner, &entry.devcomm);
+          }
+        }
+      } catch (...) {
+        LOG(WARNING) << "Failed to destroy NCCL device communicators, skipping";
+      }
+    }
+  }
+};
+
+NcclDevCommCache& devcomm_cache() {
+  static NcclDevCommCache cache;
+  return cache;
+}
+
+} // namespace
+
+void* get_or_create_nccl_devcomm(
+    const c10::Device& device,
+    const std::string& group_name,
+    const std::string& key,
+    int lsa_barrier_count,
+    bool lsa_multimem) {
+  ncclComm_t comm =
+      NCCLDevCommManager::get(device).get_comm(group_name);
+  auto& cache = devcomm_cache();
+  std::lock_guard<std::mutex> lock(cache.mutex);
+  auto& entry = cache.by_device[device.index()][group_name][key];
+  if (entry.owner == nullptr) {
+    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+    reqs.lsaBarrierCount = lsa_barrier_count;
+    reqs.lsaMultimem = lsa_multimem;
+    C10D_NCCL_CHECK(
+        ncclDevCommCreate(comm, &reqs, &entry.devcomm),
+        "ncclDevCommCreate failed");
+    entry.owner = comm;
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        entry.owner == comm,
+        "stale device communicator for group ", group_name);
+  }
+  return &entry.devcomm;
+}
+
+void release_nccl_devcomms_for_group(
+    const c10::Device& device,
+    const std::string& group_name) {
+  auto& cache = devcomm_cache();
+  std::lock_guard<std::mutex> lock(cache.mutex);
+  auto dev_it = cache.by_device.find(device.index());
+  if (dev_it == cache.by_device.end()) {
+    return;
+  }
+  // Erase without ncclDevCommDestroy: kernels from other streams may still
+  // reference the communicator at teardown time. The owning communicator
+  // reclaims the resources; only process-exit survivors need explicit
+  // destruction (see ~NcclDevCommCache).
+  dev_it->second.erase(group_name);
+}
+#else
+
+void* get_or_create_nccl_devcomm(
+    const c10::Device& /*device*/,
+    const std::string& /*group_name*/,
+    const std::string& /*key*/,
+    int /*lsa_barrier_count*/,
+    bool /*lsa_multimem*/) {
+  TORCH_CHECK(
+      false,
+      "NCCL device communicators require NCCL >= 2.29 or RCCL >= 2.29.7");
+}
+
+void release_nccl_devcomms_for_group(const c10::Device&, const std::string&) {}
+
+#endif // NCCL_HAS_DEVCOMM_STORAGE
 
 /* Start of NCCLAllocation implementation */
 
@@ -43,6 +166,15 @@ struct NCCLAllocation {
   // occupies [0, buffer_offset).
   size_t buffer_offset;
   int device_idx;
+#ifdef USE_ROCM
+    // A cached block can be reused during capture only when its signal pad was
+    // zeroed outside capture. Capture-time free marks the block dirty instead of
+    // issuing an illegal HIP memset.
+    bool signal_pad_clean = true;
+    // Monotonic insertion counter used by the free-cache byte-budget eviction
+    // (oldest block first).
+    uint64_t cache_seq = 0;
+#endif
   std::mutex mutex;
   // Map of group name to peer alloc info
   ska::flat_hash_map<std::string, c10::intrusive_ptr<NCCLPeerAllocInfo>>
@@ -127,9 +259,14 @@ NCCLAllocMap::iterator find_allocation_covering(
 
 } // namespace
 
-// Before NCCL 2.29, we can use device-side APIs to get peer pointers.
-#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+// Device-side peer-pointer resolution. Used on two paths:
+//   - CUDA/NCCL before 2.29 (no host-side peer-pointer API yet), and
+//   - ROCm/RCCL (NCCL_HAS_LSA_PEER_PTR), which has the device-side
+//     ncclGetLsaPointer helper but not the host ncclGetPeerDevicePointer API.
+#if (NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0) && \
+     defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT)) ||   \
+    defined(NCCL_HAS_LSA_PEER_PTR)
+#define NCCL_SYMMEM_BUILD_PTR_DEV
 // Fill both peer pointer arrays in a single kernel launch. For each peer,
 // NCCL returns the window base (== signal pad base); the data buffer pointer
 // is derived as `base + buffer_offset`, mirroring the host-side layout.
@@ -150,8 +287,7 @@ static __global__ void build_ptr_dev(
           : static_cast<char*>(buf) + buffer_offset;
   }
 }
-#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-#endif // NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+#endif
 
 class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
  public:
@@ -192,7 +328,9 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     // for the data sub-region: only the base pointer (returned by
     // ncclMemAlloc, already granularity-aligned) is registered.
     const size_t aligned_buffer_size = at::round_up(buffer_size_, 16UL);
-    const size_t total_size = buffer_offset_ + aligned_buffer_size;
+    const size_t total_size = at::round_up(
+        buffer_offset_ + aligned_buffer_size,
+        static_cast<size_t>(NCCL_WIN_REQUIRED_ALIGNMENT));
     C10D_NCCL_CHECK(
       ncclCommWindowRegister(comm_, allocation->alloc_base, total_size, &combined_win_, NCCL_WIN_COLL_SYMMETRIC),
       c10::str(
@@ -203,7 +341,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
           " on rank ",
           rank_));
 
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) || defined(NCCL_HAS_LSA_PEER_PTR)
     // (Host comm is already published into NCCLDevCommManager by the
     // owning backend at comm-init time. The earlier mgr.get_comm() call
     // above relied on that. No re-register here.)
@@ -217,9 +355,11 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     buffers_.resize(world_size_);
     signal_pads_.resize(world_size_);
 
-#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
-    // Lack of host-side API to get peer pointers, so a kernel writes both
-    // peer arrays at once and copies the results to host.
+#if defined(NCCL_HAS_LSA_PEER_PTR) || \
+    NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+    // No usable host-side API to get peer pointers (either NCCL < 2.29, or
+    // ROCm/RCCL which lacks ncclGetPeerDevicePointer), so a kernel resolves
+    // both peer arrays at once via ncclGetLsaPointer and copies to host.
     int threads = std::min(128, world_size_);
     auto stream = at::cuda::getCurrentCUDAStream();
     build_ptr_dev<<<1, threads, 0, stream>>>(
@@ -277,8 +417,8 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       mc_addr != nullptr) {
     mc_addr_ = mc_addr;
   }
-#endif // NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
-#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#endif // NCCL_HAS_LSA_PEER_PTR || NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT || NCCL_HAS_LSA_PEER_PTR
   }
 
   // Exact copy is not needed / supported
@@ -347,11 +487,22 @@ std::vector<void*> NCCLSymmetricMemory::get_signal_pad_ptrs() {
   return pai_->signal_pads_;
 }
 
+// The dev-side pointer tables are only populated when the peer-pointer API
+// exists (CUDA >= 2.28 device API, or RCCL >= 2.29.7 LSA). Ops that launch
+// kernels reading these tables would otherwise dereference null/garbage on
+// intermediate versions where only the host-side window registration exists.
+static constexpr const char* kPeerPtrsUnavailable =
+    "device-side peer pointer tables were not populated; symmetric-memory "
+    "peer access requires every peer to be reachable over the LSA/NVLink "
+    "domain and NCCL >= 2.28 (RCCL >= 2.29.7)";
+
 void** NCCLSymmetricMemory::get_buffer_ptrs_dev() {
+  TORCH_CHECK(pai_->buffers_dev_ != nullptr, kPeerPtrsUnavailable);
   return pai_->buffers_dev_;
 }
 
 void** NCCLSymmetricMemory::get_signal_pad_ptrs_dev() {
+  TORCH_CHECK(pai_->signal_pads_dev_ != nullptr, kPeerPtrsUnavailable);
   return pai_->signal_pads_dev_;
 }
 
@@ -371,7 +522,7 @@ void* NCCLSymmetricMemory::get_multicast_ptr() {
 }
 
 void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) || defined(NCCL_HAS_LSA_PEER_PTR)
   TORCH_CHECK(
       pai_->signal_pads_dev_ != nullptr,
       "NCCLSymmetricMemory::barrier requires peer signal pad pointers, which "
@@ -558,7 +709,68 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     const size_t buffer_offset =
         at::round_up(get_signal_pad_size(), signal_pad_alignment);
     const size_t aligned_buffer_size = at::round_up(size, 16UL);
-    const size_t total_size = buffer_offset + aligned_buffer_size;
+    const size_t total_size = at::round_up(
+        buffer_offset + aligned_buffer_size,
+        static_cast<size_t>(NCCL_WIN_REQUIRED_ALIGNMENT));
+
+#ifdef USE_ROCM
+    const bool in_capture =
+        c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
+        c10::cuda::CaptureStatus::None;
+    std::unique_ptr<NCCLAllocation> cached_alloc;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      FreeCacheKey cache_key{size, buffer_offset, device_idx};
+      auto cache_it = free_cache_.find(cache_key);
+      if (cache_it != free_cache_.end()) {
+        auto& blocks = cache_it->second;
+        auto block_it = blocks.end();
+        if (in_capture) {
+          block_it = std::find_if(
+              blocks.begin(), blocks.end(), [](const auto& block) {
+                return block->signal_pad_clean;
+              });
+        } else if (!blocks.empty()) {
+          block_it = blocks.end() - 1;
+        }
+        if (block_it != blocks.end()) {
+          cached_alloc = std::move(*block_it);
+          free_cache_bytes_ -=
+              cached_alloc->buffer_offset + cached_alloc->buffer_size;
+          blocks.erase(block_it);
+          if (blocks.empty()) {
+            free_cache_.erase(cache_it);
+          }
+        }
+      }
+    }
+    if (cached_alloc) {
+      if (!cached_alloc->signal_pad_clean) {
+        TORCH_INTERNAL_ASSERT(!in_capture);
+        C10_CUDA_CHECK(cudaMemset(
+            cached_alloc->alloc_base, 0, cached_alloc->buffer_offset));
+        cached_alloc->signal_pad_clean = true;
+      }
+      TORCH_INTERNAL_ASSERT(cached_alloc->buffer_size == size);
+      void* buffer_ptr = static_cast<char*>(cached_alloc->alloc_base) +
+          cached_alloc->buffer_offset;
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto [_, inserted] =
+            allocations_.emplace(buffer_ptr, std::move(cached_alloc));
+        TORCH_INTERNAL_ASSERT(inserted);
+      }
+      return buffer_ptr;
+    }
+    TORCH_CHECK(
+        !in_capture,
+        "NCCLSymmetricMemoryAllocator::alloc called during HIP graph capture "
+        "without a clean cached block for size=",
+        size,
+        ". Call symm_mem.empty() and rendezvous() with this exact size "
+        "outside capture before capturing the graph.");
+#endif // USE_ROCM
+
     void* alloc_base;
     C10D_NCCL_CHECK(ncclMemAlloc(&alloc_base, total_size), "ncclMemAlloc");
     // ncclMemAlloc does not zero memory. Zero the signal pad (the first
@@ -583,6 +795,62 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
   void free(void* ptr) override {
+#ifdef USE_ROCM
+    std::unique_ptr<NCCLAllocation> nccl_alloc;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      auto alloc_it = allocations_.find(ptr);
+      if (alloc_it == allocations_.end()) {
+        return;
+      }
+      nccl_alloc = std::move(alloc_it->second);
+      allocations_.erase(alloc_it);
+      // Drop the cached SymmetricMemory handles for this block so a
+      // post-free rendezvous fails instead of returning a handle to memory
+      // nobody owns. The peer alloc infos themselves stay alive inside
+      // nccl_alloc->peer_alloc_infos_ (they move with the block into the
+      // free cache), so reusing the block -- including during graph capture,
+      // where re-registering a window is illegal -- still finds them without
+      // any new NCCL calls.
+      auto cache_keys_it = symm_mem_keys_by_alloc_.find(ptr);
+      if (cache_keys_it != symm_mem_keys_by_alloc_.end()) {
+        for (const auto& key : cache_keys_it->second) {
+          symm_mems_.erase(key);
+        }
+        symm_mem_keys_by_alloc_.erase(cache_keys_it);
+      }
+    }
+
+    const bool in_capture =
+        c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
+        c10::cuda::CaptureStatus::None;
+    if (in_capture) {
+      // HIP graph capture cannot record this host-side memset. Conservatively
+      // mark the block dirty so alloc() will not reuse it in the same capture.
+      nccl_alloc->signal_pad_clean = false;
+    } else {
+      c10::cuda::CUDAGuard guard(nccl_alloc->device_idx);
+      C10_CUDA_CHECK(cudaMemset(
+          nccl_alloc->alloc_base, 0, nccl_alloc->buffer_offset));
+      nccl_alloc->signal_pad_clean = true;
+    }
+
+    FreeCacheKey cache_key{
+        nccl_alloc->buffer_size,
+        nccl_alloc->buffer_offset,
+        nccl_alloc->device_idx};
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      nccl_alloc->cache_seq = next_cache_seq_++;
+      free_cache_bytes_ += nccl_alloc->buffer_offset + nccl_alloc->buffer_size;
+      free_cache_[cache_key].push_back(std::move(nccl_alloc));
+      // Eviction ncclMemFree's blocks and deregisters their windows, which is
+      // illegal mid-capture; let the budget go transiently over instead.
+      if (!in_capture) {
+        evict_free_cache_to(kFreeCacheByteBudget);
+      }
+    }
+#else
     std::lock_guard<std::mutex> lock(mutex_);
     auto alloc_it = allocations_.find(ptr);
     if (alloc_it == allocations_.end()) {
@@ -596,6 +864,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       symm_mem_keys_by_alloc_.erase(cache_keys_it);
     }
     allocations_.erase(alloc_it);
+#endif
   };
 
   size_t get_alloc_size(void* ptr) override {
@@ -644,6 +913,14 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto& peer_alloc_infos = allocation->peer_alloc_infos_;
     auto& pai = peer_alloc_infos[*group_name];
     if (!pai) {
+#ifdef USE_ROCM
+      TORCH_CHECK(
+          c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
+              c10::cuda::CaptureStatus::None,
+          "NCCLSymmetricMemoryAllocator::rendezvous would register an NCCL "
+          "window during HIP graph capture. Call rendezvous() for this block "
+          "and group outside capture before capturing the graph.");
+#endif
       pai = c10::make_intrusive<NCCLPeerAllocInfo>(allocation, *group_name);
     }
     // Offset is relative to the data buffer base (past the signal pad).
@@ -689,6 +966,68 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
  private:
+#ifdef USE_ROCM
+  // Exact user size and signal-pad layout are part of the key. Different
+  // requests can round to the same NCCL window size but must not share cached
+  // rendezvous metadata, and blocks cached before a set_signal_pad_size()
+  // change must never be handed out against the new layout.
+  struct FreeCacheKey {
+    size_t buffer_size;
+    size_t buffer_offset;
+    int device_idx;
+    bool operator==(const FreeCacheKey& other) const {
+      return buffer_size == other.buffer_size &&
+          buffer_offset == other.buffer_offset && device_idx == other.device_idx;
+    }
+  };
+  struct FreeCacheKeyHash {
+    size_t operator()(const FreeCacheKey& key) const {
+      return c10::get_hash(key.buffer_size, key.buffer_offset, key.device_idx);
+    }
+  };
+  std::unordered_map<
+      FreeCacheKey,
+      std::vector<std::unique_ptr<NCCLAllocation>>,
+      FreeCacheKeyHash>
+      free_cache_;
+  // Total bytes of blocks sitting in free_cache_. Blocks are only returned to
+  // NCCL when evicted (or at process exit), so without a budget a workload
+  // touching many distinct sizes would pin an unbounded number of registered
+  // windows for the process lifetime.
+  size_t free_cache_bytes_ = 0;
+  uint64_t next_cache_seq_ = 0;
+
+  // Drop oldest cached blocks until the cache holds at most budget bytes.
+  // Must not be called during graph capture: eviction ncclMemFree's blocks.
+  void evict_free_cache_to(size_t budget) {
+    while (free_cache_bytes_ > budget) {
+      NCCLAllocation* oldest = nullptr;
+      FreeCacheKey oldest_key{0, 0, 0};
+      size_t oldest_idx = 0;
+      for (auto& [key, blocks] : free_cache_) {
+        for (size_t i = 0; i < blocks.size(); i++) {
+          if (oldest == nullptr ||
+              blocks[i]->cache_seq < oldest->cache_seq) {
+            oldest = blocks[i].get();
+            oldest_key = key;
+            oldest_idx = i;
+          }
+        }
+      }
+      if (oldest == nullptr) {
+        return;
+      }
+      auto& blocks = free_cache_[oldest_key];
+      free_cache_bytes_ -= blocks[oldest_idx]->buffer_offset +
+          blocks[oldest_idx]->buffer_size;
+      blocks.erase(blocks.begin() + static_cast<long>(oldest_idx));
+      if (blocks.empty()) {
+        free_cache_.erase(oldest_key);
+      }
+    }
+  }
+#endif // USE_ROCM
+
   std::mutex mutex_;
   NCCLAllocMap allocations_;
   NCCLSymmMemMap symm_mems_;
