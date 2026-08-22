@@ -5305,6 +5305,10 @@ class Buffer(IRNode, CodegenSymbol):
     # Multi-output buffers will define 'outputs: List[Buffer]'. Confusingly,
     # MultiOutput does NOT define this!
 
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self._post_init_setattr("origin_node", None)
+
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         return self.get_layout().make_indexer()
 
