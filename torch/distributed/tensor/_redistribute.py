@@ -382,7 +382,7 @@ def _warn_flatten_optimization_not_possible(
     elif reason == "uneven_tensor_shape":
         reason_msg = (
             " Unfortunately, because the tensor dimension is not evenly divisible by the product of "
-            "the mesh dim sizes that would need to be flattened for the optimization to work, it can not be optimized.",
+            "the mesh dim sizes that would need to be flattened for the optimization to work, it can not be optimized."
         )
     elif reason == "non_ascending_mesh_dims":
         reason_msg = (
@@ -481,7 +481,7 @@ def _optimize_transform_infos(
         - failure_reason is None if successful, or one of:
           - "too_few_transforms": Less than 2 transforms provided
           - "no_flattened_mesh": No flattened mesh exists for the required dimensions
-          - "uneven_tensor_shape": For reduce_scatter, tensor dim not evenly divisible
+          - "uneven_tensor_shape": For all_gather / reduce_scatter, tensor dim not evenly divisible
         """
         if len(infos) < 2:
             return None, "too_few_transforms"
@@ -524,22 +524,26 @@ def _optimize_transform_infos(
         # The outermost transform has the largest logical_shape on the affected
         # tensor dimension (least divided by prior shards).
         src, dst = first_placements
-        if comm_type == "all_gather":
-            # S->R (all_gather): affected dim is the source shard dim
-            affected_dim = cast(Shard, src).dim
-            outermost_info = max(infos, key=lambda x: x.logical_shape[affected_dim])
-        elif comm_type == "reduce_scatter":
-            affected_dim = cast(Shard, dst).dim
+        if comm_type in ("all_gather", "reduce_scatter"):
+            # all_gather (S->R): affected dim is the source shard dim.
+            # reduce_scatter (P->S): affected dim is the destination shard dim.
+            affected_dim = (
+                cast(Shard, src).dim
+                if comm_type == "all_gather"
+                else cast(Shard, dst).dim
+            )
             outermost_info = max(infos, key=lambda x: x.logical_shape[affected_dim])
             tensor_dim_size = outermost_info.logical_shape[affected_dim]
             effective_shard_mesh_size = math.prod(
                 device_mesh.size(info.mesh_dim) for info in infos
             )
-            # For reduce_scatter (Partial -> Shard), we cannot flatten if the tensor
-            # dimension is not evenly divisible by the flattened mesh size.
-            # The effective size is the product of mesh sizes for dims being transformed
-            # (not all dims with matching placement - intervening shards are already
-            # accounted for in logical_shape).
+            # We cannot flatten if the tensor dimension is not evenly divisible
+            # by the flattened mesh size: nested sharding chunks the dimension
+            # hierarchically, and those chunk boundaries only coincide with the
+            # boundaries of a single flat collective when the split is even.
+            # The effective size is the product of mesh sizes for dims being
+            # transformed (not all dims with matching placement - intervening
+            # shards are already accounted for in logical_shape).
             if tensor_dim_size % effective_shard_mesh_size != 0:
                 return None, "uneven_tensor_shape"
         elif comm_type == "all_reduce":
