@@ -350,18 +350,6 @@ the values observed during calibration (PTQ) or training (QAT).
     default_symmetric_fixed_qparams_observer
     per_channel_weight_observer_range_neg_127_to_127
     weight_observer_range_neg_127_to_127
-    AffineQuantizedObserverBase
-    Granularity
-    MappingType
-    PerAxis
-    PerBlock
-    PerGroup
-    PerRow
-    PerTensor
-    PerToken
-    TorchAODType
-    ZeroPointDomain
-    get_block_size
 ```
 
 ## torch.ao.quantization.fake_quantize
