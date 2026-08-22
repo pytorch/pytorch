@@ -131,6 +131,11 @@ void THCPGraph_init(PyObject* module) {
               &::at::cuda::CUDAGraph::begin_capture_to_if_node),
           py::arg("scalar_cuda_pred_tensor"))
       .def(
+          "begin_capture_to_if_else_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::begin_capture_to_if_else_node),
+          py::arg("scalar_cuda_pred_tensor"))
+      .def(
           "begin_capture_to_while_node",
           torch::wrap_pybind_function_no_gil(
               &::at::cuda::CUDAGraph::begin_capture_to_while_node),
