@@ -107,17 +107,17 @@ def _prepare_blockwise_scale(
     inverse_scale: torch.Tensor,
     block_outer: int,
     block_inner: int,
-    transposed: bool,
 ) -> torch.Tensor:
     # The cuBLAS blockwise kernels expect outer-dim-major scales for 1x128 blocks
     # and shape (round_up(K/128, 4), {M,N}/128) for 128x128 blocks (inner dim
-    # padded to a multiple of 4 before the transpose). `transposed` indicates
-    # whether the corresponding data tensor was transposed (e.g. weight passed
-    # as w.t()): if so we apply one additional transpose to keep the scale
-    # aligned with the data layout.
+    # padded to a multiple of 4 before the transpose).
     if (block_outer, block_inner) == (1, 128):
         out = inverse_scale.t().contiguous().t()
-        return out.t() if transposed else out
+        # cuBLAS blockwise 1x128 expects scale_b (the weight scale) to have
+        # outer-dim-major layout with shape [N, K/128] (outer = weight's
+        # output dim N). The scale describes w's N dimension regardless of
+        # whether w is transposed to w.t() before being passed to scaled_mm.
+        return out
     pad_amount = (-inverse_scale.shape[-1]) % 4
     if pad_amount:
         inverse_scale = torch.nn.functional.pad(
@@ -1149,7 +1149,15 @@ class TestFP8Lowering(TestCase):
     @xfailIf(
         torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0)
     )  # cuBLAS 128-element blockwise scaling is only supported for CC 9.0
-    @parametrize("shape", ((16, 256, 256), (1024, 512, 1024), (32768, 4096, 4096)))
+    @parametrize(
+        "shape",
+        (
+            (16, 256, 256),
+            (256, 384, 640),  # non-square 128x128 block grid with K padding
+            (1024, 512, 1024),
+            (32768, 4096, 4096),
+        ),
+    )
     @parametrize("use_fast_accum", (False, True))
     @parametrize(
         "scaling_block_sizes",
@@ -1201,17 +1209,13 @@ class TestFP8Lowering(TestCase):
             w, dtype_float8, block_outer=bn, block_inner=bk
         )
         w_t_fp8 = w_fp8.t()
-        w_inverse_scale = _prepare_blockwise_scale(
-            w_inverse_scale, bn, bk, transposed=True
-        )
+        w_inverse_scale = _prepare_blockwise_scale(w_inverse_scale, bn, bk)
 
         # quantize input x
         x_fp8, x_inverse_scale = _quantize_blockwise(
             x, dtype_float8, block_outer=am, block_inner=ak
         )
-        x_inverse_scale = _prepare_blockwise_scale(
-            x_inverse_scale, am, ak, transposed=False
-        )
+        x_inverse_scale = _prepare_blockwise_scale(x_inverse_scale, am, ak)
 
         recipe_x = (
             ScalingType.BlockWise1x128
