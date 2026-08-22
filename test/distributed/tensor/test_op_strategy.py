@@ -34,6 +34,7 @@ from torch.distributed.tensor._ops._math_ops import common_reduction_strategy
 from torch.distributed.tensor._ops.utils import replicate_op_strategy
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -446,8 +447,9 @@ class TestCostModelLatency(DTensorOpTestBase):
     def world_size(self) -> int:
         return 4
 
-    def test_addmm_partial_redistribute(self):
-        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+    def test_addmm_partial_redistribute(self, device):
+        device_type = torch.device(device).type
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
         # bias/mat1/mat2 are the GLOBAL (unsharded) tensors, distributed below;
         # the final assert checks full_tensor() against the global addmm. Every
         # rank must therefore draw identical values: distribute_tensor broadcasts
@@ -457,9 +459,9 @@ class TestCostModelLatency(DTensorOpTestBase):
         # process-global default generator; a per-thread local Generator gives
         # each rank its own state seeded identically, avoiding interleaved draws.
         gen = torch.Generator().manual_seed(0)
-        bias = torch.randn(8, generator=gen)
-        mat1 = torch.randn(50, 6, generator=gen)
-        mat2 = torch.randn(6, 8, generator=gen)
+        bias = torch.randn(8, generator=gen, device=device_type)
+        mat1 = torch.randn(50, 6, generator=gen, device=device_type)
+        mat2 = torch.randn(6, 8, generator=gen, device=device_type)
 
         dist_bias = distribute_tensor(bias, mesh, [Shard(0)])
         dist_mat1 = DTensor.from_local(
@@ -754,11 +756,12 @@ class TestStrategyOperation(DTensorTestBase):
         return 2
 
     @with_comms
-    def test_cache_clean(self):
-        mesh = self.build_device_mesh()
+    def test_cache_clean(self, device):
+        device_type = torch.device(device).type
+        mesh = init_device_mesh(device_type, (self.world_size,))
         test_op = torch.ops.mylib.numpy_sin
-        x = torch.randn(2, device=self.device_type)
-        y = torch.randn(2, device=self.device_type)
+        x = torch.randn(2, device=device_type)
+        y = torch.randn(2, device=device_type)
         x_dt = distribute_tensor(x, mesh, [Shard(0)])
         y_dt = distribute_tensor(y, mesh, [Shard(0)])
         with op_strategy_context(test_op.default, replicate_op_strategy):
@@ -768,6 +771,19 @@ class TestStrategyOperation(DTensorTestBase):
             f"Operator {test_op.default} does not have a sharding strategy registered",
         ):
             self._test_op_on_dtensor(test_op, x_dt, y_dt)
+
+
+instantiate_device_type_tests(
+    TestCostModelLatency,
+    globals(),
+    only_for=["cpu"],
+)
+instantiate_device_type_tests(
+    TestStrategyOperation,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 DistTensorReplicateStrategyRegistrationTestWithLocalTensor = (
