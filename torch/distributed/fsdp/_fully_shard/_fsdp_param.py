@@ -210,9 +210,14 @@ class FSDPParam:
     _unsharded_inner_tensors: list[torch.Tensor]
     _release_all_gather_outputs_after_post_all_gather: bool
     _orig_param_uid: int
-    # User-set Tensor.grad_dtype when it differs from param.dtype. None means
-    # the default (grad_dtype == param.dtype), which must not be copied onto
-    # the unsharded compute param or reduce-scatter would see orig_dtype grads.
+    # Tensor.grad_dtype is tri-state: a dtype, None meaning any gradient dtype
+    # is allowed, or unset, in which case the getter mirrors param.dtype. Only
+    # an explicit assignment is propagated onto the parameters FSDP creates;
+    # the unset default is reproduced by those parameters on their own, and
+    # copying it onto the unsharded compute param would make reduce-scatter see
+    # orig_dtype gradients. The two fields are needed because None is both a
+    # legal explicit value and the natural "nothing to propagate" sentinel.
+    _has_explicit_grad_dtype: bool
     _explicit_grad_dtype: torch.dtype | None
 
     def __init__(
@@ -279,11 +284,11 @@ class FSDPParam:
                 f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
             )
         # Snapshot before any rewrite of `param` (e.g. spmd_types -> DTensor).
-        explicit_grad_dtype = (
-            param.grad_dtype
-            if param.requires_grad and param.grad_dtype != param.dtype
-            else None
-        )
+        # An explicit `grad_dtype` of None is a real setting (any dtype allowed)
+        # and must be distinguished from grad_dtype never having been assigned.
+        grad_dtype = param.grad_dtype
+        has_explicit_grad_dtype = param.requires_grad and grad_dtype != param.dtype
+        explicit_grad_dtype = grad_dtype if has_explicit_grad_dtype else None
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
         elif fsdp_placement.dim < 0:
@@ -373,9 +378,9 @@ class FSDPParam:
         # Propagate user-set grad_dtype. grad_dtype returns param.dtype by
         # default, so this does not detect an explicit setting of
         # grad_dtype == param.dtype; that case matches the default.
+        self._has_explicit_grad_dtype = has_explicit_grad_dtype
         self._explicit_grad_dtype = explicit_grad_dtype
-        if explicit_grad_dtype is not None:
-            self.sharded_param.grad_dtype = explicit_grad_dtype
+        self._maybe_set_explicit_grad_dtype(self.sharded_param)
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
@@ -1035,7 +1040,7 @@ class FSDPParam:
         self.sharded_state = ShardedState.UNSHARDED
 
     def _maybe_set_explicit_grad_dtype(self, param: nn.Parameter) -> None:
-        if self._explicit_grad_dtype is not None:
+        if self._has_explicit_grad_dtype:
             param.grad_dtype = self._explicit_grad_dtype
 
     def _setattr_on_modules(self, param: nn.Parameter) -> None:
@@ -1081,16 +1086,26 @@ class FSDPParam:
 
     def to_accumulated_grad_if_needed(self) -> None:
         # Access `_unsharded_param` to bypass the sharded state check since we
-        # prefer to reshard before upcasting the gradient to save memory
+        # prefer to reshard before upcasting the gradient to save memory.
+        # `reduce_dtype` normally upcasts low-precision compute gradients before
+        # summing microbatches, but an explicit `grad_dtype` wins over it:
+        # casting down to `reduce_dtype` here would sum microbatches in low
+        # precision even though the reduced gradient is cast back up afterwards,
+        # silently discarding the precision `grad_dtype` asked for.
+        accumulate_dtype = (
+            self._explicit_grad_dtype
+            if self._has_explicit_grad_dtype and self._explicit_grad_dtype is not None
+            else self.reduce_dtype
+        )
         if (
-            self.reduce_dtype is None
+            accumulate_dtype is None
             or self._unsharded_param.grad is None
-            or self._unsharded_param.grad.dtype == self.reduce_dtype
+            or self._unsharded_param.grad.dtype == accumulate_dtype
         ):
             return
         unsharded_grad = self._unsharded_param.grad
         self._unsharded_param.grad = None
-        self.unsharded_accumulated_grad = unsharded_grad.to(self.reduce_dtype)
+        self.unsharded_accumulated_grad = unsharded_grad.to(accumulate_dtype)
 
     def accumulate_unsharded_grad_if_needed(self) -> None:
         if (
@@ -1305,9 +1320,10 @@ class FSDPParam:
                     f"instead of {self.sharded_param}"
                 )
             self.sharded_param = new_param
-        # _apply may keep the Parameter object but replace storage, dropping
-        # Tensor.grad_dtype. Re-stamp after every reset.
-        self._maybe_set_explicit_grad_dtype(self.sharded_param)
+            # grad_dtype lives on the Parameter's autograd metadata and so
+            # survives an in-place `.data` swap, but a replacement Parameter
+            # object starts from the default and has to be re-stamped.
+            self._maybe_set_explicit_grad_dtype(self.sharded_param)
 
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
