@@ -40,8 +40,9 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.nn.parallel import DistributedDataParallel
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
 )
@@ -152,25 +153,28 @@ def _train(model, optim, train_steps=1):
 
 
 class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def backend(self):
         curr_backend = dist.get_default_backend_for_device(self.device_type)
         return f"cpu:gloo,{self.device_type}:{curr_backend}"
 
-    def _create_model(self, compile, model_type, state_dict_options=None):
-        dummy_model = TestDummyModel().to(self.device_type)
+    def _create_model(self, device, compile, model_type, state_dict_options=None):
+        device_type = torch.device(device).type
+        dummy_model = TestDummyModel().to(device_type)
 
         if model_type not in ModelType:
             raise AssertionError(f"{model_type} is not supported.")
         if model_type == ModelType.FSDP:
-            device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+            device_mesh = init_device_mesh(device_type, (self.world_size,))
             model = FSDP(
                 dummy_model,
                 device_mesh=device_mesh,
                 use_orig_params=True,
             )
         elif model_type == ModelType.HSDP:
-            device_mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+            device_mesh = init_device_mesh(device_type, (2, self.world_size // 2))
             model = FSDP(
                 dummy_model,
                 device_mesh=device_mesh,
@@ -179,7 +183,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             )
         elif model_type == ModelType.FSDP_TP:
             mesh_2d = init_device_mesh(
-                self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+                device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
             )
             tp_mesh = mesh_2d["tp"]
             dp_mesh = mesh_2d["dp"]
@@ -219,8 +223,8 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     # TODO: Previously PairwiseParallel does not shard properly, passing ModelType.FSDP_TP test where it
     # should have failed. Disabling the failed test temporarily to unblock the deprecation of PairwiseParallel.
     @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP, ModelType.DDP])
-    def test_e2e(self, compile, model_type):
-        self._run_e2e_test(compile, model_type)
+    def test_e2e(self, device, compile, model_type):
+        self._run_e2e_test(device, compile, model_type)
 
     @skip_if_lt_x_gpu(4)
     @with_comms
@@ -237,9 +241,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         ],
     )
     def test_e2e_async_cached(
-        self, cache_staged_state_dict, async_checkpointer_type, zoc
+        self, device, cache_staged_state_dict, async_checkpointer_type, zoc
     ):
         self._run_e2e_test(
+            device,
             compile=False,
             model_type=ModelType.FSDP,
             async_op=True,
@@ -250,6 +255,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
     def _run_e2e_test(
         self,
+        device,
         compile,
         model_type,
         async_op=False,
@@ -257,10 +263,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         async_checkpointer_type=None,
         zoc=False,
     ):
-        model, optim = self._create_model(compile, ModelType.NONE)
+        model, optim = self._create_model(device, compile, ModelType.NONE)
         _train(model, optim, train_steps=2)
 
-        dist_model, dist_optim = self._create_model(compile, model_type)
+        dist_model, dist_optim = self._create_model(device, compile, model_type)
         _, original_train_state = _train(dist_model, dist_optim, train_steps=2)
 
         original_stateful_obj = TestStatefulObj()  # tests arbitrary saving/loading
@@ -317,7 +323,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
         loaded_stateful_obj = TestStatefulObj()
         loaded_train_state = TestTrainState()
-        dist_model, dist_optim = self._create_model(compile, model_type)
+        dist_model, dist_optim = self._create_model(device, compile, model_type)
 
         DCP.load(
             state_dict={
@@ -344,7 +350,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         self._verify_osd_by_load(model, optim, self._optim(model), dist_osd)
 
     @with_temp_dir
-    def test_stateful_and_non_stateful_loads(self) -> None:
+    def test_stateful_and_non_stateful_loads(self, device) -> None:
         class StateDict(dict):
             def __init__(self):
                 self.set_sd_item_called = False
@@ -389,12 +395,13 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @skip_if_lt_x_gpu(4)
     @with_comms
     @with_temp_dir
-    def test_different_ordered_state_dict_keys(self):
+    def test_different_ordered_state_dict_keys(self, device):
         """Tests that the order of keys in the state dict does not matter when loading
         If order was not accounted for, the following test would cause a deadlock.
         """
 
         world_size = self.world_size
+        device_type = torch.device(device).type
 
         class Foo:
             def state_dict(self):
@@ -439,7 +446,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         DCP.load(sd, checkpoint_id=self.temp_dir)
 
     @with_temp_dir
-    def test_no_dist(self):
+    def test_no_dist(self, device):
         # since comm's are not initialized in this method, `no_dist`
         # is assumed False
         DCP.save({}, checkpoint_id=self.temp_dir)
@@ -448,12 +455,12 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @skip_if_lt_x_gpu(4)
     @with_comms
     @with_temp_dir
-    def test_partial_load(self):
-        model, optim = self._create_model(compile=False, model_type=ModelType.NONE)
+    def test_partial_load(self, device):
+        model, optim = self._create_model(device, compile=False, model_type=ModelType.NONE)
         _train(model, optim, train_steps=2)
 
         dist_model, dist_optim = self._create_model(
-            compile=False, model_type=ModelType.FSDP
+            device, compile=False, model_type=ModelType.FSDP
         )
         _train(dist_model, dist_optim, train_steps=2)
 
@@ -461,7 +468,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             {"model": dist_model, "optimizer": dist_optim}, checkpoint_id=self.temp_dir
         )
 
-        dist_model, _ = self._create_model(compile=False, model_type=ModelType.FSDP)
+        dist_model, _ = self._create_model(device, compile=False, model_type=ModelType.FSDP)
         DCP.load({"model": dist_model}, checkpoint_id=self.temp_dir)
 
         dist_msd = get_model_state_dict(dist_model)
@@ -487,7 +494,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @skip_if_lt_x_gpu(4)
     @with_comms
     @with_temp_dir
-    def test_overwrite(self):
+    def test_overwrite(self, device):
         t1, t2 = torch.randn(10), torch.randn(10)
         DCP.save({"random": t1}, checkpoint_id=self.temp_dir)
         DCP.save(
@@ -510,12 +517,16 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
 
 class TestNoCPU(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def backend(self):
-        return "nccl"
+        return dist.get_default_backend_for_device(self.device_type)
 
     @with_comms
-    def test_no_cpu(self):
+    def test_no_cpu(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("test_no_cpu requires a non-CPU device")
         with self.assertRaisesRegex(
             AssertionError, r"A CPU backend must be enabled for async save;.*?"
         ):
@@ -524,6 +535,8 @@ class TestNoCPU(DTensorTestBase):
 
 
 class TestInitStateDict(DTensorTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     @with_temp_dir
     def test_init_state_dict(self):
         temp_dir = self.temp_dir
@@ -565,6 +578,16 @@ class TestInitStateDict(DTensorTestBase):
         self.assertEqual(optim_2.param_groups[0]["lr"], 0.1)
 
 
-instantiate_parametrized_tests(TestE2ESaveAndLoad)
+instantiate_device_type_tests(
+    TestNoCPU,
+    globals(),
+    except_for=("cpu",),
+)
+
+instantiate_device_type_tests(
+    TestE2ESaveAndLoad,
+    globals(),
+    except_for=("cpu",),
+)
 if __name__ == "__main__":
     run_tests()
