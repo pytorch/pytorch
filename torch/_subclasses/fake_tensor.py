@@ -1841,7 +1841,7 @@ class FakeTensorMode(TorchDispatchMode):
 
             # We have a cache entry.
 
-            output = self._output_from_cache_entry(state, entry, key, func, args)
+            output = self._output_from_cache_entry(state, entry, key, args)
             FakeTensorMode.cache_hits += 1
             if self.cache_crosscheck_enabled:
                 # For debugging / testing: Validate that the output synthesized
@@ -2183,7 +2183,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         try:
             synth_output = self._output_from_cache_entry(
-                state, entry_for_synth_output, key, func, args
+                state, entry_for_synth_output, key, args
             )
         except GuardOnDataDependentSymNode:
             # This should probably never really happen. If it does it means that
@@ -2313,7 +2313,6 @@ class FakeTensorMode(TorchDispatchMode):
         state: _CacheKeyState,
         entry: _DispatchCacheEntryOutputInfo,
         key: _DispatchCacheKey,
-        func: OpOverload,
         args: Sequence[object],
     ) -> FakeTensor | None:
         if (
@@ -2401,7 +2400,6 @@ class FakeTensorMode(TorchDispatchMode):
         state: _CacheKeyState,
         entry: _DispatchCacheValidEntry,
         key: _DispatchCacheKey,
-        func: OpOverload,
         args: Sequence[object],
     ) -> FakeTensor | None | tuple[FakeTensor | None, ...]:
         """
@@ -2410,15 +2408,13 @@ class FakeTensorMode(TorchDispatchMode):
 
         if entry.is_output_tuple:
             outputs = [
-                self._get_output_tensor_from_cache_entry(
-                    state, output_info, key, func, args
-                )
+                self._get_output_tensor_from_cache_entry(state, output_info, key, args)
                 for output_info in entry.output_infos
             ]
             return tuple(outputs)
         else:
             return self._get_output_tensor_from_cache_entry(
-                state, entry.output_infos[0], key, func, args
+                state, entry.output_infos[0], key, args
             )
 
     def _crosscheck_cache_output(

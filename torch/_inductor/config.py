@@ -364,12 +364,7 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
-pre_grad_fusion_options: dict[str, dict[str, Any]] = {
-    "batch_linear_lhs": {
-        "devices": ("xpu",),
-        "min_fuse_set_size": 2,
-    },
-}
+pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
@@ -2818,6 +2813,7 @@ class rocm:
     #   - config.rocm.origami (this knob)
     #   - config.max_autotune_gemm_search_space == "DEFAULT"
     #   - rocm-origami is installed (else the import gate sets it inert)
+    #   - ROCm version < 10.0 (origami not supported on 10.0+)
     # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
     # one-time warning; the regular config generator runs instead.
     #
