@@ -57,7 +57,7 @@ class TestCppBuilder(TestCase):
 
     def test_unregistered_device_options_unchanged(self) -> None:
         result = get_cpp_torch_device_options("unregistered_device_xyz", False, False)
-        definitions, _include_dirs, cflags, _ldflags, _lib_dirs, libraries, passthrough = result
+        definitions, _inc, cflags, _ld, _libdirs, libraries, passthrough = result
         self.assertEqual(definitions, [])
         self.assertEqual(cflags, [])
         self.assertEqual(libraries, [])
