@@ -5,22 +5,20 @@ import math
 import flydsl.compiler as flyc
 import flydsl.expr as fx
 from flydsl.expr import const_expr
+from flydsl.expr.typing import Vector as Vec
 
 from .flex_attn_mask import (
     evaluate_mask_program,
     is_causal_document_mask_program,
 )
-from .flex_attn_fwd_gfx950_mfma32 import build_flex_attn_fwd_mfma32_module
-from .flex_attn_utils import (
-    load_scalar,
-    make_global_view,
-    make_shared_view,
-    store_scalar,
-)
+from .flex_attn_utils import load_scalar, make_global_view, store_scalar
 
 _LOG2E = 1.4426950408889634
 _LN2 = math.log(2.0)
 _NEG_BIG = -1.0e30
+_FWD_COMPILE_HINTS = {
+    "fast_fp_math": True,
+}
 
 
 def _f32(value):
@@ -63,103 +61,19 @@ def build_flex_attn_fwd_module(
     o_stride=None,
     output_stats_in_log2: bool = False,
 ):
-    if (
-        seq_q not in (4, 8)
-        and seq_q % 128 == 0
-        and seq_kv % 128 == 0
-        and (qk_head_dim, v_head_dim) in ((128, 128), (192, 128))
-        and sparse_q_block_size == 128
-        and sparse_kv_block_size == 128
-    ):
-        return build_flex_attn_fwd_mfma32_module(
-            batch_size=batch_size,
-            num_q_heads=num_q_heads,
-            num_kv_heads=num_kv_heads,
-            seq_q=seq_q,
-            seq_kv=seq_kv,
-            qk_head_dim=qk_head_dim,
-            v_head_dim=v_head_dim,
-            block_mask_batch=block_mask_batch,
-            block_mask_heads=block_mask_heads,
-            num_q_blocks=num_q_blocks,
-            max_partial_blocks=max_partial_blocks,
-            max_full_blocks=max_full_blocks,
-            sparse_q_block_size=sparse_q_block_size,
-            sparse_kv_block_size=sparse_kv_block_size,
-            causal_partial_blocks=causal_partial_blocks,
-            scale=scale,
-            mask_program=mask_program,
-            mask_program_output=mask_program_output,
-            mask_buffer_shapes=mask_buffer_shapes,
-            mask_buffer_strides=mask_buffer_strides,
-            q_stride=q_stride,
-            k_stride=k_stride,
-            v_stride=v_stride,
-            o_stride=o_stride,
-            output_stats_in_log2=output_stats_in_log2,
-        )
-    return _build_flex_attn_fwd_module_mfma16(
-        batch_size=batch_size,
-        num_q_heads=num_q_heads,
-        num_kv_heads=num_kv_heads,
-        seq_q=seq_q,
-        seq_kv=seq_kv,
-        qk_head_dim=qk_head_dim,
-        v_head_dim=v_head_dim,
-        block_mask_batch=block_mask_batch,
-        block_mask_heads=block_mask_heads,
-        num_q_blocks=num_q_blocks,
-        max_partial_blocks=max_partial_blocks,
-        max_full_blocks=max_full_blocks,
-        sparse_q_block_size=sparse_q_block_size,
-        sparse_kv_block_size=sparse_kv_block_size,
-        causal_partial_blocks=causal_partial_blocks,
-        scale=scale,
-        mask_program=mask_program,
-        mask_program_output=mask_program_output,
-        mask_buffer_shapes=mask_buffer_shapes,
-        mask_buffer_strides=mask_buffer_strides,
-        q_stride=q_stride,
-        k_stride=k_stride,
-        v_stride=v_stride,
-        o_stride=o_stride,
-        output_stats_in_log2=output_stats_in_log2,
-    )
+    """Build the gfx950 prefill kernel.
 
+    A 256-thread CTA owns 128 query rows. Each of its four waves keeps one
+    32-row Q tile and the corresponding 32x128 output tile in registers. K/V
+    are staged once per CTA and consumed by all four waves.
+    """
 
-def _build_flex_attn_fwd_module_mfma16(
-    *,
-    batch_size: int,
-    num_q_heads: int,
-    num_kv_heads: int,
-    seq_q: int,
-    seq_kv: int,
-    qk_head_dim: int,
-    v_head_dim: int,
-    block_mask_batch: int,
-    block_mask_heads: int,
-    num_q_blocks: int,
-    max_partial_blocks: int,
-    max_full_blocks: int,
-    sparse_q_block_size: int,
-    sparse_kv_block_size: int,
-    causal_partial_blocks: bool,
-    scale: float,
-    mask_program=(),
-    mask_program_output: int = 0,
-    mask_buffer_shapes=(),
-    mask_buffer_strides=(),
-    q_stride=None,
-    k_stride=None,
-    v_stride=None,
-    o_stride=None,
-    output_stats_in_log2: bool = False,
-):
-    BM = 64
+    BM = 128
     BN = 64
     NW = 4
     NT = NW * 64
     VPT = 8
+    MFMA_MN = 32
 
     if (qk_head_dim, v_head_dim) not in ((128, 128), (192, 128)):
         raise ValueError(
@@ -168,10 +82,12 @@ def _build_flex_attn_fwd_module_mfma16(
         )
     if num_q_heads % num_kv_heads:
         raise ValueError("FlyDSL forward requires Hq % Hkv == 0")
-    if sparse_q_block_size != 128 or sparse_kv_block_size != 128:
-        raise ValueError("FlyDSL forward requires sparse Q/KV block size 128")
-    if seq_kv % sparse_kv_block_size:
-        raise ValueError("FlyDSL forward requires Sk divisible by 128")
+    if sparse_q_block_size != BM or sparse_kv_block_size != 128:
+        raise ValueError("FlyDSL forward requires sparse block size 128")
+    if seq_q % BM or seq_kv % sparse_kv_block_size:
+        raise ValueError("FlyDSL forward requires Sq/Sk divisible by 128")
+    if num_q_blocks != seq_q // BM:
+        raise ValueError("BlockMask Q rows must cover Sq with 128-row blocks")
     if block_mask_batch not in (1, batch_size):
         raise ValueError("BlockMask batch dimension must be 1 or B")
     if block_mask_heads not in (1, num_kv_heads, num_q_heads):
@@ -196,27 +112,16 @@ def _build_flex_attn_fwd_module_mfma16(
     MAX_PARTIAL = int(max_partial_blocks)
     MAX_FULL = int(max_full_blocks)
     GROUP_SIZE = HQ // HKV
-    DECODE = SQ in (4, 8)
-    PACKED_Q_ROWS = GROUP_SIZE * SQ if DECODE else SQ
-    Q_CHUNKS = (PACKED_Q_ROWS + BM - 1) // BM if DECODE else SQ // BM
-
-    if DECODE:
-        if BMH not in (1, HKV):
-            raise ValueError(
-                "FlyDSL forward decode requires a shared or per-KV-head BlockMask"
-            )
-        if NQB != 1:
-            raise ValueError("FlyDSL forward decode requires one sparse Q block")
-        if PACKED_Q_ROWS > 256 or PACKED_Q_ROWS % 32:
-            raise ValueError(
-                "FlyDSL forward decode requires Hq/Hkv * Sq to be a multiple "
-                "of 32 and no greater than 256"
-            )
-    else:
-        if SQ % 256:
-            raise ValueError("FlyDSL forward prefill requires Sq divisible by 256")
-        if NQB != SQ // sparse_q_block_size:
-            raise ValueError("BlockMask Q rows must cover Sq with 128-row blocks")
+    Q_CHUNKS = SQ // BM
+    CPB = sparse_kv_block_size // BN
+    K_STEPS = DQK // 16
+    D_CHUNKS = DV // MFMA_MN
+    K_DCH = DQK // VPT
+    V_DCH = DV // VPT
+    Q_LOAD_IT = (BM * K_DCH) // NT
+    K_LOAD_IT = (BN * K_DCH) // NT
+    V_LOAD_IT = (BN * V_DCH) // NT
+    DQK_SUBTILES = DQK // MFMA_MN
 
     def contiguous_stride(heads, sequence, dimension):
         return (heads * sequence * dimension, sequence * dimension, dimension, 1)
@@ -243,22 +148,12 @@ def _build_flex_attn_fwd_module_mfma16(
         MASK_BUFFER_STRIDES,
     )
 
-    QP = DQK + 8
-    KVP = max(DQK, DV) + 8
-    Q_DCH = DQK // VPT
-    V_DCH = DV // VPT
-    Q_LOAD_IT = (BM * Q_DCH) // NT
-    V_LOAD_IT = (BN * V_DCH) // NT
-    CPB = sparse_kv_block_size // BN
-    CE = [16 * (element // 4) + (element % 4) for element in range(16)]
-
     @fx.struct
     class FwdSmem:
-        query: fx.Array[fx.BFloat16, BM * QP, 16]
-        kv: fx.Array[fx.BFloat16, BN * KVP, 16]
-        row_max: fx.Array[fx.Float32, BM, 16]
-        row_sum: fx.Array[fx.Float32, BM, 16]
-        alpha: fx.Array[fx.Float32, BM, 16]
+        query: fx.Array[fx.BFloat16, BM * DQK, 16]
+        # K needs the largest allocation. V reuses the same storage after every
+        # wave has consumed K into registers.
+        kv: fx.Array[fx.BFloat16, BN * DQK, 16]
 
     @flyc.kernel(known_block_size=[NT, 1, 1])
     def kernel(
@@ -280,37 +175,23 @@ def _build_flex_attn_fwd_module_mfma16(
         tid = fx.thread_idx.x
         lane = tid % fx.Int32(64)
         wave = tid // fx.Int32(64)
-        lane16 = lane % fx.Int32(16)
-        lane_group = lane // fx.Int32(16)
+        lane_row = lane % fx.Int32(MFMA_MN)
+        lane_half = lane // fx.Int32(MFMA_MN)
         batch = fx.block_idx.z
+        head = fx.block_idx.x
+        kv_head = head // fx.Int32(GROUP_SIZE)
         q_chunk = fx.block_idx.y
         q_base = q_chunk * fx.Int32(BM)
-
-        if const_expr(DECODE):
-            kv_head = fx.block_idx.x
-            head = kv_head * fx.Int32(GROUP_SIZE)
-        else:
-            head = fx.block_idx.x
-            kv_head = head // fx.Int32(GROUP_SIZE)
+        query_pos = q_base + wave * fx.Int32(MFMA_MN) + lane_row
 
         lds = fx.SharedAllocator().allocate(FwdSmem).peek()
         pquery = lds.query.ptr
         pkv = lds.kv.ptr
-        pmax = lds.row_max.ptr
-        psum = lds.row_sum.ptr
-        palpha = lds.alpha.ptr
 
         gQ = make_global_view(Q, None, (B, HQ, SQ, DQK), Q_STRIDE)
         gK = make_global_view(K, None, (B, HKV, SK, DQK), K_STRIDE)
         gV = make_global_view(V, None, (B, HKV, SK, DV), V_STRIDE)
-
-        q_smem = make_shared_view(pquery, (BM, DQK), (QP, 1))
-        k_smem = make_shared_view(pkv, (BN, DQK), (KVP, 1))
-        v_transposed = make_shared_view(pkv, (DV, BN), (1, KVP))
-        score_anchor = fx.make_view(
-            fx.get_iter(q_smem),
-            fx.make_layout((BN, BM), (BM, 1)),
-        )
+        gO = make_global_view(O, None, (B, HQ, SQ, DV), O_STRIDE)
 
         metadata_rows = BMB * BMH * NQB
         gKVN = make_global_view(KVNumBlocks, None, metadata_rows, 1)
@@ -349,117 +230,119 @@ def _build_flex_attn_fwd_module_mfma16(
 
         i32_atom = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Int32)
         f32_atom = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Float32)
+        o64 = fx.make_copy_atom(fx.rocdl.BufferCopy64b(), fx.BFloat16)
 
         def load_i32(view, index):
             return load_scalar(i32_atom, view, index, fx.Int32)
 
+        def load_uniform_i32(view, index):
+            value = load_i32(view, index)
+            return fx.gpu.shuffle_idx(value, 0, 64)
+
         def store_f32(view, index, value):
             store_scalar(f32_atom, view, index, value, fx.Float32)
 
-        def row_coordinates(local_row):
-            packed_row = q_base + local_row
-            if const_expr(DECODE):
-                valid = packed_row < fx.Int32(PACKED_Q_ROWS)
-                safe_row = valid.select(packed_row, fx.Int32(0))
-                row_head = (
-                    kv_head * fx.Int32(GROUP_SIZE)
-                    + safe_row // fx.Int32(SQ)
-                )
-                query_pos = safe_row % fx.Int32(SQ)
-            else:
-                valid = packed_row < fx.Int32(SQ)
-                row_head = head
-                query_pos = valid.select(packed_row, fx.Int32(0))
-            return valid, row_head, query_pos
-
         g128 = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.BFloat16)
-        u64 = fx.make_copy_atom(fx.UniversalCopy64b(), fx.BFloat16)
+        dma128 = fx.make_copy_atom(fx.rocdl.BufferCopyLDS128b(), 128)
+        lds_dma_ptr_type = fx.PointerType.get(
+            fx.BFloat16.ir_type,
+            2,
+            16,
+        )
         tr16 = fx.make_copy_atom(
             fx.rocdl.cdna4.LDSReadTrans(16, 64),
             fx.BFloat16,
         )
-        o16 = fx.make_copy_atom(fx.rocdl.BufferCopy16b(), fx.BFloat16)
+        mma_atom = fx.make_mma_atom(
+            fx.rocdl.MFMA(MFMA_MN, MFMA_MN, 16, fx.BFloat16)
+        )
 
+        def make_fragment(value, size, dtype):
+            fragment = fx.make_rmem_tensor(size, dtype)
+            fragment.store(Vec(value))
+            return fragment
+
+        def mfma(a_v8, b_v8, c_v16):
+            a_fragment = make_fragment(a_v8, 8, fx.BFloat16)
+            b_fragment = make_fragment(b_v8, 8, fx.BFloat16)
+            c_fragment = make_fragment(c_v16, 16, fx.Float32)
+            fx.gemm(
+                mma_atom,
+                c_fragment,
+                a_fragment,
+                b_fragment,
+                c_fragment,
+            )
+            return c_fragment.load()
+
+        def read_v8bf16_static(pointer_base, element_offset):
+            pointer = fx.add_offset(
+                pointer_base,
+                fx.make_int_tuple(fx.Int32(element_offset)),
+            )
+            return fx.make_view(pointer, fx.make_layout(8, 1)).load()
+
+        def k_swizzled_offset(row, column):
+            # Match the conflict-free 32x32 K subtile layout used by the
+            # repository's gfx950 SWA kernel.
+            swizzled_column = (
+                column
+                ^ ((row & fx.Int32(8)) << fx.Int32(1))
+                ^ ((row & fx.Int32(16)) >> fx.Int32(1))
+            )
+            return row * fx.Int32(MFMA_MN) + swizzled_column
+
+        # Pre-scale Q into a swizzled LDS tile. Keeping Q in LDS instead of
+        # carrying all 12 MFMA packs across the sparse loop avoids the gfx950
+        # VGPR cliff for Dqk=192.
+        q_scale = Vec.from_elements([_f32(SCALE_LOG2)], fx.Float32).broadcast_to(
+            VPT
+        )
         for load_step in fx.range_constexpr(Q_LOAD_IT):
             linear = fx.Int32(load_step * NT) + tid
-            row = linear // fx.Int32(Q_DCH)
-            chunk = linear % fx.Int32(Q_DCH)
-            valid, row_head, query_pos = row_coordinates(row)
-            fragment = fx.make_rmem_tensor(VPT, fx.BFloat16)
+            row = linear // fx.Int32(K_DCH)
+            chunk = linear % fx.Int32(K_DCH)
+            column = chunk * fx.Int32(VPT)
+            q_fragment = fx.make_rmem_tensor(VPT, fx.BFloat16)
             source = fx.logical_divide(
-                fx.slice(gQ, (batch, row_head, query_pos, None)),
+                fx.slice(gQ, (batch, head, q_base + row, None)),
                 fx.make_layout(VPT, 1),
             )
-            fx.copy(g128, fx.slice(source, (None, chunk)), fragment)
-            loaded = fx.Vector(fragment.load())
-            stored = fx.Vector.from_elements(
-                [
-                    valid.select(loaded[element], fx.BFloat16(0.0))
-                    for element in fx.range_constexpr(VPT)
-                ],
-                fx.BFloat16,
+            fx.copy(
+                g128,
+                fx.slice(source, (None, chunk)),
+                q_fragment,
+            )
+            q_value = Vec(q_fragment.load())
+            q_scaled = Vec(q_value.to(fx.Float32)) * q_scale
+            q_row_group = row // fx.Int32(MFMA_MN)
+            q_row_in_group = row % fx.Int32(MFMA_MN)
+            q_d_subtile = column // fx.Int32(MFMA_MN)
+            q_column_in_subtile = column % fx.Int32(MFMA_MN)
+            q_lds_offset = (
+                (q_row_group * fx.Int32(DQK_SUBTILES) + q_d_subtile)
+                * fx.Int32(MFMA_MN * MFMA_MN)
+                + k_swizzled_offset(q_row_in_group, q_column_in_subtile)
             )
             fx.ptr_store(
-                stored,
-                pquery + row * fx.Int32(QP) + chunk * fx.Int32(VPT),
+                Vec(q_scaled).to(fx.BFloat16),
+                pquery + q_lds_offset,
             )
-
-        if tid < fx.Int32(BM):
-            fx.ptr_store(_f32(_NEG_BIG), pmax + tid)
-            fx.ptr_store(_f32(0.0), psum + tid)
-            fx.ptr_store(_f32(1.0), palpha + tid)
         fx.gpu.barrier()
 
-        atom = fx.make_mma_atom(fx.rocdl.MFMA(16, 16, 16, fx.BFloat16))
-        score_mma = fx.make_tiled_mma(
-            atom,
-            fx.make_layout((1, NW, 1), (0, 1, 0)),
-        )
-        output_mma = fx.make_tiled_mma(
-            atom,
-            fx.make_layout((NW, 1, 1), (1, 0, 0)),
-        )
-        score_thread = score_mma.thr_slice(tid)
-        output_thread = output_mma.thr_slice(tid)
-
-        copy_q = fx.make_tiled_copy_B(u64, score_mma).get_slice(tid)
-        copy_k = fx.make_tiled_copy_A(u64, score_mma).get_slice(tid)
-        copy_v = fx.make_tiled_copy_B(tr16, output_mma).get_slice(tid)
-        copy_output = fx.make_tiled_copy_C(o16, output_mma).get_slice(tid)
-
-        query_fragment = score_thread.make_fragment_B(q_smem)
-        key_fragment = score_thread.make_fragment_A(k_smem)
-        probability_fragment = output_thread.make_fragment_A(score_anchor)
-        value_fragment = output_thread.make_fragment_B(v_transposed)
-
-        fx.copy(
-            u64,
-            copy_q.partition_S(q_smem),
-            copy_q.retile(query_fragment),
-        )
-
-        if const_expr(DECODE):
-            output_offset = (
-                batch * fx.Int32(O_STRIDE[0])
-                + kv_head * fx.Int32(GROUP_SIZE * O_STRIDE[1])
-                + q_base * fx.Int32(DV)
+        def load_q_pack(k_step):
+            d_subtile = k_step // 2
+            d_half = k_step % 2
+            pointer = q_odd_pointer if d_half else q_even_pointer
+            return read_v8bf16_static(
+                pointer,
+                d_subtile * MFMA_MN * MFMA_MN,
             )
-            output_row_stride = DV
-        else:
-            output_offset = (
-                batch * fx.Int32(O_STRIDE[0])
-                + head * fx.Int32(O_STRIDE[1])
-                + q_base * fx.Int32(O_STRIDE[2])
-            )
-            output_row_stride = O_STRIDE[2]
-        output_tile = make_global_view(
-            O,
-            output_offset,
-            (BM, DV),
-            (output_row_stride, 1),
-        )
-        output_fragment = output_thread.make_fragment_C(output_tile)
-        output_fragment.fill(0)
+
+        zero16 = Vec.filled(16, 0.0, fx.Float32)
+        output = [zero16 for _ in fx.range_constexpr(D_CHUNKS)]
+        running_max = _f32(_NEG_BIG)
+        running_sum = _f32(0.0)
 
         if const_expr(BMB == 1):
             mask_batch = fx.Int32(0)
@@ -471,322 +354,505 @@ def _build_flex_attn_fwd_module_mfma16(
             mask_head = kv_head
         else:
             mask_head = head
-        if const_expr(DECODE):
-            mask_q_block = fx.Int32(0)
-        else:
-            mask_q_block = q_base // fx.Int32(sparse_q_block_size)
+        mask_q_block = q_chunk
         mask_row = (
             (mask_batch * fx.Int32(BMH) + mask_head) * fx.Int32(NQB)
             + mask_q_block
         )
 
-        def reduce_tile_max(scores, output_row):
-            tile_max = scores[0]
-            for element in fx.range_constexpr(1, 16):
-                tile_max = _maximum(tile_max, scores[element])
-            for shift in (16, 32):
-                tile_max = _maximum(
-                    tile_max,
-                    _f32(
-                        fx.gpu.shuffle_xor(tile_max, shift, 64)
-                    ),
-                )
-            if lane_group == fx.Int32(0):
-                old_max = _f32(fx.ptr_load(pmax + output_row))
-                new_max = _maximum(old_max, tile_max)
-                fx.ptr_store(new_max, pmax + output_row)
-                fx.ptr_store(
-                    _exp2(old_max - new_max),
-                    palpha + output_row,
-                )
-            fx.rocdl.s_waitcnt(lgkmcnt=0)
-            return _f32(fx.ptr_load(pmax + output_row))
-
-        def update_row_sum(probabilities, output_row):
-            tile_sum = probabilities[0]
-            for element in fx.range_constexpr(1, 16):
-                tile_sum = tile_sum + probabilities[element]
-            for shift in (16, 32):
-                tile_sum = tile_sum + _f32(
-                    fx.gpu.shuffle_xor(tile_sum, shift, 64)
-                )
-            if lane_group == fx.Int32(0):
-                old_sum = _f32(fx.ptr_load(psum + output_row))
-                alpha = _f32(fx.ptr_load(palpha + output_row))
-                fx.ptr_store(
-                    old_sum * alpha + tile_sum,
-                    psum + output_row,
-                )
-
-        def process_tile(kv_chunk, masked):
-            kv_base = kv_chunk * fx.Int32(BN)
-            for load_step in fx.range_constexpr(Q_LOAD_IT):
+        def stage_k(kv_base):
+            for load_step in fx.range_constexpr(K_LOAD_IT):
                 linear = fx.Int32(load_step * NT) + tid
-                row = linear // fx.Int32(Q_DCH)
-                chunk = linear % fx.Int32(Q_DCH)
-                fragment = fx.make_rmem_tensor(VPT, fx.BFloat16)
+                lds_offset = linear * fx.Int32(VPT)
+                subtile = lds_offset // fx.Int32(MFMA_MN * MFMA_MN)
+                within_subtile = lds_offset % fx.Int32(MFMA_MN * MFMA_MN)
+                row_in_half = within_subtile // fx.Int32(MFMA_MN)
+                swizzled_column = within_subtile % fx.Int32(MFMA_MN)
+                row_half = subtile // fx.Int32(DQK_SUBTILES)
+                d_subtile = subtile % fx.Int32(DQK_SUBTILES)
+                row = row_half * fx.Int32(MFMA_MN) + row_in_half
+                column = (
+                    d_subtile * fx.Int32(MFMA_MN)
+                    + (
+                        swizzled_column
+                        ^ ((row_in_half & fx.Int32(8)) << fx.Int32(1))
+                        ^ ((row_in_half & fx.Int32(16)) >> fx.Int32(1))
+                    )
+                )
+                chunk = column // fx.Int32(VPT)
                 source = fx.logical_divide(
                     fx.slice(gK, (batch, kv_head, kv_base + row, None)),
                     fx.make_layout(VPT, 1),
                 )
-                fx.copy(g128, fx.slice(source, (None, chunk)), fragment)
-                fx.ptr_store(
-                    fx.Vector(fragment.load()),
-                    pkv + row * fx.Int32(KVP) + chunk * fx.Int32(VPT),
+                destination_pointer = fx.inttoptr(
+                    lds_dma_ptr_type,
+                    fx.Int32(
+                        fx.ptrtoint(
+                            fx.add_offset(
+                                pkv,
+                                fx.make_int_tuple(lds_offset),
+                            )
+                        )
+                    ),
                 )
-            fx.gpu.barrier()
+                destination = fx.make_view(
+                    destination_pointer,
+                    fx.make_layout(1, 1),
+                )
+                fx.copy(
+                    dma128,
+                    fx.slice(source, (None, chunk)),
+                    destination,
+                )
 
-            fx.copy(
-                u64,
-                copy_k.partition_S(k_smem),
-                copy_k.retile(key_fragment),
+        def load_k_pack(k_step, high_half):
+            d_subtile = k_step // 2
+            d_half = k_step % 2
+            pointer = k_odd_pointer if d_half else k_even_pointer
+            row_half_offset = (
+                DQK_SUBTILES * MFMA_MN * MFMA_MN
+                if high_half
+                else 0
             )
-            fx.gpu.barrier()
-
-            scores_fragment = score_thread.make_fragment_C(score_anchor)
-            scores_fragment.fill(0)
-            fx.gemm(
-                atom,
-                scores_fragment,
-                key_fragment,
-                query_fragment,
-                scores_fragment,
+            return read_v8bf16_static(
+                pointer,
+                row_half_offset + d_subtile * MFMA_MN * MFMA_MN,
             )
 
+        def stage_v(kv_base):
             for load_step in fx.range_constexpr(V_LOAD_IT):
                 linear = fx.Int32(load_step * NT) + tid
-                row = linear // fx.Int32(V_DCH)
-                chunk = linear % fx.Int32(V_DCH)
-                fragment = fx.make_rmem_tensor(VPT, fx.BFloat16)
+                lds_offset = linear * fx.Int32(VPT)
+                subtile = lds_offset // fx.Int32(8 * MFMA_MN)
+                within_subtile = lds_offset % fx.Int32(8 * MFMA_MN)
+                row_in_group = within_subtile // fx.Int32(MFMA_MN)
+                column_in_subtile = within_subtile % fx.Int32(MFMA_MN)
+                row_group = subtile // fx.Int32(D_CHUNKS)
+                d_subtile = subtile % fx.Int32(D_CHUNKS)
+                row = row_group * fx.Int32(8) + row_in_group
+                column = d_subtile * fx.Int32(MFMA_MN) + column_in_subtile
+                chunk = column // fx.Int32(VPT)
                 source = fx.logical_divide(
                     fx.slice(gV, (batch, kv_head, kv_base + row, None)),
                     fx.make_layout(VPT, 1),
                 )
-                fx.copy(g128, fx.slice(source, (None, chunk)), fragment)
-                fx.ptr_store(
-                    fx.Vector(fragment.load()),
-                    pkv + row * fx.Int32(KVP) + chunk * fx.Int32(VPT),
+                destination_pointer = fx.inttoptr(
+                    lds_dma_ptr_type,
+                    fx.Int32(
+                        fx.ptrtoint(
+                            fx.add_offset(
+                                pkv,
+                                fx.make_int_tuple(lds_offset),
+                            )
+                        )
+                    ),
                 )
+                destination = fx.make_view(
+                    destination_pointer,
+                    fx.make_layout(1, 1),
+                )
+                fx.copy(
+                    dma128,
+                    fx.slice(source, (None, chunk)),
+                    destination,
+                )
+
+        def load_v_pack(probability_pack, d_chunk):
+            halves = []
+            for half in fx.range_constexpr(2):
+                subtile = (
+                    (probability_pack * 2 + half) * D_CHUNKS + d_chunk
+                )
+                pointer = fx.add_offset(
+                    v_lane_pointer,
+                    fx.make_int_tuple(
+                        fx.Int32(subtile * 8 * MFMA_MN)
+                    ),
+                )
+                source = fx.make_view(pointer, fx.make_layout(4, 1))
+                destination = fx.make_rmem_tensor(4, fx.BFloat16)
+                fx.copy(tr16, source, destination)
+                halves.append(Vec(destination.load()))
+            return halves[0].shuffle(halves[1], list(range(8))).ir_value()
+
+        q_wave_offset = wave * fx.Int32(
+            DQK_SUBTILES * MFMA_MN * MFMA_MN
+        )
+        even_column = lane_half * fx.Int32(VPT)
+        odd_column = fx.Int32(16) + even_column
+        q_even_pointer = fx.add_offset(
+            pquery,
+            fx.make_int_tuple(
+                q_wave_offset + k_swizzled_offset(lane_row, even_column)
+            ),
+        )
+        q_odd_pointer = fx.add_offset(
+            pquery,
+            fx.make_int_tuple(
+                q_wave_offset + k_swizzled_offset(lane_row, odd_column)
+            ),
+        )
+        k_even_pointer = fx.add_offset(
+            pkv,
+            fx.make_int_tuple(
+                k_swizzled_offset(lane_row, even_column)
+            ),
+        )
+        k_odd_pointer = fx.add_offset(
+            pkv,
+            fx.make_int_tuple(
+                k_swizzled_offset(lane_row, odd_column)
+            ),
+        )
+        v_row_offset = (
+            (lane % fx.Int32(16)) // fx.Int32(4)
+            + lane_half * fx.Int32(4)
+        )
+        v_column_offset = (
+            (lane % fx.Int32(4)) * fx.Int32(4)
+            + ((lane % fx.Int32(MFMA_MN)) // fx.Int32(16))
+            * fx.Int32(16)
+        )
+        v_lane_pointer = fx.add_offset(
+            pkv,
+            fx.make_int_tuple(
+                v_row_offset * fx.Int32(MFMA_MN) + v_column_offset
+            ),
+        )
+
+        def process_tile(
+            kv_chunk,
+            masked,
+            tile_output,
+            tile_running_max,
+            tile_running_sum,
+        ):
+            kv_base = kv_chunk * fx.Int32(BN)
+            stage_k(kv_base)
+            fx.rocdl.s_waitcnt(vmcnt=0, lgkmcnt=0, expcnt=0)
             fx.gpu.barrier()
 
-            raw_scores = fx.Vector(scores_fragment.load())
-            scores = []
+            scores_lo = zero16
+            scores_hi = zero16
+            for k_step in fx.range_constexpr(K_STEPS):
+                query_pack = load_q_pack(k_step)
+                key_lo = load_k_pack(k_step, False)
+                key_hi = load_k_pack(k_step, True)
+                scores_lo = mfma(key_lo, query_pack, scores_lo)
+                scores_hi = mfma(key_hi, query_pack, scores_hi)
+
+            # Every wave must finish its K reads before the shared allocation is
+            # reused for V.
+            fx.gpu.barrier()
+            stage_v(kv_base)
+
+            raw_lo = Vec(scores_lo)
+            raw_hi = Vec(scores_hi)
+            if const_expr(CAUSAL_DOCUMENT_MASK):
+                document_start = fx.Int32(0)
+                if masked:
+                    document_id = load_i32(
+                        mask_buffers[0],
+                        query_pos
+                        * fx.Int32(MASK_BUFFER_STRIDES[0][0]),
+                    )
+                    document_start = load_i32(
+                        mask_buffers[1],
+                        document_id
+                        * fx.Int32(MASK_BUFFER_STRIDES[1][0]),
+                    )
+            score_values = []
             keep_values = []
-            output_row = fx.Int32(16) * wave + lane16
-            row_valid, row_head, query_pos = row_coordinates(output_row)
-            for element in fx.range_constexpr(16):
-                key_pos = (
-                    kv_base
-                    + fx.Int32(4) * lane_group
-                    + fx.Int32(CE[element])
-                )
-                keep = row_valid
-                if masked and const_expr(CAUSAL_PARTIAL or bool(MASK_PROGRAM)):
+            for half in fx.range_constexpr(2):
+                raw = raw_lo if half == 0 else raw_hi
+                for element in fx.range_constexpr(16):
+                    key_pos = (
+                        kv_base
+                        + fx.Int32(32 * half)
+                        + lane_half * fx.Int32(4)
+                        + fx.Int32(8 * (element // 4) + element % 4)
+                    )
+                    keep = fx.Int32(1) == fx.Int32(1)
                     if const_expr(CAUSAL_DOCUMENT_MASK):
-                        document_id = load_i32(
-                            mask_buffers[0],
-                            query_pos
-                            * fx.Int32(MASK_BUFFER_STRIDES[0][0]),
-                        )
-                        document_start = load_i32(
-                            mask_buffers[1],
-                            document_id
-                            * fx.Int32(MASK_BUFFER_STRIDES[1][0]),
-                        )
-                        element_keep = (query_pos >= key_pos) & (
+                        mask_keep = (query_pos >= key_pos) & (
                             key_pos >= document_start
                         )
-                    elif const_expr(bool(MASK_PROGRAM)):
-                        element_keep = evaluate_mask_program(
-                            mask_program=MASK_PROGRAM,
-                            mask_program_output=MASK_PROGRAM_OUTPUT,
-                            mask_buffer_strides=MASK_BUFFER_STRIDES,
-                            mask_buffers=mask_buffers,
-                            load_i32=load_i32,
-                            batch=batch,
-                            head=row_head,
-                            q_pos=query_pos,
-                            kv_pos=key_pos,
-                        )
-                    else:
-                        element_keep = key_pos <= (
-                            query_pos + fx.Int32(SK - SQ)
-                        )
-                    keep = keep & element_keep
-                keep_values.append(keep)
-                score = _f32(raw_scores[element]) * _f32(SCALE_LOG2)
-                scores.append(keep.select(score, _f32(_NEG_BIG)))
-
-            row_max = reduce_tile_max(scores, output_row)
-            probabilities = [
-                keep_values[element].select(
-                    _exp2(scores[element] - row_max),
-                    _f32(0.0),
-                )
-                for element in fx.range_constexpr(16)
-            ]
-
-            output_values = fx.Vector(output_fragment.load())
-            output_scale = fx.Vector.from_elements(
-                [
-                    _f32(
-                        fx.ptr_load(
-                            palpha
-                            + fx.Int32(16) * wave
-                            + fx.Int32(4) * lane_group
-                            + fx.Int32(element % 4)
-                        )
+                        if isinstance(masked, bool):
+                            keep = mask_keep if masked else keep
+                        else:
+                            keep = (~masked) | mask_keep
+                    elif masked and const_expr(
+                        CAUSAL_PARTIAL or bool(MASK_PROGRAM)
+                    ):
+                        if const_expr(bool(MASK_PROGRAM)):
+                            keep = evaluate_mask_program(
+                                mask_program=MASK_PROGRAM,
+                                mask_program_output=MASK_PROGRAM_OUTPUT,
+                                mask_buffer_strides=MASK_BUFFER_STRIDES,
+                                mask_buffers=mask_buffers,
+                                load_i32=load_i32,
+                                batch=batch,
+                                head=head,
+                                q_pos=query_pos,
+                                kv_pos=key_pos,
+                            )
+                        else:
+                            keep = key_pos <= (
+                                query_pos + fx.Int32(SK - SQ)
+                            )
+                    keep_values.append(keep)
+                    score_values.append(
+                        keep.select(_f32(raw[element]), _f32(_NEG_BIG))
                     )
-                    for element in fx.range_constexpr(output_values.numel)
-                ],
-                fx.Float32,
-            )
-            output_fragment.store((output_values * output_scale).ir_value())
 
-            probability_fragment.store(
-                fx.Vector.from_elements(
-                    probabilities,
-                    fx.Float32,
+            local_max = score_values[0]
+            for element in fx.range_constexpr(1, 32):
+                local_max = _maximum(local_max, score_values[element])
+            peer_max = _f32(
+                fx.gpu.shuffle_xor(local_max, 32, 64)
+            )
+            tile_max = _maximum(local_max, peer_max)
+            new_max = _maximum(tile_running_max, tile_max)
+            correction = _exp2(tile_running_max - new_max)
+
+            correction_vec = Vec.from_elements(
+                [correction], fx.Float32
+            ).broadcast_to(16)
+            for d_chunk in fx.range_constexpr(D_CHUNKS):
+                tile_output[d_chunk] = (
+                    Vec(tile_output[d_chunk]) * correction_vec
                 )
-                .to(fx.BFloat16)
-                .ir_value()
-            )
-            update_row_sum(probabilities, output_row)
 
-            fx.copy(
-                tr16,
-                copy_v.partition_S(v_transposed),
-                copy_v.retile(value_fragment),
+            local_sum = _f32(0.0)
+            probability_packs = []
+            for pack in fx.range_constexpr(4):
+                pack_probabilities = []
+                for pack_element in fx.range_constexpr(8):
+                    element = pack * 8 + pack_element
+                    probability = keep_values[element].select(
+                        _exp2(score_values[element] - new_max),
+                        _f32(0.0),
+                    )
+                    pack_probabilities.append(probability)
+                    local_sum = local_sum + probability
+                probability_packs.append(
+                    Vec.from_elements(
+                        pack_probabilities,
+                        fx.Float32,
+                    )
+                    .to(fx.BFloat16)
+                    .ir_value()
+                )
+            peer_sum = _f32(
+                fx.gpu.shuffle_xor(local_sum, 32, 64)
             )
+            tile_sum = local_sum + peer_sum
+            tile_running_sum = (
+                tile_running_sum * correction + tile_sum
+            )
+            tile_running_max = new_max
+
+            # V writes were issued before the register-only softmax. Synchronize
+            # only when the LDS data is actually consumed.
+            fx.rocdl.s_waitcnt(vmcnt=0, lgkmcnt=0, expcnt=0)
             fx.gpu.barrier()
-            fx.gemm(
-                atom,
-                output_fragment,
-                probability_fragment,
-                value_fragment,
-                output_fragment,
-            )
+            for probability_pack in fx.range_constexpr(4):
+                for d_chunk in fx.range_constexpr(D_CHUNKS):
+                    value_pack = load_v_pack(probability_pack, d_chunk)
+                    tile_output[d_chunk] = mfma(
+                        value_pack,
+                        probability_packs[probability_pack],
+                        tile_output[d_chunk],
+                    )
 
-        full_count = load_i32(gFKVN, mask_row)
+            # Protect V from the next tile's K staging.
+            fx.gpu.barrier()
+            return tile_output, tile_running_max, tile_running_sum
+
+        full_count = load_uniform_i32(gFKVN, mask_row)
+        partial_count = load_uniform_i32(gKVN, mask_row)
         full_base = mask_row * fx.Int32(MAX_FULL)
-        for block_index in range(
-            fx.Int32(0),
-            full_count,
-            fx.Int32(1),
-        ):
-            sparse_block = load_i32(
-                gFKVI,
-                full_base + fx.Int32(block_index),
-            )
-            for sub_block in fx.range_constexpr(CPB):
-                process_tile(
-                    sparse_block * fx.Int32(CPB) + fx.Int32(sub_block),
-                    False,
-                )
-
-        partial_count = load_i32(gKVN, mask_row)
         partial_base = mask_row * fx.Int32(MAX_PARTIAL)
-        for block_index in range(
-            fx.Int32(0),
-            partial_count,
-            fx.Int32(1),
-        ):
-            sparse_block = load_i32(
-                gKVI,
-                partial_base + fx.Int32(block_index),
-            )
-            for sub_block in fx.range_constexpr(CPB):
-                process_tile(
-                    sparse_block * fx.Int32(CPB) + fx.Int32(sub_block),
-                    True,
+        initial_state = [running_max, running_sum] + output
+        if const_expr(CAUSAL_DOCUMENT_MASK):
+            total_count = full_count + partial_count
+            final_results = initial_state
+            for block_index, iter_args in range(
+                fx.Int32(0),
+                total_count,
+                fx.Int32(1),
+                init=initial_state,
+            ):
+                iter_max = _f32(iter_args[0])
+                iter_sum = _f32(iter_args[1])
+                iter_output = [
+                    iter_args[2 + d_chunk]
+                    for d_chunk in fx.range_constexpr(D_CHUNKS)
+                ]
+                block_index_i32 = fx.Int32(block_index)
+                is_partial = block_index_i32 >= full_count
+                sparse_block = fx.Int32(0)
+                if is_partial:
+                    sparse_block = load_uniform_i32(
+                        gKVI,
+                        partial_base + block_index_i32 - full_count,
+                    )
+                else:
+                    sparse_block = load_uniform_i32(
+                        gFKVI,
+                        full_base + block_index_i32,
+                    )
+                for sub_block in fx.range_constexpr(CPB):
+                    iter_output, iter_max, iter_sum = process_tile(
+                        sparse_block * fx.Int32(CPB) + fx.Int32(sub_block),
+                        is_partial,
+                        iter_output,
+                        iter_max,
+                        iter_sum,
+                    )
+                final_results = yield [iter_max, iter_sum] + iter_output
+        else:
+            full_results = initial_state
+            for block_index, iter_args in range(
+                fx.Int32(0),
+                full_count,
+                fx.Int32(1),
+                init=initial_state,
+            ):
+                iter_max = _f32(iter_args[0])
+                iter_sum = _f32(iter_args[1])
+                iter_output = [
+                    iter_args[2 + d_chunk]
+                    for d_chunk in fx.range_constexpr(D_CHUNKS)
+                ]
+                sparse_block = load_uniform_i32(
+                    gFKVI,
+                    full_base + fx.Int32(block_index),
+                )
+                for sub_block in fx.range_constexpr(CPB):
+                    iter_output, iter_max, iter_sum = process_tile(
+                        sparse_block * fx.Int32(CPB) + fx.Int32(sub_block),
+                        False,
+                        iter_output,
+                        iter_max,
+                        iter_sum,
+                    )
+                full_results = yield [iter_max, iter_sum] + iter_output
+
+            running_max = _f32(full_results[0])
+            running_sum = _f32(full_results[1])
+            output = [
+                full_results[2 + d_chunk]
+                for d_chunk in fx.range_constexpr(D_CHUNKS)
+            ]
+            partial_state = [running_max, running_sum] + output
+            final_results = partial_state
+            for block_index, iter_args in range(
+                fx.Int32(0),
+                partial_count,
+                fx.Int32(1),
+                init=partial_state,
+            ):
+                iter_max = _f32(iter_args[0])
+                iter_sum = _f32(iter_args[1])
+                iter_output = [
+                    iter_args[2 + d_chunk]
+                    for d_chunk in fx.range_constexpr(D_CHUNKS)
+                ]
+                sparse_block = load_uniform_i32(
+                    gKVI,
+                    partial_base + fx.Int32(block_index),
+                )
+                for sub_block in fx.range_constexpr(CPB):
+                    iter_output, iter_max, iter_sum = process_tile(
+                        sparse_block * fx.Int32(CPB) + fx.Int32(sub_block),
+                        True,
+                        iter_output,
+                        iter_max,
+                        iter_sum,
+                    )
+                final_results = yield [iter_max, iter_sum] + iter_output
+
+        running_max = _f32(final_results[0])
+        running_sum = _f32(final_results[1])
+        output = [
+            final_results[2 + d_chunk]
+            for d_chunk in fx.range_constexpr(D_CHUNKS)
+        ]
+
+        inverse_sum = (running_sum > _f32(0.0)).select(
+            _f32(1.0) / running_sum,
+            _f32(0.0),
+        )
+        inverse_vec = Vec.from_elements(
+            [inverse_sum], fx.Float32
+        ).broadcast_to(16)
+
+        output_row = fx.logical_divide(
+            fx.slice(gO, (batch, head, query_pos, None)),
+            fx.make_layout(4, 1),
+        )
+        for d_chunk in fx.range_constexpr(D_CHUNKS):
+            normalized = Vec(output[d_chunk]) * inverse_vec
+            for column_group in fx.range_constexpr(4):
+                values = Vec.from_elements(
+                    [
+                        normalized[column_group * 4 + element]
+                        for element in fx.range_constexpr(4)
+                    ],
+                    fx.Float32,
+                ).to(fx.BFloat16)
+                column = (
+                    fx.Int32(d_chunk * MFMA_MN)
+                    + lane_half * fx.Int32(4)
+                    + fx.Int32(column_group * 8)
+                )
+                fragment = fx.make_rmem_tensor(4, fx.BFloat16)
+                fragment.store(values.ir_value())
+                fx.copy(
+                    o64,
+                    fragment,
+                    fx.slice(output_row, (None, column // fx.Int32(4))),
                 )
 
-        output_values = fx.Vector(output_fragment.load())
-        normalizer_values = []
-        for element in fx.range_constexpr(output_values.numel):
-            value = _f32(
-                fx.ptr_load(
-                    psum
-                    + fx.Int32(16) * wave
-                    + fx.Int32(4) * lane_group
-                    + fx.Int32(element % 4)
-                )
+        if lane_half == fx.Int32(0):
+            has_values = running_sum > _f32(0.0)
+            lse_value = running_max + fx.math.log2(running_sum)
+            max_value = running_max
+            if const_expr(not OUTPUT_STATS_IN_LOG2):
+                lse_value = lse_value * _f32(_LN2)
+                max_value = max_value * _f32(_LN2)
+            lse_value = has_values.select(
+                lse_value,
+                _f32(float("-inf")),
             )
-            normalizer_values.append(
-                (value > _f32(0.0)).select(
-                    _f32(1.0) / value,
-                    _f32(0.0),
-                )
+            max_value = has_values.select(
+                max_value,
+                _f32(float("-inf")),
             )
-        normalizer = fx.Vector.from_elements(
-            normalizer_values,
-            fx.Float32,
-        )
-        output_fragment.store((output_values * normalizer).ir_value())
-        output_bf16 = fx.make_fragment_like(
-            output_fragment,
-            fx.BFloat16.ir_type,
-        )
-        output_bf16.store(
-            fx.Vector(output_fragment.load()).to(fx.BFloat16).ir_value()
-        )
-
-        output_row = fx.Int32(16) * wave + lane16
-        row_sum = _f32(fx.ptr_load(psum + output_row))
-        has_values = row_sum > _f32(0.0)
-        output_valid, output_head, output_q_pos = row_coordinates(output_row)
-        output_source = copy_output.retile(output_bf16)
-        output_predicate = fx.make_fragment_like(
-            output_source,
-            dtype=fx.Boolean,
-        )
-        output_predicate.fill(output_valid)
-        fx.copy(
-            o16,
-            output_source,
-            copy_output.partition_S(output_tile),
-            pred=output_predicate,
-        )
-
-        row_max = _f32(fx.ptr_load(pmax + output_row))
-        lse_value = row_max + fx.math.log2(row_sum)
-        max_value = row_max
-        if const_expr(not OUTPUT_STATS_IN_LOG2):
-            lse_value = lse_value * _f32(_LN2)
-            max_value = max_value * _f32(_LN2)
-        lse_value = has_values.select(
-            lse_value,
-            _f32(float("-inf")),
-        )
-        max_value = has_values.select(
-            max_value,
-            _f32(float("-inf")),
-        )
-        stats_offset = (
-            (batch * fx.Int32(HQ) + output_head) * fx.Int32(SQ)
-            + output_q_pos
-        )
-        stats_mask = output_valid & (lane_group == fx.Int32(0))
-        if stats_mask:
+            stats_offset = (
+                (batch * fx.Int32(HQ) + head) * fx.Int32(SQ)
+                + query_pos
+            )
             store_f32(gLSE, stats_offset, lse_value)
             store_f32(gMax, stats_offset, max_value)
 
     def launch_kernel(
-        Q: fx.Tensor,
-        K: fx.Tensor,
-        V: fx.Tensor,
-        LSE: fx.Tensor,
-        MaxScores: fx.Tensor,
-        KVNumBlocks: fx.Tensor,
-        KVIndices: fx.Tensor,
-        FullKVNumBlocks: fx.Tensor,
-        FullKVIndices: fx.Tensor,
-        MaskBuffer0: fx.Tensor,
-        MaskBuffer1: fx.Tensor,
-        MaskBuffer2: fx.Tensor,
-        MaskBuffer3: fx.Tensor,
-        O: fx.Tensor,
-        stream: fx.Stream,
+        Q,
+        K,
+        V,
+        LSE,
+        MaxScores,
+        KVNumBlocks,
+        KVIndices,
+        FullKVNumBlocks,
+        FullKVIndices,
+        MaskBuffer0,
+        MaskBuffer1,
+        MaskBuffer2,
+        MaskBuffer3,
+        O,
+        stream,
     ):
         kernel(
             Q,
@@ -804,7 +870,7 @@ def _build_flex_attn_fwd_module_mfma16(
             MaskBuffer3,
             O,
             value_attrs={
-                "rocdl.waves_per_eu": 2,
+                "rocdl.waves_per_eu": 1,
                 "rocdl.flat_work_group_size": "256,256",
                 "passthrough": [
                     [
@@ -816,11 +882,7 @@ def _build_flex_attn_fwd_module_mfma16(
                 ],
             },
         ).launch(
-            grid=(
-                HKV if DECODE else HQ,
-                Q_CHUNKS,
-                B,
-            ),
+            grid=(HQ, Q_CHUNKS, B),
             block=(NT, 1, 1),
             stream=stream,
         )
@@ -1005,4 +1067,5 @@ def _build_flex_attn_fwd_module_mfma16(
                 stream,
             )
 
+    launch.compile_hints = dict(_FWD_COMPILE_HINTS)
     return launch
