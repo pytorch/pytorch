@@ -254,16 +254,55 @@ def _log_softmax_handler(
     )
 
 
-# NOTE: As explained below at _nll_loss_and_log_softmax_backward, the
-# _log_softmax_backward_handler does not actually do any computation.
+# NOTE: Implements the distributed log_softmax backward, matching
+# torch._decomp.decompositions._log_softmax_backward_data but with all_reduce on
+# the sum term because the class dimension is sharded across TP ranks.
 def _log_softmax_backward_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
     kwargs: dict[str, object],
 ) -> object:
     grad_output = cast(DTensor, args[0])
+    output = cast(DTensor, args[1])
+    dim = cast(int, args[2])
     input_dtype = cast(torch.dtype, args[3])
-    return grad_output.to(input_dtype)
+
+    dim = normalize_dim(dim, output.dim())
+    spec = output._spec
+    mesh_dim = _find_all_reduce_mesh_dim(spec.placements, dim)
+
+    # Autograd may deliver grad_output with different placements than the
+    # forward output (see the analogous guard in _nll_loss_backward_handler).
+    if grad_output.placements != spec.placements:
+        grad_output = grad_output.redistribute(spec.mesh, spec.placements)
+
+    local_go = grad_output._local_tensor
+    local_out = output._local_tensor
+
+    computation_dtype, _ = utils.elementwise_dtypes(
+        local_go,
+        local_out,
+        type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+    local_go = local_go.to(computation_dtype)
+    local_softmax = torch.exp(local_out.to(computation_dtype))
+
+    local_sum = local_go.sum(dim, keepdim=True)
+    global_sum = funcol.all_reduce(
+        local_sum, reduceOp=c10d.ReduceOp.SUM.name, group=(spec.mesh, mesh_dim)
+    )
+    local_grad = (local_go - local_softmax * global_sum).to(input_dtype)
+
+    output_tensor_meta = _propagate_tensor_meta(op_call, args, kwargs)
+    out_spec = DTensorSpec(spec.mesh, spec.placements, tensor_meta=output_tensor_meta)
+    # pyrefly: ignore [bad-argument-type]
+    return DTensor(
+        # pyrefly: ignore [bad-argument-count]
+        local_grad,
+        out_spec,
+        # pyrefly: ignore [unexpected-keyword]
+        requires_grad=local_grad.requires_grad,
+    )
 
 
 # NOTE: The implementation follows torch._decomp.decomposition._nll_loss_forward,
@@ -441,14 +480,8 @@ def _nll_loss_forward_handler(
     )
 
 
-# NOTE: The backward computation of cross_entropy goes through two steps:
-# backward for nll_loss and then backward for log_softmax. In loss parallel,
-# the two steps are fused into the following function (called by _nll_loss_backward_handler)
-# to avoid communication when target contains class indices not class probabilities.
-# Also note that the _log_softmax_backward_handler does not perform computation.
-# The implementation resembles _nll_loss_backward and _log_softmax_backward_data
-# from torch._decomp.decomposition.
-def _nll_loss_and_log_softmax_backward(
+# NOTE: The implementation resembles torch._decomp.decompositions._nll_loss_backward.
+def _nll_loss_backward(
     grad_output: Tensor,
     x: Tensor,
     target: Tensor,
@@ -501,8 +534,6 @@ def _nll_loss_and_log_softmax_backward(
         new_shape = [1 for _ in range(x.dim())]
         new_shape[channel_dim] = weight.shape[0]
         weight = weight.reshape(new_shape)
-        # In order for fused computation to work, the following line is rewritten.
-        # grad_output = grad_output * weight
         new_shape = list(x.shape)
         new_shape[channel_dim] = -1
         w = weight.expand(new_shape)
@@ -511,11 +542,7 @@ def _nll_loss_and_log_softmax_backward(
 
     grad_output = torch.where(target != ignore_index, grad_output, 0)
 
-    # NOTE: Instead of directly returning the grad_input as grad_output for log_softmax,
-    # here we perform backward computation for log_softmax altogether to avoid the
-    # otherwise extra all_gather communication.
-    # return grad_input * grad_output
-    return (grad_input + torch.exp(x)) * grad_output
+    return grad_input * grad_output
 
 
 def _nll_loss_backward_handler(
@@ -565,7 +592,7 @@ def _nll_loss_backward_handler(
     args[6] = _cast_to_dtensor(total_weight, all_replicate_placements, spec.mesh)
     output_tensor_meta = _propagate_tensor_meta(op_call, tuple(args), kwargs)
 
-    result = _nll_loss_and_log_softmax_backward(
+    result = _nll_loss_backward(
         grad_output._local_tensor,
         x._local_tensor,
         target._local_tensor,
