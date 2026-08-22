@@ -334,6 +334,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Returns {window handle, byte offset of ptr within the segment}, or
   // {nullptr, 0} if ptr is not inside a window-registered segment.
   std::pair<ncclWindow_t, size_t> lookupSegmentWindow(const void* ptr);
+#if defined(USE_ROCM)
+  // Returns true when ptr exactly matches an ncclMemAlloc segment base on this
+  // process group's device and len does not exceed the allocation size.
+  bool isNcclAllocatorSegment(const void* ptr, size_t len) const;
+#endif
   // Registers the segment containing ptr as a NCCL_WIN_COLL_SYMMETRIC window
   // if it is not one already. Collective: all ranks must call it together.
   ncclResult_t ensureSegmentWindow(const void* ptr);
@@ -680,7 +685,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     ncclWindow_t winHandle{nullptr};
     size_t len{0};
   };
-  std::map<void*, RegistrationHandle, std::less<>> memoryRegistrationHandles_;
+  using RegistrationMap = std::map<void*, RegistrationHandle, std::less<>>;
+  RegistrationMap memoryRegistrationHandles_;
+  // Caller must hold memory_registration_mutex_. Returns end() when ptr is not
+  // inside a registered segment.
+  RegistrationMap::iterator findContainingRegistrationLocked(const void* ptr);
   // Guards memoryRegistrationHandles_ and registeredMemPools_:
   // register/deregister_address run on allocator threads while window ops look
   // segments up on the main thread.

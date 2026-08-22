@@ -817,6 +817,22 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
         self._check_all_reduce_over_pool(symm=True)
 
     @requires_nccl()
+    @unittest.skipUnless(torch.version.hip is not None, "ROCm-only contract")
+    @skip_if_lt_x_gpu(2)
+    def test_register_mem_pool_symmetric_rejects_unrelated_allocator(
+        self,
+    ) -> None:
+        backend = self._backend()
+        pool = torch.cuda.MemPool()
+        tensor = self._pool_tensor(pool)
+        with self.assertRaisesRegex(RuntimeError, "Failed to register segment"):
+            backend.register_mem_pool(pool, symm=True)
+        # register_mem_pool records the pool before it upgrades each segment.
+        # Remove the plain registration left by the expected upgrade failure.
+        backend.deregister_mem_pool(pool)
+        del tensor
+
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_register_mem_pool_round_trip(self) -> None:
         # Megatron re-enters its allocator context once per bucket: deregister,
