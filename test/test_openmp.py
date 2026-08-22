@@ -4,7 +4,11 @@ import collections
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 try:
@@ -28,6 +32,8 @@ class Network(torch.nn.Module):
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
 class TestOpenMP_ParallelFor(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     batch = 20
     channels = 1
     side_dim = 80
