@@ -25,9 +25,9 @@ bool check_head_dim_size_cpp(sdp_params const& params, bool debug) {
           " Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
-          params.key.sym_size(-1),
+          key_size_last,
           ", Value.size(-1): ",
-          params.value.sym_size(-1),
+          value_size_last,
           " instead.");
     }
     return false;

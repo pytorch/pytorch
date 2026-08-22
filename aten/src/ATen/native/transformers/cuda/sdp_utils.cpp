@@ -313,9 +313,9 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
             "Got Query.size(-1): ",
             query_size_last,
             ", Key.size(-1): ",
-            params.key.sym_size(-1),
+            key_size_last,
             ", Value.size(-1): ",
-            params.value.sym_size(-1),
+            value_size_last,
             " instead.");
       }
       return false;
@@ -611,11 +611,11 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   return true;
 }
 
-bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120(
+bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120_121(
     sdp_params const& params,
     bool debug) {
   // Flash Attention will raise an error in the backward pass if the head_dim
-  // size is greater than 192 And the device is between in the range [sm86, sm89]
+  // is unsupported on SM86-SM89 or SM120-SM121.
   using sm86 = SMVersion<8, 6>;
   using sm89 = SMVersion<8, 9>;
   using sm120 = SMVersion<12, 0>;
@@ -636,7 +636,7 @@ bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120(
     if (debug) {
       TORCH_WARN(
           "Flash attention currently doesn't support training with head_dim ∈ (192, 224] or "
-          "(head_dim ∈ (224, 256] and dropout > 0.0) on gpu architectures in the range[sm86, sm89].",
+          "(head_dim ∈ (224, 256] and dropout > 0.0) on SM86-SM89 or SM120-SM121.",
           "Attempting to run with dropout set to: ", params.dropout,
           "and head_dim: ",
           params.query.sym_size(-1), " on a sm ", dprops->major, ".",
@@ -1125,7 +1125,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_fa4_constraints,
       check_head_dim_size_flash<false /*caller_is_meff*/>,
       check_flash_attention_hardware_support,
-      check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120,
+      check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120_121,
       check_flash_causal_non_square_seqlens,
       check_dtypes_flash_attention});
   for (auto& constraint : general_constraints) {
