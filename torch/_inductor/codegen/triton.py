@@ -6285,6 +6285,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._handle_pdl_before_access(self.post_loop_store, var)
 
         if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
+            if isinstance(indexing, TensorDescriptorOptions):
+                self._emitted_device_tma = True
             self.post_loop_store.writeline(
                 DeferredLine(
                     name,
