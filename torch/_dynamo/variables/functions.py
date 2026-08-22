@@ -612,11 +612,13 @@ class BaseUserFunctionVariable(VariableTracker):
         return True
 
 
-class UserFunctionVariable(BaseUserFunctionVariable):
-    """Some unsupported user-defined global function"""
+class BaseUserFunctionOrMethodVariable(BaseUserFunctionVariable):
+    """Shared base for the VTs backed by a real Python function object.
 
-    # PyFunction_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/funcobject.c#L1046
-    _cpython_type = types.FunctionType
+    In CPython a method is not a subclass of a function, so UserFunctionVariable
+    and UserMethodVariable are siblings sharing this base rather than one
+    inheriting the other.
+    """
 
     _nonvar_fields = {
         "fn",
@@ -624,17 +626,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         *BaseUserFunctionVariable._nonvar_fields,
     }
 
-    _TREE_MAP_MODULES = frozenset(
-        {
-            "optree",
-            "optree.ops",
-            "torch.utils._pytree",
-            "torch.utils._cxx_pytree",
-        }
-    )
-
     @classmethod
-    def create_with_source(cls, value: Any, source: Any) -> "UserFunctionVariable":
+    def create_with_source(
+        cls, value: Any, source: Any
+    ) -> "BaseUserFunctionOrMethodVariable":
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         return cls(value, source=source)
 
@@ -672,12 +667,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn = fn
 
-    def as_python_constant(self) -> Any:
-        if istype(self, UserFunctionVariable):
-            return self.fn
-        # subclasses (such as methods) usually aren't a constant
-        return super().as_python_constant()
-
     def reconstruct_pycode(self, codegen):
         if self.source:
             return self.source.reconstruct_pycode(codegen)
@@ -685,22 +674,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             "Python codegen not implemented for sourceless UserFunctionVariable"
         )
 
-    def get_real_python_backed_value(self) -> Any:
-        if istype(self, UserFunctionVariable):
-            return self.fn
-        return super().get_real_python_backed_value()
-
-    def self_args(self) -> list[VariableTracker]:
-        return []
-
     def get_function(self) -> types.FunctionType:
         return self.fn
 
     def get_code(self) -> types.CodeType:
         return self.fn.__code__
-
-    def python_type(self) -> type:
-        return types.FunctionType
 
     def has_self(self) -> bool:
         return getattr(self.fn, "__self__", None) is not None
@@ -720,13 +698,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if is_ngb_suppressed_inline(filename):
             return False
         return True
-
-    def get_source(self) -> Source:
-        source = self.source
-
-        if source and isinstance(self, variables.UserMethodVariable):
-            source = self.source_fn  # type: ignore[assignment]
-        return source  # type: ignore[return-value]
 
     def bind_args(
         self,
@@ -830,14 +801,85 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         "__closure__": Member(lambda s, tx: s._fn_getattr(tx, "__closure__")),
     }
 
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if (
+            not tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
+            and self.fn
+            is torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer
+        ):
+            with torch._dynamo.side_effects.allow_externally_visible_side_effects_in_subtracer(
+                tx
+            ):
+                return super().call_function(tx, args, kwargs)
+
+        # FSDP registers _pre_forward/_post_forward as bound-method hooks, so
+        # this has to stay reachable from UserMethodVariable too.
+        if (
+            getattr(tx.output.current_tracer, "description", None)
+            == "torch.utils.checkpoint.checkpoint"
+            and not tx.output.current_tracer.allow_side_effects_in_hop
+        ):
+            try:
+                from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
+            except Exception:
+                FSDPState = None  # type: ignore[assignment, misc]
+            if FSDPState is not None and self.fn in [
+                FSDPState._pre_forward,
+                FSDPState._post_forward,
+            ]:
+                with torch._dynamo.side_effects.allow_side_effects_in_hop(tx):
+                    return super().call_function(tx, args, kwargs)
+
+        return super().call_function(tx, args, kwargs)
+
+
+class UserFunctionVariable(BaseUserFunctionOrMethodVariable):
+    """Some unsupported user-defined global function"""
+
+    # PyFunction_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/funcobject.c#L1046
+    _cpython_type = types.FunctionType
+
+    _TREE_MAP_MODULES = frozenset(
+        {
+            "optree",
+            "optree.ops",
+            "torch.utils._pytree",
+            "torch.utils._cxx_pytree",
+        }
+    )
+
+    def as_python_constant(self) -> Any:
+        if istype(self, UserFunctionVariable):
+            return self.fn
+        # subclasses usually aren't a constant
+        return super().as_python_constant()
+
+    def get_real_python_backed_value(self) -> Any:
+        if istype(self, UserFunctionVariable):
+            return self.fn
+        return super().get_real_python_backed_value()
+
+    def self_args(self) -> list[VariableTracker]:
+        return []
+
+    def python_type(self) -> type:
+        return types.FunctionType
+
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
         obj: VariableTracker,
         owner: VariableTracker,
     ) -> VariableTracker:
-        # Mirrors func_descr_get which calls PyMethod_New to bind
-        # the function to an instance.
+        # Mirrors func_descr_get which calls PyMethod_New to bind the function
+        # to an instance. Binding a *method* never rebinds it in CPython (before
+        # 3.14 method has no tp_descr_get; from 3.14 its __get__ returns self),
+        # so this slot deliberately lives on the function VT only.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1119
         source = obj.source and AttrSource(obj.source, self.fn.__name__)
         return UserMethodVariable(self.fn, obj, source_fn=self.source, source=source)
@@ -938,32 +980,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
-
-        if (
-            not tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
-            and self.fn
-            is torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer
-        ):
-            with torch._dynamo.side_effects.allow_externally_visible_side_effects_in_subtracer(
-                tx
-            ):
-                return super().call_function(tx, args, kwargs)
-
-        if (
-            getattr(tx.output.current_tracer, "description", None)
-            == "torch.utils.checkpoint.checkpoint"
-            and not tx.output.current_tracer.allow_side_effects_in_hop
-        ):
-            try:
-                from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
-            except Exception:
-                FSDPState = None  # type: ignore[assignment, misc]
-            if FSDPState is not None and self.fn in [
-                FSDPState._pre_forward,
-                FSDPState._post_forward,
-            ]:
-                with torch._dynamo.side_effects.allow_side_effects_in_hop(tx):
-                    return super().call_function(tx, args, kwargs)
 
         tree_map_result = self._maybe_call_tree_map_fastpath(tx, args, kwargs)
         if tree_map_result is not None:
@@ -1718,7 +1734,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         )
 
 
-class UserMethodVariable(UserFunctionVariable):
+class UserMethodVariable(BaseUserFunctionOrMethodVariable):
     """Some unsupported user-defined method"""
 
     # PyMethod_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L332
@@ -1770,6 +1786,11 @@ class UserMethodVariable(UserFunctionVariable):
 
     def self_args(self) -> list[VariableTracker]:
         return [self.obj]
+
+    def get_source(self) -> Source | None:
+        # bind_args and most guards operate on the underlying function, so
+        # prefer source_fn over the bound-method source. See __init__.
+        return self.source_fn if self.source else self.source
 
     def python_type(self) -> type[types.MethodType]:
         return types.MethodType
@@ -3529,8 +3550,11 @@ class DynamoTritonHOPifier(TritonHOPifier):
         )
 
     def is_callable(self, maybe_callable: VariableTracker) -> bool:
+        # functions and methods both reach this path: a bound method is a valid
+        # triton grid callable
         return isinstance(
-            maybe_callable, (NestedUserFunctionVariable, UserFunctionVariable)
+            maybe_callable,
+            (NestedUserFunctionVariable, UserFunctionVariable, UserMethodVariable),
         )
 
     def get_value(self, val: VariableTracker) -> Any:

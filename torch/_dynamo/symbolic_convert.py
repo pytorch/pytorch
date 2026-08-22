@@ -177,6 +177,7 @@ from .variables.functions import (
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
+    UserMethodVariable,
 )
 from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
@@ -6032,7 +6033,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 hints=[],
             )
 
-        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+        # functions and methods both reach this path: `torch.compiler.disable`
+        # applies to the underlying function either way
+        if isinstance(
+            func, (UserFunctionVariable, UserMethodVariable)
+        ) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
         ):
             msg = inspect.getattr_static(
@@ -6093,16 +6098,18 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         kwargs: dict[str, VariableTracker],
         allow_nested_graph_breaks: bool = False,
     ) -> InliningInstructionTranslator:
+        # functions and methods both reach this path: both are inlined here
         if not isinstance(
             func,
             (
                 UserFunctionVariable,
+                UserMethodVariable,
                 NestedUserFunctionVariable,
                 LocalGeneratorFunctionVariable,
             ),
         ):
             raise AssertionError(
-                "expected isinstance( func, ( UserFunctionVariable, NestedUserFunctionVariable, LocalGeneratorFunctionVariable, ), ) to be true"
+                "expected isinstance( func, ( UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable, LocalGeneratorFunctionVariable, ), ) to be true"
             )
         code: types.CodeType = func.get_code()
         result = None

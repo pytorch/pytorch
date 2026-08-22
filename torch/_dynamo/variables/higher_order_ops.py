@@ -38,7 +38,10 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
-from torch._dynamo.variables.functions import UserFunctionVariable
+from torch._dynamo.variables.functions import (
+    UserFunctionVariable,
+    UserMethodVariable,
+)
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.script_object import CustomClassObjectVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
@@ -1988,7 +1991,8 @@ def speculate_subgraph_with_auto_output_flattening(
             )
     except Unsupported as ex:
         f_name = f"{type(f).__name__}"
-        if isinstance(f, UserFunctionVariable):
+        # functions and methods both reach this path
+        if isinstance(f, (UserFunctionVariable, UserMethodVariable)):
             f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
@@ -2188,7 +2192,8 @@ def speculate_subgraph(
 
     except Unsupported as ex:
         f_name = f"{type(f).__name__}"
-        if isinstance(f, UserFunctionVariable):
+        # functions and methods both reach this path
+        if isinstance(f, (UserFunctionVariable, UserMethodVariable)):
             f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
