@@ -1,4 +1,6 @@
 # Owner(s): ["oncall: distributed"]
+import contextlib
+import io
 import os
 import unittest
 
@@ -62,6 +64,39 @@ class TestMemoryTracker(TestCase):
         self.assertTrue(len(tracker._markers) == 2)
         self.assertTrue(tracker._cur_module_name != "")
         self.assertTrue(hasattr(tracker, "_num_alloc_retries"))
+
+    def test_save_load_preserves_op_index(self):
+        """
+        A save/load round trip must restore the operation count so that
+        ``summary()`` keeps reporting the per-operator memory deltas. This runs
+        on CPU without an accelerator by populating the traces directly, mirror-
+        ing what ``_record_memory_stats()`` does during a monitored run.
+        """
+        tracker = MemoryTracker()
+        for i, name in enumerate(("op_a", "op_b")):
+            tracker.memories_allocated[i] = (name, float(i + 1))
+            tracker.memories_active[i] = (name, float(i + 1))
+            tracker.memories_reserved[i] = (name, float(i + 1))
+        tracker._op_index = 2
+
+        path = "memory_op_index.trace"
+        try:
+            tracker.save_stats(path)
+
+            loaded = MemoryTracker()
+            loaded.load(path)
+
+            self.assertEqual(loaded._op_index, tracker._op_index)
+
+            # With _op_index lost, summary() iterates range(1, 0) and emits no
+            # operator deltas; once restored, the operator name must appear.
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                loaded.summary()
+            self.assertIn("op_b", buf.getvalue())
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
 
 
 if __name__ == "__main__":
