@@ -299,11 +299,61 @@ static bool canUseAddmmCudaLtWithDistinctCAndD(
 #endif
 }
 
+// Direct call into at::cuda::blas::gemm_and_bias -- the same code path
+// taken when TunableOp is disabled. Extracted into a free function so both
+// the "TunableOp disabled" branch and the "TunableOp enabled but tunable
+// lookup missed" branch in launchGemmAndBiasCublasLt can call it without
+// having to flip the global TunableOp enable flag (which would be a data
+// race in multithreaded benchmark configs).
+template <typename scalar_t, typename res_scalar_t = scalar_t>
+bool launchGemmAndBiasNonTunable(
+    cublasCommonArgs& args,
+    const scalar_t* self_ptr,
+    const Scalar& alpha,
+    Activation activation) {
+  return at::cuda::blas::gemm_and_bias<scalar_t, res_scalar_t>(
+    args.transa == 't',
+    args.transb == 't',
+    args.m,
+    args.n,
+    args.k,
+    alpha.to<at::opmath_type<scalar_t>>(),
+    args.mata->const_data_ptr<scalar_t>(),
+    args.lda,
+    args.matb->const_data_ptr<scalar_t>(),
+    args.ldb,
+    self_ptr,
+    args.result->data_ptr<res_scalar_t>(),
+    args.result_ld,
+    activation_to_gemm_and_blas_arg(activation));
+}
+
+// Returns true iff the TunableOp dispatch succeeded. On a total miss
+// operator() resolves to ResultEntry::Default(), which is the same
+// at::cuda::blas::gemm_and_bias call launchGemmAndBiasNonTunable makes, so a
+// miss costs nothing extra. False means the selected kernel reported a non-OK
+// status and the caller must retry via launchGemmAndBiasNonTunable.
 template <typename scalar_t>
-void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
+bool launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
   bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
   bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
   at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
+  // Stamp the per-call dynamic-dims mask onto the params, remapping to BLAS
+  // frame when the dispatch swapped (M, N) -> (n, m). See
+  // GetCurrentDynamicDimsMask() in ATen/cuda/tunable/Tunable.h for the frame
+  // and remap rationale.
+  {
+    auto raw_mask = at::cuda::tunable::GetCurrentDynamicDimsMask();
+    if (args.swapped_mn) {
+      params.dynamic_dims_mask = at::cuda::tunable::DynamicDimsMask(
+          /*M=*/raw_mask.n(),
+          /*N=*/raw_mask.m(),
+          /*K=*/raw_mask.k(),
+          /*BATCH=*/raw_mask.batch());
+    } else {
+      params.dynamic_dims_mask = raw_mask;
+    }
+  }
   params.transa = args.transa;
   params.transb = args.transb;
   params.m = args.m;
@@ -318,21 +368,22 @@ void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const
   params.ldc = args.result_ld;
   params.bias = bias;
   params.activation = activation;
+
   if (transa_ && transb_) {
     static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
-    gemm(&params);
+    return gemm(&params) == at::cuda::tunable::OK;
   }
   else if (transa_ && !transb_) {
     static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::N> gemm{};
-    gemm(&params);
+    return gemm(&params) == at::cuda::tunable::OK;
   }
   else if (!transa_ && transb_) {
     static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::T> gemm{};
-    gemm(&params);
+    return gemm(&params) == at::cuda::tunable::OK;
   }
   else if (!transa_ && !transb_) {
     static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::N> gemm{};
-    gemm(&params);
+    return gemm(&params) == at::cuda::tunable::OK;
   }
   else {
     TORCH_CHECK(false, "unreachable");
@@ -356,29 +407,24 @@ bool launchGemmAndBiasCublasLt(
 
   const auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
-    // TODO: maybe also return some success state?
-    launchTunableGemmAndBias<scalar_t>(
-      args, alpha, self_ptr, activation_to_gemm_and_blas_arg(activation)
-    );
-    return true;
+    if (launchTunableGemmAndBias<scalar_t>(
+            args, alpha, self_ptr, activation_to_gemm_and_blas_arg(activation))) {
+      return true;
+    }
+    // launchTunableGemmAndBias returned false: TunableOp is enabled but
+    // there is no tuned entry for this shape and tuning is disabled.
+    // Re-dispatch through launchGemmAndBiasNonTunable -- the exact same
+    // code path taken when TunableOp is disabled at the call site. We do
+    // NOT toggle the global TunableOp enable flag for this fallback,
+    // because that flag is non-atomic global state and would race with
+    // concurrent dispatches on other CPU threads (mts_gpu_benchmark uses
+    // num_threads > 1 in some configs).
+    return launchGemmAndBiasNonTunable<scalar_t, res_scalar_t>(
+        args, self_ptr, alpha, activation);
   }
 
-  return at::cuda::blas::gemm_and_bias<scalar_t, res_scalar_t>(
-    args.transa == 't',
-    args.transb == 't',
-    args.m,
-    args.n,
-    args.k,
-    alpha.to<at::opmath_type<scalar_t>>(),
-    args.mata->const_data_ptr<scalar_t>(),
-    args.lda,
-    args.matb->const_data_ptr<scalar_t>(),
-    args.ldb,
-    self_ptr,
-    args.result->data_ptr<res_scalar_t>(),
-    args.result_ld,
-    activation_to_gemm_and_blas_arg(activation)
-  );
+  return launchGemmAndBiasNonTunable<scalar_t, res_scalar_t>(
+      args, self_ptr, alpha, activation);
 }
 
 template <typename scalar_t, typename res_scalar_t = scalar_t>
@@ -388,6 +434,19 @@ bool launchGemmCublas(
     const Scalar& alpha,
     const Scalar& beta
 ) {
+  // Re-push the mask remapped to BLAS frame so gemm_tunable (CUDABlas.cpp)
+  // stamps it, since at::cuda::blas::gemm's ABI does not carry swapped_mn.
+  // Only when a dynamic mask is active AND the dispatch swapped, so the common
+  // path is untouched. See GetCurrentDynamicDimsMask() in Tunable.h.
+  const auto raw_dyn_mask = at::cuda::tunable::GetCurrentDynamicDimsMask();
+  std::optional<at::cuda::tunable::TunableDynamicDimsGuard> dyn_guard;
+  if (raw_dyn_mask.any() && args.swapped_mn) {
+    dyn_guard.emplace(at::cuda::tunable::DynamicDimsMask(
+        /*M=*/raw_dyn_mask.n(),
+        /*N=*/raw_dyn_mask.m(),
+        /*K=*/raw_dyn_mask.k(),
+        /*BATCH=*/raw_dyn_mask.batch()));
+  }
   at::cuda::blas::gemm<scalar_t, res_scalar_t>(
     args.transa,
     args.transb,
@@ -695,6 +754,20 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
   bool is_float_output_with_half_input = (batch1.scalar_type() == at::ScalarType::Half || batch1.scalar_type() == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
+
+  // Re-push the mask remapped to BLAS frame so (b)gemm_tunable stamps it; the
+  // batched dispatch transposes the result (M<->N) and carries no swapped_mn
+  // flag. Only when a dynamic mask is active AND the result is transposed, so
+  // the common path is untouched. See GetCurrentDynamicDimsMask() in Tunable.h.
+  const auto raw_dyn_mask = at::cuda::tunable::GetCurrentDynamicDimsMask();
+  std::optional<at::cuda::tunable::TunableDynamicDimsGuard> baddbmm_dyn_guard;
+  if (raw_dyn_mask.any() && transpose_result) {
+    baddbmm_dyn_guard.emplace(at::cuda::tunable::DynamicDimsMask(
+        /*M=*/raw_dyn_mask.n(),
+        /*N=*/raw_dyn_mask.m(),
+        /*K=*/raw_dyn_mask.k(),
+        /*BATCH=*/raw_dyn_mask.batch()));
+  }
 
   if (is_float_output_with_half_input) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(batch1.scalar_type(), "baddbmm_cuda", [&] {

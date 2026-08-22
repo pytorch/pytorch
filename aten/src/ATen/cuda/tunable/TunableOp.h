@@ -51,41 +51,67 @@ class TunableOp {
     TuningStatus operator()(const ParamsT* params) {
       ResultEntry result = ResultEntry::Null();
       TuningContext* ctx = getTuningContext();
-      if (ctx->IsTunableOpEnabled()) {
+
+      // Callers already gate on this; skipping the resolve here avoids
+      // params->Signature() and manager init for any caller that does not.
+      if (!ctx->IsTunableOpEnabled()) {
+        result = ResultEntry::Default();
+      }
+      else {
         auto& mgr = ctx->GetTuningResultsManager();
-        auto op_sig = Signature();
-        auto params_sig = params->Signature();
-        auto blas_sig = params->BLASSignature();
-        result = mgr.Lookup(op_sig, params_sig);
-        // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
-        if (result == ResultEntry::Null()) {
-          bool should_record_untuned = !ctx->IsTuningEnabled();
-          if (ctx->IsTuningEnabled()) {
+        const auto op_sig = Signature();
+        const auto concrete_sig = params->Signature();
+        const bool has_dynamic_dim = params->dynamic_dims_mask.any();
+
+        result = mgr.Lookup(op_sig, concrete_sig);
+        const bool concrete_hit = (result != ResultEntry::Null());
+
+        if (ctx->IsTuningEnabled()) {
+          if (!concrete_hit) {
+            bool can_tune = true;
 #ifndef USE_ROCM
-            bool is_capturing =
-                c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
+            can_tune =
+                c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
                 c10::cuda::CaptureStatus::None;
-            if (!is_capturing) {
+            if (can_tune) {
               RegisterOpCandidates(params);
-              result = FindFastest(params);
-              mgr.Add(op_sig, params_sig, result);
-            } else {
-              should_record_untuned = true;
             }
-#else
-            result = FindFastest(params);
-            mgr.Add(op_sig, params_sig, result);
 #endif
+            if (can_tune) {
+              result = FindFastest(params);
+              mgr.Add(op_sig, concrete_sig, result);
+              if (has_dynamic_dim) {
+                mgr.Add(op_sig, params->DynamicSignature(), result);
+              }
+            }
           }
-          if (should_record_untuned && ctx->IsRecordUntunedEnabled()) {
-            // or record the gemm into file
-            mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig, blas_sig);
+          else if (has_dynamic_dim) {
+            auto dynamic_params_sig = params->DynamicSignature();
+            if (mgr.Lookup(op_sig, dynamic_params_sig) == ResultEntry::Null()) {
+              mgr.Add(op_sig, dynamic_params_sig, result);
+            }
+          }
+        }
+        else {
+          if (!concrete_hit) {
+            // Record before the wildcard lookup, not after it. A wildcard is
+            // an approximation -- the kernel was tuned for a different
+            // concrete shape and is merely reused here -- so offline tuning
+            // still needs to see this shape even when a wildcard serves it.
+            if (ctx->IsRecordUntunedEnabled()) {
+              mgr.RecordUntuned(
+                  ctx->GetUntunedFile(), op_sig, concrete_sig,
+                  params->BLASSignature());
+            }
+            if (ctx->IsWildcardFallbackEnabled()) {
+              result = mgr.LookupWildcardFallback(op_sig, concrete_sig);
+            }
           }
         }
       }
-      else {
-        result = ResultEntry::Default();
-      }
+
+      // Default() is the same non-tunable entry point the callers fall back
+      // to (gemm_internal / scaled_gemm), so just dispatch it here.
       if (result == ResultEntry::Null()) {
         TUNABLE_LOG2("no result, using default");
         result = ResultEntry::Default();
@@ -102,7 +128,24 @@ class TunableOp {
         op = GetOp(result.GetKey());
       }
       TORCH_CHECK(op != nullptr);
-      return op->Call(params);
+      // For a wildcard-served shape this is where the backend re-checks that
+      // the reused solution is valid for the new concrete dims.
+      //
+      // Every non-OK status a Callable can return is decided before the kernel
+      // is enqueued -- the TF32 guard returns early, hipBLASLt rejects via
+      // matmulIsAlgoSupported, and rocBLAS rejects via Tensile's
+      // ContractionSolution::canSolve, which runs before launchKernels and
+      // yields rocblas_status_invalid_value. Callers rely on that: they
+      // re-dispatch the non-tunable kernel on false, which would double-apply
+      // beta if C had already been touched.
+      auto status = op->Call(params);
+      if (status != OK) {
+        TORCH_WARN(
+            "TunableOp kernel returned status ",
+            status,
+            "; falling back to the non-tunable kernel");
+      }
+      return status;
     }
 
     virtual std::string Signature() {
@@ -259,7 +302,19 @@ class TunableOp {
         reference_params = params->DeepCopy(false);
         auto* default_op = GetOp(ResultEntry::Default().GetKey());
         TORCH_CHECK(default_op != nullptr);
-        TORCH_CHECK(default_op->Call(reference_params) == OK);
+        // This TORCH_CHECK was unreachable until DefaultGemmAndBiasOp started
+        // reporting gemm_and_bias failure, so keep tuning non-fatal: with no
+        // reference to compare against, drop the numerics check for this
+        // operator rather than aborting the tune.
+        if (default_op->Call(reference_params) != OK) {
+          TORCH_WARN_ONCE(
+              "TunableOp numerics check disabled for ", op_sig, '(', params_sig,
+              "): the non-tunable kernel cannot serve this shape, so there is "
+              "no reference result to compare candidates against");
+          reference_params->Delete();
+          reference_params = nullptr;
+          do_numerics_check = false;
+        }
       }
 
       // need copies of params to reuse
@@ -465,7 +520,27 @@ struct OpParams {
   OpParams(const OpParams&) = default;
   virtual ~OpParams() = default;
   virtual std::string Signature() const = 0;
+  virtual std::string DynamicSignature() const {
+    return Signature();
+  }
   virtual std::string BLASSignature() const = 0;
+
+  // Per-instance mask describing which logical GEMM dims are dynamic for
+  // this particular op invocation. The producer (Blas.cpp / CUDABlas.cpp /
+  // ScaledBlas.cpp) reads at::cuda::tunable::GetCurrentDynamicDimsMask()
+  // once and stamps the result here before calling the TunableOp; the
+  // Gemm*Params subclasses' DynamicSignature() implementations then read
+  // this field instead of the previously-global TuningContext setting.
+  //
+  // Default-constructed (all-zero) means "no dim is dynamic", which yields
+  // a DynamicSignature() byte-identical to Signature() and preserves the
+  // legacy concrete-only behavior for callers that don't push a guard.
+  DynamicDimsMask dynamic_dims_mask{};
+
+  bool IsDynamicM() const { return dynamic_dims_mask.m(); }
+  bool IsDynamicN() const { return dynamic_dims_mask.n(); }
+  bool IsDynamicK() const { return dynamic_dims_mask.k(); }
+  bool IsDynamicBatch() const { return dynamic_dims_mask.batch(); }
 };
 
 } // namespace at::cuda::tunable
