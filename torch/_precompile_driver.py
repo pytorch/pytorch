@@ -376,9 +376,10 @@ def _build_dynamo_forward():
     """Rebuild Dynamo's guards and transformed bytecode into a standalone dispatcher.
 
     The compiled graph sources stay ordinary Python in the artifact. Only the minimized
-    Dynamo dispatch guards and transformed code objects are opaque, because neither has
-    a source form. There is no compiler behind this dispatcher: a miss against every
-    retained guard set raises instead of compiling another specialization.
+    Dynamo dispatch guards, transformed entry/resume code objects, and embedded disabled
+    functions are opaque because none has a source form. There is no compiler behind
+    this dispatcher: a miss against every retained guard set raises instead of compiling
+    another specialization.
     """
     import base64
     import importlib
@@ -401,18 +402,25 @@ def _build_dynamo_forward():
         )
 
     state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
-    namespace = globals()
-    module = sys.modules.get(state["python_module"])
-    if module is None:
-        try:
-            module = importlib.import_module(state["python_module"])
-        except ImportError:
-            module = None
-    if module is not None:
-        for name, value in vars(module).items():
-            namespace.setdefault(name, value)
-    for alias, module_name in state["import_sources"].items():
-        namespace[alias] = importlib.import_module(module_name)
+    namespace = dict(globals())
+    for code_state in state["codes"]:
+        module = sys.modules.get(code_state["python_module"])
+        if module is None:
+            try:
+                module = importlib.import_module(code_state["python_module"])
+            except ImportError:
+                module = None
+        if module is not None:
+            for name, value in vars(module).items():
+                namespace.setdefault(name, value)
+        for alias, (module_name, path) in code_state["global_bindings"].items():
+            value = importlib.import_module(module_name)
+            for attr in path:
+                value = getattr(value, attr)
+            namespace[alias] = value
+        namespace.update(code_state["value_globals"])
+        for alias, module_name in code_state["import_sources"].items():
+            namespace[alias] = importlib.import_module(module_name)
 
     def make_backend(call):
         def run(*args):
@@ -430,55 +438,83 @@ def _build_dynamo_forward():
         )
         namespace[backend_id] = make_backend(backend_namespace["call"])
 
-    target = SerializedCode.to_code_object(state["code"])
-    defaults = state["defaults"]
-    kwdefaults = state["kwdefaults"]
-
-    def make_cell(value):
-        def read():
-            return value
-
-        if read.__closure__ is None:
-            raise AssertionError("expected a closure cell")
-        return read.__closure__[0]
-
-    closure_values = state["closure"]
-    closure = (
-        tuple(make_cell(value) for value in closure_values)
-        if closure_values is not None
-        else None
-    )
-    variants = []
-    for guarded in state["variants"]:
-        guards_state = load_guards_state(guarded["guards_state"])
-        manager = load_guard_manager(guards_state, target, namespace)
-        code = SerializedCode.to_code_object(guarded["dynamo_code"])
+    for global_name, function_state in state["disabled_functions"].items():
+        function_globals = dict(namespace)
+        for name, module_name in function_state["module_globals"].items():
+            function_globals[name] = importlib.import_module(module_name)
+        function_globals.update(function_state["value_globals"])
         function = types.FunctionType(
-            code, namespace, target.co_name, defaults, closure
+            SerializedCode.to_code_object(function_state["code"]),
+            function_globals,
+            function_state["name"],
+            function_state["defaults"],
         )
-        if kwdefaults:
-            function.__kwdefaults__ = dict(kwdefaults)
-        variants.append((manager, function))
+        if function_state["kwdefaults"]:
+            function.__kwdefaults__ = dict(function_state["kwdefaults"])
+        function_globals[global_name] = function
+        namespace[global_name] = function
 
-    arg_names = target.co_varnames[: target.co_argcount]
+    def prepare_code(code_state):
+        target = SerializedCode.to_code_object(code_state["code"])
+        defaults = code_state["defaults"]
+        kwdefaults = code_state["kwdefaults"]
+        guarded_variants = []
+        for guarded in code_state["variants"]:
+            guards_state = load_guards_state(guarded["guards_state"])
+            manager = load_guard_manager(guards_state, target, namespace)
+            code = SerializedCode.to_code_object(guarded["dynamo_code"])
+            guarded_variants.append((manager, code))
+        arg_names = target.co_varnames[: target.co_argcount]
 
-    def forward(*args):
-        local_scope = dict(zip(arg_names, args))
-        if defaults:
-            for name, value in zip(arg_names[-len(defaults) :], defaults):
-                local_scope.setdefault(name, value)
-        if kwdefaults:
-            for name, value in kwdefaults.items():
-                local_scope.setdefault(name, value)
-        for manager, function in variants:
-            if manager.check(local_scope):
-                return function(*args)
-        from torch._precompile import PrecompileError
+        def bind(closure=None):
+            if not guarded_variants:
+                function = types.FunctionType(
+                    target, namespace, target.co_name, defaults, closure
+                )
+                if kwdefaults:
+                    function.__kwdefaults__ = dict(kwdefaults)
+                return function
 
-        raise PrecompileError(
-            f"precompile: no captured Dynamo variant of {target.co_name!r} matches "
-            f"this call. Add an example covering it and precompile again; the artifact "
-            f"contains {len(variants)} guarded variant(s)."
-        )
+            variants = []
+            for manager, code in guarded_variants:
+                function = types.FunctionType(
+                    code, namespace, target.co_name, defaults, closure
+                )
+                if kwdefaults:
+                    function.__kwdefaults__ = dict(kwdefaults)
+                variants.append((manager, function))
 
-    return forward
+            def dispatch(*args):
+                local_scope = dict(zip(arg_names, args))
+                if defaults:
+                    for name, value in zip(arg_names[-len(defaults) :], defaults):
+                        local_scope.setdefault(name, value)
+                if kwdefaults:
+                    for name, value in kwdefaults.items():
+                        local_scope.setdefault(name, value)
+                for manager, function in variants:
+                    if manager.check(local_scope):
+                        return function(*args)
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    f"precompile: no captured Dynamo variant of {target.co_name!r} "
+                    f"matches this call. Add an example covering it and precompile "
+                    f"again; the artifact contains {len(variants)} guarded variant(s)."
+                )
+
+            return dispatch
+
+        return target, bind
+
+    main_state, *resume_states = state["codes"]
+    for code_state in resume_states:
+        target, bind = prepare_code(code_state)
+        function = bind if target.co_freevars else bind()
+        for name in code_state["function_names"]:
+            namespace[name] = function
+
+    target, bind = prepare_code(main_state)
+    if target.co_freevars:
+        raise AssertionError("main Dynamo frame must not have free variables")
+    return bind()
