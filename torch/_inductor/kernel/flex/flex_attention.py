@@ -369,7 +369,7 @@ def flex_attention(
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
     if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
         raise AssertionError(
-            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+            f"Bq and Bkv must be broadcastable. Got Bq={Bq} and Bkv={Bkv}"
         )
     if not V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_q, 0)):
         raise AssertionError("Query length must be greater than 0")
@@ -813,7 +813,7 @@ def flex_attention_backward(*args, **kwargs):
 
     if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
         raise AssertionError(
-            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+            f"Bq and Bkv must be broadcastable. Got Bq={Bq} and Bkv={Bkv}"
         )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
