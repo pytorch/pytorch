@@ -2,11 +2,19 @@
 
 #ifdef USE_C10D_GLOO
 
+#include <array>
+#include <optional>
+
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
 namespace c10d {
+
+// Registered by the Python bindings when available.
+typedef std::optional<std::array<int64_t, 3>> (*gc_count_getter_t)();
+
+TORCH_API gc_count_getter_t& get_gc_count_getter();
 
 // ProcessGroupWrapper wraps a Backend for debugging purposes. It intercepts
 // collective operations to verify consistency across ranks before dispatching
