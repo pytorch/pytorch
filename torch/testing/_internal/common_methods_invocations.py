@@ -17529,7 +17529,7 @@ op_db: list[OpInfo] = [
     ),
     UnaryUfuncInfo(
         'nn.functional.threshold',
-        ref=lambda x, threshold, value: np.where(x <= threshold, value, x).astype(x.dtype),
+        ref=lambda x, threshold, value: np.where(x <= threshold, np.asarray(value).astype(x.dtype), x).astype(x.dtype),
         dtypes=all_types_and(torch.half, torch.bfloat16),
         dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.bool),
         inplace_variant=lambda x, threshold, value:
