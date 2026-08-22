@@ -3041,9 +3041,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from .constant import ConstantVariable
             from .dicts import ConstDictVariable
             from .lists import BaseListVariable
-            from .tensor import TensorVariable
+            from .tensor import _contains_graph_intermediate, TensorVariable
 
             if not config.trace_autograd_ops:
+                inputs = args[1] if len(args) >= 2 else kwargs.get("inputs")
+                skip_frame = (
+                    _contains_graph_intermediate(inputs)
+                    or tx.has_live_graph_intermediate()
+                )
+                # AOTAutograd does not preserve relationships between outputs of
+                # a compiled prefix. Skip this invocation if eager grad targets an
+                # intermediate or another differentiable intermediate stays live.
                 unimplemented(
                     gb_type="using `torch.autograd.grad` with `torch._dynamo.config.trace_autograd_ops=False`",
                     context=f"trace_autograd_ops={config.trace_autograd_ops}",
@@ -3054,6 +3062,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     hints=[
                         "Change `torch._dynamo.config.trace_autograd_ops` to `True`.",
                     ],
+                    skip_frame=skip_frame,
+                    preserve_skip_frame_after_inline=skip_frame,
+                    apply_to_code=not skip_frame,
                 )
 
             # Graph break if we detected on a previous attempt that autograd.grad
