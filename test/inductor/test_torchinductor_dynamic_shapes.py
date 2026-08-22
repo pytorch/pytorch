@@ -197,6 +197,28 @@ if HAS_CPU:
                 self.assertEqual(actual[0], expected[0])
                 self.assertEqual(actual[1], expected[1])
 
+        @config.patch("graph_partition", False)
+        def test_relational_symbool_graph_input_codegen(self):
+            class AssertModel(torch.nn.Module):
+                def forward(self, x):
+                    torch._check(x.shape[0] <= 128)
+                    return x.relu() + x
+
+            class IntModel(torch.nn.Module):
+                def forward(self, x):
+                    a = x.shape[0] <= 128
+                    return x.relu() + x + int(a)
+
+            for model_cls, batch_sizes in (
+                (AssertModel, (8,)),
+                (IntModel, (8, 160)),
+            ):
+                model = model_cls()
+                opt_model = torch.compile(model, fullgraph=True, dynamic=True)
+                for batch_size in batch_sizes:
+                    inp = torch.randn(batch_size, 4, dtype=torch.float32)
+                    self.assertEqual(opt_model(inp), model(inp))
+
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 

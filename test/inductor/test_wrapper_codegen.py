@@ -97,6 +97,20 @@ s0 = arg1_1""",
         self.assertEqual(wrapper.prefix.getvalue(), "")
         self.assertEqual(list(bound_vars), [])
 
+    def test_relational_symbool_input_does_not_bind_symbol(self):
+        wrapper = self._new_wrapper()
+        bound_vars = OrderedSet()
+        s0 = sympy.Symbol("s0")
+        symbool = sympy.LessThan(s0, 128)
+
+        self.assertIsInstance(symbool, sympy.logic.boolalg.Boolean)
+        self.assertNotIsInstance(symbool, sympy.Expr)
+
+        wrapper.codegen_input_symbol_assignment("arg0_1", symbool, bound_vars)
+
+        self.assertEqual(wrapper.prefix.getvalue(), "")
+        self.assertEqual(list(bound_vars), [])
+
     def test_record_symbolic_input_source_ignores_non_input_tensorbox(self):
         s0 = sympy.Symbol("s0")
         tensor = ir.Pointwise.create(

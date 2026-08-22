@@ -2780,10 +2780,17 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_input_symbol_assignment(
         self,
         name: str,
-        value: ir.TensorBox | sympy.Expr,
+        value: ir.TensorBox | sympy.Expr | sympy.logic.boolalg.Boolean,
         bound_vars: OrderedSet[sympy.Symbol],
         deferred_symbol_assignments=None,
     ):
+        # SymInt/SymFloat placeholders are SymPy Exprs. Relational SymBool
+        # placeholders are SymPy booleans instead, and do not define a symbol
+        # assignment for the wrapper.
+        if isinstance(value, sympy.logic.boolalg.Boolean) and not isinstance(
+            value, sympy.Expr
+        ):
+            return
         if isinstance(value, sympy.Expr):
             raw_value = value
             value = V.graph.sizevars.simplify(raw_value)
