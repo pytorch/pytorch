@@ -328,6 +328,27 @@ class _PrecompileTrainMod(torch.nn.Module):
         return torch.relu(self.b(torch.relu(self.a(x))))
 
 
+class _PrecompileUnpicklableHolder:
+    def __init__(self, bad):
+        self.bad = bad
+
+
+def _precompile_reads_holder(obj, x):
+    return x * 2 if obj.bad is not None else x
+
+
+def _precompile_reads_holder_in_list(objs, y):
+    return y * 2 if objs[0].bad is not None else y
+
+
+_precompile_reads_shadowed = {
+    "pytype": lambda x: x * x.pytype,
+    "fake_mode": lambda x: x * x.fake_mode,
+    "dispatch_keys": lambda x: x * x.dispatch_keys,
+    "_fake_device": lambda x: x * x._fake_device,
+}
+
+
 class _PrecompileStepCounter(torch.nn.Module):
     """Its own forward advances a value the guards will be built from."""
 
@@ -2692,6 +2713,39 @@ class TestPrecompile(TestCase):
             example_inputs=[(torch.randn(n), 2) for n in (3, 5)],
         )
         self.assertTrue(_read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS"))
+
+
+
+    @parametrize("where", ["object", "in_a_list"])
+    def test_unpicklable_guard_value_names_where_it_lives(self, where):
+        # The type in a pickle error says WHAT failed and never WHERE, which on a
+        # large model means bisecting by hand. A lock is the archetypal offender
+        # and the one the type-name match used to miss, because CPython reports
+        # it as '_thread.lock' while type(...).__name__ is 'lock'.
+        import threading
+
+        if where == "object":
+            entry = _precompile_reads_holder
+            args = (_PrecompileUnpicklableHolder(threading.Lock()), torch.randn(4))
+            expected = r"reached via: local_scope\['obj'\].bad"
+        else:
+            entry = _precompile_reads_holder_in_list
+            args = ([_PrecompileUnpicklableHolder(threading.Lock())], torch.randn(4))
+            expected = r"reached via: local_scope\['objs'\]\[0\].bad"
+        with self.assertRaisesRegex(PrecompileError, expected), torch.no_grad():
+            torch.compiler.precompile(
+                entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[args],
+            )
+
+
+
+
+
 
     def test_serialized_guards_drop_export_bookkeeping(self):
         # Guard.code_list and .guard_types are rebuilt by create_fn at load, and
