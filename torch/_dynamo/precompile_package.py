@@ -1181,8 +1181,8 @@ def _missing_backends_message(total: int, missing: Sequence[object]) -> str:
         shown += f", ... ({len(missing) - 8} more)"
     bypasses = _autograd_cache_bypasses()
     bypass_note = (
-        f" It bypassed {bypasses} time(s) here, which rendering does routinely "
-        "and which does not by itself explain a gap."
+        f" It bypassed {bypasses} time(s) here, which rendering does for any "
+        "graph the cache cannot key, and which does not by itself explain a gap."
         if bypasses
         else ""
     )
