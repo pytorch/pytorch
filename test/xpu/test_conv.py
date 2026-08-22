@@ -609,8 +609,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             _test(t, weight_even, mode)
             _test(t, weight_odd, mode)
 
-    @onlyXPU
-    @dtypes(torch.double)
+    @dtypes(torch.float, torch.double)
     def test_conv1d_backward_depthwise(self, device, dtype):
         batch, channels, width = 2, 4, 2
         x = make_tensor(
