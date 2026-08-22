@@ -7342,6 +7342,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return True
         return False
 
+    def pointer_range_kwargs(self) -> dict[str, Any]:
+        """``config_of`` kwargs deciding whether ``tt.pointer_range=32`` may be emitted.
+
+        On HIP the annotation lets the backend use buffer ops. Buffer atomics exist but
+        are far slower than global atomics under contention, so a kernel that uses
+        atomics must not be tagged. Every path that builds triton_meta has to reach the
+        same decision -- this class and ``TritonTemplateKernel``, which does not go
+        through ``codegen_kernel`` -- so the rule lives in one place.
+
+        Only valid once the kernel body exists, since it depends on
+        ``atomic_add_found``.
+        """
+        if torch.version.hip is not None and (
+            self.atomic_add_found or not config.triton.emit_pointer_range_32
+        ):
+            return {"pointer_range_override": ()}
+        return {}
+
     def codegen_kernel(self, name=None) -> str:
         """
         Convert the TritonKernel from Inductor SIMD IR to triton code, including inductor triton heuristics, imports,
@@ -7539,24 +7557,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self._filter_pdl(self.body)
 
-        # Compute configs after codegen_body() so we know if the kernel
-        # uses atomic ops. On HIP, buffer ops don't support atomics, so
-        # we must not tag any args with pointer_range_32 in that case.
-        # Also disable pointer_range_32 when the config flag is off.
-        if torch.version.hip is not None and (
-            self.atomic_add_found or not config.triton.emit_pointer_range_32
-        ):
-            triton_meta["configs"] = [
-                config_of(
-                    signature,
-                    pointer_range_override=(),
-                    skip_cpp_wrapper_input_tensor_alignment=True,
-                )
-            ]
-        else:
-            triton_meta["configs"] = [
-                config_of(signature, skip_cpp_wrapper_input_tensor_alignment=True)
-            ]
+        # Computed after codegen_body() so self.atomic_add_found is accurate.
+        triton_meta["configs"] = [
+            config_of(
+                signature,
+                skip_cpp_wrapper_input_tensor_alignment=True,
+                **self.pointer_range_kwargs(),
+            )
+        ]
 
         for helper in self.helper_functions:
             code.writeline("")
