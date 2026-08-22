@@ -21,14 +21,14 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
+    HardwareClassification, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_ROCM, decorateIf, skipIfXpu
+    TEST_CUDA, TEST_WITH_ROCM, decorateIf, skipIfXpu
 )
 from torch.testing._internal.common_cuda import has_device_side_assert
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
-     get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
+     get_device_type_test_bases, instantiate_device_type_tests, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import opinfo
@@ -38,26 +38,9 @@ from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInf
 import operator
 import string
 
-# For testing TestCase methods and torch.testing functions
-class TestTesting(TestCase):
-    # Ensure that assertEqual handles numpy arrays properly
-    @dtypes(*all_types_and_complex_and(torch.bool, torch.half))
-    def test_assertEqual_numpy(self, device, dtype):
-        S = 10
-        test_sizes = [
-            (),
-            (0,),
-            (S,),
-            (S, S),
-            (0, S),
-            (S, 0)]
-        for test_size in test_sizes:
-            a = make_tensor(test_size, dtype=dtype, device=device, low=-5, high=5)
-            a_n = a.cpu().numpy()
-            msg = f'size: {test_size}'
-            self.assertEqual(a_n, a, rtol=0, atol=0, msg=msg)
-            self.assertEqual(a, a_n, rtol=0, atol=0, msg=msg)
-            self.assertEqual(a_n, a_n, rtol=0, atol=0, msg=msg)
+# For testing TestCase methods and torch.testing functions that are device-agnostic
+class TestTestingGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_assertEqual_longMessage(self):
         actual = "actual"
@@ -114,6 +97,64 @@ class TestTesting(TestCase):
         # A plain string msg is unchanged.
         with self.assertRaisesRegex(AssertionError, re.escape("True is not false : plain")):
             self.assertFalse(True, msg="plain")
+
+    def test_isclose_equality_shortcut(self):
+        # For values >= 2**53, integers differing by 1 can no longer differentiated by torch.float64 or lower precision
+        # floating point dtypes. Thus, even with rtol == 0 and atol == 0, these tensors would be considered close if
+        # they were not compared as integers.
+        a = torch.tensor(2 ** 53, dtype=torch.int64)
+        b = a + 1
+
+        self.assertFalse(torch.isclose(a, b, rtol=0, atol=0))
+
+    def test_supported_dtypes(self):
+        # OpInfo.supported_dtypes() is a pure string-keyed lookup (see
+        # opinfo/core.py) with no hardware dependency, despite the "cpu"/"cuda"
+        # device-type arguments.
+        matching_ops = [
+            op
+            for op in op_db
+            if len(
+                op.supported_dtypes("cpu").symmetric_difference(
+                    op.supported_dtypes("cuda")
+                )
+            )
+            > 0
+        ]
+        if not matching_ops:
+            self.skipTest("no op with differing cpu/cuda supported dtypes found")
+        op = matching_ops[0]
+
+        self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes("cuda"))
+        self.assertEqual(op.supported_dtypes("cuda"), op.supported_dtypes("cuda:0"))
+        self.assertEqual(
+            op.supported_dtypes(torch.device("cuda")),
+            op.supported_dtypes(torch.device("cuda", index=1)),
+        )
+
+
+# For testing TestCase methods and torch.testing functions that require device-type instantiation
+class TestTesting(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # Ensure that assertEqual handles numpy arrays properly
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half))
+    def test_assertEqual_numpy(self, device, dtype):
+        S = 10
+        test_sizes = [
+            (),
+            (0,),
+            (S,),
+            (S, S),
+            (0, S),
+            (S, 0)]
+        for test_size in test_sizes:
+            a = make_tensor(test_size, dtype=dtype, device=device, low=-5, high=5)
+            a_n = a.cpu().numpy()
+            msg = f'size: {test_size}'
+            self.assertEqual(a_n, a, rtol=0, atol=0, msg=msg)
+            self.assertEqual(a, a_n, rtol=0, atol=0, msg=msg)
+            self.assertEqual(a_n, a_n, rtol=0, atol=0, msg=msg)
 
     def _isclose_helper(self, tests, device, dtype, equal_nan, atol=1e-08, rtol=1e-05):
         for test in tests:
@@ -296,15 +337,6 @@ class TestTesting(TestCase):
         with self.assertRaises(RuntimeError):
             torch.isclose(t, t, atol=-1, rtol=-1)
 
-    def test_isclose_equality_shortcut(self):
-        # For values >= 2**53, integers differing by 1 can no longer differentiated by torch.float64 or lower precision
-        # floating point dtypes. Thus, even with rtol == 0 and atol == 0, these tensors would be considered close if
-        # they were not compared as integers.
-        a = torch.tensor(2 ** 53, dtype=torch.int64)
-        b = a + 1
-
-        self.assertFalse(torch.isclose(a, b, rtol=0, atol=0))
-
     @dtypes(torch.float16, torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_isclose_nan_equality_shortcut(self, device, dtype):
         if dtype.is_floating_point:
@@ -350,13 +382,72 @@ class TestTesting(TestCase):
         result = torch.isclose(a, b, equal_nan=True)
         self.assertEqual(result, torch.tensor([True, True], device=device))
 
+    @expectedFailureMeta  # This is only supported for CPU and CUDA
+    @onlyNativeDeviceTypes
+    def test_get_supported_dtypes(self, device):
+        # Test the `get_supported_dtypes` helper function.
+        # We acquire the dtypes for few Ops dynamically and verify them against
+        # the correct statically described values.
+        ops_to_test = list(filter(lambda op: op.formatted_name in ['atan2', 'topk', 'xlogy'], op_db))
+
+        for op in ops_to_test:
+            dynamic_dtypes = opinfo.utils.get_supported_dtypes(op, op.sample_inputs_func, self.device_type)
+            dynamic_dispatch = opinfo.utils.dtypes_dispatch_hint(dynamic_dtypes)
+            if self.device_type == 'cpu':
+                dtypes = op.dtypes
+            else:  # device_type ='cuda'
+                dtypes = op.dtypesIfCUDA
+
+            self.assertTrue(set(dtypes) == set(dynamic_dtypes))
+            self.assertTrue(set(dtypes) == set(dynamic_dispatch.dispatch_fn()))
+
+    def test_setup_and_teardown_run_for_device_specific_tests(self, device):
+        # TODO: Move this (and other similar text blocks) to some fixtures/ subdir
+        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
+#!/usr/bin/env python3
+
+import torch
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
+
+class TestFoo(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # store something on the test class to query during teardown
+        cls.stored_thing = "called with " + cls.__name__
+
+    @classmethod
+    def tearDownClass(cls):
+        # throw here so we know teardown was run
+        raise RuntimeError(cls.stored_thing)
+
+    def test_bar(self, device):
+        # make sure the test can access the stored thing
+        print(self.stored_thing)
+
+instantiate_device_type_tests(TestFoo, globals(), only_for='{self.device_type}')
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        expected_device_class_name = f"TestFoo{self.device_type.upper()}"
+        expected_error_text = f"RuntimeError: called with {expected_device_class_name}"
+        self.assertIn(expected_error_text, stderr)
+
+
+instantiate_device_type_tests(TestTesting, globals())
+
+
+class TestTestingCudaAssert(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     # The following tests (test_cuda_assert_*) are added to ensure test suite terminates early
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.
     # See: https://github.com/pytorch/pytorch/issues/49019
-    @onlyCUDA
+    @unittest.skipIf(not TEST_CUDA, "Skipping because CUDA is not available")
     @slowTest
-    def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
+    def test_cuda_assert_should_stop_common_utils_test_suite(self):
         # test to ensure common_utils.py override has early termination for CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
 #!/usr/bin/env python3
@@ -390,9 +481,9 @@ if __name__ == '__main__':
             self.assertIn('errors=1', stderr)
 
 
-    @onlyCUDA
+    @unittest.skipIf(not TEST_CUDA, "Skipping because CUDA is not available")
     @slowTest
-    def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
+    def test_cuda_assert_should_stop_common_device_type_test_suite(self):
         # test to ensure common_device_type.py override has early termination for CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
 #!/usr/bin/env python3
@@ -435,9 +526,9 @@ if __name__ == '__main__':
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/106308")
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
-    @onlyCUDA
+    @unittest.skipIf(not TEST_CUDA, "Skipping because CUDA is not available")
     @slowTest
-    def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
+    def test_cuda_assert_should_not_stop_common_distributed_test_suite(self):
         # test to ensure common_distributed.py override should not early terminate CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
 #!/usr/bin/env python3
@@ -473,85 +564,9 @@ if __name__ == '__main__':
         # we are currently disabling CUDA early termination for distributed tests.
         self.assertIn('errors=2', stderr)
 
-    @expectedFailureMeta  # This is only supported for CPU and CUDA
-    @onlyNativeDeviceTypes
-    def test_get_supported_dtypes(self, device):
-        # Test the `get_supported_dtypes` helper function.
-        # We acquire the dtypes for few Ops dynamically and verify them against
-        # the correct statically described values.
-        ops_to_test = list(filter(lambda op: op.formatted_name in ['atan2', 'topk', 'xlogy'], op_db))
-
-        for op in ops_to_test:
-            dynamic_dtypes = opinfo.utils.get_supported_dtypes(op, op.sample_inputs_func, self.device_type)
-            dynamic_dispatch = opinfo.utils.dtypes_dispatch_hint(dynamic_dtypes)
-            if self.device_type == 'cpu':
-                dtypes = op.dtypes
-            else:  # device_type ='cuda'
-                dtypes = op.dtypesIfCUDA
-
-            self.assertTrue(set(dtypes) == set(dynamic_dtypes))
-            self.assertTrue(set(dtypes) == set(dynamic_dispatch.dispatch_fn()))
-
-    @onlyCPU
-    @ops(
-        [
-            op
-            for op in op_db
-            if len(
-                op.supported_dtypes("cpu").symmetric_difference(
-                    op.supported_dtypes("cuda")
-                )
-            )
-            > 0
-        ][:1],
-        dtypes=OpDTypes.none,
-    )
-    def test_supported_dtypes(self, device, op):
-        self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes("cuda"))
-        self.assertEqual(op.supported_dtypes("cuda"), op.supported_dtypes("cuda:0"))
-        self.assertEqual(
-            op.supported_dtypes(torch.device("cuda")),
-            op.supported_dtypes(torch.device("cuda", index=1)),
-        )
-
-    def test_setup_and_teardown_run_for_device_specific_tests(self, device):
-        # TODO: Move this (and other similar text blocks) to some fixtures/ subdir
-        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
-#!/usr/bin/env python3
-
-import torch
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import TestCase, run_tests
-
-class TestFoo(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        # store something on the test class to query during teardown
-        cls.stored_thing = "called with " + cls.__name__
-
-    @classmethod
-    def tearDownClass(cls):
-        # throw here so we know teardown was run
-        raise RuntimeError(cls.stored_thing)
-
-    def test_bar(self, device):
-        # make sure the test can access the stored thing
-        print(self.stored_thing)
-
-instantiate_device_type_tests(TestFoo, globals(), only_for='{self.device_type}')
-
-if __name__ == '__main__':
-    run_tests()
-""")
-        expected_device_class_name = f"TestFoo{self.device_type.upper()}"
-        expected_error_text = f"RuntimeError: called with {expected_device_class_name}"
-        self.assertIn(expected_error_text, stderr)
-
-
-instantiate_device_type_tests(TestTesting, globals())
-
 
 class TestFrameworkUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
@@ -607,6 +622,8 @@ if __name__ == '__main__':
 
 class TestEnvironmentDefFlag(TestCase):
     """Verify env-var-vs-implication precedence in TestEnvironment.def_flag."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -713,6 +730,8 @@ def assert_close_with_inputs(actual: Any, expected: Any) -> Iterator[Callable]:
 
 
 class TestAssertClose(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_mismatching_types_subclasses(self):
         actual = torch.rand(())
         expected = torch.nn.Parameter(actual)
@@ -1001,6 +1020,8 @@ class TestAssertClose(TestCase):
 
 
 class TestAssertCloseMultiDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @deviceCountAtLeast(1)
     def test_mismatching_device(self, devices):
         for actual_device, expected_device in itertools.permutations(("cpu", *devices), 2):
@@ -1023,6 +1044,8 @@ instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for="c
 
 
 class TestAssertCloseErrorMessage(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_identifier_tensor_likes(self):
         actual = torch.tensor([1, 2, 3, 4])
         expected = torch.tensor([1, 2, 5, 6])
@@ -1184,6 +1207,8 @@ class TestAssertCloseErrorMessage(TestCase):
 
 
 class TestAssertCloseContainer(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_sequence_mismatching_len(self):
         actual = (torch.empty(()),)
         expected = ()
@@ -1337,6 +1362,8 @@ class TestAssertCloseContainer(TestCase):
 
 
 class TestAssertCloseSparseCOO(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_matching_coalesced(self):
         indices = (
             (0, 1),
@@ -1430,6 +1457,8 @@ class TestAssertCloseSparseCOO(TestCase):
 
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support CSR testing")
 class TestAssertCloseSparseCSR(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_matching(self):
         crow_indices = (0, 1, 2)
         col_indices = (1, 0)
@@ -1488,6 +1517,8 @@ class TestAssertCloseSparseCSR(TestCase):
 
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support CSC testing")
 class TestAssertCloseSparseCSC(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_matching(self):
         ccol_indices = (0, 1, 2)
         row_indices = (1, 0)
@@ -1546,6 +1577,8 @@ class TestAssertCloseSparseCSC(TestCase):
 
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support BSR testing")
 class TestAssertCloseSparseBSR(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_matching(self):
         crow_indices = (0, 1, 2)
         col_indices = (1, 0)
@@ -1604,6 +1637,8 @@ class TestAssertCloseSparseBSR(TestCase):
 
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support BSC testing")
 class TestAssertCloseSparseBSC(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_matching(self):
         ccol_indices = (0, 1, 2)
         row_indices = (1, 0)
@@ -1661,6 +1696,8 @@ class TestAssertCloseSparseBSC(TestCase):
 
 
 class TestAssertCloseQuantized(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_mismatching_is_quantized(self):
         actual = torch.tensor(1.0)
         expected = torch.quantize_per_tensor(actual, scale=1.0, zero_point=0, dtype=torch.qint32)
@@ -1706,6 +1743,8 @@ class TestAssertCloseQuantized(TestCase):
 
 
 class TestMakeTensor(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     supported_dtypes = dtypes(
         torch.bool,
         torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
@@ -1907,6 +1946,8 @@ def _get_test_funcs_for_test_class(test_cls):
 
 
 class TestTestParametrization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_default_names(self):
 
         class TestParametrized(TestCase):
@@ -2145,6 +2186,8 @@ class TestTestParametrization(TestCase):
 
 
 class TestTestParametrizationDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_unparametrized_names(self, device):
         # This test exists to protect against regressions in device / dtype test naming
         # due to parametrization logic.
@@ -2620,6 +2663,8 @@ instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
 
 
 class TestImports(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def _check_python_output(cls, program) -> str:
         return subprocess.check_output(
@@ -2740,6 +2785,8 @@ class TestImports(TestCase):
         self.assertEqual(out.strip(), expected)
 
 class TestOpInfos(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_sample_input(self) -> None:
         a, b, c, d, e = (object() for _ in range(5))
 
@@ -2812,6 +2859,7 @@ class TestOpInfos(TestCase):
 
 # Tests that validate the various sample generating functions on each OpInfo.
 class TestOpInfoSampleFunctions(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_opinfo_sample_generators(self, device, dtype, op):
@@ -2833,6 +2881,8 @@ class TestOpInfoSampleFunctions(TestCase):
 
 # Tests test classification.
 class TestHardwareClassifications(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         import torch.testing._internal.common_utils as _cu
