@@ -1,7 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
+import io
 import sys
 import tempfile
+from contextlib import contextmanager
 from typing import Any, IO
 
 import torch
@@ -23,6 +25,9 @@ from torch.distributed.checkpoint import (
     save_state_dict,
 )
 from torch.distributed.checkpoint._extension import ZStandard
+from torch.distributed.checkpoint.filesystem import _StorageWriterTransforms, FileSystem
+from torch.distributed.checkpoint.metadata import MetadataIndex
+from torch.distributed.checkpoint.planner import WriteItem, WriteItemType
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -223,6 +228,150 @@ class TestDistributedStateDictSaveLoadZStandard(TestCase):
             )
 
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+
+class TestFileSystemWriterFlushBehavior(TestCase):
+    def test_no_close_writer_does_not_flush_raw_stream(self) -> None:
+        """
+        Verify that NoCloseWriter.close() does not eagerly call flush()
+        on the underlying raw stream for each write item.
+        """
+
+        class MockRawStream(io.BytesIO):
+            def __init__(self) -> None:
+                super().__init__()
+                self.flush_count = 0
+
+            def flush(self) -> None:
+                self.flush_count += 1
+                super().flush()
+
+        raw_stream = MockRawStream()
+        transforms = _StorageWriterTransforms()
+        write_item = WriteItem(
+            index=MetadataIndex("test_item"),
+            type=WriteItemType.BYTE_IO,
+        )
+
+        transform_to, _ = transforms.transform_save_stream(write_item, raw_stream)
+        transform_to.write(b"test_payload")
+        transform_to.close()
+
+        # Closing transform_to (NoCloseWriter) should NOT flush the underlying raw stream
+        self.assertEqual(raw_stream.flush_count, 0)
+        self.assertEqual(raw_stream.getvalue(), b"test_payload")
+
+    def test_transform_with_extension_does_not_flush_raw_stream(self) -> None:
+        """
+        Verify that closing a stream transformed by extensions completes
+        transformation without flushing the underlying raw stream.
+        """
+
+        class MockRawStream(io.BytesIO):
+            def __init__(self) -> None:
+                super().__init__()
+                self.flush_count = 0
+
+            def flush(self) -> None:
+                self.flush_count += 1
+                super().flush()
+
+        raw_stream = MockRawStream()
+        transforms = _StorageWriterTransforms(extensions=[Rot13Example()])
+        write_item = WriteItem(
+            index=MetadataIndex("test_item"),
+            type=WriteItemType.BYTE_IO,
+        )
+
+        transform_to, descriptors = transforms.transform_save_stream(
+            write_item, raw_stream
+        )
+        transform_to.write(b"Hello World")
+        transform_to.close()
+
+        # Extension transformed data is written, but raw stream is not eagerly flushed
+        self.assertEqual(raw_stream.flush_count, 0)
+        self.assertNotEqual(raw_stream.getvalue(), b"Hello World")
+        self.assertEqual(len(descriptors), 1)
+
+    @parametrize("sync_files", [True, False])
+    def test_file_system_writer_flush_counts(self, sync_files: bool) -> None:
+        """
+        Verify that FileSystemWriter does not perform per-tensor flushes on shard streams.
+        With N tensors in a single shard file:
+          - If sync_files=True, stream.flush() is called 2 times per file (1 explicit before
+            os.fsync + 1 during stream.close()).
+          - If sync_files=False, stream.flush() is called 1 time per file (0 explicit + 1 during stream.close()).
+          - In both cases, there are NO per-item flushes (which previously added N flushes per shard file).
+        """
+        flush_counts: dict[str, int] = {}
+
+        class FlushTrackingFileSystem(FileSystem):
+            @contextmanager
+            def create_stream(self, path, mode):
+                with super().create_stream(path, mode) as stream:
+                    path_str = str(path)
+                    flush_counts.setdefault(path_str, 0)
+
+                    orig_flush = stream.flush
+
+                    def tracking_flush():
+                        flush_counts[path_str] += 1
+                        return orig_flush()
+
+                    stream.flush = tracking_flush  # type: ignore[method-assign]
+                    yield stream
+
+        with tempfile.TemporaryDirectory() as path:
+            num_tensors = 10
+            state_dict_to_save = {
+                f"tensor_{i}": torch.ones(5, 5) * i for i in range(num_tensors)
+            }
+
+            fs_writer = FileSystemWriter(
+                path=path,
+                sync_files=sync_files,
+                single_file_per_rank=True,
+                thread_count=1,
+            )
+            fs_writer.fs = FlushTrackingFileSystem()
+
+            save(
+                state_dict=state_dict_to_save,
+                storage_writer=fs_writer,
+            )
+
+            # Separate shard file and metadata file flush counts
+            shard_flushes = [
+                count
+                for p, count in flush_counts.items()
+                if not p.endswith(".tmp") and "__0_0.distcp" in p
+            ]
+            metadata_flushes = [
+                count
+                for p, count in flush_counts.items()
+                if p.endswith(".tmp") or ".metadata" in p
+            ]
+
+            if sync_files:
+                # Shard file: 1 explicit flush before fsync + 1 on close (NOT num_tensors + 2)
+                self.assertEqual(shard_flushes, [2])
+                self.assertEqual(metadata_flushes, [2])
+            else:
+                # Shard file: 0 explicit flush before fsync + 1 on close (NOT num_tensors + 1)
+                self.assertEqual(shard_flushes, [1])
+                self.assertEqual(metadata_flushes, [1])
+
+            # Verify saved checkpoint loads back correctly
+            state_dict_to_load = {
+                f"tensor_{i}": torch.zeros(5, 5) for i in range(num_tensors)
+            }
+            fs_reader = FileSystemReader(path=path)
+            load(
+                state_dict=state_dict_to_load,
+                storage_reader=fs_reader,
+            )
+            assert_state_dict_equal(self, state_dict_to_load, state_dict_to_save)
 
 
 class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
@@ -561,6 +710,7 @@ instantiate_parametrized_tests(TestDistributedStateDictSaveLoadRot13)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadZStandard)
 instantiate_parametrized_tests(TestDistributedReshardOnLoad)
+instantiate_parametrized_tests(TestFileSystemWriterFlushBehavior)
 
 if __name__ == "__main__":
     run_tests()
