@@ -56,19 +56,19 @@ jobs:
       # which case the canonical linux.rocm.gpu.mi350.* labels are used).
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
-          { config: "default", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
-          { config: "default", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
-          { config: "default", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
-          { config: "default", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
-          { config: "default", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
-          { config: "default", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
-          { config: "default", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
-          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "default", shard: 1, num_shards: 8, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.1" },
+          { config: "default", shard: 2, num_shards: 8, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.1" },
+          { config: "default", shard: 3, num_shards: 8, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.1" },
+          { config: "default", shard: 4, num_shards: 8, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.1" },
+          { config: "default", shard: 5, num_shards: 8, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.1" },
+          { config: "default", shard: 6, num_shards: 8, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.1" },
+          { config: "default", shard: 7, num_shards: 8, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.1" },
+          { config: "default", shard: 8, num_shards: 8, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.1" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.1" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.1" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
         ]}
     secrets: inherit
 
