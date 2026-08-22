@@ -1928,6 +1928,17 @@
       ]
     }
   ],
+  "GB1560": [
+    {
+      "Gb_type": "assume_constant_result specialize_args argument mutated in graph",
+      "Context": "function {name}, source {source_name}",
+      "Explanation": "Argument `{source_name}` of function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True) was mutated inside the torch.compile region before the call, so value guards derived from it would not match the value at frame entry.",
+      "Hints": [
+        "Perform the mutation outside the torch.compile region",
+        "Pass the already-mutated value in as an input instead"
+      ]
+    }
+  ],
   "GB0127": [
     {
       "Gb_type": "Unsupported Tensor.resize_as_() call",
@@ -4641,6 +4652,19 @@
       ]
     }
   ],
+  "GB7404": [
+    {
+      "Gb_type": "assume_constant_result specialize_args tensor argument",
+      "Context": "function {name}, variable type {type(x).__name__}",
+      "Explanation": "Function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True) was called with a tensor argument. Tensor data cannot be value-guarded, so the baked constant could silently go stale when the data changes.",
+      "Hints": [
+        "Pass the relevant values as non-tensor arguments instead",
+        "Use plain torch._dynamo.assume_constant_result (without ",
+        "specialize_args), which passes tensors by real value without ",
+        "any guard"
+      ]
+    }
+  ],
   "GB0282": [
     {
       "Gb_type": "Placement with custom __getattr__ not supported",
@@ -5839,6 +5863,31 @@
       ]
     }
   ],
+  "GB5167": [
+    {
+      "Gb_type": "assume_constant_result specialize_args unguardable argument",
+      "Context": "function {name}, source {source.name}, value type {type(value).__name__}: {reason}",
+      "Explanation": "Cannot install value guards for argument `{source.name}` of type {type(value).__name__} passed to function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True): {reason}. Supported argument values are constants, enums, registered constant classes (torch.utils._pytree.register_constant or torch._library opaque typ=\"constant\"), tuples/lists of them, dicts with literal keys, and dataclasses whose fields are recursively supported.",
+      "Hints": [
+        "Restructure this argument to use value-guardable types",
+        "Register the argument's class with torch.utils._pytree.register_constant ",
+        "to guard it by equality",
+        "Use plain torch._dynamo.assume_constant_result (without specialize_args) ",
+        "to guard this argument by object identity instead"
+      ]
+    }
+  ],
+  "GB6069": [
+    {
+      "Gb_type": "assume_constant_result specialize_args argument conversion failed",
+      "Context": "function {name}, variable type {type(x).__name__}",
+      "Explanation": "Cannot convert argument of type {type(x).__name__} to a Python constant for function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True).",
+      "Hints": [
+        "Use plain torch._dynamo.assume_constant_result (without specialize_args) instead",
+        "Ensure all arguments can be converted to constants"
+      ]
+    }
+  ],
   "GB2404": [
     {
       "Gb_type": "Unsupported object.__new__ user-defined class construction",
@@ -5879,6 +5928,17 @@
       "Context": "str(self.bwd_graph)",
       "Explanation": "Expected backward function to be a function or method.",
       "Hints": []
+    }
+  ],
+  "GB8797": [
+    {
+      "Gb_type": "assume_constant_result specialize_args self-referential argument",
+      "Context": "function {name}, source {source.name}",
+      "Explanation": "Argument `{source.name}` of function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True) is part of a reference cycle, so it cannot be walked to derive value guards.",
+      "Hints": [
+        "Pass a structure without reference cycles",
+        "Use plain torch._dynamo.assume_constant_result (without specialize_args)"
+      ]
     }
   ],
   "GB8887": [
@@ -6177,6 +6237,39 @@
       "Explanation": "Attribute/method access of OpaqueObjects is not supported.",
       "Hints": [
         "Use custom operators instead of direct attribute/method access."
+      ]
+    }
+  ],
+  "GB1008": [
+    {
+      "Gb_type": "assume_constant_result specialize_args unguardable argument source",
+      "Context": "function {name}, source {source.name}",
+      "Explanation": "Argument `{source.name}` of function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True) comes from a source whose guards are skipped (e.g. a function's __annotations__ or a stdlib module global), so the baked result could not be invalidated when the argument changes.",
+      "Hints": [
+        "Pass this value in as a regular argument to the compiled function",
+        "Use plain torch._dynamo.assume_constant_result (without specialize_args)"
+      ]
+    }
+  ],
+  "GB1890": [
+    {
+      "Gb_type": "assume_constant_result default argument mutated in graph",
+      "Context": "function {name}, source {source_name}",
+      "Explanation": "Default arguments of function {name} marked with torch._dynamo.assume_constant_result were mutated inside the torch.compile region before the call, so its trace-time invocation would use a stale value.",
+      "Hints": [
+        "Perform the mutation outside the torch.compile region",
+        "Pass the already-mutated value explicitly instead"
+      ]
+    }
+  ],
+  "GB3576": [
+    {
+      "Gb_type": "assume_constant_result specialize_args unguardable-source argument conversion failed",
+      "Context": "function {name}, variable type {type(x).__name__}",
+      "Explanation": "Cannot convert argument of type {type(x).__name__} to a Python constant for function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True). The argument has no guardable source, so it must already be a constant.",
+      "Hints": [
+        "Pass this argument from outside the torch.compile region so it has a source",
+        "Ensure all arguments can be converted to constants"
       ]
     }
   ],

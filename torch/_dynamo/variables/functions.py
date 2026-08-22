@@ -24,6 +24,8 @@ accurate graph capture while handling Python's various function-related behavior
 import _collections  # type: ignore[import-not-found]
 import builtins
 import collections
+import dataclasses
+import enum
 import functools
 import importlib.metadata
 import importlib.util
@@ -46,7 +48,8 @@ from weakref import WeakKeyDictionary
 import torch
 from torch._dynamo.exc import get_stack_above_dynamo
 from torch._guards import Source
-from torch.utils._pytree import is_namedtuple_class
+from torch._library.opaque_object import is_opaque_constant_type
+from torch.utils._pytree import is_constant_class, is_namedtuple_class
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -68,11 +71,15 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     CellContentsSource,
+    ChainedSource,
     ClosureSource,
     ConstantSource,
     DefaultsSource,
+    DictGetItemSource,
     GetItemSource,
     ImportSource,
+    is_constant_source,
+    is_from_skip_guard_source,
     SkipGuardSource,
     TypeMROSource,
     TypeSource,
@@ -84,6 +91,7 @@ from ..utils import (
     identity,
     is_function,
     is_lru_cache_wrapper_trace_without_warning_allowed,
+    is_namedtuple_cls,
     is_tensor_base_attr_getter,
     is_wrapper_or_member_descriptor,
     istype,
@@ -205,6 +213,8 @@ def bind_args_cached(
     fn_source: Source | None,
     args: Sequence[Any],
     kwargs: dict[str, Any],
+    *,
+    force_guard_defaults: bool = False,
 ) -> dict[str, VariableTracker]:
     spec = _get_spec(func)
 
@@ -258,6 +268,7 @@ def bind_args_cached(
             if fn_source and not (
                 ConstantVariable.is_literal(spec.defaults[idx])
                 and config.skip_guards_on_constant_func_defaults
+                and not force_guard_defaults
             ):
                 default_source = DefaultsSource(fn_source, idx)
             ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
@@ -797,6 +808,47 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
         return result
 
+    def _constant_implicit_args(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> list[VariableTracker]:
+        if not isinstance(self.fn, FunctionType):
+            raise TypeError("Only supports regular Python functions.")
+
+        fn_source = self.get_source()
+        self_args = self.self_args()
+        call_args = [*self_args, *args]
+        bound = bind_args_cached(
+            self.fn,
+            tx.output.root_tx,
+            fn_source,
+            call_args,
+            kwargs,
+            force_guard_defaults=getattr(self.fn, "_dynamo_specialize_args", False),
+        )
+        spec = _get_spec(self.fn)
+        spec.update_defaults(self.fn)
+        implicit_args = list(self_args)
+
+        for i, name in enumerate(spec.all_pos_names):
+            if i < len(call_args) or (
+                name in kwargs and name not in spec.posonly_names
+            ):
+                continue
+            if name in spec.pos_default_map:
+                implicit_args.append(bound[name])
+
+        for name in spec.kwonly_names:
+            if name not in kwargs and name in spec.kwdefaults:
+                implicit_args.append(bound[name])
+
+        if len(implicit_args) != len(self_args):
+            _check_no_in_graph_default_mutation(tx, self.get_name(), self.fn)
+
+        return implicit_args
+
     # func.__get__ binds the function to an instance via the tp_descr_get slot
     # wrapper. https://github.com/python/cpython/blob/v3.13.0/Objects/funcobject.c#L1119
     def _get_dunder_get(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -935,8 +987,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             )
 
         if self.is_constant:
+            implicit_args = self._constant_implicit_args(tx, args, kwargs)
             return invoke_and_store_as_constant(
-                tx, self.fn, self.get_name(), args, kwargs
+                tx,
+                self.fn,
+                self.get_name(),
+                args,
+                kwargs,
+                implicit_args=implicit_args,
             )
 
         if (
@@ -1804,6 +1862,10 @@ class UserMethodVariable(UserFunctionVariable):
             )
             return var.call_function(tx, call_args, kwargs)
 
+        constant_implicit_args = (
+            self._constant_implicit_args(tx, args, kwargs) if self.is_constant else []
+        )
+
         # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
         # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
         # since we ensure `forward` of allowed modules can be traced by AOT safely.
@@ -1828,7 +1890,12 @@ class UserMethodVariable(UserFunctionVariable):
                 or self.is_constant
             ):
                 return self.obj.call_method(
-                    tx, self.fn.__name__, list(args), kwargs, constant=self.is_constant
+                    tx,
+                    self.fn.__name__,
+                    list(args),
+                    kwargs,
+                    constant=self.is_constant,
+                    constant_implicit_args=constant_implicit_args,
                 )
         elif (
             _fsdp_param_group is not None
@@ -1839,7 +1906,14 @@ class UserMethodVariable(UserFunctionVariable):
             )
         if self.is_constant:
             fn = getattr(self.obj.value, self.fn.__name__)  # type: ignore[attr-defined]
-            return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
+            return invoke_and_store_as_constant(
+                tx,
+                fn,
+                self.get_name(),
+                args,
+                kwargs,
+                implicit_args=constant_implicit_args,
+            )
         return super().call_function(tx, args, kwargs)
 
     def _get_func(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -1928,16 +2002,291 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         codegen.extend_output(create_call_function(1, False))
 
 
+def _mutated_constant_arg(name: str, source_name: str) -> Never:
+    unimplemented(
+        gb_type="assume_constant_result specialize_args argument mutated in graph",
+        context=f"function {name}, source {source_name}",
+        explanation=f"Argument `{source_name}` of function {name} marked with "
+        f"torch._dynamo.assume_constant_result(specialize_args=True) was mutated "
+        f"inside the torch.compile region before the call, so value guards derived "
+        f"from it would not match the value at frame entry.",
+        hints=[
+            "Perform the mutation outside the torch.compile region",
+            "Pass the already-mutated value in as an input instead",
+        ],
+    )
+
+
+def _mutated_constant_default(name: str, source_name: str) -> Never:
+    unimplemented(
+        gb_type="assume_constant_result default argument mutated in graph",
+        context=f"function {name}, source {source_name}",
+        explanation=f"Default arguments of function {name} marked with "
+        f"torch._dynamo.assume_constant_result were mutated inside the "
+        f"torch.compile region before the call, so its trace-time invocation "
+        f"would use a stale value.",
+        hints=[
+            "Perform the mutation outside the torch.compile region",
+            "Pass the already-mutated value explicitly instead",
+        ],
+    )
+
+
+def _check_no_in_graph_default_mutation(
+    tx: "InstructionTranslatorBase", name: str, fn: FunctionType
+) -> None:
+    side_effects = tx.output.side_effects
+    for value in (fn.__defaults__, fn.__kwdefaults__):
+        if value is not None and value in side_effects:
+            vt = side_effects[value]
+            if vt.mutation_type is not None and side_effects.is_modified(vt):
+                source_name = vt.source.name if vt.source else "<default argument>"
+                _mutated_constant_default(name, source_name)
+
+    for source in tx.output.side_effects.mutated_sources:
+        current = source
+        while isinstance(current, ChainedSource):
+            base = None
+            if isinstance(current, DefaultsSource) or (
+                isinstance(current, AttrSource)
+                and current.member in ("__defaults__", "__kwdefaults__")
+            ):
+                base = current.base
+            if base is not None and tx.output.resolve_source_value(base) is fn:
+                _mutated_constant_default(name, source.name)
+            current = current.base
+
+
+def _self_referential_constant_arg(source: Source, name: str) -> Never:
+    unimplemented(
+        gb_type="assume_constant_result specialize_args self-referential argument",
+        context=f"function {name}, source {source.name}",
+        explanation=f"Argument `{source.name}` of function {name} marked with "
+        f"torch._dynamo.assume_constant_result(specialize_args=True) is part of a "
+        f"reference cycle, so it cannot be walked to derive value guards.",
+        hints=[
+            "Pass a structure without reference cycles",
+            "Use plain torch._dynamo.assume_constant_result (without specialize_args)",
+        ],
+    )
+
+
+def _unguardable_constant_arg_source(source: Source, name: str) -> Never:
+    unimplemented(
+        gb_type="assume_constant_result specialize_args unguardable argument source",
+        context=f"function {name}, source {source.name}",
+        explanation=f"Argument `{source.name}` of function {name} marked with "
+        f"torch._dynamo.assume_constant_result(specialize_args=True) comes from a "
+        f"source whose guards are skipped (e.g. a function's __annotations__ or a "
+        f"stdlib module global), so the baked result could not be invalidated when "
+        f"the argument changes.",
+        hints=[
+            "Pass this value in as a regular argument to the compiled function",
+            "Use plain torch._dynamo.assume_constant_result (without specialize_args)",
+        ],
+    )
+
+
+def _check_no_in_graph_mutation(
+    x: VariableTracker,
+    tx: "InstructionTranslatorBase",
+    name: str,
+    source: Source,
+) -> None:
+    side_effects = tx.output.side_effects
+    mutated = False
+
+    def check(vt: VariableTracker) -> None:
+        nonlocal mutated
+        if vt.mutation_type is not None and side_effects.is_modified(vt):
+            mutated = True
+
+    VariableTracker.visit(check, x, side_effects=side_effects)
+    if mutated:
+        _mutated_constant_arg(name, source.name)
+
+
+def _unguardable_constant_arg(
+    source: Source, value: Any, name: str, reason: str
+) -> Never:
+    unimplemented(
+        gb_type="assume_constant_result specialize_args unguardable argument",
+        context=f"function {name}, source {source.name}, value type {type(value).__name__}: {reason}",
+        explanation=f"Cannot install value guards for argument `{source.name}` of type "
+        f"{type(value).__name__} passed to function {name} marked with "
+        f"torch._dynamo.assume_constant_result(specialize_args=True): {reason}. "
+        f"Supported argument values are constants, enums, registered constant "
+        f"classes (torch.utils._pytree.register_constant or torch._library opaque "
+        f'typ="constant"), tuples/lists of them, dicts with literal keys, and '
+        f"dataclasses whose fields are recursively supported.",
+        hints=[
+            "Restructure this argument to use value-guardable types",
+            "Register the argument's class with torch.utils._pytree.register_constant "
+            "to guard it by equality",
+            "Use plain torch._dynamo.assume_constant_result (without specialize_args) "
+            "to guard this argument by object identity instead",
+        ],
+    )
+
+
+def _is_stateless_namedtuple(value: Any) -> bool:
+    # A namedtuple instance whose state is exactly its items: no instance
+    # __dict__ and no nonempty __slots__ anywhere in the MRO.
+    if not is_namedtuple_cls(type(value)):
+        return False
+    if hasattr(value, "__dict__"):
+        return False
+    return all(not klass.__dict__.get("__slots__", ()) for klass in type(value).__mro__)
+
+
+def _install_constant_arg_guards(
+    source: Source,
+    value: Any,
+    name: str,
+    ancestors: set[int],
+    tx: "InstructionTranslatorBase",
+) -> None:
+    """
+    Install value guards rooted at `source` so the baked constant is invalidated
+    when `value` changes. Only structureless values get a whole-value
+    EQUALS_MATCH: literals (per ConstantVariable.is_base_literal), enums, and
+    constant classes (pytree ``register_constant`` or opaque ``typ="constant"``,
+    which are guarded by their own __eq__). Containers are always walked -
+    tuples/lists guard their type and length, dicts their type and keys,
+    dataclasses their type - because EQUALS_MATCH short-circuits on pointer
+    equality and would not see a mutation reachable through them. Only exact
+    container types (plus torch.Size and stateless namedtuples) qualify:
+    subclasses can carry state beyond their items that the walk cannot see.
+    Anything else, sets included (their elements have no stable source to
+    walk), is a graph break: value-based invalidation is the point of
+    specialize_args, so there is deliberately no identity fallback.
+    """
+    # A nested object mutated in-graph before the call has guards derived from
+    # its traced (post-mutation) state, which cannot match the frame-entry
+    # value; the top-level VariableTracker check in convert cannot see it.
+    side_effects = tx.output.side_effects
+    if value in side_effects:
+        vt = side_effects[value]
+        if vt.mutation_type is not None and side_effects.is_modified(vt):
+            _mutated_constant_arg(name, source.name)
+    if (
+        ConstantVariable.is_base_literal(value)
+        or isinstance(value, enum.Enum)
+        or is_constant_class(type(value))
+        or is_opaque_constant_type(type(value))
+    ):
+        install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
+        return
+    # `ancestors` holds ids only for the objects currently on the recursion
+    # path, so it flags true cycles while an object shared by two paths (a
+    # diamond) is walked once per path, installing guards under each source.
+    if id(value) in ancestors:
+        _unguardable_constant_arg(source, value, name, "self-referential structure")
+    ancestors.add(id(value))
+    if isinstance(value, (tuple, list)):
+        # Exact types only (subclass state is invisible to the item walk);
+        # TYPE_MATCH forces a recompile when a later call switches types.
+        if not (
+            istype(value, (tuple, list, torch.Size))
+            or _is_stateless_namedtuple(value)
+        ):
+            _unguardable_constant_arg(
+                source,
+                value,
+                name,
+                f"sequence subclass {type(value).__name__} can carry state "
+                f"beyond its items",
+            )
+        install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+        install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+        for i, item in enumerate(value):
+            _install_constant_arg_guards(
+                GetItemSource(source, i), item, name, ancestors, tx
+            )
+    elif isinstance(value, dict):
+        if not istype(value, dict):
+            _unguardable_constant_arg(
+                source,
+                value,
+                name,
+                f"dict subclass {type(value).__name__} can carry state "
+                f"beyond its items",
+            )
+        for k in value:
+            if not ConstantVariable.is_literal(k):
+                _unguardable_constant_arg(
+                    source,
+                    value,
+                    name,
+                    f"non-literal dict key of type {type(k).__name__}",
+                )
+        install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+        install_guard(source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+        tx.output.guard_on_key_order.add(source)
+        for k, v in value.items():
+            _install_constant_arg_guards(
+                DictGetItemSource(source, k), v, name, ancestors, tx
+            )
+    elif not isinstance(value, type) and dataclasses.is_dataclass(value):
+        # dataclasses.fields() omits attributes set outside the generated
+        # __init__ (assigned directly or in __post_init__); fn can read those,
+        # so walking fields alone would leave them under TYPE_MATCH only.
+        # Such state can live in __dict__ or, on slotted classes, in __slots__.
+        field_names = {f.name for f in dataclasses.fields(value)}
+        extra = set(getattr(value, "__dict__", ())) - field_names
+        for klass in type(value).__mro__:
+            slots = klass.__dict__.get("__slots__", ())
+            for slot in (slots,) if isinstance(slots, str) else slots:
+                if (
+                    slot not in field_names
+                    and slot not in ("__dict__", "__weakref__")
+                    and hasattr(value, slot)
+                ):
+                    extra.add(slot)
+        if extra:
+            _unguardable_constant_arg(
+                source,
+                value,
+                name,
+                f"dataclass has non-field attributes {sorted(extra)}",
+            )
+        install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+        for field in dataclasses.fields(value):
+            if not hasattr(value, field.name):
+                _unguardable_constant_arg(
+                    source, value, name, f"dataclass field `{field.name}` is unset"
+                )
+            _install_constant_arg_guards(
+                AttrSource(source, field.name),
+                getattr(value, field.name),
+                name,
+                ancestors,
+                tx,
+            )
+    else:
+        _unguardable_constant_arg(source, value, name, "no value-guardable structure")
+    ancestors.discard(id(value))
+
+
 def invoke_and_store_as_constant(
     tx: "InstructionTranslatorBase",
     fn: Callable[..., Any],
     name: str,
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
+    implicit_args: Sequence[VariableTracker] = (),
 ) -> VariableTracker:
-    def convert(x: VariableTracker) -> Any:
-        if x.is_tensor():
-            return cast("TensorVariable", x).get_real_value()
+    """
+    Run `fn` on the converted arguments at compile time and bake the result into
+    the graph as a constant. With `assume_constant_result(specialize_args=True)`
+    (the `_dynamo_specialize_args` marker on `fn`), sourced arguments get
+    value guards derived from their structure (see `_install_constant_arg_guards`)
+    instead of the default identity-only guarding, so a freshly-allocated but
+    equal argument does not recompile and a changed field value does.
+    """
+    specialize_args = getattr(fn, "_dynamo_specialize_args", False)
+
+    def convert_plain(x: VariableTracker) -> Any:
         if isinstance(x, UserDefinedObjectVariable):
             if x.source is not None:
                 install_guard(x.make_guard(GuardBuilder.ID_MATCH))
@@ -1956,6 +2305,141 @@ def invoke_and_store_as_constant(
                     "Ensure all arguments passed to the function can be converted to constants",
                 ],
             )
+
+    def convert_guardless(x: VariableTracker) -> Any:
+        try:
+            return x.as_python_constant()
+        except AsPythonConstantNotImplementedError:
+            unimplemented(
+                gb_type="assume_constant_result specialize_args unguardable-source argument conversion failed",
+                context=f"function {name}, variable type {type(x).__name__}",
+                explanation=f"Cannot convert argument of type {type(x).__name__} to a "
+                f"Python constant for function {name} marked with "
+                f"torch._dynamo.assume_constant_result(specialize_args=True). The "
+                f"argument has no guardable source, so it must already be a constant.",
+                hints=[
+                    "Pass this argument from outside the torch.compile region so it has a source",
+                    "Ensure all arguments can be converted to constants",
+                ],
+            )
+
+    def convert_specialized(
+        x: VariableTracker,
+        source: Source | None = None,
+        ancestors: frozenset[int] = frozenset(),
+    ) -> Any:
+        # `source` is threaded when recursing into a container whose leaves are
+        # not all python constants; at the top level it is the argument's source.
+        top_level = source is None
+        if source is None:
+            source = x.source
+        if x.is_tensor():
+            unimplemented(
+                gb_type="assume_constant_result specialize_args tensor argument",
+                context=f"function {name}, variable type {type(x).__name__}",
+                explanation=f"Function {name} marked with "
+                f"torch._dynamo.assume_constant_result(specialize_args=True) was "
+                f"called with a tensor argument. Tensor data cannot be value-guarded, "
+                f"so the baked constant could silently go stale when the data changes.",
+                hints=[
+                    "Pass the relevant values as non-tensor arguments instead",
+                    "Use plain torch._dynamo.assume_constant_result (without "
+                    "specialize_args), which passes tensors by real value without "
+                    "any guard",
+                ],
+            )
+        if isinstance(x, variables.SymNodeVariable):
+            # A symbolic scalar (e.g. an int made dynamic by automatic dynamic
+            # shapes) has no single Python value to bake; evaluate_expr()
+            # specializes it to the traced value and installs a shape-env
+            # guard, so a different value recompiles and re-invokes fn.
+            return x.evaluate_expr(tx.output)
+        # A sourceless value is built by the traced bytecode itself and a
+        # constant-source one is already baked into the graph: neither can vary
+        # across calls, so no guard is needed (and none can be installed).
+        # Split conditions: pyrefly does not narrow `source` past a compound
+        # `or` whose branch exits via NoReturn inside an except handler.
+        if source is None:
+            return convert_guardless(x)
+        if is_constant_source(source):
+            return convert_guardless(x)
+        # The cycle check lives below the sourceless/constant-source branch so
+        # `source` is narrowed; it cannot fire at top level (ancestors is empty).
+        if id(x) in ancestors:
+            _self_referential_constant_arg(source, name)
+        ancestors = ancestors | {id(x)}
+        if top_level:
+            if is_from_skip_guard_source(source):
+                _unguardable_constant_arg_source(source, name)
+            _check_no_in_graph_mutation(x, tx, name, source)
+        if isinstance(x, UserDefinedObjectVariable):
+            value = x.value
+            _install_constant_arg_guards(source, value, name, set(), tx)
+            return value
+        # Fast path: a fully-constant argument (covers wholly-literal containers,
+        # enums, and constant classes) bakes as one value with whole-value guards.
+        try:
+            value = x.as_python_constant()
+        except AsPythonConstantNotImplementedError:
+            pass
+        else:
+            _install_constant_arg_guards(source, value, name, set(), tx)
+            return value
+        # A container whose structure is guardable but whose leaves are not all
+        # python constants (e.g. a nested int promoted to a dynamic SymInt by
+        # automatic dynamic on recompile): walk the tracker and specialize the
+        # dynamic leaves rather than graph-breaking on as_python_constant.
+        # Subclasses fall through to the graph break below: they can carry
+        # state beyond their items (see _install_constant_arg_guards).
+        if isinstance(
+            x, (variables.ListVariable, variables.TupleVariable)
+        ) and x.python_type() in (tuple, list, torch.Size):
+            install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+            install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            return x.python_type()(
+                convert_specialized(item, GetItemSource(source, i), ancestors)
+                for i, item in enumerate(x.items)
+            )
+        if isinstance(x, variables.ConstDictVariable) and x.python_type() is dict and all(
+            key.vt.is_python_constant()
+            and ConstantVariable.is_literal(key.vt.as_python_constant())
+            for key in x.items
+        ):
+            install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+            install_guard(source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+            tx.output.guard_on_key_order.add(source)
+            result = {}
+            for key, val in x.items.items():
+                py_key = key.vt.as_python_constant()
+                result[py_key] = convert_specialized(
+                    val, DictGetItemSource(source, py_key), ancestors
+                )
+            return result
+        unimplemented(
+            gb_type="assume_constant_result specialize_args argument conversion failed",
+            context=f"function {name}, variable type {type(x).__name__}",
+            explanation=f"Cannot convert argument of type {type(x).__name__} to a Python "
+            f"constant for function {name} marked with "
+            f"torch._dynamo.assume_constant_result(specialize_args=True).",
+            hints=[
+                "Use plain torch._dynamo.assume_constant_result (without specialize_args) instead",
+                "Ensure all arguments can be converted to constants",
+            ],
+        )
+
+    def convert(x: VariableTracker) -> Any:
+        if specialize_args:
+            return convert_specialized(x)
+        if x.is_tensor():
+            return cast("TensorVariable", x).get_real_value()
+        return convert_plain(x)
+
+    for x in implicit_args:
+        if not specialize_args and isinstance(x, variables.NNModuleVariable):
+            if x.source is not None:
+                install_guard(x.source.make_guard(GuardBuilder.ID_MATCH))
+        else:
+            convert(x)
 
     args = [convert(x) for x in args]
     kwargs = {k: convert(v) for k, v in kwargs.items()}
