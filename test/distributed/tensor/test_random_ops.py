@@ -24,10 +24,7 @@ from torch.distributed.tensor._random import (
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
-from torch.testing._internal.common_device_type import (
-    deviceCountAtLeast,
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -36,7 +33,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
-    NUM_DEVICES,
+    skip_if_lt_x_gpu,
     with_comms,
 )
 from torch.utils._typing_utils import not_none
@@ -144,9 +141,9 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertEqual(result_last.placements, (Replicate(),))
 
     @with_comms
-    @deviceCountAtLeast(4)
-    def test_init_with_user_generator(self, devices):
-        device_type = torch.device(devices[0]).type
+    @skip_if_lt_x_gpu(4)
+    def test_init_with_user_generator(self, device):
+        device_type = torch.device(device).type
         device_mesh = init_device_mesh(device_type, (self.world_size,))
         torch.manual_seed(42)
         rng = torch.Generator(device=device_type).manual_seed(42)
@@ -174,9 +171,9 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertEqual(t1.full_tensor(), t2.full_tensor())
 
     @with_comms
-    @deviceCountAtLeast(4)
-    def test_meta_tensor_init(self, devices):
-        device_type = torch.device(devices[0]).type
+    @skip_if_lt_x_gpu(4)
+    def test_meta_tensor_init(self, device):
+        device_type = torch.device(device).type
         # test suite sets each rank's seed to the same value.
         # The DTensor random ops will use the same generator as the default one on the device.
 
@@ -236,9 +233,8 @@ class DistTensorRandomInitTest(DTensorTestBase):
         compute_rankwise_if_local_tensor(local_tensor.wait(), self.rank)
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_tp_model_meta_init(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_tp_model_meta_init(self, device):
+        device_type = torch.device(device).type
         # initialize the 1-d device mesh for TP
         tp_mesh = init_device_mesh(device_type, mesh_shape=(self.world_size,))
 
@@ -292,9 +288,9 @@ class DistTensorRandomInitTest(DTensorTestBase):
         compute_rankwise_if_local_tensor(weight_local, weight_gather.wait(), self.rank)
 
     @with_comms
-    @deviceCountAtLeast(4)
-    def test_fsdp_tp_model_meta_init(self, devices):
-        device_type = torch.device(devices[0]).type
+    @skip_if_lt_x_gpu(4)
+    def test_fsdp_tp_model_meta_init(self, device):
+        device_type = torch.device(device).type
         # initialize the 2-d device mesh
         global_mesh = init_device_mesh(
             device_type,
@@ -354,12 +350,12 @@ class DistTensorRandomInitTest(DTensorTestBase):
         compute_rankwise_if_local_tensor(weight_local, weight_gather.wait(), self.rank)
 
     @with_comms
-    @deviceCountAtLeast(2)
-    def test_dtensor_init_helper_tensor_meta_strides(self, devices):
+    @skip_if_lt_x_gpu(2)
+    def test_dtensor_init_helper_tensor_meta_strides(self, device):
         """Test that DTensorSpec.tensor_meta has correct strides in _distribute_region."""
         import torch.distributed.tensor._random as random_module
 
-        device_type = torch.device(devices[0]).type
+        device_type = torch.device(device).type
         device_mesh = DeviceMesh(device_type, torch.arange(self.world_size))
         captured_specs = []
 
@@ -395,9 +391,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_rng_tracker_init(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_rng_tracker_init(self, device):
+        device_type = torch.device(device).type
         torch.manual_seed(self.rank)
         seed_local = (
             torch.zeros_like(torch.empty(1), device=device_type) + torch.initial_seed()
@@ -427,9 +422,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
         )
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_manual_seed(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_manual_seed(self, device):
+        device_type = torch.device(device).type
         device_mesh = DeviceMesh(device_type, torch.arange(self.world_size))
 
         # in the case of calling ``torch.distributed.tensor._random.manual_seed``,
@@ -453,9 +447,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_manual_seed_submesh(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_manual_seed_submesh(self, device):
+        device_type = torch.device(device).type
 
         @maybe_run_for_local_tensor
         def compute_rankwise_if_local_tensor(rank):
@@ -472,9 +465,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
         compute_rankwise_if_local_tensor(self.rank)
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_pipeline_parallel_manual_seed(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_pipeline_parallel_manual_seed(self, device):
+        device_type = torch.device(device).type
         # This test is to verify the `manual_seed` API works as expected in the
         # pipeline parallel setting.
         world_mesh = init_device_mesh(
@@ -514,9 +506,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
                 )
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_deterministic_dropout_1d(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_deterministic_dropout_1d(self, device):
+        device_type = torch.device(device).type
         # test suite sets each rank's seed to the same value but in actual
         # execution the default random seed will be different (a random value).
         # The DTensor random ops will use the same random seed even though the
@@ -560,9 +551,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
         compute_rankwise_if_local_tensor(local_tensor, self.rank)
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_deterministic_rand_1d(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_deterministic_rand_1d(self, device):
+        device_type = torch.device(device).type
         device_mesh = DeviceMesh(device_type, torch.arange(self.world_size))
         size = [4, 4 * self.world_size]
 
@@ -613,9 +603,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
             compute_rankwise_if_local_tensor(local_tensor, self.rank)
 
     @with_comms
-    @deviceCountAtLeast(4)
-    def test_deterministic_uniform_2d(self, devices):
-        device_type = torch.device(devices[0]).type
+    @skip_if_lt_x_gpu(4)
+    def test_deterministic_uniform_2d(self, device):
+        device_type = torch.device(device).type
         mesh = torch.arange(self.world_size).reshape(2, 2)
         device_mesh = DeviceMesh(device_type, mesh)
         dtensor = distribute_tensor(
@@ -911,9 +901,8 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         )
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_compile_native_dropout(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_compile_native_dropout(self, device):
+        device_type = torch.device(device).type
         device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         def fn(x):
@@ -925,9 +914,8 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
             )
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_compile_normal_(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_compile_normal_(self, device):
+        device_type = torch.device(device).type
         device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         def fn(x):
@@ -939,9 +927,8 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
             )
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_compile_rand_like(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_compile_rand_like(self, device):
+        device_type = torch.device(device).type
         device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         def fn(x):
@@ -953,9 +940,8 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
             )
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_compile_randn_like(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_compile_randn_like(self, device):
+        device_type = torch.device(device).type
         device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         def fn(x):
@@ -967,9 +953,8 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
             )
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_compile_randint_like(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_compile_randint_like(self, device):
+        device_type = torch.device(device).type
         device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         def fn(x):
@@ -981,9 +966,8 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
             )
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_compile_uniform_(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_compile_uniform_(self, device):
+        device_type = torch.device(device).type
         device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         def fn(x):
@@ -995,9 +979,8 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
             )
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_compile_bernoulli(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_compile_bernoulli(self, device):
+        device_type = torch.device(device).type
         device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         def fn(x):
@@ -1021,9 +1004,8 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
             )
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_compile_bernoulli_float(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_compile_bernoulli_float(self, device):
+        device_type = torch.device(device).type
         device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         def fn(x):
@@ -1035,9 +1017,8 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
             )
 
     @with_comms
-    @deviceCountAtLeast(NUM_DEVICES)
-    def test_compile_multiple_random_ops(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_compile_multiple_random_ops(self, device):
+        device_type = torch.device(device).type
         device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         def fn(x):
@@ -1058,10 +1039,10 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
     def world_size(self):
         return 8
 
-    @deviceCountAtLeast(8)
+    @skip_if_lt_x_gpu(8)
     @with_comms
-    def test_hsdp_tp_model_meta_init(self, devices):
-        device_type = torch.device(devices[0]).type
+    def test_hsdp_tp_model_meta_init(self, device):
+        device_type = torch.device(device).type
         # initialize the 3-d device mesh
         global_mesh = init_device_mesh(
             device_type,
