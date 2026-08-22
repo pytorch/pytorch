@@ -8,6 +8,8 @@
 #include <c10/core/Storage.h>
 #include <c10/util/Exception.h>
 
+#include <string>
+
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
 namespace at {
@@ -20,6 +22,11 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
       "by `RegisterPrivateUse1HooksInterface` and implement `", \
       func,                                                     \
       "` at the same time for PrivateUse1.");
+
+  struct IpcMemHandle {
+    ptrdiff_t offset = 0;
+    std::string handle;
+  };
 
   ~PrivateUse1HooksInterface() override = default;
 
@@ -65,6 +72,50 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
   virtual void resizePrivateUse1Bytes(
       const c10::Storage& storage,
       size_t newsize) const {
+    FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
+  }
+
+  // Returns true if this device supports IPC memory sharing.
+  // This function should NEVER throw.
+  // If this returns true, the device must implement requiresEventSync,
+  // getIpcMemHandle, getIpcEventHandle, openIpcMemHandle, and waitIpcEvent.
+  virtual bool supportsIpc() const {
+    return false;
+  }
+
+  // Returns true if the consumer must wait on an event before reading
+  // shared memory. Only meaningful when supportsIpc() returns true.
+  virtual bool requiresEventSync() const {
+    FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
+  }
+
+  // Returns a serialized handle and byte offset for the allocation at ptr.
+  // The caller applies offset as a byte offset after opening the handle.
+  // Only called when supportsIpc() returns true.
+  virtual IpcMemHandle getIpcMemHandle(
+      [[maybe_unused]] void* ptr) const {
+    FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
+  }
+
+  // Returns serialized event handle bytes for the current stream's event.
+  // Only called when supportsIpc() and requiresEventSync() return true.
+  virtual std::string getIpcEventHandle() const {
+    FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
+  }
+
+  // Opens a shared IPC handle and returns a DataPtr whose deleter
+  // must unmap the IPC memory when the storage is freed.
+  // Only called when supportsIpc() returns true.
+  virtual c10::DataPtr openIpcMemHandle(
+      [[maybe_unused]] const std::string& handle) const {
+    FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
+  }
+
+  // Waits on the given IPC event on stream before reading shared memory.
+  // Only called when supportsIpc() and requiresEventSync() return true.
+  virtual void waitIpcEvent(
+      [[maybe_unused]] const std::string& event_bytes,
+      [[maybe_unused]] const c10::Stream& stream) const {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
 
