@@ -3001,9 +3001,10 @@ The parameter :attr:`mode` chooses between the full and reduced QR decomposition
 If :attr:`A` has shape `(*, m, n)`, denoting `k = min(m, n)`
 
 - :attr:`mode`\ `= 'reduced'` (default): Returns `(Q, R, P)` of shapes `(*, m, k)`, `(*, k, n)` and `(*, n)`.
-  It is always differentiable.
+  It is differentiable when :attr:`A`\ `[:, P]` has full rank `k`, assuming the pivot pattern `P` is locally constant.
 - :attr:`mode`\ `= 'complete'`: Returns `(Q, R, P)` of shapes `(*, m, m)`, `(*, m, n)` and `(*, n)`.
-  It is differentiable for `m <= n`.
+  It is differentiable for `m <= n` when :attr:`A`\ `[:, P]` has full rank `k`, assuming the pivot pattern `P`
+  is locally constant.
 - :attr:`mode`\ `= 'r'`: Computes only the reduced `R`. Returns `(Q, R, P)` with `Q` empty, `R` of shape `(*, k, n)`
   and `P` of shape `(*, n)`. It is never differentiable.
 
@@ -3018,10 +3019,15 @@ Differences with `scipy.linalg.qr` with argument pivoting=True:
              Therefore, different platforms, like SciPy, or inputs on different devices,
              may produce different valid decompositions.
 
-.. warning:: The QR decomposition is only well-defined if the first `k = min(m, n)` columns
-             of every matrix in :attr:`A` are linearly independent.
+.. warning:: The pivoted QR decomposition is only well-defined if the pivoted matrix
+             :attr:`A`\ `[:, P]` has full rank `k = min(m, n)`, i.e. if :attr:`A` has full rank `k`.
              If this condition is not met, no error will be thrown, but the QR produced
              may be incorrect and its autodiff may fail or produce incorrect results.
+
+.. warning:: The derivatives of this function assume that the pivot pattern `P` is locally
+             constant, i.e. that `P` does not change under small perturbations of :attr:`A`.
+             If :attr:`A` has repeated or nearly-equal column norms, this assumption may not
+             hold, and the gradients computed may be incorrect.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
@@ -3065,7 +3071,7 @@ Examples::
     tensor([[1., 0., 0.],
             [0., 1., 0.],
             [0., 0., 1.]])
-    >>> Q2, R2, P2 = torch.linalg.qr(A, mode='r')
+    >>> Q2, R2, P2 = torch.linalg.qr_piv(A, mode='r')
     >>> Q2
     tensor([])
     >>> torch.equal(R, R2)
