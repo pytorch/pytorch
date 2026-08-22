@@ -559,21 +559,25 @@ int32_t potential_register_count(int32_t dim_size, int32_t thread_count){
   return reg_cnt;
 }
 
+C10_DEVICE bool inline is_32bit_representable(const int64_t value) {
+  return value < static_cast<int64_t>(std::numeric_limits<int32_t>::max());
+}
+
 /**
  * This will apply the Epilogue with vectorized reads & writes when input & output have the same shift
  */
-template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
+template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue, typename index_t = int32_t>
 __device__ __forceinline__ void
 WriteFpropResultsVectorized(
-             int size,
-             const int shift,
+             index_t size,
+             const index_t shift,
              const scalar_t *input,
              outscalar_t *output,
              Epilogue<scalar_t, accum_t, outscalar_t> epilogue) {
   using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;
   using StoreT = at::native::memory::aligned_vector<outscalar_t, ILP>;
 
-  int offset = threadIdx.x;
+  index_t offset = threadIdx.x;
 
   // if unaligned, do one value / thread and move on, guaranteeing aligned reads/writes later
   if (shift > 0) {
@@ -589,7 +593,7 @@ WriteFpropResultsVectorized(
     output += blockDim.x;
   }
 
-  const int last = size % (ILP * blockDim.x);
+  const index_t last = size % (ILP * blockDim.x);
 
   scalar_t in_v[ILP];
   LoadT* in_value = reinterpret_cast<LoadT*>(&in_v);
@@ -677,14 +681,14 @@ WriteBpropResultsVectorized(
 /**
  * This will apply the Epilogue with non-vectorized reads & writes for the general case
  */
-template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
+template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue, typename index_t = int32_t>
 __device__ __forceinline__ void
 WriteFpropResults(
-             int classes,
+             index_t classes,
              const scalar_t *input,
              outscalar_t *output,
              Epilogue<scalar_t, accum_t, outscalar_t> epilogue) {
-  for (int offset = threadIdx.x; offset < classes; offset += blockDim.x) {
+  for (index_t offset = threadIdx.x; offset < classes; offset += blockDim.x) {
     output[offset] = epilogue(input[offset]);
   }
 }
@@ -758,7 +762,7 @@ cunn_SoftMaxForwardFast(outscalar_t *output, const scalar_t *input, int classes)
 
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue>
 __global__ void
-cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
+cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int64_t classes)
 {
   extern __shared__ unsigned char smem[];
   auto sdata = reinterpret_cast<accscalar_t*>(smem);
@@ -768,27 +772,61 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   input += static_cast<int64_t>(blockIdx.x) * classes;
   output += static_cast<int64_t>(blockIdx.x) * classes;
 
-  const int shift = ((uint64_t)input) % ALIGN_BYTES / sizeof(scalar_t);
-  const int output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
+  const int64_t shift = ((uint64_t)input) % ALIGN_BYTES / sizeof(scalar_t);
+  const int64_t output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
+
+  // Row length can reach INT32_MAX (gh-191565); 32-bit index math would then
+  // wrap negative and read out of bounds. Mirror cunn_SoftMaxBackward: keep the
+  // cheaper 32-bit path and widen only when the sizes demand it.
+  const bool can_use_32bit_indexing = is_32bit_representable(shift) &&
+      is_32bit_representable(output_shift) && is_32bit_representable(classes);
 
   // find the max
-  accscalar_t threadMax = ilpReduce<MaxFloat, ILP, scalar_t, accscalar_t>(
-    shift, input, classes, MaxFloat<scalar_t, accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
+  accscalar_t threadMax;
+  if (can_use_32bit_indexing) {
+    threadMax = ilpReduce<MaxFloat, ILP, scalar_t, accscalar_t, int32_t>(
+      static_cast<int32_t>(shift), input, static_cast<int32_t>(classes),
+      MaxFloat<scalar_t, accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
+  } else {
+    threadMax = ilpReduce<MaxFloat, ILP, scalar_t, accscalar_t, int64_t>(
+      shift, input, classes,
+      MaxFloat<scalar_t, accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
+  }
   accscalar_t max_k = blockReduceWarp<Max, accscalar_t>(sdata, threadMax,
     Max<accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
 
   // reduce all values
-  accscalar_t threadExp = ilpReduce<SumExpFloat, ILP, scalar_t, accscalar_t>(
-    shift, input, classes, SumExpFloat<scalar_t, accscalar_t>(max_k), static_cast<accscalar_t>(0));
+  accscalar_t threadExp;
+  if (can_use_32bit_indexing) {
+    threadExp = ilpReduce<SumExpFloat, ILP, scalar_t, accscalar_t, int32_t>(
+      static_cast<int32_t>(shift), input, static_cast<int32_t>(classes),
+      SumExpFloat<scalar_t, accscalar_t>(max_k), static_cast<accscalar_t>(0));
+  } else {
+    threadExp = ilpReduce<SumExpFloat, ILP, scalar_t, accscalar_t, int64_t>(
+      shift, input, classes,
+      SumExpFloat<scalar_t, accscalar_t>(max_k), static_cast<accscalar_t>(0));
+  }
   accscalar_t sumAll = blockReduceWarp<Add, accscalar_t>(sdata, threadExp,
     Add<accscalar_t>(), static_cast<accscalar_t>(0));
 
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
 
   if (shift == output_shift) {
-    WriteFpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, shift, input, output, epilogue);
+    if (can_use_32bit_indexing) {
+      WriteFpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue, int32_t>(
+          static_cast<int32_t>(classes), static_cast<int32_t>(shift), input, output, epilogue);
+    } else {
+      WriteFpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue, int64_t>(
+          classes, shift, input, output, epilogue);
+    }
   } else {
-    WriteFpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, input, output, epilogue);
+    if (can_use_32bit_indexing) {
+      WriteFpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue, int32_t>(
+          static_cast<int32_t>(classes), input, output, epilogue);
+    } else {
+      WriteFpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue, int64_t>(
+          classes, input, output, epilogue);
+    }
   }
 }
 
@@ -981,9 +1019,6 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, index_t clas
   }
 }
 
-C10_DEVICE bool inline is_32bit_representable(const int64_t value) {
-  return value < static_cast<int64_t>(std::numeric_limits<int32_t>::max());
-}
 
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
 __global__ void

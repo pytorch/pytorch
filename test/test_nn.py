@@ -13502,6 +13502,21 @@ if __name__ == '__main__':
         rtol, atol = torch.testing._comparison.get_tolerances(torch.float16, rtol=None, atol=None)
         self.assertEqual(nll, torch.ones_like(nll) * torch.log(torch.tensor(vocab_size)), rtol=rtol, atol=atol)
 
+    # reference issue: https://github.com/pytorch/pytorch/issues/191565
+    @onlyCUDA
+    @largeTensorTest("14GB", "cuda")
+    def test_softmax_forward_64bit_indexing_large_dim(self, device):
+        # The existing 64-bit indexing coverage uses many short rows, which only
+        # exercises the int64 batch offset. A single row whose length reaches
+        # INT32_MAX overflows the index math inside cunn_SoftMaxForward instead.
+        numel = 2**31 - 1
+        x = torch.ones(1, dtype=torch.float16, device=device).expand(numel)
+        out = F.log_softmax(x, dim=-1, dtype=torch.float32)
+        # every input is equal, so softmax is uniform and log_softmax is -log(numel)
+        expected = -math.log(numel)
+        self.assertEqual(out[0].item(), expected, atol=1e-3, rtol=0)
+        self.assertEqual(out[-1].item(), expected, atol=1e-3, rtol=0)
+
     @onlyCUDA
     @largeTensorTest("20GB", "cuda")
     def test_softmax_backward_64bit_indexing(self, device):
