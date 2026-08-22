@@ -6,6 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import errno
 import os
 import tempfile
 from base64 import b64encode
@@ -260,6 +261,30 @@ class CreateBackendTest(TestCase):
                     ValueError, r"^The read timeout must be a positive integer.$"
                 ):
                     create_backend(self._params)
+
+    def test_create_backend_closes_the_descriptor_returned_by_tempfile(self) -> None:
+        # ``FileStore`` opens the path on its own, so the descriptor handed back
+        # by ``mkstemp()`` has to be closed or it is leaked for the lifetime of
+        # the process.
+        fd, path = tempfile.mkstemp()
+
+        self._params_filestore.endpoint = ""
+
+        try:
+            with mock.patch("tempfile.mkstemp", return_value=(fd, path)):
+                create_backend(self._params_filestore)
+
+            with self.assertRaises(OSError) as ctx:
+                os.fstat(fd)
+
+            self.assertEqual(ctx.exception.errno, errno.EBADF)
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            if os.path.exists(path):
+                os.remove(path)
 
     @mock.patch("tempfile.mkstemp")
     def test_create_backend_raises_error_if_tempfile_creation_fails(
