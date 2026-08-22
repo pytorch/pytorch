@@ -8114,6 +8114,24 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(output, input_cpu[src_offset:].to(dst_dtype))
         self.assertTrue(torch.equal(input_mps.cpu(), input_cpu))
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/194344
+    @parametrize("src_dtype,dst_dtype", [
+        (torch.half, torch.float),
+        (torch.bfloat16, torch.float),
+        (torch.float, torch.half),
+        (torch.short, torch.int),
+    ])
+    @parametrize("src_offset", [1, 2, 64, 256, 4096, 65536])
+    def test_cast_mps_to_cpu_source_offset(self, src_dtype, dst_dtype, src_offset):
+        input_cpu = torch.randn(1 << 20).to(src_dtype)
+        input_mps = input_cpu.to("mps")
+        expected = input_cpu[src_offset:src_offset + 64].to(dst_dtype)
+
+        fused = input_mps[src_offset:src_offset + 64].to("cpu", dst_dtype)
+
+        self.assertEqual(fused, expected)
+        self.assertTrue(torch.equal(input_mps.cpu(), input_cpu))
+
     def test_cast_mps_to_cpu_preserves_transposed_layout(self):
         input_cpu = torch.arange(12, dtype=torch.float).reshape(3, 4).t()
         input_mps = input_cpu.to("mps")
