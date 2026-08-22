@@ -32,6 +32,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbacked_skip
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
+    HardwareClassification,
     np,
     run_tests,
     SEED,
@@ -405,9 +406,7 @@ skip_bw = [
 
 
 OP_DB_WORLD_SIZE = 4
-# DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() >= OP_DB_WORLD_SIZE else "cpu"
 # TODO: debug cuda illegal memory access issue and re-enable cuda tests
-DEVICE_TYPE = "cpu"
 
 
 class TestDTensorOps(TestCase):
@@ -423,6 +422,7 @@ class TestDTensorOps(TestCase):
 
     def iter_valid_samples(
         self,
+        device,
         op,
         dtype,
         requires_grad=False,
@@ -440,7 +440,7 @@ class TestDTensorOps(TestCase):
             needs_deepcopy: If True, yields deepcopied args/kwargs and skips
                             samples that can't be deepcopied
         """
-        samples = op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=requires_grad)
+        samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
@@ -458,12 +458,19 @@ class TestDTensorOps(TestCase):
             yield args, kwargs
 
     def run_opinfo_test(
-        self, dtype, op, requires_grad=True, sample_filter=None, sample_lock=None
+        self,
+        device,
+        dtype,
+        op,
+        requires_grad=True,
+        sample_filter=None,
+        sample_lock=None,
     ):
-        self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
+        self.mesh = init_device_mesh(torch.device(device).type, (self.world_size,))
 
         def valid_samples():
             return self.iter_valid_samples(
+                device,
                 op,
                 dtype,
                 requires_grad=requires_grad,
@@ -618,27 +625,28 @@ class TestDTensorOps(TestCase):
                 else:
                     print(f"xfail('{opinfo.name}'),")
 
-    def run_one_hot(self):
+    def run_one_hot(self, device):
         ops = [op for op in op_db if op.name == "nn.functional.one_hot"]
         if len(ops) != 1:
             raise AssertionError(f"Expected 1 op, got {len(ops)}")
         op = ops[0]
         # num_classes = -1 appears to have a bug with dtensor.max().item()
         self.run_opinfo_test(
+            device,
             torch.int64,
             op,
             requires_grad=False,
             sample_filter=lambda args, kwargs: kwargs.get("num_classes") != -1,
         )
 
-    def run_mean(self):
-        self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
+    def run_mean(self, device):
+        self.mesh = init_device_mesh(torch.device(device).type, (self.world_size,))
 
         shape = [2 * self.world_size + 1, 2 * self.world_size]
         tensor = (
             torch.arange(shape[0] * shape[1], dtype=torch.float32)
             .reshape(shape)
-            .to(DEVICE_TYPE)
+            .to(device)
         )
 
         for is_evenly_shardable in [True, False]:
@@ -661,16 +669,18 @@ class TestDTensorOps(TestCase):
             else:
                 self.assertTrue("S(0)->R" in debug_mode.debug_string())
 
-    def test_embedding_error_msg(self):
+    def _test_embedding_error_msg(self, device):
         self.mesh_2d = init_device_mesh(
-            DEVICE_TYPE, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+            torch.device(device).type,
+            (2, self.world_size // 2),
+            mesh_dim_names=("dp", "tp"),
         )
         self.mesh_1d = self.mesh_2d["tp"]
 
-        weight_global = torch.randn(2048, 256, device=DEVICE_TYPE)
+        weight_global = torch.randn(2048, 256, device=device)
         weight_dtensor = distribute_tensor(weight_global, self.mesh_1d, [Shard(0)])
 
-        input_global = torch.randint(0, 2048, (16, 2048), device=DEVICE_TYPE)
+        input_global = torch.randint(0, 2048, (16, 2048), device=device)
         input_dtensor = distribute_tensor(
             input_global, self.mesh_2d, [Shard(0), Replicate()]
         )
@@ -685,6 +695,8 @@ class TestDTensorOps(TestCase):
 
 
 class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
+    hw_classification = HardwareClassification.CPU
+
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestMultiThreadedDTensorOps")
     _op_db_sample_lock = threading.Lock()
 
@@ -693,17 +705,24 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
     @skipOps(
         dtensor_fails | dtensor_multi_threaded_fails | dtensor_fails_no_strategy,
     )
-    def test_dtensor_op_db(self, dtype, op):
-        self.run_opinfo_test(dtype, op, sample_lock=self.__class__._op_db_sample_lock)
+    def test_dtensor_op_db(self, device, dtype, op):
+        self.run_opinfo_test(
+            device, dtype, op, sample_lock=self.__class__._op_db_sample_lock
+        )
 
-    def test_mean(self):
-        self.run_mean()
+    def test_mean(self, device):
+        self.run_mean(device)
 
-    def test_one_hot(self):
-        self.run_one_hot()
+    def test_one_hot(self, device):
+        self.run_one_hot(device)
+
+    def test_embedding_error_msg(self, device):
+        self._test_embedding_error_msg(device)
 
 
 class TestLocalDTensorOps(TestDTensorOps):
+    hw_classification = HardwareClassification.CPU
+
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestLocalDTensorOps")
 
     def setUp(self) -> None:
@@ -728,19 +747,24 @@ class TestLocalDTensorOps(TestDTensorOps):
     @skipOps(
         dtensor_fails | dtensor_fails_no_strategy,
     )
-    def test_dtensor_op_db(self, dtype, op):
-        self.run_opinfo_test(dtype, op)
+    def test_dtensor_op_db(self, device, dtype, op):
+        self.run_opinfo_test(device, dtype, op)
 
-    def test_mean(self):
+    def test_mean(self, device):
         with LocalTensorMode(frozenset(range(self.world_size))):
-            self.run_mean()
+            self.run_mean(device)
 
-    def test_one_hot(self):
-        self.run_one_hot()
+    def test_one_hot(self, device):
+        self.run_one_hot(device)
 
-    def run_opinfo_test(self, dtype, op, requires_grad=True, sample_filter=None):
+    def test_embedding_error_msg(self, device):
+        self._test_embedding_error_msg(device)
+
+    def run_opinfo_test(
+        self, device, dtype, op, requires_grad=True, sample_filter=None
+    ):
         with LocalTensorMode(frozenset(range(self.world_size))):
-            super().run_opinfo_test(dtype, op, requires_grad, sample_filter)
+            super().run_opinfo_test(device, dtype, op, requires_grad, sample_filter)
 
     def assertEqualOnRank(self, x, y, msg=None, *, rank=0):
         self.assertEqual(x, y, msg)
@@ -873,6 +897,8 @@ class TestUnbackedDTensorOps(TestDTensorOps):
     and the op compiled with fullgraph=True to catch DDEs during tracing.
     """
 
+    hw_classification = HardwareClassification.CPU
+
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestUnbackedDTensorOps")
 
     def setUp(self) -> None:
@@ -974,17 +1000,23 @@ class TestUnbackedDTensorOps(TestDTensorOps):
         | dtensor_fails_no_strategy
         | ops_unbacked_skip,
     )
-    def test_unbacked_dtensor_op_db(self, dtype, op):
+    def test_unbacked_dtensor_op_db(self, device, dtype, op):
         # Filter to samples with valid unbacked dimensions
         self.run_opinfo_test(
+            device,
             dtype,
             op,
             requires_grad=False,
             sample_filter=self._sample_has_valid_unbacked_dims,
         )
 
+    def test_embedding_error_msg(self, device):
+        self._test_embedding_error_msg(device)
+
 
 class TestSingleDimStrategies(DTensorOpTestBase):
+    hw_classification = HardwareClassification.CPU
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1016,13 +1048,13 @@ class TestSingleDimStrategies(DTensorOpTestBase):
             skip("uniform"),
         },
     )
-    def test_single_dim_strategy(self, dtype, op):
+    def test_single_dim_strategy(self, device, dtype, op):
         torch.manual_seed(42)
-        mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
+        mesh = init_device_mesh(torch.device(device).type, (self.world_size,))
         sharding_prop = DTensor._op_dispatcher.sharding_propagator
 
         try:
-            samples = list(op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=False))
+            samples = list(op.sample_inputs(device, dtype, requires_grad=False))
         except Exception:
             self.skipTest(f"Failed to get sample inputs for {op.name}")
         if not samples:
@@ -1127,6 +1159,8 @@ class TestCompiledDTensorOps(TestDTensorOps):
     Uses fake PG for speed - focuses on compilation, not output correctness.
     """
 
+    hw_classification = HardwareClassification.CPU
+
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestCompiledDTensorOps")
 
     def setUp(self) -> None:
@@ -1203,28 +1237,23 @@ class TestCompiledDTensorOps(TestDTensorOps):
         )
         - dtensor_numeric_only_fails,
     )
-    def test_compiled_dtensor_op_db(self, dtype, op):
-        self.run_opinfo_test(dtype, op, requires_grad=False)
+    def test_compiled_dtensor_op_db(self, device, dtype, op):
+        self.run_opinfo_test(device, dtype, op, requires_grad=False)
+
+    def test_embedding_error_msg(self, device):
+        self._test_embedding_error_msg(device)
 
 
-# only instantiate tests for DEVICE_TYPE alone (i.e. either CPU or GPU)
-instantiate_device_type_tests(
-    TestMultiThreadedDTensorOps, globals(), only_for=(DEVICE_TYPE,)
-)
+# Only instantiate the CPU tests while CUDA OpInfo coverage is disabled above.
+instantiate_device_type_tests(TestMultiThreadedDTensorOps, globals(), only_for=("cpu",))
 
-instantiate_device_type_tests(TestLocalDTensorOps, globals(), only_for=(DEVICE_TYPE,))
+instantiate_device_type_tests(TestLocalDTensorOps, globals(), only_for=("cpu",))
 
-instantiate_device_type_tests(
-    TestUnbackedDTensorOps, globals(), only_for=(DEVICE_TYPE,)
-)
+instantiate_device_type_tests(TestUnbackedDTensorOps, globals(), only_for=("cpu",))
 
-instantiate_device_type_tests(
-    TestSingleDimStrategies, globals(), only_for=(DEVICE_TYPE,)
-)
+instantiate_device_type_tests(TestSingleDimStrategies, globals(), only_for=("cpu",))
 
-instantiate_device_type_tests(
-    TestCompiledDTensorOps, globals(), only_for=(DEVICE_TYPE,)
-)
+instantiate_device_type_tests(TestCompiledDTensorOps, globals(), only_for=("cpu",))
 
 if __name__ == "__main__":
     run_tests()

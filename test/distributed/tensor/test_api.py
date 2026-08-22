@@ -6,6 +6,7 @@ import tempfile
 import torch
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_module,
@@ -16,7 +17,8 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -44,6 +46,8 @@ c10d_ops = torch.ops.c10d
 
 
 class DTensorAPITest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         # hard code world size to 4 as we need to test
@@ -51,10 +55,11 @@ class DTensorAPITest(DTensorTestBase):
         return 4
 
     @with_comms
-    def test_distribute_tensor_rank(self):
+    def test_distribute_tensor_rank(self, device):
+        device_type = torch.device(device).type
         comm_mode = CommDebugMode()
 
-        device_mesh = self.build_device_mesh()
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
         shard_spec = [Shard(0)]
 
         for requires_grad in [True, False]:
@@ -120,9 +125,10 @@ class DTensorAPITest(DTensorTestBase):
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
-    def test_distribute_tensor_errors(self):
+    def test_distribute_tensor_errors(self, device):
+        device_type = torch.device(device).type
         device_mesh = DeviceMesh(
-            self.device_type, torch.arange(self.world_size).reshape(2, 2)
+            device_type, torch.arange(self.world_size).reshape(2, 2)
         )
         tensor_shape = [3 * self.world_size, 3 * self.world_size]
         tensor_to_distribute = torch.randn(*tensor_shape)
@@ -145,7 +151,7 @@ class DTensorAPITest(DTensorTestBase):
         dtensor = distribute_tensor(tensor_to_distribute, device_mesh, spec)
 
         with self.assertRaisesRegex(ValueError, "to a different device mesh"):
-            new_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+            new_mesh = DeviceMesh(device_type, torch.arange(self.world_size))
             distribute_tensor(dtensor, new_mesh, [Shard(0)])
 
         with self.assertRaisesRegex(ValueError, "to a different placements"):
@@ -153,8 +159,9 @@ class DTensorAPITest(DTensorTestBase):
             distribute_tensor(dtensor, device_mesh, new_spec)
 
     @with_comms
-    def test_distribute_tensor_uneven_sharding(self):
-        device_mesh = self.build_device_mesh()
+    def test_distribute_tensor_uneven_sharding(self, device):
+        device_type = torch.device(device).type
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
         input_sizes_and_shard_dims = [
             ((self.world_size * 3 + 1, 3, 3), 0),
             ((self.world_size * 3 + 2, 3, 3), 0),
@@ -180,10 +187,11 @@ class DTensorAPITest(DTensorTestBase):
             )
 
     @with_comms
-    def test_distribute_module(self):
-        device_mesh = self.build_device_mesh()
+    def test_distribute_module(self, device):
+        device_type = torch.device(device).type
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
         # fully shard all linear modules on dim 0
-        module_to_shard = MyModel(5 * self.world_size, 20, device=self.device_type)
+        module_to_shard = MyModel(5 * self.world_size, 20, device=device_type)
         shard_spec = [Shard(0)]
 
         def shard_fn(name, module, device_mesh):
@@ -201,7 +209,7 @@ class DTensorAPITest(DTensorTestBase):
 
         replica_spec = [Replicate()]
         # fully replicate all modules without passing in partition_fn
-        module_to_replicate = MyModel(5, 20, device=self.device_type)
+        module_to_replicate = MyModel(5, 20, device=device_type)
         replica_module = distribute_module(module_to_replicate, device_mesh)
         for param in replica_module.parameters():
             self.assertIsInstance(param, DTensor)
@@ -216,7 +224,7 @@ class DTensorAPITest(DTensorTestBase):
                     )
                     module.register_parameter(name, dist_param)
 
-        module_to_replicate = MyModel(5, 20, device=self.device_type)
+        module_to_replicate = MyModel(5, 20, device=device_type)
         replica_module = distribute_module(
             module_to_replicate, device_mesh, replicate_fn
         )
@@ -233,7 +241,7 @@ class DTensorAPITest(DTensorTestBase):
                     )
                     module.register_parameter(name, dist_param)
 
-        module_to_distribute = MyModel(5 * self.world_size, 20, device=self.device_type)
+        module_to_distribute = MyModel(5 * self.world_size, 20, device=device_type)
         dist_module = distribute_module(module_to_distribute, device_mesh, shard_fn)
         for name, param in dist_module.named_parameters():
             self.assertIsInstance(param, DTensor)
@@ -243,11 +251,12 @@ class DTensorAPITest(DTensorTestBase):
                 self.assertEqual(param.placements, replica_spec)
 
     @with_comms
-    def test_distribute_module_input_fn_output_fn(self):
-        device_mesh = self.build_device_mesh()
+    def test_distribute_module_input_fn_output_fn(self, device):
+        device_type = torch.device(device).type
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         # fully replicate all linear modules
-        module_to_replicate = MyModel(20, 1, device=self.device_type)
+        module_to_replicate = MyModel(20, 1, device=device_type)
 
         # mark input sharding on dim 0
         def input_fn(mod, inputs, device_mesh):
@@ -265,13 +274,13 @@ class DTensorAPITest(DTensorTestBase):
             output_fn=output_fn,
         )
 
-        input_tensor = torch.randn(5, 20, device=self.device_type)
+        input_tensor = torch.randn(5, 20, device=device_type)
         local_out = replica_module(input_tensor)
         self.assertIsInstance(local_out, torch.Tensor)
         self.assertNotIsInstance(local_out, DTensor)
 
         # full replicate (even on inputs)
-        model = MyModel(10, 10, device=self.device_type)
+        model = MyModel(10, 10, device=device_type)
 
         def replicate_input_fn(mod, inputs, device_mesh):
             return DTensor.from_local(inputs[0], device_mesh, [Replicate()])
@@ -289,8 +298,9 @@ class DTensorAPITest(DTensorTestBase):
         self.assertTrue(isinstance(param_grad.placements[0], Replicate))
 
     @with_comms
-    def test_distribute_module_preserves_requires_grad(self):
-        device_mesh = self.build_device_mesh()
+    def test_distribute_module_preserves_requires_grad(self, device):
+        device_type = torch.device(device).type
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         class ModelWithFrozenParam(nn.Module):
             def __init__(self):
@@ -301,7 +311,7 @@ class DTensorAPITest(DTensorTestBase):
             def forward(self, x):
                 return x + self.frozen + self.trainable
 
-        model = ModelWithFrozenParam().to(self.device_type)
+        model = ModelWithFrozenParam().to(device_type)
 
         distributed_model = distribute_module(model, device_mesh)
 
@@ -309,7 +319,7 @@ class DTensorAPITest(DTensorTestBase):
         self.assertTrue(distributed_model.trainable.requires_grad)
 
         x = DTensor.from_local(
-            torch.randn(10, 10, device=self.device_type),
+            torch.randn(10, 10, device=device_type),
             device_mesh,
             [Replicate()],
         )
@@ -320,11 +330,12 @@ class DTensorAPITest(DTensorTestBase):
         self.assertIsNotNone(distributed_model.trainable.grad)
 
     @with_comms
-    def test_distribute_module_input_fn_output_fn_warning(self):
-        device_mesh = self.build_device_mesh()
+    def test_distribute_module_input_fn_output_fn_warning(self, device):
+        device_type = torch.device(device).type
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         # fully replicate all linear modules
-        module_to_replicate = MyModel(20, 1, device=self.device_type)
+        module_to_replicate = MyModel(20, 1, device=device_type)
 
         # mark input sharding on dim 0
         def input_fn(inputs, device_mesh):
@@ -343,14 +354,15 @@ class DTensorAPITest(DTensorTestBase):
                 output_fn=output_fn,
             )
 
-        input_tensor = torch.randn(5, 20, device=self.device_type)
+        input_tensor = torch.randn(5, 20, device=device_type)
         local_out = replica_module(input_tensor)
         self.assertIsInstance(local_out, torch.Tensor)
         self.assertNotIsInstance(local_out, DTensor)
 
     @with_comms
-    def test_distribute_module_casting(self):
-        device_mesh = self.build_device_mesh()
+    def test_distribute_module_casting(self, device):
+        device_type = torch.device(device).type
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         # check DTensor casting
         dt = DTensor.from_local(torch.rand(10), device_mesh, [Replicate()])
@@ -365,7 +377,7 @@ class DTensorAPITest(DTensorTestBase):
         self.assertEqual(dt._local_tensor.dtype, torch.bfloat16)
 
         # check distribute_module casting
-        model = MyModel(10, 10, device=self.device_type)
+        model = MyModel(10, 10, device=device_type)
         replica_model = distribute_module(
             model,
             device_mesh,
@@ -379,21 +391,22 @@ class DTensorAPITest(DTensorTestBase):
         # check autocast
         # `distribute_module` is an in-place operation, so we need to create a
         # new model
-        model = MyModel(10, 10, device=self.device_type)
+        model = MyModel(10, 10, device=device_type)
         dt = distribute_tensor(torch.rand(10), device_mesh, [Replicate()])
         replica_model = distribute_module(
             model,
             device_mesh,
         )
-        with torch.autocast(device_type=self.device_type, dtype=torch.bfloat16):
+        with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
             output = replica_model(dt)
         self.assertEqual(output.dtype, torch.bfloat16)
 
     @with_comms
-    def test_distribute_module_meta(self):
+    def test_distribute_module_meta(self, device):
         # If  the model is too big, the user may first the create entire model on the meta device and then initialize
         # it on the device in the partition function.
-        device_mesh = self.build_device_mesh()
+        device_type = torch.device(device).type
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         # fully shard all parameters on dim 0
         module_to_shard = MyModel(5 * self.world_size, 20, device="meta")
@@ -415,9 +428,10 @@ class DTensorAPITest(DTensorTestBase):
             self.assertTrue(param.device.type == device_mesh.device_type)
 
     @with_comms
-    def test_checkpoint_apis_check_partial_placement(self):
-        device_mesh = self.build_device_mesh()
-        tensor = torch.randn(5, 5, device=self.device_type)
+    def test_checkpoint_apis_check_partial_placement(self, device):
+        device_type = torch.device(device).type
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
+        tensor = torch.randn(5, 5, device=device_type)
         dtensor = DTensor.from_local(tensor, device_mesh, [Partial()])
         with self.assertRaisesRegex(
             ValueError, "Any checkpointing related operations are not supported for"
@@ -445,6 +459,21 @@ class DTensorAPITest(DTensorTestBase):
 DTensorAPITestWithLocalTensor = create_local_tensor_test_class(
     DTensorAPITest, skipped_tests=["test_checkpoint_apis_check_partial_placement"]
 )
+
+
+instantiate_device_type_tests(
+    DTensorAPITest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    DTensorAPITestWithLocalTensor,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()
