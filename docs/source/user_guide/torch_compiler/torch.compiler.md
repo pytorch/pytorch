@@ -35,11 +35,33 @@ might be used interchangeably in this documentation.
 :::
 
 `torch.compiler` also includes an ahead-of-time API, `torch.compiler.precompile`. It
-captures a whole computation `fn(*example_inputs)` -- with the model(s) passed among
-`example_inputs`, e.g. `precompile(lambda model, x: model(x), model, x)` -- and lowers it
-to a self-contained, runnable Python source string plus an acceleration cache. Reload the
-artifact with `torch.compiler.precompile.load`; since no weights are baked in, you pass
-the model again at runtime. See the {ref}`API reference <torch.compiler_api>` for details.
+captures a whole computation from positional-argument tuples in `example_inputs` -- with
+the model(s) included in each tuple, e.g.
+`precompile(lambda model, x: model(x), example_inputs=[(model, x)])` -- and lowers it to
+a runnable Python source string plus an acceleration cache. Make-fx artifacts are
+self-contained. Dynamo artifacts may import modules referenced by transformed globals;
+installed artifacts also import the defining Python modules.
+Reload the artifact with `torch.compiler.precompile.load`; since no weights are baked in,
+you pass the model again at runtime. The optional `tracer="dynamo"` path accepts several
+example calls and retains the guarded recompilations they trigger, including
+automatically dynamic graphs. Use `torch.compiler.ExampleInput(args=..., kwargs=...)`
+for a call with keyword arguments. Its serialized guard records are minimized while
+preserving how every example dispatches. The Python environment, including globals and
+context-manager state, must be semantically unchanged at runtime; guards that only check
+that promise may be omitted, while input-derived guards remain part of dispatch. Breaking
+an unchecked environment assumption can silently miscompute. Tensor, scalar,
+Python-container, and `nn.Module` arguments are supported. Graph breaks and
+closure-free `torch._dynamo.disable` functions are preserved; top-level closures and
+nested functions that capture locals are not yet supported. Captured nested frames that
+cannot be reached by a source-only dispatcher use an isolated installed artifact; it
+installs lazily, can be scoped with `with`, exposes `unload()`, and may compile an
+uncovered call. A standalone artifact instead rejects calls outside its captured guard
+sets. With `training=True`, both eager and Inductor artifacts retain autograd history;
+Inductor graphs include readable compiled forward and backward code. This training mode
+works across captured recompilations and graph breaks. `PrecompileSummary` reports
+coverage and dropped guards, while the `require_*` options let callers reject incomplete
+or insufficiently guarded captures. See the
+{ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}
 `torch.compile` may not support recently released major versions of Python.
