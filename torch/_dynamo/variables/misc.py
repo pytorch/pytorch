@@ -39,7 +39,7 @@ import torch._numpy as tnp
 import torch.utils._pytree as pytree
 from torch._dynamo.variables.base import MutationType
 from torch._dynamo.variables.lists import TupleVariable
-from torch._guards import Source
+from torch._guards import Guard, Source
 
 from .. import config, graph_break_hints, trace_rules, variables
 from ..bytecode_transformation import (
@@ -60,6 +60,7 @@ from ..source import (
     AttrSource,
     GenericAttrSource,
     GetItemSource,
+    GlobalStateSource,
     TypeMROSource,
     TypeSource,
     WeakRefCallSource,
@@ -1083,6 +1084,18 @@ def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:
     return trampoline_autograd_apply
 
 
+def _forward_ad_active() -> bool:
+    """Whether forward-mode AD can propagate tangents at the current tracing point.
+
+    A dual level covers both entry points: `torch.func.jvp` enters one via
+    `_jvp_with_argnums`, and `dual_level()` is one. Forward grad mode is checked
+    too because `_set_fwd_grad_enabled(False)` makes `make_dual` a no-op, so no
+    jvp rule is consulted however many levels are live.
+    """
+    level = torch.autograd.forward_ad._current_level
+    return level >= 0 and torch._C._is_fwd_grad_enabled()
+
+
 class AutogradFunctionVariable(VariableTracker):
     """represents a torch.autograd.Function subclass"""
 
@@ -1171,6 +1184,30 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.visit(visit, (args, kwargs))
 
+        # Forward-mode duals carry requires_grad=False, so the branch below is
+        # not taken under forward AD. Check the custom jvp here instead, or
+        # tracing forward() inline would silently swap it for the default
+        # forward-AD rules of the primitives it decomposes into.
+        jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
+        if jvp_fn is not torch.autograd.Function.jvp:
+            if (requires_grad and torch.is_grad_enabled()) or _forward_ad_active():
+                unimplemented(
+                    gb_type="Unsupported custom jvp",
+                    context=f"call_apply {self} {args} {kwargs}",
+                    explanation="Dynamo does not support tracing "
+                    "`torch.autograd.Function` subclasses that define "
+                    "a custom `jvp` method.",
+                    hints=[
+                        "Remove the custom `jvp` method if possible.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+            # Not breaking was a decision about ambient forward-AD state, which
+            # nothing guards by default. Pin the dual level so entering one later
+            # recompiles instead of reusing a graph that inlined forward() and
+            # dropped the jvp.
+            install_guard(Guard(GlobalStateSource(), GuardBuilder.DUAL_LEVEL))  # type: ignore[arg-type]
+
         if requires_grad and torch.is_grad_enabled():
             source = self.source
 
@@ -1204,20 +1241,6 @@ class AutogradFunctionVariable(VariableTracker):
                     hints=[
                         "Remove the custom `vjp` method if possible.",
                         "Use standard `backward` instead if applicable.",
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
-
-            jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
-            if jvp_fn is not torch.autograd.Function.jvp:
-                unimplemented(
-                    gb_type="Unsupported custom jvp",
-                    context=f"call_apply {self} {args} {kwargs}",
-                    explanation="Dynamo does not support tracing "
-                    "`torch.autograd.Function` subclasses that define "
-                    "a custom `jvp` method.",
-                    hints=[
-                        "Remove the custom `jvp` method if possible.",
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
