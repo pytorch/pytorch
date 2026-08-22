@@ -32,6 +32,7 @@ OBJECT_ALIASING = guards.OBJECT_ALIASING
 install_object_aliasing_guard = guards.install_object_aliasing_guard
 NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
 install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
+install_storage_overlapping_guard = guards.install_storage_overlapping_guard
 
 
 x = torch.tensor(4)
@@ -808,6 +809,8 @@ user_stack=None)
         guards_manager = RootGuardManager()
         x_mgr = guards_manager.framelocals_manager(("x", 0), "x", a, default_mgr_enum)
         d_mgr = guards_manager.framelocals_manager(("d", 1), "d", d, default_mgr_enum)
+        # This synthetic nested FrameLocals accessor directly exercises the
+        # descendant-accessor condition; production installs it only at root.
         d_t_mgr = d_mgr.framelocals_manager(
             ("t", 0), "d['t']", d["t"], default_mgr_enum
         )
@@ -818,6 +821,35 @@ user_stack=None)
 
         self.assertTrue(guards_manager.check({"x": a, "d": d}))
         self.assertFalse(guards_manager.check({"x": b, "d": d}))
+
+    def test_storage_overlapping_guard_not_tag_safe(self):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        storage = torch.randn(6)
+        a = storage[:2]
+        overlapping = storage[1:3]
+        non_overlapping = storage[3:5]
+        d = {"a": a}
+
+        guards_manager = RootGuardManager()
+        x_mgr = guards_manager.framelocals_manager(
+            ("x", 0), "x", overlapping, default_mgr_enum
+        )
+        d_mgr = guards_manager.framelocals_manager(("d", 1), "d", d, default_mgr_enum)
+        d_a_mgr = d_mgr.dict_getitem_manager("a", "d['a']", a, default_mgr_enum)
+        install_storage_overlapping_guard(
+            [x_mgr, d_a_mgr], [], ["x overlaps d['a']"], None
+        )
+
+        GuardManagerWrapper(guards_manager).find_tag_safe_roots()
+
+        self.assertTrue(x_mgr.has_unoptimized_relational_guard())
+        self.assertTrue(d_a_mgr.has_unoptimized_relational_guard())
+        self.assertFalse(x_mgr.is_tag_safe())
+        self.assertFalse(d_mgr.is_tag_safe())
+        self.assertFalse(d_a_mgr.is_tag_safe())
+        self.assertTrue(guards_manager.check({"x": overlapping, "d": d}))
+        self.assertFalse(guards_manager.check({"x": non_overlapping, "d": d}))
 
     def test_globals(self):
         global global_pair, Pair
@@ -1549,6 +1581,39 @@ class TagSafetyChecks(RecursiveDictTagTests):
         self.assertEqual(opt_fn(foo), expected)
         self.assertEqual(opt_fn(foo), expected)
         self.assertEqual(counter.frame_count, 1)
+
+    def test_custom_metaclass_mro_first_item_mutation(self):
+        from torch._dynamo.testing import CompileCounter
+
+        use_object_first = False
+
+        class Meta(type):
+            def mro(cls):
+                return [object, cls] if use_object_first else [cls, object]
+
+        class Foo(metaclass=Meta):
+            pass
+
+        def fn(x):
+            if type(x).__mro__[0] is object:
+                return torch.ones(1)
+            return torch.zeros(1)
+
+        counter = CompileCounter()
+        with torch._dynamo.config.patch(
+            assume_dunder_attributes_remain_unchanged=False
+        ):
+            opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+            foo = Foo()
+
+            self.assertEqual(opt_fn(foo), torch.zeros(1))
+            self.assertEqual(counter.frame_count, 1)
+
+            use_object_first = True
+            Foo.__bases__ = Foo.__bases__
+
+            self.assertEqual(opt_fn(foo), torch.ones(1))
+            self.assertEqual(counter.frame_count, 2)
 
     def test_nn_module_tag_safe(self):
         class Foo(torch.nn.Module):

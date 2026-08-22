@@ -491,7 +491,6 @@ class GuardManagerWrapper:
                 )
 
             tag_safe_roots = []
-            is_subtree_tag_safe = True
             has_unoptimized_relational_guard = node.has_unoptimized_relational_guard()
 
             # Recurse to get the tag safe roots from subtree.
@@ -513,15 +512,16 @@ class GuardManagerWrapper:
                         child_has_unoptimized_relational_guard
                     )
 
+            if has_unoptimized_relational_guard:
+                return tag_safe_roots, has_unoptimized_relational_guard
+
+            is_subtree_tag_safe = True
             for key_mgr, val_mgr in node.get_key_value_managers().values():
                 if key_mgr:
                     is_subtree_tag_safe &= key_mgr.is_tag_safe()
 
                 if val_mgr:
                     is_subtree_tag_safe &= val_mgr.is_tag_safe()
-
-            if has_unoptimized_relational_guard:
-                return tag_safe_roots, has_unoptimized_relational_guard
 
             if is_subtree_tag_safe:
                 node.mark_tag_safe()

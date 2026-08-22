@@ -1894,8 +1894,7 @@ class LAMBDA_GUARD : public LeafGuard {
     if (py::isinstance<py::function>(guard_check_fn)) {
       _guard_check_fn = py::cast<py::function>(std::move(guard_check_fn));
     } else {
-      throw py::type_error(
-          "LAMBDA_GUARD expects (callable, str)"); // @allow-raw-throw
+      TORCH_CHECK_TYPE(false, "LAMBDA_GUARD expects (callable, str)");
     }
   }
 
@@ -2364,10 +2363,9 @@ class GLOBAL_STATE : public LeafGuard {
       : LeafGuard(root, std::move(verbose_code_parts), std::move(user_stack)),
         owner_(std::move(initial_state)),
         _guard((GlobalStateGuard*)owner_.ptr()) {
-    if (!PyObject_TypeCheck(owner_.ptr(), &GlobalStateGuardType)) {
-      throw py::type_error(
-          "GLOBAL_STATE expects a GlobalStateGuard"); // @allow-raw-throw
-    }
+    TORCH_CHECK_TYPE(
+        PyObject_TypeCheck(owner_.ptr(), &GlobalStateGuardType),
+        "GLOBAL_STATE expects a GlobalStateGuard");
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -2747,17 +2745,13 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
     _nargs_int = PyLong_AsSize_t(nargs_int.ptr());
     _nargs_float = PyLong_AsSize_t(nargs_float.ptr());
     _nargs = _nargs_int + _nargs_float;
-    if (PyErr_Occurred()) {
-      // @allow-raw-throw
-      throw py::value_error(
-          "SYMBOLIC_SHAPE_GUARD expected a non-negative number of arguments.");
-    }
+    TORCH_CHECK_VALUE(
+        !PyErr_Occurred(),
+        "SYMBOLIC_SHAPE_GUARD expected a non-negative number of arguments.");
     uintptr_t addr = PyLong_AsUnsignedLongLong(py_addr.ptr());
-    if (PyErr_Occurred()) {
-      // @allow-raw-throw
-      throw py::value_error(
-          "SYMBOLIC_SHAPE_GUARD expected an address to a C function.");
-    }
+    TORCH_CHECK_VALUE(
+        !PyErr_Occurred(),
+        "SYMBOLIC_SHAPE_GUARD expected an address to a C function.");
     _guard_check_fn = reinterpret_cast<int8_t (*)(int64_t*, double*)>(addr);
     _args_int = std::vector<int64_t>(_nargs_int);
     _args_float = std::vector<double>(_nargs_float);
@@ -3126,9 +3120,7 @@ class DICT_VERSION : public LeafGuard {
             root_guard_manager,
             std::move(verbose_code_parts),
             std::move(user_stack)) {
-    if (!PyDict_Check(value.ptr())) {
-      throw py::type_error("DICT_VERSION expects a dict"); // @allow-raw-throw
-    }
+    TORCH_CHECK_TYPE(PyDict_Check(value.ptr()), "DICT_VERSION expects a dict");
     _tag = get_dict_version_unchecked(value.ptr());
   }
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -3525,10 +3517,16 @@ class GuardManager {
       GuardManager* cloned_mgr,
       const py::function& clone_filter_fn) {
     for (const auto& guard : _leaf_guards) {
-      cloned_mgr->record_leaf_guard_properties(guard);
       cloned_mgr->_leaf_guards.emplace_back(guard);
       if (std::shared_ptr<RelationalGuard> relational_guard =
               std::dynamic_pointer_cast<RelationalGuard>(guard)) {
+        // Cloned roots do not own the dedicated NO_TENSOR_ALIASING replay
+        // guard. Preserve only the classification needed to prevent ordinary
+        // dict-tag skips from omitting an unoptimized relational guard.
+        if (std::dynamic_pointer_cast<NO_TENSOR_ALIASING>(relational_guard) ==
+            nullptr) {
+          cloned_mgr->_has_unoptimized_relational_guard = true;
+        }
         add_relational_guard_resetter_to_cloned_root(
             cloned_root, relational_guard);
       }
@@ -3651,7 +3649,7 @@ class GuardManager {
     return true;
   }
 
-  bool check_no_tensor_aliasing_guards_fast(PyObject* value) {
+  std::optional<bool> check_no_tensor_aliasing_guards_fast(PyObject* value) {
     auto it = _tensor_pointers.find(value);
     if (it == _tensor_pointers.end() || it->second.empty()) {
       return true;
@@ -3659,7 +3657,9 @@ class GuardManager {
     std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard =
         get_no_tensor_aliasing_guard(_root);
     if (no_tensor_aliasing_guard == nullptr) {
-      return false;
+      // Cloned roots do not own this guard. Tell the caller that the fast path
+      // is unavailable so it can fall back to the full recursive check.
+      return std::nullopt;
     }
     for (auto& tensor_weakref : it->second) {
       PyObject* tensor_ptr = nullptr;
@@ -3745,9 +3745,12 @@ class GuardManager {
           // if (is_weakref_valid(value) && check_dict_pointer_tags(value)) {
           if (check_dict_pointer_tags(value) &&
               check_tensor_metadata_fast(value)) {
-            if (check_no_tensor_aliasing_guards_fast(value)) {
-              return true;
-            } else {
+            std::optional<bool> no_tensor_aliasing_result =
+                check_no_tensor_aliasing_guards_fast(value);
+            if (no_tensor_aliasing_result.has_value()) {
+              if (*no_tensor_aliasing_result) {
+                return true;
+              }
               _disable_dict_tag_matching = true;
               return false;
             }
@@ -5015,7 +5018,7 @@ std::unique_ptr<GuardManager> make_guard_manager(
       return std::make_unique<DictGuardManager>(
           root, std::move(source), example_value);
     } else {
-      throw py::type_error("Invalid guard manager enum"); // @allow-raw-throw
+      TORCH_CHECK_TYPE(false, "Invalid guard manager enum");
     }
   }
   return std::make_unique<GuardManager>(root, std::move(source), example_value);
