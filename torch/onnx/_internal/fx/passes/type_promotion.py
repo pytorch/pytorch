@@ -1440,6 +1440,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         node: torch.fx.Node,
         fx_arg: torch.fx.node.Argument,
         dtype: torch.dtype | None,
+        force_tensor: bool = False,
     ) -> torch.fx.node.Argument:
         """Promote fx_arg to dtype if necessary."""
         if dtype is None:
@@ -1478,7 +1479,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                 )
                 if equivalent_dtype is None:
                     raise AssertionError(f"Unexpected arg_type: {arg_type}")
-                if equivalent_dtype != dtype:
+                if force_tensor or equivalent_dtype != dtype:
                     # Promote Sym number to tensor of dtype.
                     graph = node.graph
                     with graph.inserting_before(node):
@@ -1503,7 +1504,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                 type(fx_arg)
             )
         ) is not None:
-            if equivalent_dtype != dtype:
+            if force_tensor or equivalent_dtype != dtype:
                 # Promote number to tensor of dtype.
                 # The op should have overload that supports tensor for this arg, otherwise
                 # the type promotion rule should not suggest promoting this arg.
@@ -1542,18 +1543,31 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         """Promote node inputs and outputs according to type promotion rule."""
         args, kwargs = self.fetch_args_kwargs_from_env(node)
         type_promotion_info = rule.preview_type_promotion(args, kwargs)
+        target = node.target
+        if not isinstance(target, torch._ops.OpOverload):
+            raise AssertionError(f"Expected OpOverload, got {type(target)}")
+        schema_args = target._schema.arguments
+        schema_kwargs = {arg.name: arg for arg in schema_args}
         new_args = []
         new_kwargs = {}
         for i, arg in enumerate(node.args):
             new_args.append(
                 self._maybe_promote_arg(
-                    node, arg, type_promotion_info.args_dtypes.get(i, None)
+                    node,
+                    arg,
+                    type_promotion_info.args_dtypes.get(i, None),
+                    i < len(schema_args)
+                    and isinstance(schema_args[i].type, torch.TensorType),
                 )
             )
 
         for name, arg in node.kwargs.items():
             new_kwargs[name] = self._maybe_promote_arg(
-                node, arg, type_promotion_info.kwargs_dtypes.get(name, None)
+                node,
+                arg,
+                type_promotion_info.kwargs_dtypes.get(name, None),
+                name in schema_kwargs
+                and isinstance(schema_kwargs[name].type, torch.TensorType),
             )
         new_args = tuple(new_args)
 
