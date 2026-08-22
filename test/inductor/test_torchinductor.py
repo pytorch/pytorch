@@ -21272,6 +21272,10 @@ if RUN_GPU:
             torch.cuda.is_available() and torch.cuda.get_device_capability() < (9, 0),
             "Triton does not support fp8 on A100",
         )
+        @unittest.skipIf(
+            not IS_BIG_GPU,
+            "reduction kernel count (triton_red_ vs triton_per_) differs on low-SM devices; IS_BIG_GPU (>= 68 SMs) used as the gating proxy",
+        )
         def test_red_followed_by_transposed_pointwise(self):
             bs = 26624
             dim = 1024
