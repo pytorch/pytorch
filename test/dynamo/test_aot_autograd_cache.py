@@ -3450,6 +3450,49 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_module_activation_memory_budget_causes_cache_miss(self):
+        """Changing a per-module budget invalidates the AOTAutograd cache, while
+        the process-local id() keys it is stored under do not."""
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.lin(x).relu()
+
+        def run(budget):
+            mod = Mod()
+            by_module_id = {id(m): budget for m in mod.modules()}
+            with functorch_config.patch(
+                activation_memory_budget_by_module_id=by_module_id
+            ):
+                compiled_fn = torch.compile(mod, backend="inductor")
+                compiled_fn(torch.randn(10, 10, requires_grad=True)).sum().backward()
+
+        with fresh_cache():
+            run(0.3)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            # A fresh module gives every id() a new value while the budget is
+            # unchanged, so the key must not move.
+            run(0.3)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+            self._clear_dynamo_and_codecache()
+
+            run(0.8)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     def test_region_activation_memory_budget_graph_break_cache(self):
         """With graph breaks, changing one graph's budget causes a miss for
         that graph but a hit for the unchanged graph."""

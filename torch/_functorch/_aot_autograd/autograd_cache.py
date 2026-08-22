@@ -533,6 +533,17 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             else None
         )
 
+        # activation_memory_budget_by_module_id is in _save_config_ignore, so the
+        # saved config cannot invalidate the cache when a budget changes. Record
+        # the budget values rather than the id() keys, which are process-local and
+        # would miss on every run, and only once the feature is in use so that a
+        # default config leaves the key untouched.
+        module_budgets = tuple(
+            sorted(set(config.activation_memory_budget_by_module_id.values()))
+        )
+        if module_budgets:
+            self.module_activation_memory_budgets: tuple[float, ...] = module_budgets
+
         # Note: We use the live config module, not self.autograd_config (the
         # saved config), because activation_memory_budget_runtime_estimator and
         # activation_memory_budget_solver are excluded from save_config (in
