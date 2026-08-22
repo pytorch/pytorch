@@ -216,6 +216,17 @@ class _PrecompileDynamoUnguardedAttribute(torch.nn.Module):
         return self.linear(x).relu().sum()
 
 
+class _PrecompileDynamoStepCounter(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(8, 8)
+        self.step = 0
+
+    def forward(self, x):
+        self.step += 1
+        return self.linear(x) * self.step
+
+
 class _PrecompileDynamoPipeline:
     def __init__(self, model):
         self.model = model
@@ -1623,6 +1634,25 @@ class TestPrecompile(TestCase):
         )
         for (example,) in examples:
             self.assertEqual(example, torch.ones_like(example))
+
+    def test_tracer_dynamo_guards_mutating_module_at_capture_state(self):
+        torch.manual_seed(0)
+        model = _PrecompileDynamoStepCounter()
+        examples = [(model, torch.randn(size, 8)) for size in (2, 3, 4)]
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_call_module,
+            example_inputs=examples,
+            tracer="dynamo",
+            backend="eager",
+        )
+
+        torch.manual_seed(0)
+        runtime = _PrecompileDynamoStepCounter()
+        torch.manual_seed(0)
+        reference = _PrecompileDynamoStepCounter()
+        loaded = torch.compiler.precompile.load(code, cache)
+        for _, x in examples:
+            self.assertEqual(loaded(runtime, x), reference(x))
 
     def test_tracer_dynamo_captures_every_example_past_default_limit(self):
         x = torch.randn(4)
