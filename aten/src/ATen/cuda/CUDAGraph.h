@@ -99,6 +99,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   static CUDAGraph* get_currently_capturing_graph();
   void begin_capture_to_if_node(const Tensor& scalar_cuda_pred_tensor);
+  void begin_capture_to_if_else_node(const Tensor& scalar_cuda_pred_tensor);
   void begin_capture_to_while_node(const Tensor& scalar_cuda_pred_tensor);
   void begin_capture_to_switch_node(
       const Tensor& scalar_cuda_index_tensor,
