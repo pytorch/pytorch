@@ -107,6 +107,11 @@ class TestMultiheadAttentionNN(NNTestCase):
                 for j in range(x.shape[1]):
                     for k in range(x.shape[2]):
                         x_curr = x[i, j, k, :]
+                        # A fully masked row (all -inf) matches torch._safe_softmax:
+                        # zero row instead of a 0/0 NaN.
+                        if np.all(np.isneginf(x_curr)):
+                            output[i, j, k, :] = 0
+                            continue
                         e_x = np.exp(x_curr - np.amax(x_curr))
                         output[i, j, k, :] = e_x / np.sum(e_x)
             return output

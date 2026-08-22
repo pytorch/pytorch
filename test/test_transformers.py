@@ -447,6 +447,30 @@ class TestTransformers(NNTestCase):
             # of NaNs for fully masked rows
             self.assertEqual(out, out_fp.nan_to_num())
 
+    @parametrize("need_weights", [True, False])
+    @parametrize("batch_first", [True, False])
+    def test_multiheadattention_fully_masked_row_no_nan_grad(self, device, need_weights, batch_first):
+        # Regression test for https://github.com/pytorch/pytorch/issues/41508
+        # A key_padding_mask that fully masks out every key for a batch element
+        # produces an all -inf attention row. Plain softmax(-inf, ..., -inf) is
+        # a 0/0 NaN, which used to leak into both the output and the gradient
+        # of the `need_weights=True` (eager) path of multi_head_attention_forward,
+        # even though the SDPA fast path (need_weights=False) was already fixed
+        # via torch._safe_softmax (see attention.cpp's _safe_softmax).
+        embed_dim, num_heads, bsz, seq_len = 8, 2, 3, 5
+        mha = nn.MultiheadAttention(embed_dim, num_heads, batch_first=batch_first, device=device)
+
+        shape = (bsz, seq_len, embed_dim) if batch_first else (seq_len, bsz, embed_dim)
+        x = torch.randn(*shape, device=device, requires_grad=True)
+
+        key_padding_mask = torch.zeros(bsz, seq_len, dtype=torch.bool, device=device)
+        key_padding_mask[0, :] = True  # every key masked out for batch element 0
+
+        out, _ = mha(x, x, x, key_padding_mask=key_padding_mask, need_weights=need_weights)
+        self.assertFalse(out.isnan().any().item(), "output contains NaN for a fully masked row")
+        out.sum().backward()
+        self.assertFalse(x.grad.isnan().any().item(), "gradient contains NaN for a fully masked row")
+
     @onlyCUDA
     def test_multiheadattention_fastpath_fp16_head_dim_alignment(self, device):
         previous_fastpath = torch.backends.mha.get_fastpath_enabled()
