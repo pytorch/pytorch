@@ -8,6 +8,7 @@
 // This file is auto-generated. See "generate_kernels.py"
 #pragma once
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>
+#include <c10/cuda/CUDAArchList.h>
 using namespace PyTorchMemEffAttention;
 // ======== f16 / sm70 ========
 __global__ void __launch_bounds__(
@@ -868,31 +869,31 @@ template <typename T> void dispatch_cutlassB_f32_sm80(T cb, int cc) {
 template <typename DT, typename T>
 void dispatch_cutlassB(T cb, int cc = 0) {
 
-    if (std::is_same_v<DT, cutlass::half_t> && 70 <= cc && cc <= 74) {
-        dispatch_cutlassB_f16_sm70(cb, cc);
+    if constexpr (std::is_same_v<DT, cutlass::half_t> && c10::cuda::targets_any_arch_in(70, 74)) {
+        if (70 <= cc && cc <= 74) { dispatch_cutlassB_f16_sm70(cb, cc); }
     }
-    if (std::is_same_v<DT, cutlass::bfloat16_t> && 80 <= cc && cc <= 121) {
-        dispatch_cutlassB_bf16_sm80(cb, cc);
+    if constexpr (std::is_same_v<DT, cutlass::bfloat16_t> && c10::cuda::targets_any_arch_in(80, 121)) {
+        if (80 <= cc && cc <= 121) { dispatch_cutlassB_bf16_sm80(cb, cc); }
     }
-    if (std::is_same_v<DT, cutlass::half_t> && 80 <= cc && cc <= 121) {
-        dispatch_cutlassB_f16_sm80(cb, cc);
+    if constexpr (std::is_same_v<DT, cutlass::half_t> && c10::cuda::targets_any_arch_in(80, 121)) {
+        if (80 <= cc && cc <= 121) { dispatch_cutlassB_f16_sm80(cb, cc); }
     }
-    if (std::is_same_v<DT, cutlass::half_t> && 50 <= cc && cc <= 69) {
-        dispatch_cutlassB_f16_sm50(cb, cc);
+    if constexpr (std::is_same_v<DT, cutlass::half_t> && c10::cuda::targets_any_arch_in(50, 69)) {
+        if (50 <= cc && cc <= 69) { dispatch_cutlassB_f16_sm50(cb, cc); }
     }
-    if (std::is_same_v<DT, float> && 50 <= cc && cc <= 69) {
-        dispatch_cutlassB_f32_sm50(cb, cc);
+    if constexpr (std::is_same_v<DT, float> && c10::cuda::targets_any_arch_in(50, 69)) {
+        if (50 <= cc && cc <= 69) { dispatch_cutlassB_f32_sm50(cb, cc); }
     }
-    if (std::is_same_v<DT, float> && 70 <= cc && cc <= 74) {
-        dispatch_cutlassB_f32_sm70(cb, cc);
+    if constexpr (std::is_same_v<DT, float> && c10::cuda::targets_any_arch_in(70, 74)) {
+        if (70 <= cc && cc <= 74) { dispatch_cutlassB_f32_sm70(cb, cc); }
     }
-    if (std::is_same_v<DT, cutlass::half_t> && 75 <= cc && cc <= 79) {
-        dispatch_cutlassB_f16_sm75(cb, cc);
+    if constexpr (std::is_same_v<DT, cutlass::half_t> && c10::cuda::targets_any_arch_in(75, 79)) {
+        if (75 <= cc && cc <= 79) { dispatch_cutlassB_f16_sm75(cb, cc); }
     }
-    if (std::is_same_v<DT, float> && 75 <= cc && cc <= 79) {
-        dispatch_cutlassB_f32_sm75(cb, cc);
+    if constexpr (std::is_same_v<DT, float> && c10::cuda::targets_any_arch_in(75, 79)) {
+        if (75 <= cc && cc <= 79) { dispatch_cutlassB_f32_sm75(cb, cc); }
     }
-    if (std::is_same_v<DT, float> && 80 <= cc && cc <= 121) {
-        dispatch_cutlassB_f32_sm80(cb, cc);
+    if constexpr (std::is_same_v<DT, float> && c10::cuda::targets_any_arch_in(80, 121)) {
+        if (80 <= cc && cc <= 121) { dispatch_cutlassB_f32_sm80(cb, cc); }
     }
 }
