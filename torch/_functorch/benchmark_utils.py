@@ -91,10 +91,10 @@ def get_chrome_trace_events(filename: str) -> list[dict[str, Any]]:
 
 
 def is_gpu_compute_event(event: dict[str, Any]) -> bool:
-    global gpu_pids
+    global accelerator_pids
     return (
         "pid" in event
-        and event["pid"] in gpu_pids
+        and event["pid"] in accelerator_pids
         and "ph" in event
         and event["ph"] == "X"
     )
@@ -141,12 +141,12 @@ def get_sorted_gpu_mm_conv_events(events: list[dict[str, Any]]) -> list[dict[str
     return sorted_events
 
 
-gpu_pids: list[Any] = []
+accelerator_pids: list[Any] = []
 
 
 def compute_utilization(filename: str, total_length: float) -> tuple[float, float]:
     """
-    Process the chrome traces outputs by the pytorch profiler to compute GPU Utilization
+    Process the chrome traces outputs by the pytorch profiler to compute accelerator utilization
     and percent of times spent on matmul and convolution
 
     Args:
@@ -155,18 +155,20 @@ def compute_utilization(filename: str, total_length: float) -> tuple[float, floa
         total_length(float): total length of the process without profiler in second
 
     Return:
-        tuple: (GPU Utilization, percent of time spent on matmul and convolution)
+        tuple: (accelerator utilization, percent of time spent on matmul and convolution)
     """
     events = get_chrome_trace_events(filename)
 
-    # get pids of GPU events
-    global gpu_pids
-    gpu_pids = []
+    # get pids of accelerator events: every process_labels event other than the
+    # "CPU" host process is a device process, regardless of vendor label (e.g.
+    # "GPU {n}" for CUDA/ROCm/XPU, "NPU {n}" for torch_npu)
+    global accelerator_pids
+    accelerator_pids = []
     for event in events:
         if "name" not in event:
             continue
-        if event["name"] == "process_labels" and "GPU" in event["args"]["labels"]:
-            gpu_pids.append(event["pid"])
+        if event["name"] == "process_labels" and "CPU" not in event["args"]["labels"]:
+            accelerator_pids.append(event["pid"])
 
     total_length = total_length * 1e6
     sorted_gpu_events = get_sorted_gpu_events(events)
@@ -187,7 +189,7 @@ def benchmark_utilization(
     num_runs: int = 1,
 ) -> tuple[float, float]:
     """
-    Benchmark the GPU Utilization and percent of time spent on matmul and convolution operations of
+    Benchmark the accelerator utilization and percent of time spent on matmul and convolution operations of
     running f(input_, **kwargs_for_f) with [optimize_ctx] [num_runs] times.
     It will produce a chrome trace file in trace_folder/trace_file_name.json
 
@@ -218,7 +220,7 @@ def benchmark_utilization(
         num_runs: number of times to run f, excluding the warm-up runs, default to 1.
 
     Return:
-        tuple: (GPU Utilization, percent of time spent on matmul and convolution)
+        tuple: (accelerator utilization, percent of time spent on matmul and convolution)
 
     """
     isExist = os.path.exists(trace_folder)
