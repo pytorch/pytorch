@@ -7987,8 +7987,14 @@ class ExternKernel(InputsKernel):
         n_args = len(args)
         n_pos_args = len(self.arg_properties)
         # For cpp wrapper, if some positional args are not provided, we need to check
-        # if they're in the kwargs or use their default value
-        if n_args < n_pos_args:
+        # if they're in the kwargs or use their default value. This is schema-based and
+        # only applies to OpOverloads: for HigherOrderOperators (and other non-OpOverload
+        # kernels) collect_arg_kwarg_properties fills arg_properties with empty placeholder
+        # dicts (one per flattened input, not the positional-arg count), so they have no
+        # "name"/"default_value" to fill from and the args/kwargs from unflatten_args are
+        # already complete. e.g. triton_kernel_wrapper_functional passes all its tensors via
+        # kwargs (n_args == 0), which would otherwise index empty dicts here -> KeyError.
+        if n_args < n_pos_args and isinstance(self.op_overload, torch._ops.OpOverload):
             log.debug(
                 "%s has %d unprovided positional arguments. "
                 "Will check if they are in the keyword arguments or will use default values.",
