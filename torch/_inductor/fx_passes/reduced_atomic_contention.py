@@ -26,6 +26,7 @@ from torch._inductor.pattern_matcher import (
     Match,
     PatternMatcherPass,
     register_graph_pattern,
+    stable_topological_sort,
 )
 from torch._logging import getArtifactLogger
 from torch.fx.experimental.symbolic_shapes import optimization_hint
@@ -153,6 +154,22 @@ def _evaluate_candidate(
     if scatter_dim >= len(input_meta["shape"]):
         _record_skip(ctx, "dim_out_of_bounds", node_name)
         return None
+
+    # A multi-dimensional index makes the replacement flatten values against the
+    # index shape. index_put only requires those to broadcast, and a broadcast
+    # operand has too few elements to reshape to the flattened length.
+    index_ndim = len(index_meta["shape"])
+    if index_ndim > 1:
+        values_node = output_node.args[2] if len(output_node.args) > 2 else None
+        values_meta = (
+            _get_tensor_meta(values_node) if isinstance(values_node, fx.Node) else None
+        )
+        if (
+            values_meta is None
+            or values_meta["shape"][:index_ndim] != index_meta["shape"]
+        ):
+            _record_skip(ctx, "broadcast_operand", node_name)
+            return None
 
     output_size = _resolve_numel(input_meta["numel"])
     index_size = _resolve_numel(index_meta["numel"])
@@ -634,6 +651,12 @@ def partitioned_scatter_optimization_pass(graph: fx.Graph) -> fx.Graph:
     if not ctx.candidates:
         _log_summary(ctx, 0)
         return graph
+
+    # post_grad only sorts the graph after this pass runs, so a node may still sit
+    # after one of its users here. build_memory_profile raises on the out-of-order
+    # node, and replace_by_example inserts at the match node, so an argument placed
+    # after it would leave the nodes we emit reading a later definition.
+    stable_topological_sort(graph)
 
     # Stage 2: build the memory profile and run the pattern matcher.
     ctx.memory = _build_scatter_memory_state(graph)
