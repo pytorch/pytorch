@@ -3,6 +3,7 @@
 
 import torch
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
     DTensor,
@@ -12,6 +13,7 @@ from torch.distributed.tensor import (
     Shard,
     zeros,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -23,11 +25,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 class DTensorInitOpsTest(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def _run_init_op(self, init_op, *args, **kwargs):
-        device_mesh = self.build_device_mesh()
+    def _run_init_op(self, init_op, device_type, *args, **kwargs):
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
         shard_spec = [Shard(0)]
         input_size = (8, 4)
-        input_tensor = torch.randn(*input_size, device=self.device_type)
+        input_tensor = torch.randn(*input_size, device=device_type)
         dtensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
         local_tensor_clone = torch.clone(input_tensor)
         torch.manual_seed(self.rank)
@@ -37,23 +39,25 @@ class DTensorInitOpsTest(DTensorTestBase):
         self.assertEqual(local_tensor_clone, dtensor.to_local())
 
     @with_comms
-    def test_init_ops(self):
+    def test_init_ops(self, device):
         # NOTE: random init tests are moved to test_random_ops.py
-        self._run_init_op(torch.nn.init.constant_, 2.4)
+        device_type = torch.device(device).type
+        self._run_init_op(torch.nn.init.constant_, device_type, 2.4)
 
     @with_comms
-    def test_eye_init(self):
+    def test_eye_init(self, device):
         # Test nn.init.eye_() with DTensor (issue #173357)
-        device_mesh = self.build_device_mesh()
+        device_type = torch.device(device).type
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
         shard_spec = [Replicate()]
         input_size = (8, 8)
 
-        input_tensor = torch.randn(*input_size, device=self.device_type)
+        input_tensor = torch.randn(*input_size, device=device_type)
         dtensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
 
         torch.nn.init.eye_(dtensor)
 
-        expected = torch.eye(*input_size, device=self.device_type)
+        expected = torch.eye(*input_size, device=device_type)
         self.assertEqual(expected, dtensor.to_local())
 
 
@@ -417,6 +421,14 @@ DTensorConstructorTestWithLocalTensor = create_local_tensor_test_class(
         # Non-contigous sub-meshes are not supported
         "test_zeros_submesh",
     ],
+)
+
+
+instantiate_device_type_tests(
+    DTensorInitOpsTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
 )
 
 

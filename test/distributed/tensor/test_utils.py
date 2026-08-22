@@ -39,6 +39,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -1318,6 +1319,7 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
     def _test_optimizer_with_fsdp_tp(
         self,
         optimizer_cls: type,
+        device_type: str,
         optimizer_kwargs: dict | None = None,
     ):
         """Test an optimizer with FSDP+TP parallelized model.
@@ -1342,7 +1344,7 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
         dp_size = 2
         tp_size = self.world_size // dp_size
         global_mesh = init_device_mesh(
-            self.device_type,
+            device_type,
             (dp_size, tp_size),
             mesh_dim_names=("dp", "tp"),
         )
@@ -1363,7 +1365,7 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
         dim = 16
         model = SimpleMLP(dim)
         ref_model = replicate(
-            deepcopy(model).to(self.device_type),
+            deepcopy(model).to(device_type),
             process_group=dp_mesh.get_group(),
         )
         ref_optim = optimizer_cls(ref_model.parameters(), lr=1e-2, **optimizer_kwargs)
@@ -1398,7 +1400,7 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
 
         # Run training loop
         torch.manual_seed(42 + dp_mesh.get_local_rank() + 1)
-        inp = torch.randn((4, dim), device=self.device_type)
+        inp = torch.randn((4, dim), device=device_type)
 
         for iter_idx in range(5):
             ref_optim.zero_grad()
@@ -1428,34 +1430,41 @@ class Test_StridedShard_Optimizer(DTensorTestBase):
                 )
 
     @with_comms
-    def test_sgd_optimizer(self):
-        self._test_optimizer_with_fsdp_tp(torch.optim.SGD)
+    def test_sgd_optimizer(self, device):
+        device_type = torch.device(device).type
+        self._test_optimizer_with_fsdp_tp(torch.optim.SGD, device_type)
 
     @with_comms
-    def test_sgd_optimizer_with_momentum(self):
+    def test_sgd_optimizer_with_momentum(self, device):
+        device_type = torch.device(device).type
         self._test_optimizer_with_fsdp_tp(
-            torch.optim.SGD, optimizer_kwargs={"momentum": 0.9}
+            torch.optim.SGD, device_type, optimizer_kwargs={"momentum": 0.9}
         )
 
     @with_comms
-    def test_adam_optimizer(self):
-        self._test_optimizer_with_fsdp_tp(torch.optim.Adam)
+    def test_adam_optimizer(self, device):
+        device_type = torch.device(device).type
+        self._test_optimizer_with_fsdp_tp(torch.optim.Adam, device_type)
 
     @with_comms
-    def test_adamw_optimizer(self):
-        self._test_optimizer_with_fsdp_tp(torch.optim.AdamW)
+    def test_adamw_optimizer(self, device):
+        device_type = torch.device(device).type
+        self._test_optimizer_with_fsdp_tp(torch.optim.AdamW, device_type)
 
     @with_comms
-    def test_rmsprop_optimizer(self):
-        self._test_optimizer_with_fsdp_tp(torch.optim.RMSprop)
+    def test_rmsprop_optimizer(self, device):
+        device_type = torch.device(device).type
+        self._test_optimizer_with_fsdp_tp(torch.optim.RMSprop, device_type)
 
     @with_comms
-    def test_adagrad_optimizer(self):
-        self._test_optimizer_with_fsdp_tp(torch.optim.Adagrad)
+    def test_adagrad_optimizer(self, device):
+        device_type = torch.device(device).type
+        self._test_optimizer_with_fsdp_tp(torch.optim.Adagrad, device_type)
 
     @with_comms
-    def test_adadelta_optimizer(self):
-        self._test_optimizer_with_fsdp_tp(torch.optim.Adadelta)
+    def test_adadelta_optimizer(self, device):
+        device_type = torch.device(device).type
+        self._test_optimizer_with_fsdp_tp(torch.optim.Adadelta, device_type)
 
 
 class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
@@ -1752,11 +1761,12 @@ class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBa
         return 4
 
     @with_comms
-    def test_StridedShard_to_replicate(self):
-        mesh = self.build_device_mesh()
+    def test_StridedShard_to_replicate(self, device):
+        device_type = torch.device(device).type
+        mesh = init_device_mesh(device_type, (self.world_size,))
         for split_factor in range(2, 17):
             for tensor_size in range(1, 200):
-                a = torch.arange(tensor_size)
+                a = torch.arange(tensor_size, device=device_type)
                 src_p = (_StridedShard(0, split_factor=split_factor),)
                 a_dt = distribute_tensor(a, mesh, src_p, src_data_rank=None)
                 logical_shape = self._get_logical_shape(
@@ -1777,12 +1787,13 @@ class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBa
                 )
 
     @with_comms
-    def test_replicate_to_StridedShard(self):
-        mesh = self.build_device_mesh()
+    def test_replicate_to_StridedShard(self, device):
+        device_type = torch.device(device).type
+        mesh = init_device_mesh(device_type, (self.world_size,))
         coordinate = mesh.get_coordinate()
         for split_factor in range(2, 17):
             for tensor_size in range(1, 200):
-                a = torch.arange(tensor_size)
+                a = torch.arange(tensor_size, device=device_type)
                 a_dt_replicate = distribute_tensor(
                     a, mesh, [Replicate()], src_data_rank=None
                 )
@@ -2051,6 +2062,20 @@ UtilTestWithLocalTensor = create_local_tensor_test_class(UtilTest)
 TestStridedShardingWithLocalTensor = create_local_tensor_test_class(TestStridedSharding)
 Test2DStridedLocalShardWithLocalTensor = create_local_tensor_test_class(
     Test2DStridedLocalShard
+)
+
+
+instantiate_device_type_tests(
+    Test_StridedShard_Optimizer,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestStridedShardReplicate,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
 )
 
 
