@@ -10,6 +10,8 @@ from torch.testing._internal import common_utils
 
 @common_utils.instantiate_parametrized_tests
 class TestGlobalHelpers(common_utils.TestCase):
+    hw_classification = common_utils.HardwareClassification.GENERIC
+
     @common_utils.parametrize(
         "available_opsets, target, expected",
         [
@@ -48,6 +50,8 @@ class TestGlobalHelpers(common_utils.TestCase):
 
 
 class TestOverrideDict(common_utils.TestCase):
+    hw_classification = common_utils.HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.override_dict: registration.OverrideDict[str, int] = (
@@ -168,6 +172,8 @@ class TestOverrideDict(common_utils.TestCase):
 
 
 class TestRegistrationDecorators(common_utils.TestCase):
+    hw_classification = common_utils.HardwareClassification.GENERIC
+
     def tearDown(self) -> None:
         registration.registry._registry.pop("test::test_op", None)
 
