@@ -1195,6 +1195,27 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     mode=mode,
                 )
 
+    @onlyOn("cpu")
+    @dtypes(torch.int, torch.long)
+    @parametrize_test("mode", ["sum", "mean", "max"])
+    def test_embedding_bag_invalid_offsets(self, device, dtype, mode):
+        # https://github.com/pytorch/pytorch/issues/175368
+        weight = torch.randn(5, 3, device=device)
+        msg = "monotonically non-decreasing"
+        for requires_grad in (False, True):
+            w = weight.detach().requires_grad_(requires_grad)
+            indices = torch.tensor([], device=device, dtype=dtype)
+            offsets = torch.tensor([0, 2, 0], device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                F.embedding_bag(indices, w, offsets, mode=mode)
+            indices = torch.tensor([1, 2, 3, 4], device=device, dtype=dtype)
+            offsets = torch.tensor([0, 3, 1, 4], device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                F.embedding_bag(indices, w, offsets, mode=mode)
+            offsets = torch.tensor([0, 2, 2, 4], device=device, dtype=dtype)
+            out = F.embedding_bag(indices, w, offsets, mode=mode)
+            self.assertEqual(out.shape, torch.Size([4, 3]))
+
     def test_embedding_bag_dimension_errors(self, device):
         funcs = (
             lambda x, y, z: torch.nn.functional.embedding_bag(y, x, z),
