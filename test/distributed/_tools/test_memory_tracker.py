@@ -1,22 +1,28 @@
 # Owner(s): ["oncall: distributed"]
 import os
-import unittest
 
 import torch
 import torch.nn as nn
 from torch.distributed._tools import MemoryTracker
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import (
+    DeviceTypeTestBase,
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+)
 
 
-class TestMemoryTracker(TestCase):
-    @unittest.skipIf(not torch.accelerator.is_available(), "no accelerator")
-    def test_local_model(self):
+class TestMemoryTracker(DeviceTypeTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_local_model(self, device):
         """
         Minimal test case to check the memory tracker can collect the expected
         memory stats at operator level, as well as can print the summary result
         without crash.
         """
-        device = torch.accelerator.current_accelerator()
         # Create a model with a hierarchy of modules
         torch.manual_seed(0)
         model = nn.Sequential(
@@ -62,6 +68,9 @@ class TestMemoryTracker(TestCase):
         self.assertTrue(len(tracker._markers) == 2)
         self.assertTrue(tracker._cur_module_name != "")
         self.assertTrue(hasattr(tracker, "_num_alloc_retries"))
+
+
+instantiate_device_type_tests(TestMemoryTracker, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
