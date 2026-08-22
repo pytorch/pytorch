@@ -29,7 +29,6 @@ from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
-    IS_MACOS,
     IS_WINDOWS,
     isRocmArchAnyOf,
     retry_shell,
@@ -1621,16 +1620,7 @@ def parse_args():
         "--enable-td",
         action="store_true",
         help="Enables removing tests based on TD",
-        default=IS_CI
-        and get_pr_number() is not None
-        and not strtobool(os.environ.get("NO_TD", "False"))
-        and not IS_MACOS
-        and "xpu" not in BUILD_ENVIRONMENT
-        and "onnx" not in BUILD_ENVIRONMENT
-        and (
-            GITHUB_WORKFLOW in ("trunk", "pull")
-            or GITHUB_WORKFLOW.startswith(("rocm-", "periodic-rocm-"))
-        ),
+        default=False,
     )
     parser.add_argument(
         "--shard",

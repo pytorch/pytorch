@@ -380,11 +380,10 @@ jobs:
           cat test/**/*_toprint.log || true
 
       - name: Upload test artifacts
-        uses: pytorch/pytorch/.github/actions/upload-test-artifacts@release/2.14
+        uses: chuanqi129/pytorch/.github/actions/upload-test-artifacts@test_bmg_ut_v2
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
-          use-gha: ${{ inputs.use-gha }}
           s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Authenticate to refresh the HF cache in S3
