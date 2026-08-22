@@ -84,6 +84,9 @@ TORCH_CUDA_CPP_API c10::Allocator* getCUDADeviceAllocator();
 /* Handles */
 TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();
 TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle(bool setup = true);
+TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle(
+    at::DataPtr& workspace,
+    bool setup = true);
 TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
@@ -98,6 +101,8 @@ TORCH_CUDA_CPP_API WorkspaceMapWithMutex& cublaslt_handle_stream_to_workspace();
 TORCH_CUDA_CPP_API size_t getChosenWorkspaceSize();
 TORCH_CUDA_CPP_API size_t getCUDABlasLtWorkspaceSize();
 TORCH_CUDA_CPP_API void* getCUDABlasLtWorkspace();
+TORCH_CUDA_CPP_API void* getCUDABlasLtWorkspace(size_t workspace_size);
+TORCH_CUDA_CPP_API at::DataPtr getEagerCUDABlasWorkspace(size_t size);
 TORCH_CUDA_CPP_API void setChosenWorkspaceSize(size_t size);
 TORCH_CUDA_CPP_API void setCUDABlasLtWorkspaceSize(size_t size);
 TORCH_CUDA_CPP_API void resetChosenWorkspaceSize();

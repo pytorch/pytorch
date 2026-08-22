@@ -142,9 +142,14 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 struct CublasLtWorkspace {
   CublasLtWorkspace() {
     size = at::cuda::getCUDABlasLtWorkspaceSize();
-    ptr = at::cuda::getCUDABlasLtWorkspace();
+    workspace = at::cuda::getEagerCUDABlasWorkspace(size);
+    ptr = workspace.get();
+    if (ptr == nullptr && size != 0) {
+      ptr = at::cuda::getCUDABlasLtWorkspace(size);
+    }
   }
 
+  at::DataPtr workspace;
   void* ptr;
   size_t size;
 };

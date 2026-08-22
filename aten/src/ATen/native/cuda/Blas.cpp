@@ -871,7 +871,8 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
       [&] {
         Tensor result = at::empty({}, self.options());
 
-        auto handle = at::cuda::getCurrentCUDABlasHandle();
+        at::DataPtr workspace;
+        auto handle = at::cuda::getCurrentCUDABlasHandle(workspace);
         at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
         at::cuda::blas::dot<scalar_t>(
             handle,
@@ -918,7 +919,8 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
     Tensor result = at::empty({}, self.options());
 
-    auto handle = at::cuda::getCurrentCUDABlasHandle();
+    at::DataPtr workspace;
+    auto handle = at::cuda::getCurrentCUDABlasHandle(workspace);
     at::cuda::blas::PointerModeGuard pointerModeGuard(
         handle, CUBLAS_POINTER_MODE_DEVICE);
     at::cuda::blas::vdot<scalar_t>(
