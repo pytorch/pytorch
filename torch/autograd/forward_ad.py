@@ -175,6 +175,12 @@ def unpack_dual(tensor, *, level=None):
     if level < 0:
         return UnpackedDualTensor(tensor, None)
 
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    if isinstance(tensor, FunctionalTensor):
+        primal, tangent = tensor.unpack_dual(level)
+        return UnpackedDualTensor(primal, tangent)
+
     from torch._functorch.predispatch import _unpack_dual as _predispatch_unpack_dual
 
     primal, dual = _predispatch_unpack_dual(tensor, level=level)
