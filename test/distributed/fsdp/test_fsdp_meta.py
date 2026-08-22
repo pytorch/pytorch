@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import functools
 import itertools
 import sys
 
@@ -13,10 +14,15 @@ from torch.distributed.fsdp.wrap import (
     ModuleWrapPolicy,
     wrap,
 )
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
@@ -41,8 +47,6 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 def _reset_params_if_meta(is_meta: bool, model: nn.Module):
@@ -106,7 +110,7 @@ class NestedModel(nn.Module):
         return self.l3(self.lin2(self.lin1(x)))
 
 
-def _init_with_reset_params(module: nn.Module):
+def _init_with_reset_params(module: nn.Module, device_type: str):
     """
     to_empty + reset_parameters() init function example for modules
     initialized with device="meta"
@@ -118,8 +122,7 @@ def _init_with_reset_params(module: nn.Module):
         )
     )
     if has_meta_states:
-        device = torch.device(device_type, torch.accelerator.current_device_index())
-        module.to_empty(device=device, recurse=False)
+        module.to_empty(device=torch.device(device_type), recurse=False)
         module.reset_parameters()
 
 
@@ -138,6 +141,8 @@ def _init_with_torchdistX(module: nn.Module):
 
 
 class TestFSDPWithMetaDevice(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -154,7 +159,9 @@ class TestFSDPWithMetaDevice(FSDPTestContinuous):
                         torch.allclose(p1, p2), lambda msg: f"{msg}\n{p1} vs {p2}"
                     )
 
-    def _test_simple_model_with_meta_device(self, meta_module_fn, init_fn=None):
+    def _test_simple_model_with_meta_device(
+        self, meta_module_fn, device_type: str, init_fn=None
+    ):
         # Create model on meta device and wrap with FSDP.
         model = meta_module_fn()
         is_meta = next(model.parameters()).is_meta
@@ -198,48 +205,62 @@ class TestFSDPWithMetaDevice(FSDPTestContinuous):
         regular_opt.step()
         self._compare_fsdp(fsdp_meta, fsdp_regular)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_simple_model_with_meta_device_reset_params(self):
+    def test_simple_model_with_meta_device_reset_params(self, device):
+        device_type = torch.device(device).type
+
         def meta_module_fn():
             return MyModel(device="meta")
 
         self._test_simple_model_with_meta_device(
-            meta_module_fn, _init_with_reset_params
+            meta_module_fn,
+            device_type,
+            functools.partial(_init_with_reset_params, device_type=device_type),
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_simple_model_with_meta_device_default_init(self):
+    def test_simple_model_with_meta_device_default_init(self, device):
+        device_type = torch.device(device).type
+
         def meta_module_fn():
             return MyModel(device="meta")
 
-        self._test_simple_model_with_meta_device(meta_module_fn)
+        self._test_simple_model_with_meta_device(meta_module_fn, device_type)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @skip_but_pass_in_sandcastle_if(
         not _TORCHDISTX_AVAIL,
         "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )
-    def test_simple_model_with_torchdistX_default_init(self):
+    def test_simple_model_with_torchdistX_default_init(self, device):
+        device_type = torch.device(device).type
+
         def meta_module_fn():
             return deferred_init.deferred_init(MyModel, device=device_type)
 
-        self._test_simple_model_with_meta_device(meta_module_fn)
+        self._test_simple_model_with_meta_device(meta_module_fn, device_type)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @skip_but_pass_in_sandcastle_if(
         not _TORCHDISTX_AVAIL,
         "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )
-    def test_simple_model_with_torchdistX_init_fn(self):
+    def test_simple_model_with_torchdistX_init_fn(self, device):
+        device_type = torch.device(device).type
+
         def meta_module_fn():
             return deferred_init.deferred_init(MyModel, device=device_type)
 
         self._test_simple_model_with_meta_device(
-            meta_module_fn, init_fn=_init_with_torchdistX
+            meta_module_fn, device_type, init_fn=_init_with_torchdistX
         )
 
     def _test_nested_model_with_meta_device(
-        self, auto_wrap, meta_module_fn, init_fn=None
+        self, auto_wrap, meta_module_fn, device_type: str, init_fn=None
     ):
         if auto_wrap:
             module = meta_module_fn()
@@ -290,56 +311,71 @@ class TestFSDPWithMetaDevice(FSDPTestContinuous):
         regular_opt.step()
         self._compare_fsdp(fsdp_meta, fsdp_regular)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize("auto_wrap", [True, False])
-    def test_nested_model_with_meta_device_reset_params(self, auto_wrap):
+    def test_nested_model_with_meta_device_reset_params(self, device, auto_wrap):
+        device_type = torch.device(device).type
+
         def meta_module_fn():
             return NestedModel(device="meta")
 
         self._test_nested_model_with_meta_device(
             auto_wrap=auto_wrap,
             meta_module_fn=meta_module_fn,
-            init_fn=_init_with_reset_params,
+            device_type=device_type,
+            init_fn=functools.partial(_init_with_reset_params, device_type=device_type),
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize("auto_wrap", [True, False])
-    def test_nested_model_with_meta_device_default_init(self, auto_wrap):
+    def test_nested_model_with_meta_device_default_init(self, device, auto_wrap):
+        device_type = torch.device(device).type
+
         def meta_module_fn():
             return NestedModel(device="meta")
 
         self._test_nested_model_with_meta_device(
             auto_wrap=auto_wrap,
             meta_module_fn=meta_module_fn,
+            device_type=device_type,
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @skip_but_pass_in_sandcastle_if(
         not _TORCHDISTX_AVAIL,
         "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )
     @parametrize("auto_wrap", [True, False])
-    def test_nested_model_with_torchdistX_default_init(self, auto_wrap):
+    def test_nested_model_with_torchdistX_default_init(self, device, auto_wrap):
+        device_type = torch.device(device).type
+
         def meta_module_fn():
             return deferred_init.deferred_init(NestedModel, device=device_type)
 
         self._test_nested_model_with_meta_device(
-            auto_wrap=auto_wrap, meta_module_fn=meta_module_fn
+            auto_wrap=auto_wrap, meta_module_fn=meta_module_fn, device_type=device_type
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @skip_but_pass_in_sandcastle_if(
         not _TORCHDISTX_AVAIL,
         "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )
     @parametrize("auto_wrap", [True, False])
-    def test_nested_model_with_torchdistX_init_fn(self, auto_wrap):
+    def test_nested_model_with_torchdistX_init_fn(self, device, auto_wrap):
+        device_type = torch.device(device).type
+
         def meta_module_fn():
             return deferred_init.deferred_init(NestedModel, device=device_type)
 
         self._test_nested_model_with_meta_device(
             auto_wrap=auto_wrap,
             meta_module_fn=meta_module_fn,
+            device_type=device_type,
             init_fn=_init_with_torchdistX,
         )
 
@@ -348,17 +384,21 @@ class TestFSDPWithMetaDevice(FSDPTestContinuous):
         with self.assertRaisesRegex(ValueError, "to be callable"):
             FSDP(mod, param_init_fn=42)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @skip_but_pass_in_sandcastle_if(
         not _TORCHDISTX_AVAIL,
         "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )
-    def test_bad_arg_torchdistx(self):
+    def test_bad_arg_torchdistx(self, device):
+        device_type = torch.device(device).type
+
         def meta_module_fn():
-            return deferred_init.deferred_init(NestedModel, device_type)
+            return deferred_init.deferred_init(NestedModel, device=device_type)
 
         self._test_bad_arg(meta_module_fn)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_bad_arg_meta(self):
         def meta_module_fn():
@@ -366,12 +406,15 @@ class TestFSDPWithMetaDevice(FSDPTestContinuous):
 
         self._test_bad_arg(meta_module_fn)
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_meta_device_with_mixed_precision(self):
+    def test_meta_device_with_mixed_precision(self, device):
         """
         Tests meta device initialization with a ``param_init_fn`` when
         specifying mixed precision with ``param_dtype=torch.float32``.
         """
+
+        device_type = torch.device(device).type
 
         class FakeLinear(nn.Module):
             def __init__(
@@ -418,11 +461,16 @@ class TestFSDPWithMetaDevice(FSDPTestContinuous):
                 param_dtype=torch.float32, reduce_dtype=torch.float16
             ),
             param_init_fn=_param_init_fn,
-            device_id=torch.accelerator.current_device_index(),
+            device_id=device_type,
         )
 
 
-instantiate_parametrized_tests(TestFSDPWithMetaDevice)
+instantiate_device_type_tests(
+    TestFSDPWithMetaDevice,
+    globals(),
+    only_for=("cuda", "hpu", "xpu", "privateuse1"),
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
