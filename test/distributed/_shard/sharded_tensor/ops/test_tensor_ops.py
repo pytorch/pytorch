@@ -5,11 +5,13 @@ import copy
 import torch
 import torch.distributed._shard.sharded_tensor as sharded_tensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     TEST_GPU_NUM,
@@ -24,10 +26,13 @@ backend = torch.distributed.get_default_backend_for_device(device_type)
 
 
 class TestTensorOps(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_deep_copy(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_deep_copy(self, device):
+        device_type = torch.device(device).type
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -45,8 +50,9 @@ class TestTensorOps(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_inplace_copy(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_inplace_copy(self, device):
+        device_type = torch.device(device).type
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -72,8 +78,9 @@ class TestTensorOps(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_clone(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_clone(self, device):
+        device_type = torch.device(device).type
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -91,8 +98,9 @@ class TestTensorOps(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_detach(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_detach(self, device):
+        device_type = torch.device(device).type
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -116,8 +124,9 @@ class TestTensorOps(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_set_requires_grad(self):
+    @requires_capabilities(Capability.distributed.backend)
+    def test_set_requires_grad(self, device):
+        device_type = torch.device(device).type
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -139,6 +148,8 @@ class TestTensorOps(ShardedTensorTestBase):
         for local_shard in local_shards:
             self.assertTrue(local_shard.tensor.requires_grad)
 
+
+instantiate_device_type_tests(TestTensorOps, globals(), except_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
