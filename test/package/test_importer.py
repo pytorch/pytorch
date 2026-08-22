@@ -10,7 +10,7 @@ from torch.package import (
     PackageImporter,
     sys_importer,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 try:
@@ -22,6 +22,8 @@ except ImportError:
 
 class TestImporter(PackageTestCase):
     """Tests for Importer and derived classes."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_sys_importer(self):
         import package_a
