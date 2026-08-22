@@ -71,6 +71,7 @@ from torch.utils._sympy.functions import (
     Min,
     Mod,
 )
+from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRangeError
 
 
@@ -5799,6 +5800,34 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         torch._dynamo.decorators.mark_unbacked(x2, 0, shape_id="other")
         compiled_func(x2)
         self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_bounds_partially_specified(self):
+        """
+        Unbacked sizes are size oblivious, an unspecified min stays 0.
+        """
+        ranges = []
+
+        def backend(gm, example_inputs):
+            for arg in example_inputs:
+                if isinstance(arg, torch.SymInt):
+                    vr = arg.node.shape_env.var_to_range[arg.node.expr]
+                    ranges.append((vr.lower, vr.upper))
+            return gm.forward
+
+        for kwargs, expected in (
+            ({"max": 10}, (0, 10)),
+            ({"min": 3}, (3, int_oo)),
+            ({"min": 3, "max": 10}, (3, 10)),
+            ({}, (0, int_oo)),
+        ):
+            with self.subTest(kwargs=kwargs):
+                torch._dynamo.reset()
+                ranges.clear()
+                x = torch.randn(4)
+                torch._dynamo.decorators.mark_unbacked(x, 0, **kwargs)
+                torch.compile(lambda t: t.cos() * t.shape[0], backend=backend)(x)
+                self.assertEqual(ranges, [expected])
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_unbacked_bounds_recompilation(self):
