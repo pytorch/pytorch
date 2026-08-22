@@ -41,6 +41,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -168,6 +169,8 @@ def get_transform_func(num_tensors, dtype, device, is_fastpath):
 # as the pair would go through `multi_tensor_apply_kernel` if inputs are not zero size.
 @unittest.mock.patch.dict(os.environ, {"KINETO_LOG_LEVEL": "5"})
 class TestForeach(TestCase):
+    hw_classification = HardwareClassification.DEVICE_GENERIC
+
     @property
     def is_cuda(self):
         return self.device_type == "cuda"
@@ -2158,7 +2161,7 @@ _FOREACH_MM_SHAPES = [
 ]
 
 
-class TestForeachMM(TestCase):
+class _ForeachMMCheckMixin:
     def _check(self, shapes, dtype, device):
         A = [torch.randn(M, K, dtype=dtype, device=device) for M, _, K in shapes]
         B = [torch.randn(K, N, dtype=dtype, device=device) for _, N, K in shapes]
@@ -2173,6 +2176,10 @@ class TestForeachMM(TestCase):
                 o, r, msg=lambda msg: f"{msg}\nmismatch at group {i}", **kwargs
             )
 
+
+class TestForeachMMGeneric(_ForeachMMCheckMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "label,shapes",
         _FOREACH_MM_SHAPES,
@@ -2180,16 +2187,6 @@ class TestForeachMM(TestCase):
     )
     def test_foreach_mm_cpu(self, label, shapes):
         self._check(shapes, torch.float32, "cpu")
-
-    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
-    @parametrize(
-        "label,shapes",
-        _FOREACH_MM_SHAPES,
-        name_fn=lambda label, shapes: label,
-    )
-    @parametrize("dtype", [torch.bfloat16, torch.float32])
-    def test_foreach_mm_cuda(self, label, shapes, dtype):
-        self._check(shapes, dtype, "cuda")
 
     def test_foreach_mm_gradcheck(self):
         G = 4
@@ -2289,9 +2286,21 @@ class TestForeachMM(TestCase):
         ):
             self.assertEqual(impl._foreach_mm_route(A, B), expected)
 
-    @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+
+@unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
+class TestForeachMMCUDA(_ForeachMMCheckMixin, TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @parametrize(
+        "label,shapes",
+        _FOREACH_MM_SHAPES,
+        name_fn=lambda label, shapes: label,
     )
+    @parametrize("dtype", [torch.bfloat16, torch.float32])
+    def test_foreach_mm_cuda(self, label, shapes, dtype):
+        self._check(shapes, dtype, "cuda")
+
+    @unittest.skipUnless(SM90OrLater, "requires SM90+")
     @parametrize(
         "label,a_shape,b_shape,a_dtype,b_dtype",
         [
@@ -2312,9 +2321,7 @@ class TestForeachMM(TestCase):
         B = [torch.randn(*b_shape, dtype=b_dtype, device="cuda") for _ in range(2)]
         self.assertFalse(_foreach_mm_cond(A, B))
 
-    @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
-    )
+    @unittest.skipUnless(SM90OrLater, "requires SM90+")
     @parametrize(
         "label,shapes",
         [
@@ -2346,9 +2353,7 @@ class TestForeachMM(TestCase):
             self.assertEqual(o, r)
 
     @skipIfNoNvmath
-    @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
-    )
+    @unittest.skipUnless(SM90OrLater, "requires SM90+")
     @parametrize(
         "label,shapes",
         [
@@ -2382,7 +2387,8 @@ class TestForeachMM(TestCase):
         self._check(shapes, torch.bfloat16, "cuda")
 
 
-instantiate_parametrized_tests(TestForeachMM)
+instantiate_parametrized_tests(TestForeachMMGeneric)
+instantiate_parametrized_tests(TestForeachMMCUDA)
 
 
 if __name__ == "__main__":
