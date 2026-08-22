@@ -7,6 +7,8 @@ from unittest import mock
 from tools.stats.upload_test_stats import (
     backfill_test_jsons_while_running,
     get_tests,
+    parse_xml_report,
+    sanitize_case_inplace,
     summarize_test_cases,
 )
 
@@ -15,6 +17,16 @@ IN_CI = os.environ.get("CI")
 
 _MINIMAL_JUNIT_XML = (
     '<testsuite><testcase classname="C" name="t" time="0"/></testsuite>'
+)
+
+# A raw pytest xunit2 testcase: dotted package-path classname and no `file`
+# attribute. This is the shape that leaks to ClickHouse with file='' when the
+# in-process sanitize pass (common_utils.sanitize_pytest_xml) is skipped because
+# the test subprocess was killed (shard timeout, OOM, teardown crash).
+_UNSANITIZED_PYTEST_XML = (
+    "<testsuite>"
+    '<testcase classname="test.test_ops.TestCommonCPU" name="test_foo_cpu" time="1.5"/>'
+    "</testsuite>"
 )
 
 
@@ -92,6 +104,91 @@ class TestUploadTestStats(unittest.TestCase):
             self.assertIn("python-pytest_foo-1.json", joined)
             self.assertIn("python-pytest_bar-1.json", joined)
             self.assertNotIn("baz-1", joined)
+
+
+class TestSanitizeCaseInplace(unittest.TestCase):
+    def test_backfills_file_from_dotted_classname(self) -> None:
+        case = {"classname": "test.test_ops.TestCommonCPU", "name": "test_foo"}
+        sanitize_case_inplace(case)
+        self.assertEqual(case["file"], "test_ops.py")
+        self.assertEqual(case["classname"], "TestCommonCPU")
+
+    def test_nested_module_path_becomes_directory(self) -> None:
+        case = {"classname": "test.inductor.test_torchinductor.TestInductorCPU"}
+        sanitize_case_inplace(case)
+        self.assertEqual(case["file"], "inductor/test_torchinductor.py")
+        self.assertEqual(case["classname"], "TestInductorCPU")
+
+    def test_no_test_prefix(self) -> None:
+        # classname without the leading "test." package prefix still resolves.
+        case = {"classname": "test_ops.TestCommonCPU"}
+        sanitize_case_inplace(case)
+        self.assertEqual(case["file"], "test_ops.py")
+        self.assertEqual(case["classname"], "TestCommonCPU")
+
+    def test_idempotent(self) -> None:
+        case = {"classname": "test.test_ops.TestCommonCPU"}
+        sanitize_case_inplace(case)
+        first = dict(case)
+        sanitize_case_inplace(case)  # second pass must be a no-op
+        self.assertEqual(case, first)
+
+    def test_leaves_already_sanitized_case_untouched(self) -> None:
+        case = {"classname": "TestCommonCPU", "file": "test_ops.py"}
+        before = dict(case)
+        sanitize_case_inplace(case)
+        self.assertEqual(case, before)
+
+    def test_never_overwrites_a_populated_file(self) -> None:
+        # Defensive: even with a dotted classname, an existing file wins.
+        case = {"classname": "test.weird.Thing", "file": "real_file.py"}
+        before = dict(case)
+        sanitize_case_inplace(case)
+        self.assertEqual(case, before)
+
+    def test_dotless_classname_without_file_is_left_alone(self) -> None:
+        # No dot -> nothing to derive -> leave the row as-is rather than guess.
+        case = {"classname": "TestCommonCPU"}
+        sanitize_case_inplace(case)
+        self.assertNotIn("file", case)
+        self.assertEqual(case["classname"], "TestCommonCPU")
+
+    def test_degenerate_dotted_classname_left_alone(self) -> None:
+        # Leading/trailing-dot classnames are malformed; don't emit a
+        # nonsensical ".py" file or an empty classname -- leave them untouched.
+        for bad in (".TestFoo", "test.test_ops."):
+            case = {"classname": bad}
+            sanitize_case_inplace(case)
+            self.assertNotIn("file", case)
+            self.assertEqual(case["classname"], bad)
+
+    def test_non_string_classname_ignored(self) -> None:
+        case = {"classname": 123}
+        sanitize_case_inplace(case)
+        self.assertNotIn("file", case)
+
+    def test_missing_classname_ignored(self) -> None:
+        case: dict = {"name": "t"}
+        sanitize_case_inplace(case)
+        self.assertNotIn("file", case)
+
+
+class TestParseXmlReportSanitizes(unittest.TestCase):
+    def test_parse_xml_report_backfills_empty_file(self) -> None:
+        """End-to-end: an unsanitized pytest XML parses into a case with `file`
+        backfilled and the classname stripped to its bare form.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            report = Path(raw) / "test_ops" / "python-pytest_test_ops.xml"
+            report.parent.mkdir(parents=True)
+            report.write_text(_UNSANITIZED_PYTEST_XML)
+
+            cases = parse_xml_report("testcase", report, 99, 1, job_id=7)
+
+            self.assertEqual(len(cases), 1)
+            self.assertEqual(cases[0]["file"], "test_ops.py")
+            self.assertEqual(cases[0]["classname"], "TestCommonCPU")
+            self.assertEqual(cases[0]["job_id"], 7)
 
 
 if __name__ == "__main__":
