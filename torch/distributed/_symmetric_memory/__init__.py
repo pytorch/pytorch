@@ -24,6 +24,35 @@ from torch._prims_common import make_contiguous_strides_for
 from torch.utils._triton import has_triton
 
 
+_watchdog_timeout: float | timedelta | None = None
+
+
+def set_watchdog_timeout(timeout: float | timedelta | None) -> None:
+    """
+    Set the watchdog timeout for symmetric memory operations. This is a global
+    setting. When set, blocking operations (e.g. rendezvous) are guarded by a
+    CPU watchdog timer that fires if the operation exceeds the configured
+    duration. Stream operations (e.g. put_signal, wait_signal) are guarded by
+    a stream watchdog timer.
+
+    Pass ``None`` to disable the watchdog.
+
+    Args:
+        timeout (float | timedelta | None): timeout in seconds (float) or as a
+            timedelta. ``None`` disables the watchdog.
+    """
+    global _watchdog_timeout
+    _watchdog_timeout = timeout
+
+
+def get_watchdog_timeout() -> float | timedelta | None:
+    """
+    Return the current watchdog timeout for symmetric memory operations, or
+    ``None`` if no watchdog is configured.
+    """
+    return _watchdog_timeout
+
+
 _group_name_to_store: dict[str, c10d.Store] = {}
 
 
@@ -147,6 +176,14 @@ def get_symm_mem_workspace(
             group_name,
         )
         _group_name_to_workspace_tensor[group_name] = tensor
+    if _watchdog_timeout is not None:
+        from torch.distributed._watchdog import cpu_timeout
+
+        handle = cpu_timeout(_watchdog_timeout)
+        try:
+            return _SymmetricMemory.rendezvous(tensor)
+        finally:
+            handle.cancel()
     return _SymmetricMemory.rendezvous(tensor)
 
 
@@ -2272,6 +2309,14 @@ def rendezvous(
             participating processes. This can be either a group name or a process group object.
     """
     group_name = _resolve_group_name(group)
+    if _watchdog_timeout is not None:
+        from torch.distributed._watchdog import cpu_timeout
+
+        handle = cpu_timeout(_watchdog_timeout)
+        try:
+            return _SymmetricMemory.rendezvous(tensor, group_name)
+        finally:
+            handle.cancel()
     return _SymmetricMemory.rendezvous(tensor, group_name)
 
 
@@ -2518,6 +2563,10 @@ def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
     # TODO: other backends' dispatch goes here
     else:
         raise ValueError(f"put_signal: unsupported backend: {backend}")
+    if _watchdog_timeout is not None:
+        from torch.distributed._watchdog import stream_timeout
+
+        stream_timeout(_watchdog_timeout)
 
 
 def wait_signal(hdl: _SymmetricMemory, peer: int) -> None:
@@ -2538,6 +2587,10 @@ def wait_signal(hdl: _SymmetricMemory, peer: int) -> None:
     # TODO: other backends' dispatch goes here
     else:
         raise ValueError(f"wait_signal: unsupported backend: {backend}")
+    if _watchdog_timeout is not None:
+        from torch.distributed._watchdog import stream_timeout
+
+        stream_timeout(_watchdog_timeout)
 
 
 def reduce_scatter_offset(
