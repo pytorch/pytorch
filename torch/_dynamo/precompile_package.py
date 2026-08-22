@@ -1112,6 +1112,11 @@ def _wont_generalize(
     return tuple(sorted(pinned))
 
 
+# Healing re-serializes, which can in principle prune something new. Bounded
+# rather than open: in practice one pass is always enough.
+_VALIDATION_PASSES = 4
+
+
 def _grad_snapshot(
     fn: object, examples: Sequence[object]
 ) -> dict[torch.Tensor, torch.Tensor | None]:
@@ -1584,8 +1589,10 @@ class PrecompileSession:
                 self._report_guard_drift(code_entry, probe.guard_manager)
                 if not failures:
                     continue
-                guarded.guards_state = self._reserialize_without(
-                    code_entry, f_code, loaded, failures
+                guarded.guards_state = self._validated(
+                    code_entry,
+                    f_code,
+                    self._reserialize_without(code_entry, f_code, loaded, failures),
                 )
 
     def _report_guard_drift(self, code_entry: Any, rebuilt: Any) -> None:
@@ -1618,6 +1625,47 @@ class PrecompileSession:
             code_entry.python_code.co_name,
             len(extra),
             sorted(f"{cls}: {payload}" for cls, payload in extra)[:5],
+        )
+
+    def _validated(
+        self, code_entry: Any, f_code: types.CodeType, written: bytes
+    ) -> bytes:
+        """Rebuild the pickle that will SHIP, and heal it if it does not.
+
+        The policy pass validates the pickle it READ and ships the one it WROTE.
+        Those differ -- re-serialization rebuilds the value-pruning tree against
+        reconstructed objects, so a value whose identity the reconstruction
+        changed is pruned on the way out even though the guard naming it was
+        kept. Nothing downstream rebuilds the shipped bytes, so that lands on
+        the serving machine as a load failure.
+
+        Loops rather than checking once, because healing re-serializes and a
+        re-serialization is what introduces this class in the first place.
+        """
+        from torch._dynamo.guards import CheckFunctionManager
+        from torch._dynamo.output_graph import OutputGraphCommon
+        from torch._dynamo.package import load_guards_state
+
+        for _ in range(_VALIDATION_PASSES):
+            loaded = load_guards_state(written)
+            failures: list[tuple[Guard, Exception]] = []
+            try:
+                CheckFunctionManager(
+                    f_code,
+                    OutputGraphCommon(loaded.output_graph),
+                    shape_code_parts=loaded.shape_code_parts,
+                    runtime_global_scope=None,
+                    guard_build_local_state=getattr(loaded, "local_state", None),
+                    collect_guard_failures=failures,
+                )
+            except Exception as e:
+                raise _unrebuildable_guards(code_entry, e) from e
+            if not failures:
+                return written
+            written = self._reserialize_without(code_entry, f_code, loaded, failures)
+        raise _unrebuildable_guards(
+            code_entry,
+            AssertionError(f"still not rebuildable after {_VALIDATION_PASSES} passes"),
         )
 
     def _record_unrebuildable(
@@ -1758,7 +1806,7 @@ class PrecompileSession:
                 if failures:
                     self._record_unrebuildable(code_entry, failures)
                 self._report_guard_drift(code_entry, rebuilt)
-                guarded.guards_state = pruned
+                guarded.guards_state = self._validated(code_entry, f_code, pruned)
 
         self._policy_dropped_guards |= dropped
         # Not "risky": the policy is the caller stating that the environment is
