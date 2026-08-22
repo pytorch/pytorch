@@ -16,12 +16,18 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.tensor import DTensor, Replicate, Shard
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import parametrize, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
-    skip_if_lt_x_gpu,
     with_comms,
 )
 
@@ -49,6 +55,8 @@ class DenseModel(torch.nn.Module):
 
 # TODO: Consolidate DeviceMesh based FSDP and HSDP test cases.
 class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _create_model(self, device, device_mesh=None):
         device_id = device_type
         if device_mesh:
@@ -324,9 +332,8 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
                 self.assertIsInstance(state["exp_avg_sq"], torch.Tensor)
 
 
-devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
-    TestHSDPWithDeviceMeshAndDTensor, globals(), only_for=devices, allow_xpu=True
+    TestHSDPWithDeviceMeshAndDTensor, globals(), except_for="cpu", allow_xpu=True
 )
 if __name__ == "__main__":
     run_tests()
