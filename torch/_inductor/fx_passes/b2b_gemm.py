@@ -3,6 +3,7 @@ import functools
 from collections import deque
 
 import torch
+from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
@@ -358,6 +359,72 @@ b2b_gemm_configs = [
 ]
 
 
+# XPU-specific configs: num_stages=1 with smaller tiles and lower warps.
+# Appended to the autotune candidate set only on XPU (see tuned_b2b_gemm).
+# On XPU these simpler configs are what autotune selects as best for the
+# nested b2b loops; the CUDA-tuned num_stages>=2 / larger-tile candidates
+# do not win on XPU hardware. Gated to XPU so CUDA/HIP autotune sees no
+# extra candidates.
+b2b_gemm_xpu_configs = [
+    {
+        "BLOCK_SIZE_M": 32,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 32,
+        "BLOCK_SIZE_P": 32,
+        "num_stages": 1,
+        "num_warps": 2,
+    },
+    {
+        "BLOCK_SIZE_M": 32,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 16,
+        "BLOCK_SIZE_P": 32,
+        "num_stages": 1,
+        "num_warps": 2,
+    },
+    {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 16,
+        "BLOCK_SIZE_P": 64,
+        "num_stages": 1,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 32,
+        "BLOCK_SIZE_P": 64,
+        "num_stages": 1,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 16,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 1,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 16,
+        "BLOCK_SIZE_P": 16,
+        "num_stages": 1,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 32,
+        "BLOCK_SIZE_O": 32,
+        "BLOCK_SIZE_P": 64,
+        "num_stages": 1,
+        "num_warps": 4,
+    },
+]
+
+
 def is_b2b_gemm_good_on(
     is_left_assoc: bool,
     A_node: torch.fx.Node,
@@ -387,11 +454,28 @@ def is_b2b_gemm_good_on(
         return False
     if not all([len(A.shape) == 2, len(B.shape) == 2, len(C.shape) == 2]):
         return False
-    if not ((A.shape[1] == B.shape[0]) and (B.shape[1] == C.shape[0])):
-        return False
     # size checks: we only dispatch to B2B-GEMM when the average load ratio is > 1
     M, N = A.shape
     O, P = C.shape
+
+    # Convert symbolic shape dims to concrete ints up front. FakeTensor shapes
+    # may be torch.SymInt: a hinted SymInt guards to its concrete value, but an
+    # unhinted/unbacked one raises GuardOnDataDependentSymNode (a RuntimeError,
+    # not TypeError); a non-SymInt, non-int raises TypeError. Converting before
+    # the compatibility checks below matters because SymInt == SymInt returns a
+    # SymBool whose bool() raises GuardOnDataDependentSymNode when the symbol
+    # is unbacked, which would otherwise escape this heuristic. Once concrete,
+    # the checks below are plain int comparisons. If we can't make the dims
+    # concrete, the heuristic can't be evaluated statically, so skip b2b_gemm.
+    try:
+        M, N, O, P = int(M), int(N), int(O), int(P)
+        # contraction dims must line up: A cols == B rows, B cols == C rows.
+        N_b, O_b = int(B.shape[0]), int(B.shape[1])
+    except (TypeError, GuardOnDataDependentSymNode):
+        return False
+    if not (N == N_b and O == O_b):
+        return False
+
     ratios = []
     if is_left_assoc:
         for config in b2b_gemm_configs:
@@ -569,8 +653,18 @@ def tuned_b2b_gemm(
         placeholders,  # type: ignore[arg-type, list-item]
         subgraph,
     )
+    # XPU gets extra num_stages=1 / small-tile candidates, which autotune
+    # selects as best on XPU for the nested b2b loops. Gated by device so
+    # that CUDA and HIP share the original CUDA-oriented b2b_gemm_configs
+    # candidate set.
+    device = A.get_device_or_error()
+    candidate_configs = (
+        b2b_gemm_configs + b2b_gemm_xpu_configs
+        if device.type == "xpu"
+        else b2b_gemm_configs
+    )
     choices: list[TritonTemplateCaller] = []
-    for config in b2b_gemm_configs:
+    for config in candidate_configs:
         if is_left_assoc:
             b2b_gemm_left_template.maybe_append_choice(
                 choices,

@@ -7,11 +7,9 @@ from torch._dynamo.utils import counters
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
-@skipIfXpu(msg="Segmentation fault on CI machine")
 class B2BGEMMTest(TestCase):
     device = GPU_TYPE
 
@@ -166,6 +164,77 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
+
+    @torch._dynamo.config.patch(recompile_limit=32)
+    @torch._inductor.config.patch(b2b_gemm_pass=True)
+    def test_b2b_gemm_good_shape_dynamic_shapes(self):
+        """
+        Under dynamic=True, FakeTensor shapes can be concrete-wrapping
+        torch.SymInt. is_b2b_gemm_good_on() converts them with int() before
+        passing to ceildiv(), which asserts on non-int. Without the guard this
+        used to crash the compiler (AssertionError: <class 'torch.SymInt'>).
+        """
+
+        def f(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
+            return torch.mm(torch.mm(m1, m2), m3)
+
+        f_opt = torch.compile(f, dynamic=True)
+        A = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
+        B = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
+        C = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
+        res = f_opt(A, B, C)
+        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
+        self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
+
+    @torch._dynamo.config.patch(recompile_limit=32)
+    @torch._inductor.config.patch(b2b_gemm_pass=True)
+    def test_b2b_gemm_good_shape_unbacked_symbol_skips(self):
+        """
+        When a b2b_gemm input has an unhinted, unbacked symbolic shape (a
+        data-dependent dim with no concrete value to guard to), int(SymInt)
+        raises GuardOnDataDependentSymNode (a RuntimeError, not TypeError).
+        is_b2b_gemm_good_on() must catch it and skip b2b_gemm rather than
+        crashing the compiler. The pass should not fire for such a shape.
+
+        Cover two placements of the unbacked symbol:
+        - an outer (batch) dim of A, which is converted by int() directly;
+        - a contraction dim shared by two operands, where the compatibility
+          check (A.shape[1] == B.shape[0]) would otherwise bool() a SymBool and
+          raise GuardOnDataDependentSymNode before the int() block.
+        """
+
+        class FakeVal:
+            def __init__(self, shape):
+                self.shape = shape
+                self.is_cuda = False
+                self.is_xpu = True
+
+        class FakeNode:
+            def __init__(self, shape):
+                self.meta = {"val": FakeVal(shape)}
+
+        from torch._inductor.fx_passes.b2b_gemm import is_b2b_gemm_good_on
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        # Unbacked symbol in an outer dim of A (the M dim). int() hits it.
+        env = ShapeEnv()
+        u_m = env.create_unbacked_symint()  # unhinted, unbacked
+        A_node = FakeNode((u_m, 32))
+        B_node = FakeNode((32, 64))
+        C_node = FakeNode((64, 32))
+        self.assertFalse(is_b2b_gemm_good_on(True, A_node, B_node, C_node))
+
+        # Unbacked symbol in a contraction dim, compared against a concrete
+        # dim in the other operand (A's cols == B's rows, where one is unbacked
+        # and the other is a concrete int). The compatibility check would
+        # bool() a SymBool and raise GuardOnDataDependentSymNode before the
+        # int() block if the guard did not cover this path.
+        env = ShapeEnv()
+        u_k = env.create_unbacked_symint()  # unhinted, unbacked
+        A_node = FakeNode((64, u_k))
+        B_node = FakeNode((32, 64))
+        C_node = FakeNode((64, 32))
+        self.assertFalse(is_b2b_gemm_good_on(True, A_node, B_node, C_node))
 
     @unittest.skipIf(os.environ.get("DO_PERF_TEST") != "1", "Perf test not enabled")
     @torch._dynamo.config.patch(recompile_limit=32)
