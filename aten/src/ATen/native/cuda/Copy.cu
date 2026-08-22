@@ -340,8 +340,8 @@ bool maybe_tiled_transpose_copy(TensorIterator& iter) {
   dim3 grid((unsigned)tiles_x,
             (unsigned)(tiles_y < kMaxGridY ? tiles_y : kMaxGridY));
   auto stream = at::cuda::getCurrentCUDAStream();
-  const void* sp = iter.data_ptr(1);
-  void* dp = iter.data_ptr(0);
+  const void* sp = iter.tensor(1).const_data_ptr();
+  void* dp = iter.tensor(0).mutable_data_ptr();
 
   switch (es) {
     case 1: transpose_copy_tiled_kernel<uint8_t><<<grid, block, 0, stream>>>(
