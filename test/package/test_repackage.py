@@ -3,7 +3,7 @@
 from io import BytesIO
 
 from torch.package import PackageExporter, PackageImporter, sys_importer
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 try:
@@ -15,6 +15,8 @@ except ImportError:
 
 class TestRepackage(PackageTestCase):
     """Tests for repackaging."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_repackage_import_indirectly_via_parent_module(self):
         from package_d.imports_directly import ImportsDirectlyFromSubSubPackage
