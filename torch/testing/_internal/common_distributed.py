@@ -310,6 +310,10 @@ def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
 def skip_if_lt_x_gpu(x, *, allow_cpu=False):
     """Skip if fewer than x accelerators available.
 
+    NOTE: The naming retains "gpu" for backward compatibility, but the logic
+    is hardware-agnostic and works for any accelerator supported by
+    torch.accelerator (e.g., CUDA, XPU, HPU, and PrivateUse1-based backends).
+
     Args:
         x: Minimum number of accelerators required.
         allow_cpu: If True, run the test on CPU-only machines (no accelerators).
@@ -318,15 +322,18 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if torch.cuda.is_available() and torch.cuda.device_count() >= x:
+            if torch.accelerator.is_available():
+                if torch.accelerator.device_count() >= x:
+                    return func(*args, **kwargs)
+            elif allow_cpu:
                 return func(*args, **kwargs)
-            if TEST_HPU and torch.hpu.device_count() >= x:
-                return func(*args, **kwargs)
-            if TEST_XPU and torch.xpu.device_count() >= x:
-                return func(*args, **kwargs)
-            if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU):
-                return func(*args, **kwargs)
+
+            # NOTE: TEST_SKIPS uses "multi-gpu-{x}" naming for historical/
+            # backward-compatibility reasons only. The skip logic itself is
+            # hardware-agnostic and does not assume CUDA/GPU.
             test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
+            # NOTE: _maybe_handle_skip_if_lt_x_gpu retains "gpu" in its name
+            # for backward compatibility; it is hardware-agnostic.
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
