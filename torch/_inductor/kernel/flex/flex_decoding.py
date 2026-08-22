@@ -406,7 +406,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         # Add ROCm-specific parameters if they exist in the config
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
             if hasattr(conf, attrib):
-                cur_kernel_options[attrib] = getattr(conf, attrib)
+                cur_kernel_options.setdefault(attrib, getattr(conf, attrib))
 
         flex_decoding_template.maybe_append_choice(
             choices=choices,

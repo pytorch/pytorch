@@ -509,7 +509,7 @@ def flex_attention(
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
             if hasattr(conf, attrib):
-                cur_kernel_options[attrib] = getattr(conf, attrib)
+                cur_kernel_options.setdefault(attrib, getattr(conf, attrib))
 
         error = flex_attention_template.maybe_append_choice(
             choices=choices,
@@ -1099,7 +1099,7 @@ def flex_attention_backward(*args, **kwargs):
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
             if hasattr(conf, attrib):
-                cur_kernel_options[attrib] = getattr(conf, attrib)
+                cur_kernel_options.setdefault(attrib, getattr(conf, attrib))
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
