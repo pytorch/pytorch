@@ -216,6 +216,21 @@ class _PrecompileDynamoUnguardedAttribute(torch.nn.Module):
         return self.linear(x).relu().sum()
 
 
+class _PrecompileDynamoReadsTensorAttribute(torch.nn.Module):
+    def forward(self, x):
+        companion = getattr(x, "_cpu_copy", None)
+        return x * 2 if companion is None else x * 2 + companion.to(x.device)
+
+
+def _precompile_dynamo_tensor_attribute_break(module, x):
+    torch._dynamo.graph_break()
+    return module(x).sum()
+
+
+def _precompile_dynamo_reads_tensor_flag(x):
+    return x * getattr(x, "my_flag", 1)
+
+
 class _PrecompileDynamoStepCounter(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1653,6 +1668,82 @@ class TestPrecompile(TestCase):
         loaded = torch.compiler.precompile.load(code, cache)
         for _, x in examples:
             self.assertEqual(loaded(runtime, x), reference(x))
+
+    @parametrize("graph_break", (False, True))
+    def test_tracer_dynamo_guard_through_tensor_attribute(self, graph_break):
+        model = _PrecompileDynamoReadsTensorAttribute()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        x.unused = (index for index in range(3))
+        fn = (
+            _precompile_dynamo_tensor_attribute_break
+            if graph_break
+            else _precompile_dynamo_call_module
+        )
+        code, cache = torch.compiler.precompile(
+            fn,
+            example_inputs=[(model, x)],
+            tracer="dynamo",
+            backend="eager",
+            require_no_risky_drops=False,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(model, x), fn(model, x))
+        x._cpu_copy = torch.randn(8)
+        self.assertEqual(loaded(model, x), fn(model, x))
+
+    def test_tracer_dynamo_self_referential_tensor_attribute(self):
+        x = torch.randn(4)
+        x.my_flag = x
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_reads_tensor_flag,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+            require_no_risky_drops=False,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x), _precompile_dynamo_reads_tensor_flag(x))
+
+    def test_tracer_dynamo_wrapper_subclass_requires_grad(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        x = TwoTensor(torch.randn(3), torch.randn(3)).requires_grad_(True)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+            training=True,
+            require_no_risky_drops=False,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
+
+    @parametrize(
+        "marking",
+        ("unbacked", "unbacked_bounds", "unbacked_shape_id", "static", "dynamic"),
+    )
+    def test_tracer_dynamo_marked_artifact_serves_capture_tensor(self, marking):
+        model = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        {
+            "unbacked": lambda t: mark_unbacked(t, 0),
+            "unbacked_bounds": lambda t: mark_unbacked(t, 0, min=4, max=16),
+            "unbacked_shape_id": lambda t: mark_unbacked(t, 0, shape_id="batch"),
+            "static": lambda t: torch._dynamo.decorators.mark_static(t, 0),
+            "dynamic": lambda t: mark_dynamic(t, 0),
+        }[marking](x)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_call_module,
+            example_inputs=[(model, x)],
+            tracer="dynamo",
+            backend="eager",
+            training=True,
+            require_no_risky_drops=False,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(model, x), model(x))
 
     def test_tracer_dynamo_captures_every_example_past_default_limit(self):
         x = torch.randn(4)

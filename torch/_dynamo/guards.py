@@ -3841,11 +3841,17 @@ class GuardBuilder(GuardBuilderBase):
                 "_dynamo_static_indices",
             )
 
+            def read_marking(attr_name: str) -> Any:
+                marking = getattr(value, attr_name, None)
+                if marking is not None:
+                    self.guard_tree_values[id(marking)] = marking
+                return marking
+
             expected_attrs: dict[str, set[int]] = {}
             absent_attrs: list[str] = []
             for attr_name in dim_marking_attrs:
                 if hasattr(value, attr_name):
-                    expected_attrs[attr_name] = getattr(value, attr_name)
+                    expected_attrs[attr_name] = read_marking(attr_name)
                     code_part = f"((getattr({tensor_name}, '{attr_name}', set()).issubset({getattr(value, attr_name)!r})) if hasattr({tensor_name}, '{attr_name}') else True)"
                     code.append(code_part)
                 else:
@@ -3859,7 +3865,7 @@ class GuardBuilder(GuardBuilderBase):
             gate_attr = "_dynamo_unbacked_indices"
             if hasattr(value, gate_attr):
                 for attr_name in dep_attr_names:
-                    attr_value = getattr(value, attr_name, None)
+                    attr_value = read_marking(attr_name)
                     dependent_attrs[attr_name] = (attr_value, gate_attr)
                     code_part = f"((getattr({tensor_name}, '{attr_name}', None) == {attr_value!r}) if hasattr({tensor_name}, '{gate_attr}') else True)"
                     code.append(code_part)
@@ -4090,12 +4096,44 @@ class _Missing:
         return _Missing()
 
 
+_FAKE_TENSOR_OWNED_ATTRIBUTES = frozenset(
+    {
+        "_fake_device",
+        "fake_mode",
+        "constant",
+        "pytype",
+        "dispatch_keys",
+        "real_tensor",
+        "_nonzero_memo",
+        "_nonzero_memo_vc",
+        "_nonzero_memo_epoch",
+        "_item_memo",
+        "_item_memo_vc",
+        "_item_memo_epoch",
+        "_unique_memo",
+        "_unique_memo_vc",
+        "_unique_memo_epoch",
+        "_unique_consecutive_memo",
+        "_unique_consecutive_memo_vc",
+        "_unique_consecutive_memo_epoch",
+        "_nested_int_memo",
+        "_nested_int_memo_vc",
+        "_nested_int_memo_epoch",
+    }
+)
+
+_FAKE_TENSOR_RESERVED_ATTRIBUTES = frozenset(
+    {"_fake_device", "fake_mode", "pytype", "dispatch_keys"}
+)
+
+
 @functools.cache
 def _get_unsupported_types() -> tuple[type, ...]:
     # We only do ID_MATCH on C objects which is already banned from guards serialization.
     ret: tuple[type, ...] = (
         torch._C.Stream,
         weakref.ReferenceType,
+        torch._C.Generator,
     )
     try:
         ret += (torch._C._distributed_c10d.ProcessGroup,)
@@ -4140,6 +4178,34 @@ class GuardsStatePickler(pickle.Pickler):
         self.guard_tree_values = guard_tree_values
         self.empty_values = empty_values
         self.missing_values = missing_values
+
+    @classmethod
+    def _restore_tensor_attributes(
+        cls, tensor: torch.Tensor, state: dict[str, Any]
+    ) -> None:
+        for name, value in state.items():
+            object.__setattr__(tensor, name, value)
+
+    def _carried_tensor_attributes(self, obj: torch.Tensor) -> dict[str, Any] | None:
+        state = getattr(obj, "__dict__", None)
+        if not state:
+            return None
+        is_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+            obj, torch._subclasses.FakeTensor
+        )
+        carried: dict[str, Any] = {}
+        for name, value in state.items():
+            if is_fake and name in _FAKE_TENSOR_OWNED_ATTRIBUTES:
+                continue
+            if not self._keep(value):
+                continue
+            if name in _FAKE_TENSOR_RESERVED_ATTRIBUTES:
+                raise torch._dynamo.exc.PackageError(
+                    f"a guard reads {name!r} off a tensor, but precompile rebuilds "
+                    "that tensor as a FakeTensor whose own state uses the same name"
+                )
+            carried[name] = value
+        return carried or None
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4189,6 +4255,8 @@ class GuardsStatePickler(pickle.Pickler):
         out = pytype.__tensor_unflatten__(  # type: ignore[attr-defined]
             inner_tensors, ctx, outer_size, outer_stride
         )
+        if out.requires_grad != meta_tensor.requires_grad:
+            out.requires_grad_(meta_tensor.requires_grad)
         out.pytype = pytype
         out.dispatch_keys = torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw)
         return out
@@ -4453,13 +4521,25 @@ class GuardsStatePickler(pickle.Pickler):
                         self.guard_tree_values[id(inner)] = inner
                     inner_data.append((attr, inner))
 
-                return type(self)._unpickle_traceable_wrapper_subclass, (
-                    meta_tensor,
-                    obj.device,
-                    type(obj),
-                    dispatch_keys.raw_repr(),
-                    ctx,
-                    inner_data,
+                carried = self._carried_tensor_attributes(obj)
+                if carried is not None:
+                    for attr in attrs:
+                        carried.pop(attr, None)
+                    carried = carried or None
+                return (
+                    type(self)._unpickle_traceable_wrapper_subclass,
+                    (
+                        meta_tensor,
+                        obj.device,
+                        type(obj),
+                        dispatch_keys.raw_repr(),
+                        ctx,
+                        inner_data,
+                    ),
+                    carried,
+                    None,
+                    None,
+                    type(self)._restore_tensor_attributes,
                 )
 
             # For FakeTensors, use pytype if set, otherwise default to
@@ -4473,12 +4553,19 @@ class GuardsStatePickler(pickle.Pickler):
             if pytype.__qualname__ != pytype.__name__:
                 raise_local_type_error(pytype)
 
-            return type(self)._unpickle_tensor, (
-                meta_tensor,
-                obj.device,
-                pytype,
-                dispatch_keys.raw_repr(),
-                obj.grad if obj.is_leaf else None,
+            return (
+                type(self)._unpickle_tensor,
+                (
+                    meta_tensor,
+                    obj.device,
+                    pytype,
+                    dispatch_keys.raw_repr(),
+                    obj.grad if obj.is_leaf else None,
+                ),
+                self._carried_tensor_attributes(obj),
+                None,
+                None,
+                type(self)._restore_tensor_attributes,
             )
 
         elif isinstance(obj, torch.nn.Module):
