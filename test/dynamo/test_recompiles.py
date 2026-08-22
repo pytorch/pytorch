@@ -550,7 +550,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         @torch.compile(backend=counter, fullgraph=True)
         def apply_patches(f, x, keys):
             patches = []
-            for key, patch in keys:  # noqa: F402
+            for key, patch in keys:  # noqa: F402, B007
                 patches.append(patch)
             x = f(x, key, patches)
             return x

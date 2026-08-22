@@ -1913,7 +1913,7 @@ class GuardedCache(Generic[T]):
         # Iterate over any entries in the subdir for this key and evaluate
         # guards to determine whether there's a hit.
 
-        for candidate, content, in_local in cls.iterate_over_candidates(
+        for candidate, content, in_local in cls.iterate_over_candidates(  # noqa: B007
             local, remote_cache, key
         ):
             if not hasattr(candidate, "guards_expr"):

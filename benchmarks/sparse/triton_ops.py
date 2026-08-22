@@ -382,7 +382,7 @@ if __name__ == "__main__":
                 )
                 time_ms_lst = []
                 performance_tflops_lst = []
-                for r in range(args.repeat):
+                for _r in range(args.repeat):
                     try:
                         time_ms, performance_tflops = test_func(x, y, **meta)
                     except triton.compiler.OutOfResources:
