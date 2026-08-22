@@ -39,6 +39,15 @@ void lapackGeqrf(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *wo
 template <class scalar_t>
 void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
 
+template <typename scalar_t>
+void lapackGeqp3(int m, int n, scalar_t* a, int lda, int* jpvt, scalar_t* tau, scalar_t* work, int lwork, int* info);
+
+template <typename scalar_t>
+void lapackGeqp3(int m, int n, scalar_t* a, int lda, int* jpvt, scalar_t* tau, scalar_t* work, int lwork, double* rwork, int* info);
+
+template <typename scalar_t>
+void lapackGeqp3(int m, int n, scalar_t* a, int lda, int* jpvt, scalar_t* tau, scalar_t* work, int lwork, float* rwork, int* info);
+
 template <class scalar_t>
 void lapackOrmqr(char side, char trans, int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *c, int ldc, scalar_t *work, int lwork, int *info);
 
@@ -252,6 +261,9 @@ DECLARE_DISPATCH(geqrf_fn, geqrf_stub)
 
 using orgqr_fn = Tensor& (*)(Tensor& /*result*/, const Tensor& /*tau*/);
 DECLARE_DISPATCH(orgqr_fn, orgqr_stub)
+
+using geqp3_fn = void (*)(const Tensor& /*input*/, const Tensor& /*tau*/, const Tensor& /*jpvt*/);
+DECLARE_DISPATCH(geqp3_fn, geqp3_stub)
 
 using ormqr_fn = void (*)(const Tensor& /*input*/, const Tensor& /*tau*/, const Tensor& /*other*/, bool /*left*/, bool /*transpose*/);
 DECLARE_DISPATCH(ormqr_fn, ormqr_stub)
