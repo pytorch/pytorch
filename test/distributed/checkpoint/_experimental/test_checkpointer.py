@@ -28,7 +28,12 @@ from torch.distributed.checkpoint._experimental.staging import (
     DefaultStager,
 )
 from torch.distributed.checkpoint._experimental.types import RankInfo
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfRocm,
+    TestCase
+)
 
 
 def subprocess_init_fn(name: str, parent_pid: int) -> None:
@@ -50,6 +55,8 @@ def ckpt_writer_init_fn(**kwargs) -> CheckpointWriter:
 
 
 class TestCheckpointer(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Parameterized tests that work with both sync and async checkpointers."""
 
     def setUp(self):
@@ -396,6 +403,8 @@ class TestCheckpointer(TestCase):
 
 
 class TestAsyncCheckpointerSpecific(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Tests specific to AsyncCheckpointer functionality."""
 
     def setUp(self):
