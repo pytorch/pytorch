@@ -260,6 +260,106 @@ void neg_conj_kernel_cuda(TensorIteratorBase &iter) {
 
 using namespace at::cuda;
 
+namespace {
+
+constexpr int kTransposeTile = 32;
+constexpr int kTransposeRows = 8;
+
+// Shared-memory banks are 4 bytes wide, so what must be coprime with 32 is
+// the tile row stride measured in 32-bit words, not in elements. Padding by
+// one element only achieves that for 4-byte types; 1- and 2-byte types need
+// a wider pad. For 8-byte types a warp's access splits into two 16-lane
+// phases that already cover all 32 banks.
+template <typename T>
+struct TransposeTilePad {
+  static constexpr int value = sizeof(T) == 1 ? 4    // 36 B = 9 words
+                             : sizeof(T) == 2 ? 2    // 68 B = 17 words
+                                              : 1;   // 4 B: 33 words
+};
+
+template <typename T>
+__global__ void transpose_copy_tiled_kernel(
+    const T* __restrict__ src, T* __restrict__ dst,
+    int64_t width, int64_t height) {
+  __shared__ T tile[kTransposeTile][kTransposeTile + TransposeTilePad<T>::value];
+
+  // gridDim.y is capped at 65535 on every compute capability, so walk the
+  // tile rows with a grid-stride loop instead of mapping them 1:1 to blocks.
+  const int64_t tiles_y = (height + kTransposeTile - 1) / kTransposeTile;
+
+  for (int64_t by = blockIdx.y; by < tiles_y; by += gridDim.y) {
+    int64_t x = static_cast<int64_t>(blockIdx.x) * kTransposeTile + threadIdx.x;
+    int64_t y = by * kTransposeTile + threadIdx.y;
+
+    for (int j = 0; j < kTransposeTile; j += kTransposeRows) {
+      if (x < width && (y + j) < height) {
+        tile[threadIdx.y + j][threadIdx.x] = src[(y + j) * width + x];
+      }
+    }
+    __syncthreads();
+
+    x = by * kTransposeTile + threadIdx.x;
+    y = static_cast<int64_t>(blockIdx.x) * kTransposeTile + threadIdx.y;
+
+    for (int j = 0; j < kTransposeTile; j += kTransposeRows) {
+      if (x < height && (y + j) < width) {
+        dst[(y + j) * height + x] = tile[threadIdx.x][threadIdx.y + j];
+      }
+    }
+    // Required before the next iteration overwrites the tile.
+    __syncthreads();
+  }
+}
+
+bool maybe_tiled_transpose_copy(TensorIterator& iter) {
+  if (iter.ndim() != 2) return false;
+  const int64_t es = iter.element_size(0);
+  if (iter.element_size(1) != es) return false;
+
+  auto shape = iter.shape();
+  auto os = iter.strides(0);
+  auto is = iter.strides(1);
+  const int64_t h = shape[0];
+  const int64_t w = shape[1];
+
+  if (os[0] != es || os[1] != es * h) return false;
+  if (is[1] != es || is[0] != es * w) return false;
+
+  // Below ~4 MB the tiled path and the generic strided kernel are
+  // indistinguishable above kernel-launch overhead (measured on sm_89 with
+  // L2 flushing and 3 repeats; every smaller size showed >4% run-to-run
+  // variance). Above it the tiled path was faster in every measured case
+  // except fp64 with a very short output row, where the strided kernel
+  // already reaches peak bandwidth and tiling costs ~4%.
+  if (h * w * es < (int64_t(4) << 20)) return false;
+
+  constexpr int64_t kMaxGridY = 65535;
+  const int64_t tiles_x = (w + kTransposeTile - 1) / kTransposeTile;
+  const int64_t tiles_y = (h + kTransposeTile - 1) / kTransposeTile;
+  dim3 block(kTransposeTile, kTransposeRows);
+  dim3 grid((unsigned)tiles_x,
+            (unsigned)(tiles_y < kMaxGridY ? tiles_y : kMaxGridY));
+  auto stream = at::cuda::getCurrentCUDAStream();
+  const void* sp = iter.tensor(1).const_data_ptr();
+  void* dp = iter.tensor(0).mutable_data_ptr();
+
+  switch (es) {
+    case 1: transpose_copy_tiled_kernel<uint8_t><<<grid, block, 0, stream>>>(
+              reinterpret_cast<const uint8_t*>(sp), reinterpret_cast<uint8_t*>(dp), w, h); break;
+    case 2: transpose_copy_tiled_kernel<uint16_t><<<grid, block, 0, stream>>>(
+              reinterpret_cast<const uint16_t*>(sp), reinterpret_cast<uint16_t*>(dp), w, h); break;
+    case 4: transpose_copy_tiled_kernel<uint32_t><<<grid, block, 0, stream>>>(
+              reinterpret_cast<const uint32_t*>(sp), reinterpret_cast<uint32_t*>(dp), w, h); break;
+    case 8: transpose_copy_tiled_kernel<uint64_t><<<grid, block, 0, stream>>>(
+              reinterpret_cast<const uint64_t*>(sp), reinterpret_cast<uint64_t*>(dp), w, h); break;
+    default: return false;
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return true;
+}
+
+} // namespace
+
 // device-to-device copy, does type conversion
 void copy_device_to_device(TensorIterator& iter,
                            bool non_blocking,
@@ -317,7 +417,9 @@ void copy_device_to_device(TensorIterator& iter,
         size, copy_stream, p2p_enabled));
     }
   } else {
-    if (same_neg) {
+    if (same_type && same_neg && same_conj && maybe_tiled_transpose_copy(iter)) {
+      // handled by the tiled transpose kernel
+    } else if (same_neg) {
       if (!same_conj) {
         conj_kernel_cuda(iter);
       } else {
