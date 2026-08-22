@@ -328,6 +328,31 @@ class _PrecompileTrainMod(torch.nn.Module):
         return torch.relu(self.b(torch.relu(self.a(x))))
 
 
+class _PrecompileStepCounter(torch.nn.Module):
+    """Its own forward advances a value the guards will be built from."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.lin = torch.nn.Linear(8, 8)
+        self.step = 0
+
+    def forward(self, x):
+        self.step += 1
+        return self.lin(x) * self.step
+
+
+_precompile_counted_calls: list[int] = []
+
+
+def _precompile_counted(x):
+    _precompile_counted_calls.append(x.shape[0])
+    return x.sin().sum()
+
+
+def _precompile_backward_step(model, x):
+    model(x).sum().backward()
+
+
 def _precompile_scaled(x, k):
     return x * k
 
@@ -2653,6 +2678,20 @@ class TestPrecompile(TestCase):
             with self.assertRaisesRegex(RuntimeError, "no captured variant"):
                 loaded(x, 5)
 
+    def test_invariant_guard_policy_is_still_reported(self):
+        # The policy drops guards that could have been serialized, so what it
+        # discarded has to stay visible in the header even though it is now
+        # applied after the capture rather than during it.
+        from torch._precompile import _read_literal
+
+        code, _ = torch.compiler.precompile(
+            _precompile_scaled,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+            example_inputs=[(torch.randn(n), 2) for n in (3, 5)],
+        )
+        self.assertTrue(_read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS"))
 
     def test_serialized_guards_drop_export_bookkeeping(self):
         # Guard.code_list and .guard_types are rebuilt by create_fn at load, and
@@ -2686,10 +2725,117 @@ class TestPrecompile(TestCase):
             for x in xs:
                 self.assertEqual(loaded(model, x), model(x))
 
+    def test_reserialized_guards_do_not_carry_the_fake_tensor_machinery(self):
+        # Applying the policy re-serializes guard state whose tensors are now
+        # the FAKES the first pass wrote, and empty_like() under a live
+        # FakeTensorMode hands back another fake -- which pickles the mode, its
+        # converters and their weakrefs along with it.
+        from torch._precompile import _read_literal
 
+        model = torch.nn.Linear(32, 32).eval()
+        xs = [torch.randn(n, 32) for n in (4, 8)]
+        with torch.no_grad():
+            code, _ = torch.compiler.precompile(
+                _precompile_call_model,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, x) for x in xs],
+            )
+        blob = base64.b64decode(_read_literal(ast.parse(code), "_FRAMES"))
+        for name in (b"FakeTensorMode", b"MetaTensorDescriber", b"WeakIdRef"):
+            self.assertNotIn(name, blob)
 
+    def test_capture_runs_each_example_once(self):
+        # Learning the guard policy from a throwaway first capture would run
+        # every example twice. That is not free: the region below counts its
+        # own calls, and a region that mutates anything would be recorded at
+        # values the discarded pass had already advanced past.
+        _precompile_counted_calls.clear()
+        xs = [torch.randn(n, 8) for n in (3, 5)]
+        with torch.no_grad():
+            torch.compiler.precompile(
+                _precompile_counted,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                example_inputs=[(x,) for x in xs],
+            )
+        self.assertEqual(len(_precompile_counted_calls), len(xs))
 
+    def test_capture_does_not_double_the_gradients_it_accumulates(self):
+        # Same defect seen through autograd: a training capture leaves .grad on
+        # the caller's module, so a second pass silently doubles it.
+        torch.manual_seed(0)
+        model = _PrecompileTrainMod()
+        xs = [torch.randn(n, 8) for n in (3, 5)]
+        with torch.enable_grad():
+            for x in xs:
+                _precompile_backward_step(model, x)
+            expected = [p.grad.detach().clone() for p in model.parameters()]
+            for p in model.parameters():
+                p.grad = None
+            torch.compiler.precompile(
+                _precompile_backward_step,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                training=True,
+                example_inputs=[(model, x) for x in xs],
+            )
+        for p, want in zip(model.parameters(), expected):
+            self.assertEqual(p.grad, want)
 
+    def test_a_mutating_module_is_guarded_on_what_the_capture_saw(self):
+        # A counter advanced by the capture itself is baked into the guards. It
+        # has to be the value the ONE pass saw, or a fresh model never matches:
+        # a discarded first pass would leave every variant pinned to a step the
+        # served model has not reached.
+        torch.manual_seed(0)
+        model = _PrecompileStepCounter()
+        xs = [torch.randn(n, 8) for n in (2, 3, 4)]
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _brk_call,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, x) for x in xs],
+            )
+        torch._dynamo.reset()
+        torch.manual_seed(0)
+        cold = _PrecompileStepCounter()
+        torch.manual_seed(0)
+        reference = _PrecompileStepCounter()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            for x in xs:
+                self.assertEqual(loaded(cold, x), _brk_call(reference, x))
+
+    def test_portable_guard_filter_artifact_still_loads(self):
+        # The policy is applied by re-serializing the capture's own guard
+        # pickle, so that pickle has to survive a second trip. A portable
+        # filter is the case that does not: it drops the whole global scope
+        # while keeping the name of the builtins dict inside it.
+        model = torch.nn.Linear(8, 4).eval()
+        xs = [torch.randn(n, 8) for n in (3, 5)]
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_call_model,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                guard_filter_fn=torch.compiler.keep_portable_guards_unsafe,
+                require_no_risky_drops=False,
+                example_inputs=[(model, x) for x in xs],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            for x in xs:
+                self.assertEqual(loaded(model, x), model(x))
 
     @parametrize("junk", ["dtype", "int", "str", "device"])
     def test_unguarded_interned_attribute_does_not_poison_the_artifact(self, junk):
