@@ -4675,23 +4675,51 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         They used to be assigned from the heuristic config unconditionally, which
         overwrote whatever the caller passed, so none of the three could be tuned.
+        The forward, backward and decoding templates all apply them.
         """
+        from torch._inductor.heuristics.template.triton import get_default_kpack
+
+        # kpack's default is architecture dependent (1 on gfx942, 2 elsewhere), so
+        # pick whichever value the heuristic would not have produced here.
+        kpack = 1 if get_default_kpack() != 1 else 2
+        kernel_options = {"kpack": kpack, "matrix_instr_nonkdim": 16, "waves_per_eu": 3}
+
+        def check_templates(code):
+            templates = [c for c in code if "triton_tem_fused" in c]
+            self.assertTrue(templates, "no template kernel was generated")
+            for kernel_code in templates:
+                FileCheck().check(f"kpack : tl.constexpr = {kpack}").run(kernel_code)
+                FileCheck().check("matrix_instr_nonkdim : tl.constexpr = 16").run(
+                    kernel_code
+                )
+                FileCheck().check("waves_per_eu : tl.constexpr = 3").run(kernel_code)
+
+        compiled = torch.compile(flex_attention, fullgraph=True)
         make_tensor = functools.partial(
-            torch.randn, (2, 2, 128, 64), device=device, dtype=torch.float16
+            torch.randn,
+            (2, 2, 128, 64),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
 
-        # Values chosen to differ from every default the heuristic produces.
         _, code = run_and_get_code(
-            torch.compile(flex_attention, fullgraph=True),
-            q,
-            k,
-            v,
-            kernel_options={"kpack": 1, "matrix_instr_nonkdim": 16, "waves_per_eu": 3},
+            lambda: compiled(q, k, v, kernel_options=kernel_options).sum().backward()
         )
-        FileCheck().check("kpack : tl.constexpr = 1").run(code[0])
-        FileCheck().check("matrix_instr_nonkdim : tl.constexpr = 16").run(code[0])
-        FileCheck().check("waves_per_eu : tl.constexpr = 3").run(code[0])
+        self.assertIn(
+            "flex_attention_backward", "\n".join(code), "backward kernel not built"
+        )
+        check_templates(code)
+
+        # a single query token routes to the decoding template, which carries its
+        # own copy of the same logic
+        with torch.no_grad():
+            q = torch.randn(2, 2, 1, 64, device=device, dtype=torch.float16)
+            _, code = run_and_get_code(
+                compiled, q, k.detach(), v.detach(), kernel_options=kernel_options
+            )
+        check_templates(code)
 
     @supported_platform
     @skip_on_cpu
