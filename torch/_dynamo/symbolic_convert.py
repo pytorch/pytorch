@@ -186,6 +186,7 @@ from .variables.lists import (
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .variables.misc import (
@@ -6557,8 +6558,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        # tuple iterators subclass ListIteratorVariable; deque is a sibling
-        if not isinstance(tos, (ListIteratorVariable, DequeIteratorVariable)):
+        iter_vts = (ListIteratorVariable, TupleIteratorVariable, DequeIteratorVariable)
+        if not isinstance(tos, iter_vts):
             self.pop()
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
