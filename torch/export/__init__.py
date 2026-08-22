@@ -61,8 +61,7 @@ def export(
     args: tuple[Any, ...],
     kwargs: Mapping[str, Any] | None = None,
     *,
-    # dynamic_shapes: _DynamicShapesInput | AdditionalInputs | ShapesCollection
-    dynamic_shapes: Any = None,
+    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
     prefer_deferred_runtime_asserts_over_guards: bool = False,
@@ -130,52 +129,6 @@ def export(
          are denoted by None. Arguments that are dicts or tuples / lists of tensors are
          recursively specified by using mappings or sequences of contained specifications.
 
-         **ShapesSpec API.** ``dynamic_shapes`` may also be a
-         :class:`torch.fx.experimental.dynamic_spec.ShapesSpec` (or its
-         shorthand :class:`torch.fx.experimental.dynamic_spec.ParamsSpec`).
-         This is a newer unbacked unified API across compile, pre-compile,
-         export, etc., and is the recommended way to specify dynamic
-         shapes for export going forward. It is the same spec API exposed
-         via ``dynamic_shapes=`` in :func:`torch.compile`.
-
-         The keys of ``ParamsSpec`` are **parameter names of the callable
-         being traced** (for an ``nn.Module``, the parameters of
-         ``forward``); keyword and ``**kwargs`` arguments are addressed by
-         name too.
-
-         Key properties (see :mod:`torch.fx.experimental.dynamic_spec` for
-         full details):
-
-         * **Unbacked-only.** Dims / scalars marked dynamic become unbacked
-           SymInts (``u`` symbols) and are never specialized (including no
-           0/1 specialization).
-         * **Assumptions and derived expressions.** A dim can be an
-           expression over the spec's symbols (e.g. ``TensorSpec([B * 2,
-           ...])``), and you can pass relational ``assumptions`` between
-           symbols (e.g. ``[B % 2 == 0]``) that export validates.
-         * **No silent specialization.** The exported graph is guaranteed valid
-           for every assumption provided, otherwise export fails. (By
-           contrast, ``Dim.DYNAMIC`` / ``Dim.AUTO`` may silently specialize a
-           dynamic dim, yielding a graph that is not valid for all the inputs).
-
-         Example::
-
-            batch = ShapeVar("batch", min=2, max=128)
-            ep = torch.export.export(
-                mod,
-                (torch.randn(8, 3), torch.randn(16, 3)),
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec(
-                        {
-                            "x": TensorSpec([batch, 3]),
-                            "y": TensorSpec([batch * 2, 3]),  # derived expression
-                        }
-                    ),
-                    assumptions=[batch % 2 == 0],
-                ),
-                strict=True,
-            )
-
         strict: When disabled (default), the export function will trace the program through
          Python runtime, which by itself will not validate some of the implicit assumptions
          baked into the graph. It will still validate most critical assumptions like shape
@@ -215,12 +168,6 @@ def export(
             "Maybe try converting your ScriptModule to an ExportedProgram "
             "using `TS2EPConverter(mod, args, kwargs).convert()` instead."
         )
-
-    # If ``mod.forward`` carries an ``@dynamic_spec(...)`` decorator, the
-    # attached ``ShapesSpec`` is used as ``dynamic_shapes``. Passing both raises.
-    from torch.fx.experimental.dynamic_spec import _resolve_dynamic_shapes
-
-    dynamic_shapes = _resolve_dynamic_shapes(mod, dynamic_shapes)
 
     try:
         return _export(
@@ -269,10 +216,11 @@ def save(
     *,
     extra_files: dict[str, Any] | None = None,
     opset_version: dict[str, int] | None = None,
-    pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+    pickle_protocol: int = 2,
+    weights_only: bool = False,
+    format: str | None = None,
 ) -> None:
     """
-
     .. warning::
         Under active development, saved files may not be usable in newer versions
         of PyTorch.
@@ -294,16 +242,26 @@ def save(
 
         pickle_protocol: can be specified to override the default protocol
 
+        weights_only: If True, use `torch.load(..., weights_only=True)` when
+         loading the saved file (only affects loading, not saving).
+         This is a security feature to prevent arbitrary code execution when
+         loading the model. Note that setting this to True may fail if the
+         archive contains non-tensor data (e.g., custom objects) that require
+         pickle to load.
+
+        format: The format to use for saving. Currently only `None` (the default)
+         and `'safetensors'` are supported. If `None`, the standard `.pt2` format
+         is used. If `'safetensors'`, the model is saved in safetensors format.
+         Note: safetensors support is not yet implemented and will raise an error.
+
     Example::
 
         import torch
         import io
 
-
         class MyModule(torch.nn.Module):
             def forward(self, x):
                 return x + 10
-
 
         ep = torch.export.export(MyModule(), (torch.randn(5),))
 
@@ -324,6 +282,9 @@ def save(
             f"The 'ep' parameter must be an instance of 'ExportedProgram', got '{type(ep).__name__}' instead."
         )
 
+    if format is not None and format != "pt2":
+        raise ValueError(f"Unsupported format: {format}. Only 'pt2' is currently supported.")
+
     from torch.export.pt2_archive._package import package_pt2
 
     package_pt2(
@@ -333,16 +294,15 @@ def save(
         pickle_protocol=pickle_protocol,
         opset_version=opset_version,
     )
-
-
 def load(
     f: FileLike,
     *,
     extra_files: dict[str, Any] | None = None,
     expected_opset_version: dict[str, int] | None = None,
+    weights_only: bool = False,
+    format: str | None = None,
 ) -> ExportedProgram:
     """
-
     .. warning::
         Under active development, saved files may not be usable in newer versions
         of PyTorch.
@@ -351,7 +311,7 @@ def load(
         :func:`torch.export.load()` uses pickle under the hood to load models. **Never load data from an untrusted source.**
 
     Loads an :class:`ExportedProgram` previously saved with
-    :func:`torch.export.save <torch.export.save>`.
+    :func:`torch.export.save <torch.export.load>`.
 
     Args:
         f (str | os.PathLike[str] | IO[bytes]): A file-like object (has to
@@ -363,6 +323,17 @@ def load(
 
         expected_opset_version (Optional[Dict[str, int]]): A map of opset names
          to expected opset versions
+
+        weights_only: If True, use `torch.load(..., weights_only=True)` when
+         loading the file (default: False). This is a security feature
+         to prevent arbitrary code execution when loading the model. Note that
+         setting this to True may fail if the archive contains non-tensor data
+         (e.g., custom objects) that require pickle to load.
+
+        format: The format of the file to load. Currently only `None` (the default)
+         and `'safetensors'` are supported. If `None`, the standard `.pt2` format
+         is assumed. If `'safetensors'`, the file is expected to be in safetensors format.
+         Note: safetensors support is not yet implemented and will raise an error.
 
     Returns:
         An :class:`ExportedProgram` object
@@ -386,109 +357,33 @@ def load(
         ep = torch.export.load("exported_program.pt2", extra_files=extra_files)
         print(extra_files["foo.txt"])
         print(ep(torch.randn(5)))
+
     """
-    if isinstance(f, (str, os.PathLike)):
-        f = os.fspath(f)
+    if format is not None and format != "pt2":
+        raise ValueError(f"Unsupported format: {format}. Only 'pt2' is currently supported.")
 
-    extra_files = extra_files or {}
-
-    from torch.export.pt2_archive._package import load_pt2, PT2ArchiveContents
+    from torch.export.pt2_archive._package import load_pt2
 
     try:
-        pt2_contents = load_pt2(
+        return load_pt2(
             f,
+            extra_files=extra_files,
             expected_opset_version=expected_opset_version,
+            weights_only=weights_only,
         )
     except RuntimeError:
-        log.warning("Ran into the following error when deserializing", exc_info=True)
-        pt2_contents = PT2ArchiveContents({}, {}, {})
+        # Backward compatibility for the zip file format
+        if isinstance(f, (str, os.PathLike)):
+            f = os.fspath(f)
 
-    if len(pt2_contents.exported_programs) > 0 or len(pt2_contents.extra_files) > 0:
-        for k, v in pt2_contents.extra_files.items():
-            extra_files[k] = v
+        extra_files = {} if extra_files is None else extra_files
 
-        return pt2_contents.exported_programs["model"]
-
-    # TODO: For backward compatibility, we support loading a zip file from 2.7. Delete this path in 2.9(?)
-    with zipfile.ZipFile(f, "r") as zipf:
-        if "version" not in zipf.namelist():
-            raise RuntimeError(
-                "We ran into an error when deserializing the saved file. "
-                "Please check the warnings above for possible errors. "
-            )
-
-        log.warning(
-            "Trying to deserialize for the older format. This version of file is "
-            "deprecated. Please generate a new pt2 saved file."
-        )
-
-        # Check the version
-        version = zipf.read("version").decode().split(".")
-        from torch._export.serde.schema import (
-            SCHEMA_VERSION,  # todo change archive version to schema version
-        )
-
-        if len(version) != len(SCHEMA_VERSION):
-            raise AssertionError(
-                "Version in the saved file has incorrect length, double check if the file is generated by torch.export.save()"
-            )
-        if version[0] != str(SCHEMA_VERSION[0]):
-            raise RuntimeError(
-                f"Serialized version {version} does not match our current "
-                f"schema version {SCHEMA_VERSION}."
-            )
-
-        from torch._export.serde.serialize import deserialize, SerializedArtifact
-
-        # Load serialized_ep and serialized_state_dict from the zip file
-
-        serialized_exported_program: bytes | None = None
-        serialized_state_dict: bytes | None = None
-        serialized_constants: bytes | None = None
-        serialized_example_inputs: bytes | None = None
-
-        for file_info in zipf.infolist():
-            file_content = zipf.read(file_info.filename)
-
-            if file_info.filename == "serialized_exported_program.json":
-                serialized_exported_program = file_content
-            elif file_info.filename == "serialized_state_dict.json":
-                warnings.warn("This version of file is deprecated", stacklevel=2)
-                serialized_state_dict = file_content
-            elif file_info.filename == "serialized_constants.json":
-                warnings.warn("This version of file is deprecated", stacklevel=2)
-                serialized_constants = file_content
-            elif file_info.filename == "serialized_state_dict.pt":
-                serialized_state_dict = file_content
-            elif file_info.filename == "serialized_constants.pt":
-                serialized_constants = file_content
-            elif file_info.filename == "serialized_example_inputs.pt":
-                serialized_example_inputs = file_content
-            elif file_info.filename.startswith("extra_files"):
-                filename = file_info.filename.split("/", 1)[1]
-                extra_files[filename] = file_content.decode("utf-8")
-
-        if serialized_exported_program is None:
-            raise AssertionError("serialized_exported_program is None")
-        if serialized_state_dict is None:
-            raise AssertionError("serialized_state_dict is None")
-        if serialized_constants is None:
-            raise AssertionError("serialized_constants is None")
-        if serialized_example_inputs is None:
-            raise AssertionError("serialized_example_inputs is None")
-        artifact: SerializedArtifact = SerializedArtifact(
-            serialized_exported_program,
-            serialized_state_dict,
-            serialized_constants,
-            serialized_example_inputs,
-        )
-
-        # Deserialize ExportedProgram
-        ep = deserialize(artifact, expected_opset_version)
-
-        return ep
-
-
+        if isinstance(f, (str, os.PathLike)):
+            with open(f, "rb") as f:
+                return _load_legacy_zip(f, extra_files, expected_opset_version, weights_only)
+        else:
+            # Assume it's a file-like object
+            return _load_legacy_zip(f, extra_files, expected_opset_version, weights_only)
 def draft_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
@@ -504,15 +399,7 @@ def draft_export(
     an ExportedProgram, even if there are potential soundness issues, and to
     generate a report listing the issues found.
     """
-    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
-
     from ._draft_export import draft_export
-
-    if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
-        raise NotImplementedError(
-            f"draft_export does not support the new dynamic shapes API "
-            f"({type(dynamic_shapes).__name__}); use torch.export.export instead."
-        )
 
     return draft_export(
         mod=mod,
