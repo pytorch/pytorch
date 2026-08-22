@@ -523,7 +523,8 @@ class HipblasltGemmOp : public Callable<ParamsT> {
 
       hipblasComputeType_t computeType = HipBlasComputeTypeFor<CT>();
       if constexpr (std::is_same_v<CT, float>) {
-        if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
+        if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32 &&
+            at::globalContext().tf32Supported()) {
           computeType = HIPBLAS_COMPUTE_32F_FAST_TF32;
         }
       }
@@ -651,7 +652,8 @@ auto GetHipBlasLtTypeStringAndOps() {
 
   hipblasComputeType_t computeType = HipBlasComputeTypeFor<CT>();
   if constexpr (std::is_same_v<CT, float>) {
-    if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
+    if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32 &&
+        at::globalContext().tf32Supported()) {
       computeType = HIPBLAS_COMPUTE_32F_FAST_TF32;
     }
   }
