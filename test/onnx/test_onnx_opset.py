@@ -89,6 +89,8 @@ def check_onnx_opsets_operator(
 
 
 class TestONNXOpset(pytorch_test_common.ExportTestCase):
+    hw_classification = common_utils.HardwareClassification.GENERIC
+
     def test_opset_fallback(self):
         class MyModule(Module):
             def forward(self, x):
