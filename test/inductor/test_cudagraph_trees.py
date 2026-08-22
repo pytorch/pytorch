@@ -1444,6 +1444,50 @@ if HAS_CUDA_AND_TRITON:
                     "incompatible op aten.topk.default"
                 ).run(log_stream.getvalue())
 
+        # Pin graph_partition=False so the "disabling cudagraphs due to
+        # incompatible op ..." log line is actually emitted. With
+        # graph_partition=True (OSS default), incompatible ops are handled
+        # by partitioning rather than disabling cudagraphs, and the FileCheck
+        # pattern below never appears.
+        @torch._inductor.config.patch("graph_partition", False)
+        def test_conv_transpose1d_skips_cudagraph_on_hip(self):
+            # rocm workaround: MIOpen convolution kernels are not cudagraph-safe.
+            # See https://github.com/pytorch/pytorch/issues/188338
+            IN_CHANNELS = 4
+            OUT_CHANNELS = 8
+            KERNEL_SIZE = 3
+            STRIDE = 2
+
+            @torch.no_grad()
+            def f(x, weight):
+                return torch.nn.functional.conv_transpose1d(
+                    x, weight, stride=STRIDE
+                )
+
+            compiled = torch.compile(f, fullgraph=True, mode="reduce-overhead")
+
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
+                for _ in range(3):
+                    torch.compiler.cudagraph_mark_step_begin()
+                    x = torch.randn(
+                        2, IN_CHANNELS, 16, device="cuda", dtype=torch.float32
+                    )
+                    weight = torch.randn(
+                        IN_CHANNELS, OUT_CHANNELS // 1, KERNEL_SIZE,
+                        device="cuda", dtype=torch.float32
+                    )
+                    compiled(x, weight)
+                    torch.cuda.synchronize()
+
+            if torch.version.hip is not None:
+                FileCheck().check(
+                    "skipping cudagraphs due to disabling cudagraphs due to "
+                    "incompatible op aten.convolution.default"
+                ).run(log_stream.getvalue())
+
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
         def test_graph_partition_with_memory_plan_reuse(self):
