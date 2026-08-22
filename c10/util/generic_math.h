@@ -32,8 +32,7 @@ namespace c10 {
 // https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
 
 template <typename scalar_t>
-inline C10_HOST_DEVICE scalar_t div_floor_floating(scalar_t a, scalar_t b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE scalar_t div_floor_floating(scalar_t a, scalar_t b) {
   if (C10_UNLIKELY(b == 0)) {
     // Divide by zero: return standard IEEE result
     return a / b;
@@ -83,8 +82,7 @@ inline C10_HOST_DEVICE scalar_t div_floor_integer(scalar_t a, scalar_t b) {
 template <
     typename scalar_t,
     std::enable_if_t<std::is_floating_point_v<scalar_t>, int> = 0>
-inline C10_HOST_DEVICE scalar_t div_mod(scalar_t a, scalar_t b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE scalar_t div_mod(scalar_t a, scalar_t b) {
   if (C10_UNLIKELY(b == 0)) {
     // Divide by zero: return standard IEEE result
     return std::fmod(a, b);
