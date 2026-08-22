@@ -2,7 +2,6 @@
 
 import collections
 import functools
-import unittest
 
 import torch
 from torch.nn.attention import SDPBackend
@@ -130,6 +129,27 @@ class TestQuantization(TestCase):
         quantized_tensor = torch.quantize_per_tensor(x, 0.1, 10, torch.qint8)
         self.assertEqual(quantized_tensor.device, torch.device("openreg:0"))
         self.assertEqual(quantized_tensor.dtype, torch.qint8)
+
+    def test_make_per_tensor_quantized_tensor(self):
+        """Test _make_per_tensor_quantized_tensor on OpenReg device"""
+        int_data = torch.randint(0, 100, (3, 4, 5), dtype=torch.uint8, device="openreg")
+        scale, zero_point = 0.1, 10
+        q = torch._make_per_tensor_quantized_tensor(int_data, scale, zero_point)
+        self.assertEqual(q.device.type, "openreg")
+        self.assertEqual(q.dtype, torch.quint8)
+        self.assertEqual(q.shape, torch.Size([3, 4, 5]))
+
+    def test_dequantize(self):
+        """Test that .dequantize() on an OpenReg quantized tensor no longer crashes"""
+        x = torch.randn(3, 4, 5, dtype=torch.float32, device="openreg")
+        scale, zero_point = 0.1, 10
+
+        q = torch.quantize_per_tensor(x, scale, zero_point, torch.qint8)
+        result = q.dequantize()
+
+        self.assertEqual(result.device.type, "openreg")
+        self.assertEqual(result.dtype, torch.float32)
+        self.assertEqual(result.shape, torch.Size([3, 4, 5]))
 
 
 class TestAutogradFunction(TestCase):
@@ -454,34 +474,47 @@ class TestSTUBExtended(TestCase):
         self.assertEqual(out, torch.abs(x))
 
 
-@unittest.skip("Skipping all quantization tests for openreg backend")
 class TestQuantizationExtended(TestCase):
-    def test_quantize_per_tensor_different_scales(self):
-        """Test quantization with different scales"""
+    def test_q_scale_and_zero_point(self):
+        """Test q_scale and q_zero_point on quantized OpenReg tensors"""
         x = torch.randn(3, 4, 5, dtype=torch.float32, device="openreg")
-
         scale = 0.1
         zero_point = 10
-        quantized = torch.quantize_per_tensor(x, scale, zero_point, torch.qint8)
-        self.assertEqual(quantized.device.type, "openreg")
-        self.assertEqual(quantized.dtype, torch.qint8)
-        self.assertEqual(quantized.q_scale(), scale)
-        self.assertEqual(quantized.q_zero_point(), zero_point)
+        q = torch.quantize_per_tensor(x, scale, zero_point, torch.qint8)
+        self.assertEqual(q.q_scale(), scale)
+        self.assertEqual(q.q_zero_point(), zero_point)
 
-    def test_quantize_per_tensor_quint8(self):
-        """Test quantization with quint8 dtype"""
+    def test_int_repr(self):
+        """Test int_repr on quantized OpenReg tensors"""
         x = torch.randn(3, 4, dtype=torch.float32, device="openreg")
-        quantized = torch.quantize_per_tensor(x, 0.1, 128, torch.quint8)
-        self.assertEqual(quantized.device.type, "openreg")
-        self.assertEqual(quantized.dtype, torch.quint8)
+        q = torch.quantize_per_tensor(x, 0.1, 10, torch.qint8)
+        ir = q.int_repr()
+        self.assertEqual(ir.dtype, torch.int8)
+        self.assertEqual(ir.shape, q.shape)
 
-    def test_dequantize(self):
-        """Test dequantization"""
+    def test_view_quantized(self):
+        """Test view on quantized OpenReg tensors"""
         x = torch.randn(3, 4, dtype=torch.float32, device="openreg")
-        quantized = torch.quantize_per_tensor(x, 0.1, 10, torch.qint8)
-        dequantized = quantized.dequantize()
-        self.assertEqual(dequantized.device.type, "openreg")
-        self.assertEqual(dequantized.dtype, torch.float32)
+        q = torch.quantize_per_tensor(x, 0.1, 10, torch.qint8)
+        v = q.view(12)
+        self.assertEqual(v.shape, torch.Size([12]))
+        self.assertEqual(v.device.type, "openreg")
+
+    def test_reshape_quantized(self):
+        """Test reshape on quantized OpenReg tensors"""
+        x = torch.randn(3, 4, dtype=torch.float32, device="openreg")
+        q = torch.quantize_per_tensor(x, 0.1, 10, torch.qint8)
+        r = q.reshape(2, 6)
+        self.assertEqual(r.shape, torch.Size([2, 6]))
+        self.assertEqual(r.device.type, "openreg")
+
+    def test_expand_quantized(self):
+        """Test expand on quantized OpenReg tensors"""
+        x = torch.randn(1, 4, dtype=torch.float32, device="openreg")
+        q = torch.quantize_per_tensor(x, 0.1, 10, torch.qint8)
+        e = q.expand(3, 4)
+        self.assertEqual(e.shape, torch.Size([3, 4]))
+        self.assertEqual(e.device.type, "openreg")
 
 
 class TestFallbackExtended(TestCase):
