@@ -432,12 +432,12 @@ class DTensorExportTest(TestCase):
         )
         model = EinsumModel()
 
-        x = torch.randn(4, 8, 16)
+        x = torch.randn(4, 8, 16, device=device)
         x_dtensor = distribute_tensor(x, device_mesh, placements=[Shard(0)])
 
         # y: [16, 16] replicated
-        y = torch.randn(16, 16)
-        z = torch.randn(16, 16)
+        y = torch.randn(16, 16, device=device)
+        z = torch.randn(16, 16, device=device)
         y_dtensor = distribute_tensor(y, device_mesh, placements=[Replicate()])
         z_dtensor = DTensor.from_local(z, device_mesh, placements=[Partial()])
         inputs = (x_dtensor, y_dtensor, z_dtensor)
@@ -457,8 +457,8 @@ class DTensorExportTest(TestCase):
             def forward(self, x, y):
                 return x[y]
 
-        x = torch.randn(10)
-        y = torch.randint(1, (10,)).bool()
+        x = torch.randn(10, device=device)
+        y = torch.randint(1, (10,), device=device).bool()
         x_dt = distribute_tensor(x, device_mesh, placements=[Replicate()])
         y_dt = distribute_tensor(y, device_mesh, placements=[Replicate()])
         dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
@@ -469,7 +469,7 @@ class DTensorExportTest(TestCase):
                 torch._check(val >= 1)
                 return x[:val]
 
-        x = torch.randint(1000, (4, 64, 16))
+        x = torch.randint(1000, (4, 64, 16), device=device)
         x_dt = distribute_tensor(x, device_mesh, placements=[Replicate()])
         gm = dynamo_graph_capture_for_export(Bar())(x_dt)
         self.assertExpectedInline(
@@ -496,7 +496,9 @@ graph():
                 return x @ y
 
         x_dt = distribute_tensor(
-            torch.randn(64, 64), device_mesh, placements=[Replicate(), Replicate()]
+            torch.randn(64, 64, device=device),
+            device_mesh,
+            placements=[Replicate(), Replicate()],
         )
         y_dt = x_dt.clone()
         for i in range(2):
@@ -514,7 +516,9 @@ graph():
 
         # test size-0 tensor
         z_dt = distribute_tensor(
-            torch.randn(0, 0), device_mesh, placements=[Replicate(), Replicate()]
+            torch.randn(0, 0, device=device),
+            device_mesh,
+            placements=[Replicate(), Replicate()],
         )
         self.assertEqual(gm(z_dt, z_dt).shape, (0, 0))
 
