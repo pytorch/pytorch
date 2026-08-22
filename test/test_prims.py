@@ -367,6 +367,51 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
         with self.assertWarnsRegex(FutureWarning, 'will be removed in the future'):
             torch._prims_common.check(True, lambda: 'message')
 
+    def test_rng_state_fns_resolve_via_device_module(self):
+        from torch._prims.rng_prims import _rng_state_fns
+
+        # CPU keeps its accessors at the top level; accelerators expose them on
+        # torch.<device_type>. Neither needs CUDA to be present to resolve.
+        for device_type, mod in (('cpu', torch), ('cuda', torch.cuda)):
+            self.assertEqual(
+                _rng_state_fns(device_type), (mod.get_rng_state, mod.set_rng_state)
+            )
+
+        with self.assertRaisesRegex(RuntimeError, 'get_rng_state and set_rng_state'):
+            _rng_state_fns('not_a_registered_backend')
+
+        with self.assertRaisesRegex(RuntimeError, 'requires a device'):
+            _rng_state_fns(None)
+
+    def test_run_with_rng_state_restores_state_on_exception(self):
+        from torch._prims.rng_prims import run_with_rng_state
+
+        saved = torch.get_rng_state()
+        torch.rand(4)  # advance the generator away from `saved`
+        before = torch.get_rng_state()
+
+        class _Boom(Exception):
+            pass
+
+        def _raises(_):
+            raise _Boom
+
+        with self.assertRaises(_Boom):
+            run_with_rng_state(saved, _raises, torch.empty(0))
+
+        # Without the finally, the generator would be left holding `saved`.
+        self.assertEqual(torch.get_rng_state(), before)
+
+    def test_rng_state_hops_cover_privateuse1(self):
+        # An out-of-tree backend registers under PrivateUse1; both HOPs must have
+        # a kernel there or functionalized RNG fails before reaching the device
+        # module lookup above.
+        from torch._C import DispatchKey
+        from torch._prims.rng_prims import run_and_save_rng_state, run_with_rng_state
+
+        for hop in (run_and_save_rng_state, run_with_rng_state):
+            self.assertIn(DispatchKey.PrivateUse1, hop.py_kernels)
+
 
 instantiate_device_type_tests(TestPrims, globals())
 
