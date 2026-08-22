@@ -16,16 +16,18 @@ With ``tracer="dynamo"``, precompile executes every tuple in ``example_inputs`` 
 captures the guarded specializations, recompilations, and graph-break resume frames
 Dynamo produces. Closure-free functions wrapped with ``torch._dynamo.disable`` are
 embedded for eager execution between compiled segments. The serialized guard records
-are minimized while preserving how every example dispatches among the captured
-variants. The Python environment, including globals and context-manager state, must be
+are filtered under the input-only recompilation contract while preserving how every
+example dispatches among the captured variants. The Python environment, including
 semantically unchanged at runtime; guards that only enforce that promise may be omitted,
-including guards through process-local values that cannot be reconstructed. Input-derived
-guards remain responsible for dispatch. A standalone artifact raises when no captured
-variant matches. Captured nested frames that are reachable only by an ordinary Python
-call use an isolated installed mode; it installs lazily, may compile an uncovered call
-with the selected backend, and can be removed with ``unload()``. Compiled graphs and
-kernels remain Python source, while guard trees, transformed entry/resume bytecode, and
-disabled-function bytecode are stored as opaque inline data.
+including guards through process-local values that cannot be reconstructed. By default,
+every portable input-derived guard is retained, rebuilt from frozen capture state, and
+checked for predicate drift. A standalone artifact raises when no captured variant matches.
+Captured nested frames that are reachable only by an ordinary Python call use an isolated
+installed mode; it installs lazily, may compile an uncovered call with the selected
+backend, and can be removed with ``unload()``. Compiled graph bodies and kernels remain
+Python source. Eager higher-order ops retain opaque FX structure only where their runtime
+interpreters require a real ``Graph``; guard trees and transformed/disabled bytecode are
+also stored as opaque inline data.
 
 With ``tracer="dynamo", training=True``, captured graphs remain differentiable on both
 backends. Inductor artifacts contain AOTAutograd's forward and backward as readable
@@ -223,9 +225,11 @@ it.
 #
 # tracer: the capture front-end, orthogonal to backend. "make_fx" (default) is a
 # non-strict trace. "dynamo" analyzes Python bytecode, captures one variant per
-# specialization/recompilation exercised by example_inputs, minimizes guard records
-# while preserving dispatch for those calls, and dispatches among the variants at
-# runtime. Graph breaks are reconstructed from their captured resume frames.
+# specialization/recompilation exercised by example_inputs, omits guards for the
+# caller-promised invariant environment, and retains every portable input-derived
+# guard. Graph breaks are reconstructed from their captured resume frames. The eager
+# backend preserves higher-order graph bodies as Python plus the opaque FX structure
+# their runtime interpreters require; it does not symbolically retrace them at load.
 
 from __future__ import annotations
 
@@ -1549,16 +1553,6 @@ def _dynamo_backend_compiler(
     return compile_graph
 
 
-_DYNAMO_REQUIRED_GUARD_TYPES = frozenset(
-    {
-        "CONSTANT_MATCH",
-        "DUPLICATE_INPUT",
-        "EQUALS_MATCH",
-        "SEQUENCE_LENGTH",
-        "SYMBOL_MATCH",
-        "TENSOR_MATCH",
-    }
-)
 _DYNAMO_UNMODELLED_GUARD_TYPES = frozenset(
     {
         "DETERMINISTIC_ALGORITHMS",
@@ -1836,9 +1830,9 @@ def _filter_dynamo_guards(
     runtime_global_scope: dict[str, object],
     guarded_codes: Sequence[Any],
     captured: Sequence[_DynamoCapturedGuardSet],
-    live_leaf_sets: Sequence[frozenset[tuple[str, str]]],
+    live_leaf_sets: Sequence[frozenset[tuple[str, str, str]]],
 ) -> _DynamoGuardFinalization:
-    """Rebuild, validate, and minimize guards from frozen capture state."""
+    """Rebuild and validate guards from frozen capture state."""
     import dataclasses
     import functools
 
@@ -1852,15 +1846,6 @@ def _filter_dynamo_guards(
     from torch._dynamo.package import load_guard_manager, load_guards_state
     from torch._guards import GuardsSet
     from torch.utils._ordered_set import OrderedSet
-
-    def required_guard(guard: Any) -> bool:
-        required = _DYNAMO_REQUIRED_GUARD_TYPES | _DYNAMO_UNMODELLED_GUARD_TYPES
-        return guard.create_fn_name() in required or bool(
-            required.intersection(
-                getattr(guard, "guard_types", ())
-                or getattr(guard, "derived_guard_types", ())
-            )
-        )
 
     def fresh_guard(guard: Any, *, final: bool = False) -> Any:
         create_fn = guard.create_fn
@@ -1896,27 +1881,6 @@ def _filter_dynamo_guards(
             "precompile tracer='dynamo' did not record one live guard tree for "
             "every captured variant."
         )
-    slots = {
-        (fact.guard_type, fact.source)
-        for record in captured
-        for fact in record.facts
-        if fact.enforced
-    }
-    varying_slots = {
-        slot
-        for slot in slots
-        if len(
-            {
-                frozenset(
-                    fact
-                    for fact in record.facts
-                    if fact.enforced and (fact.guard_type, fact.source) == slot
-                )
-                for record in captured
-            }
-        )
-        > 1
-    }
     filtered_states: list[bytes] = []
     kept_slots: list[frozenset[tuple[str, str]]] = []
     policy_dropped: set[tuple[str, str]] = set()
@@ -1931,7 +1895,6 @@ def _filter_dynamo_guards(
             guard
             for guard in state.output_graph.guards
             if _dynamo_guard_slot(guard) not in record.environment
-            and (required_guard(guard) or _dynamo_guard_slot(guard) in varying_slots)
         ]
         kept_aot_guards = list(state.output_graph.aotautograd_guards)
         environment_sources = {source for _, source in record.environment}
@@ -2017,11 +1980,57 @@ def _filter_dynamo_guards(
             raise AssertionError("guards_state must not be None")
         filtered_state = load_guards_state(check_fn.guards_state)
         rebuilt = manager_for(filtered_state)
-        extra_leaves = rebuilt.leaf_fingerprint() - live_leaves
-        if extra_leaves:
+        dropped_sources = {
+            source for _, source in record.environment | record.dropped if source
+        }
+        dropped_root_types = {
+            guard_type
+            for guard_type, source in record.environment | record.dropped
+            if not source
+        }
+        root_environment_types = {
+            "DEFAULT_DEVICE",
+            "GLOBAL_STATE",
+            "TORCH_FUNCTION_MODE_STACK",
+        }
+
+        def normalize_leaf(
+            leaf: tuple[str, str, str],
+        ) -> tuple[str, str, str]:
+            source, guard_type, payload = leaf
+            return (
+                _normalize_dynamo_guard_text(source),
+                guard_type,
+                _normalize_dynamo_guard_text(payload),
+            )
+
+        def is_dropped_leaf(leaf: tuple[str, str, str]) -> bool:
+            source, guard_type, payload = leaf
+            if not source:
+                return guard_type in root_environment_types or (
+                    guard_type == "LAMBDA_GUARD"
+                    and (
+                        "top_saved_tensors_hooks" in payload
+                        or "SHAPE_ENV" in dropped_root_types
+                    )
+                )
+            return any(
+                source == root or source.startswith((f"{root}.", f"{root}["))
+                for root in dropped_sources
+            )
+
+        normalized_live_leaves = map(normalize_leaf, live_leaves)
+        expected_leaves = frozenset(
+            leaf for leaf in normalized_live_leaves if not is_dropped_leaf(leaf)
+        )
+        rebuilt_leaves = frozenset(
+            normalize_leaf(leaf) for leaf in rebuilt.leaf_fingerprint()
+        )
+        changed_leaves = expected_leaves ^ rebuilt_leaves
+        if changed_leaves:
             examples = ", ".join(
-                f"{guard_type}: {payload}"
-                for guard_type, payload in sorted(extra_leaves)[:3]
+                f"{source or '<root>'}: {guard_type}: {payload}"
+                for source, guard_type, payload in sorted(changed_leaves)[:3]
             )
             raise PrecompileError(
                 "precompile tracer='dynamo' rebuilt a guard tree with changed "
@@ -2729,8 +2738,11 @@ def _precompile_dynamo(
             # input closure belong to the caller-promised invariant environment.
             environment_assumptions = [
                 guard.guard_type in _DYNAMO_ENVIRONMENT_GUARD_TYPES
+                or guard.source_root_is_import
                 or (
                     guard.has_value
+                    and guard.source_root_id is not None
+                    and guard.source_root_id not in input_object_ids
                     and id(guard.value) not in input_object_ids
                     and importable_global(guard.value) is not None
                 )
@@ -3047,28 +3059,13 @@ def _precompile_dynamo(
             for record in records
             for slot in record.dropped
         }
+        dropped_guards.update(policy_dropped_guards)
         risky_dropped_guards = {
             slot
             for records in captured_guard_sets.values()
             for record in records
             for slot in record.risky_dropped
         }
-        for entry in code_entries:
-            records = captured_guard_sets.get(id(entry), [])
-            values_by_source: dict[str, set[tuple[tuple[str, ...], str]]] = {}
-            dropped_by_source: dict[str, set[tuple[str, str]]] = {}
-            for record in records:
-                for fact in record.facts:
-                    values_by_source.setdefault(fact.source, set()).add(
-                        (fact.code, fact.value)
-                    )
-                for guard_type, source in record.dropped:
-                    dropped_by_source.setdefault(source, set()).add(
-                        (guard_type, source)
-                    )
-            for source, values in values_by_source.items():
-                if len(values) > 1:
-                    risky_dropped_guards.update(dropped_by_source.get(source, ()))
         kept_guards = {
             slot
             for variants in kept_by_entry.values()
@@ -3105,8 +3102,9 @@ def _precompile_dynamo(
             )
         if require_no_dropped_guards and summary.dropped_guards:
             raise PrecompileError(
-                "precompile tracer='dynamo' dropped unserializable or "
-                f"caller-filtered guards: {list(summary.dropped_guards)}. Pass "
+                "precompile tracer='dynamo' dropped environment-contract, "
+                "unserializable, or caller-filtered guards: "
+                f"{list(summary.dropped_guards)}. Pass "
                 "require_no_dropped_guards=False to accept them."
             )
         if require_no_risky_drops and summary.risky_dropped_guards:
@@ -3594,8 +3592,9 @@ class _PrecompileApi:
         The outer sequence supports capture front-ends that can specialize one artifact
         from multiple calls. The ``make_fx`` tracer accepts exactly one tuple because it
         records only one execution; ``dynamo`` executes every tuple and records the
-        guarded recompilations they trigger. The Dynamo artifact minimizes serialized
-        guard records while preserving how every example dispatches among those variants.
+        guarded recompilations they trigger. The Dynamo artifact filters serialized guard
+        records under its input-only recompilation contract while preserving how every
+        example dispatches among those variants.
 
         THREADING: the inductor lowering step drives process-global compiler state
         and is serialized by an internal lock, so concurrent ``backend="inductor"``
@@ -3612,12 +3611,14 @@ class _PrecompileApi:
           holds the save_cache_artifacts bundle that primes the inductor cache on load.
         - ``"eager"``: do NOT lower -- keep the captured ATen graph and run it as-is
           (analogous to ``torch.compile(backend="eager")``). ``python_code`` inlines
-          the readable captured graph (both the inspectable rendering and the
-          executable artifact); the eager cache carries no compiled artifact
+          the readable captured graph. Higher-order graph bodies are readable Python;
+          their FX structure is also embedded because eager HOP interpreters require a
+          real ``Graph`` at runtime. Loading recompiles that structure to bytecode but
+          never symbolically retraces it. The eager cache carries no compiled artifact
           (artifact=None) but is still a full integrity-tagged envelope -- with no
           kernels there is nothing to accelerate, so ``load`` runs the inlined graph.
-          Useful for
-          inspecting/debugging exactly what was traced without an Inductor dependency.
+          Useful for inspecting/debugging exactly what was traced without an Inductor
+          dependency.
 
         ``tracer`` selects the capture front-end:
 
@@ -3629,13 +3630,17 @@ class _PrecompileApi:
           specialization/recompilation exercised by ``example_inputs``. The emitted
           artifact drops a serialized guard record only when doing so preserves every
           example's variant-match results, or when the guard only checks process-local
-          state outside the explicit inputs. The Python environment -- including globals
-          and context-manager state -- must be semantically identical between capture and
-          runtime, so such environment-only checks are caller assumptions rather than
-          dispatch predicates. Input-derived guards are retained. Filtering is at
-          guard-record granularity, so a retained composite record can still rebuild
-          invariant leaf checks. Breaking an unchecked assumption can silently
-          miscompute.
+          state outside the explicit inputs. The Python environment -- including
+          globals and context-manager state -- must be semantically identical between
+          capture and runtime, and only explicit inputs may vary in a way that causes a
+          recompile. Environment-only checks are therefore caller assumptions rather
+          than dispatch predicates. By default, every portable input-derived guard is
+          retained. Each guard is rebuilt independently from frozen capture state; an
+          input-derived rebuild failure or changed predicate raises, while an
+          environment-only failure is omitted with dependent attribute checks.
+          Filtering is at guard-record granularity, so a retained composite record can
+          still rebuild invariant leaf checks. Breaking an unchecked assumption can
+          silently miscompute.
           A standalone call that fails every retained guard set raises. An installed
           artifact can compile an uncovered call with its selected backend. Graph breaks
           are preserved through their Dynamo resume frames;
@@ -3665,10 +3670,12 @@ class _PrecompileApi:
 
         ``guard_filter_fn`` receives each candidate Dynamo guard sequence and returns
         one bool per guard. It can narrow the portable default set but cannot restore a
-        guard Dynamo cannot serialize. After all examples run, precompile further drops
-        only records whose removal preserves the complete example-to-variant dispatch
-        matrix. ``invariants`` optionally names a text file receiving the resulting
-        invariant, varying, and undetermined guard report.
+        guard Dynamo cannot serialize. Input guards removed by this callback are risky
+        drops and are rejected unless ``require_no_risky_drops=False``. After all examples
+        run, precompile drops guards covered by the invariant-environment contract and
+        verifies that retained frozen facts still distinguish the captured variants.
+        ``invariants`` optionally names a text file receiving the resulting invariant,
+        varying, and undetermined guard report.
 
         ``require_complete`` rejects captures with bypassed, truncated, uncovered, or
         failed frames. ``require_no_risky_drops`` rejects dropped guards that could alter
@@ -3687,8 +3694,8 @@ class _PrecompileApi:
         With ``tracer="dynamo"``, shape variation across ``example_inputs`` uses
         Dynamo's ordinary automatic dynamic-shape policy: for example, a static first
         graph can recompile into a symbolic graph when a later tuple changes a dimension.
-        The symbolic graphs and the minimized dispatch guard records are retained in the
-        artifact.
+        The symbolic graphs and contract-filtered dispatch guard records are retained in
+        the artifact.
 
         With ``tracer="make_fx"``, dynamic shapes are opt-in via
         ``torch._dynamo.decorators.mark_unbacked``
