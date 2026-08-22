@@ -4669,13 +4669,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @skip_on_mps
     @skip_on_xpu
-    @unittest.skipUnless(torch.version.hip is not None, "ROCm-specific kernel_options")
+    @unittest.skipUnless(TEST_WITH_ROCM, "ROCm-specific kernel_options")
     def test_rocm_kernel_options_are_respected(self, device):
-        """kpack/matrix_instr_nonkdim/waves_per_eu are documented FlexKernelOptions.
-
-        They used to be assigned from the heuristic config unconditionally, which
-        overwrote whatever the caller passed, so none of the three could be tuned.
-        The forward, backward and decoding templates all apply them.
+        """A caller-supplied kpack/matrix_instr_nonkdim/waves_per_eu has to win
+        over the heuristic's, in each of the forward, backward and decoding
+        templates.
         """
         from torch._inductor.heuristics.template.triton import get_default_kpack
 
