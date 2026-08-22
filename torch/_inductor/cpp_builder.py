@@ -414,6 +414,24 @@ def check_mingw_win32_flavor(compiler: str) -> str:
     return flavor
 
 
+def _get_rocm_clang_cl_windows() -> str:
+    """
+    On Windows + ROCm, generated HIP host wrappers include ROCm headers that
+    use Clang-only syntax which MSVC cannot parse. Prefer the clang-cl shipped
+    in the ROCm SDK and fall back to clang-cl on PATH.
+    """
+    try:
+        from torch.utils.cpp_extension import ROCM_HOME
+    except Exception:
+        ROCM_HOME = None
+
+    if ROCM_HOME:
+        candidate = os.path.join(ROCM_HOME, "lib", "llvm", "bin", "clang-cl.exe")
+        if os.path.exists(candidate):
+            return candidate
+    return "clang-cl"
+
+
 def get_cpp_compiler() -> str:
     if (
         config.aot_inductor.cross_target_platform == "windows"
@@ -426,10 +444,14 @@ def get_cpp_compiler() -> str:
         return compiler
 
     if _IS_WINDOWS:
-        compiler = os.environ.get("CXX", "cl")
+        default_compiler = (
+            _get_rocm_clang_cl_windows() if torch.version.hip is not None else "cl"
+        )
+        compiler = os.environ.get("CXX", default_compiler)
         compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
-        check_msvc_cl_language_id(compiler)
+        if _is_msvc_cl(compiler):
+            check_msvc_cl_language_id(compiler)
     else:
         if config.is_fbcode():
             return build_paths.cc
@@ -2210,6 +2232,9 @@ def get_cpp_torch_device_options(
                 libraries += ["amdhip64"]
             else:
                 libraries += ["torch_hip"]
+                if _IS_WINDOWS:
+                    # The generated wrapper calls the HIP runtime API directly.
+                    libraries += ["amdhip64"]
             definitions.append(" __HIP_PLATFORM_AMD__")
             _transform_rocm_paths(libraries_dirs)
         else:
