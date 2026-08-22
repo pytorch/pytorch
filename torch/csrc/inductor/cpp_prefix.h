@@ -354,6 +354,39 @@ inline at::vec::VecMask<float, 1> min_masked_reduce(
   return at::vec::VecMask<float, 1>::set(a, out, tail_size);
 }
 
+// Signed-zero aware vectorized minimum/maximum used by inductor-generated
+// kernels so that compiled results follow IEEE 754 semantics for +/- zero
+// ties (minimum(-0., +0.) == -0. and maximum(-0., +0.) == +0.). The plain
+// comparisons inside at::vec::minimum/maximum treat the two zeros as equal,
+// which can drop the sign bit of the result.
+template <typename V>
+inline V minimum_preserve_signbit_vec(const V& a, const V& b) {
+  auto result = at::vec::minimum(a, b);
+  using T = typename V::value_type;
+  if constexpr (std::is_floating_point_v<T>) {
+    // For +/- zero ties the result sign must be negative, which is exactly
+    // the bitwise OR of the two values.
+    auto both_zero =
+        (a == V(static_cast<T>(0))) & (b == V(static_cast<T>(0)));
+    result = V::blendv(result, a | b, both_zero);
+  }
+  return result;
+}
+
+template <typename V>
+inline V maximum_preserve_signbit_vec(const V& a, const V& b) {
+  auto result = at::vec::maximum(a, b);
+  using T = typename V::value_type;
+  if constexpr (std::is_floating_point_v<T>) {
+    // For +/- zero ties the result sign must be positive, which is exactly
+    // the bitwise AND of the two values.
+    auto both_zero =
+        (a == V(static_cast<T>(0))) & (b == V(static_cast<T>(0)));
+    result = V::blendv(result, a & b, both_zero);
+  }
+  return result;
+}
+
 template <typename T>
 inline T sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = a + b;
@@ -975,6 +1008,39 @@ inline scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
     return a;
   }
   return a < b ? a : b;
+}
+
+template <typename scalar_t>
+inline scalar_t maximum_preserve_signbit(scalar_t a, scalar_t b) {
+  if (at::_isnan(a)) {
+    return a;
+  }
+  if constexpr (std::is_integral_v<scalar_t>) {
+    return a > b ? a : b;
+  } else {
+    // IEEE 754: maximum(-0., +0.) is +0., but plain `>` treats the two
+    // zeros as equal and may drop the sign bit of the result.
+    if (a == static_cast<scalar_t>(0) && b == static_cast<scalar_t>(0)) {
+      return std::signbit(static_cast<double>(a)) ? b : a;
+    }
+    return a > b ? a : b;
+  }
+}
+
+template <typename scalar_t>
+inline scalar_t minimum_preserve_signbit(scalar_t a, scalar_t b) {
+  if (at::_isnan(a)) {
+    return a;
+  }
+  if constexpr (std::is_integral_v<scalar_t>) {
+    return a < b ? a : b;
+  } else {
+    // IEEE 754: minimum(-0., +0.) is -0.
+    if (a == static_cast<scalar_t>(0) && b == static_cast<scalar_t>(0)) {
+      return std::signbit(static_cast<double>(a)) ? a : b;
+    }
+    return a < b ? a : b;
+  }
 }
 
 constexpr float uint32_to_uniform_float(uint32_t value) {

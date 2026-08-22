@@ -145,6 +145,42 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    @parametrize("size", [1, 32, 40])
+    @parametrize("dtype", [torch.float64, torch.float32, torch.float16, torch.bfloat16])
+    @parametrize(
+        "op,x_value,y_value",
+        [
+            ("minimum", -0.0, 0.0),
+            ("minimum", 0.0, -0.0),
+            ("maximum", -0.0, 0.0),
+            ("maximum", 0.0, -0.0),
+        ],
+    )
+    def test_minimum_maximum_signed_zero(self, dtype, op, x_value, y_value, size):
+        # torch.minimum/torch.maximum must follow IEEE 754 signed zero
+        # semantics in compiled code: the minimum of two zeros is negative
+        # zero and the maximum is positive zero, regardless of operand order.
+        # See https://github.com/pytorch/pytorch/issues/194347
+        def fn(x, y):
+            return getattr(torch, op)(x, y)
+
+        x = torch.full((size,), x_value, dtype=dtype)
+        y = torch.full((size,), y_value, dtype=dtype)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+
+        if dtype is torch.float64:
+            view_dtype = torch.int64
+        elif dtype is torch.float32:
+            view_dtype = torch.int32
+        else:
+            view_dtype = torch.int16
+
+        width = 8 * x.element_size()
+        mask = (1 << width) - 1
+        sign_bit_mask = 1 << (width - 1)
+        result_bits = int(actual.view(view_dtype)[0].item()) & mask
+        self.assertEqual(bool(result_bits & sign_bit_mask), op == "minimum")
+
     @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
         def fn(x):
