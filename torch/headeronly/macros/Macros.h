@@ -554,11 +554,82 @@ __host__ __device__
     abort();                     \
   }
 #else
+#if defined(USE_ROCM) && defined(__HIPCC__)
+namespace torch::headeronly::detail {
+// Merge prefix + __func__ + suffix at the macro call site (not via helper
+// params).
+template <
+    unsigned N1,
+    unsigned N2,
+    unsigned N3,
+    unsigned Out = N1 + N2 + N3 - 2>
+constexpr auto rocm_assert_concat(
+    const char (&a)[N1],
+    const char (&b)[N2],
+    const char (&c)[N3]) {
+  struct {
+    char data[Out];
+  } msg{};
+  unsigned i = 0;
+  for (unsigned j = 0; j < N1 - 1; ++j) {
+    msg.data[i++] = a[j];
+  }
+  for (unsigned j = 0; j < N2 - 1; ++j) {
+    msg.data[i++] = b[j];
+  }
+  for (unsigned j = 0; j < N3; ++j) {
+    msg.data[i++] = c[j];
+  }
+  return msg;
+}
+
+template <unsigned N>
+__device__ __attribute__((flatten)) void rocm_assert_one_shot(
+    const char (&msg)[N]) {
+  auto d = __ockl_fprintf_stderr_begin();
+  __ockl_fprintf_append_string_n(d, msg, N - 1, 1);
+  __builtin_trap();
+}
+
+template <unsigned N>
+__host__ __device__ inline void rocm_kernel_assert(
+    const char* cond,
+    const char* file,
+    unsigned int line,
+    const char (&msg)[N]) {
+#if defined(__HIP_DEVICE_COMPILE__)
+  (void)cond;
+  (void)file;
+  (void)line;
+  rocm_assert_one_shot(msg);
+#else
+  (void)msg;
+  __assert_fail(cond, file, line, __func__);
+#endif
+}
+} // namespace torch::headeronly::detail
+#endif // defined(USE_ROCM) && defined(__HIPCC__)
+
+#if defined(USE_ROCM) && defined(__HIPCC__)
+#define CUDA_KERNEL_ASSERT(cond)                             \
+  if C10_UNLIKELY (!(cond)) {                                \
+    ::torch::headeronly::detail::rocm_kernel_assert(         \
+        #cond,                                               \
+        __FILE__,                                            \
+        static_cast<unsigned int>(__LINE__),                 \
+        ::torch::headeronly::detail::rocm_assert_concat(     \
+            __FILE__ ":" C10_STRINGIZE(__LINE__) ": ",       \
+            __func__,                                        \
+            ": Device-side assertion `" #cond "' failed.\n") \
+            .data);                                          \
+  }
+#else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
+#endif // defined(USE_ROCM) && defined(__HIPCC__)
 #define CUDA_KERNEL_ASSERT_MSG(cond, msg)                              \
   if (C10_UNLIKELY(!(cond))) {                                         \
     __assert_fail(                                                     \
