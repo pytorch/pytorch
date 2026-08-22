@@ -916,7 +916,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         weight_scales_data[0],
         w_zero_points[0],
         std::nullopt);
-    auto* qnnp_w_data = qnnp_weight.template data_ptr<c10::quint8>();
+    auto* qnnp_w_data = qnnp_weight.template mutable_data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
     for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
