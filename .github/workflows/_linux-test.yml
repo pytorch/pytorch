@@ -380,7 +380,7 @@ jobs:
           cat test/**/*_toprint.log || true
 
       - name: Upload test artifacts
-        uses: ./.github/actions/upload-test-artifacts
+        uses: chuanqi129/pytorch/.github/actions/upload-test-artifacts@test_bmg_ut_v2
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
