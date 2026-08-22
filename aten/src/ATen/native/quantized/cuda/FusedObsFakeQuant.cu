@@ -284,6 +284,14 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     bool per_row_fq,
     bool symmetric_quant) {
   TORCH_CHECK(ch_axis < x.dim(), "Error in fused_moving_avg_obs_fake_quant_cpu: ch_axis must be < self.dim()");
+  // The kernels dereference observer_on[0] / fake_quant_on[0]; an empty flag
+  // tensor yields a null data_ptr and an out-of-bounds read (gh-189671).
+  TORCH_CHECK(
+      observer_on.numel() == 1 && fake_quant_on.numel() == 1,
+      "Error in fused_moving_avg_obs_fake_quant_cuda: observer_on and fake_quant_on must each have exactly one element, but got observer_on.numel()=",
+      observer_on.numel(),
+      " and fake_quant_on.numel()=",
+      fake_quant_on.numel());
   const auto x_contig = x.contiguous();
   // Calculate the size of the dimension we need to quantize over,
   // For per-channel quant we default to axis 0, since it is only for
