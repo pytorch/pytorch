@@ -971,10 +971,13 @@ print(t.is_pinned())
 
         def check_workspace_size(inp):
             torch._C._cuda_clearCublasWorkspaces()
-            start = torch.cuda.memory_stats()["active_bytes.all.allocated"]
+            torch.cuda.synchronize()
+            torch.cuda.reset_peak_memory_stats()
+            start = torch.cuda.memory_allocated()
             with torch.no_grad():
                 torch.matmul(inp, inp)
-            finish = torch.cuda.memory_stats()["active_bytes.all.allocated"]
+            torch.cuda.synchronize()
+            finish = torch.cuda.max_memory_allocated()
             return finish - start
 
         # check default
@@ -997,25 +1000,123 @@ print(t.is_pinned())
 
         torch._C._cuda_clearCublasWorkspaces()
 
+    @unittest.skipIf(
+        IS_WINDOWS and SM89OrLater, "preferred_blas_library not supported on Windows"
+    )
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
+    @unittest.skipIf(TEST_WITH_ROCM, "eager workspaces are CUDA-only")
+    @serialTest()
+    @parametrize("backend", ("cublas", "cublaslt"))
+    def test_cublas_workspace_cache_env(self, backend):
+        test_script = f"""
+import torch
+torch.backends.cuda.preferred_blas_library("{backend}")
+a = torch.randn(7, 7, device="cuda")
+out = torch.empty_like(a)
+torch._C._cuda_clearCublasWorkspaces()
+start = torch.cuda.memory_allocated()
+torch.mm(a, a, out=out)
+torch.cuda.synchronize()
+print(torch.cuda.memory_allocated() - start)
+"""
+        env = os.environ.copy()
+        env.pop("TORCH_CUBLAS_WORKSPACE_CACHE", None)
+        eager_alloc = int(
+            subprocess.check_output([sys.executable, "-c", test_script], env=env)
+        )
+        env["TORCH_CUBLAS_WORKSPACE_CACHE"] = "1"
+        cached_alloc = int(
+            subprocess.check_output([sys.executable, "-c", test_script], env=env)
+        )
+        self.assertEqual(eager_alloc, 0)
+        self.assertGreater(cached_alloc, 0)
+
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @unittest.skipIf(IS_FBCODE, "not enabled by default on fbcode")
     @unittest.skipIf(TEST_WITH_ROCM, "not enabled by default on rocm")
-    @setBlasBackendsToDefaultFinally
     @serialTest()
     def test_cublas_unified_workspace(self):
-        torch.cuda.reset_peak_memory_stats()
-        # We run a cuBLAS matmul, guaranteeing a workspace present on the current stream
-        torch.backends.cuda.preferred_blas_library("cublas")
-        x = torch.randn(128, 128, device="cuda")
-        torch.matmul(x, x)
-        # Stash the maximum memory allocated after running matmuls
-        warmed_alloc = torch.cuda.max_memory_allocated()
-        torch.backends.cuda.preferred_blas_library("cublaslt")
-        torch.matmul(x, x)
-        lt_alloc = torch.cuda.max_memory_allocated()
-        # With unified workspaces, the peak memory allocation should not increase after
-        # switching to Lt, otherwise the temporary allocation would bump the peak
+        test_script = """
+import torch
+x = torch.randn(128, 128, device="cuda")
+out = torch.empty_like(x)
+torch.cuda.reset_peak_memory_stats()
+torch.backends.cuda.preferred_blas_library("cublas")
+torch.mm(x, x, out=out)
+torch.cuda.synchronize()
+warmed_alloc = torch.cuda.max_memory_allocated()
+torch.backends.cuda.preferred_blas_library("cublaslt")
+torch.mm(x, x, out=out)
+torch.cuda.synchronize()
+print(warmed_alloc, torch.cuda.max_memory_allocated())
+"""
+        env = os.environ.copy()
+        env["TORCH_CUBLAS_WORKSPACE_CACHE"] = "1"
+        env.pop("TORCH_CUBLASLT_UNIFIED_WORKSPACE", None)
+        output = subprocess.check_output(
+            [sys.executable, "-c", test_script], env=env, text=True
+        )
+        warmed_alloc, lt_alloc = (int(value) for value in output.split())
         self.assertEqual(warmed_alloc, lt_alloc)
+
+    @unittest.skipIf(IS_FBCODE, "not enabled by default on fbcode")
+    @unittest.skipIf(TEST_WITH_ROCM, "not enabled by default on rocm")
+    @serialTest()
+    def test_cublas_unified_workspace_requires_cache(self):
+        test_script = """
+import torch
+print(torch.backends.cuda.cublaslt_workspace_size())
+"""
+        env = os.environ.copy()
+        env["CUBLAS_WORKSPACE_CONFIG"] = ":1024:1"
+        env["CUBLASLT_WORKSPACE_SIZE"] = "4096"
+        env.pop("TORCH_CUBLASLT_UNIFIED_WORKSPACE", None)
+        env.pop("TORCH_CUBLAS_WORKSPACE_CACHE", None)
+        eager_size = int(
+            subprocess.check_output(
+                [sys.executable, "-c", test_script], env=env, text=True
+            )
+        )
+        env["TORCH_CUBLAS_WORKSPACE_CACHE"] = "1"
+        cached_size = int(
+            subprocess.check_output(
+                [sys.executable, "-c", test_script], env=env, text=True
+            )
+        )
+        self.assertEqual(eager_size, 4096 * 1024)
+        self.assertEqual(cached_size, 1024 * 1024)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
+    @unittest.skipIf(IS_FBCODE, "not enabled by default on fbcode")
+    @unittest.skipIf(TEST_WITH_ROCM, "not enabled by default on rocm")
+    @serialTest()
+    def test_cublas_unified_workspace_reallocation(self):
+        test_script = """
+import torch
+torch.backends.cuda.preferred_blas_library("cublaslt")
+torch.backends.cuda.cublas_workspace_size(1024 * 1024)
+torch.backends.cuda.cublaslt_workspace_size(1024 * 1024)
+a = torch.randn(7, 7, device="cuda")
+out = torch.empty_like(a)
+torch.mm(a, a, out=out)
+torch.cuda.synchronize()
+mem_after_first = torch.cuda.memory_allocated()
+torch.backends.cuda.cublas_workspace_size(4 * 1024 * 1024)
+torch.backends.cuda.cublaslt_workspace_size(4 * 1024 * 1024)
+torch.mm(a, a, out=out)
+torch.cuda.synchronize()
+print(mem_after_first, torch.cuda.memory_allocated())
+"""
+        env = os.environ.copy()
+        env["TORCH_CUBLAS_WORKSPACE_CACHE"] = "1"
+        env["TORCH_CUBLASLT_UNIFIED_WORKSPACE"] = "1"
+        output = subprocess.check_output(
+            [sys.executable, "-c", test_script], env=env, text=True
+        )
+        mem_after_first, mem_after_realloc = (
+            int(value) for value in output.split()
+        )
+        self.assertGreater(mem_after_realloc, mem_after_first)
 
     @setBlasBackendsToDefaultFinally
     def test_cublas_workspace_size_api(self):
@@ -1100,33 +1201,36 @@ print(t.is_pinned())
             torch.backends.cuda.blas_workspace_size(backend=42)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
-    @setBlasBackendsToDefaultFinally
-    def test_cublas_workspace_lazy_reallocation(self):
-        torch.backends.cuda.preferred_blas_library("cublas")
-
-        original_size = torch.backends.cuda.cublas_workspace_size()
-        torch._C._cuda_clearCublasWorkspaces()
-
-        # Trigger initial allocation with matmul
-        a = torch.randn(7, 7, device="cuda", requires_grad=False)
-        with torch.no_grad():
-            torch.matmul(a, a)
-
-        mem_after_first = torch.cuda.memory_stats()["active_bytes.all.allocated"]
-
-        # Increase workspace size
-        bigger_size = original_size + 32 * 1024 * 1024  # +32 MiB
-        torch.backends.cuda.cublas_workspace_size(bigger_size)
-
-        # No immediate memory change (lazy reallocation)
-        mem_after_set = torch.cuda.memory_stats()["active_bytes.all.allocated"]
+    @unittest.skipIf(TEST_WITH_ROCM, "workspace cache env is CUDA-only")
+    @serialTest()
+    @parametrize("backend", ("cublas", "cublaslt"))
+    def test_cublas_workspace_cached_lazy_reallocation(self, backend):
+        test_script = f"""
+import torch
+torch.backends.cuda.preferred_blas_library("{backend}")
+original_size = torch.backends.cuda.blas_workspace_size(backend="{backend}")
+a = torch.randn(7, 7, device="cuda")
+out = torch.empty_like(a)
+torch.mm(a, a, out=out)
+torch.cuda.synchronize()
+mem_after_first = torch.cuda.memory_allocated()
+bigger_size = original_size + 32 * 1024 * 1024
+torch.backends.cuda.blas_workspace_size(bigger_size, backend="{backend}")
+mem_after_set = torch.cuda.memory_allocated()
+torch.mm(a, a, out=out)
+torch.cuda.synchronize()
+print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
+"""
+        env = os.environ.copy()
+        env["TORCH_CUBLAS_WORKSPACE_CACHE"] = "1"
+        env["TORCH_CUBLASLT_UNIFIED_WORKSPACE"] = "0"
+        output = subprocess.check_output(
+            [sys.executable, "-c", test_script], env=env, text=True
+        )
+        mem_after_first, mem_after_set, mem_after_realloc = (
+            int(value) for value in output.split()
+        )
         self.assertEqual(mem_after_first, mem_after_set)
-
-        # Next matmul triggers reallocation
-        with torch.no_grad():
-            torch.matmul(a, a)
-
-        mem_after_realloc = torch.cuda.memory_stats()["active_bytes.all.allocated"]
         self.assertGreater(mem_after_realloc, mem_after_first)
 
     @recover_orig_fp32_precision

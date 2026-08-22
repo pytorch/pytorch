@@ -144,8 +144,8 @@ struct CublasLtWorkspace {
     size = at::cuda::getCUDABlasLtWorkspaceSize();
     workspace = at::cuda::getEagerCUDABlasWorkspace(size);
     ptr = workspace.get();
-    if (ptr == nullptr) {
-      ptr = at::cuda::getCUDABlasLtWorkspace();
+    if (ptr == nullptr && size != 0) {
+      ptr = at::cuda::getCUDABlasLtWorkspace(size);
     }
   }
 

@@ -19,10 +19,9 @@ struct MAGMAQueue {
   MAGMAQueue() = delete;
 
   // Constructor
-  explicit MAGMAQueue(int64_t device_id)
-      : workspace_(at::cuda::getEagerCUDABlasWorkspace()) {
+  explicit MAGMAQueue(int64_t device_id) {
     cublasHandle_t handle =
-        at::cuda::getCurrentCUDABlasHandle(workspace_.get());
+        at::cuda::getCurrentCUDABlasHandle(workspace_);
 #if !defined(USE_ROCM)
     // Magma operations is numerically sensitive, so TF32 should be off
     // regardless of the global flag.
