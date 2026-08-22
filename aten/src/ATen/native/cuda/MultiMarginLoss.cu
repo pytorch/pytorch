@@ -272,6 +272,8 @@ Tensor& multi_margin_loss_cuda_backward_out(
               "multi_margin_loss_backward: Invalid p, expected 1 or 2 but got ", p);
 
   multi_margin_loss_shape_check(nframe, dim, ndims, input_, target_, weights_);
+  multi_margin_loss_backward_grad_output_shape_check(
+      grad_output_, target_, nframe, reduction);
   resize_output(grad_input_, input_.sizes());
 
   if (input_.numel() == 0) {
