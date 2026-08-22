@@ -137,20 +137,13 @@ aten = torch.ops.aten
 
 meta_consistency_out_dtype_mismatch_xfails = {
     xfail("bucketize"),
-    xfail("conj_physical"),
     xfail("cross"),
     xfail("cummax"),
     xfail("cummin"),
     xfail("diag"),
-    xfail("fft.ihfft2"),
-    xfail("fft.ihfftn"),
-    xfail("frexp"),
     xfail("geqrf"),
     xfail("heaviside"),
     xfail("histc"),
-    xfail("index_add"),
-    xfail("index_copy"),
-    xfail("index_select"),
     xfail("isin"),
     xfail("kthvalue"),
     xfail("lerp"),
@@ -176,7 +169,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("mode"),
     xfail("msort"),
     xfail("multinomial"),
-    xfail("nan_to_num"),
     xfail("native_batch_norm"),
     xfail("neg"),
     xfail("nn.functional.avg_pool3d"),
@@ -200,8 +192,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("sort"),
     xfail("sparse.sampled_addmm"),
     xfail("take"),
-    xfail("tril"),
-    xfail("triu"),
     xfail("unfold_copy"),
     # Output has dynamic shape.
     # Does not have a meta kernel implementation.
