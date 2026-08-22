@@ -7840,6 +7840,39 @@ def forward(self, arg0_1):
         fn, inp = WHILE_LOOP_TESTS[while_loop_test]
         self._check_compile(fn, inp, backend=backend)
 
+    def test_while_loop_carried_input_is_also_additional_input(self):
+        def f(x):
+            captured = x
+
+            def cond_fn(i, v):
+                return i < 3
+
+            def body_fn(i, v):
+                return i + 1, v + captured
+
+            return while_loop(cond_fn, body_fn, (torch.tensor(0), x))[1]
+
+        self._check_compile(f, (torch.randn(4, 4),), backend="aot_eager")
+
+    def test_while_loop_body_fn_output_alias_input(self):
+        def cond_fn(i, v, a):
+            return i < 3
+
+        def body_fn(i, v, a):
+            return i + 1, v.view(v.shape)
+
+        # x is passed as a carried input and as an additional input, which is allowed,
+        # but body_fn's output still must not alias its input.
+        def f(x):
+            return torch.ops.higher_order.while_loop(
+                cond_fn, body_fn, (torch.tensor(0), x), (x,)
+            )[1]
+
+        with self.assertRaisesRegex(
+            RuntimeError, "body_fn might be aliasing the input or the output!"
+        ):
+            make_fx(torch.func.functionalize(f))(torch.randn(4, 4))
+
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipIfCrossRef  # Arg order changes with cross ref
     def test_while_loop_simple_with_linear_compile_check_graph(self):
