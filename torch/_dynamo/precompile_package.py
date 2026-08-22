@@ -163,7 +163,7 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 )
 
 
-_CAPTURE_CONFIG_STATE: ContextVar[tuple[int, tuple[bool, bool, bool] | None]] = (
+_CAPTURE_CONFIG_STATE: ContextVar[tuple[int, tuple[bool, bool, bool, bool] | None]] = (
     ContextVar("precompile_capture_config_state", default=(0, None))
 )
 
