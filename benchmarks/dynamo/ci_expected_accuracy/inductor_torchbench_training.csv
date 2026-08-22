@@ -42,7 +42,7 @@ dcgan,pass,6,17,0
 
 
 
-demucs,pass,9,88,1
+demucs,pass,6,88,0
 
 
 
@@ -186,7 +186,7 @@ torchrec_dlrm,pass,6,0,0
 
 
 
-tts_angular,pass,9,70,1
+tts_angular,pass,7,70,0
 
 
 

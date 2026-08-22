@@ -3970,7 +3970,13 @@ def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
     bidirectional = False
     batch_first = False
 
-    train = False
+    # Pass train=True when any weight requires grad so the C++ kernel
+    # allocates the workspace needed by mkldnn_rnn_layer_backward.
+    # select_one_layer_lstm_function only routes here when
+    # input.requires_grad is False, but parameter gradients still need
+    # backward, and AOTAutograd's compiled forward runs under no_grad
+    # where GradMode::is_enabled() is false.
+    train = w0.requires_grad or w1.requires_grad
     # If batch_first, inp has been permuted in _rnn_helper. Convert to contiguous here.
     # Same as aten/src/ATen/native/mkldnn/RNN.cpp: mkldnn_rnn: input = input.contiguous();
     inp = inp.contiguous()
