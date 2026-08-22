@@ -3284,27 +3284,33 @@ class TestPrecompile(TestCase):
             )
         self.assertEqual(len(_precompile_counted_calls), len(xs))
 
-    def test_capture_does_not_double_the_gradients_it_accumulates(self):
-        # Same defect seen through autograd: a training capture leaves .grad on
-        # the caller's module, so a second pass silently doubles it.
+    @parametrize("tracer", ["make_fx", "dynamo"])
+    def test_capture_does_not_touch_the_example_gradients(self, tracer):
+        # A training example runs a real backward, which ACCUMULATES. Leaving
+        # that behind silently doubles the gradients of anyone who took a warmup
+        # step before capturing -- the documented flow -- and then perturbs
+        # every subsequent step through the optimizer. The same grad OBJECT has
+        # to come back, too: optimizer state can be keyed on its identity.
         torch.manual_seed(0)
         model = _PrecompileTrainMod()
         xs = [torch.randn(n, 8) for n in (3, 5)]
         with torch.enable_grad():
-            for x in xs:
-                _precompile_backward_step(model, x)
-            expected = [p.grad.detach().clone() for p in model.parameters()]
-            for p in model.parameters():
-                p.grad = None
+            _precompile_backward_step(model, xs[0])
+            before = [(p.grad, p.grad.detach().clone()) for p in model.parameters()]
+            # make_fx captures a single call; dynamo records one per call.
+            examples = [(model, x) for x in xs]
+            extra = {"dynamic": False, "training": True}
+            if tracer == "make_fx":
+                examples, extra = examples[:1], {}
             torch.compiler.precompile(
                 _precompile_backward_step,
                 backend="eager",
-                dynamic=False,
-                tracer="dynamo",
-                training=True,
-                example_inputs=[(model, x) for x in xs],
+                tracer=tracer,
+                example_inputs=examples,
+                **extra,
             )
-        for p, want in zip(model.parameters(), expected):
+        for p, (grad_object, want) in zip(model.parameters(), before):
+            self.assertIs(p.grad, grad_object)
             self.assertEqual(p.grad, want)
 
     def test_a_mutating_module_is_guarded_on_what_the_capture_saw(self):
