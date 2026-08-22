@@ -2814,6 +2814,9 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         self.assertEqual(annotations, [])
 
     def test_untraceable_builtin_recommends_nonstrict_trace(self):
+        # Make the warning assertion independent of prior tests.
+        torch._dynamo.utils.warn_once_cache.clear()
+
         def forward(x):
             return x + os.getpid()
 
