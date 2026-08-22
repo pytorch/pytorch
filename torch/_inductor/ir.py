@@ -6589,11 +6589,17 @@ class CppTemplateBuffer(TemplateBuffer):
         make_kernel_render: Callable[_P, _T],
         template: CUTLASSTemplate,
         choice: Any,
+        mutated_inputs: Iterable[IRNode] | None = None,
     ) -> None:
-        super().__init__(layout, inputs, make_kernel_render)
+        super().__init__(
+            layout, inputs, make_kernel_render, mutated_inputs=mutated_inputs
+        )
         self.template = template
         self.choice = choice
         self.outputs: list[Buffer] | None = None
+
+    def get_outputs(self) -> list[Buffer]:
+        return [self, *self.mutation_outputs]
 
     def get_layout(self) -> Layout:
         if isinstance(self.layout, MultiOutputLayout):
