@@ -88,6 +88,7 @@ size_hints_regex = re.compile(
 class_private_mangling_regex = re.compile(r"^_[A-Za-z0-9_]+?__")
 non_word_char_regex = re.compile(r"[^\w]")
 
+
 def _pycodecache_kernel_compile_env() -> dict[str, str | None]:
     env_vars = [
         "TORCHINDUCTOR_CACHE_DIR",
@@ -155,7 +156,6 @@ def _add_triton_kernel_info(kernel_name: str, info: dict[str, Any]):
         _triton_kernel_metrics[kernel_name] = info
 
 
-
 def _sanitize_kernel_name(name: str) -> str:
     # Strip Python class-private attribute mangling (e.g., _ClassName__kernel_name -> kernel_name)
     name = class_private_mangling_regex.sub("", name)
@@ -163,7 +163,6 @@ def _sanitize_kernel_name(name: str) -> str:
     # Sanitization logic
     name = non_word_char_regex.sub("_", name)
     return name
-
 
 
 def _emit_triton_kernel_compile_metric(
