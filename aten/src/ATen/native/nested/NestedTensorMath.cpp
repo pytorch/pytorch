@@ -62,6 +62,19 @@ Tensor pad_tensor_to_shape(
 } // namespace
 
 
+Tensor expand_as_nested(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(
+      !self.is_nested() && self.dim() == 0,
+      "expand_as(): only a scalar can be expanded to a NestedTensor");
+  const auto* other_impl = get_nested_tensor_impl(other);
+  const auto& sizes = other_impl->get_nested_sizes();
+  return at::_nested_view_from_buffer(
+      self.reshape({1}),
+      sizes,
+      at::zeros_like(sizes),
+      at::zeros_like(other_impl->get_storage_offsets()));
+}
+
 Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask, bool mask_check) {
     TORCH_CHECK(mask.scalar_type() == at::ScalarType::Bool, "Expected mask to be of ScalarType Bool, but got ", mask.scalar_type(), " instead.");
     TORCH_CHECK(mask.dim() == 2, "Padding mask should be 2D");
