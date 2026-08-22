@@ -3020,6 +3020,68 @@ class GraphModule(torch.nn.Module):
         self.assertIsInstance(result, MyTensor)
         self.assertEqual(result, x)
 
+    def test_bare_subclass_getattr_method_does_not_crash(self):
+        # https://github.com/pytorch/pytorch/issues/194323
+        class CustomTensor(torch.Tensor):
+            def __getattr__(self, attr):
+                if attr == "custom_method":
+                    return lambda x: self + x
+
+        def fn():
+            ct = CustomTensor([1, 2, 3])
+            return ct.custom_method(torch.tensor([4, 5, 6]))
+
+        expected = fn()
+        actual = torch.compile(fn, backend="eager")()
+        self.assertEqual(actual, expected)
+
+    def test_bare_subclass_getattr_method_raises_does_not_crash(self):
+        class CustomTensor(torch.Tensor):
+            def __getattr__(self, attr):
+                if attr == "custom_method":
+                    return lambda x: self + x
+                raise AttributeError(attr)
+
+        def fn():
+            ct = CustomTensor([1, 2, 3])
+            return ct.custom_method(torch.tensor([4, 5, 6]))
+
+        expected = fn()
+        actual = torch.compile(fn, backend="eager")()
+        self.assertEqual(actual, expected)
+
+    def test_bare_subclass_getattr_method_inside_compiled_fn(self):
+        def fn():
+            class CustomTensor(torch.Tensor):
+                def __getattr__(self, attr):
+                    if attr == "custom_method":
+                        return lambda x: self + x
+
+            ct = CustomTensor([1, 2, 3])
+            return ct.custom_method(torch.tensor([4, 5, 6]))
+
+        expected = fn()
+        actual = torch.compile(fn, backend="eager")()
+        # Nested class objects differ across eager vs compile, compare as Tensor.
+        self.assertEqual(
+            actual.as_subclass(torch.Tensor), expected.as_subclass(torch.Tensor)
+        )
+
+    def test_bare_subclass_getattr_still_traces_tensor_methods(self):
+        class CustomTensor(torch.Tensor):
+            def __getattr__(self, attr):
+                if attr == "custom_method":
+                    return lambda x: self + x
+                raise AttributeError(attr)
+
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3).as_subclass(CustomTensor)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+
 
 instantiate_parametrized_tests(SubclassTests)
 

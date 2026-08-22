@@ -4640,6 +4640,29 @@ def get_custom_getattr(
     return getattr_fn
 
 
+def getattr_swallows_missing_attrs(value: Any) -> bool:
+    """True if type(value).__getattr__ returns for names that are not on the object.
+
+    Instance hasattr()/getattr(..., default) are unreliable in that case, because a
+    missing name does not raise AttributeError.
+    """
+    if inspect.getattr_static(type(value), "__getattr__", None) is None:
+        return False
+    sentinel = "__dynamo_missing_attr_probe__"
+    if inspect.getattr_static(value, sentinel, None) is not None:
+        return False
+    try:
+        object.__getattribute__(value, sentinel)
+        return False
+    except AttributeError:
+        pass
+    try:
+        getattr(value, sentinel)
+    except Exception:
+        return False
+    return True
+
+
 class TensorStaticReason(enum.Enum):
     PARAMETER = 2
     NOT_TENSOR = 4
