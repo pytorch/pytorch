@@ -255,6 +255,53 @@ class TestFileSystem(TestCase):
         # os.sync() may be called on backends that don't support per-file fsync
         self.assertLessEqual(mock_os_sync.call_count, 2)
 
+    def test_fsspec_writer_thread_count_auto_tuning(self):
+        """
+        Verify that FsspecWriter works with auto-tuned thread_count (default None)
+        and with explicit thread_count overrides.
+        """
+        state_dict = {f"k_{i}": torch.randn(10, 10) for i in range(8)}
+
+        # 1. Default auto-tuning (thread_count=None, min_size_per_thread=1GB, max_threads=16)
+        writer_auto = FsspecWriter("memory://test_fsspec_auto_tune")
+        self.assertIsNone(writer_auto.thread_count)
+        self.assertEqual(writer_auto.min_size_per_thread, 1024 * 1024 * 1024)
+        self.assertEqual(writer_auto.max_threads, 16)
+
+        dcp.save(state_dict, storage_writer=writer_auto, no_dist=True)
+
+        loaded_auto = {f"k_{i}": torch.zeros(10, 10) for i in range(8)}
+        dcp.load(
+            loaded_auto,
+            storage_reader=FsspecReader("memory://test_fsspec_auto_tune"),
+            no_dist=True,
+        )
+        for k in state_dict:
+            self.assertTrue(torch.equal(state_dict[k], loaded_auto[k]))
+
+        # 2. Explicit thread_count override and custom parameters
+        writer_explicit = FsspecWriter(
+            "memory://test_fsspec_explicit_threads",
+            thread_count=4,
+            max_threads=8,
+            min_size_per_thread=64 * 1024 * 1024,
+        )
+        self.assertEqual(writer_explicit.thread_count, 4)
+        self.assertEqual(writer_explicit.max_threads, 8)
+        self.assertEqual(writer_explicit.min_size_per_thread, 64 * 1024 * 1024)
+
+        dcp.save(state_dict, storage_writer=writer_explicit, no_dist=True)
+
+        loaded_explicit = {f"k_{i}": torch.zeros(10, 10) for i in range(8)}
+        dcp.load(
+            loaded_explicit,
+            storage_reader=FsspecReader("memory://test_fsspec_explicit_threads"),
+            no_dist=True,
+        )
+        for k in state_dict:
+            self.assertTrue(torch.equal(state_dict[k], loaded_explicit[k]))
+
 
 if __name__ == "__main__":
     run_tests()
+

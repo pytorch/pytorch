@@ -112,11 +112,13 @@ class FsspecWriter(FileSystemWriter):
         path: str | os.PathLike,
         single_file_per_rank: bool = True,
         sync_files: bool = True,
-        thread_count: int = 1,
+        thread_count: int | None = None,
         per_thread_copy_ahead: int = 10_000_000,
         overwrite: bool = True,
         _extensions: Sequence[StreamTransformExtension] | None = None,
         serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
+        max_threads: int = 16,
+        min_size_per_thread: int = 1024 * 1024 * 1024,
         **kwargs,
     ) -> None:
         """
@@ -126,22 +128,26 @@ class FsspecWriter(FileSystemWriter):
             path: directory where the checkpoint will be written to.
             single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
             sync_files : force files to be synced to permanent storage. Default to True.
-            thread_count: Number of IO threads to use to write. Default to 1.
+            thread_count: Number of IO threads to use to write. Default to None (auto-tuned based on plan size).
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. Default 10Mb.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
+            max_threads: Maximum number of IO threads to use when auto-tuning thread_count. Default to 16.
+            min_size_per_thread: Minimum chunk size in bytes per thread when auto-tuning thread_count. Default to 1GB.
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
         super().__init__(
-            path,
-            single_file_per_rank,
-            sync_files,
-            thread_count,
-            per_thread_copy_ahead,
+            path=path,
+            single_file_per_rank=single_file_per_rank,
+            sync_files=sync_files,
+            thread_count=thread_count,
+            per_thread_copy_ahead=per_thread_copy_ahead,
             overwrite=overwrite,
             _extensions=_extensions,
             serialization_format=serialization_format,
+            max_threads=max_threads,
+            min_size_per_thread=min_size_per_thread,
         )
         self.fs = FileSystem()
         self.path = self.fs.init_path(path, **kwargs)
