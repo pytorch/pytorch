@@ -174,6 +174,12 @@ _BackendId = NewType("_BackendId", str)  # __compiled_fn
 _FunctionId = NewType("_FunctionId", str)  # __resume_at
 
 
+@dataclasses.dataclass
+class _PreparedInstall:
+    backends: dict[_BackendId, Any]
+    managers: dict[tuple[types.CodeType, int], "GuardManagerWrapper"]
+
+
 def _backend_ids_from_code(code: types.CodeType) -> Iterator[_BackendId]:
     for name in code.co_names:
         if is_compiled_fn_name(name):
@@ -693,6 +699,7 @@ class CompilePackage:
         self._installed_precompile_region_id = -1
         self._installed_precompile_probe: types.CodeType | None = None
         self._install_owner = object()
+        self._prepared: _PreparedInstall | None = None
         # device_type that model compiled with.
         self._device_type = "cpu"
 
@@ -1011,6 +1018,8 @@ class CompilePackage:
         from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
 
+        prepared = self._prepared
+        self._prepared = None
         with _PACKAGE_INSTALL_LOCK:
             self.uninstall()
             self._installed_precompile_region_id = isolate_recompiles_id
@@ -1068,7 +1077,11 @@ class CompilePackage:
                         with dynamo_timed(
                             "after_deserialization", phase_name="backend_compile"
                         ):
-                            backend = backends[backend_id].after_deserialization()
+                            backend = (
+                                prepared.backends[backend_id]
+                                if prepared is not None
+                                else backends[backend_id].after_deserialization()
+                            )
                             self._install_global(
                                 module,
                                 backend_id,
@@ -1093,7 +1106,7 @@ class CompilePackage:
                                 ),
                             )
 
-                    for guarded_code in entry.guarded_codes:
+                    for index, guarded_code in enumerate(entry.guarded_codes):
                         with dynamo_timed("precompile_load_guards"):
                             guards_state = load_guards_state(guarded_code.guards_state)
                         runtime_global_scope = sys.modules[entry.python_module].__dict__
@@ -1119,10 +1132,16 @@ class CompilePackage:
                             raise AssertionError(
                                 f"Expected GuardsState, got {type(guards_state)}"
                             )
-                        with dynamo_timed("precompile_build_guards"):
-                            guard_manager = load_guard_manager(
-                                guards_state, target_code, runtime_global_scope
-                            )
+                        guard_manager = (
+                            prepared.managers.get((target_code, index))
+                            if prepared is not None
+                            else None
+                        )
+                        if guard_manager is None:
+                            with dynamo_timed("precompile_build_guards"):
+                                guard_manager = load_guard_manager(
+                                    guards_state, target_code, runtime_global_scope
+                                )
                         _load_precompile_entry(
                             target_code,
                             guard_manager,
@@ -1135,6 +1154,27 @@ class CompilePackage:
                         )
                         if self._installed_precompile_probe is None:
                             self._installed_precompile_probe = target_code
+
+    def prepare(self, backends: dict[_BackendId, Any]) -> None:
+        """Deserialize backends and build guard trees without installing them."""
+        managers = {}
+        for code, entry in self._codes.items():
+            if entry.bypassed or not entry.guarded_codes:
+                continue
+            target_code = _lookup_code(entry) if entry.code_source else code
+            runtime_global_scope = sys.modules[entry.python_module].__dict__
+            for index, guarded_code in enumerate(entry.guarded_codes):
+                guards_state = load_guards_state(guarded_code.guards_state)
+                managers[(target_code, index)] = load_guard_manager(
+                    guards_state, target_code, runtime_global_scope
+                )
+        self._prepared = _PreparedInstall(
+            backends={
+                backend_id: artifact.after_deserialization()
+                for backend_id, artifact in backends.items()
+            },
+            managers=managers,
+        )
 
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()

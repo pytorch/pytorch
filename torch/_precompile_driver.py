@@ -396,12 +396,14 @@ def _build_dynamo_forward():
 
     The compiled graph sources stay ordinary Python in the artifact. Only the minimized
     Dynamo dispatch guards, transformed entry/resume code objects, and embedded disabled
-    functions are opaque because none has a source form. There is no compiler behind
-    this dispatcher: a miss against every retained guard set raises instead of compiling
-    another specialization.
+    functions are opaque because none has a source form. Standalone mode has no compiler
+    and raises on a miss; installed mode may compile an uncovered specialization and
+    reports those compiles on its loaded handle.
     """
     import base64
+    import contextlib
     import importlib
+    import logging
     import pickle
     import sys
     import types
@@ -666,6 +668,35 @@ def _build_dynamo_forward():
             for backend_id, function in backend_calls.items()
         }
 
+        class ServingBackend:
+            def __init__(self):
+                self.backend = torch._dynamo.lookup_backend(BACKEND)
+                self.backend_ctx_ctor = getattr(
+                    self.backend, "backend_ctx_ctor", contextlib.nullcontext
+                )
+                self.lock = threading.Lock()
+                self.compiles = 0
+
+            def __call__(self, graph, example_inputs):
+                with self.lock:
+                    self.compiles += 1
+                    compiles = self.compiles
+                logging.getLogger("torch._precompile").warning(
+                    "precompile: serving compiled a new graph because no captured "
+                    "variant matched this call (%d total); recapture with an example "
+                    "that covers it.",
+                    compiles,
+                )
+                return self.backend(graph, example_inputs)
+
+            def get_compiler_config(self):
+                getter = getattr(self.backend, "get_compiler_config", None)
+                return None if getter is None else getter()
+
+            def count(self):
+                with self.lock:
+                    return self.compiles
+
         def keep_serializable_guards(entries):
             from torch._dynamo.guards import CheckFunctionManager
 
@@ -710,15 +741,16 @@ def _build_dynamo_forward():
                 self.unloading = False
                 self.loaded = True
                 self.capture_summary = state.summary
+                self.serving_backend = ServingBackend()
 
             def _rebind(self, fn):
                 with self.state:
-                    if self.compiled is not None:
+                    if self.compiled is not None or self.package is not None:
                         from torch._precompile import PrecompileError
 
                         raise PrecompileError(
-                            "precompile: this artifact is already installed; pass "
-                            "fn= to load() before the first call."
+                            "precompile: this artifact is already prepared; pass fn= "
+                            "to load() instead of rebinding it afterwards."
                         )
                     entry = fn.forward if isinstance(fn, torch.nn.Module) else fn
                     code = getattr(entry, "__code__", None)
@@ -743,6 +775,31 @@ def _build_dynamo_forward():
                         )
                     self.fn = fn
 
+            def _prepare(self):
+                with self.state:
+                    if not self.loaded:
+                        raise RuntimeError("precompile artifact has been unloaded")
+                    if self.package is not None:
+                        return
+                    fn = entry_function() if self.fn is None else self.fn
+                    entry = fn.forward if isinstance(fn, torch.nn.Module) else fn
+                    package = CompilePackage(
+                        entry,
+                        state.package,
+                        ignore_inlined_sources=False,
+                        serialization_guard_filter_fn=keep_serializable_guards,
+                    )
+                    try:
+                        package.prepare(backends)
+                    except Exception as error:
+                        from torch._precompile import PrecompileError
+
+                        if isinstance(error, PrecompileError):
+                            raise
+                        raise PrecompileError(str(error)) from error
+                    self.fn = fn
+                    self.package = package
+
             def _ensure(self):
                 with self.state:
                     if not self.loaded:
@@ -751,17 +808,14 @@ def _build_dynamo_forward():
                         raise RuntimeError("precompile artifact is being unloaded")
                     if self.compiled is not None:
                         return
-                    fn = entry_function() if self.fn is None else self.fn
-                    entry = fn.forward if isinstance(fn, torch.nn.Module) else fn
-
-                    package = CompilePackage(
-                        entry,
-                        state.package,
-                        ignore_inlined_sources=False,
-                        serialization_guard_filter_fn=keep_serializable_guards,
-                    )
+                    if self.package is None:
+                        self._prepare()
+                    if self.fn is None or self.package is None:
+                        raise AssertionError("installed artifact was not prepared")
+                    fn = self.fn
+                    package = self.package
                     context = torch._dynamo.optimize(
-                        torch._dynamo.lookup_backend(BACKEND),
+                        self.serving_backend,
                         package=package,
                         dynamic=state.dynamic,
                         recompile_limit=state.recompile_limit,
@@ -776,9 +830,11 @@ def _build_dynamo_forward():
                         raise
                     self.fn = fn
                     self.compiled = compiled
-                    self.package = package
                     self.region = region
                     self.codes = package.region_codes()
+
+            def serve_time_compiles(self):
+                return self.serving_backend.count()
 
             def __call__(self, *args, **kwargs):
                 self._ensure()

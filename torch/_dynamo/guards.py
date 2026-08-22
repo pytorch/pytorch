@@ -745,6 +745,11 @@ class GuardManagerWrapper:
                 else strip_local_scope(manager.get_source())
             )
             for guard in manager.get_leaf_guards():
+                # compile_check_fn derives relational guards from the complete
+                # tensor set, so a rebuild can place them on different managers
+                # without changing the serialized high-level guards.
+                if isinstance(guard, RelationalGuard):
+                    continue
                 found.update(
                     (source, type(guard).__name__, part) for part in payload(guard)
                 )

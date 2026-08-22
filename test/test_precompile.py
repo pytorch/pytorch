@@ -351,8 +351,40 @@ class _PrecompileDynamoFoldsGlobal(torch.nn.Module):
         return self.linear(x), _PRECOMPILE_DYNAMO_GLOBAL_SCALE
 
 
+class _PrecompileDynamoPlainMatmul(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.randn(8, 8))
+
+    def forward(self, x):
+        return (x @ self.weight).relu()
+
+
+class _PrecompileDynamoCustomOpMatmul(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.randn(8, 8))
+
+    def forward(self, x):
+        return torch.ops.precompile_parity.fused_matmul(x, self.weight).relu()
+
+
+class _PrecompileDynamoGradState(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.randn(4))
+        self.register_buffer("buffer", torch.randn(4, requires_grad=True))
+
+    def step(self, x):
+        ((self.weight + self.buffer) * x).sum().backward()
+
+
 def _precompile_dynamo_call_module(module, x):
     return module(x)
+
+
+def _precompile_dynamo_grad_state(module, x):
+    module.step(x)
 
 
 def _precompile_dynamo_late_varying(fixed, varying):
@@ -1933,6 +1965,31 @@ class TestPrecompile(TestCase):
         self.assertEqual(len(calls), len(examples))
         self.assertIsNone(model.weight.grad)
 
+    @parametrize("bound_method", (False, True))
+    def test_tracer_dynamo_preserves_all_example_grads(self, bound_method):
+        model = _PrecompileDynamoGradState()
+        x = torch.randn(4)
+        model.step(x)
+        before = [
+            (tensor, tensor.grad, tensor.grad.detach().clone())
+            for tensor in (model.weight, model.buffer)
+        ]
+        fn = model.step if bound_method else _precompile_dynamo_grad_state
+        example = (x,) if bound_method else (model, x)
+
+        torch.compiler.precompile(
+            fn,
+            example_inputs=[example],
+            tracer="dynamo",
+            backend="eager",
+            training=True,
+            dynamic=False,
+        )
+
+        for tensor, grad, value in before:
+            self.assertIs(tensor.grad, grad)
+            self.assertEqual(tensor.grad, value)
+
     def test_tracer_dynamo_guards_mutating_module_at_capture_state(self):
         torch.manual_seed(0)
         model = _PrecompileDynamoStepCounter()
@@ -2973,6 +3030,57 @@ class TestPrecompile(TestCase):
         )
         loaded.unload()
 
+    def test_tracer_dynamo_installed_artifact_reuses_prepared_state(self):
+        from unittest import mock
+
+        import torch._dynamo.package as package_module
+
+        built = []
+        load_guard_manager = package_module.load_guard_manager
+
+        def count(*args, **kwargs):
+            built.append(1)
+            return load_guard_manager(*args, **kwargs)
+
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_unreachable_branch_caller,
+            example_inputs=[(x, 0), (x, 1)],
+            tracer="dynamo",
+            backend="eager",
+            dynamic=False,
+        )
+        with mock.patch.object(package_module, "load_guard_manager", count):
+            loaded = torch.compiler.precompile.load(code, cache)
+            at_load = len(built)
+            try:
+                loaded(x, 0)
+            finally:
+                loaded.unload()
+        self.assertGreater(at_load, 0)
+        self.assertEqual(len(built), at_load)
+
+    def test_tracer_dynamo_installed_artifact_reports_serve_time_compiles(self):
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_unreachable_branch_caller,
+            example_inputs=[(x, 0), (x, 1)],
+            tracer="dynamo",
+            backend="eager",
+            dynamic=False,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        try:
+            self.assertEqual(loaded.serve_time_compiles(), 0)
+            loaded(x, 0)
+            self.assertEqual(loaded.serve_time_compiles(), 0)
+            with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                loaded(x, 2)
+            self.assertTrue(any("compiled a new graph" in line for line in logs.output))
+            self.assertGreater(loaded.serve_time_compiles(), 0)
+        finally:
+            loaded.unload()
+
     def test_tracer_dynamo_installed_artifact_rejects_wrong_callable(self):
         model = _PrecompileDynamoBreakingModule().eval()
         x = torch.randn(5, 4)
@@ -3021,6 +3129,32 @@ class TestPrecompile(TestCase):
         replacement = _PrecompileDynamoFoldsGlobal().eval()
         self.assertEqual(loaded(model, x), model(x))
         self.assertEqual(loaded(replacement, x), replacement(x))
+
+    @parametrize("backend", ("eager", "inductor"))
+    @parametrize("kind", ("plain", "custom_op"))
+    def test_tracer_dynamo_module_callable_with_grad_input(self, backend, kind):
+        from torch.library import _scoped_library
+
+        with _scoped_library("precompile_parity", "FRAGMENT") as lib:
+            lib.define("fused_matmul(Tensor x, Tensor w) -> Tensor")
+            lib.impl("fused_matmul", torch.mm, "CompositeExplicitAutograd")
+            lib.impl("fused_matmul", torch.mm, "Meta")
+            module_type = (
+                _PrecompileDynamoPlainMatmul
+                if kind == "plain"
+                else _PrecompileDynamoCustomOpMatmul
+            )
+            model = module_type()
+            x = torch.randn(8, 8, requires_grad=True)
+            code, cache = torch.compiler.precompile(
+                model,
+                example_inputs=[(x,)],
+                tracer="dynamo",
+                backend=backend,
+            )
+            loaded = torch.compiler.precompile.load(code, cache)
+            with torch.no_grad():
+                self.assertEqual(loaded(model, x), model(x))
 
     def test_tracer_dynamo_bare_builtin_module_is_rejected(self):
         model = torch.nn.Linear(4, 3).eval()
