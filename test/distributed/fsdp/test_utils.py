@@ -15,6 +15,7 @@ from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize,
     run_tests,
     subtest,
@@ -41,10 +42,13 @@ if TEST_HPU:
 elif TEST_XPU:
     list_device = "xpu"
 else:
-    list_device = "cuda"
+    _acc = torch.accelerator.current_accelerator(check_available=True)
+    list_device = _acc.type if _acc is not None else "cuda"
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize(
         "device_list",
         [
@@ -54,7 +58,7 @@ class TestUtils(TestCase):
         ],
     )
     @skip_if_lt_x_gpu(1)
-    def test_apply_to_tensors(self, device_list):
+    def test_apply_to_tensors(self, device, device_list):
         expected = 0
 
         def get_a_tensor():
@@ -104,7 +108,7 @@ class TestUtils(TestCase):
             self.assertEqual(type(new_data[i]), type(v))
 
     @skip_if_lt_x_gpu(1)
-    def test_replace_by_prefix(self):
+    def test_replace_by_prefix(self, device):
         state_dict = {
             "layer.a": torch.tensor(1),
             "abc.layer.def": torch.tensor(2),
@@ -129,7 +133,7 @@ class TestUtils(TestCase):
             )
 
     @skip_if_lt_x_gpu(1)
-    def test_packed_sequence(self):
+    def test_packed_sequence(self, device):
         """Test to ensure RNN packed sequences are modified correctly."""
         rnn = nn.RNN(5, 5)
 
@@ -145,7 +149,7 @@ class TestUtils(TestCase):
         x, _ = nn.utils.rnn.pad_packed_sequence(x)
         self.assertEqual(torch.sum(x), 0)
 
-    def test_get_param_to_fqns_scales_linearly(self):
+    def test_get_param_to_fqns_scales_linearly(self, device):
         """Regression test for https://github.com/pytorch/pytorch/issues/168329.
 
         _apply_to_modules had O(N_submodules * N_params) complexity when
@@ -203,7 +207,6 @@ class TestUtils(TestCase):
         )
 
 
-devices = ("cuda", "hpu", "xpu")
-instantiate_device_type_tests(TestUtils, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(TestUtils, globals(), except_for="cpu", allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
