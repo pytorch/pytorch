@@ -531,7 +531,9 @@ endif()
 
 # ---[ NNPACK
 if(USE_NNPACK)
-  include(${CMAKE_CURRENT_LIST_DIR}/External/nnpack.cmake)
+  add_subdirectory(
+    "${CMAKE_CURRENT_LIST_DIR}/External/nnpack"
+    "${PROJECT_BINARY_DIR}/cmake/External/nnpack")
   if(NNPACK_FOUND)
     if(TARGET nnpack)
       # ---[ NNPACK is being built together with Caffe2: explicitly specify dependency
