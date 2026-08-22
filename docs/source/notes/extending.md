@@ -945,6 +945,35 @@ as was the case before version 1.7.0. Failing to do this may cause ``func``
 to recurse back into ``__torch_function__`` and therefore cause infinite
 recursion.
 
+When you call ``backward()`` on a tensor subclass, PyTorch temporarily disables
+subclass ``__torch_function__`` dispatch for the entire backward pass. Autograd
+hooks (for example, ``register_post_accumulate_grad_hook`` and ``register_hook``) run during that pass, so
+PyTorch operations inside those hooks do not dispatch to your subclass's
+``__torch_function__``.
+
+This happens because subclass dispatch uses
+``torch._C.DisableTorchFunctionSubclass()`` inside
+``Tensor.__torch_function__`` when you call ``super().__torch_function__()``.
+Since ``backward()`` runs synchronously inside that context, hooks inherit the
+disabled state.
+
+If you need subclass dispatch inside a hook, re-enable it locally with
+``torch._C._EnableTorchFunction()``:
+
+```{code-block} python
+:dedent: 2
+
+  def post_accum_hook(param):
+      with torch._C._EnableTorchFunction():
+          param + MyTensor(torch.ones_like(param))
+
+```
+
+Tensor-like objects (separate wrapper classes that are not ``Tensor`` subclasses)
+behave differently: their ``__torch_function__`` is still called inside hooks
+because they do not go through ``super().__torch_function__()`` during
+``backward()``.
+
 ### Extending {mod}`torch` with a {class}`Tensor` wrapper type
 
 Another useful case is a type that wraps a {class}`Tensor`, either as an
