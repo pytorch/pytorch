@@ -296,6 +296,50 @@ bool is_two_level_nvfp4(
 
 } // namespace
 
+bool validate_cpu_mxfp_v2_inputs(
+    const Tensor& mat_a,
+    ArrayRef<Tensor> scale_a,
+    ArrayRef<ScalingType> recipe_a,
+    ArrayRef<SwizzleType> swizzle_a,
+    ArrayRef<Tensor> scale_b,
+    ArrayRef<ScalingType> recipe_b,
+    ArrayRef<SwizzleType> swizzle_b,
+    IntArrayRef contraction_dim) {
+  const auto has_mxfp_scale = [](ArrayRef<Tensor> scales) {
+    for (const auto& scale : scales) {
+      if (scale.scalar_type() == ScalarType::Float8_e8m0fnu) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (!mat_a.device().is_cpu() ||
+      (!has_mxfp_scale(scale_a) && !has_mxfp_scale(scale_b))) {
+    return false;
+  }
+  TORCH_CHECK_VALUE(
+      scale_a.size() == 1 && scale_b.size() == 1 &&
+          is_single_recipe(
+              recipe_a,
+              recipe_b,
+              ScalingType::BlockWise1x32,
+              ScalingType::BlockWise1x32),
+      "CPU MXFP requires one BlockWise1x32 scale per operand");
+  const auto is_no_swizzle = [](ArrayRef<SwizzleType> swizzle) {
+    return swizzle.empty() ||
+        (swizzle.size() == 1 && swizzle[0] == SwizzleType::NO_SWIZZLE);
+  };
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      is_no_swizzle(swizzle_a) && is_no_swizzle(swizzle_b),
+      "CPU MXFP only supports NO_SWIZZLE");
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      contraction_dim.empty() ||
+          (contraction_dim.size() == 2 && contraction_dim[0] == 1 &&
+           contraction_dim[1] == 0),
+      "CPU scaled_mm_v2 only supports contraction_dim=[] or [1, 0]");
+  return true;
+}
+
 // Eager-and-meta validation for `_scaled_mm_v2`. Mirrors a subset of the
 // kernel-side checks so torch.compile tracing fails fast with the same
 // messages users get in eager. We deliberately *don't* duplicate checks
