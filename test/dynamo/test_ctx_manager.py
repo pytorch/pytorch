@@ -322,6 +322,44 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled.device.index, 0)
         self.assertEqual(compiled.dtype, torch.float32)
 
+    def test_autocast_object_guarded_by_value_not_identity(self):
+        # A user-held autocast object reaches the trace as four specialized
+        # values (device, dtype, enabled, cache_enabled), so those are what the
+        # graph depends on. Guarding the object by id() instead is both too
+        # strong -- a second object configured identically cannot reuse the
+        # graph -- and unserializable, which is what makes a precompiled
+        # artifact drop the guard entirely.
+        class MyModule(torch.nn.Module):
+            def __init__(self, ctx):
+                super().__init__()
+                self.ctx = ctx
+                self.l = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                with self.ctx:
+                    return self.l(x)
+
+        module = MyModule(torch.amp.autocast("cpu", dtype=torch.bfloat16))
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(module, backend=cnts)
+        x = torch.randn(4, 4)
+        self.assertEqual(compiled(x).dtype, torch.bfloat16)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # A DIFFERENT object with the same settings: same graph, no recompile.
+        # An id() guard would miss here and recompile.
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.bfloat16)
+        self.assertEqual(compiled(x).dtype, torch.bfloat16)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # A different setting is a different graph. Checked on `enabled` rather
+        # than dtype: flipping dtype on a live model reuses autocast's cached
+        # cast of the weight, which is its own behaviour and not what is under
+        # test here.
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.bfloat16, enabled=False)
+        self.assertEqual(compiled(x).dtype, torch.float32)
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_autocast_cpu(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
