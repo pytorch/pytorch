@@ -19,6 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
@@ -83,6 +84,7 @@ def _functionalize(
     TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/81457"
 )
 class TestFunctionalization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     crossref = False
 
     def get_logs(self, func, *inpts, reapply_views=False, run_reinplace=False):
@@ -2359,10 +2361,12 @@ def forward(self, arg0_1):
     TEST_WITH_TORCHDYNAMO, "dynamo-ing code with proxy + fake doesn't work well"
 )
 class TestCrossRefFunctionalization(TestFunctionalization):
+    hw_classification = HardwareClassification.GENERIC
     crossref = True
 
 
 class TestViewMetaSerialization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     # Exercise to_serializable_tuple() via as_tuple() and pickle, covering each
     # element kind that used to be a dangling reference: std::vector (resize_/
     # _unsafe_view_), const at::Tensor& (_make_dual), and const
