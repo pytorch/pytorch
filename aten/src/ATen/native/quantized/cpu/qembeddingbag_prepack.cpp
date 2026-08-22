@@ -97,7 +97,7 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
       output_shape,
       weight_contig.options().dtype(at::kByte),
       weight_contig.suggest_memory_format());
-  auto* output_data = output.data_ptr<uint8_t>();
+  auto* output_data = output.mutable_data_ptr<uint8_t>();
 
   if (bit_width == 8) {
     at::parallel_for(
@@ -290,7 +290,7 @@ Tensor& qembeddingbag_byte_prepack_out(
   std::vector<int64_t> output_shape = weight_sizes.vec();
   output_shape.at(cols_dim) = output_columns;
   at::native::resize_(output, output_shape, std::nullopt);
-  auto* output_data = output.data_ptr<uint8_t>();
+  auto* output_data = output.mutable_data_ptr<uint8_t>();
 
 #ifdef USE_FBGEMM
   // Move these outside of the ifdef when we support non-FBGEMM flow.
@@ -463,7 +463,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
       output_shape,
       weight_contig.options().dtype(at::kByte),
       weight_contig.suggest_memory_format());
-  auto* output_data = output.data_ptr<uint8_t>();
+  auto* output_data = output.mutable_data_ptr<uint8_t>();
 
 #ifdef USE_FBGEMM
   // Move these outside of the ifdef when we support non-FBGEMM flow.

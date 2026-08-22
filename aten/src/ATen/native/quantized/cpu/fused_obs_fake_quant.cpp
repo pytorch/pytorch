@@ -43,8 +43,8 @@ void calculate_moving_average(
   const float* min_curr_val = x_min.const_data_ptr<float>();
   const float* max_curr_val = x_max.const_data_ptr<float>();
   // Moving Average Min/Max observer for input tensor
-  float* running_min_val = running_min.data_ptr<float>();
-  float* running_max_val = running_max.data_ptr<float>();
+  float* running_min_val = running_min.mutable_data_ptr<float>();
+  float* running_max_val = running_max.mutable_data_ptr<float>();
   for (const auto i : c10::irange(x_min.numel())) {
     running_min_val[i] = std::isinf(running_min_val[i]) ? min_curr_val[i]
                                                         : running_min_val[i] +
