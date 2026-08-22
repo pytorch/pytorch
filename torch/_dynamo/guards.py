@@ -724,23 +724,30 @@ class GuardManagerWrapper:
                 )
                 self.construct_manager_string(child_mgr, body)
 
-    def leaf_fingerprint(self) -> frozenset[tuple[str, str]]:
+    def leaf_fingerprint(self) -> frozenset[tuple[str, str, str]]:
         """Return a stable description of the checks made by this guard tree."""
-        found: set[tuple[str, str]] = set()
+        found: set[tuple[str, str, str]] = set()
 
         def payload(guard: LeafGuard) -> Iterator[str]:
             for part in guard.verbose_code_parts():
                 text = part.split("  # ", 1)[0]
                 text = re.sub(r"___check_metadata\S*", "___check_metadata", text)
-                yield re.sub(r"\d{6,}", "N", text)
+                text = re.sub(
+                    r"___check_opaque_guard_fn_\S*", "___check_opaque_guard_fn", text
+                )
+                text = re.sub(r"__dtensor_spec_\d+", "__dtensor_spec", text)
+                yield text.strip()
 
         def walk(manager: GuardManager) -> None:
+            source = (
+                ""
+                if isinstance(manager, RootGuardManager)
+                else strip_local_scope(manager.get_source())
+            )
             for guard in manager.get_leaf_guards():
-                if isinstance(guard, RelationalGuard):
-                    continue
-                if type(guard).__name__ == "LAMBDA_GUARD":
-                    continue
-                found.update((type(guard).__name__, part) for part in payload(guard))
+                found.update(
+                    (source, type(guard).__name__, part) for part in payload(guard)
+                )
             if isinstance(manager, DictGuardManager):
                 pairs = manager.get_key_value_managers().values()
                 for key_manager, value_manager in pairs:
@@ -751,9 +758,14 @@ class GuardManagerWrapper:
                 walk(child)
 
         walk(self.root)
+        if hasattr(self.root, "get_epilogue_lambda_guards"):
+            for guard in self.root.get_epilogue_lambda_guards():
+                found.update(
+                    ("", type(guard).__name__, part) for part in payload(guard)
+                )
         return frozenset(
-            (guard_type, value.replace(", FakeTensor,", ", Tensor,"))
-            for guard_type, value in found
+            (source, guard_type, value.replace(", FakeTensor,", ", Tensor,"))
+            for source, guard_type, value in found
         )
 
     def __str__(self) -> str:
@@ -4166,16 +4178,6 @@ def _companion_attribute_guards(
     return result
 
 
-@contextmanager
-def _quiet_guard_errors() -> Generator[None, None, None]:
-    disabled = torch._guards.log.disabled
-    torch._guards.log.disabled = True
-    try:
-        yield
-    finally:
-        torch._guards.log.disabled = disabled
-
-
 _FAKE_TENSOR_OWNED_ATTRIBUTES = frozenset(
     {
         "_fake_device",
@@ -4836,7 +4838,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
             has_value = False
     source = guard.originating_source
     source_root_id = None
-    source_root_is_module = False
+    source_root_is_import = False
     source_has_unsupported_value = False
     while source is not None:
         try:
@@ -4849,7 +4851,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
             )
             if not isinstance(source, ChainedSource):
                 source_root_id = id(source_value)
-                source_root_is_module = isinstance(source_value, torch.nn.Module)
+                source_root_is_import = isinstance(source, ImportSource)
         source = source.base if isinstance(source, ChainedSource) else None
     is_global = get_global_source_name(guard.originating_source) is not None
     return GuardFilterEntry(
@@ -4861,7 +4863,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         is_global=is_global,
         orig_guard=guard,
         source_root_id=source_root_id,
-        source_root_is_module=source_root_is_module,
+        source_root_is_import=source_root_is_import,
         source_has_unsupported_value=source_has_unsupported_value,
         code=tuple(guard.code_list or ()),
     )
@@ -5459,8 +5461,7 @@ class CheckFunctionManager:
                 guard.create(builder)
             else:
                 try:
-                    with _quiet_guard_errors():
-                        guard.create(builder)
+                    guard.create_fn(builder, guard)
                 except Exception as error:
                     self._collect_guard_failures.append((guard, error))
         return builder, guard_manager
