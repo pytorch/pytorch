@@ -152,10 +152,25 @@ elseif("${XPU_SYCL_COMPILER}" MATCHES "icx")
     NO_DEFAULT_PATH
     )
 
+  set(sycl_library_name "sycl")
+  # On Windows, use sycld.lib for Debug builds.
+  if(CMAKE_SYSTEM_NAME MATCHES "Windows" AND CMAKE_BUILD_TYPE MATCHES "Debug")
+    set(sycl_library_name "sycld")
+  endif()
+
+  # If cache already contains a different config (e.g. sycl.lib from a previous
+  # non-debug configure), force a re-search with the current candidate names.
+  if(DEFINED SYCL_LIBRARY AND SYCL_LIBRARY)
+    get_filename_component(_sycl_library_cached_name "${SYCL_LIBRARY}" NAME_WE)
+    if(NOT _sycl_library_cached_name STREQUAL sycl_library_name)
+      unset(SYCL_LIBRARY CACHE)
+    endif()
+  endif()
+
   # Find SYCL library fullname.
   find_library(
     SYCL_LIBRARY
-    NAMES "sycl"
+    NAMES ${sycl_library_name}
     HINTS ${SYCL_LIBRARY_DIR}
     NO_DEFAULT_PATH
   )
