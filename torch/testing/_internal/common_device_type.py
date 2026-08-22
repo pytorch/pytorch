@@ -348,6 +348,8 @@ class Capability:
 
         flash_attention = "attention.flash_attention"
         mem_efficient_attention = "attention.mem_efficient_attention"
+        flex_attention = "attention.flex_attention"
+        fused_attention = "attention.fused_attention"
 
 
 class DeviceTypeTestBase(TestCase):
@@ -793,6 +795,10 @@ class CPUTestBase(DeviceTypeTestBase):
             Capability.dtype.bf16: lambda: True,
             Capability.attention.flash_attention: lambda: True,
             Capability.attention.mem_efficient_attention: lambda: False,
+            Capability.attention.flex_attention: lambda: (
+                IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
+            ),
+            Capability.attention.fused_attention: lambda: False,
         }
 
 
@@ -816,12 +822,21 @@ class CUDATestBase(DeviceTypeTestBase):
             PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
             SM80OrLater,
         )
+        from torch.utils._triton import has_triton
 
         return {
             Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
             Capability.dtype.bf16: lambda: SM80OrLater,
-            Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
-            Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+            Capability.attention.flash_attention: lambda: (
+                PLATFORM_SUPPORTS_FLASH_ATTENTION
+            ),
+            Capability.attention.mem_efficient_attention: lambda: (
+                PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+            ),
+            Capability.attention.flex_attention: lambda: (
+                IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED
+            ),
+            Capability.attention.fused_attention: lambda: has_triton(),
         }
 
     @classmethod
@@ -907,6 +922,10 @@ class MPSTestBase(DeviceTypeTestBase):
             Capability.dtype.bf16: lambda: True,
             Capability.attention.flash_attention: lambda: False,
             Capability.attention.mem_efficient_attention: lambda: False,
+            Capability.attention.flex_attention: lambda: (
+                IS_FLEX_ATTENTION_MPS_PLATFORM_SUPPORTED
+            ),
+            Capability.attention.fused_attention: lambda: False,
         }
 
 
@@ -919,12 +938,19 @@ class XPUTestBase(DeviceTypeTestBase):
         from torch.testing._internal.common_xpu import (
             PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
         )
+        from torch.utils._triton import has_triton
 
         return {
             Capability.dtype.fp8: lambda: True,
             Capability.dtype.bf16: lambda: True,
-            Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+            Capability.attention.flash_attention: lambda: (
+                PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
+            ),
             Capability.attention.mem_efficient_attention: lambda: True,
+            Capability.attention.flex_attention: lambda: (
+                IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED
+            ),
+            Capability.attention.fused_attention: lambda: has_triton(),
         }
 
     @classmethod
@@ -1040,9 +1066,7 @@ device_type_test_bases = get_device_type_test_bases()
 
 def filter_desired_device_types(device_type_test_bases, except_for=None, only_for=None):
     # device type cannot appear in both except_for and only_for
-    intersect = set(except_for if except_for else []) & set(
-        only_for if only_for else []
-    )
+    intersect = set(except_for or []) & set(only_for or [])
     if intersect:
         raise AssertionError(
             f"device ({intersect}) appeared in both except_for and only_for"
