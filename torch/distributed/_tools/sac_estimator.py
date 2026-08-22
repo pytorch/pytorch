@@ -1,4 +1,3 @@
-import math
 import os
 import sys
 from collections import OrderedDict
@@ -10,7 +9,10 @@ import torch
 from torch import nan, nn, UntypedStorage
 from torch._guards import active_fake_mode
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed._tools.common_utils import get_untyped_storages
+from torch.distributed._tools.common_utils import (
+    get_allocation_granularity,
+    get_untyped_storages,
+)
 from torch.distributed._tools.mod_tracker import ModTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.testing._internal.composite_compliance import (
@@ -32,11 +34,6 @@ _ADDITIONAL_IGNORED_OPS = {
     aten.clone.default,  # type: ignore[attr-defined] # seems needed for torch.compile
 }
 OPS_TO_ALWAYS_SKIP = SAC_IGNORED_OPS | _ADDITIONAL_IGNORED_OPS
-# This value is hard-coded here:
-# https://github.com/pytorch/pytorch/blob/5fba5d83f0703ff8077ab65448a998e9ad6598fd/c10/cuda/CUDACachingAllocator.cpp#L117
-_PYTORCH_MIN_ALLOCATE = (
-    2**9 if int(os.environ.get("PYTORCH_NO_CUDA_MEMORY_CACHING", 0)) == 0 else 1
-)
 
 
 def _display_stats_tabular(headers: list[str], table_data: list[list[Any]]) -> None:
@@ -403,32 +400,36 @@ class SACEstimator(TorchDispatchMode):
         # 1. Get the runtime estimate
         out, op_time = self._estimate_runtime(func, args, kwargs)
         flat_outs, _ = tree_flatten(out)
-        out_storages_cuda: set[UntypedStorage] = set()
+        acc = torch.accelerator.current_accelerator()
+        out_storages_acc: set[UntypedStorage] = set()
         out_storages_cpu: set[UntypedStorage] = set()
-        cuda_devices: set[torch.device] = set()
+        acc_devices: set[torch.device] = set()
         for o in flat_outs:
             if isinstance(o, torch.Tensor):
-                if o.device.type == "cuda":
-                    out_storages_cuda.update(get_untyped_storages(o))
-                    cuda_devices.add(o.device)
+                if acc is not None and o.device.type == acc.type:
+                    out_storages_acc.update(get_untyped_storages(o))
+                    acc_devices.add(o.device)
                 else:
                     out_storages_cpu.update(get_untyped_storages(o))
 
-        # Check if there's more than 1 CUDA device
-        if len(cuda_devices) > 1:
+        # Check if there's more than 1 accelerator device
+        if len(acc_devices) > 1:
             raise AssertionError(
-                f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
+                f"{func.__name__}'s output has more than 1 accelerator devices {acc_devices}"
             )
 
-        # 2. Get the memory consumed by output
-        nbytes_cuda = sum(
-            math.ceil(st.nbytes() / _PYTORCH_MIN_ALLOCATE) * _PYTORCH_MIN_ALLOCATE
-            for st in out_storages_cuda
+        # 2. Get the memory consumed by output. This mode runs under ``FakeTensorMode``
+        # where the storages live on meta, so the granularity comes from the tensor's
+        # device rather than the storage's.
+        granularity = get_allocation_granularity(acc.type) if acc is not None else 1
+        nbytes_acc = sum(
+            (st.nbytes() + granularity - 1) // granularity * granularity
+            for st in out_storages_acc
         )
         nbytes_cpu = sum(st.nbytes() for st in out_storages_cpu)
-        nbytes = nbytes_cuda + nbytes_cpu
+        nbytes = nbytes_acc + nbytes_cpu
+        out_storages = out_storages_acc | out_storages_cpu
         # 3. Get the current operator index, output storage identifiers and inplace metadata
-        out_storages = out_storages_cuda | out_storages_cpu
         curr_idx, output_ids, mod_inplace_info = self._get_inplace_metadata(
             func, out_storages
         )

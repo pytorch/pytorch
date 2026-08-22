@@ -1,5 +1,3 @@
-import math
-import os
 import re
 import warnings
 from collections.abc import Callable
@@ -13,7 +11,10 @@ import torch
 import torch.distributed._tools.fake_collectives
 from torch import nn, optim
 from torch._guards import active_fake_mode
-from torch.distributed._tools.common_utils import get_untyped_storages
+from torch.distributed._tools.common_utils import (
+    get_allocation_granularity,
+    get_untyped_storages,
+)
 from torch.distributed._tools.mod_tracker import ModTracker
 from torch.distributed.tensor import DTensor
 from torch.optim.optimizer import (
@@ -28,11 +29,6 @@ from torch.utils.weak import WeakIdKeyDictionary, weakref
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
 
-# This value is hard-coded here:
-# https://github.com/pytorch/pytorch/blob/5fba5d83f0703ff8077ab65448a998e9ad6598fd/c10/cuda/CUDACachingAllocator.cpp#L117
-_PYTORCH_MIN_ALLOCATE = (
-    2**9 if int(os.environ.get("PYTORCH_NO_CUDA_MEMORY_CACHING", 0)) == 0 else 1
-)
 _TOTAL_KEY = "Total"
 
 __all__ = ["MemTracker"]
@@ -153,9 +149,8 @@ class _WeakRefInfo:
             int: The memory consumed in bytes.
         """
         mem = self.size * self.element_size
-        if self.device.type == "cuda":
-            return math.ceil((mem) / _PYTORCH_MIN_ALLOCATE) * _PYTORCH_MIN_ALLOCATE
-        return mem
+        granularity = get_allocation_granularity(self.device.type)
+        return (mem + granularity - 1) // granularity * granularity
 
     def update_mem_consumed(self, st: torch.UntypedStorage) -> int:
         """

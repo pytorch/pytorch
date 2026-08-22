@@ -4,6 +4,7 @@ import unittest
 
 import torch
 import torch.nn as nn
+from torch.distributed._tools.common_utils import get_allocation_granularity
 from torch.distributed._tools.mem_tracker import MemTracker
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -237,6 +238,53 @@ class TestMemTracker(TestCase):
             optim.zero_grad()
             # After zero_grad: Gradients are deallocated
             test_attribution_equivalence(mt, model, optim)
+
+    def test_tracker_charges_allocator_rounded_size(self):
+        """
+        Tests that the tracker charges the size the allocator actually consumed rather
+        than the raw byte count, on whatever backend the test runs on.
+        """
+        dev = (
+            torch.device(torch.accelerator.current_device_index())
+            if torch.accelerator.is_available()
+            else torch.device("cpu")
+        )
+        granularity = get_allocation_granularity(dev.type)
+        n_tensors, numel, dtype = 8, 100, torch.float32
+        # 400 bytes per tensor, deliberately not a multiple of any plausible
+        # granularity, so a missing round-up changes the expected total.
+        nbytes = numel * torch.empty(0, dtype=dtype).element_size()
+        expected = n_tensors * ((nbytes + granularity - 1) // granularity * granularity)
+        gc.collect(1)
+
+        def stat(key: str) -> int:
+            if not torch.accelerator.is_available():
+                return 0
+            return torch.accelerator.memory_stats().get(key, 0)
+
+        mem_tracker = MemTracker()
+        with mem_tracker as mt:
+            pre_tracked = mt.get_tracker_snapshot().get(dev, {}).get("Total", 0)
+            pre_requested = stat("requested_bytes.all.current")
+            pre_allocated = stat("allocated_bytes.all.current")
+            tensors = [  # noqa: F841
+                torch.empty(numel, dtype=dtype, device=dev) for _ in range(n_tensors)
+            ]
+            tracked = mt.get_tracker_snapshot()[dev]["Total"] - pre_tracked
+            requested = stat("requested_bytes.all.current") - pre_requested
+            consumed = stat("allocated_bytes.all.current") - pre_allocated
+
+        if consumed > 0 and requested == 0:
+            # The allocator rounds but never reports ``requested_bytes``, so the
+            # granularity cannot be measured and the tracker falls back to charging
+            # raw bytes. torch.mps is the in-tree example.
+            self.skipTest(f"torch.{dev.type} does not report requested_bytes")
+
+        self.assertEqual(tracked, expected)
+        # Cross-check against the allocator itself so the assertion above cannot pass
+        # merely because the tracker and the granularity probe agree with each other.
+        if consumed > 0:
+            self.assertEqual(tracked, consumed)
 
 
 if __name__ == "__main__":
