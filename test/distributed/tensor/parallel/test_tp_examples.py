@@ -32,6 +32,7 @@ from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -63,6 +64,8 @@ class ExpCommCounts(NamedTuple):
 
 
 class DistTensorParallelExampleTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _check_module(self, m1, m2, check_grad=False):
         named_parameters = dict(m1.named_parameters())
         for name, param_m2 in m2.named_parameters():
@@ -866,10 +869,10 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
 
 instantiate_parametrized_tests(DistTensorParallelExampleTest)
-
 DistTensorParallelExampleTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorParallelExampleTest,
 )
+
 
 if __name__ == "__main__":
     run_tests()

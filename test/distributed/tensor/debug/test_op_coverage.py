@@ -3,7 +3,11 @@
 import torch
 import torch.nn as nn
 from torch.distributed.tensor.debug._op_coverage import get_inductor_decomp_graphs
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class SimpleMLP(nn.Module):
@@ -18,6 +22,8 @@ class SimpleMLP(nn.Module):
 
 
 class TestOpCoverage(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_trace_with_inductor_decomp(self):
         model = SimpleMLP()
         args = (torch.randn(8, 50),)

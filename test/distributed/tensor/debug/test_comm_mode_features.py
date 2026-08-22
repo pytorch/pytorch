@@ -11,14 +11,18 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfHpu, TEST_XPU, xfailIf
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfHpu,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
     MLPStacked,
     ModelArgs,
     NUM_DEVICES,
-    skip_unless_torch_gpu,
     Transformer,
     with_comms,
 )
@@ -28,6 +32,8 @@ c10d_functional = torch.ops.c10d_functional
 
 
 class TestCommModeFeatures(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # checks if parameter / sharding info is the same as ground truth
     def check_same_set_of_keys(self, dict1, dict2):
         """
@@ -76,19 +82,17 @@ class TestCommModeFeatures(DTensorTestBase):
         return module_parameters_dict, module_sharding_dict
 
     @with_comms
-    def test_MLP_distributed_sharding_display(self):
+    def test_MLP_distributed_sharding_display(self, device):
         """
         tests parameters and sharding on a module level
         """
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
+        device_type = torch.device(device).type
+        device_mesh = DeviceMesh(device_type, torch.arange(0, NUM_DEVICES))
 
         inp_size = [8, 10]
         torch.manual_seed(0)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
+        inp = torch.rand(*inp_size, device=device_type)
+        model = MLPModule(device_type)
 
         parallelize_plan = {
             "net1": ColwiseParallel(),
@@ -113,20 +117,18 @@ class TestCommModeFeatures(DTensorTestBase):
 
     @skipIfHpu
     @with_comms
-    def test_MLPStacked_distributed_sharding_display(self):
+    def test_MLPStacked_distributed_sharding_display(self, device):
         """
         tests model with nested modules and makes sure comm_mode correctly resets parameter and sharding information
         """
 
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
+        device_type = torch.device(device).type
+        device_mesh = DeviceMesh(device_type, torch.arange(0, NUM_DEVICES))
 
         inp_size = [8, 10]
         torch.manual_seed(0)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
+        inp = torch.rand(*inp_size, device=device_type)
+        model = MLPModule(device_type)
 
         parallelize_plan = {
             "net1": ColwiseParallel(),
@@ -141,7 +143,7 @@ class TestCommModeFeatures(DTensorTestBase):
             output_tp = model(inp)
             output_tp.sum().backward()
 
-        model2 = MLPStacked(self.device_type)
+        model2 = MLPStacked(device_type)
 
         parallelize_plan = {
             "layers.0.net1": ColwiseParallel(),
@@ -168,19 +170,17 @@ class TestCommModeFeatures(DTensorTestBase):
         self.assertEqual(len(comm_mode.get_sharding_info()), 8)
 
     @with_comms
-    def test_MLP_module_tracing(self):
+    def test_MLP_module_tracing(self, device):
         """
         tests module-level tracing for MLP module
         """
 
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
+        device_type = torch.device(device).type
+        device_mesh = DeviceMesh(device_type, torch.arange(0, NUM_DEVICES))
         inp_size = [8, 10]
         torch.manual_seed(0)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
+        inp = torch.rand(*inp_size, device=device_type)
+        model = MLPModule(device_type)
 
         parallelize_plan = {
             "net1": ColwiseParallel(),
@@ -219,23 +219,22 @@ class TestCommModeFeatures(DTensorTestBase):
             1,
         )
 
-    @skipIfHpu
-    @skip_unless_torch_gpu
-    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1555
+
+class TestCommModeTransformerCUDA(DTensorTestBase):
+    hw_classification = HardwareClassification.CUDA
+
     @with_comms
-    def test_transformer_module_tracing(self, is_seq_parallel=False):
+    def test_transformer_module_tracing(self, device, is_seq_parallel=False):
         """
         tests module-level tracing for more complicated transformer module and
         ensures that comm_module depth and tracing dictionaries correctly reset
         """
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
+        device_type = torch.device(device).type
+        device_mesh = DeviceMesh(device_type, torch.arange(0, NUM_DEVICES))
         inp_size = [8, 10]
         torch.manual_seed(0)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
+        inp = torch.rand(*inp_size, device=device_type)
+        model = MLPModule(device_type)
 
         parallelize_plan = {
             "net1": ColwiseParallel(),
@@ -256,12 +255,12 @@ class TestCommModeFeatures(DTensorTestBase):
             model(inp)
 
         model_args = ModelArgs(dropout_p=0.0)
-        model2 = Transformer(model_args).to(device=self.device_type)
+        model2 = Transformer(model_args).to(device=device_type)
         model2 = Transformer.parallelize(model2, device_mesh, is_seq_parallel)
 
         inp_size = [8, 8]
 
-        inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
+        inp = torch.randint(model_args.vocab_size, inp_size, device=device_type)
         inp = distribute_tensor(inp, device_mesh=device_mesh)
 
         comm_mode = CommDebugMode()
@@ -371,6 +370,19 @@ class TestCommModeFeatures(DTensorTestBase):
             ],
             1,
         )
+
+
+instantiate_device_type_tests(
+    TestCommModeFeatures,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestCommModeTransformerCUDA,
+    globals(),
+    only_for=["cuda"],
+)
 
 
 if __name__ == "__main__":
