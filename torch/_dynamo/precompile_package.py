@@ -948,6 +948,14 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "CONSTANT_MATCH",
         "EQUALS_MATCH",
         "DUPLICATE_INPUT",
+        # And the guard that pins an input's KIND. Dropped, a graph traced for
+        # one class is served to another and returns the first one's answer,
+        # silently -- there is no shape to crash on. Upstream depends on this
+        # specifically: an AsyncCollectiveTensor's tensor-class guards are
+        # deliberately removed so an ACT-traced graph can be reused for the
+        # resolved tensor, and the observation sites reinstall exactly this
+        # guard to keep that sound.
+        "TYPE_MATCH",
     }
 )
 
