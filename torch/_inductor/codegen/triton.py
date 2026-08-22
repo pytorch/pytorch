@@ -7802,7 +7802,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 else:
                     line = f"assert not {arg}.isnan().any().item()"
                     wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item()"
+                    line = f"assert not {arg}.float().isinf().any().item()"
                     wrapper.writeline(line)
 
     def create_cse_var(self, *args, **kwargs) -> TritonCSEVariable:
