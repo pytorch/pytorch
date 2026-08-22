@@ -10001,6 +10001,10 @@ def forward(self, x):
         ep = export(Simple(), example_inputs)
         self.assertEqual(ep.module()(*example_inputs), Simple()(*example_inputs))
 
+    # This suite folds run_decompositions into export, so the NYI error is
+    # raised by export itself rather than the explicit run_decompositions call.
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_effectful_while_loop_export_nyi(self):
         class M(torch.nn.Module):
             def forward(self, matrix, count):
