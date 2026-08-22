@@ -163,7 +163,7 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 )
 
 
-_CAPTURE_CONFIG_STATE: ContextVar[tuple[int, tuple[bool, bool, bool] | None]] = (
+_CAPTURE_CONFIG_STATE: ContextVar[tuple[int, tuple[bool, bool, bool, bool] | None]] = (
     ContextVar("precompile_capture_config_state", default=(0, None))
 )
 
@@ -191,8 +191,19 @@ def _capture_config(training: bool = False) -> Iterator[None]:
             functorch_config.bundled_autograd_cache,
             dynamo_config.allow_empty_graphs,
             functorch_config.force_non_lazy_backward_lowering,
+            functorch_config.bypass_autograd_cache_key,
         )
         functorch_config.bundled_autograd_cache = True
+        # AOTAutogradCache refuses to KEY a graph it cannot address soundly --
+        # a graph calling anything outside its allowlist -- and a refusal means
+        # it never saves, which means the bundled artifact precompile needs is
+        # never recorded and the capture ends with nothing to serialize. That
+        # gate asks "is this key enough to tell this graph's behaviour apart
+        # from another's", which a precompile artifact does not depend on: it
+        # is addressed by backend id and pinned to one torch build. So fall
+        # back to a nonce key rather than declining, as torch._dynamo.aot_compile
+        # and aot_compile_joint_with_descriptors already do.
+        functorch_config.bypass_autograd_cache_key = True
         # Keeps an empty graph as a compiled frame so its guards reach the
         # artifact. Note it also extends the lifetime of objects the frame
         # holds: with it on, a weakref callback on a value the frame captured
@@ -218,6 +229,7 @@ def _capture_config(training: bool = False) -> Iterator[None]:
             functorch_config.bundled_autograd_cache = prior[0]
             dynamo_config.allow_empty_graphs = prior[1]
             functorch_config.force_non_lazy_backward_lowering = prior[2]
+            functorch_config.bypass_autograd_cache_key = prior[3]
             _CAPTURE_CONFIG_STATE.set((0, None))
         else:
             _CAPTURE_CONFIG_STATE.set((depth, prior))
