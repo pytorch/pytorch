@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import builtins
 import collections
+import contextvars
 import dataclasses
 import enum
 import functools
@@ -129,6 +130,8 @@ from .source import (
     CodeSource,
     ConstantSource,
     ConstDictKeySource,
+    ContextVarExplicitStateSource,
+    ContextVarExplicitValueSource,
     ContextVarGetSource,
     CurrentStreamSource,
     DataclassFieldsSource,
@@ -177,6 +180,7 @@ from .types import (  # noqa: F401
     GuardFn,
 )
 from .utils import (
+    _contextvar_has_explicit_binding,
     builtin_dict_keys,
     common_constant_types,
     dataclass_fields,
@@ -2046,6 +2050,26 @@ class GuardBuilder(GuardBuilderBase):
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
                 )
+        elif istype(source, ContextVarExplicitValueSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: contextvars.copy_context().get(
+                    x, contextvars.Token.MISSING
+                ),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, ContextVarExplicitStateSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: _contextvar_has_explicit_binding(x),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, FloatTensorSource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
