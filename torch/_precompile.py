@@ -445,6 +445,17 @@ class PrecompiledCallable:
         return self._compiled._package
 
 
+def _serve_parameters(serve: Callable[..., object]) -> frozenset[str]:
+    """An artifact carries its driver frozen, so a _serve emitted before this
+    took a prepared package has to keep working."""
+    import inspect
+
+    try:
+        return frozenset(inspect.signature(serve).parameters)
+    except (TypeError, ValueError):
+        return frozenset()
+
+
 class _InstalledArtifact:
     """Handle for a multi-graph artifact that serves by installing.
 
@@ -457,13 +468,14 @@ class _InstalledArtifact:
 
     def __init__(
         self,
-        serve: Callable[[Callable[..., object]], Any],
+        serve: Callable[..., Any],
         entry_factory: Callable[[], Callable[..., object]],
     ) -> None:
         self._serve = serve
         self._entry_factory = entry_factory
         self._fn: Callable[..., object] | None = None
         self._inner: Any = None
+        self._prepared: Any = None
 
     def _rebind(self, fn: Callable[..., object]) -> None:
         if self._inner is not None:
@@ -473,17 +485,19 @@ class _InstalledArtifact:
             )
         self._fn = fn
 
-    def _validate(self, package_blob: str) -> None:
-        """Check the artifact against this host at load, not at first call."""
+    def _prepare(self, package_blob: str) -> None:
+        """Build what serving needs, at load rather than at the first call."""
         import base64
 
-        from torch._dynamo.precompile_package import validate_cache_entry
+        from torch._dynamo.precompile_package import prepare_cache_entry
 
-        # Exactly the resolution _ensure performs, or this checks a different
-        # entry frame than the install will.
+        # Exactly the resolution _ensure performs, or this prepares a different
+        # entry frame than the install will use.
         fn = self._entry_factory() if self._fn is None else self._fn
         try:
-            validate_cache_entry(fn, pickle.loads(base64.b64decode(package_blob)))
+            self._prepared = prepare_cache_entry(
+                fn, pickle.loads(base64.b64decode(package_blob))
+            )
         except PrecompileError:
             raise
         except Exception as e:
@@ -492,7 +506,15 @@ class _InstalledArtifact:
     def _ensure(self) -> Any:
         if self._inner is None:
             fn = self._entry_factory() if self._fn is None else self._fn
-            self._inner = self._serve(fn)
+            # An artifact emitted before _serve took a prepared package still
+            # serves; it just rebuilds what _prepare already built.
+            if self._prepared is not None and "prepared" in _serve_parameters(
+                self._serve
+            ):
+                self._inner = self._serve(fn, prepared=self._prepared)
+            else:
+                self._inner = self._serve(fn)
+            self._prepared = None
         return self._inner
 
     def __call__(self, *args: object, **kwargs: object) -> object:
@@ -3089,7 +3111,7 @@ class _PrecompileApi:
                 )
             if fn is not None:
                 forward._rebind(fn)
-            forward._validate(cast(str, meta["_PACKAGE"]))
+            forward._prepare(cast(str, meta["_PACKAGE"]))
             return PrecompiledCallable(forward)
         if fn is not None:
             raise PrecompileError(
