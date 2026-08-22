@@ -27,6 +27,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -46,6 +47,44 @@
 #endif
 
 namespace at::cuda::tunable {
+
+namespace {
+
+// Matches a tunableop params signature against a wildcard pattern. Both
+// strings are split on '_' and compared token-by-token; '*' in the pattern
+// matches any single token. Returns true iff every pattern token equals
+// the corresponding concrete token (or is '*').
+bool matches_wildcard_pattern(
+    const std::string& pattern,
+    const std::string& concrete) {
+  if (pattern.find('*') == std::string::npos) {
+    // Pattern has no wildcard token -> only exact match counts.
+    return pattern == concrete;
+  }
+  size_t p_i = 0, c_i = 0;
+  while (p_i < pattern.size() && c_i < concrete.size()) {
+    // Find next token boundary in each string.
+    size_t p_end = pattern.find('_', p_i);
+    if (p_end == std::string::npos) {
+      p_end = pattern.size();
+    }
+    size_t c_end = concrete.find('_', c_i);
+    if (c_end == std::string::npos) {
+      c_end = concrete.size();
+    }
+    const auto p_tok = std::string_view(pattern).substr(p_i, p_end - p_i);
+    const auto c_tok = std::string_view(concrete).substr(c_i, c_end - c_i);
+    if (p_tok != "*" && p_tok != c_tok) {
+      return false;
+    }
+    p_i = (p_end == pattern.size()) ? pattern.size() : p_end + 1;
+    c_i = (c_end == concrete.size()) ? concrete.size() : c_end + 1;
+  }
+  // Both must be fully consumed (same token count).
+  return p_i >= pattern.size() && c_i >= concrete.size();
+}
+
+} // namespace
 
 TuningContext* getTuningContext() {
   static TuningContext tuning_context;
@@ -83,14 +122,54 @@ ResultEntry TuningResultsManager::Lookup(const std::string& op_signature, const 
 
   const auto& km = kernel_map_it->second;
   auto it = km.find(params_signature);
-  if (it == km.cend()) {
-    TUNABLE_LOG3("missing params_signature, returning null ResultEntry for ", op_signature, ",", params_signature);
-    return ResultEntry::Null();
+  if (it != km.cend()) {
+    TUNABLE_LOG3(
+        "ResultEntry found for ",
+        op_signature,
+        ",",
+        params_signature);
+    return it->second;
   }
-  TUNABLE_LOG3("ResultEntry found for ", op_signature, ",", params_signature);
-  return it->second;
+  // Exact match only: a caller that wants a wildcard key must pass the
+  // already-formed wildcard signature. This neither expands wildcards in the
+  // request nor matches a wildcard request against concrete candidates;
+  // wildcard fallback lives in LookupWildcardFallback below.
+  TUNABLE_LOG3(
+      "missing params_signature, returning null ResultEntry for ",
+      op_signature,
+      ",",
+      params_signature);
+  return ResultEntry::Null();
 }
 
+ResultEntry TuningResultsManager::LookupWildcardFallback(
+    const std::string& op_signature,
+    const std::string& concrete_params_signature) {
+  std::scoped_lock l{lock_};
+  auto kernel_map_it = results_.find(op_signature);
+  if (kernel_map_it == results_.cend()) {
+    return ResultEntry::Null();
+  }
+  const auto& km = kernel_map_it->second;
+  // First match wins in unspecified order; a rejected candidate falls back to
+  // default ATen, not to the next pattern. See the decl in Tunable.h.
+  for (const auto& [key, entry] : km) {
+    if (key.find('*') == std::string::npos) {
+      continue;
+    }
+    if (matches_wildcard_pattern(key, concrete_params_signature)) {
+      TUNABLE_LOG3(
+          "wildcard fallback hit for ",
+          op_signature,
+          ",",
+          concrete_params_signature,
+          " via wildcard ",
+          key);
+      return entry;
+    }
+  }
+  return ResultEntry::Null();
+}
 void TuningResultsManager::AddImpl(const std::string& op_signature,
     const std::string& params_signature,
     ResultEntry best,
@@ -171,6 +250,12 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
 
 void TuningResultsManager::ClearUntuned() {
   std::scoped_lock l{lock_};
+  untuned_results_.clear();
+}
+
+void TuningResultsManager::ClearAll() {
+  std::scoped_lock l{lock_};
+  results_.clear();
   untuned_results_.clear();
 }
 
@@ -515,7 +600,8 @@ TuningContext::TuningContext() :
     icache_flush_{true},
     rotating_buffer_size_{-1},
     results_count_from_input_file_{0},
-    is_shutting_down_{false}
+    is_shutting_down_{false},
+    wildcard_fallback_enabled_{false}
 {
 }
 
@@ -573,6 +659,18 @@ void TuningContext::EnableRecordUntuned(bool value) {
     untuned_file_.close();
     manager_.ClearUntuned();
   }
+}
+
+void TuningContext::EnableWildcardFallback(bool value) {
+  wildcard_fallback_enabled_ = value;
+}
+
+bool TuningContext::IsWildcardFallbackEnabled() const {
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_WILDCARD_FALLBACK") == "1";
+  if (eval) {
+    return true;
+  }
+  return wildcard_fallback_enabled_;
 }
 
 bool TuningContext::IsTuningEnabled() const {
@@ -934,6 +1032,145 @@ bool TuningContext::GetLogOkay() const {
 std::ostream& TuningContext::GetLog() const {
   static auto streamptr = get_stream(GetLogFilename());
   return *streamptr;
+}
+
+namespace {
+
+// Per-thread stack of dynamic-dims masks. Producers in Blas.cpp /
+// CUDABlas.cpp / ScaledBlas.cpp read the top via GetCurrentDynamicDimsMask()
+// and stamp it onto the constructed Gemm*Params before calling the
+// TunableOp. The stack semantics let nested wrappers compose naturally:
+// e.g. an outer torch.cuda.tunable.dynamic_dims_mask(...) ctx-mgr around a
+// benchmark loop, with inner per-choice or per-call wrappers; each
+// TunableDynamicDimsGuard pushes on construction and pops on destruction.
+struct DynamicDimsEntry {
+  DynamicDimsMask mask;
+  uint64_t token;
+};
+
+struct DynamicDimsThreadState {
+  std::vector<DynamicDimsEntry> stack;
+  // Tokens orphaned by cross-thread guard destruction. The owner thread
+  // drains these on next push/pop/read so the leak is bounded.
+  std::vector<uint64_t> orphaned_tokens;
+  std::mutex orphan_mutex;
+};
+
+// Forward declarations for the registry (defined below).
+std::mutex& thread_registry_mutex();
+std::unordered_map<std::thread::id, DynamicDimsThreadState*>& thread_registry();
+
+// RAII wrapper ensuring the thread unregisters from the global registry
+// when its thread-local state is destroyed (i.e. on thread exit).
+struct DynamicDimsThreadStateHolder {
+  DynamicDimsThreadState state;
+  ~DynamicDimsThreadStateHolder() {
+    std::lock_guard<std::mutex> lk(thread_registry_mutex());
+    thread_registry().erase(std::this_thread::get_id());
+  }
+};
+
+DynamicDimsThreadState& dynamic_dims_state() {
+  thread_local DynamicDimsThreadStateHolder holder;
+  return holder.state;
+}
+
+void drain_orphaned_tokens(DynamicDimsThreadState& state) {
+  std::vector<uint64_t> orphans;
+  {
+    std::lock_guard<std::mutex> lk(state.orphan_mutex);
+    orphans.swap(state.orphaned_tokens);
+  }
+  for (auto token : orphans) {
+    auto& stack = state.stack;
+    auto it = std::find_if(stack.begin(), stack.end(),
+        [token](const DynamicDimsEntry& e) { return e.token == token; });
+    if (it != stack.end()) {
+      stack.erase(it);
+    }
+  }
+}
+
+uint64_t next_dynamic_dims_token() {
+  thread_local uint64_t counter = 0;
+  return ++counter;
+}
+
+// Global registry mapping thread IDs to their DynamicDimsThreadState, so
+// cross-thread destructors can post orphan tokens to the owner's state.
+std::mutex& thread_registry_mutex() {
+  static std::mutex m;
+  return m;
+}
+
+std::unordered_map<std::thread::id, DynamicDimsThreadState*>& thread_registry() {
+  static std::unordered_map<std::thread::id, DynamicDimsThreadState*> reg;
+  return reg;
+}
+
+DynamicDimsThreadState& register_thread_state() {
+  auto& state = dynamic_dims_state();
+  std::lock_guard<std::mutex> lk(thread_registry_mutex());
+  thread_registry()[std::this_thread::get_id()] = &state;
+  return state;
+}
+
+} // namespace
+
+DynamicDimsMask GetCurrentDynamicDimsMask() {
+  auto& state = dynamic_dims_state();
+  drain_orphaned_tokens(state);
+  if (state.stack.empty()) {
+    return DynamicDimsMask{};
+  }
+  return state.stack.back().mask;
+}
+
+TunableDynamicDimsGuard::TunableDynamicDimsGuard(DynamicDimsMask mask)
+    : owner_thread_(std::this_thread::get_id()),
+      token_(next_dynamic_dims_token()) {
+  auto& state = register_thread_state();
+  drain_orphaned_tokens(state);
+  state.stack.push_back({mask, token_});
+}
+
+TunableDynamicDimsGuard::~TunableDynamicDimsGuard() {
+  if (std::this_thread::get_id() != owner_thread_) {
+    // Cross-thread destruction (e.g. PyCapsule GC'd on finalizer thread).
+    // Post our token to the owner's orphan queue for lazy cleanup.
+    std::lock_guard<std::mutex> lk(thread_registry_mutex());
+    auto it = thread_registry().find(owner_thread_);
+    if (it != thread_registry().end()) {
+      std::lock_guard<std::mutex> olck(it->second->orphan_mutex);
+      it->second->orphaned_tokens.push_back(token_);
+    }
+    // If the owner thread's state is gone, the entry is already destroyed.
+    return;
+  }
+  auto& state = dynamic_dims_state();
+  drain_orphaned_tokens(state);
+  auto& stack = state.stack;
+  if (stack.empty()) {
+    TORCH_WARN("TunableDynamicDimsGuard pop on empty stack (double pop?)");
+    return;
+  }
+  if (stack.back().token == token_) {
+    stack.pop_back();
+    return;
+  }
+  // LIFO violation: find and remove our entry without corrupting others.
+  auto it = std::find_if(stack.rbegin(), stack.rend(),
+      [this](const DynamicDimsEntry& e) { return e.token == token_; });
+  if (it != stack.rend()) {
+    TORCH_WARN(
+        "TunableDynamicDimsGuard LIFO violation: token ", token_,
+        " not at top; removing out-of-order");
+    stack.erase(std::next(it).base());
+  } else {
+    TORCH_WARN(
+        "TunableDynamicDimsGuard: token ", token_,
+        " not found in stack (double pop?)");
+  }
 }
 
 } // namespace at::cuda::tunable
