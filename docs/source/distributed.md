@@ -1240,7 +1240,7 @@ For fine-grained control of the debug level during runtime the functions {func}`
 {func}`torch.distributed.get_debug_level` can also be used.
 :::
 
-In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` can be used in conjunction with `TORCH_SHOW_CPP_STACKTRACES=1` to log the entire callstack when a collective desynchronization is detected. These
+In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` enables C++ stack traces by default to log the entire callstack when a collective desynchronization is detected. Set `TORCH_SHOW_CPP_STACKTRACES=0` to opt out. These
 collective desynchronization checks will work for all applications that use `c10d` collective calls backed by process groups created with the
 {func}`torch.distributed.init_process_group` and {func}`torch.distributed.new_group` APIs.
 
