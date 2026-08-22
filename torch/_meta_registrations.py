@@ -6467,6 +6467,14 @@ def meta__scaled_dot_product_fused_attention_overrideable(
     S_KV = key.size(-2)
     D_V = value.size(-1)
 
+    if attn_bias is not None:
+        bias_s_kv = attn_bias.size(-1)
+        torch._check(
+            bias_s_kv == S_KV or bias_s_kv == 1,
+            lambda: f"attn_bias last dimension must match S_KV ({S_KV}) "
+            f"or be 1 for broadcasting, but got {bias_s_kv}",
+        )
+
     # Preserve input dimensionality for the output shape
     out_shape = list(query.shape)
     out_shape[-1] = D_V
