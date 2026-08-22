@@ -2661,7 +2661,12 @@ class CachingAutotuner(KernelInterface):
                 n_scratch = max(n_scratch, 2)
 
             fast_runner = _FastCudaLauncher(
-                cu_function, num_warps, shared, arg_tys, n_scratch
+                cu_function,
+                num_warps,
+                shared,
+                arg_tys,
+                n_scratch,
+                getattr(kernel, "auto_tma_recipes", None) or None,
             )
 
             new_globals = {**launcher.__globals__, "runner": fast_runner}

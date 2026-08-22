@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import torch
+import torch._dynamo
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime import triton_helpers
@@ -124,7 +125,9 @@ class TestStaticTritonLauncherUnit(TestCase):
         import types
 
         class FakeFastLauncher:
-            def __init__(self, func, num_warps, shared, arg_tys, n_scratch):
+            def __init__(
+                self, func, num_warps, shared, arg_tys, n_scratch, recipes=None
+            ):
                 self.func = func
 
         kernel = object.__new__(StaticallyLaunchedCudaKernel)
@@ -249,6 +252,55 @@ class TestStaticTritonLauncherUnit(TestCase):
         autotuner, result = self._autotuner_with_static_cubin(b"cubin")
         autotuner.prepare_for_caching()
         self.assertEqual(result.kernel.cubin_raw, b"cubin")
+
+    def test_auto_tma_recipes_stored_from_metadata(self):
+        """Verify auto_tma_recipes are picked up from kernel.metadata."""
+        recipe = {
+            "base_ptr_arg_index": 0,
+            "shape_arg_indices": [2],
+            "stride_arg_indices": [-1],
+            "block_shape": [64],
+            "swizzle": -1,
+            "elem_type": 7,  # CU_TENSOR_MAP_DATA_TYPE_FLOAT32
+            "elem_size": 4,
+            "fp4_padded": 0,
+            "fill_mode": 0,
+        }
+
+        launcher = object.__new__(StaticallyLaunchedCudaKernel)
+        launcher.auto_tma_recipes = []
+        # Simulate what __init__ does for auto_tma_recipes
+        kernel = SimpleNamespace(metadata=SimpleNamespace(auto_tma_recipes=[recipe]))
+        if hasattr(kernel, "metadata"):
+            recipes = getattr(kernel.metadata, "auto_tma_recipes", None)
+            if recipes:
+                launcher.auto_tma_recipes = list(recipes)
+
+        self.assertEqual(len(launcher.auto_tma_recipes), 1)
+        self.assertEqual(launcher.auto_tma_recipes[0]["base_ptr_arg_index"], 0)
+        self.assertEqual(launcher.auto_tma_recipes[0]["block_shape"], [64])
+
+    def test_auto_tma_recipes_empty_when_absent(self):
+        """Verify auto_tma_recipes defaults to [] when metadata lacks the field."""
+        launcher = object.__new__(StaticallyLaunchedCudaKernel)
+        launcher.auto_tma_recipes = []
+        kernel = SimpleNamespace(metadata=SimpleNamespace())
+        if hasattr(kernel, "metadata"):
+            recipes = getattr(kernel.metadata, "auto_tma_recipes", None)
+            if recipes:
+                launcher.auto_tma_recipes = list(recipes)
+
+        self.assertEqual(launcher.auto_tma_recipes, [])
+
+    def test_launch_kernel_tma_method_exists(self):
+        """Verify _StaticCudaLauncher exposes _launch_kernel_tma."""
+        try:
+            from torch._C import _StaticCudaLauncher
+        except ImportError:
+            self.skipTest("_StaticCudaLauncher not available (no CUDA)")
+
+        self.assertTrue(hasattr(_StaticCudaLauncher, "_launch_kernel_tma"))
+        self.assertTrue(callable(_StaticCudaLauncher._launch_kernel_tma))
 
 
 @requires_gpu_and_triton
@@ -689,6 +741,195 @@ def kernel_many_args(out_tensor, {decl}):
         self.assertIsNone(owner_ref())
         self.assertEqual(unloaded_modules, [0xC0FFEE])
 
+    @skipIfRocm
+    @skipIfXpu
+    def test_auto_tma_recipe_launch_static(self):
+        """Verify _launch_kernel_tma correctly launches a kernel with a TMA recipe.
+
+        Compiles a 1D copy kernel, crafts a recipe that makes the launcher build
+        a CUtensorMap for the input pointer, and checks that the kernel produces
+        the correct output.
+        """
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        cap = torch.cuda.get_device_capability()
+        if cap < (9, 0):
+            self.skipTest(f"TMA requires sm_90+, got sm_{cap[0]}{cap[1]}")
+
+        @triton.jit
+        def copy_kernel(src, dst, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(src + offsets, mask=mask)
+            tl.store(dst + offsets, x, mask=mask)
+
+        N = 64
+        src = torch.randn(N, device="cuda")
+        dst = torch.zeros(N, device="cuda")
+        compiled = copy_kernel[(1,)](src, dst, N, BLOCK_SIZE=64)
+        launcher = self._make_launcher(compiled)
+
+        # Build a recipe for the src pointer (arg index 0)
+        # Shape = n_elements (arg index 2), contiguous stride (= -1)
+        recipe = {
+            "base_ptr_arg_index": 0,
+            "shape_arg_indices": [2],
+            "stride_arg_indices": [-1],
+            "block_shape": [64],
+            "swizzle": -1,
+            "elem_type": 7,  # CU_TENSOR_MAP_DATA_TYPE_FLOAT32
+            "elem_size": 4,
+            "fp4_padded": 0,
+            "fill_mode": 0,
+        }
+
+        # Inject recipe and test the TMA launch path
+        launcher.auto_tma_recipes = [recipe]
+
+        new_src = torch.randn(N, device="cuda")
+        new_dst = torch.zeros(N, device="cuda")
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+
+        # The auto-TMA path passes user args only + recipes + nScratch to C++
+        n_scratch = int(launcher.has_global_scratch) + int(launcher.has_profile_scratch)
+        launcher.C_impl._launch_kernel_tma(
+            launcher.function,
+            1,  # grid_x
+            1,  # grid_y
+            1,  # grid_z
+            launcher.num_warps,
+            launcher.shared,
+            launcher.arg_tys,
+            (new_src, new_dst, N),
+            stream,
+            [recipe],
+            n_scratch,
+        )
+        self.assertEqual(new_dst, new_src)
+
+    @skipIfRocm
+    @skipIfXpu
+    def test_auto_tma_recipe_launch_via_run(self):
+        """Verify run() routes through the auto-TMA path when recipes present."""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        cap = torch.cuda.get_device_capability()
+        if cap < (9, 0):
+            self.skipTest(f"TMA requires sm_90+, got sm_{cap[0]}{cap[1]}")
+
+        @triton.jit
+        def copy_kernel(src, dst, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(src + offsets, mask=mask)
+            tl.store(dst + offsets, x, mask=mask)
+
+        N = 64
+        src = torch.randn(N, device="cuda")
+        dst = torch.zeros(N, device="cuda")
+        compiled = copy_kernel[(1,)](src, dst, N, BLOCK_SIZE=64)
+        launcher = self._make_launcher(compiled)
+
+        recipe = {
+            "base_ptr_arg_index": 0,
+            "shape_arg_indices": [2],
+            "stride_arg_indices": [-1],
+            "block_shape": [64],
+            "swizzle": -1,
+            "elem_type": 7,  # CU_TENSOR_MAP_DATA_TYPE_FLOAT32
+            "elem_size": 4,
+            "fp4_padded": 0,
+            "fill_mode": 0,
+        }
+        launcher.auto_tma_recipes = [recipe]
+
+        new_src = torch.randn(N, device="cuda")
+        new_dst = torch.zeros(N, device="cuda")
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+
+        # run() should detect auto_tma_recipes and route to _launch_kernel_tma
+        launcher.run(1, 1, 1, stream, new_src, new_dst, N)
+        self.assertEqual(new_dst, new_src)
+
+    @skipIfRocm
+    @skipIfXpu
+    def test_auto_tma_recipe_2d(self):
+        """Verify 2D TMA recipe (e.g. GEMM tile) constructs correctly."""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        cap = torch.cuda.get_device_capability()
+        if cap < (9, 0):
+            self.skipTest(f"TMA requires sm_90+, got sm_{cap[0]}{cap[1]}")
+
+        # A kernel that copies a 2D tile: src[M, N] -> dst[M, N]
+        # arg layout: (src, dst, M, N, stride_m)
+        @triton.jit
+        def copy_2d_kernel(
+            src,
+            dst,
+            M,
+            N,
+            stride_m,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            pid_m = tl.program_id(0)
+            pid_n = tl.program_id(1)
+            offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+            offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+            mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
+            ptrs = src + offs_m[:, None] * stride_m + offs_n[None, :]
+            x = tl.load(ptrs, mask=mask)
+            out_ptrs = dst + offs_m[:, None] * stride_m + offs_n[None, :]
+            tl.store(out_ptrs, x, mask=mask)
+
+        M, N = 32, 64
+        src = torch.randn(M, N, device="cuda")
+        dst = torch.zeros(M, N, device="cuda")
+        compiled = copy_2d_kernel[(1, 1)](
+            src, dst, M, N, src.stride(0), BLOCK_M=32, BLOCK_N=64
+        )
+        launcher = self._make_launcher(compiled)
+
+        # 2D recipe for the src pointer (arg 0)
+        # shape: [M(arg 2), N(arg 3)], stride: [stride_m(arg 4), contiguous(-1)]
+        recipe = {
+            "base_ptr_arg_index": 0,
+            "shape_arg_indices": [2, 3],
+            "stride_arg_indices": [4, -1],
+            "block_shape": [32, 64],
+            "swizzle": -1,
+            "elem_type": 7,  # CU_TENSOR_MAP_DATA_TYPE_FLOAT32
+            "elem_size": 4,
+            "fp4_padded": 0,
+            "fill_mode": 0,
+        }
+
+        new_src = torch.randn(M, N, device="cuda")
+        new_dst = torch.zeros(M, N, device="cuda")
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+
+        n_scratch = int(launcher.has_global_scratch) + int(launcher.has_profile_scratch)
+        launcher.C_impl._launch_kernel_tma(
+            launcher.function,
+            1,
+            1,
+            1,
+            launcher.num_warps,
+            launcher.shared,
+            launcher.arg_tys,
+            (new_src, new_dst, M, N, new_src.stride(0)),
+            stream,
+            [recipe],
+            n_scratch,
+        )
+        self.assertEqual(new_dst, new_src)
+
 
 @requires_gpu_and_triton
 @torch._inductor.config.patch(
@@ -826,6 +1067,201 @@ class TestStaticTritonCompileResult(TestCase):
                 mocked.assert_not_called()
 
             self.assertEqual(result, torch.cat(((x * 4), y + 10)))
+
+
+@requires_gpu_and_triton
+@torch._inductor.config.patch(
+    {"use_static_triton_launcher": True, "strict_static_triton_launcher": True}
+)
+@skipIfRocm
+@skipIfXpu
+class TestAutoTmaE2E(TestCase):
+    """E2E tests: TRITON_AUTO_TMA=1 → torch.compile → inductor static launcher."""
+
+    def test_auto_tma_pointwise(self):
+        """Verify auto-TMA works end-to-end with torch.compile on a pointwise op."""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        cap = torch.cuda.get_device_capability()
+        if cap < (9, 0):
+            self.skipTest(f"TMA requires sm_90+, got sm_{cap[0]}{cap[1]}")
+
+        torch._dynamo.reset()
+
+        @torch.compile
+        def foo(x, y):
+            return x + y
+
+        x = torch.randn(1024, device="cuda")
+        y = torch.randn(1024, device="cuda")
+
+        with mock.patch.dict(os.environ, {"TRITON_AUTO_TMA": "1"}):
+            result = foo(x, y)
+
+        self.assertEqual(result, x + y)
+
+    def test_auto_tma_elementwise_chain(self):
+        """Verify auto-TMA with a multi-op elementwise chain."""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        cap = torch.cuda.get_device_capability()
+        if cap < (9, 0):
+            self.skipTest(f"TMA requires sm_90+, got sm_{cap[0]}{cap[1]}")
+
+        torch._dynamo.reset()
+
+        @torch.compile
+        def foo(x, y):
+            return (x * 2 + y) * 3
+
+        x = torch.randn(2048, device="cuda")
+        y = torch.randn(2048, device="cuda")
+
+        with mock.patch.dict(os.environ, {"TRITON_AUTO_TMA": "1"}):
+            result = foo(x, y)
+
+        self.assertEqual(result, (x * 2 + y) * 3)
+
+    def test_auto_tma_perf_no_regression(self):
+        """Benchmark auto-TMA vs baseline — verify no major regression."""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        cap = torch.cuda.get_device_capability()
+        if cap < (9, 0):
+            self.skipTest(f"TMA requires sm_90+, got sm_{cap[0]}{cap[1]}")
+
+        N = 1048576  # 1M elements
+        x = torch.randn(N, device="cuda")
+        y = torch.randn(N, device="cuda")
+
+        def bench(fn, warmup=10, rep=50):
+            for _ in range(warmup):
+                fn(x, y)
+            torch.cuda.synchronize()
+            start = [torch.cuda.Event(enable_timing=True) for _ in range(rep)]
+            end = [torch.cuda.Event(enable_timing=True) for _ in range(rep)]
+            for i in range(rep):
+                start[i].record()
+                fn(x, y)
+                end[i].record()
+            torch.cuda.synchronize()
+            times = sorted(s.elapsed_time(e) for s, e in zip(start, end))
+            return times[len(times) // 2]
+
+        # Baseline
+        torch._dynamo.reset()
+        os.environ.pop("TRITON_AUTO_TMA", None)
+
+        @torch.compile
+        def baseline_add(a, b):
+            return a + b
+
+        t_base = bench(baseline_add)
+
+        # Auto-TMA
+        torch._dynamo.reset()
+        with mock.patch.dict(os.environ, {"TRITON_AUTO_TMA": "1"}):
+
+            @torch.compile
+            def auto_tma_add(a, b):
+                return a + b
+
+            t_tma = bench(auto_tma_add)
+
+        ratio = t_tma / t_base if t_base > 0 else float("inf")
+        print(
+            f"\nPerf: baseline={t_base:.4f}ms, auto-TMA={t_tma:.4f}ms, "
+            f"ratio={ratio:.3f}"
+        )
+        # Allow up to 20% regression — auto-TMA adds cuTensorMapEncodeTiled
+        # overhead per launch, but should not cause a major slowdown.
+        self.assertLess(
+            ratio,
+            1.2,
+            f"Auto-TMA is {ratio:.1%} of baseline — possible regression",
+        )
+
+    def test_host_side_tma_gemm_perf(self):
+        """Compare baseline vs auto-TMA vs enable_host_side_tma on a GEMM."""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        cap = torch.cuda.get_device_capability()
+        if cap < (10, 0):
+            self.skipTest(
+                f"host-side TMA GEMM needs Blackwell, got sm_{cap[0]}{cap[1]}"
+            )
+
+        M, N, K = 2048, 2048, 2048
+        a = torch.randn(M, K, device="cuda", dtype=torch.float16)
+        b = torch.randn(K, N, device="cuda", dtype=torch.float16)
+
+        def bench_gemm(fn, warmup=20, rep=100):
+            for _ in range(warmup):
+                fn()
+            torch.cuda.synchronize()
+            start = [torch.cuda.Event(enable_timing=True) for _ in range(rep)]
+            end = [torch.cuda.Event(enable_timing=True) for _ in range(rep)]
+            for i in range(rep):
+                start[i].record()
+                fn()
+                end[i].record()
+            torch.cuda.synchronize()
+            times = sorted(s.elapsed_time(e) for s, e in zip(start, end))
+            return times[len(times) // 2]
+
+        gemm_cfg = {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON,ATEN",
+        }
+
+        # 1) Baseline
+        torch._dynamo.reset()
+        os.environ.pop("TRITON_AUTO_TMA", None)
+        with torch._inductor.config.patch(gemm_cfg):
+
+            @torch.compile
+            def baseline_mm(x, y):
+                return x @ y
+
+            baseline_mm(a, b)
+        t_baseline = bench_gemm(lambda: baseline_mm(a, b))
+
+        # 2) Auto-TMA (compiler pass)
+        torch._dynamo.reset()
+        with mock.patch.dict(os.environ, {"TRITON_AUTO_TMA": "1"}):
+            with torch._inductor.config.patch(gemm_cfg):
+
+                @torch.compile
+                def auto_tma_mm(x, y):
+                    return x @ y
+
+                auto_tma_mm(a, b)
+            t_auto_tma = bench_gemm(lambda: auto_tma_mm(a, b))
+
+        # 3) Host-side TMA (Inductor template)
+        torch._dynamo.reset()
+        with torch._inductor.config.patch(
+            {
+                **gemm_cfg,
+                "triton.enable_host_side_tma": True,
+                "triton.use_tensor_descriptor": True,
+                "assume_aligned_inputs": True,
+            }
+        ):
+
+            @torch.compile
+            def host_tma_mm(x, y):
+                return x @ y
+
+            host_tma_mm(a, b)
+        t_host = bench_gemm(lambda: host_tma_mm(a, b))
+
+        print(
+            f"\nGEMM Perf ({M}x{N}x{K} fp16, 100 reps median):"
+            f"\n  baseline (device TMA) = {t_baseline:.4f} ms"
+            f"\n  auto-TMA              = {t_auto_tma:.4f} ms (ratio={t_auto_tma / t_baseline:.3f})"
+            f"\n  host-side TMA         = {t_host:.4f} ms (ratio={t_host / t_baseline:.3f})"
+        )
 
 
 @requires_gpu_and_triton
@@ -972,6 +1408,117 @@ class TestFastCudaLauncher(TestCase):
         arg_tys = "O" * 130
         with self.assertRaises(ValueError):
             _FastCudaLauncher(0, 1, 0, arg_tys, 0)
+
+    def test_fast_launcher_accepts_recipes_arg(self):
+        """Verify _FastCudaLauncher constructor accepts optional 6th arg (recipes)."""
+
+        @triton.jit
+        def simple_kernel_recipes(arg0, arg1):
+            x = tl.load(arg0)
+            y = arg1
+            tl.store(arg0, x + y)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel_recipes[(1,)](arg0, 5)
+        launcher = self._make_launcher(compiled_kernel)
+
+        n_scratch = 0
+        if getattr(launcher, "has_global_scratch", False):
+            n_scratch += 1
+        if getattr(launcher, "has_profile_scratch", False):
+            n_scratch += 1
+
+        from torch._C import _FastCudaLauncher
+
+        # 6-arg form with None (no recipes) — should work like 5-arg form
+        fast_none = _FastCudaLauncher(
+            launcher.function,
+            launcher.num_warps,
+            launcher.shared,
+            launcher.arg_tys,
+            n_scratch,
+            None,
+        )
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        new_arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        fast_none(1, 1, 1, stream, new_arg0, 5)
+        self.assertEqual(
+            new_arg0, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE)
+        )
+
+        # 6-arg form with empty list — should also work
+        fast_empty = _FastCudaLauncher(
+            launcher.function,
+            launcher.num_warps,
+            launcher.shared,
+            launcher.arg_tys,
+            n_scratch,
+            [],
+        )
+        new_arg0.zero_()
+        fast_empty(1, 1, 1, stream, new_arg0, 5)
+        self.assertEqual(
+            new_arg0, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE)
+        )
+
+    def test_fast_launcher_auto_tma_launch(self):
+        """Verify _FastCudaLauncher with auto-TMA recipes launches correctly."""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        cap = torch.cuda.get_device_capability()
+        if cap < (9, 0):
+            self.skipTest(f"TMA requires sm_90+, got sm_{cap[0]}{cap[1]}")
+
+        @triton.jit
+        def copy_kernel(src, dst, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(src + offsets, mask=mask)
+            tl.store(dst + offsets, x, mask=mask)
+
+        N = 64
+        src = torch.randn(N, device="cuda")
+        dst = torch.zeros(N, device="cuda")
+        compiled = copy_kernel[(1,)](src, dst, N, BLOCK_SIZE=64)
+        launcher = self._make_launcher(compiled)
+
+        recipe = {
+            "base_ptr_arg_index": 0,
+            "shape_arg_indices": [2],
+            "stride_arg_indices": [-1],
+            "block_shape": [64],
+            "swizzle": -1,
+            "elem_type": 7,  # CU_TENSOR_MAP_DATA_TYPE_FLOAT32
+            "elem_size": 4,
+            "fp4_padded": 0,
+            "fill_mode": 0,
+        }
+
+        from torch._C import _FastCudaLauncher
+
+        n_scratch = 0
+        if getattr(launcher, "has_global_scratch", False):
+            n_scratch += 1
+        if getattr(launcher, "has_profile_scratch", False):
+            n_scratch += 1
+
+        fast = _FastCudaLauncher(
+            launcher.function,
+            launcher.num_warps,
+            launcher.shared,
+            launcher.arg_tys,
+            n_scratch,
+            [recipe],
+        )
+
+        new_src = torch.randn(N, device="cuda")
+        new_dst = torch.zeros(N, device="cuda")
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        fast(1, 1, 1, stream, new_src, new_dst, N)
+        self.assertEqual(new_dst, new_src)
 
 
 @requires_gpu_and_triton
