@@ -14,12 +14,13 @@ from torch._inductor import config
 from torch._inductor.codegen.common import TritonScratchWorkspace
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.cpp_wrapper_gpu import (
+    _launch_pdl_cpp_literal,
     CppWrapperGpu,
     DeferredTritonCallWrapper,
 )
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import IndentedBuffer
+from torch._inductor.utils import DualIndentedBuffer, IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -381,6 +382,145 @@ class TestGpuWrapper(InductorTestCase):
         ).generate_launch_kernel(prefix, wrapper, "kernel_var", params)
 
         self.assertEqual(wrapper.scratch_spaces, {"global_scratch": 256 * 8})
+
+    @parametrize(
+        "triton_meta,expected",
+        [
+            (None, "false"),
+            ({}, "false"),
+            ({"launch_pdl": False}, "false"),
+            ({"launch_pdl": True}, "true"),
+            (
+                {"launch_pdl": False, "backend_options": {"launch_pdl": True}},
+                "true",
+            ),
+            (
+                {"launch_pdl": True, "backend_options": {"launch_pdl": False}},
+                "false",
+            ),
+        ],
+    )
+    def test_launch_pdl_cpp_literal(self, triton_meta, expected):
+        self.assertEqual(_launch_pdl_cpp_literal(triton_meta), expected)
+
+    @parametrize("invalid_value", [1, "true", object()])
+    def test_launch_pdl_cpp_literal_rejects_non_bool(self, invalid_value):
+        with self.assertRaisesRegex(TypeError, "launch_pdl must be a concrete bool"):
+            _launch_pdl_cpp_literal({"launch_pdl": invalid_value})
+
+    @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
+    @parametrize("enable_kernel_profile", [False, True])
+    @parametrize("wrapper_device,launch_pdl_arg", [("cuda", ", true"), ("xpu", "")])
+    def test_triton_wrapper_forwards_launch_pdl(
+        self, enable_kernel_profile, wrapper_device, launch_pdl_arg
+    ):
+        class FakeWrapper:
+            device = wrapper_device
+
+            @staticmethod
+            def generate_args_decl(
+                prefix,
+                call_args,
+                arg_types,
+                arg_signatures,
+                is_triton_kernel=True,
+                scratch_spaces=None,
+            ):
+                return ""
+
+        prefix = IndentedBuffer()
+        params = {
+            "triton_meta": {
+                "signature": {"x": "*fp32"},
+                "constants": {},
+                "launch_pdl": True,
+            },
+            "def_args": ["x"],
+            "call_args": ["x"],
+            "config": {},
+            "num_warps": 4,
+            "shared_mem": 0,
+        }
+        with config.patch({"cpp.enable_kernel_profile": enable_kernel_profile}):
+            DeferredTritonCallWrapper(
+                wrapper_name="wrapper",
+                kernel_name="kernel",
+                kernel_name_to_body={},
+                arg_types=[torch.float32],
+            ).generate_launch_kernel(prefix, FakeWrapper(), "kernel_var", params)
+
+        self.assertIn(
+            "launchKernel(kernel_var, grid_0, grid_1, grid_2, 4, 0, "
+            f"kernel_args_, stream_{launch_pdl_arg});",
+            prefix.getvalue(),
+        )
+
+    @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
+    @parametrize("wrapper_device,launch_pdl_arg", [("cuda", ", true"), ("xpu", "")])
+    def test_lazy_triton_wrapper_forwards_launch_pdl(
+        self, wrapper_device, launch_pdl_arg
+    ):
+        class FakeDeviceCodegen:
+            @staticmethod
+            def cpp_device_ptr():
+                return "CUdeviceptr"
+
+        class FakeWrapper:
+            device = wrapper_device
+            device_codegen = FakeDeviceCodegen()
+
+            @staticmethod
+            def generate_args_decl(
+                prefix,
+                call_args,
+                arg_types,
+                arg_signatures,
+                is_triton_kernel=True,
+                scratch_spaces=None,
+            ):
+                return ""
+
+            @staticmethod
+            def codegen_dtype(dtype):
+                return "at::ScalarType::Byte"
+
+            @staticmethod
+            def codegen_device(device):
+                return "c10::DeviceType::CUDA, 0"
+
+        prefix = DualIndentedBuffer()
+        deferred = DeferredTritonCallWrapper(
+            wrapper_name="wrapper",
+            kernel_name="kernel",
+            kernel_name_to_body={},
+            arg_types=[torch.float32],
+            triton_meta={
+                "signature": {"x": "*fp32"},
+                "constants": {},
+                "launch_pdl": True,
+            },
+        )
+        deferred._generate_lazy_launch(prefix, FakeWrapper(), ["x"], ["x"])
+
+        expected_args = (
+            "grid_0, grid_1, grid_2, kernel_result.num_warps, "
+            f"kernel_result.shared_mem, kernel_args_, stream_{launch_pdl_arg}"
+        )
+        self.assertIn(f"launchKernel(kernel, {expected_args});", prefix.getvalue())
+        self.assertIn(
+            f"launchKernel(kernels_.kernel, {expected_args});",
+            prefix.aot.getvalue(),
+        )
+
+    @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
+    def test_cuda_driver_supports_per_kernel_pdl(self):
+        source = CUDADeviceOpOverrides().kernel_driver()
+        self.assertIn("if (!launchPdl)", source)
+        self.assertIn("cuLaunchKernel(", source)
+        self.assertIn("cuLaunchKernelEx(", source)
+        self.assertIn("CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION", source)
+        self.assertIn("programmaticStreamSerializationAllowed = 1", source)
+        self.assertIn("CUDA_VERSION >= 11080", source)
 
     @parametrize("per_subkernel_blocks", [False, True])
     def test_lazy_compile_combo_kernel_default_config(self, per_subkernel_blocks):
