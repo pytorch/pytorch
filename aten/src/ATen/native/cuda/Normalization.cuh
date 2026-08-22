@@ -697,8 +697,6 @@ void batch_norm_stats_cuda_template(
 
   using accscalar_t = at::acc_type<scalar_t, true>;
   int64_t n_input = input_.size(1);
-  Tensor dummy_mean_;
-  Tensor dummy_var_;
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
 
   resize_output(out_mean, {n_input});
