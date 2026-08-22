@@ -11,7 +11,7 @@ import threading
 import typing
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import sympy
@@ -873,18 +873,14 @@ def get_tma_stores(
                 for i, inp in enumerate(op.args):
                     if Param(idx=i) in tma_stores:
                         result.add(inp)
-            elif op.name == "tt.experimental_descriptor_store":
-                if len(op.args) < 1:
-                    raise AssertionError(
-                        f"tt.experimental_descriptor_store expected at least 1 arg, got {len(op.args)}"
-                    )
-                result.add(op.args[0])
-            elif op.name == "tt.descriptor_store":
-                if len(op.args) < 1:
-                    raise AssertionError(
-                        f"tt.descriptor_store expected at least 1 arg, got {len(op.args)}"
-                    )
-                result.add(op.args[0])
+            else:
+                op_info = _KERNEL_ACCESS_OPS.get(op.name)
+                if (
+                    op_info is not None
+                    and op_info.is_tma_store
+                    and op_info.write_indexes is not None
+                ):
+                    result.update(op.args[idx] for idx in op_info.write_indexes(op))
 
     for val in list(result):
         if val in ops:
@@ -908,6 +904,103 @@ class TensorAccesses:
     can_fuse_epilogue: bool
 
 
+class IgnoreUnknownOp(Protocol):
+    """Returns True if the op should be skipped; otherwise the caller raises."""
+
+    def __call__(self, op: Op) -> bool: ...
+
+
+class ReadWriteIndexes(Protocol):
+    """Return the argument indexes read / written."""
+
+    def __call__(self, op: Op) -> Sequence[int]: ...
+
+
+def first_arg(op: Op) -> list[int]:
+    """Return the first argument index after checking that it exists."""
+    if len(op.args) < 1:
+        raise AssertionError(f"{op.name} expected at least 1 arg, got {len(op.args)}")
+    return [0]
+
+
+@dataclasses.dataclass(frozen=True)
+class _KernelAccessOpInfo:
+    read_indexes: ReadWriteIndexes | None = None
+    write_indexes: ReadWriteIndexes | None = None
+    is_tma_store: bool = False
+    ignore_if: IgnoreUnknownOp | None = None
+
+
+# List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td.
+# What if Triton exposed this?
+_KERNEL_ACCESS_OPS: dict[str, _KernelAccessOpInfo] = {
+    "tt.experimental_descriptor_store": _KernelAccessOpInfo(
+        write_indexes=first_arg, is_tma_store=True
+    ),
+    "tt.descriptor_store": _KernelAccessOpInfo(
+        write_indexes=first_arg, is_tma_store=True
+    ),
+    "tt.store": _KernelAccessOpInfo(write_indexes=first_arg),
+    "tt.atomic_cas": _KernelAccessOpInfo(write_indexes=first_arg),
+    "tt.atomic_rmw": _KernelAccessOpInfo(
+        read_indexes=first_arg, write_indexes=first_arg
+    ),
+    "tt.experimental_tensormap_create": _KernelAccessOpInfo(write_indexes=first_arg),
+    "tt.load": _KernelAccessOpInfo(read_indexes=first_arg),
+    "tt.load_tensor_descriptor": _KernelAccessOpInfo(read_indexes=first_arg),
+    "tt.descriptor_load": _KernelAccessOpInfo(read_indexes=first_arg),
+    "tt.elementwise_inline_asm": _KernelAccessOpInfo(ignore_if=lambda op: op.is_pure),
+}
+
+
+def _read_write_indexes(indexes: Sequence[int] | ReadWriteIndexes) -> ReadWriteIndexes:
+    if callable(indexes):
+        return indexes
+    index_tuple = tuple(indexes)
+    return lambda op: index_tuple
+
+
+def register_kernel_access_op(
+    name: str,
+    *,
+    read_indexes: Sequence[int] | ReadWriteIndexes | None = None,
+    write_indexes: Sequence[int] | ReadWriteIndexes | None = None,
+    is_tma_store: bool = False,
+    ignore_if: IgnoreUnknownOp | None = None,
+) -> None:
+    """Register a Triton op for kernel read/write analysis."""
+    if is_tma_store and write_indexes is None:
+        raise AssertionError(
+            f"{name} is marked as a TMA store but has no write indexes"
+        )
+    has_indexes = read_indexes is not None or write_indexes is not None
+    if ignore_if is not None and has_indexes:
+        raise AssertionError(
+            f"{name}: ignore_if cannot be combined with read/write indexes"
+        )
+    _KERNEL_ACCESS_OPS[name] = _KernelAccessOpInfo(
+        read_indexes=(
+            None if read_indexes is None else _read_write_indexes(read_indexes)
+        ),
+        write_indexes=(
+            None if write_indexes is None else _read_write_indexes(write_indexes)
+        ),
+        is_tma_store=is_tma_store,
+        ignore_if=ignore_if,
+    )
+
+
+def unregister_kernel_access_op(name: str) -> None:
+    """
+    Unregister a Triton op from kernel read/write analysis.
+
+    This is mainly useful for tests and temporary backend registrations. It
+    does not reset memoized analysis, so direct analyze_kernel_access callers
+    must reset their own caches.
+    """
+    _KERNEL_ACCESS_OPS.pop(name, None)
+
+
 @MemoizeWithCycleCheck
 def analyze_kernel_access(
     functions: dict[str, dict[Intermediate, list[Op]]],
@@ -929,25 +1022,6 @@ def analyze_kernel_access(
     """
     from torch._inductor.dependencies import Dep, ReadWrites, StarDep
 
-    # Name of mutation op to mutated parameter indices
-    # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
-    # All the OPs that have MemWrite trait.
-    # What if Triton exposed this?
-    WRITE_OPS = {
-        "tt.store": [0],
-        "tt.atomic_cas": [0],
-        "tt.atomic_rmw": [0],
-        "tt.experimental_descriptor_store": [0],
-        "tt.experimental_tensormap_create": [0],
-        "tt.descriptor_store": [0],
-    }
-    READ_OPS = {
-        "tt.load": [0],
-        "tt.load_tensor_descriptor": [0],
-        "tt.descriptor_load": [0],
-    }
-    UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
-
     write_stack: list[Param | Intermediate] = []
     read_stack: list[Param | Intermediate] = []
 
@@ -958,8 +1032,9 @@ def analyze_kernel_access(
         for op in op_list:
             # If we encounter an operation with effects that cannot be reliably analyzed
             # (e.g. `tt.elementwise_inline_asm`), we assume it does not mutate any input parameters.
-            if op.name in UNKNOWN_OPS:
-                if op.name == "tt.elementwise_inline_asm" and op.is_pure:
+            op_info = _KERNEL_ACCESS_OPS.get(op.name)
+            if op_info is not None and op_info.ignore_if is not None:
+                if op_info.ignore_if(op):
                     continue
                 raise RuntimeError(
                     f"ttir analysis hit an op we do not know how to analyze: {op.name}"
@@ -1009,8 +1084,12 @@ def analyze_kernel_access(
                     if name in read_set:
                         read_stack.append(arg)
             else:
-                write_stack.extend(op.args[idx] for idx in WRITE_OPS.get(op.name, []))
-                read_stack.extend(op.args[idx] for idx in READ_OPS.get(op.name, []))
+                if op_info is not None and op_info.write_indexes is not None:
+                    write_stack.extend(
+                        op.args[idx] for idx in op_info.write_indexes(op)
+                    )
+                if op_info is not None and op_info.read_indexes is not None:
+                    read_stack.extend(op.args[idx] for idx in op_info.read_indexes(op))
 
     # For these ops, only the first argument (base pointer) refers to actual
     # memory. The remaining arguments are shape/stride/offset metadata and

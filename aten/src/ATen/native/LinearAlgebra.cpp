@@ -184,11 +184,7 @@ namespace meta {
 #define ADDMM_META() \
   TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "self and mat2 must have the same dtype, but got ", self.scalar_type(), " and ", mat2.scalar_type()); \
   TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "mat1 and mat2 must have the same dtype, but got ", mat1.scalar_type(), " and ", mat2.scalar_type()); \
-  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor"); \
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor"); \
-  TORCH_CHECK( \
-      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (", \
-      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")"); \
+  native::check_mm_shapes(mat1, mat2, "addmm"); \
   set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, mat1.options());
 
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
@@ -200,11 +196,7 @@ TORCH_META_FUNC(_addmm_activation)(const Tensor& self, const Tensor& mat1, const
 }
 
 TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
-  TORCH_CHECK(self.dim() == 2, "self must be a matrix");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
-  TORCH_CHECK(
-      self.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
-      self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+  native::check_mm_shapes(self, mat2, "mm");
 
   set_output_raw_strided(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options());
 }
@@ -1968,17 +1960,12 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
     return true;
   }
 
-  // t1->view(-1, t1->size(-1)) does not copy only when the first n-1 dimensions are contiguous
-  // in the sense that t1_stride[i] = t1_stride[i+1]*t1_shape[i+1]
   const auto t1_shape = t1->sym_sizes();
-  const auto t1_strides = t1->sym_strides();
-  for (auto i = int64_t{0}; i < dim_t1 - int64_t{2}; ++i) {
-    if (TORCH_GUARD_OR_TRUE(
-            t1_strides[i].sym_ne(t1_strides[i + 1] * t1_shape[i + 1]))) {
-      return false;
-    }
-  }
-  return true;
+  const c10::SymDimVector leading_shape(t1_shape.begin(), t1_shape.end() - 1);
+  const c10::SymDimVector folded_shape{
+      c10::multiply_integers(leading_shape), t1_shape.back()};
+  return at::detail::computeStride(t1_shape, t1->sym_strides(), folded_shape)
+      .has_value();
 }
 
 /*
@@ -2132,7 +2119,9 @@ static Tensor _matmul_impl(
 
     // flatten expanded batches
     const auto tensor1_expand_size = [&output_shape, n, m1]{
-      c10::SymDimVector ret(output_shape);
+      c10::SymDimVector ret;
+      ret.reserve(output_shape.size() + 2);
+      ret.append(output_shape.begin(), output_shape.end());
       ret.append({n, m1});
       return ret;
     }();
@@ -2143,7 +2132,9 @@ static Tensor _matmul_impl(
     // a vector of shape (n,) into a batch of matrices of shape (*, n, 1)
     auto vector_rhs = dim_tensor2 == 1;
     const auto tensor2_expand_size = [&output_shape, m2, p, vector_rhs]{
-      c10::SymDimVector ret(output_shape);
+      c10::SymDimVector ret;
+      ret.reserve(output_shape.size() + (vector_rhs ? 1 : 2));
+      ret.append(output_shape.begin(), output_shape.end());
       if (vector_rhs) {
         ret.push_back(m2);
       } else {
@@ -3742,9 +3733,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
 #ifndef STRIP_ERROR_MESSAGES
   static constexpr std::string_view func_name = "int_mm_out_cpu";
 #endif
-  TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
-  TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
-  TORCH_CHECK(self.size(1) == mat2.size(0), func_name, ": self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
+  check_mm_shapes(self, mat2, "_int_mm");
   TORCH_CHECK(self.dtype() == at::kChar || self.dtype() == at::kByte,
     func_name, ": Expected self dtype to be int8 or uint8 but got ", self.dtype());
   TORCH_CHECK(mat2.dtype() == at::kChar, func_name, ": Expected mat2 dtype to be of type int8 but got ", mat2.dtype());

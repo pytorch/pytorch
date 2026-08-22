@@ -222,6 +222,21 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         # If we reach this point, the barrier succeeded without deadlock
         self.assertTrue(True)
 
+    def test_monitored_barrier(self):
+        # monitored_barrier is gloo-only; the default PG is gloo only on the
+        # cpu variant (nccl on cuda/xpu), so run there. This drives the full
+        # dist.monitored_barrier dispatch onto BackendWrapper::monitoredBarrier
+        # (the torchcomms reimplementation of ProcessGroupGloo::monitoredBarrier).
+        if self.device_type != "cpu":
+            return
+        self.assertEqual(dist.get_backend(self.pg), dist.Backend.GLOO)
+        # All ranks check in -> the health-checking barrier returns cleanly.
+        dist.monitored_barrier(
+            group=self.pg,
+            timeout=datetime.timedelta(seconds=30),
+            wait_all_ranks=True,
+        )
+
     def test_new_group_delegates_to_split_group(self):
         # Under torchcomms, `new_group` routes through `split_group`. The
         # resulting subgroup must contain the requested ranks and be usable
@@ -356,6 +371,24 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
         default_pg = dist.distributed_c10d._get_default_group()
         self.assertIsNotNone(default_pg.bound_device_id)
         self.assertEqual(default_pg.bound_device_id.type, "cuda")
+
+    def test_monitored_barrier_on_multi_backend_group(self):
+        # A device-bound world reports a multi-backend string from get_backend
+        # (e.g. "cpu:gloo,cuda:nccl"), which is NOT equal to Backend.GLOO. The
+        # relaxed monitored_barrier guard must still accept it under torchcomms
+        # (because it has a CPU-capable backend) and dispatch to the gloo CPU
+        # backend's BackendWrapper::monitoredBarrier, rather than rejecting it
+        # for not being a plain gloo group.
+        backend = dist.get_backend(self.pg)
+        self.assertNotEqual(backend, dist.Backend.GLOO)
+        self.assertIn("gloo", str(backend))
+        # All ranks check in -> the barrier returns cleanly. Reaching past this
+        # call proves the guard accepted the group and the barrier ran.
+        dist.monitored_barrier(
+            group=self.pg,
+            timeout=datetime.timedelta(seconds=30),
+            wait_all_ranks=True,
+        )
 
     def test_new_group_nccl_lazy_builds_per_peer_group(self):
         # Passing backend="nccl-lazy" builds a per-peer, lazily-initialized
@@ -802,6 +835,244 @@ class TestC10dGroupNameHashSalt(TestCase):
         first = c10d._process_group_name([2, 3], use_hashed_name=True)
         second = c10d._process_group_name([2, 3], use_hashed_name=True)
         self.assertNotEqual(first, second)
+
+
+class _FakeComm:
+    """Stand-in for a TorchComm whose ``finalize`` is not idempotent.
+
+    Mirrors the real comm: the second ``finalize`` raises, exactly the failure
+    ``destroy_process_group`` must avoid when a comm is shared across device
+    types.
+    """
+
+    def __init__(self):
+        self.finalize_calls = 0
+
+    def finalize(self):
+        self.finalize_calls += 1
+        if self.finalize_calls > 1:
+            raise RuntimeError("already finalized")
+
+
+class _FakeBackendWrapper:
+    def __init__(self, comm):
+        self._comm = comm
+
+    def get_comm(self):
+        return self._comm
+
+
+class _FakeOtherBackend:
+    """A c10d backend that is not a _BackendWrapper (must be left untouched)."""
+
+
+class TestC10dTorchCommsDestroyDedup(TestCase):
+    """Unit-test the comm-deduplication in ``destroy_process_group``.
+
+    A gloo subgroup reports both ``cuda`` and ``cpu`` device types backed by the
+    same _BackendWrapper/comm; the destroy loop must finalize each comm exactly
+    once because ``finalize()`` is not idempotent. Everything TorchComms-specific
+    is patched (``create=True``), so these run even when TorchComms is not
+    installed.
+    """
+
+    _WORLD_ATTRS = (
+        "pg_map",
+        "pg_names",
+        "pg_group_ranks",
+        "pg_backend_config",
+        "pg_to_tag",
+        "tags_to_pg",
+        "pg_coalesce_state",
+        "comms",
+    )
+
+    def setUp(self):
+        super().setUp()
+        self._saved_world = {
+            attr: getattr(c10d._world, attr).copy() for attr in self._WORLD_ATTRS
+        }
+        self._saved_default_pg = c10d._world.default_pg
+        self._saved_group_count = c10d._world.group_count
+
+    def tearDown(self):
+        for attr, value in self._saved_world.items():
+            container = getattr(c10d._world, attr)
+            container.clear()
+            if isinstance(value, dict):
+                container.update(value)
+            else:
+                container.extend(value)
+        c10d._world.default_pg = self._saved_default_pg
+        c10d._world.group_count = self._saved_group_count
+        super().tearDown()
+
+    def _register_pg(self, device_backends, *, name=None):
+        """Register a fake PG whose backends are keyed by device type."""
+        pg = mock.MagicMock()
+        pg._device_types = list(device_backends)
+        pg._get_backend.side_effect = lambda dev: device_backends[dev]
+        group_name = c10d.GroupName(self.id() if name is None else name)
+        pg.group_name = group_name
+
+        c10d._world.pg_map[pg] = (None, None)
+        c10d._world.pg_names[pg] = group_name
+        c10d._world.pg_group_ranks[pg] = {}
+        c10d._world.pg_backend_config[pg] = ""
+        c10d._world.pg_to_tag[pg] = None
+        return pg
+
+    def _drive_destroy(self, device_backends):
+        """Register a fake subgroup PG and run ``destroy_process_group`` on it."""
+        pg = self._register_pg(device_backends)
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _BackendWrapper=_FakeBackendWrapper,
+            _unregister_process_group=lambda group_name: None,
+            create=True,
+        ):
+            c10d.destroy_process_group(pg)
+        return pg
+
+    def test_shared_comm_finalized_once(self):
+        # gloo scenario: one _BackendWrapper/comm shared across cuda and cpu.
+        comm = _FakeComm()
+        wrapper = _FakeBackendWrapper(comm)
+        pg = self._drive_destroy({"cuda": wrapper, "cpu": wrapper})
+        self.assertEqual(comm.finalize_calls, 1)
+        pg.shutdown.assert_called_once()
+        self.assertNotIn(pg, c10d._world.pg_map)
+
+    def test_same_comm_distinct_wrappers_finalized_once(self):
+        # Dedup keys on comm identity, not wrapper identity: two distinct
+        # _BackendWrapper objects sharing one comm still finalize it once.
+        comm = _FakeComm()
+        pg = self._drive_destroy(
+            {"cuda": _FakeBackendWrapper(comm), "cpu": _FakeBackendWrapper(comm)}
+        )
+        self.assertEqual(comm.finalize_calls, 1)
+        pg.shutdown.assert_called_once()
+
+    def test_distinct_comms_each_finalized_once(self):
+        comm_a, comm_b = _FakeComm(), _FakeComm()
+        self._drive_destroy(
+            {"cuda": _FakeBackendWrapper(comm_a), "cpu": _FakeBackendWrapper(comm_b)}
+        )
+        self.assertEqual(comm_a.finalize_calls, 1)
+        self.assertEqual(comm_b.finalize_calls, 1)
+
+    def test_non_backendwrapper_backend_is_skipped(self):
+        # A non-_BackendWrapper backend must not be finalized; the wrapped comm
+        # still finalizes exactly once.
+        comm = _FakeComm()
+        self._drive_destroy(
+            {"cuda": _FakeBackendWrapper(comm), "cpu": _FakeOtherBackend()}
+        )
+        self.assertEqual(comm.finalize_calls, 1)
+
+    def test_destroy_subgroup_keeps_other_live_comms_tracked(self):
+        world_pg = self._register_pg({}, name="world_pg")
+        comm_a, comm_b = _FakeComm(), _FakeComm()
+        subgroup_a = self._register_pg(
+            {"cuda": _FakeBackendWrapper(comm_a)}, name="subgroup_a"
+        )
+        subgroup_b = self._register_pg(
+            {"cuda": _FakeBackendWrapper(comm_b)}, name="subgroup_b"
+        )
+        c10d._world.default_pg = world_pg
+        c10d._world.comms.extend([comm_a, comm_b])
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _BackendWrapper=_FakeBackendWrapper,
+            _unregister_process_group=lambda group_name: None,
+            _unregister_all_process_groups=lambda: None,
+            _update_default_pg=lambda pg: setattr(c10d._world, "default_pg", pg),
+            create=True,
+        ):
+            c10d.destroy_process_group(subgroup_a)
+            self.assertEqual(comm_a.finalize_calls, 1)
+            self.assertEqual(comm_b.finalize_calls, 0)
+            self.assertNotIn(subgroup_a, c10d._world.pg_map)
+            self.assertIn(subgroup_b, c10d._world.pg_map)
+            self.assertEqual(c10d._world.comms, [comm_b])
+
+            c10d.destroy_process_group()
+            self.assertEqual(comm_a.finalize_calls, 1)
+            self.assertEqual(comm_b.finalize_calls, 1)
+            self.assertEqual(c10d._world.comms, [])
+
+
+class TestC10dTorchCommsBackendConfig(TestCase):
+    def test_registered_device_qualified_torchcomms_backend_uses_custom_type(self):
+        backend_name = "tc_test_backend"
+        self.assertNotIn(backend_name, dist.Backend.backend_type_map)
+
+        orig_use = c10d._use_torchcomms_enabled
+        orig_registered = c10d._torchcomms_is_backend_registered
+        orig_built = c10d._torchcomms_is_backend_built
+        c10d._use_torchcomms_enabled = lambda: True
+        c10d._torchcomms_is_backend_registered = lambda backend: backend == backend_name
+        c10d._torchcomms_is_backend_built = lambda backend: False
+        try:
+            backend_config = dist.BackendConfig(f"cuda:{backend_name}")
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                dist.ProcessGroup.BackendType.CUSTOM,
+            )
+        finally:
+            c10d._use_torchcomms_enabled = orig_use
+            c10d._torchcomms_is_backend_registered = orig_registered
+            c10d._torchcomms_is_backend_built = orig_built
+
+    def test_unregistered_device_qualified_backend_with_torchcomms_keeps_gloo_type(
+        self,
+    ):
+        backend_name = "tc_test_backend"
+        self.assertNotIn(backend_name, dist.Backend.backend_type_map)
+
+        orig_use = c10d._use_torchcomms_enabled
+        orig_registered = c10d._torchcomms_is_backend_registered
+        orig_built = c10d._torchcomms_is_backend_built
+        c10d._use_torchcomms_enabled = lambda: True
+        c10d._torchcomms_is_backend_registered = lambda backend: False
+        c10d._torchcomms_is_backend_built = lambda backend: False
+        try:
+            backend_config = dist.BackendConfig(f"cuda:{backend_name}")
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                dist.ProcessGroup.BackendType.GLOO,
+            )
+        finally:
+            c10d._use_torchcomms_enabled = orig_use
+            c10d._torchcomms_is_backend_registered = orig_registered
+            c10d._torchcomms_is_backend_built = orig_built
+
+    def test_registered_device_qualified_backend_without_torchcomms_keeps_gloo_type(
+        self,
+    ):
+        backend_name = "tc_test_backend"
+        self.assertNotIn(backend_name, dist.Backend.backend_type_map)
+
+        orig_use = c10d._use_torchcomms_enabled
+        orig_registered = c10d._torchcomms_is_backend_registered
+        orig_built = c10d._torchcomms_is_backend_built
+        c10d._use_torchcomms_enabled = lambda: False
+        c10d._torchcomms_is_backend_registered = lambda backend: backend == backend_name
+        c10d._torchcomms_is_backend_built = lambda backend: True
+        try:
+            backend_config = dist.BackendConfig(f"cuda:{backend_name}")
+            self.assertEqual(
+                c10d._get_default_backend_type_for_backend_config(backend_config),
+                dist.ProcessGroup.BackendType.GLOO,
+            )
+        finally:
+            c10d._use_torchcomms_enabled = orig_use
+            c10d._torchcomms_is_backend_registered = orig_registered
+            c10d._torchcomms_is_backend_built = orig_built
 
 
 if __name__ == "__main__":

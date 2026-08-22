@@ -103,6 +103,33 @@ class AbstractP2PTest(C10dBackendTest):
                     ):
                         self._test_batch_isend_irecv(dtype, recv_first, num_ops)
 
+    def test_send_recv_event_ordering(self):
+        # Regression test for the single-op P2P group-wrap fix (TorchComms
+        # D109625550): the nccl2 sendImpl/recvImpl now wrap ncclSend/ncclRecv in
+        # ncclGroupStart/End so the kernel is enqueued before the end CUDA event
+        # is recorded. Without it a non-blocking comm could complete the event
+        # ahead of the transfer and wait() would return stale/partial data. Loop
+        # with distinct per-iteration values and read back immediately after
+        # wait(): an early completion surfaces as a value mismatch. Generic P2P
+        # ordering check, so it runs across every backend.
+        self._init_pg()
+        next_rank, previous_rank = self._peers()
+        numel = 1024 * 1024
+        for i in range(50):
+            send = self._tensor(numel, torch.float32, self.rank + i)
+            recv = torch.empty_like(send)
+            if self.rank % 2 == 0:
+                send_work = dist.isend(send, next_rank)
+                recv_work = dist.irecv(recv, previous_rank)
+            else:
+                recv_work = dist.irecv(recv, previous_rank)
+                send_work = dist.isend(send, next_rank)
+            send_work.wait()
+            recv_work.wait()
+            self.assertEqual(
+                recv, self._tensor(numel, torch.float32, previous_rank + i)
+            )
+
     def test_async_work_lifetime(self):
         if not self.supports_dropped_p2p_work:
             self.skipTest(f"{self.backend_name} does not retain dropped P2P work")
