@@ -1,11 +1,11 @@
-# mypy: allow-untyped-defs
 import sys
+from collections.abc import Callable
 
 
 __all__ = ["register_after_fork"]
 
 
-def register_after_fork(func):
+def register_after_fork(func: Callable) -> None:
     """Register a callable to be executed in the child process after a fork.
 
     Works with processes created using the ``multiprocessing`` module and
@@ -17,7 +17,9 @@ def register_after_fork(func):
     """
     if sys.platform == "win32":
         import multiprocessing.util as _util
-        _util.register_after_fork(lambda _: func(), None)
+
+        _util.register_after_fork(register_after_fork, lambda _: func())
     else:
         import os
+
         os.register_at_fork(after_in_child=func)
