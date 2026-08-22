@@ -9537,9 +9537,18 @@ class Scheduler:
                     return dep1.name == dep2.name
                 return False
 
+            # Every match (exact equality or the StarDep/MemoryDep name rule)
+            # implies the two deps share a name, so bucket node2's deps by name
+            # and only compare within a bucket. This avoids the full O(d1 * d2)
+            # cross product -- and the expensive sympy index comparisons in
+            # `dep1 == dep2` -- when deps have distinct names.
+            node2_deps_by_name: dict[str, list[Dep]] = defaultdict(list)
+            for node2_dep in node2_deps:
+                node2_deps_by_name[node2_dep.name].append(node2_dep)
+
             score = 0
             for node1_dep in node1_deps:
-                for node2_dep in node2_deps:
+                for node2_dep in node2_deps_by_name.get(node1_dep.name, ()):
                     if _match(node1_dep, node2_dep):
                         score += max(
                             self.dep_size_hint(node1_dep), self.dep_size_hint(node2_dep)
