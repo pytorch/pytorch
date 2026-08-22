@@ -5980,6 +5980,17 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
         )
 
 
+@register_decomposition(aten.divmod)
+def divmod_tensor(
+    self: torch.Tensor,
+    other: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return (
+        aten.floor_divide(self, other),
+        aten.remainder(self, other),
+    )
+
+
 @register_decomposition(aten.bernoulli.default)
 def bernoulli(
     self: torch.Tensor,

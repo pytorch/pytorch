@@ -362,6 +362,7 @@ view of a storage and defines numeric operations on it.
     Tensor.div_
     Tensor.divide
     Tensor.divide_
+    Tensor.divmod
     Tensor.dot
     Tensor.double
     Tensor.dsplit

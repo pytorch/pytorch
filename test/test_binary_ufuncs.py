@@ -1045,6 +1045,20 @@ class TestBinaryUfuncsDevice(TestCase):
             )
             raise AssertionError(msg)
 
+    @dtypes(*all_types_and(torch.half))
+    def test_rdivmod(self, device, dtype):
+        samples = [(2, 3)]
+        if dtype != torch.uint8:
+            samples += [(-2, 3), (2, -3)]
+        for a, b in samples:
+            q, r = divmod(a, b)
+            tq, tr = divmod(a, torch.tensor(b, dtype=dtype, device=device))
+
+            self.assertIsInstance(tq, torch.Tensor)
+            self.assertIsInstance(tr, torch.Tensor)
+            self.assertEqual(tq, torch.tensor(q, dtype=dtype, device=device))
+            self.assertEqual(tr, torch.tensor(r, dtype=dtype, device=device))
+
     def test_add_broadcast_empty(self, device):
         # empty + empty
         self.assertRaises(
@@ -5092,9 +5106,10 @@ tensor_binary_ops = [
     "__or__",
     "__ror__",
     "__ior__",
+    "__divmod__",
+    "__rdivmod__",
     # Unsupported operators
     # '__imatmul__',
-    # '__divmod__', '__rdivmod__', '__idivmod__',
 ]
 
 

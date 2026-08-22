@@ -23,14 +23,15 @@ from torch.overrides import (
 
 
 _P = ParamSpec("_P")
+_T = TypeVar("_T")
 _TensorLike = TypeVar("_TensorLike", bound=_C.TensorBase)
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(
-    f: Callable[Concatenate[_TensorLike, _P], "Tensor"],
-) -> Callable[Concatenate[_TensorLike, _P], "Tensor"]:
+    f: Callable[Concatenate[_TensorLike, _P], _T],
+) -> Callable[Concatenate[_TensorLike, _P], _T]:
     @functools.wraps(f)
-    def wrapped(self: _TensorLike, *args: _P.args, **kwargs: _P.kwargs) -> "Tensor":
+    def wrapped(self: _TensorLike, *args: _P.args, **kwargs: _P.kwargs) -> _T:
         try:
             # See https://github.com/pytorch/pytorch/issues/75462
             sargs = self, *args
@@ -38,7 +39,7 @@ def _handle_torch_function_and_wrap_type_error_to_not_implemented(
                 return handle_torch_function(wrapped, sargs, self, *args, **kwargs)
             return f(self, *args, **kwargs)
         except TypeError:
-            return NotImplemented
+            return NotImplemented  # type: ignore[return-value]
 
     return wrapped
 
@@ -1185,6 +1186,18 @@ class Tensor(torch._C.TensorBase):
     __pos__ = _C.TensorBase.positive
     __neg__ = _C.TensorBase.neg
     __abs__ = _C.TensorBase.abs
+
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
+    def __divmod__(
+        self, other: Union["Tensor", int, float]
+    ) -> tuple["Tensor", "Tensor"]:
+        return torch.divmod(self, other)
+
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
+    def __rdivmod__(
+        self, other: Union["Tensor", int, float]
+    ) -> tuple["Tensor", "Tensor"]:
+        return torch.divmod(other, self)
 
     def __len__(self):
         if has_torch_function_unary(self):
