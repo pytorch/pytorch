@@ -8,11 +8,18 @@ from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export.verifier import SpecViolationError, Verifier
 from torch.export import export
 from torch.export.exported_program import InputKind, InputSpec, TensorArgument
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 
 
 @unittest.skipIf(not is_dynamo_supported(), "dynamo isn't supported")
 class TestVerifier(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_verifier_basic(self) -> None:
         class Foo(torch.nn.Module):
             def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
