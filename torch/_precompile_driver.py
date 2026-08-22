@@ -469,6 +469,16 @@ def _build_multigraph_forward():
             f"artifact was produced on Python {produced_on[0]}.{produced_on[1]}"
         )
 
+    # A dynamo artifact carries Dynamo internals in its opaque blobs, so it is
+    # locked to the build that made it. Say so, rather than letting the mismatch
+    # surface as whatever import or attribute error happens to come first.
+    produced_by = globals().get("TORCH_VERSION")
+    if produced_by is not None and produced_by != torch.__version__:
+        raise ValueError(
+            f"artifact was produced by torch {produced_by}, "
+            f"this is torch {torch.__version__}"
+        )
+
     # The graphs below were captured with these functions inlined into them, so
     # their current source has to be the source that was traced. The installed
     # mode gets this check from CompilePackage; here it is the artifact's own.
