@@ -10,6 +10,7 @@ from torch._dynamo import config as dynamo_config
 from torch._dynamo.exc import InternalTorchDynamoError
 from torch._inductor import config as inductor_config, ir
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.compile_fx import compile_fx
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import IndentedBuffer
@@ -335,6 +336,39 @@ class TestUnbackedSymints(InductorTestCase):
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    def test_bool_mask_index_put_backward_nonzero(self, device):
+        # gh-issue #194166: the backward of a boolean-mask assignment (index_put)
+        # computes index(grad, mask) -> nonzero, a data-dependent op that only
+        # appears in AOTAutograd's joint trace of the resume graph. It must be
+        # compiled with an unbacked symint instead of falling back to eager via
+        # a backend exception. The forward read x[mask] graph-breaks once, so
+        # the backend must be invoked exactly twice (clone + masked write).
+        def fn(x, mask):
+            out = x.clone()
+            out[mask] = x[mask] + 1
+            return out
+
+        x = make_tensor(64, 8, dtype=torch.float32, device=device, requires_grad=True)
+        x_expected = x.detach().clone().requires_grad_(True)
+        mask = make_tensor(64, dtype=torch.bool, device=device)
+        mask[0 : x.shape[0] // 2] = True
+
+        num_compiled = []
+
+        def backend(gm, example_inputs):
+            num_compiled.append(gm)
+            return compile_fx(gm, example_inputs)
+
+        actual = torch.compile(fn, backend=backend, dynamic=True)(x, mask)
+        actual.sum().backward()
+        self.assertEqual(len(num_compiled), 2)
+
+        expected = fn(x_expected, mask)
+        expected.sum().backward()
+        torch.testing.assert_close(actual, expected)
+        torch.testing.assert_close(x.grad, x_expected.grad)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
