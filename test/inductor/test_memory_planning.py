@@ -153,9 +153,7 @@ class TestAllocFromPool(TestCase):
         # Matches as_strided / checkInBoundsForStorage: 0-extent views skip the
         # byte bound, so a huge offset is accepted when size is empty.
         base = torch.arange(8, dtype=torch.int64)
-        view = torch.ops.inductor._alloc_from_pool(
-            base, 1 << 40, torch.int64, [0], [1]
-        )
+        view = torch.ops.inductor._alloc_from_pool(base, 1 << 40, torch.int64, [0], [1])
         self.assertEqual(view.numel(), 0)
         self.assertEqual(view.storage_offset(), 1 << 37)
 
