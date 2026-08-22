@@ -197,6 +197,23 @@ supported_ctx_manager_classes = dict.fromkeys(
 )
 
 
+def device_type_for_autocast_class(value: Any) -> str | None:
+    """Return the device_type that registered ``value`` as its autocast class.
+
+    ``None`` means ``value`` is not a registered autocast class.  See
+    ``device_interface.device_type_for_autocast_class`` for how a class is
+    matched against what a device registered.
+    """
+    from ..device_interface import device_type_for_autocast_class as lookup
+
+    return lookup(value)
+
+
+def _matches_device_autocast_class(value: Any) -> bool:
+    """Check whether value is an autocast class registered by a device."""
+    return device_type_for_autocast_class(value) is not None
+
+
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
     [
         torch._shape_as_tensor,
@@ -689,7 +706,10 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             callable(value)
             and (
                 hashable(value)  # accesses value.__hash__()
-                and value in supported_ctx_manager_classes
+                and (
+                    value in supported_ctx_manager_classes
+                    or _matches_device_autocast_class(value)
+                )
             )
         )
 
@@ -811,7 +831,8 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
-        ):
+            # An autocast class registered via DeviceInterface.autocast_classes.
+        ) or _matches_device_autocast_class(self.value):
             # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
