@@ -6,6 +6,8 @@ import os
 import sys
 from datetime import datetime
 
+from triage_marker import mark_blocked
+
 
 DEBUG_LOG = os.environ.get("TRIAGE_HOOK_DEBUG_LOG", "/tmp/triage_hooks.log")
 REPOSITORY_ENV = "GITHUB_REPOSITORY"
@@ -80,6 +82,7 @@ def main() -> None:
             )
     except Exception as error:
         debug_log(f"Blocked mutation: {type(error).__name__}: {error}")
+        mark_blocked(f"target hook: {type(error).__name__}")
         print(f"Blocked issue mutation: {error}", file=sys.stderr)
         sys.exit(2)
 
