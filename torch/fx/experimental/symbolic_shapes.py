@@ -7044,14 +7044,30 @@ class ShapeEnv:
         args = {str(e): val for e, val in self.backed_var_to_val.items()}
         return eval(code, SYMPY_INTERP, args)
 
+    # Creates FX placeholders in the ShapeEnv, so it must be replayable like any
+    # other ShapeEnv mutation: translation validation replays self.events onto a
+    # fresh ShapeEnv, and an unrecorded placeholder makes that replay fail with
+    # "Node sN not found in name_to_node".
+    @record_shapeenv_event()
     def deserialize_symexpr(self, code: str) -> SymInt | SymFloat | SymBool:
         """
         To be used by compile_fx to deserialize symexprs
         """
-        args = {
-            str(e): SymInt(SymNode(e, self, int, int(val), fx_node=None))
-            for e, val in self.backed_var_to_val.items()
-        }
+        args = {}
+        for symbol in self.var_to_range:
+            val = self.backed_var_to_val.get(symbol)
+            # Unbacked symbols have no hint, and nested-tensor symbols hint to a
+            # SingletonInt which has no integer value; both bind hintless.
+            hint = int(val) if isinstance(val, (sympy.Integer, sympy.Float)) else None
+            args[str(symbol)] = SymInt(
+                SymNode(
+                    symbol,
+                    self,
+                    int,
+                    hint,
+                    fx_node=self._create_fx_placeholder_and_z3var(symbol, int),
+                )
+            )
         return eval(code, SYMPY_INTERP, args)
 
     def evaluate_guards_expression(self, code: str, args: Sequence[object]) -> bool:

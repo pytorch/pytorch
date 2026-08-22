@@ -2365,22 +2365,22 @@ def _aot_stage2b_bw_compile(
 
                 # Inductor can choose different strides for activations than
                 # what backward graph has. if we can't statically tell that
-                # strides are the same, we assume they are not.
+                # strides are the same, we assume they are not. real_stride may
+                # be symbolic (see set_tracing_context_output_strides).
                 with suppress_ctx:
                     for k in range(len(ph_arg.stride())):
-                        # real_stride can't be symbolic.
-
-                        if guard_or_true(ph_arg.stride()[k] != int(real_stride[k])):
+                        if guard_or_true(ph_arg.stride()[k] != real_stride[k]):
                             stride_different = True
                             break
 
                 if stride_different:
-                    # Note that here we use the stride of the real tensor to
-                    # restride a FakeTensor. This does not cause trouble
-                    # for dynamic shape since this code path only get
-                    # executed if layout optimization is enabled. And we
-                    # disable layout optimization for dynamic shape right
-                    # now.
+                    # Note that here we use the stride inductor chose to restride
+                    # a FakeTensor. Under dynamic shapes that stride can be
+                    # symbolic, since config.pad_dynamic_shapes lets inductor pad
+                    # a symbolically-shaped buffer. It has to stay symbolic here:
+                    # resolving it against the current hint bakes that constant
+                    # into the backward graph and breaks every later call whose
+                    # dynamic size differs.
                     #
                     # A solution that decide stride order based on real
                     # tensor's stride and then apply that stride order to
