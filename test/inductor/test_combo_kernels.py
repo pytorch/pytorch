@@ -356,6 +356,71 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    @requires_cuda_and_triton
+    @parametrize("bias_kind", ("causal", "alibi"))
+    def test_source_independent_masks_stay_local(self, bias_kind):
+        def make_bias(q):
+            size = q.shape[-2]
+            index = torch.arange(size, device=GPU_TYPE)
+            if bias_kind == "alibi":
+                num_heads = q.shape[-3]
+                head = torch.arange(num_heads, device=GPU_TYPE)
+                slopes = torch.exp2(-((head + 1) * 8.0 / num_heads))
+                relative_position = index[None, :] - index[:, None]
+                return (slopes[:, None, None] * relative_position[None, :, :]).to(
+                    q.dtype
+                )
+            causal = index[:, None] >= index[None, :]
+            return torch.where(causal, 0.0, float("-inf")).to(q.dtype)
+
+        def fn(q1, k1, v1, q2, k2, v2):
+            first = torch.nn.functional.scaled_dot_product_attention(
+                q1, k1, v1, attn_mask=make_bias(q1)
+            )
+            second = torch.nn.functional.scaled_dot_product_attention(
+                q2, k2, v2, attn_mask=make_bias(q2)
+            )
+            return first, second
+
+        inps = []
+        for num_heads, size in ((4, 96), (8, 128)):
+            inps.extend(
+                torch.rand(1, num_heads, size, 32, device=GPU_TYPE, dtype=torch.float16)
+                for _ in range(3)
+            )
+        with fresh_cache():
+            _, code = run_and_get_code(torch.compile(fn), *inps)
+
+        source = "\n".join(code)
+        aoti_sdpa = "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda__scaled_dot_product_"
+        events = []
+        for line in source.splitlines():
+            line = line.lstrip()
+            if " = torch.ops.aten._scaled_dot_product_" in line or line.startswith(
+                aoti_sdpa
+            ):
+                events.append("attention")
+            elif ".run(" in line or line.startswith("call_triton_"):
+                events.append("kernel")
+        self.assertEqual(events[:4], ["kernel", "attention", "kernel", "attention"])
+        self.assertNotIn("'num_kernels': 2", source)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_gpu_and_triton
+    @torch._functorch.config.patch("cse", False)
+    def test_source_independent_wheres_without_sdpa_remain_combinable(self):
+        def make_mask(size):
+            index = torch.arange(size, device=GPU_TYPE)
+            return torch.where(index[:, None] >= index[None, :], 0.0, float("-inf"))
+
+        def fn():
+            return make_mask(64), make_mask(128)
+
+        _, code = run_and_get_code(torch.compile(fn))
+
+        self.assertIn("'num_kernels': 2", "\n".join(code))
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
     @requires_gpu_and_triton
     def test_reduce_functions(self):
         def test_reduce(a, b, c, d):

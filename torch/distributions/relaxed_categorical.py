@@ -108,7 +108,7 @@ class ExpRelaxedCategorical(Distribution):
 
 class RelaxedOneHotCategorical(TransformedDistribution):
     r"""
-    Creates a RelaxedOneHotCategorical distribution parametrized by
+    Creates a RelaxedOneHotCategorical distribution parameterized by
     :attr:`temperature`, and either :attr:`probs` or :attr:`logits`.
     This is a relaxed version of the :class:`OneHotCategorical` distribution, so
     its samples are on simplex, and are reparametrizable.

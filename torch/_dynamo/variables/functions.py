@@ -30,14 +30,15 @@ import importlib.util
 import inspect
 import itertools
 import logging
+import operator
 import os
 import re
 import sys
+import time
 import traceback
 import types
 import typing
 from collections.abc import Callable, Sequence
-from time import time as _time_time
 from types import CellType, FunctionType
 from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
@@ -134,6 +135,25 @@ CO_VARARGS = 0x04
 CO_VARKEYWORDS = 0x08
 _SUPPORTED_TREE_MAP_KWARGS = frozenset({"namespace", "none_is_leaf", "is_leaf"})
 _TREE_MAP_ONLY_SUPPORTED_KWARGS = frozenset({"is_leaf"})
+
+_TIME_FUNCTION_NAMES = (
+    "monotonic",
+    "monotonic_ns",
+    "perf_counter",
+    "perf_counter_ns",
+    "process_time",
+    "process_time_ns",
+    "thread_time",
+    "thread_time_ns",
+    "time",
+    "time_ns",
+)
+
+# Capture the available original functions so monkey-patched replacements keep
+# their normal Dynamo handling.
+_TIME_FUNCTIONS: frozenset[Callable[..., Any]] = frozenset(
+    getattr(time, name) for name in _TIME_FUNCTION_NAMES if hasattr(time, name)
+)
 
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
@@ -2474,16 +2494,18 @@ class SkipFunctionVariable(VariableTracker):
                     "Remove the `torch.compiler.disable` call",
                 ],
             )
-        elif self.value is _time_time and not args and not kwargs:
+        elif self.value in _TIME_FUNCTIONS:
+            time_fn = cast(Callable[..., Any], self.value)
+            fn_name = f"time.{time_fn.__name__}"
             unimplemented(
-                gb_type="Call to `time.time()`",
-                context="Called `time.time()` inside a compiled region",
+                gb_type="Call to a time function",
+                context=f"Called `{fn_name}()` inside a compiled region",
                 explanation=(
-                    "Dynamo graph breaks on `time.time()` so that the clock read "
+                    f"Dynamo graph breaks on `{fn_name}()` so that the clock read "
                     "occurs at the correct point relative to compiled operations."
                 ),
                 hints=[
-                    "Move the `time.time()` call outside the compiled function if the graph break is undesirable.",
+                    f"Move the `{fn_name}()` call outside the compiled function if the graph break is undesirable.",
                 ],
             )
         elif self.value is torch._dynamo.graph_break:
@@ -2874,6 +2896,119 @@ def _traceable_collectives_source(
     return AttrSource(path_source, inner_name)
 
 
+def _fuse_batch_p2p_waits(gm: torch.fx.GraphModule) -> None:
+    from torch.distributed._functional_collectives import wait_tensor
+
+    batch_targets = {
+        torch.ops._c10d_functional.batch_p2p_ops,
+        torch.ops._c10d_functional.batch_p2p_ops.default,
+    }
+    wait_targets = {
+        wait_tensor,
+        torch.ops._c10d_functional.wait_tensor,
+        torch.ops._c10d_functional.wait_tensor.default,
+    }
+    graph = gm.graph
+    changed = False
+
+    for batch in list(graph.nodes):
+        if batch.target not in batch_targets:
+            continue
+
+        outputs: dict[int, torch.fx.Node] = {}
+        for user in batch.users:
+            if (
+                user.target is not operator.getitem
+                or len(user.args) != 2
+                or not isinstance(user.args[1], int)
+            ):
+                outputs.clear()
+                break
+            outputs[user.args[1]] = user
+        if (
+            not outputs
+            or len(outputs) != len(batch.users)
+            or sorted(outputs) != list(range(len(outputs)))
+        ):
+            continue
+
+        waits: list[torch.fx.Node] = []
+        for output in (outputs[i] for i in range(len(outputs))):
+            output_waits = [
+                user for user in output.users if user.target in wait_targets
+            ]
+            if len(output.users) != 1 or len(output_waits) != 1:
+                waits.clear()
+                break
+            wait = output_waits[0]
+            if wait.users:
+                waits.clear()
+                break
+            waits.append(wait)
+        if not waits:
+            continue
+
+        nodes = list(graph.nodes)
+        positions = {node: i for i, node in enumerate(nodes)}
+        first = min(waits, key=positions.__getitem__)
+        last = max(waits, key=positions.__getitem__)
+        between = nodes[positions[first] : positions[last] + 1]
+        if any(node not in waits for node in between):
+            continue
+
+        op_list = batch.args[0]
+        tensors = batch.args[3]
+        has_static_inputs = (
+            isinstance(op_list, (list, tuple))
+            and isinstance(tensors, (list, tuple))
+            and len(op_list) == len(tensors) == len(outputs)
+        )
+        insert_before = first
+        if has_static_inputs:
+            for op, tensor in zip(op_list, tensors):
+                if op != "irecv" or not isinstance(tensor, torch.fx.Node):
+                    continue
+                for user in tensor.users:
+                    if (
+                        user is not batch
+                        and positions[batch]
+                        < positions.get(user, -1)
+                        < positions[insert_before]
+                    ):
+                        insert_before = user
+
+        with graph.inserting_before(insert_before):
+            wait_tensors = graph.call_function(
+                torch.ops._c10d_functional.wait_tensors.default,
+                args=([outputs[i] for i in range(len(outputs))],),
+            )
+
+        if has_static_inputs:
+            for i, (op, tensor) in enumerate(zip(op_list, tensors)):
+                if op != "irecv" or not isinstance(tensor, torch.fx.Node):
+                    continue
+                users = [
+                    user
+                    for user in tensor.users
+                    if user is not batch and positions.get(user, -1) > positions[batch]
+                ]
+                if not users:
+                    continue
+                with graph.inserting_after(wait_tensors):
+                    waited = graph.call_function(
+                        operator.getitem, args=(wait_tensors, i)
+                    )
+                for user in users:
+                    user.replace_input_with(tensor, waited)
+        for wait in waits:
+            graph.erase_node(wait)
+        changed = True
+
+    if changed:
+        graph.lint()
+        gm.recompile()
+
+
 class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     """
     Some of the torch.distributed.* collective APIs are possible to rewrite to 'traceable' collectives.
@@ -3018,7 +3153,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 "tensors": variables.ListVariable(tensors),
                 "group_name": group_var,
             }
-            return self.replacement_var.call_function(tx, new_args, new_kwargs)
+            result = self.replacement_var.call_function(tx, new_args, new_kwargs)
+            if _fuse_batch_p2p_waits not in tx.output.register_finalizer_fns:
+                tx.output.add_graph_finalizer(_fuse_batch_p2p_waits)
+            return result
 
         if self.fn in (dist.isend, dist.irecv):
             if not config.enable_p2p_compilation:
@@ -4283,7 +4421,10 @@ class MethodWrapperVariable(VariableTracker):
                 descriptor = cast(Any, method_wrapper.__self__)
                 return args[0].tp_getattro_impl(tx, descriptor.__name__)
 
-        return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
+        sd = self.obj.lookup_slotdefs(self.descriptor.__name__)
+        if sd is None:
+            return self.obj.call_method(tx, self.descriptor.__name__, args, kwargs)
+        return sd(self.obj, tx, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)

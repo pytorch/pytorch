@@ -1227,11 +1227,11 @@
   ],
   "GB9193": [
     {
-      "Gb_type": "Call to `time.time()`",
-      "Context": "Called `time.time()` inside a compiled region",
-      "Explanation": "Dynamo graph breaks on `time.time()` so that the clock read occurs at the correct point relative to compiled operations.",
+      "Gb_type": "Call to a time function",
+      "Context": "Called `{fn_name}()` inside a compiled region",
+      "Explanation": "Dynamo graph breaks on `{fn_name}()` so that the clock read occurs at the correct point relative to compiled operations.",
       "Hints": [
-        "Move the `time.time()` call outside the compiled function if the graph break is undesirable."
+        "Move the `{fn_name}()` call outside the compiled function if the graph break is undesirable."
       ]
     }
   ],
@@ -3742,6 +3742,14 @@
       ]
     }
   ],
+  "GB9118": [
+    {
+      "Gb_type": "Data pointer truth value",
+      "Context": "nb_bool_impl {self}",
+      "Explanation": "Dynamo cannot decide the truth value of a data pointer because the address is only known at runtime.",
+      "Hints": []
+    }
+  ],
   "GB0233": [
     {
       "Gb_type": "Attempted to use strided NestedTensor",
@@ -5941,6 +5949,16 @@
       "Context": "str(self.bwd_graph)",
       "Explanation": "Expected backward function to be a function or method.",
       "Hints": []
+    }
+  ],
+  "GB2582": [
+    {
+      "Gb_type": "Missing nb_bool_impl override",
+      "Context": "nb_bool_impl {self}",
+      "Explanation": "{type(self).__name__} does not implement nb_bool_impl. Add a nb_bool_impl override to {type(self).__name__}.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
     }
   ],
   "GB0353": [
