@@ -26473,7 +26473,7 @@ python_ref_db = [
             ),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps',
-                dtypes=(torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz,)
+                dtypes=(torch.float8_e4m3fnuz, torch.float8_e5m2fnuz,)
             ),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',

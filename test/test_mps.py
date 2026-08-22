@@ -10575,6 +10575,7 @@ def _conformance_read_metal_header(rel_path):
 
 def _conformance_compose_metal_source():
     return "\n".join([
+        _conformance_read_metal_header("c10/metal/float8.h"),
         _conformance_read_metal_header("c10/metal/common.h"),
         _conformance_read_metal_header("c10/metal/utils.h"),
         _conformance_read_metal_header("c10/metal/indexing.h"),

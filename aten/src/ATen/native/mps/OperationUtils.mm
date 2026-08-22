@@ -140,6 +140,12 @@ std::string getMPSTypeString(ScalarType scalar_type, bool short_name) {
       return short_name ? "f16" : "Float16";
     case ScalarType::BFloat16:
       return short_name ? "bf16" : "BFloat16";
+    case ScalarType::Float8_e4m3fn:
+      return short_name ? "f8e4m3fn" : "Float8E4M3FN";
+    case ScalarType::Float8_e5m2:
+      return short_name ? "f8e5m2" : "Float8E5M2";
+    case ScalarType::Float8_e8m0fnu:
+      return short_name ? "f8e8m0fnu" : "Float8E8M0FNU";
     case ScalarType::Int:
       return short_name ? "i32" : "Int32";
     case ScalarType::Long:
@@ -176,6 +182,12 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
       return "half";
     case ScalarType::BFloat16:
       return "bfloat";
+    case ScalarType::Float8_e4m3fn:
+      return "float8_e4m3fn";
+    case ScalarType::Float8_e5m2:
+      return "float8_e5m2";
+    case ScalarType::Float8_e8m0fnu:
+      return "float8_e8m0fnu";
     case ScalarType::Int:
       return "int";
     case ScalarType::Long:
@@ -602,6 +614,12 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
       return {.size = sizeof(short), .type = type, .value = {.h = scalar.to<Half>()}};
     case ScalarType::BFloat16:
       return {.size = sizeof(short), .type = type, .value = {.bf16 = scalar.to<BFloat16>()}};
+    case ScalarType::Float8_e4m3fn:
+      return {.size = sizeof(uint8_t), .type = type, .value = {.f8 = scalar.to<Float8_e4m3fn>().x}};
+    case ScalarType::Float8_e5m2:
+      return {.size = sizeof(uint8_t), .type = type, .value = {.f8 = scalar.to<Float8_e5m2>().x}};
+    case ScalarType::Float8_e8m0fnu:
+      return {.size = sizeof(uint8_t), .type = type, .value = {.f8 = scalar.to<Float8_e8m0fnu>().x}};
     case ScalarType::ComplexHalf:
       return {.size = sizeof(int32_t), .type = type, .value = {.ch = scalar.to<c10::complex<Half>>()}};
     case ScalarType::ComplexFloat:
