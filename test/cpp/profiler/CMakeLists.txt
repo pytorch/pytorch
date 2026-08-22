@@ -1,7 +1,7 @@
 if(USE_KINETO)
   set(PROFILER_TEST_ROOT ${TORCH_ROOT}/test/cpp/profiler)
 
-  set(PROFILER_TEST_DEPENDENCIES torch gtest_main fmt::fmt-header-only)
+  set(PROFILER_TEST_DEPENDENCIES torch gtest_main fmt::fmt)
 
   add_executable(test_privateuse1_profiler
     ${TORCH_ROOT}/test/cpp/common/main.cpp
