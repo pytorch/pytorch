@@ -55,6 +55,10 @@ Per-template overrides for the CUDA plugin
   ``requires_grad_(True)`` to float args, and overrides ``wrap_body`` to
   partition non-leaf operations across 2-3 ``torch.cuda.Stream()`` contexts
   with proper ``wait_stream`` / event-based synchronization.
+* :class:`ReduceOverheadFuzzTemplate` - reuses the default operator set but
+  swaps in a check that compiles with ``mode="reduce-overhead"`` and runs the
+  program for several steps (warmup / record / replay) with a backward pass,
+  comparing each step against an eager reference to exercise cudagraph_trees.
 * :class:`DTensorFuzzTemplate` - overrides ``imports_codegen`` /
   ``flags_codegen`` for distributed setup, ``args_codegen`` to wrap each arg
   via ``DTensor.from_local`` on a fake-PG 2D mesh, ``return_codegen`` to use
@@ -94,6 +98,7 @@ from torchfuzz.cuda._codegen import (
     DefaultFuzzTemplate,
     DTensorFuzzPlacementsTemplate,
     DTensorFuzzTemplate,
+    ReduceOverheadFuzzTemplate,
     StreamFuzzTemplate,
     UnbackedFuzzTemplate,
 )
@@ -110,6 +115,7 @@ def register_codegen() -> dict[str, type[FuzzTemplate]]:
         "dtensor_placements": DTensorFuzzPlacementsTemplate,
         "unbacked": UnbackedFuzzTemplate,
         "streams": StreamFuzzTemplate,
+        "reduce_overhead": ReduceOverheadFuzzTemplate,
     }
 
 
