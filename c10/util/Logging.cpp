@@ -328,7 +328,7 @@ DECLARE_int32(v);
 DECLARE_bool(logtostderr);
 #endif // defined(C10_USE_GFLAGS) && defined(C10_USE_GLOG)
 
-#if !defined(C10_USE_GLOG)
+#if !defined(C10_USE_GLOG) && !defined(C10_USE_ABSL_LOG)
 // This backward compatibility flags are in order to deal with cases where
 // Caffe2 are not built with glog, but some init flags still pass in these
 // flags. They may go away in the future.
@@ -338,7 +338,7 @@ C10_DEFINE_int32(minloglevel, 0, "Equivalent to glog minloglevel")
 C10_DEFINE_int32(v, 0, "Equivalent to glog verbose")
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_DEFINE_bool(logtostderr, false, "Equivalent to glog logtostderr")
-#endif // !defined(c10_USE_GLOG)
+#endif // !defined(C10_USE_GLOG) && !defined(C10_USE_ABSL_LOG)
 
 #ifdef C10_USE_GLOG
 
@@ -456,7 +456,90 @@ void ShowLogInfoToStderr() {
 }
 } // namespace c10
 
-#else // !C10_USE_GLOG
+#elif defined(C10_USE_ABSL_LOG)
+
+namespace c10 {
+
+MessageLogger::MessageLogger(
+    SourceLocation source_location,
+    int severity,
+    bool exit_on_fatal)
+    : severity_(severity),
+      exit_on_fatal_(exit_on_fatal),
+      source_location_(source_location) {}
+
+MessageLogger::~MessageLogger() noexcept(false) {
+  if (severity_ == static_cast<int>(::absl::LogSeverity::kFatal)) {
+    DealWithFatal();
+  }
+}
+
+std::stringstream& MessageLogger::stream() {
+  return stream_;
+}
+
+void MessageLogger::DealWithFatal() {
+  if (exit_on_fatal_) {
+    LOG(FATAL).AtLocation(
+        source_location_.file, static_cast<int>(source_location_.line))
+        << stream_.str();
+  } else {
+    throw c10::Error(source_location_, stream_.str());
+  }
+}
+
+} // namespace c10
+
+C10_DEFINE_int(
+    caffe2_log_level,
+    static_cast<int>(absl::LogSeverity::kWarning),
+    "The minimum log level that caffe2 will output.");
+
+namespace c10 {
+
+void initLogging() {
+  detail::setLogLevelFlagFromEnv();
+
+  UpdateLoggingLevelsFromFlags();
+}
+
+bool InitCaffeLogging(int* argc, char** argv) {
+  if (*argc == 0) {
+    return true;
+  }
+
+  absl::InitializeLog();
+
+  UpdateLoggingLevelsFromFlags();
+
+  return true;
+}
+
+void UpdateLoggingLevelsFromFlags() {
+#ifdef FBCODE_CAFFE2
+  folly::annotate_ignore_thread_sanitizer_guard g(__FILE__, __LINE__);
+#endif
+  if (FLAGS_caffe2_log_level >= 0) {
+    absl::SetMinLogLevel(static_cast<absl::LogSeverityAtLeast>(std::min(
+        FLAGS_caffe2_log_level, static_cast<int>(absl::MinLogLevel()))));
+  }
+  if (FLAGS_caffe2_log_level < static_cast<int>(absl::LogSeverity::kWarning)) {
+    absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
+  }
+  if (FLAGS_caffe2_log_level < 0) {
+    absl::SetGlobalVLogLevel(-FLAGS_caffe2_log_level);
+  }
+}
+
+void ShowLogInfoToStderr() {
+  absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
+  absl::SetMinLogLevel(static_cast<absl::LogSeverityAtLeast>(std::min(
+      static_cast<int>(absl::MinLogLevel()),
+      static_cast<int>(absl::LogSeverity::kInfo))));
+}
+} // namespace c10
+
+#else // !C10_USE_GLOG && !C10_USE_ABSL_LOG
 
 #ifdef ANDROID
 #include <android/log.h>
@@ -599,7 +682,7 @@ void MessageLogger::DealWithFatal() {
 
 } // namespace c10
 
-#endif // !C10_USE_GLOG
+#endif // !C10_USE_GLOG && !C10_USE_ABSL_LOG
 
 namespace c10::detail {
 namespace {

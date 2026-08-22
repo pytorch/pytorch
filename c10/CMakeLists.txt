@@ -20,6 +20,10 @@ endif()
 
 set(C10_USE_GFLAGS ${USE_GFLAGS})  # also used in torch/headeronly
 set(C10_USE_GLOG ${USE_GLOG})  # also used in torch/headeronly
+set(C10_USE_ABSL_LOG ${USE_ABSL_LOG})  # also used in torch/headeronly
+if(C10_USE_GLOG AND C10_USE_ABSL_LOG)
+  message(FATAL_ERROR "C10_USE_GLOG and C10_USE_ABSL_LOG cannot be used at the same time.")
+endif()
 set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})  # also used in torch/headeronly
 set(C10_USE_NUMA ${USE_NUMA})  # also used in torch/headeronly
 set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})  # also used in torch/headeronly
@@ -90,6 +94,10 @@ if(NOT BUILD_LIBTORCHLESS)
 
   if(C10_USE_GLOG)
     target_link_libraries(c10 PUBLIC glog::glog)
+  endif()
+
+  if(C10_USE_ABSL_LOG)
+    target_link_libraries(c10 PUBLIC absl::log absl::log_initialize absl::log_globals absl::log_severity absl::check)
   endif()
 
   target_link_libraries(c10 PUBLIC headeronly)

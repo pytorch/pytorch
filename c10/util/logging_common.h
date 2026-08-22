@@ -25,7 +25,7 @@ class C10_API MessageLogger {
   // otherwise, we throw.
   void DealWithFatal();
 
-#if defined(ANDROID) && !defined(C10_USE_GLOG)
+#if defined(ANDROID) && !defined(C10_USE_GLOG) && !defined(C10_USE_ABSL_LOG)
   const char* tag_{"native"};
 #endif
   std::stringstream stream_;

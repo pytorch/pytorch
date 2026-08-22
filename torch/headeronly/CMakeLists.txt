@@ -10,6 +10,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # ---[ Configure macro file.
 set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
 set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
+set(C10_USE_ABSL_LOG ${USE_ABSL_LOG}) # used in cmake_macros.h.in
+if(C10_USE_GLOG AND C10_USE_ABSL_LOG)
+  message(FATAL_ERROR "C10_USE_GLOG and C10_USE_ABSL_LOG cannot be used at the same time.")
+endif()
 set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
 set(C10_USE_NUMA ${USE_NUMA}) # used in cmake_macros.h.in
 set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME}) # used in cmake_macros.h.in
