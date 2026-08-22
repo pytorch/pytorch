@@ -17,6 +17,9 @@ else
   apt-get install -y "python${PYTHON_VERSION}" "python${PYTHON_VERSION}-dev" python3-pip "python${PYTHON_VERSION}-venv"
 fi
 
+# needed to build 3.15 packages
+apt-get install -y libxml2-dev libxslt1-dev libxslt1-dev
+
 # Use a venv because uv and some other package managers don't support --user install
 ln -sf "/usr/bin/${PYTHON}" /usr/bin/python
 "${PYTHON}" -m venv "${VENV_PATH}"
