@@ -189,8 +189,9 @@ const auto log_ndtr_string = jiterator_stringify(
 const auto gcd_string = jiterator_stringify(
   template <typename T>
   T gcd(const T a_in, const T b_in) {
-    T a = abs(a_in);
-    T b = abs(b_in);
+    // abs the result, not the inputs, to avoid abs(INT_MIN) overflow.
+    T a = a_in;
+    T b = b_in;
 
     while (a != T{0}) {
       T c = a;
@@ -198,15 +199,16 @@ const auto gcd_string = jiterator_stringify(
       b = c;
     }
 
-    return b;
+    return abs(b);
   }
 ); // gcd_string
 
 const auto lcm_string = jiterator_stringify(
   template <typename T>
   T gcd(const T a_in, const T b_in) {
-    T a = abs(a_in);
-    T b = abs(b_in);
+    // abs the result, not the inputs, to avoid abs(INT_MIN) overflow.
+    T a = a_in;
+    T b = b_in;
 
     while (a != T{0}) {
       T c = a;
@@ -214,7 +216,7 @@ const auto lcm_string = jiterator_stringify(
       b = c;
     }
 
-    return b;
+    return abs(b);
   }
 
   template <typename T>
@@ -3054,15 +3056,15 @@ const auto spherical_bessel_j0_string = jiterator_stringify(
 #else // !AT_USE_JITERATOR() -- kernels must be precompiled
 
 template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
-  scalar_t a = ::abs(a_in);
-  scalar_t b = ::abs(b_in);
+static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a, scalar_t b) {
+  // See calc_gcd in ATen/native/Math.h: abs the result, not the inputs, to
+  // avoid abs(INT_MIN) overflow.
   while (a != 0) {
     scalar_t c = a;
     a = b % a;
     b = c;
   }
-  return b;
+  return ::abs(b);
 }
 
 /*
