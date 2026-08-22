@@ -51,3 +51,31 @@ uint64_t OpenRegTracer::getExternalCorrelationId() const {
 }
 
 } // namespace openreg::profiler
+
+extern "C" {
+
+orError_t orActivityEnableTracing() {
+  openreg::profiler::OpenRegTracer::instance().enableActivityTracing();
+  return orSuccess;
+}
+
+orError_t orActivityDisableTracing() {
+  openreg::profiler::OpenRegTracer::instance().disableActivityTracing();
+  return orSuccess;
+}
+
+orError_t orActivityPushExternalCorrelationId(uint64_t id) {
+  openreg::profiler::OpenRegTracer::instance().pushExternalCorrelationId(id);
+  return orSuccess;
+}
+
+orError_t orActivityPopExternalCorrelationId(uint64_t* id) {
+  if (id) {
+    *id = openreg::profiler::OpenRegTracer::instance()
+              .getExternalCorrelationId();
+  }
+  openreg::profiler::OpenRegTracer::instance().popExternalCorrelationId();
+  return orSuccess;
+}
+
+} // extern "C"

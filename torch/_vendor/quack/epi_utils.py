@@ -57,7 +57,7 @@ def setup_epi_tensor(gemm, tensor, epi_tile=None, op_type="store", stage=None):
     # ragging conversion.
     tma_input = (
         copy_utils.create_ragged_tensor_for_tma(tensor, ragged_dim=0, ptr_shift=True)
-        if op_type != "load" and cute.rank(tensor) == 2 and not getattr(gemm, "varlen_n", False)
+        if op_type != "load" and cute.rank(tensor) == 2
         else tensor
     )
     tma_atom, tma_tensor = gemm._make_tma_epi_atoms_and_tensors(

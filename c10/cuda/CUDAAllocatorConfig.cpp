@@ -1,6 +1,10 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <cmath>
+#include <locale>
+#include <sstream>
+
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #endif
@@ -97,6 +101,12 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
       used_native_specific_option = true;
     } else if (key == "throw_on_cudamalloc_oom") {
       i = parseThrowOnCudaMallocOom(tokenizer, i);
+      used_native_specific_option = true;
+    } else if (key == "expandable_segments_reserve") {
+      i = parseExpandableSegmentsReserve(tokenizer, i);
+      used_native_specific_option = true;
+    } else if (key == "expandable_segments_reserve_by_class") {
+      i = parseExpandableSegmentsReserveByClass(tokenizer, i);
       used_native_specific_option = true;
     } else {
       const auto& keys =
@@ -197,6 +207,77 @@ size_t CUDAAllocatorConfig::parseThrowOnCudaMallocOom(
   // would likely fail due to insufficient memory.
   tokenizer.checkToken(++i, ":");
   m_throw_on_cudamalloc_oom = tokenizer.toBool(++i);
+  return i;
+}
+
+std::optional<ExpandableSegmentReserveSpec> CUDAAllocatorConfig::
+    parseReserveSpec(const std::string& token) {
+  // A trailing 'G' means the value is absolute GiB; otherwise it is a fraction
+  // of total GPU memory. Malformed or non-positive values are intentionally
+  // non-fatal: we log and return nullopt so the caller keeps its default rather
+  // than aborting the process over a bad PYTORCH_CUDA_ALLOC_CONF entry.
+  bool is_gib = !token.empty() && (token.back() == 'G' || token.back() == 'g');
+  const std::string num = is_gib ? token.substr(0, token.size() - 1) : token;
+  // Parse in the classic (C) locale so a non-C process locale cannot change how
+  // the decimal separator is interpreted, and reject non-finite values (inf/nan
+  // would otherwise slip past the range check and poison resolveBytes).
+  double value = 0.0;
+  std::istringstream iss(num);
+  iss.imbue(std::locale::classic());
+  iss >> value;
+  const bool ok = !num.empty() && !iss.fail() && iss.eof() &&
+      std::isfinite(value) && value > 0.0;
+  if (!ok) {
+    TORCH_WARN(
+        "Ignoring invalid expandable-segment reserve value '",
+        token,
+        "' in PYTORCH_CUDA_ALLOC_CONF (expected a positive, finite fraction "
+        "like 0.5 or an absolute size like 40G); using default.");
+    return std::nullopt;
+  }
+  return ExpandableSegmentReserveSpec{/*is_fraction=*/!is_gib, value};
+}
+
+size_t CUDAAllocatorConfig::parseExpandableSegmentsReserve(
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  // Bad value -> keep the default (leave m_expandable_segments_reserve_set
+  // false so untagged streams stay on the historical reserve).
+  auto spec = parseReserveSpec(tokenizer[++i]);
+  if (spec) {
+    std::lock_guard<std::mutex> lock(m_reserve_mutex);
+    m_expandable_segments_reserve = *spec;
+    m_expandable_segments_reserve_set = true;
+  }
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parseExpandableSegmentsReserveByClass(
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+    size_t i) {
+  // Format: expandable_segments_reserve_by_class:[name:val,name:val,...]
+  tokenizer.checkToken(++i, ":");
+  tokenizer.checkToken(++i, "[");
+  // Build into a local map, then publish under the lock so readers on the
+  // segment-creation path never observe a partially-updated map.
+  ska::flat_hash_map<std::string, ExpandableSegmentReserveSpec> parsed;
+  while (!tokenizer.checkToken(i + 1, "]")) {
+    const std::string& name = tokenizer[++i];
+    tokenizer.checkToken(++i, ":");
+    // A malformed entry is skipped (logged); other entries still apply.
+    if (auto spec = parseReserveSpec(tokenizer[++i])) {
+      parsed[name] = *spec;
+    }
+    if (tokenizer.checkToken(i + 1, ",")) {
+      ++i;
+    }
+  }
+  ++i; // consume ']'
+  {
+    std::lock_guard<std::mutex> lock(m_reserve_mutex);
+    m_expandable_segments_reserve_by_class = std::move(parsed);
+  }
   return i;
 }
 

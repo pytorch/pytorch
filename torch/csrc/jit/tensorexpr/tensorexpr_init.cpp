@@ -87,7 +87,7 @@ void initTensorExprBindings(PyObject* module) {
               [](const ExprHandle& self) {
                 std::stringstream ss;
                 ss << self;
-                return ss.str();
+                return std::move(ss).str();
               })
           .def(py::self + py::self)
           .def(py::self * py::self)
@@ -226,7 +226,7 @@ void initTensorExprBindings(PyObject* module) {
           [](const ExprHandle& self) {
             std::stringstream ss;
             ss << self;
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(py::init<Dtype>())
       .def(py::init<const std::string&, Dtype>());
@@ -398,7 +398,7 @@ void initTensorExprBindings(PyObject* module) {
       .def("__str__", [](Stmt& self) {
         std::stringstream ss;
         ss << self;
-        return ss.str();
+        return std::move(ss).str();
       });
   py::class_<Store, Stmt, std::shared_ptr<Store>>(te, "Store")
       .def_static(
@@ -702,7 +702,7 @@ void initTensorExprBindings(PyObject* module) {
           [](const LoopNest& self) {
             std::stringstream ss;
             ss << *self.root_stmt();
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(
           "root_stmt",
