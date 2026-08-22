@@ -274,6 +274,13 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
   auto grad = grad_.contiguous().view({num_indices, grad_.size(-1)});
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
+  // With zero embedding width (or no rows) there is nothing to accumulate and
+  // the gradient is empty; launching the backward kernels would dereference a
+  // null data_ptr of the empty gradient (gh-189668).
+  if (num_weights == 0 || grad_.size(-1) == 0) {
+    return at::zeros({num_weights, grad_.size(-1)}, grad_.options());
+  }
+
   if (num_indices <= 3072 && !scale_grad_by_freq) {
     auto indices_contig = indices.contiguous();
     auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
