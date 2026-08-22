@@ -8,9 +8,12 @@ import json
 import torch
 from torch.onnx._internal.exporter import _verification
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class VerificationInfoTest(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_from_tensors(self):
         # Test with tensors
         expected = torch.tensor([1.0, 2.0, 3.0])
@@ -83,6 +86,8 @@ class VerificationInfoTest(common_utils.TestCase):
 
 
 class VerificationInterpreterTest(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_interpreter_stores_correct_info(self):
         class Model(torch.nn.Module):
             def forward(self, a, b):
@@ -105,6 +110,8 @@ class VerificationInterpreterTest(common_utils.TestCase):
 
 
 class VerificationFunctionsTest(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_verify_onnx_program(self):
         class Model(torch.nn.Module):
             def forward(self, a, b):
