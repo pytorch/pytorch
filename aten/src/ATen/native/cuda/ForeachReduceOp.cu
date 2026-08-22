@@ -177,7 +177,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
         options.memory_format_opt()));
   }
 
-  auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
 
   AT_DISPATCH_ALL_TYPES_AND3(
       kHalf,
@@ -480,7 +480,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
         res_option.memory_format_opt()));
   }
 
-  auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
