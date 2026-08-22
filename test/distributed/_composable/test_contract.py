@@ -5,7 +5,12 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 from torch.distributed._composable import _get_registry, contract
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 class ToyModel(nn.Module):
@@ -24,6 +29,8 @@ class ToyModel(nn.Module):
 
 
 class TestContract(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo("Dynamo does not support the state key")
     def test_add_hooks(self):
         def forward_pre_hook(
