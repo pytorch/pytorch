@@ -41,6 +41,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      load_compiled_function
      save_cache_artifacts
      wrap_numpy
+     ExampleInput
 ```
 
 ## torch.compiler.precompile
@@ -52,8 +53,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 ```{eval-rst}
 .. py:function:: precompile(fn, *, example_inputs, backend="inductor", tracer="make_fx", decompositions=None, training=False)
 
-   Ahead-of-time precompile ``fn`` against example inputs, returning a self-contained,
-   runnable Python source string plus an acceleration cache as ``(python_code, cache)``.
+   Ahead-of-time precompile ``fn`` against example inputs, returning a runnable Python
+   source string plus an acceleration cache as ``(python_code, cache)``.
    ``fn`` is the whole computation, taking the model(s) as
    explicit arguments, e.g. ``lambda model, x: model(x)`` or a training step. The
    ``nn.Module`` arguments have their parameters/buffers lifted to graph inputs, so no
@@ -74,9 +75,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       model] in ``torch/_precompile.py``. ``torch.compiler.precompile`` is distinct from
       ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` caching mode).
 
-      With ``tracer="dynamo"``, every tuple in ``example_inputs`` is executed during
-      capture. Recompilations become guarded variants in the artifact, including
-      automatically dynamic graphs produced when dimensions vary across examples. The
+      With ``tracer="dynamo"``, every tuple or ``ExampleInput`` in ``example_inputs``
+      is executed exactly once during capture. Recompilations become guarded variants
+      in the artifact, including automatically dynamic graphs produced when dimensions
+      vary across examples. The
       artifact drops a serialized guard record only when doing so preserves how every
       example matches the captured variants. This filtering is at guard-record
       granularity, so a retained composite record can still contain invariant leaf
@@ -94,8 +96,17 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       trees, transformed Dynamo entry/resume bytecode, and embedded disabled-function
       bytecode are stored as opaque inline data because they have no Python-source
       representation. The top-level function cannot have closure cells or nested
-      functions that capture its locals, and ``nn.Module`` arguments are not supported
-      yet because their identity guards are not serializable.
+      functions that capture its locals. ``nn.Module`` arguments are supported and are
+      checked at runtime for type, training mode, parameter/buffer names, aliasing,
+      shapes, strides, dtypes, devices, and ``requires_grad`` state.
+
+      Entry and graph-break resume frames are dispatched directly from the generated
+      source. If capture also compiles a nested frame reachable only through an ordinary
+      Python call, the artifact uses an isolated installed mode so that frame is served
+      too instead of silently running eager. Installation happens on first call (or
+      context-manager entry), and ``unload()`` removes only that artifact's entries.
+      Installed artifacts require the defining Python modules to be importable. Pass the
+      live callable as ``fn=`` to ``load`` when the entry itself must be rebound.
 
       Pass ``training=True`` with ``tracer="dynamo"`` and ``backend="inductor"`` to
       capture differentiable graphs. Each compiled segment contains readable Inductor
@@ -115,9 +126,12 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
        as positional arguments.
-   :param example_inputs: A sequence of positional-argument tuples for ``fn``. The
+   :param example_inputs: A sequence of positional-argument tuples or
+       ``torch.compiler.ExampleInput`` values for ``fn``. ``ExampleInput`` carries an
+       ``args`` tuple and ``kwargs`` dict. The
        ``make_fx`` tracer requires exactly one tuple. The ``dynamo`` tracer accepts one
-       or more tuples and records the guarded recompilations they exercise. With
+       or more calls and records the guarded recompilations they exercise. Keyword
+       examples are supported only by the Dynamo tracer. With
        ``make_fx``, ``nn.Module`` arguments within the tuple are lifted and the rest are
        runtime inputs.
    :param backend: ``"inductor"`` (default) lowers through AOTAutograd + Inductor;
@@ -126,16 +140,15 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param tracer: capture front-end. ``"make_fx"`` (default) is a non-strict make_fx
        trace. ``"dynamo"`` captures guarded specializations and recompilations from a
        Python function, including graph-break resume frames; it does not yet support
-       top-level closures, nested functions that capture locals, or ``nn.Module``
-       arguments.
+       top-level closures or nested functions that capture locals.
    :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
        decomposition function) forwarded to ``make_fx``; defaults to ``None`` and is not
        yet supported with ``tracer="dynamo"``.
    :param training: If ``True``, capture a differentiable Dynamo/Inductor artifact whose
        outputs can be passed to ``backward()``. Defaults to ``False`` and currently
        requires ``tracer="dynamo"`` and ``backend="inductor"``.
-   :returns: ``(python_code, cache)`` -- a self-contained Python source string (the
-       single source of truth for the calling convention) and a binary acceleration
+   :returns: ``(python_code, cache)`` -- an executable Python source string (the single
+       source of truth for the calling convention) and a binary acceleration
        cache (no weights, no calling-convention metadata; it carries a small
        format/version/backend/code_hash integrity tag that ``load`` verifies).
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
@@ -170,13 +183,16 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 ```
 
 ```{eval-rst}
-.. py:method:: precompile.load(python_code, cache)
+.. py:method:: precompile.load(python_code, cache, *, fn=None)
 
    Reconstruct a runnable from the ``(python_code, cache)`` pair returned by
    ``precompile``. The calling convention is read from ``python_code`` (the single
    source of truth); ``cache`` only accelerates loading -- it carries only the compiled
    backend artifact (the Inductor bundle for ``backend="inductor"``; empty for
    ``backend="eager"``) and no weights. You pass the model(s) again at runtime.
+   ``fn`` is optional and is used by an installed Dynamo artifact to bind its captured
+   package to a live callable. Loaded installed artifacts also support ``unload()`` and
+   the context-manager protocol.
 
    .. warning::
 
@@ -187,11 +203,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       run (see Note [precompile programming model], invariant 7). ``load`` also emits a
       per-call warning before it runs.
 
-   :param python_code: The self-contained Python source string returned by ``precompile``.
+   :param python_code: The executable Python source string returned by ``precompile``.
    :param cache: The binary acceleration cache returned by ``precompile``.
    :returns: A runnable callable with the same calling convention as the captured ``fn``.
-       Arguments are matched positionally at both capture and load time; keyword-argument
-       calling conventions are not supported.
+       The Dynamo tracer also preserves captured keyword-argument calling conventions.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
        fails to parse or is missing its calling-convention metadata), if ``cache`` is
        paired with a different ``python_code`` (mismatched ``backend`` tag or
