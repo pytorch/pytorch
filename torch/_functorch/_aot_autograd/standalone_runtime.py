@@ -26,7 +26,7 @@ from torch._prims_common import CUDARngStateHelper
 # The same contract covers ``CUDARngStateHelper`` (imported above for circular-import
 # ordering): the table keys on id() of its ``get_torch_state_as_tuple`` /
 # ``set_new_offset`` staticmethods, so it too must not be wrapped or aliased.
-from .functional_utils import gen_alias_from_base
+from .functional_utils import gen_alias_from_base, gen_aliases_from_multi_output_view
 from .runtime_wrappers import (
     _unwrap_tensoralias,
     mark_dynamo_propagated_dynamic_indices,
@@ -36,6 +36,7 @@ from .utils import normalize_as_list
 
 __all__ = [
     "gen_alias_from_base",
+    "gen_aliases_from_multi_output_view",
     "_unwrap_tensoralias",
     "mark_dynamo_propagated_dynamic_indices",
     "normalize_as_list",

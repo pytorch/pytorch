@@ -551,20 +551,24 @@ class TestAOTCompileToPython(TestCase):
 
     def test_helpers_imported_from_standalone_runtime_surface(self):
         # End-to-end lock for the stability contract: a graph closing over a runtime helper
-        # (here gen_alias_from_base, via output-alias regen) must import it from the
+        # (here the output-alias regeneration helpers) must import it from the
         # standalone_runtime surface, not its internal AOTAutograd location. A dropped or
         # aliased _known_helper_table entry would silently fall through to the internal
         # module. (ViewMetaSequence legitimately imports functional_utils, so this checks the
-        # specific helper expression, not the bare module name.)
+        # specific helper expressions, not the bare module name.)
         m = _ViewAlias().eval()
         x = torch.randn(4, 4)
         src, _cache = _compose(m, x)
-        self.assertIn(
-            "from torch._functorch._aot_autograd.standalone_runtime import "
+        for helper in (
             "gen_alias_from_base",
-            src,
-        )
-        self.assertNotIn("functional_utils.gen_alias_from_base", src)
+            "gen_aliases_from_multi_output_view",
+        ):
+            self.assertIn(
+                "from torch._functorch._aot_autograd.standalone_runtime import "
+                f"{helper}",
+                src,
+            )
+            self.assertNotIn(f"functional_utils.{helper}", src)
 
     @parametrize("target", _EFFECTFUL_TARGETS)
     def test_rejects_effectful_op(self, target):

@@ -62,7 +62,7 @@ from .descriptors import (
     SyntheticBaseAOTInput,
     ViewBaseAOTInput,
 )
-from .functional_utils import gen_alias_from_base
+from .functional_utils import gen_alias_from_base, gen_aliases_from_multi_output_view
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
     compute_overlapping_inputs,
@@ -245,8 +245,12 @@ class AliasOfInputHandler:
         self.base_idx = info.base_idx
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
+        self.is_conj = info.is_conj
+        self.is_neg = info.is_neg
         self.view_meta_sequence = info.view_meta_sequence
         self.replay_views = config.view_replay_for_aliased_outputs
+        self.multi_output_view_group = info.multi_output_view_group
+        self.multi_output_view_index = info.multi_output_view_index
 
     def __call__(
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any], out: Any
@@ -258,6 +262,8 @@ class AliasOfInputHandler:
             self.requires_grad,
             self.view_meta_sequence,
             replay_views=self.replay_views,
+            target_is_conj=self.is_conj,
+            target_is_neg=self.is_neg,
         )
 
 
@@ -302,6 +308,8 @@ class AliasOfIntermediateHandler:
 
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
+        self.is_conj = info.is_conj
+        self.is_neg = info.is_neg
         self.view_meta_sequence = info.view_meta_sequence
         self.replay_views = config.view_replay_for_aliased_outputs
 
@@ -315,6 +323,8 @@ class AliasOfIntermediateHandler:
             self.requires_grad,
             self.view_meta_sequence,
             replay_views=self.replay_views,
+            target_is_conj=self.is_conj,
+            target_is_neg=self.is_neg,
         )
 
 
@@ -345,6 +355,81 @@ def make_output_handler(
 ):
     handler_type = _HANDLER_MAP[info.output_type]
     return handler_type(info, runtime_metadata, trace_joint)
+
+
+_OutputHandler = (
+    NoopAliasHandler | AliasOfInputHandler | IsInputHandler | AliasOfIntermediateHandler
+)
+
+
+@dataclass(frozen=True)
+class _MultiOutputViewGroupInfo:
+    member_indices: tuple[int, ...]
+    input_handlers: tuple[AliasOfInputHandler, ...]
+    base_idx: int
+    output_indices: tuple[int, ...]
+    view_meta_indices: tuple[int, ...]
+    is_conjs: tuple[bool, ...]
+    is_negs: tuple[bool, ...]
+    replay_views: bool
+    member_positions: dict[int, int]
+
+
+def _multi_output_view_group_info(
+    output_handlers: Sequence[_OutputHandler], member_indices: Sequence[int]
+) -> _MultiOutputViewGroupInfo:
+    member_handlers = [output_handlers[i] for i in member_indices]
+    if not all(isinstance(h, AliasOfInputHandler) for h in member_handlers):
+        raise AssertionError("multi-output view group must contain input aliases")
+    input_handlers = typing.cast(list[AliasOfInputHandler], member_handlers)
+    base_idx = input_handlers[0].base_idx
+    if not all(h.base_idx == base_idx for h in input_handlers):
+        raise AssertionError("multi-output view group must share an input base")
+    output_indices = tuple(h.multi_output_view_index for h in input_handlers)
+    if not all(isinstance(idx, int) for idx in output_indices):
+        raise AssertionError("multi-output view group must have output indices")
+    view_meta_indices = []
+    for handler, output_index in zip(input_handlers, output_indices, strict=True):
+        if handler.view_meta_sequence is None:
+            # make_runtime_safe() drops sequences containing symbolic values.
+            # ViewFunc replay does not need this index; -1 prevents an unsafe
+            # ViewMeta attempt if mixed metadata ever reaches this path.
+            view_meta_indices.append(-1)
+            continue
+        multi_output_indices = [
+            i
+            for i, view_meta in enumerate(handler.view_meta_sequence.sequence)
+            if view_meta.is_multi_output
+        ]
+        if not multi_output_indices:
+            raise AssertionError(
+                "multi-output view group must contain a multi-output ViewMeta"
+            )
+        view_meta_index = multi_output_indices[-1]
+        if (
+            int(handler.view_meta_sequence.sequence[view_meta_index].out_index)
+            != output_index
+        ):
+            raise AssertionError(
+                "multi-output ViewMeta index must match the output index"
+            )
+        view_meta_indices.append(view_meta_index)
+    replay_views = input_handlers[0].replay_views
+    if not all(h.replay_views == replay_views for h in input_handlers):
+        raise AssertionError("multi-output view group must share replay config")
+    return _MultiOutputViewGroupInfo(
+        member_indices=tuple(member_indices),
+        input_handlers=tuple(input_handlers),
+        base_idx=base_idx,
+        output_indices=typing.cast(tuple[int, ...], output_indices),
+        view_meta_indices=tuple(view_meta_indices),
+        is_conjs=tuple(h.is_conj for h in input_handlers),
+        is_negs=tuple(h.is_neg for h in input_handlers),
+        replay_views=replay_views,
+        member_positions={
+            member_idx: position for position, member_idx in enumerate(member_indices)
+        },
+    )
 
 
 # _dynamo_propagated_dynamic_indices: A guardless attribute for cross-graph-break
@@ -803,10 +888,46 @@ class _RuntimeForwardEpilogue:
             raise AssertionError(
                 f"expected {expect_num_outputs} fw_outs, got {len(fw_outs)}"
             )
-        return [
-            handler(orig_inputs, fw_outs, out)
-            for out, handler in zip(fw_outs, self.output_handlers)
-        ]
+        replayed_groups: dict[int, dict[int, Tensor]] = {}
+        ret_outs = []
+        for i, (out, handler) in enumerate(zip(fw_outs, self.output_handlers)):
+            if (
+                isinstance(handler, AliasOfInputHandler)
+                and handler.multi_output_view_group is not None
+            ):
+                group = handler.multi_output_view_group
+                if group not in replayed_groups:
+                    member_indices = self.runtime_metadata.multi_output_view_groups[
+                        group
+                    ]
+                    group_info = _multi_output_view_group_info(
+                        self.output_handlers, member_indices
+                    )
+                    replayed = gen_aliases_from_multi_output_view(
+                        orig_inputs[group_info.base_idx],
+                        [
+                            h.unwrap_out(fw_outs[j])
+                            for j, h in zip(
+                                group_info.member_indices,
+                                group_info.input_handlers,
+                                strict=True,
+                            )
+                        ],
+                        [h.requires_grad for h in group_info.input_handlers],
+                        group_info.is_conjs,
+                        group_info.is_negs,
+                        [h.view_meta_sequence for h in group_info.input_handlers],
+                        group_info.output_indices,
+                        group_info.view_meta_indices,
+                        replay_views=group_info.replay_views,
+                    )
+                    replayed_groups[group] = dict(
+                        zip(group_info.member_indices, replayed, strict=True)
+                    )
+                ret_outs.append(replayed_groups[group][i])
+            else:
+                ret_outs.append(handler(orig_inputs, fw_outs, out))
+        return ret_outs
 
 
 def _codegen_capture_orig_inputs(
@@ -997,16 +1118,64 @@ def _create_runtime_wrapper(
         )
         buf.bind(
             gen_alias_from_base=gen_alias_from_base,
+            gen_aliases_from_multi_output_view=gen_aliases_from_multi_output_view,
             _unwrap_tensoralias=_unwrap_tensoralias,
         )
+        multi_output_group_infos = {
+            group: _multi_output_view_group_info(output_handlers, member_indices)
+            for group, member_indices in runtime_metadata.multi_output_view_groups.items()
+        }
         with buf.indent():
             buf.writeline("ret_outs = []")
+            emitted_multi_output_groups: set[int] = set()
             for i, handler in enumerate(output_handlers):
                 if isinstance(handler, NoopAliasHandler):
                     buf.writeline(f"ret_outs.append(fw_outs[{i}])")
                 elif isinstance(handler, IsInputHandler):
                     buf.writeline(f"ret_outs.append(orig_inputs[{handler.base_idx}])")
                 elif isinstance(handler, AliasOfInputHandler):
+                    if handler.multi_output_view_group is not None:
+                        group = handler.multi_output_view_group
+                        group_info = multi_output_group_infos[group]
+                        if group not in emitted_multi_output_groups:
+                            target_exprs = [
+                                (
+                                    f"_unwrap_tensoralias(fw_outs[{j}])"
+                                    if trace_joint
+                                    else f"fw_outs[{j}]"
+                                )
+                                for j in group_info.member_indices
+                            ]
+                            targets_expr = (
+                                f"({', '.join(target_exprs)}"
+                                f"{',' if len(target_exprs) == 1 else ''})"
+                            )
+                            requires_grads = tuple(
+                                h.requires_grad for h in group_info.input_handlers
+                            )
+                            view_meta_sequences = tuple(
+                                h.view_meta_sequence for h in group_info.input_handlers
+                            )
+                            vms_name = buf.bind_value(
+                                "_multi_output_vms", view_meta_sequences
+                            )
+                            buf.writeline(
+                                f"multi_output_view_group_{group} = "
+                                f"gen_aliases_from_multi_output_view("
+                                f"orig_inputs[{group_info.base_idx}], {targets_expr}, "
+                                f"{requires_grads!r}, {group_info.is_conjs!r}, "
+                                f"{group_info.is_negs!r}, {vms_name}, "
+                                f"{group_info.output_indices!r}, "
+                                f"{group_info.view_meta_indices!r}, "
+                                f"replay_views={group_info.replay_views!r})"
+                            )
+                            emitted_multi_output_groups.add(group)
+                        group_output_idx = group_info.member_positions[i]
+                        buf.writeline(
+                            f"ret_outs.append(multi_output_view_group_{group}"
+                            f"[{group_output_idx}])"
+                        )
+                        continue
                     vms_name = buf.bind_value("_vms", handler.view_meta_sequence)
                     out_expr = (
                         f"_unwrap_tensoralias(fw_outs[{i}])"
@@ -1017,7 +1186,9 @@ def _create_runtime_wrapper(
                         f"ret_outs.append(gen_alias_from_base("
                         f"orig_inputs[{handler.base_idx}], {out_expr}, "
                         f"{handler.requires_grad!r}, {vms_name}, "
-                        f"replay_views={handler.replay_views!r}))"
+                        f"replay_views={handler.replay_views!r}, "
+                        f"target_is_conj={handler.is_conj!r}, "
+                        f"target_is_neg={handler.is_neg!r}))"
                     )
                 elif isinstance(handler, AliasOfIntermediateHandler):
                     vms_name = buf.bind_value("_vms", handler.view_meta_sequence)
@@ -1038,7 +1209,9 @@ def _create_runtime_wrapper(
                         f"ret_outs.append(gen_alias_from_base("
                         f"{base_expr}, {out_expr}, "
                         f"{handler.requires_grad!r}, {vms_name}, "
-                        f"replay_views={handler.replay_views!r}))"
+                        f"replay_views={handler.replay_views!r}, "
+                        f"target_is_conj={handler.is_conj!r}, "
+                        f"target_is_neg={handler.is_neg!r}))"
                     )
                 else:
                     raise AssertionError(
@@ -2075,9 +2248,41 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             if num_meta_mut > 0:
                 meta_items = ", ".join(f"args[{i}]" for i in aliased_meta_mut_indices)
                 buf.writeline(f"_meta_mut = [{meta_items}]")
+                # The original metadata mutation ran before user outputs were
+                # created. Record its version bump at the same point so views
+                # regenerated by the inner runtime wrapper are not invalidated
+                # when we apply the deferred metadata update below.
 
             buf.writeline("args.clear()")
-            buf.writeline("_outs = _compiled_fn_(_new_args)")
+            if num_meta_mut > 0:
+                # A failed call may exit before the logical metadata mutation.
+                # Roll back only in that case; successful calls retain both
+                # this staged bump and any version changes made by the inner
+                # runtime wrapper.
+                buf.writeline(
+                    "_versioned_meta_mut = tuple(_inp for _inp in _meta_mut "
+                    "if not _inp.is_inference())"
+                )
+                buf.writeline(
+                    "_meta_mut_versions = tuple(_inp._version "
+                    "for _inp in _versioned_meta_mut)"
+                )
+                buf.writeline("_meta_mut_completed = False")
+                buf.writeline("try:")
+                with buf.indent():
+                    buf.writeline("torch.autograd.graph.increment_version(_meta_mut)")
+                    buf.writeline("_outs = _compiled_fn_(_new_args)")
+                    buf.writeline("_meta_mut_completed = True")
+                buf.writeline("finally:")
+                with buf.indent():
+                    buf.writeline("if not _meta_mut_completed:")
+                    with buf.indent():
+                        buf.writeline(
+                            "torch._C._autograd._unsafe_set_version_counter("
+                            "_versioned_meta_mut, _meta_mut_versions)"
+                        )
+            else:
+                buf.writeline("_outs = _compiled_fn_(_new_args)")
 
             if num_meta_mut > 0:
                 # Handles metadata mutations on inputs that were merged into
@@ -2090,9 +2295,20 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 buf.writeline(f"_user_outs = _outs[:-{num_meta_mut}]")
                 buf.writeline("for _inp, _mi in zip(_meta_mut, _mut_inps):")
                 with buf.indent():
-                    buf.writeline(
-                        "_inp.as_strided_(_mi.size(), _mi.stride(), _mi.storage_offset())"
-                    )
+                    buf.writeline("if _inp.is_inference():")
+                    with buf.indent():
+                        buf.writeline(
+                            "_inp.as_strided_(_mi.size(), _mi.stride(), _mi.storage_offset())"
+                        )
+                    buf.writeline("else:")
+                    with buf.indent():
+                        buf.writeline(
+                            "with torch.autograd._unsafe_preserve_version_counter(_inp):"
+                        )
+                        with buf.indent():
+                            buf.writeline(
+                                "_inp.as_strided_(_mi.size(), _mi.stride(), _mi.storage_offset())"
+                            )
                 buf.writeline("return _user_outs")
             else:
                 buf.writeline("return _outs")

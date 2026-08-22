@@ -97,7 +97,11 @@ def remove_dupe_metadata(
                 base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx],
                 requires_grad=o.requires_grad,
                 requires_grad_for_backward=o.requires_grad_for_backward,
+                is_conj=o.is_conj,
+                is_neg=o.is_neg,
                 view_meta_sequence=o.view_meta_sequence,
+                multi_output_view_group=o.multi_output_view_group,
+                multi_output_view_index=o.multi_output_view_index,
             )
             for o in m.output_info
         ],
@@ -219,6 +223,10 @@ def create_synthetic_base_metadata(
     ]
 
     # grab the original requires grad info on the outputs, except the ones from the mutated inputs
+    # These entries are synthesized solely to restore metadata-mutated inputs,
+    # not user outputs. They cannot be grouped multi-output views: autograd
+    # rejects metadata mutation on a differentiable multi-output view or its
+    # descendants, while detached/no-grad views have no eligible grad_fn.
     input_metadata_output_info = [
         OutputAliasInfo(
             output_type=OutputType.alias_of_input,
@@ -231,6 +239,8 @@ def create_synthetic_base_metadata(
             base_idx=synthetic_base_info[outer_idx][0],  # type: ignore[index]
             requires_grad=(requires_grad := outer_args[outer_idx].requires_grad),
             requires_grad_for_backward=requires_grad,
+            is_conj=outer_args[outer_idx].is_conj(),
+            is_neg=outer_args[outer_idx].is_neg(),
         )
         for outer_idx in outer_aliased_arg_idx_with_metadata_mutations
     ]
@@ -253,6 +263,13 @@ def create_synthetic_base_metadata(
         input_merged = o.base_idx is not None and isinstance(
             synthetic_base_info[o.base_idx], tuple
         )
+        # A ViewMeta sequence for an input alias is relative to that original
+        # input. After replacing the input with its synthetic root, replaying
+        # the old sequence on the root would omit the input's own offset/stride
+        # prefix and can select the wrong data. Runtime ViewFuncs are collected
+        # from the wrapped synthetic-base graph and include that prefix; if they
+        # are unavailable, gen_alias_from_base safely falls back to as_strided.
+        view_meta_sequence = None if input_merged else o.view_meta_sequence
         new_output_type = (
             OutputType.alias_of_input
             if o.output_type == OutputType.is_input and input_merged
@@ -267,7 +284,11 @@ def create_synthetic_base_metadata(
                 base_idx=new_base_idx,  # type: ignore[arg-type]
                 requires_grad=o.requires_grad,
                 requires_grad_for_backward=o.requires_grad_for_backward,
-                view_meta_sequence=o.view_meta_sequence,
+                is_conj=o.is_conj,
+                is_neg=o.is_neg,
+                view_meta_sequence=view_meta_sequence,
+                multi_output_view_group=o.multi_output_view_group,
+                multi_output_view_index=o.multi_output_view_index,
             )
         )
 

@@ -368,6 +368,8 @@ def get_ignored_functions() -> set[Callable]:
         Tensor._reduce_ex_internal,
         Tensor._fix_weakref,
         Tensor._view_func,
+        Tensor._view_func_apply_after_multi_output,
+        Tensor._view_func_multi_output,
         Tensor._view_func_unsafe,
         Tensor._rev_view_func_unsafe,
         Tensor._dtensor__new__,

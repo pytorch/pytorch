@@ -4,6 +4,7 @@
 #include <ATen/FunctionalStorageImpl.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/FunctionalizeFallbackKernel.h>
+#include <c10/util/irange.h>
 #include <memory>
 
 namespace torch::functionalization {
@@ -33,6 +34,27 @@ void initModule(PyObject* module) {
             base, sequence);
       });
 
+  functionalization.def(
+      "apply_multi_output_view_meta_sequence",
+      [](const at::Tensor& base,
+         const std::vector<std::shared_ptr<at::functionalization::ViewMeta>>&
+             sequence) {
+        TORCH_CHECK(
+            !sequence.empty(),
+            "expected a ViewMeta sequence ending in a multi-output view");
+        for (const auto i : c10::irange(sequence.size())) {
+          TORCH_CHECK(sequence[i], "expected a non-null ViewMeta at index ", i);
+        }
+        TORCH_CHECK(
+            sequence.back()->is_multi_output,
+            "expected a ViewMeta sequence ending in a multi-output view");
+        at::Tensor current = base;
+        for (const auto i : c10::irange(sequence.size() - 1)) {
+          current = sequence[i]->forward(current);
+        }
+        return sequence.back()->forward_multi_output(current);
+      });
+
   // Binding for InverseReturnMode.
   py::enum_<at::functionalization::InverseReturnMode>(
       functionalization, "InverseReturnMode")
@@ -56,6 +78,16 @@ void initModule(PyObject* module) {
           "has_symbolic_inputs",
           [](const std::shared_ptr<at::functionalization::ViewMeta>& meta) {
             return meta->has_symbolic_inputs;
+          })
+      .def_property_readonly(
+          "is_multi_output",
+          [](const std::shared_ptr<at::functionalization::ViewMeta>& meta) {
+            return meta->is_multi_output;
+          })
+      .def_property_readonly(
+          "out_index",
+          [](const std::shared_ptr<at::functionalization::ViewMeta>& meta) {
+            return meta->out_index;
           });
 
   // Bindings for `ViewMeta` specializations manually implemented.

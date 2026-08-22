@@ -574,6 +574,51 @@ static PyObject* THPVariable_view_func_unsafe(
   return view_func_impl(self_, args, kwargs, /*check_has_same_meta=*/false);
 }
 
+static PyObject* THPVariable_view_func_multi_output(
+    PyObject* self_,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  const auto& self = THPVariable_Unpack(self_);
+  TORCH_CHECK(
+      THPVariable_Check(arg),
+      "_view_func_multi_output expects a single argument that is a Tensor");
+  const auto& new_base = THPVariable_Unpack(arg);
+
+  torch::autograd::variable_list outs;
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  if (diff_view_meta && diff_view_meta->has_bw_view()) {
+    const auto& view_info = diff_view_meta->get_backward_view();
+    if (torch::autograd::utils::has_same_meta(new_base, view_info.base_) &&
+        view_info.has_view_fn() && view_info.view_fn().has_multi_output()) {
+      outs = view_info.view_fn().call_multi_output(new_base);
+    }
+  }
+  return THPVariable_WrapList(outs);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPVariable_view_func_apply_after_multi_output(
+    PyObject* self_,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  const auto& self = THPVariable_Unpack(self_);
+  TORCH_CHECK(
+      THPVariable_Check(arg),
+      "_view_func_apply_after_multi_output expects a single argument that is a Tensor");
+  const auto& output = THPVariable_Unpack(arg);
+
+  at::Tensor out;
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  if (diff_view_meta && diff_view_meta->has_bw_view()) {
+    const auto& view_info = diff_view_meta->get_backward_view();
+    if (view_info.has_view_fn() && view_info.view_fn().has_multi_output()) {
+      out = view_info.view_fn().apply_after_multi_output(output);
+    }
+  }
+  return THPVariable_Wrap(out);
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* rev_view_func_impl(PyObject* self_, PyObject* arg) {
   HANDLE_TH_ERRORS
   const auto& self = THPVariable_Unpack(self_);
@@ -3533,6 +3578,14 @@ static PyMethodDef extra_methods[] = {
     {"_view_func_unsafe",
      castPyCFunctionWithKeywords(THPVariable_view_func_unsafe),
      METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_view_func_multi_output",
+     THPVariable_view_func_multi_output,
+     METH_O,
+     nullptr},
+    {"_view_func_apply_after_multi_output",
+     THPVariable_view_func_apply_after_multi_output,
+     METH_O,
      nullptr},
     {"_rev_view_func_unsafe",
      THPVariable_rev_view_func_unsafe,
