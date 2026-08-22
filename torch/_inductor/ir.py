@@ -611,6 +611,9 @@ class IRNode:
     stream_idx: int | None = dataclasses.field(init=False)
     # User-annotated CUDA MemPool from FX node metadata (set during lowering)
     mempool: tuple[int, int] | None = dataclasses.field(init=False)
+    # The FX node that is being lowered when this IRNode is created.
+    # Set from V.current_node; None outside of lowering.
+    lowering_fx_node: torch.fx.Node | None = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -679,6 +682,11 @@ class IRNode:
         self._post_init_setattr("annotations", {})
         self._post_init_setattr("stream_idx", self._current_stream_idx)
         self._post_init_setattr("mempool", self._current_mempool)
+        current = V.get_current_node()
+        self._post_init_setattr(
+            "lowering_fx_node",
+            current if isinstance(current, torch.fx.Node) else None,
+        )
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -688,6 +696,9 @@ class IRNode:
 
     def get_origin_node(self) -> torch.fx.Node | None:
         return self.origin_node
+
+    def get_lowering_fx_node(self) -> torch.fx.Node | None:
+        return self.lowering_fx_node
 
     def get_defining_op(self) -> Operation | None:
         return None
@@ -5292,10 +5303,6 @@ class Buffer(IRNode, CodegenSymbol):
 
     # Multi-output buffers will define 'outputs: List[Buffer]'. Confusingly,
     # MultiOutput does NOT define this!
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        self._post_init_setattr("origin_node", None)
 
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         return self.get_layout().make_indexer()

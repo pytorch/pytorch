@@ -2580,6 +2580,99 @@ def _prune_redundant_deps(
         node.set_read_writes(node.read_writes.remove_reads(deps_to_prune))
 
 
+def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
+    """
+    Return a human-readable FQN annotation for a fused kernel.
+
+    Uses V.graph.fx_fqn_map — built once during lowering in graph.py:run_node —
+    to map FX node names to FQN strings, e.g.
+    "convolution_1" -> "L.networks.1.conv.convolution".
+
+    Two-pass hybrid algorithm:
+
+    Pass 1 — anchor prefixes via lowering_fx_node:
+        For each snode, lowering_fx_node is the direct FX node whose run_node
+        call created the IR buffer.  It is never transitively accumulated,
+        so it gives an unambiguous block identity.  Look it up in fqn_map
+        to get the anchor FQN, then read its nn_module_stack outermost
+        entry to get the block-level prefix (e.g. "L.networks.3").
+
+    Pass 2 — collect FQNs from origins with prefix filter:
+        Walk all origins across every snode.  origins is transitively
+        accumulated (cascading history from upstream blocks), but each
+        entry is looked up in fqn_map and filtered by the anchor prefix.
+        This correctly captures inline ops (relu, add) that share the
+        same block but were inlined into a parent buffer and never became
+        their own snodes, while excluding cascaded history from upstream
+        blocks.
+    """
+    from torch._inductor.fx_passes.graph_view import _outermost_prefix
+
+    fqn_map: dict[str, str] = V.graph.fx_fqn_map
+    log.debug("get_fused_kernel_module_fqn: snodes=%d", len(scheduler_nodes))
+
+    # Pass 1: derive block anchor prefixes from each snode's lowering_fx_node.
+    # lowering_fx_node is the direct FX node lowered to produce the IR node,
+    # giving clean block identity.
+    # Fallback: when lowering_fx_node is absent or a placeholder (not in fqn_map),
+    # walk origins to find the first non-placeholder op in fqn_map.
+    anchor_prefixes: OrderedSet[str] = OrderedSet()
+    for snode in scheduler_nodes:
+        if snode.node is None:
+            continue
+        origin = snode.node.get_lowering_fx_node()
+        origin_name = origin.name if origin is not None else None
+        anchor_fqn = fqn_map.get(origin_name) if origin_name else None
+        if anchor_fqn:
+            stack = origin.meta.get("nn_module_stack")
+            prefix = _outermost_prefix(stack) if stack else None
+            if prefix:
+                anchor_prefixes.add(prefix)
+            continue
+
+        # lowering_fx_node absent or not in fqn_map.
+        # For placeholders: scan FX consumers (users) — they identify which
+        # block uses this parameter, not the upstream producers in origins.
+        # For None lowering_fx_node: fall back to scanning origins.
+        if origin is not None and origin.op == "placeholder":
+            fallback_source = origin.users
+        else:
+            fallback_source = snode.node.origins
+        for fx_node in fallback_source:
+            fallback_fqn = fqn_map.get(fx_node.name)
+            if fallback_fqn:
+                stack = fx_node.meta.get("nn_module_stack")
+                prefix = _outermost_prefix(stack) if stack else None
+                if prefix:
+                    anchor_prefixes.add(prefix)
+                break
+    if not anchor_prefixes:
+        return None
+
+    # Pass 2: walk all origins across every snode (the transitively accumulated
+    # set), look each up in fqn_map, and include only those whose FQN prefix
+    # matches an anchor.  This captures inline ops (e.g. relu, add inlined into
+    # a parent buffer) while rejecting cascaded history from upstream blocks.
+    extern_fqns: OrderedSet[str] = V.graph.fx_extern_fqns
+    module_names: OrderedSet[str] = OrderedSet()
+    for snode in scheduler_nodes:
+        if snode.node is None:
+            continue
+        for fx_node in snode.node.origins:
+            fqn = fqn_map.get(fx_node.name)
+            if not fqn:
+                continue
+            if fqn in extern_fqns:
+                continue
+            if not any(fqn == p or fqn.startswith(p + ".") for p in anchor_prefixes):
+                continue
+            module_names.add(fqn)
+
+    result = " + ".join(f"L.{fqn}" for fqn in module_names) if module_names else None
+    log.debug("get_fused_kernel_module_fqn: result=%s", result)
+    return result
+
+
 class ExternKernelSchedulerNode(BaseSchedulerNode):
     def __init__(self, scheduler: Scheduler, node: ir.Operation) -> None:
         super().__init__(scheduler)
@@ -2613,9 +2706,51 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             return ([numel], [])
         return ([], [])
 
+    def _get_extern_module_fqn(self) -> str | None:
+        """Derive the FQN annotation string for this extern kernel.
+
+        Separated from codegen() so the Scheduler can pre-populate
+        fx_extern_fqns before any Triton kernel codegen runs, making
+        get_fused_kernel_module_fqn's pass-2 filter order-independent.
+        """
+        if not isinstance(self.node, ir.ExternKernel):
+            raise AssertionError("expected self.node to be an ir.ExternKernel")
+        from torch._inductor.fx_passes.graph_view import (
+            _clean_stack_name,
+            _strip_instance_suffix,
+        )
+
+        lowering_node = self.node.get_lowering_fx_node()
+        if lowering_node is not None:
+            stack = lowering_node.meta.get("nn_module_stack")
+            if stack:
+                module_path = _clean_stack_name(next(reversed(stack.values()))[0])
+                if module_path:
+                    return (
+                        f"L.{module_path}.{_strip_instance_suffix(lowering_node.name)}"
+                    )
+            return None
+        # lowering_fx_node not set (e.g. convolution); fall back to walking origins.
+        return get_fused_kernel_module_fqn([self])
+
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         if not isinstance(self.node, ir.ExternKernel):
             raise AssertionError("expected self.node to be an ir.ExternKernel")
+        if (
+            torch._inductor.config.triton.cudagraph_kernel_annotations
+            and not V.graph.cpp_wrapper
+        ):
+            from torch._inductor.codegen.wrapper import AnnotatedExternKernelBlock
+
+            module_fqn = self._get_extern_module_fqn()
+            if module_fqn:
+                V.graph.fx_extern_fqns.add(module_fqn.removeprefix("L."))
+                n_before = len(wrapper.lines)
+                self.node.codegen(wrapper)
+                inner_lines = wrapper.lines[n_before:]
+                del wrapper.lines[n_before:]
+                wrapper.writeline(AnnotatedExternKernelBlock(inner_lines, module_fqn))
+                return
         return self.node.codegen(wrapper)
 
 
@@ -10803,6 +10938,21 @@ class Scheduler:
                 multi = [name for name, ss in input_streams.items() if len(ss) > 1]
                 if multi:
                     V.graph.wrapper_code.mark_multistream_alignment(multi)
+
+        # Pre-populate fx_extern_fqns for all extern kernels before any Triton
+        # kernel is codegen'd.  get_fused_kernel_module_fqn's pass-2 filter
+        # reads this set to exclude extern-kernel FQNs from Triton annotations;
+        # if an extern kernel is codegen'd after a Triton kernel that shares the
+        # same block, the filter is incomplete and returns None, leaving the
+        # Triton kernel unannotated.  Walking all nodes up front makes the
+        # filter order-independent.
+        if config.triton.cudagraph_kernel_annotations and not V.graph.cpp_wrapper:
+            for node in nodes:
+                for snode in node.get_nodes():
+                    if isinstance(snode, ExternKernelSchedulerNode):
+                        fqn = snode._get_extern_module_fqn()
+                        if fqn:
+                            V.graph.fx_extern_fqns.add(fqn.removeprefix("L."))
 
         for node in nodes:
             if log.isEnabledFor(logging.DEBUG):
