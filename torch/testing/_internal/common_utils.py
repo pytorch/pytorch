@@ -1862,6 +1862,18 @@ TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
+# Enables tests that run only in the periodic-strict CI workflow (disabled by default)
+TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
+    "TEST_WITH_PERIODIC",
+    env_var="PYTORCH_TEST_WITH_PERIODIC",
+)
+# Disables tests not marked @periodic; used in conjunction with
+# TEST_WITH_PERIODIC to run *only* periodic tests (the periodic-strict CI
+# workflow). The periodic analog of TEST_SKIP_FAST.
+TEST_SKIP_NON_PERIODIC: bool = TestEnvironment.def_flag(
+    "TEST_SKIP_NON_PERIODIC",
+    env_var="PYTORCH_TEST_SKIP_NON_PERIODIC",
+)
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
     "TEST_WITH_SLOW",
@@ -2872,6 +2884,36 @@ def skipIfCachingAllocatorDisabled(fn):
         "requires the CUDA/HIP caching allocator (current allocator is uncached)",
     )(fn)
 
+def periodic(fn):
+    """Marks a test to run only when periodic test mode is enabled.
+
+    Periodic tests run in the periodic-strict CI workflow, which sweeps the
+    default test files with PYTORCH_TEST_WITH_PERIODIC set and skips every
+    test not marked @periodic (via PYTORCH_TEST_SKIP_NON_PERIODIC). Tests in
+    files outside that sweep (e.g. distributed or quantization) never run.
+
+    Composes with @slowTest: periodic-strict sets PYTORCH_TEST_WITH_SLOW, so
+    slow gating (static or dynamic) does not block @periodic tests there,
+    while the periodic gate keeps a test marked both out of the slow shards;
+    it runs only in periodic-strict.
+    """
+    if isinstance(fn, type):
+        raise TypeError(f"@periodic cannot be applied to a class ({fn.__name__}); decorate its test methods instead")
+
+    # The passthrough wrapper keeps skipUnless and the periodic_test mark off
+    # fn itself, which parametrize subtests may share with sibling subtests.
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    wrapper = unittest.skipUnless(
+        TEST_WITH_PERIODIC,
+        "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test",
+    )(wrapper)
+    wrapper.__dict__['periodic_test'] = True
+    return wrapper
+
+
 def slowTest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -3371,6 +3413,10 @@ def check_if_enable(test: unittest.TestCase):
     if TEST_SKIP_FAST:
         if hasattr(test, test._testMethodName) and not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
+
+    if TEST_SKIP_NON_PERIODIC:
+        if hasattr(test, test._testMethodName) and not getattr(test, test._testMethodName).__dict__.get('periodic_test', False):
+            raise unittest.SkipTest("test is not periodic; we disabled it with PYTORCH_TEST_SKIP_NON_PERIODIC")
 
 
 # `TestCase.assertEqual` is very permissive and coerced the inputs into a format that could be compared. This is very

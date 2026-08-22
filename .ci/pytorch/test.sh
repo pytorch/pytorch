@@ -242,6 +242,15 @@ if [[ "$TEST_CONFIG" == 'slow' ]]; then
   export PYTORCH_TEST_SKIP_FAST=1
 fi
 
+if [[ "$TEST_CONFIG" == 'periodic' ]]; then
+  export PYTORCH_TEST_WITH_PERIODIC=1
+  export PYTORCH_TEST_SKIP_NON_PERIODIC=1
+  # Allows @periodic tests that are also marked slow (@slowTest or
+  # slow-tests.json) to run. This does not run other slow tests: anything not
+  # marked @periodic is still skipped via PYTORCH_TEST_SKIP_NON_PERIODIC.
+  export PYTORCH_TEST_WITH_SLOW=1
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
   export PYTORCH_TEST_WITH_SLOW_GRADCHECK=1
   # TODO: slow gradcheck tests run out of memory a lot recently, so setting this
@@ -2522,6 +2531,11 @@ elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_aten
   fi
+elif [[ "${TEST_CONFIG}" == periodic ]]; then
+  # Sweeps the default test files but runs only tests marked @periodic; the
+  # PYTORCH_TEST_SKIP_NON_PERIODIC export above skips everything else.
+  install_torchvision
+  test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
