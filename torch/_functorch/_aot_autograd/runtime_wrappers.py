@@ -2857,7 +2857,12 @@ class _AutogradBackwardCompiler:
     fw_metadata: ViewAndMutationMeta
     try_save_cache_entry: Callable[..., Any] | None
 
-    def get_or_compile(self, *, saved_tensors_use_once: bool) -> Callable[..., Any]:
+    def get_or_compile(
+        self,
+        *,
+        saved_tensors_use_once: bool,
+        all_args: list[Any] | None = None,
+    ) -> Callable[..., Any]:
         if self.compiled_bw is not None:
             return self.compiled_bw
 
@@ -2878,6 +2883,13 @@ class _AutogradBackwardCompiler:
 
         context = torch._C._DisableAutocast if self.disable_amp else nullcontext
         metrics_context = get_metrics_context()
+        if all_args is not None:
+            from torch._inductor.virtualized import V
+
+            set_real_inputs_ctx = V.set_real_inputs(all_args)
+        else:
+            set_real_inputs_ctx = nullcontext()
+
         with (
             tracing(saved_context),
             compile_context(saved_compile_context),
@@ -2896,6 +2908,7 @@ class _AutogradBackwardCompiler:
                 CallbackTrigger.LAZY_BACKWARD,
                 str(CompileContext.current_compile_id()),
             ),
+            set_real_inputs_ctx,
         ):
             CompileEventLogger.compilation_metric(is_forward=False)
             # See Note: [Backward graph lazy lowering]
@@ -3586,7 +3599,8 @@ class _AOTDispatchAutogradFunctionFactory:
                     not torch._C._autograd._get_current_graph_task_keep_graph()
                 )
                 compiled_bw = backward_compiler.get_or_compile(
-                    saved_tensors_use_once=saved_tensors_use_once
+                    saved_tensors_use_once=saved_tensors_use_once,
+                    all_args=all_args,
                 )
                 CompiledFunction.compiled_bw = compiled_bw
 

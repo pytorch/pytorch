@@ -492,6 +492,66 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertIn(".requires_grad", source)
         self.assertIn(".copy_(", source)
 
+    def test_autograd_backward_compiler_real_inputs_prevents_defake(self):
+        """
+        Verify that passing all_args to _AutogradBackwardCompiler.get_or_compile
+        sets V.real_inputs during backward compilation so that Inductor's extract_real_inputs()
+        uses real input tensors directly and avoids calling defake() on FakeTensor placeholders (issue #194046).
+        """
+        from unittest.mock import patch
+
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _AutogradBackwardCompiler,
+            AutogradLazyBackwardCompileInfo,
+        )
+        from torch._inductor.codegen.cpp_wrapper_gpu import CppWrapperGpu
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.virtualized import NullHandler, V
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        all_args = [torch.randn(4, 4), torch.randn(4, 4)]
+        fake_mode = FakeTensorMode()
+        placeholders = [fake_mode.from_tensor(t) for t in all_args]
+        extracted_inputs = []
+
+        def mock_bw_compiler(bw_module, placeholder_list):
+            graph = GraphLowering(bw_module, example_inputs=placeholder_list, cpp_wrapper=True)
+            graph.device_types = {"cuda"}
+            graph.wrapper_code = CppWrapperGpu()
+            graph.wrapper_code._lazy_kernel_names = ["kernel_1"]
+
+            def intercept_run_jit_variant(wrapper_code, kernel_code, extract_real_inputs_fn, lazy_kernel_names):
+                extracted_inputs.extend(extract_real_inputs_fn())
+
+            with patch.object(graph, "_run_jit_variant_for_autotune", side_effect=intercept_run_jit_variant):
+                graph.codegen_with_cpp_wrapper()
+
+            return lambda *args: args
+
+        compiler = _AutogradBackwardCompiler(
+            compiled_bw=None,
+            lazy_backward_info=AutogradLazyBackwardCompileInfo(
+                bw_module=torch.fx.GraphModule({}, torch.fx.Graph()),
+                placeholder_list=placeholders,
+                saved_context=None,
+                saved_compile_context=None,
+            ),
+            disable_amp=False,
+            bw_compiler=mock_bw_compiler,
+            aot_config=None,
+            fw_metadata=None,
+            try_save_cache_entry=None,
+        )
+
+        with patch("torch._inductor.graph.defake") as mock_defake:
+            compiler.get_or_compile(saved_tensors_use_once=True, all_args=all_args)
+
+        mock_defake.assert_not_called()
+        self.assertEqual(len(extracted_inputs), len(all_args))
+        for extracted_t, real_t in zip(extracted_inputs, all_args):
+            self.assertIs(extracted_t, real_t)
+        self.assertTrue(isinstance(V._real_inputs._get_handler(), NullHandler))
+
 
 if __name__ == "__main__":
     run_tests()
