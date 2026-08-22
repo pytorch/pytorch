@@ -963,16 +963,6 @@ class HPUTestBase(DeviceTypeTestBase):
         return cls.primary_device
 
     @classmethod
-    def get_all_devices(cls):
-        primary_device_idx = int(cls.get_primary_device().split(":")[1])
-        num_devices = torch.hpu.device_count()
-        primary_device = cls.get_primary_device()
-        non_primary_devices = [
-            f"hpu:{idx}" for idx in range(num_devices) if idx != primary_device_idx
-        ]
-        return [primary_device] + non_primary_devices
-
-    @classmethod
     def setUpClass(cls):
         cls.primary_device = "hpu:0"
 
