@@ -1901,19 +1901,33 @@ bool AliasDb::mayAliasWildcard(const at::ArrayRef<Value*> vs) const {
       vs.begin(), vs.end(), [&](Value* v) { return mayAliasWildcard(v); });
 }
 
+TypePtr AliasDb::getWildcardKeyType(
+    const TypePtr& type,
+    const AliasTypeSet& mut_types) const {
+  if (mut_types.size() == 1) {
+    return mut_types[0];
+  }
+  auto it = wildcard_key_types_.find(type);
+  if (it != wildcard_key_types_.end()) {
+    return it->second;
+  }
+  return wildcard_key_types_.emplace(type, UnionType::create(mut_types))
+      .first->second;
+}
+
 std::optional<Element*> AliasDb::tryGetOrCreateWildcard(const TypePtr& type) {
   auto maybe_mut_types = mapTypeToAliasTypeSetPtr(type);
   if (!maybe_mut_types) {
     return std::nullopt;
   }
-  auto mut_type = toSingleType(*maybe_mut_types);
-  auto existing_wildcard = wildcardIndex_.find(*mut_type);
+  auto mut_type = getWildcardKeyType(type, *maybe_mut_types);
+  auto existing_wildcard = wildcardIndex_.find(mut_type);
   if (existing_wildcard != wildcardIndex_.end()) {
     return existing_wildcard->second;
   }
 
   auto wildcard_elem = memoryDAGBuilder_->makeFreshValue(nullptr);
-  wildcardIndex_.emplace(*std::move(mut_type), wildcard_elem);
+  wildcardIndex_.emplace(std::move(mut_type), wildcard_elem);
   if (maybe_mut_types->size() > 1) {
     pointUnionTypeElementToAllContainedTypes(wildcard_elem, *maybe_mut_types);
   } else {
@@ -1955,7 +1969,7 @@ Element* AliasDb::getWildcard(const TypePtr& type) const {
     return {};
   }
   if (maybe_mut_types->size() > 1) {
-    auto union_type = UnionType::create(*maybe_mut_types);
+    auto union_type = getWildcardKeyType(type, *maybe_mut_types);
     // Get a <TypePtr, Element*> pair where the TypePtr is this Union
     // type and the Element is the corresponding Wildcard
     auto maybe_union_pair = wildcardIndex_.find(union_type);
