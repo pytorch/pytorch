@@ -897,6 +897,38 @@ class TestFX(JitTestCase):
             "return a * b", 1, exactly=True
         ).run(stack_traces.strip())
 
+    def test_stack_traces_nested_modules(self):
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                return x + self.linear(x)
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, x):
+                return x + self.m1(x)
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+        graph = tracer.trace(M2())
+        stack_traces = "\n".join(
+            [node.meta.get("stack_trace", "") for node in graph.nodes]
+        )
+        FileCheck().check("return x + self.linear(x)").run(stack_traces.strip())
+        FileCheck().check("return x + self.m1(x)").run(stack_traces.strip())
+        for node in graph.nodes:
+            if node.op in {"placeholder", "output"}:
+                continue
+            stack_trace = node.stack_trace
+            self.assertIsNotNone(stack_trace)
+            self.assertNotIn("torch/fx/proxy.py", stack_trace)
+
     def test_stack_traces_with_transformer(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
