@@ -105,6 +105,7 @@ class LoopBody:
     root_block: LoopBodyBlock
     memory_usage: dict[MemoryUsageType, list[MemoryEntry]]
     op_counts: collections.Counter[str]
+    auxiliary_writes: tuple[Any, ...]
 
     # defined only temporarily
     indexing_exprs_name: dict[sympy.Expr, str]
@@ -124,6 +125,7 @@ class LoopBody:
         iter_vars,
         reduce_vars,
         allow_same_symbol_in_index=False,
+        auxiliary_writes=(),
     ):
         super().__init__()
 
@@ -136,6 +138,7 @@ class LoopBody:
         self.iter_vars = iter_vars
         self.reduce_vars = reduce_vars
         self.var_ranges = var_ranges
+        self.auxiliary_writes = tuple(auxiliary_writes)
 
         if isinstance(fn, LoopBody):
             self._init_with_copy(fn, args, allow_same_symbol_in_index)
@@ -199,6 +202,7 @@ class LoopBody:
         self.op_counts = other.op_counts
         self.root_block = other.root_block.clone(self)
         self.has_partial_accumulate = other.has_partial_accumulate
+        self.auxiliary_writes = other.auxiliary_writes
 
         submodules = {**other.submodules}
         submodules.pop("get_index")
@@ -576,6 +580,13 @@ class LoopBody:
         self.indexing = self.indexing_from_args(indices, allow_same_symbol_in_index)
         result = self.root_block()
         self.indexing = None
+        if config.triton.enable_fuse_auxiliary_writes and self.auxiliary_writes:
+            if not hasattr(V.kernel, "codegen_auxiliary_write"):
+                raise AssertionError(
+                    "backend does not support auxiliary write regions"
+                )
+            for write in self.auxiliary_writes:
+                V.kernel.codegen_auxiliary_write(write)
         return result
 
     def bind_set_indirect_shim(self, var, size, check, wrap_neg):
