@@ -3341,6 +3341,82 @@ class TestExperimentalUtils(TestCase):
         n2 = names(prof2)
         self.assertEqual(n1, n2)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_export_csv_protocol(self):
+        """Load the CsvLogger extension (registered via CustomLoggerRegistry),
+        profile real ops, export through the csv protocol, and verify the
+        output CSV against the column schema."""
+        import csv
+
+        import torch.utils.cpp_extension
+
+        test_dir = os.path.dirname(os.path.abspath(__file__))
+        torch_dir = os.path.dirname(torch.__file__)
+        kineto_include = os.path.join(
+            torch_dir, "..", "third_party", "kineto", "libkineto", "include"
+        )
+        old_cwd = os.getcwd()
+        os.chdir(test_dir)
+        try:
+            torch.utils.cpp_extension.load(
+                name="csv_logger_lib",
+                sources=["csv_logger.cpp"],
+                extra_include_paths=[kineto_include],
+                extra_cflags=["-DUSE_KINETO"],
+                verbose=True,
+            )
+        finally:
+            os.chdir(old_cwd)
+
+        expected_headers = [
+            "name",
+            "start_us",
+            "duration_us",
+            "device_id",
+            "resource_id",
+            "correlation_id",
+        ]
+        expected_names = [
+            "test_csv_export",
+            "aten::ones",
+            "aten::empty",
+            "aten::fill_",
+            "aten::add",
+        ]
+
+        with TemporaryFileName(suffix=".csv") as csv_path:
+            with profile(
+                activities=[ProfilerActivity.CPU],
+            ) as prof:
+                with record_function("test_csv_export"):
+                    x = torch.ones(10, 10)
+                    y = x + x
+
+            prof.export_using_protocol(csv_path, "csv")
+
+            with open(csv_path) as f:
+                reader = csv.reader(f)
+                headers = next(reader)
+                self.assertEqual(headers, expected_headers)
+                rows = list(reader)
+
+            self.assertGreater(len(rows), 0)
+            activity_names = [row[0] for row in rows]
+            self.assertEqual(len(activity_names), len(expected_names))
+            for an, en in zip(activity_names, expected_names):
+                self.assertEqual(
+                    an,
+                    en,
+                    f"Expected '{en}' but got '{an}', activities: {activity_names}",
+                )
+            for row in rows:
+                self.assertEqual(len(row), len(expected_headers))
+                for val in row[1:]:
+                    self.assertTrue(
+                        val.lstrip("-").isdigit(),
+                        f"Expected integer field, got: {val}",
+                    )
+
 
 class TestPrivateUse1ProfilerState(TestCase):
     """Tests for PrivateUse1 profiler state selection logic."""

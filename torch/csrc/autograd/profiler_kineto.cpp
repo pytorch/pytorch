@@ -35,6 +35,7 @@
 #include <ApproximateClock.h>
 #include <libkineto.h>
 #include <time_since_epoch.h>
+#include <torch/csrc/profiler/standalone/custom_logger_registry.h>
 #include <torch/csrc/profiler/standalone/privateuse1_profiler.h>
 
 #ifndef _MSC_VER
@@ -631,10 +632,13 @@ void prepareProfiler(
     return;
   }
 
+#ifdef USE_KINETO
+  // Forward registered custom logger factories to Kineto.
+  torch::profiler::impl::CustomLoggerRegistry::instance().onKinetoInit();
+
   // Forward registered PrivateUse1 profiler factory to Kineto.
   // Only for KINETO_PRIVATEUSE1 state where backend provides its own
   // IActivityProfiler.
-#ifdef USE_KINETO
   if (config.state == ProfilerState::KINETO_PRIVATEUSE1) {
     torch::profiler::impl::PrivateUse1ProfilerRegistry::instance()
         .onKinetoInit();
