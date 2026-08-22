@@ -90,7 +90,9 @@ def promote_tensors(
 
     prom_dt = PROMOTE_TYPES.get(out_dt, out_dt)
     return out_dt, tuple(
-        t.to(prom_dt) if isinstance(t, Tensor) else torch.asarray(t, dtype=prom_dt)
+        t.to(prom_dt)
+        if isinstance(t, Tensor)
+        else torch.asarray(t, dtype=prom_dt, device=tensor.device)
         for t in tensors
     )
 
