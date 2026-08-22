@@ -387,6 +387,21 @@ struct TORCH_API ViewFunc {
   }
   /// Reapplies the view on the given base using the saved state.
   virtual at::Tensor operator()(const at::Tensor&) const = 0;
+  /// Whether this view chain contains a multi-output view.
+  virtual bool has_multi_output() const {
+    return false;
+  }
+  /// Replays the last multi-output view in this chain and returns its siblings
+  /// before any later suffix views. Returns an empty list when batched replay
+  /// is unavailable.
+  virtual std::vector<at::Tensor> call_multi_output(
+      const at::Tensor& /*unused*/) const {
+    return {};
+  }
+  /// Applies the portion of this chain after its last multi-output view.
+  virtual at::Tensor apply_after_multi_output(const at::Tensor& output) const {
+    return output;
+  }
   /// Returns a clone of this ViewFunc, optionally with the specified saved
   /// state.
   virtual std::unique_ptr<ViewFunc> clone_and_set(
@@ -423,6 +438,13 @@ struct ChainedViewFunc : public ViewFunc {
   }
   at::Tensor operator()(
       const at::Tensor& /*input_base*/ /*unused*/) const override;
+  bool has_multi_output() const override {
+    return first->has_multi_output() || second->has_multi_output();
+  }
+  std::vector<at::Tensor> call_multi_output(
+      const at::Tensor& /*input_base*/ /*unused*/) const override;
+  at::Tensor apply_after_multi_output(
+      const at::Tensor& /*output*/ /*unused*/) const override;
   std::unique_ptr<ViewFunc> clone_and_set(
       std::optional<std::vector<c10::SymInt>> /*symints*/ /*unused*/ =
           std::nullopt,
