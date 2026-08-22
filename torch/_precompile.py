@@ -1651,6 +1651,7 @@ def _dynamo_frame_invariants(
                 " ".join(fact.code),
                 fact.value,
             )
+
         result.append(
             FrameInvariants(
                 frame=code.co_name,
@@ -1717,9 +1718,9 @@ def _filter_dynamo_guards(
     target_code: CodeType,
     runtime_global_scope: dict[str, object],
     guarded_codes: Sequence[Any],
-    example_scopes: Sequence[dict[str, object]],
+    captured: Sequence[_DynamoCapturedGuardSet],
 ) -> _DynamoGuardFinalization:
-    """Minimize frozen guard records while preserving variant dispatch."""
+    """Drop guards proven invariant across the frozen capture variants."""
     import dataclasses
     import functools
 
@@ -1728,15 +1729,6 @@ def _filter_dynamo_guards(
     from torch._dynamo.package import load_guard_manager, load_guards_state
     from torch._guards import GuardsSet
     from torch.utils._ordered_set import OrderedSet
-
-    dimension_marking_attrs = (
-        "_has_dynamo_dim_marking",
-        "_dynamo_dynamic_indices",
-        "_dynamo_weak_dynamic_indices",
-        "_dynamo_unbacked_indices",
-        "_dynamo_strict_unbacked_indices",
-        "_dynamo_static_indices",
-    )
 
     def required_guard(guard: Any) -> bool:
         required = _DYNAMO_REQUIRED_GUARD_TYPES | _DYNAMO_UNMODELLED_GUARD_TYPES
@@ -1770,103 +1762,46 @@ def _filter_dynamo_guards(
             state = dataclasses.replace(state, output_graph=output_graph)
         return load_guard_manager(state, target_code, runtime_global_scope)
 
-    def check(manager: Any, scope: dict[str, object]) -> bool:
-        removed: list[tuple[torch.Tensor, str, object]] = []
-        seen: set[tuple[int, str]] = set()
-        for value in scope.values():
-            for leaf in pytree.tree_leaves(value):
-                if not isinstance(leaf, torch.Tensor):
-                    continue
-                for attr in dimension_marking_attrs:
-                    key = (id(leaf), attr)
-                    if key in seen or not hasattr(leaf, attr):
-                        continue
-                    seen.add(key)
-                    removed.append((leaf, attr, getattr(leaf, attr)))
-                    delattr(leaf, attr)
-        try:
-            return manager.check(scope)
-        finally:
-            for tensor, attr, value in removed:
-                setattr(tensor, attr, value)
-
-    def outcomes(
-        state: Any,
-        *,
-        guards: Sequence[Any],
-        aot_guards: Sequence[Any],
-        key_order: Sequence[Any],
-    ) -> list[bool]:
-        output_graph = dataclasses.replace(
-            state.output_graph,
-            _guards=GuardsSet(OrderedSet(fresh_guard(guard) for guard in guards)),
-            _aotautograd_guards=list(aot_guards),
-            guard_on_key_order=set(key_order),
-        )
-        manager = manager_for(state, output_graph)
-        return [check(manager, scope) for scope in example_scopes]
-
     states = [load_guards_state(guarded.guards_state) for guarded in guarded_codes]
+    if len(states) != len(captured):
+        raise PrecompileError(
+            "precompile tracer='dynamo' did not record one guard set for every "
+            "captured variant."
+        )
+    slots = {
+        (fact.guard_type, fact.source)
+        for record in captured
+        for fact in record.facts
+        if fact.enforced
+    }
+    varying_slots = {
+        slot
+        for slot in slots
+        if len(
+            {
+                frozenset(
+                    fact
+                    for fact in record.facts
+                    if fact.enforced and (fact.guard_type, fact.source) == slot
+                )
+                for record in captured
+            }
+        )
+        > 1
+    }
     filtered_states: list[bytes] = []
     kept_slots: list[frozenset[tuple[str, str]]] = []
     policy_dropped: set[tuple[str, str]] = set()
     for state in states:
-        kept_guards = list(state.output_graph.guards)
-        original_guard_slots = {_dynamo_guard_slot(guard) for guard in kept_guards}
+        kept_guards = [
+            guard
+            for guard in state.output_graph.guards
+            if required_guard(guard) or _dynamo_guard_slot(guard) in varying_slots
+        ]
         kept_aot_guards = list(state.output_graph.aotautograd_guards)
         kept_key_order = sorted(
             state.output_graph.guard_on_key_order, key=lambda source: source.name
         )
-        baseline = outcomes(
-            state,
-            guards=kept_guards,
-            aot_guards=kept_aot_guards,
-            key_order=kept_key_order,
-        )
-        matching_scopes = [
-            scope
-            for scope, matches in zip(example_scopes, baseline, strict=True)
-            if matches
-        ]
-        if not matching_scopes:
-            raise PrecompileError(
-                "precompile tracer='dynamo' captured a variant that does not match "
-                "any example input."
-            )
-
-        def try_drop(records: list[Any], index: int) -> bool:
-            if records is kept_guards and required_guard(records[index]):
-                return False
-            candidate = records[:index] + records[index + 1 :]
-            trial_guards = candidate if records is kept_guards else kept_guards
-            trial_aot = candidate if records is kept_aot_guards else kept_aot_guards
-            trial_key_order = candidate if records is kept_key_order else kept_key_order
-            try:
-                return (
-                    outcomes(
-                        state,
-                        guards=trial_guards,
-                        aot_guards=trial_aot,
-                        key_order=trial_key_order,
-                    )
-                    == baseline
-                )
-            except Exception:
-                # Some records construct relational checks jointly. If removing one
-                # leaves an invalid manager, it is a required dependency.
-                return False
-
-        changed = True
-        while changed:
-            changed = False
-            for records in (kept_guards, kept_aot_guards, kept_key_order):
-                index = 0
-                while index < len(records):
-                    if try_drop(records, index):
-                        del records[index]
-                        changed = True
-                    else:
-                        index += 1
 
         output_graph = dataclasses.replace(
             state.output_graph,
@@ -1893,17 +1828,14 @@ def _filter_dynamo_guards(
         if check_fn.guards_state is None:
             raise AssertionError("guards_state must not be None")
         filtered_state = load_guards_state(check_fn.guards_state)
-        filtered_manager = manager_for(filtered_state)
-        filtered_outcomes = [check(filtered_manager, scope) for scope in example_scopes]
-        if filtered_outcomes != baseline:
-            raise PrecompileError(
-                "precompile tracer='dynamo' guard filtering changed captured "
-                "example dispatch."
-            )
+        manager_for(filtered_state)
         filtered_states.append(check_fn.guards_state)
         final_slots = frozenset(_dynamo_guard_slot(guard) for guard in kept_guards)
         kept_slots.append(final_slots)
-        policy_dropped.update(original_guard_slots - final_slots)
+        policy_dropped.update(
+            {_dynamo_guard_slot(guard) for guard in state.output_graph.guards}
+            - final_slots
+        )
 
     return _DynamoGuardFinalization(
         states=tuple(filtered_states),
@@ -2750,8 +2682,7 @@ def _precompile_dynamo(
         kept_by_entry: dict[int, list[frozenset[tuple[str, str]]]] = {}
         policy_dropped_guards = set(contract_dropped_guards)
         unportable_globals: set[tuple[str, str]] = set()
-        observed_scopes = package.observed_scopes()
-        for index, (code, scopes) in enumerate(zip(code_entries, observed_scopes)):
+        for index, code in enumerate(code_entries):
             original_code = SerializedCode.to_code_object(code.python_code)
             runtime_globals = sys.modules[code.python_module].__dict__
             runtime_codes = [
@@ -2783,7 +2714,7 @@ def _precompile_dynamo(
                 original_code,
                 runtime_globals,
                 code.guarded_codes,
-                scopes,
+                captured_guard_sets.get(id(code), ()),
             )
             filtered_guard_states = finalized.states
             kept_by_entry[id(code)] = list(finalized.kept_slots)
