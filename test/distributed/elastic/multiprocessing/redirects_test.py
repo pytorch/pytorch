@@ -7,6 +7,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import ctypes
+import io
 import os
 import shutil
 import sys
@@ -115,6 +116,65 @@ class RedirectsTest(unittest.TestCase):
             self.assertEqual(
                 {"redir stderr from python\n", "redir stderr from c\n"}, lines
             )
+
+    def _assert_all_three_sources(self, stdout_log):
+        with open(stdout_log) as f:
+            self.assertEqual(
+                {"foo from python\n", "foo from c\n", "foo from cmd\n"},
+                set(f.readlines()),
+            )
+
+    def test_redirect_stdout_without_fileno(self):
+        # A test runner may replace sys.stdout with a stream that has no fd at
+        # all (pytest --capture=sys). Deriving the fd from it used to raise
+        # io.UnsupportedOperation.
+        stdout_log = os.path.join(self.test_dir, "stdout.log")
+
+        orig_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            with redirect_stdout(stdout_log):
+                print("foo from python")
+                libc.printf(b"foo from c\n")
+                os.system("echo foo from cmd")
+        finally:
+            sys.stdout = orig_stdout
+
+        self._assert_all_three_sources(stdout_log)
+
+    def test_redirect_stdout_bound_to_other_fd(self):
+        # sys.stdout may instead be backed by an unrelated fd (pytest's default
+        # --capture=fd). Redirecting that fd let C and subprocess output escape.
+        stdout_log = os.path.join(self.test_dir, "stdout.log")
+        other_log = os.path.join(self.test_dir, "other.log")
+
+        orig_stdout = sys.stdout
+        with open(other_log, "w") as other:
+            sys.stdout = other
+            try:
+                with redirect_stdout(stdout_log):
+                    print("foo from python")
+                    libc.printf(b"foo from c\n")
+                    os.system("echo foo from cmd")
+            finally:
+                sys.stdout = orig_stdout
+
+        self._assert_all_three_sources(stdout_log)
+        with open(other_log) as f:
+            self.assertEqual("", f.read())
+
+    def test_redirect_restores_replaced_stdout(self):
+        stdout_log = os.path.join(self.test_dir, "stdout.log")
+
+        orig_stdout = sys.stdout
+        replacement = io.StringIO()
+        sys.stdout = replacement
+        try:
+            with redirect_stdout(stdout_log):
+                pass
+            self.assertIs(replacement, sys.stdout)
+        finally:
+            sys.stdout = orig_stdout
 
     def _redirect_large_buffer(self, print_fn, num_lines=500_000):
         stdout_log = os.path.join(self.test_dir, "stdout.log")
