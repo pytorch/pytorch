@@ -103,6 +103,7 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.output_graph import OutputGraph
+    from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .functions import UserFunctionVariable
@@ -165,6 +166,29 @@ _VIEW_ATTR_TO_ATEN_OP = {
     "H": torch.ops.aten.matrix_H,
     "mH": torch.ops.aten.mH,
 }
+
+
+def _contains_graph_intermediate(
+    value: Any, side_effects: "SideEffects | None" = None
+) -> bool:
+    """Return whether value contains a differentiable current-graph tensor."""
+    found = False
+
+    def visit(vt: VariableTracker) -> None:
+        nonlocal found
+        if (
+            isinstance(vt, TensorVariable)
+            # Sources can describe in-graph views (for example, x.real). A
+            # sourced placeholder is only an input boundary for this trace;
+            # relationships severed by an earlier graph break are already
+            # outside the scope of this check.
+            and (vt.source is None or vt.proxy.node.op != "placeholder")
+            and (vt.requires_grad or vt.has_grad_fn)
+        ):
+            found = True
+
+    VariableTracker.visit(visit, value, side_effects=side_effects)
+    return found
 
 
 def _is_sym_arith_operand(vt: VariableTracker) -> bool:

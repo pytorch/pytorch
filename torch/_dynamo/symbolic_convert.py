@@ -157,7 +157,13 @@ from .utils import (
     PySendResult,
     unpack_iterable,
 )
-from .variables.base import SourceLocation, typestr, ValueMutationNew, VariableTracker
+from .variables.base import (
+    AttributeMutationNew,
+    SourceLocation,
+    typestr,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import ConstantVariable
@@ -208,7 +214,12 @@ from .variables.object_protocol import (
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
-from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
+from .variables.tensor import (
+    _contains_graph_intermediate,
+    supported_comparison_ops,
+    SymNodeVariable,
+    TensorVariable,
+)
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
     TorchFunctionModeVariable,
@@ -1116,6 +1127,9 @@ def break_graph_if_unsupported(
                     # If there is, we roll back to the checkpoint and fall back.
                     if isinstance(excp, Unsupported):
                         excp.remove_from_stats()
+                    preserve_skip_frame = (
+                        excp.skip_frame and excp.preserve_skip_frame_after_inline
+                    )
                     unimplemented(
                         gb_type="Graph break under GenericContextWrappingVariable",
                         context=f"Active generic context managers: {self.active_generic_context_managers}",
@@ -1125,9 +1139,16 @@ def break_graph_if_unsupported(
                             *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
                         ],
                         from_exc=excp,
+                        skip_frame=preserve_skip_frame,
+                        preserve_skip_frame_after_inline=preserve_skip_frame,
+                        # Only a preserved whole-frame skip may remain
+                        # invocation-scoped; replacement graph breaks are cached.
+                        apply_to_code=(
+                            excp.apply_to_code if preserve_skip_frame else True
+                        ),
                     )
 
-                if getattr(excp, "skip_frame", False):
+                if excp.skip_frame:
                     raise
 
                 if not self.should_compile_partial_graph():
@@ -1610,6 +1631,102 @@ class InstructionTranslatorBase(
         self.symbolic_locals = {
             k: v for k, v in self.symbolic_locals.items() if k in normalized_reads
         }
+
+    def has_live_graph_intermediate(self) -> bool:
+        """Return whether a differentiable intermediate must cross this break."""
+
+        # Note [Liveness scan for eager autograd graph breaks]
+        # AOTAutograd does not preserve edges between differentiably related
+        # outputs of the current compiled prefix. A false negative here can
+        # therefore silently change gradients. These roots cover the persistent
+        # stores currently known to carry values across the break: the current and
+        # inlined parent frames, active exception state, modified pre-existing
+        # objects (including globals), active context managers, backward state,
+        # tensor hooks, saved tensors, and suspended local generators. New
+        # persistent VariableTracker storage must extend this list.
+
+        def get_live_values(tx: InstructionTranslatorBase) -> list[Any]:
+            values: list[Any] = [
+                tx.stack,
+                tx.symbolic_cellvars,
+                [tx.exn_vt_stack[i] for i in range(len(tx.exn_vt_stack))],
+                tx.active_generic_context_managers,
+                [
+                    entry.with_context
+                    for entry in tx.block_stack
+                    if entry.with_context is not None
+                ],
+            ]
+            if tx.exn_vt_stack._current_exception is not None:
+                values.append(tx.exn_vt_stack._current_exception)
+            if isinstance(tx, InliningGeneratorInstructionTranslator):
+                # A suspended generator detaches its exception segment from the
+                # shared stack, but those exception values remain live in the
+                # generator frame.
+                values.append(tx.gi_exc_state.items)
+            instruction = tx.current_instruction
+            if instruction not in tx.instructions:
+                # Before Python 3.11, creating a local generator does not run its
+                # inline tracer, so it still points at the synthetic initial NOP.
+                instruction = tx.instructions[0]
+            reads = livevars_analysis(tx.instructions, instruction)
+            for name in reads:
+                key = name.replace(".", "implicit") if name.startswith(".") else name
+                if key in tx.symbolic_locals:
+                    values.append(tx.symbolic_locals[key])
+            return values
+
+        live_values: list[Any] = []
+        cur_tx: InstructionTranslatorBase | None = self
+        while cur_tx is not None:
+            live_values.extend(get_live_values(cur_tx))
+            cur_tx = cur_tx.parent
+
+        side_effects = self.output.side_effects
+        modified_existing_vars = [
+            var
+            for var in side_effects.id_to_variable.values()
+            if not isinstance(var.mutation_type, AttributeMutationNew)
+            and side_effects.is_modified(var)
+        ]
+        live_values.extend(
+            [
+                modified_existing_vars,
+                self.output.backward_state,
+                side_effects.tensor_hooks,
+                side_effects.save_for_backward,
+            ]
+        )
+
+        # LocalGeneratorObjectVariable deliberately excludes its instruction
+        # translator from generic VariableTracker traversal. Its created or
+        # suspended frame can nevertheless keep graph intermediates live here.
+        pending_values = list(live_values)
+        visit_cache: dict[int, Any] = {}
+        seen_generator_tracers: set[int] = set()
+        while pending_values:
+            generators: list[LocalGeneratorObjectVariable] = []
+
+            def collect_generator(vt: VariableTracker) -> None:
+                if isinstance(vt, LocalGeneratorObjectVariable):
+                    generators.append(vt)
+
+            VariableTracker.visit(
+                collect_generator,
+                pending_values.pop(),
+                cache=visit_cache,
+                side_effects=side_effects,
+            )
+            for generator in generators:
+                tracer = generator.inline_tracer
+                if id(tracer) in seen_generator_tracers:
+                    continue
+                seen_generator_tracers.add(id(tracer))
+                generator_values = get_live_values(tracer)
+                live_values.extend(generator_values)
+                pending_values.extend(generator_values)
+
+        return _contains_graph_intermediate(live_values, side_effects)
 
     def call_function(
         self,
@@ -6259,9 +6376,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # bubble up the exception to the parent frame.
             raise
         except (Unsupported, UserError) as e:
-            # If this graph break has skip_frame set, unset it
-            # since it refers to the current frame and not the parent.
-            e.skip_frame = False
+            if not e.preserve_skip_frame_after_inline:
+                # If this graph break has skip_frame set, unset it
+                # since it refers to the current frame and not the parent.
+                e.skip_frame = False
+                e.apply_to_code = True
             raise
         except Exception:
             log.debug("FAILED INLINING %s", code)
