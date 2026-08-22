@@ -18,7 +18,6 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include "caffe2/utils/string_utils.h"
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/import.h>
