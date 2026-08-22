@@ -1771,6 +1771,19 @@ void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
       });
 }
 
+void masked_fill_kernel_tensor(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
+      kBool, kHalf, kBFloat16, kComplexHalf, kBComplex32, iter.common_dtype(), "masked_fill_", [&]() {
+        gpu_kernel(
+            iter, [] GPU_LAMBDA(scalar_t self, bool mask, scalar_t value) -> scalar_t {
+              if (mask) {
+                return value;
+              }
+              return self;
+            });
+      });
+}
+
 template <typename scalar_t>
 void cuda_masked_fill_kernel_quantized(TensorIterator& iter, scalar_t quantized_val) {
     gpu_kernel(
@@ -1834,7 +1847,41 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & val
   // `mask` to be CPU tensor. Check for `self` and `mask` being on same device
   // exists in `masked_fill__cuda` (Scalar version).
   TORCH_CHECK(!self.device().is_cpu(), "masked_fill_: Expected inputs to be on same device")
-  return masked_fill__cuda(self, mask, value.item());
+  // A host-side value carries no device sync, so keep the cheap Scalar path.
+  if (value.device().is_cpu()) {
+    return masked_fill__cuda(self, mask, value.item());
+  }
+  TORCH_CHECK(self.device() == mask.device(), "expected self and mask to be on the same device, but got mask on ",
+    mask.device(), " and self on ", self.device());
+  TORCH_CHECK(mask.scalar_type() == kBool,
+    "masked_fill only supports boolean masks, but got dtype ", mask.scalar_type());
+  if (at::has_internal_overlap(self) == MemOverlap::Yes) {
+    TORCH_WARN(
+      "Use of masked_fill_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
+  }
+  at::assert_no_partial_overlap(self, mask);
+
+  // A device value used to go through value.item(), forcing a blocking
+  // device-to-host sync on every call and breaking CUDA graph capture. Read it
+  // on-device instead: a 0-dim value is broadcast by the iterator; keep it in
+  // self's dtype so the numerics match the Scalar overload.
+  c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
+  Tensor value_ = value.to(self.options());
+
+  auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .add_output(self)
+      .add_const_input(self)
+      .add_const_input(*b_mask)
+      .add_const_input(value_)
+      .build();
+
+  masked_fill_kernel_tensor(iter);
+  return self;
 }
 
 
