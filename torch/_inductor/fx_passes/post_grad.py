@@ -1923,18 +1923,9 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         torch.bfloat16,
         torch.float16,
     ):
-        # Narrowing-cast unfuse (PR #183680) is XPU-only: it preserves
-        # precision on XPU pointwise but regresses accuracy on ROCm
-        # (basic_gnn_edgecnn training+amp fails on gfx950 otherwise).
+        # CUDA/ROCm keep addmm fused for half dtypes; XPU prefers unfuse
+        # so the pointwise kernel absorbs the bias add directly.
         if inp.meta["val"].device.type != "xpu":
-            return
-        if not (
-            inp.op == "call_function"
-            and inp.target is torch.ops.prims.convert_element_type.default
-            and inp.args[0].meta["val"].dtype.is_floating_point
-            and torch.finfo(inp.args[0].meta["val"].dtype).bits
-            > torch.finfo(inp.meta["val"].dtype).bits
-        ):
             return
 
     drop_input_for_beta_zero = inp.meta["val"].device.type == "cuda"
