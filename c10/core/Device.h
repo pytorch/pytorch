@@ -178,10 +178,6 @@ struct C10_API Device final {
         index_ >= -1,
         "Device index must be -1 or non-negative, got ",
         static_cast<int>(index_));
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        !is_cpu() || index_ <= 0,
-        "CPU device index must be -1 or zero, got ",
-        static_cast<int>(index_));
   }
 };
 
