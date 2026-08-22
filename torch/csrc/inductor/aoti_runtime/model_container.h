@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -45,7 +46,10 @@ struct ConstantBufferSet {
   RAIIDataPtr aux_cpu_blob;
   std::shared_ptr<ConstantMap> map;
   std::shared_ptr<std::vector<ConstantHandle>> array;
-  ConstantState fold_state{ConstantState::NONE};
+  // Atomic because run_const_fold reads it once before taking any lock, to
+  // skip the work when the buffer is already folded. Every write is still made
+  // under a lock; this only removes the data race on that unlocked pre-check.
+  std::atomic<ConstantState> fold_state{ConstantState::NONE};
 
   void* ensure_blob(size_t blob_size) {
     if (!blob) {
@@ -81,7 +85,9 @@ struct ConstantBufferSet {
     aux_cpu_blob.reset();
     int num_constants = static_cast<int>(model->num_constants());
     for (int i = 0; i < num_constants; i++) {
-      if (model->constant_from_folded(i)) {
+      // Blobless constants (folded outputs and fold-input-only constants) own
+      // their storage individually, so dropping the blob does not free them.
+      if (model->constant_is_blobless(i)) {
         auto it = map->find(model->constant_name(i));
         if (it != map->end()) {
           it->second.reset();
@@ -89,8 +95,48 @@ struct ConstantBufferSet {
       }
     }
   }
+
+  // Releases the constants that only the const graph reads. Safe once folding
+  // has produced the folded constants: by construction no main-graph kernel
+  // reads them. The array slot is cleared too, since the generated run_impl
+  // binds every constants_->at(idx) up front (as [[maybe_unused]] auto&) and
+  // would otherwise hold a handle to freed memory.
+  size_t drop_fold_input_only(AOTInductorModel* model) {
+    size_t dropped = 0;
+    int num_constants = static_cast<int>(model->num_constants());
+    for (int i = 0; i < num_constants; i++) {
+      if (!model->constant_fold_input_only(i)) {
+        continue;
+      }
+      auto it = map->find(model->constant_name(i));
+      if (it == map->end() || it->second.get() == nullptr) {
+        continue;
+      }
+      it->second.reset();
+      map->erase(it);
+      if (static_cast<size_t>(i) < array->size()) {
+        array->at(i) = ConstantHandle();
+      }
+      dropped++;
+    }
+    return dropped;
+  }
 };
 
+// Threading contract, which the locking here relies on rather than enforces:
+//
+//   - run() is the only concurrent entry point. Any number of threads.
+//   - update_constant_buffer / run_const_fold / swap_constant_buffer /
+//     free_inactive_constant_buffer are a single serialized writer. They take
+//     no lock against each other (update_constant_buffer takes none at all),
+//     so a second concurrent writer corrupts the buffer being written.
+//   - Writers target the inactive buffer; the swap is what publishes it.
+//     Folding may instead happen lazily inside run() on the active buffer,
+//     which is the load-time path.
+//
+// Given that, run() never contends with a writer over the same buffer, which
+// is why folding the inactive buffer needs only a shared lock: it excludes the
+// swap and an active-buffer fold, but deliberately not readers.
 class AOTInductorModelContainer {
  public:
   AOTInductorModelContainer(
@@ -132,9 +178,9 @@ class AOTInductorModelContainer {
     buffers_[0].blob = model->release_constant_blob();
     buffers_[0].aux_cpu_blob = model->release_aux_cpu_constant_blob();
     constants_internal_offset_.resize(
-        model->num_constants() - model->num_folded_constants());
+        model->num_constants() - model->num_blobless_constants());
     aux_cpu_constants_internal_offset_.resize(
-        model->num_constants() - model->num_folded_constants());
+        model->num_constants() - model->num_blobless_constants());
     model->compute_constant_blob(
         blob_size_,
         constants_internal_offset_,
@@ -197,9 +243,9 @@ class AOTInductorModelContainer {
     buffers_[1].array =
         std::make_shared<std::vector<ConstantHandle>>(model->num_constants());
     constants_internal_offset_.resize(
-        model->num_constants() - model->num_folded_constants());
+        model->num_constants() - model->num_blobless_constants());
     aux_cpu_constants_internal_offset_.resize(
-        model->num_constants() - model->num_folded_constants());
+        model->num_constants() - model->num_blobless_constants());
     model->compute_constant_blob(
         blob_size_,
         constants_internal_offset_,
@@ -241,6 +287,7 @@ class AOTInductorModelContainer {
       std::unique_lock constants_folding_lk(model_exec_mutex_);
       // Double locking to make sure constant folding is only ran once.
       if (const_folded == ConstantState::INITIALIZED) {
+        assert_fold_inputs_available(active());
         auto* model = get_available_model();
         // TODO: add try catch block to handle exception.
         auto folded_const_map = model->run_const_fold(
@@ -250,6 +297,7 @@ class AOTInductorModelContainer {
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
         const_folded = ConstantState::FOLDED;
+        active().drop_fold_input_only(models_[0].get());
         {
           std::lock_guard lk(models_mutex_);
           pending_models_.push_back(model);
@@ -296,6 +344,7 @@ class AOTInductorModelContainer {
 
     auto& const_folded = active().fold_state;
     if (const_folded == ConstantState::INITIALIZED) {
+      assert_fold_inputs_available(active());
       auto folded_const_map = model->run_const_fold(
           stream, proxy_executor, /* initialization = */ true);
       update_constant_buffer(
@@ -303,6 +352,7 @@ class AOTInductorModelContainer {
           /* use_inactive = */ false,
           /* validate_full_update = */ false);
       const_folded = ConstantState::FOLDED;
+      active().drop_fold_input_only(models_[0].get());
     } else if (const_folded != ConstantState::FOLDED) {
       throw std::runtime_error(
           "Unknown constant state: " + toStringConstantState(const_folded));
@@ -391,6 +441,15 @@ class AOTInductorModelContainer {
     return models_[0]->constant_from_folded(static_cast<int64_t>(idx));
   }
 
+  // retrieve whether constants_info_[idx] is only read by the const graph, and
+  // is therefore released once constant folding has run
+  bool constant_fold_input_only(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_fold_input_only(static_cast<int64_t>(idx));
+  }
+
   size_t constant_data_size(size_t idx) const {
     if (this->num_models() == 0) {
       throw std::runtime_error("No available models in container!");
@@ -435,6 +494,38 @@ class AOTInductorModelContainer {
     return models_[0]->update_constants_from_blob(weight_blob_ptr);
   }
 
+  // The const graph reads every fold-input-only constant out of the constants
+  // array, so re-folding a buffer whose fold inputs were already released would
+  // dereference a null handle. Fail with an actionable message instead.
+  // Name of the first fold-input-only constant missing from `buffer`, or empty
+  // if the buffer can still fold.
+  std::string first_missing_fold_input(const ConstantBufferSet& buffer) const {
+    size_t num_constants = models_[0]->num_constants();
+    for (size_t idx = 0; idx < num_constants; idx++) {
+      if (!models_[0]->constant_fold_input_only(static_cast<int64_t>(idx))) {
+        continue;
+      }
+      auto name =
+          std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
+      auto it = buffer.map->find(name);
+      if (it == buffer.map->end() || it->second.get() == nullptr) {
+        return name;
+      }
+    }
+    return {};
+  }
+
+  void assert_fold_inputs_available(const ConstantBufferSet& buffer) const {
+    auto missing = first_missing_fold_input(buffer);
+    if (!missing.empty()) {
+      throw std::runtime_error(
+          "run_const_fold: constant '" + missing +
+          "' was released after a previous fold"
+          " (aot_inductor.free_fold_input_only_constants). Provide it via"
+          " update_constant_buffer before folding again.");
+    }
+  }
+
   void run_const_fold(
       bool inactive_buffer,
       DeviceStreamType stream,
@@ -442,10 +533,39 @@ class AOTInductorModelContainer {
     AOTInductorModel* model;
     auto& const_folded =
         inactive_buffer ? inactive().fold_state : active().fold_state;
+    // A buffer folds at most once per weight generation. Discarding rather
+    // than repeating is what makes releasing the fold inputs safe: a folded
+    // buffer has nothing left to fold from. Only an update, which restores the
+    // inputs and moves the buffer back to INITIALIZED, re-arms it. Callers may
+    // reasonably fold after every update without tracking which ones changed
+    // state, so this is a warning rather than an error.
+    //
+    // Redundant for correctness -- both branches re-check under their lock --
+    // but kept so a no-op call does not take the exclusive lock below and
+    // stall every concurrent run(), which holds the same mutex shared.
+    if (const_folded == ConstantState::FOLDED) {
+      // Once per process. A caller that folds after every update hits this
+      // whenever an update left the buffer FOLDED, and per-call stderr output
+      // would be noise in a long-running service.
+      static std::atomic<bool> warned{false};
+      if (!warned.exchange(true)) {
+        std::cerr << "[WARNING] run_const_fold: buffer is already folded for"
+                  << " the current weights; discarding this call (logged"
+                  << " once). Supply new constants via update_constant_buffer"
+                  << " if a re-fold is intended.\n";
+      }
+      return;
+    }
     if (!inactive_buffer) {
       // We would need to acquire a unique lock if we want to run constant
       // folding on the active buffer.
       std::unique_lock constants_folding_lk(model_exec_mutex_);
+      // Double-check under the exclusive lock, mirroring run(): "Double
+      // locking to make sure constant folding is only ran once."
+      if (const_folded == ConstantState::FOLDED) {
+        return;
+      }
+      assert_fold_inputs_available(active());
       model = get_available_model();
       try {
         auto folded_const_map = model->run_const_fold(stream, proxy_executor);
@@ -454,6 +574,7 @@ class AOTInductorModelContainer {
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
         const_folded = ConstantState::FOLDED;
+        active().drop_fold_input_only(models_[0].get());
       } catch (...) {
         std::lock_guard lk(models_mutex_);
         available_models_.push_back(model);
@@ -461,6 +582,13 @@ class AOTInductorModelContainer {
       }
     } else {
       std::shared_lock model_lk(model_exec_mutex_);
+      // Shared, so unlike the active branch this re-check does not exclude a
+      // second concurrent inactive fold -- only the single-writer contract
+      // above does.
+      if (const_folded == ConstantState::FOLDED) {
+        return;
+      }
+      assert_fold_inputs_available(inactive());
       model = get_available_model();
 
       // We swap the constant mapping to the inactive buffer in the model to run
@@ -478,6 +606,12 @@ class AOTInductorModelContainer {
             std::move(folded_const_map),
             /* use_inactive = */ true,
             /* validate_full_update = */ false);
+        // Record FOLDED before releasing, matching the three active-buffer
+        // call sites. This branch holds only a shared_lock, so a concurrent
+        // reader must never observe INITIALIZED after the inputs are gone --
+        // that is the pair assert_fold_inputs_available() rejects.
+        const_folded = ConstantState::FOLDED;
+        inactive().drop_fold_input_only(models_[0].get());
 
         // Swap back the model's constants mapping
         auto active_map = active().map;
@@ -485,7 +619,6 @@ class AOTInductorModelContainer {
         model->update_constants_map(
             active_map, /* remap_constants_array= */ false);
         model->update_constants_array(active_array);
-        const_folded = ConstantState::FOLDED;
       } catch (...) {
         std::lock_guard lk(models_mutex_);
         available_models_.push_back(model);
@@ -593,8 +726,16 @@ class AOTInductorModelContainer {
 
         AtenTensorHandle tensor;
         if (it == constants_map.end()) {
-          aoti_torch_clone(
-              source.map->find(constant_name)->second.get(), &tensor);
+          auto source_it = source.map->find(constant_name);
+          if (source_it == source.map->end() ||
+              source_it->second.get() == nullptr) {
+            // A fold-input-only constant already released from the source
+            // buffer has nothing to carry over; it is not needed by the main
+            // graph, so leave the target entry absent.
+            continue;
+          }
+          AOTI_TORCH_ERROR_CODE_CHECK(
+              aoti_torch_clone(source_it->second.get(), &tensor));
         } else {
           tensor = it->second;
           // Null the source slot before RAIIAtenTensorHandle takes ownership so
@@ -701,13 +842,19 @@ class AOTInductorModelContainer {
       int32_t const_device_type =
           models_[0]->constant_device_type(static_cast<int64_t>(idx));
       bool is_aux_cpu = const_device_type != model_device_type;
+      bool fold_input_only =
+          models_[0]->constant_fold_input_only(static_cast<int64_t>(idx));
 
       size_t this_main_idx = main_blob_idx;
       size_t this_aux_cpu_idx = aux_cpu_blob_idx;
-      if (is_aux_cpu) {
-        aux_cpu_blob_idx++;
-      } else {
-        main_blob_idx++;
+      // Fold-input-only constants get their own storage rather than a blob
+      // slice, so they must not consume a blob offset here either.
+      if (!fold_input_only) {
+        if (is_aux_cpu) {
+          aux_cpu_blob_idx++;
+        } else {
+          main_blob_idx++;
+        }
       }
 
       auto constant_name =
@@ -721,17 +868,66 @@ class AOTInductorModelContainer {
 
       AtenTensorHandle tensor;
       if (it == constants_map.end()) {
-        tensor = source.map->find(constant_name)->second.get();
+        auto source_it = source.map->find(constant_name);
+        if (source_it == source.map->end() ||
+            source_it->second.get() == nullptr) {
+          // Reachable once a fold-input-only constant has been released: there
+          // is nothing left to carry over, so the caller has to supply it.
+          throw std::runtime_error(
+              "update_constant_buffer: constant '" + constant_name +
+              "' was not provided and is not available in the source buffer." +
+              (fold_input_only
+                   ? " It was released after constant folding"
+                     " (aot_inductor.free_fold_input_only_constants), so every"
+                     " update must provide it."
+                   : ""));
+        }
+        tensor = source_it->second.get();
       } else {
         tensor = it->second;
       }
 
       if (user_managed) {
         // If user managed, we pass in the pointer directly, and skip the
-        // copy.
+        // copy. This deliberately precedes the fold_input_only branch: a
+        // fold-input-only constant supplied this way is not copied either, so
+        // the post-fold release just drops the container's reference and the
+        // caller keeps owning the memory. The caller must therefore keep it
+        // alive until the fold runs, which happens on the next run(), not here.
         target.map->insert_or_assign(
             constant_name,
             MaybeOwningAtenTensorHandle(tensor, /* user_managed = */ true));
+        continue;
+      }
+
+      if (fold_input_only) {
+        // Owns a private copy so it can be released independently of the blob
+        // after the fold consumes it.
+        int32_t src_device_type = 0;
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_get_device_type(tensor, &src_device_type));
+        AtenTensorHandle materialized = nullptr;
+        if (src_device_type == const_device_type) {
+          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_clone(tensor, &materialized));
+        } else {
+          // Only reachable under allow_h2d_copy, since the device check at the
+          // top of this function rejects every other mismatch. Allocate on the
+          // constant's device with its own layout, then copy element-wise:
+          // copy_ handles a non-contiguous or storage-offset CPU source, which
+          // a raw byte copy off data_ptr() would silently corrupt.
+          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+              static_cast<int64_t>(models_[0]->constant_ndim(idx)),
+              models_[0]->constant_shape(idx),
+              models_[0]->constant_stride(idx),
+              models_[0]->constant_dtype(idx),
+              const_device_type,
+              models_[0]->get_device_idx(),
+              &materialized));
+          AOTI_TORCH_ERROR_CODE_CHECK(
+              aoti_torch_copy_(materialized, tensor, /* non_blocking = */ 0));
+        }
+        target.map->insert_or_assign(
+            constant_name, RAIIAtenTensorHandle(materialized));
         continue;
       }
 
