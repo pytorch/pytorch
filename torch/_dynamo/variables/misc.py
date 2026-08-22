@@ -32,7 +32,7 @@ import weakref
 from collections.abc import Callable, Sequence
 from random import Random
 from types import BuiltinFunctionType
-from typing import Any, cast, TYPE_CHECKING, TypeGuard, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeGuard, Union
 
 import torch._C
 import torch._numpy as tnp
@@ -58,8 +58,10 @@ from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
+    DictGetItemSource,
     GenericAttrSource,
     GetItemSource,
+    TypeDictSource,
     TypeMROSource,
     TypeSource,
     WeakRefCallSource,
@@ -1324,7 +1326,11 @@ class AutogradFunctionVariable(VariableTracker):
         )
 
     def _resolve_staticmethod(
-        self, obj: Any, source: Source | None, name: str
+        self,
+        obj: Any,
+        source: Source | None,
+        descriptor_source: Source | None,
+        name: str,
     ) -> VariableTracker:
         func = obj.__get__(self.fn_cls)
         traced = trace_rules.lookup(func)
@@ -1336,14 +1342,66 @@ class AutogradFunctionVariable(VariableTracker):
                 "on a torch.autograd.Function subclass.",
                 hints=["Use a standard function or another supported callable."],
             )
-        if source is None:
+        if source is None or descriptor_source is None:
             return traced(func)  # type: ignore[misc]
 
         # create_with_source can guard the function's code, but callers also
         # observe function identity (for example, setup_context comparisons).
+        func_source = AttrSource(descriptor_source, "__func__")
         install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+        install_guard(func_source.make_guard(GuardBuilder.ID_MATCH))
         return traced.create_with_source(  # type: ignore[attr-defined]
-            func, source=source
+            func, source=func_source
+        )
+
+    def _get_raw_attribute_source(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> Source | None:
+        if self.fn_cls_source is None:
+            return None
+
+        for idx, klass in enumerate(self.fn_cls.__mro__):
+            if name not in klass.__dict__:
+                continue
+
+            for absent_idx in range(idx):
+                absent_klass = self.fn_cls.__mro__[absent_idx]
+                cache_key = (id(absent_klass), name)
+                if cache_key in tx.output.guarded_mro_absent_keys:
+                    continue
+                tx.output.guarded_mro_absent_keys.add(cache_key)
+                klass_source: Source = self.fn_cls_source
+                if absent_idx:
+                    klass_source = GetItemSource(
+                        TypeMROSource(self.fn_cls_source), absent_idx
+                    )
+                install_guard(
+                    TypeDictSource(klass_source).make_guard(
+                        functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
+                    )
+                )
+
+            klass_source = self.fn_cls_source
+            if idx:
+                klass_source = GetItemSource(TypeMROSource(self.fn_cls_source), idx)
+            source = DictGetItemSource(TypeDictSource(klass_source), name)
+            install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+            return source
+
+        return None
+
+    def _unsupported_method(self, name: str) -> NoReturn:
+        unimplemented(
+            gb_type="Unsupported autograd.Function method",
+            context=f"call_method {self} {name}",
+            explanation="Dynamo does not support calling the method "
+            f"`{name}` directly on the `torch.autograd.Function` "
+            "instance. Supported methods include `apply`, `backward`, "
+            "static methods, and class methods.",
+            hints=[
+                "Ensure the method is decorated with `@staticmethod` "
+                "or `@classmethod` if it's meant to be called on the class.",
+            ],
         )
 
     def tp_getattro_impl(
@@ -1369,19 +1427,14 @@ class AutogradFunctionVariable(VariableTracker):
             )
 
         if type(obj) is staticmethod:
-            return self._resolve_staticmethod(obj, source, name)
+            descriptor_source = self._get_raw_attribute_source(tx, name)
+            if descriptor_source is None:
+                self._unsupported_method(name)
+            return self._resolve_staticmethod(obj, source, descriptor_source, name)
         elif type(obj) is classmethod:
             return GetAttrVariable(self, name, py_type=types.MethodType, source=source)
-        elif inspect.getattr_static(type(obj), "__get__", None) is not None:
-            unimplemented(
-                gb_type="Unsupported descriptor on torch.autograd.Function subclass",
-                context=f"{self.fn_cls.__qualname__}.{name}",
-                explanation="Dynamo does not execute custom descriptors on "
-                "torch.autograd.Function subclasses while tracing.",
-                hints=["Access custom descriptors outside the compiled region."],
-            )
 
-        return GetAttrVariable(self, name, source=source)
+        return super().tp_getattro_impl(tx, name)
 
     def call_method(
         self,
@@ -1422,30 +1475,22 @@ class AutogradFunctionVariable(VariableTracker):
                 obj = None
 
             if type(obj) is staticmethod:
-                return self._resolve_staticmethod(obj, source, name).call_function(
-                    tx, args, kwargs
-                )
+                descriptor_source = self._get_raw_attribute_source(tx, name)
+                if descriptor_source is not None:
+                    return self._resolve_staticmethod(
+                        obj, source, descriptor_source, name
+                    ).call_function(tx, args, kwargs)
             elif type(obj) is classmethod:
-                func_source = AttrSource(source, "__func__") if source else None
-                if func_source:
+                descriptor_source = self._get_raw_attribute_source(tx, name)
+                if descriptor_source is not None:
+                    func_source = AttrSource(descriptor_source, "__func__")
                     install_guard(func_source.make_guard(GuardBuilder.ID_MATCH))
                     install_guard(func_source.make_guard(GuardBuilder.CLOSURE_MATCH))
-                return variables.UserMethodVariable(
-                    obj.__func__, self, source_fn=func_source, source=source
-                ).call_function(tx, args, kwargs)
-            else:
-                unimplemented(
-                    gb_type="Unsupported autograd.Function method",
-                    context=f"call_method {self} {name}",
-                    explanation="Dynamo does not support calling the method "
-                    f"`{name}` directly on the `torch.autograd.Function` "
-                    "instance. Supported methods include `apply`, `backward`, "
-                    "static methods, and class methods.",
-                    hints=[
-                        "Ensure the method is decorated with `@staticmethod` "
-                        "or `@classmethod` if it's meant to be called on the class.",
-                    ],
-                )
+                    return variables.UserMethodVariable(
+                        obj.__func__, self, source_fn=func_source, source=source
+                    ).call_function(tx, args, kwargs)
+
+            self._unsupported_method(name)
 
 
 @dataclasses.dataclass
