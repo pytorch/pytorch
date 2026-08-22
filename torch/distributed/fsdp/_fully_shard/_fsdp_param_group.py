@@ -302,7 +302,12 @@ class FSDPParamGroup:
         self._reduce_dtype = (
             next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
         )
-        grad_dtypes = {p.sharded_param.grad_dtype for p in trainable_params}
+        # Read the construction-time snapshot rather than the live parameter,
+        # since that snapshot is what the reduce path consults for the group.
+        grad_dtypes = {
+            p._explicit_grad_dtype if p._has_explicit_grad_dtype else p.orig_dtype
+            for p in trainable_params
+        }
         if len(trainable_params) > 0 and len(grad_dtypes) != 1:
             raise AssertionError(
                 f"FSDP expects uniform grad_dtype but got {grad_dtypes}"

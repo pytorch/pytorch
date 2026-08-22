@@ -15,6 +15,7 @@ from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_state import _get_module_fsdp_state
 from torch.distributed.tensor import distribute_tensor, Shard
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
@@ -590,10 +591,28 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             is_last_microbatch = microbatch_idx == num_microbatches - 1
             model.set_requires_gradient_sync(is_last_microbatch)
             model(microbatch_inps[microbatch_idx]).sum().backward()
+            if not is_last_microbatch:
+                # The microbatch sums themselves must happen at grad_dtype
+                # precision. Checking only the final `param.grad.dtype` would
+                # miss accumulating in a narrower reduce_dtype and casting up.
+                self._assert_accumulation_dtype(model, grad_dtype)
 
         for param in model.parameters():
             self.assertIsNotNone(param.grad)
             self.assertEqual(param.grad.dtype, grad_dtype)
+
+    def _assert_accumulation_dtype(self, model: nn.Module, grad_dtype: torch.dtype):
+        for module in model.modules():
+            state = _get_module_fsdp_state(module)
+            if state is None or state._fsdp_param_group is None:
+                continue
+            for fsdp_param in state._fsdp_param_group.fsdp_params:
+                accumulated_grad = fsdp_param.unsharded_accumulated_grad
+                if accumulated_grad is not None:
+                    self.assertEqual(accumulated_grad.dtype, grad_dtype)
+                unsharded_grad = fsdp_param._unsharded_param.grad
+                if unsharded_grad is not None:
+                    self.assertEqual(unsharded_grad.dtype, grad_dtype)
 
     @skip_if_lt_x_gpu(2)
     def test_grad_dtype_numerics_grad_acc(self):
@@ -607,7 +626,9 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                     (torch.float32, torch.bfloat16),
                     (torch.bfloat16, torch.float32),
                 ],
-                "reduce_dtype": [torch.float32],
+                # bfloat16 covers reduce_dtype narrower than grad_dtype, where
+                # accumulating at reduce_dtype would silently lose precision.
+                "reduce_dtype": [torch.float32, torch.bfloat16],
             },
             self._test_grad_dtype_numerics_grad_acc,
         )
@@ -687,6 +708,57 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         inp = torch.randn(2, 16, device=device_type)
         with self.assertRaisesRegex(AssertionError, "uniform grad_dtype"):
             model(inp).sum().backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_none_keeps_orig_dtype(self):
+        """A grad_dtype of None allows any gradient dtype; it does not opt out
+        of the cast back to the original parameter dtype."""
+        torch.manual_seed(42)
+        model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
+        model.to(device=device_type, dtype=torch.float32)
+        for param in model.parameters():
+            param.grad_dtype = None
+
+        mp_policy = MixedPrecisionPolicy(reduce_dtype=torch.bfloat16)
+        for mlp in model:
+            fully_shard(mlp, mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        for param in model.parameters():
+            self.assertIsNone(param.grad_dtype)
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn(2, 16, device=device_type)
+        model(inp).sum().backward()
+
+        for param in model.parameters():
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(param.grad.dtype, torch.float32)
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_preserved_across_apply(self):
+        """`nn.Module._apply` can replace the sharded Parameter object, which
+        would otherwise drop grad_dtype."""
+        torch.manual_seed(42)
+        model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
+        model.to(device=device_type, dtype=torch.bfloat16)
+        for param in model.parameters():
+            param.grad_dtype = torch.float32
+
+        for mlp in model:
+            fully_shard(mlp)
+        fully_shard(model)
+
+        # `load_state_dict` runs the post-hook that re-derives the sharded param
+        model.load_state_dict(model.state_dict())
+        for param in model.parameters():
+            self.assertEqual(param.grad_dtype, torch.float32)
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn(2, 16, device=device_type, dtype=torch.bfloat16)
+        model(inp).sum().backward()
+        for param in model.parameters():
+            self.assertEqual(param.grad.dtype, torch.float32)
 
     @skip_if_lt_x_gpu(2)
     def test_structured_input_output(self):
