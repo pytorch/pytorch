@@ -311,8 +311,18 @@ class BatchNorm1d(_BatchNorm):
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
+        y = \frac{x - \mathrm{E}[x]}{\sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
-        y = \frac{x - \mathrm{E}[x]}{\sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,t)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(c)  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(c)  \\
+          \gamma          &=& \gamma          &(c)  \\
+          \beta           &=& \beta           &(c)
+        \end{alignat*}
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
@@ -426,13 +436,24 @@ class BatchNorm2d(_BatchNorm):
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+    with
 
-    The mean and standard-deviation are calculated per-dimension over
-    the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
-    to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,h,w)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(c)  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(c)  \\
+          \gamma          &=& \gamma          &(c)  \\
+          \beta           &=& \beta           &(c)
+        \end{alignat*}
+
+    The mean and standard-deviation are calculated per-dimension over the
+    mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter
+    vectors of size `C` (where `C` is the input number of channels). By default, the
+    elements of :math:`\gamma` are set to 1 and the elements of
+    :math:`\beta` are set to 0. At train time in the forward pass, the
     standard-deviation is calculated via the biased estimator, equivalent to
     ``torch.var(input, correction=0)``. However, the value stored in the moving average of the
     standard-deviation is calculated via the unbiased estimator, equivalent to
@@ -540,13 +561,24 @@ class BatchNorm3d(_BatchNorm):
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+    with
 
-    The mean and standard-deviation are calculated per-dimension over
-    the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
-    to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,d,h,w)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(c)  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(c)  \\
+          \gamma          &=& \gamma          &(c)  \\
+          \beta           &=& \beta           &(c)
+        \end{alignat*}
+
+    The mean and standard-deviation are calculated per-dimension over the
+    mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter
+    vectors of size `C` (where `C` is the input number of channels). By default, the
+    elements of :math:`\gamma` are set to 1 and the elements of
+    :math:`\beta` are set to 0. At train time in the forward pass, the
     standard-deviation is calculated via the biased estimator, equivalent to
     ``torch.var(input, correction=0)``. However, the value stored in the moving average of the
     standard-deviation is calculated via the unbiased estimator, equivalent to
@@ -648,15 +680,25 @@ class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
 
 
 class SyncBatchNorm(_BatchNorm):
-    r"""Applies Batch Normalization over a N-Dimensional input.
+    r"""Applies Batch Normalization over an N-Dimensional input.
 
     The N-D input is a mini-batch of [N-2]D inputs with additional channel dimension as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} \cdot \gamma + \beta
 
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
+    with
+
+    .. math::
+        \begin{alignat*}{2}
+          x               &=& x               &(n,c,\dots)  \\
+          \mathrm{E}[x]   &=& \mathrm{E}[x]   &(c)  \\
+          \mathrm{Var}[x] &=& \mathrm{Var}[x] &(c)  \\
+          \gamma          &=& \gamma          &(c)  \\
+          \beta           &=& \beta           &(c)
+        \end{alignat*}
 
     The mean and standard-deviation are calculated per-dimension over all
     mini-batches of the same process groups. :math:`\gamma` and :math:`\beta`
@@ -664,7 +706,7 @@ class SyncBatchNorm(_BatchNorm):
     By default, the elements of :math:`\gamma` are sampled from
     :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
     The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, correction=0)`.
+    ``torch.var(input, correction=0)``.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
