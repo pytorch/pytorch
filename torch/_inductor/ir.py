@@ -662,7 +662,7 @@ class IRNode:
     def wrap_for_lowering(self) -> IRNode:
         return TensorBox.create(self)
 
-    def _post_init_setattr(self, attr: str, value: Any) -> None:
+    def _post_init_setattr(self, attr: str, value: object) -> None:
         # Intended for use in __post_init__ for enforcing an invariant on a dataclass
         # If you must, can also be used for setting provenance info
         # We would like to try and minimize these usages though
@@ -3842,7 +3842,7 @@ class SqueezeView(BaseView):
 
         return new_size, reindex
 
-    def __init__(self, data: Any) -> None:
+    def __init__(self, data: object) -> None:
         raise AssertionError("use SqueezeView.create()")
 
 
@@ -5210,7 +5210,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
         return self.real_layout().storage_size()
 
     def get_buffer(self) -> Buffer:
-        def unwrap_views(target: Any) -> Any:
+        def unwrap_views(target: object) -> object:
             if isinstance(target, MutationLayoutSHOULDREMOVE):
                 return unwrap_views(target.target)
             if isinstance(target, BaseView):
@@ -7226,7 +7226,7 @@ class ExternKernel(InputsKernel):
     def get_read_writes(self) -> dependencies.ReadWrites:
         read_writes = super().get_read_writes()
 
-        def add_ir_read(value: Any) -> None:
+        def add_ir_read(value: object) -> None:
             if isinstance(value, IRNode):
                 name = value.maybe_get_name()
                 if name is not None:
@@ -7987,8 +7987,14 @@ class ExternKernel(InputsKernel):
         n_args = len(args)
         n_pos_args = len(self.arg_properties)
         # For cpp wrapper, if some positional args are not provided, we need to check
-        # if they're in the kwargs or use their default value
-        if n_args < n_pos_args:
+        # if they're in the kwargs or use their default value. This is schema-based and
+        # only applies to OpOverloads: for HigherOrderOperators (and other non-OpOverload
+        # kernels) collect_arg_kwarg_properties fills arg_properties with empty placeholder
+        # dicts (one per flattened input, not the positional-arg count), so they have no
+        # "name"/"default_value" to fill from and the args/kwargs from unflatten_args are
+        # already complete. e.g. triton_kernel_wrapper_functional passes all its tensors via
+        # kwargs (n_args == 0), which would otherwise index empty dicts here -> KeyError.
+        if n_args < n_pos_args and isinstance(self.op_overload, torch._ops.OpOverload):
             log.debug(
                 "%s has %d unprovided positional arguments. "
                 "Will check if they are in the keyword arguments or will use default values.",
