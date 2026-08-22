@@ -18,7 +18,14 @@ class ForeachMap(BaseHOP):
 _foreach_map = ForeachMap()
 
 
-def foreach_map(op: Callable, *operands: Any, **kwargs: dict[str, Any]):
+def foreach_map(
+    op: Callable,
+    *operands: Any,
+    _debug_assert_fused: bool = False,
+    **kwargs: dict[str, Any],
+):
     from torch._dynamo.polyfills import foreach_map_fn
 
-    return _foreach_map(foreach_map_fn, op, *operands, **kwargs)
+    return _foreach_map(
+        foreach_map_fn, op, *operands, _debug_assert_fused=_debug_assert_fused, **kwargs
+    )
