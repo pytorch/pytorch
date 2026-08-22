@@ -84,6 +84,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
     slowTest,
+    TEST_ACCELERATOR,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
@@ -16036,6 +16037,23 @@ class TestAutogradStreamSynchronization(TestCase):
 
 
 class TestMultithreadAutograd(TestCase):
+    # Shared preamble for subprocess scripts that need to count autograd
+    # threads via /proc.  Each test concatenates this with its own logic.
+    _AUTOGRAD_THREADS_SCRIPT = """\
+import os
+def autograd_threads():
+    names = []
+    for tid in os.listdir("/proc/self/task"):
+        try:
+            with open(f"/proc/self/task/{tid}/comm") as f:
+                name = f.read().strip()
+            if name.startswith("pt_autograd"):
+                names.append(name)
+        except OSError:
+            pass
+    return names
+"""
+
     def _run_py_multithread_fn(
         self, fn, args=(), num_threads=10, kwargs=None, pass_idx=False
     ):
@@ -16472,6 +16490,242 @@ class TestMultithreadAutograd(TestCase):
         self.assertTrue(torch._C._is_key_in_tls("test_obj"))
         torch._C._remove_obj_from_tls("test_obj")
         self.assertFalse(torch._C._is_key_in_tls("test_obj"))
+
+    @unittest.skipIf(not IS_LINUX, "requires /proc filesystem")
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires accelerator")
+    def test_no_device_threads_when_multithreading_disabled(self):
+        # Issue #184783: set_multithreading_enabled(False) should prevent
+        # autograd device threads from being spawned.
+        # We run in a subprocess to ensure a fresh engine state.
+        script = (
+            self._AUTOGRAD_THREADS_SCRIPT
+            + """\
+import sys, torch
+
+device = torch.accelerator.current_accelerator().type
+torch.autograd.set_multithreading_enabled(False)
+x = torch.ones(100, device=device, requires_grad=True)
+(x * 2).sum().backward()
+
+threads = autograd_threads()
+if threads:
+    print(f"FAIL: found autograd threads: {threads}", file=sys.stderr)
+    sys.exit(1)
+"""
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Autograd threads spawned despite multithreading disabled: {result.stderr}",
+        )
+
+    @unittest.skipIf(not IS_LINUX, "requires /proc filesystem")
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires accelerator")
+    def test_device_threads_created_on_reenable(self):
+        # Verify that disabling multithreading, running backward, then
+        # re-enabling actually creates device threads for subsequent calls.
+        script = (
+            self._AUTOGRAD_THREADS_SCRIPT
+            + """\
+import sys, threading, torch
+from torch.autograd import Function
+
+device = torch.accelerator.current_accelerator().type
+torch.autograd.set_multithreading_enabled(False)
+x = torch.ones(10, device=device, requires_grad=True)
+x.mean().backward()
+
+threads = autograd_threads()
+if threads:
+    print(f"FAIL phase1: threads exist while disabled: {threads}", file=sys.stderr)
+    sys.exit(1)
+
+torch.autograd.set_multithreading_enabled(True)
+
+exec_threads = []
+class RecordThread(Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x.clone()
+    @staticmethod
+    def backward(ctx, grad):
+        exec_threads.append(threading.current_thread().name)
+        return grad
+
+y = torch.ones(10, device=device, requires_grad=True)
+RecordThread.apply(y).sum().backward()
+
+threads = autograd_threads()
+if not threads:
+    print("FAIL phase2: no threads after re-enable", file=sys.stderr)
+    sys.exit(1)
+
+if exec_threads[0] == threading.current_thread().name:
+    print("FAIL phase2: backward ran on main thread after re-enable", file=sys.stderr)
+    sys.exit(1)
+"""
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Re-enable test failed: {result.stderr}",
+        )
+
+    @unittest.skipIf(not IS_LINUX, "requires /proc filesystem")
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires accelerator")
+    def test_device_threads_default_behavior(self):
+        # Regression guard: default multithreading (enabled) still creates
+        # device threads and routes accelerator backward work to them.
+        script = (
+            self._AUTOGRAD_THREADS_SCRIPT
+            + """\
+import sys, threading, torch
+from torch.autograd import Function
+
+exec_threads = []
+class RecordThread(Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x.clone()
+    @staticmethod
+    def backward(ctx, grad):
+        exec_threads.append(threading.current_thread().name)
+        return grad
+
+device = torch.accelerator.current_accelerator().type
+x = torch.ones(10, device=device, requires_grad=True)
+RecordThread.apply(x).sum().backward()
+
+if not autograd_threads():
+    print("FAIL: no autograd threads with default settings", file=sys.stderr)
+    sys.exit(1)
+
+if exec_threads[0] == threading.current_thread().name:
+    print("FAIL: backward ran on main thread with default settings", file=sys.stderr)
+    sys.exit(1)
+"""
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Default behavior test failed: {result.stderr}",
+        )
+
+    def test_multithreading_disabled_gradient_correctness(self):
+        # Gradient correctness on CPU with multithreading disabled.
+        with torch.autograd.set_multithreading_enabled(False):
+            x = torch.randn(4, 4, requires_grad=True)
+            y = (x**2).sum()
+            y.backward()
+            self.assertEqual(x.grad, 2 * x)
+
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires accelerator")
+    def test_multithreading_disabled_accelerator_correctness(self):
+        # Gradient correctness on accelerator with multithreading disabled.
+        device = torch.accelerator.current_accelerator().type
+        with torch.autograd.set_multithreading_enabled(False):
+            x = torch.randn(4, 4, device=device, requires_grad=True)
+            y = (x**2).sum()
+            y.backward()
+            self.assertEqual(x.grad, 2 * x)
+
+    @unittest.skipIf(not IS_LINUX, "requires /proc filesystem")
+    @unittest.skipIf(not TEST_ACCELERATOR, "test requires accelerator")
+    def test_context_manager_deferred_threads(self):
+        # Inside the disabled context manager, no device threads should
+        # be spawned.  After exiting and running backward, threads appear.
+        script = (
+            self._AUTOGRAD_THREADS_SCRIPT
+            + """\
+import sys, torch
+
+device = torch.accelerator.current_accelerator().type
+with torch.autograd.set_multithreading_enabled(False):
+    x = torch.ones(10, device=device, requires_grad=True)
+    x.mean().backward()
+    if autograd_threads():
+        print(f"FAIL: threads inside context: {autograd_threads()}", file=sys.stderr)
+        sys.exit(1)
+
+y = torch.ones(10, device=device, requires_grad=True)
+y.mean().backward()
+if not autograd_threads():
+    print("FAIL: no threads after context exit", file=sys.stderr)
+    sys.exit(1)
+"""
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Context manager test failed: {result.stderr}",
+        )
+
+    def test_reentrant_thread_pool_with_multithreading_disabled(self):
+        # Deep reentrant backward (depth > MAX_DEPTH=60) triggers
+        # add_thread_pool_task() which dereferences thread_pool_shared_.
+        # With the deferred-init change, thread_pool_shared_ is
+        # allocated in the Engine constructor, so this path must work
+        # even when start_device_threads() has been skipped.
+        script = """\
+import sys, torch
+from torch.autograd import Function, Variable
+
+class DeepReentrant(Function):
+    @staticmethod
+    def forward(ctx, x):
+        with torch.enable_grad():
+            ctx.x = Variable(x.detach(), requires_grad=True)
+            ctx.x = ctx.x - 1
+        return ctx.x.detach()
+
+    @staticmethod
+    def backward(ctx, x):
+        if ctx.x < 0:
+            return x
+        with torch.enable_grad():
+            DeepReentrant.apply(ctx.x).sum().backward()
+        return x
+
+torch.autograd.set_multithreading_enabled(False)
+
+v = torch.tensor(100.0, requires_grad=True)
+DeepReentrant.apply(v).sum().backward()
+assert v.grad is not None and v.grad.item() == 1.0, f"bad gradient: {v.grad}"
+
+v2 = torch.tensor(200.0, requires_grad=True)
+DeepReentrant.apply(v2).sum().backward()
+assert v2.grad is not None and v2.grad.item() == 1.0, f"bad gradient on reuse: {v2.grad}"
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Reentrant thread pool test failed: {result.stderr}",
+        )
 
 
 class TestNestedCheckpoint(TestCase):
