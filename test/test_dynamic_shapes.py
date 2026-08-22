@@ -2,10 +2,12 @@
 # ruff: noqa: F841
 import contextlib
 import copy
+import gc
 import itertools
 import math
 import operator
 import unittest
+import weakref
 
 import numpy as np
 import sympy
@@ -6982,6 +6984,26 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
         self.assertEqual(
             len(local_env.foreign_unbacked_symbol_cache), cache_size_before
         )
+
+    def test_foreign_cache_does_not_retain_shape_env(self):
+        foreign_env = ShapeEnv()
+        foreign_u0 = foreign_env.create_unbacked_symint()
+        foreign_ref = weakref.ref(foreign_env)
+        local_env = ShapeEnv()
+
+        self._transfer_symint(
+            local_env,
+            foreign_u0,
+            source=self._make_source("foreign_u0"),
+        )
+        self.assertIn(foreign_env, local_env.foreign_unbacked_symbol_cache)
+
+        del foreign_u0
+        del foreign_env
+        gc.collect()
+
+        self.assertIsNone(foreign_ref())
+        self.assertEqual(len(local_env.foreign_unbacked_symbol_cache), 0)
 
     def test_transfer_constrains_size_on_cache_hit(self):
         """When is_size=True and the expression resolves to a single Symbol

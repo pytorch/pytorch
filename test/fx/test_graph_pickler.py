@@ -1095,6 +1095,89 @@ class TestWeakrefPickle(TestCase):
         self.assertIs(restored_weak(), restored_strong)
 
 
+class TestShapeEnvPickle(TestCase):
+    """Regression tests for pickling a ShapeEnv whose
+    foreign_unbacked_symbol_cache (a weakref.WeakKeyDictionary keyed by live
+    ShapeEnvs) is populated. The cache is derived, reconstructed-on-demand
+    state and must not enter the pickle payload: stock pickle cannot serialize
+    the WeakKeyDictionary's internal remove-closure, and dill would resolve its
+    weakref keys and drag foreign ShapeEnvs across the boundary."""
+
+    def _make_source(self, name="t"):
+        from torch._dynamo.source import ConstantSource
+
+        return ConstantSource(name)
+
+    def _populate_foreign_cache(self, local_env, foreign_env):
+        """Mint an unbacked symint in foreign_env and transfer it into
+        local_env, which populates local_env.foreign_unbacked_symbol_cache
+        with a weakref key pointing at foreign_env."""
+        u = foreign_env.create_unbacked_symint()
+        new_expr = local_env._transfer_foreign_expr_as_unbacked(
+            u, source=self._make_source("local")
+        )
+        local_env.create_symintnode(
+            new_expr, hint=None, source=self._make_source("local")
+        )
+
+    def test_foreign_cache_populated_before_test(self):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        local_env = ShapeEnv()
+        foreign_env = ShapeEnv()
+        self.assertEqual(len(local_env.foreign_unbacked_symbol_cache), 0)
+        self._populate_foreign_cache(local_env, foreign_env)
+        # Sanity: the transfer actually populated the cache with foreign_env.
+        self.assertIn(foreign_env, local_env.foreign_unbacked_symbol_cache)
+
+    def test_shape_env_pickle_data_drops_foreign_cache(self):
+        """_ShapeEnvPickleData must strip foreign_unbacked_symbol_cache so the
+        payload pickles cleanly (repro of the bug: before the fix this raises
+        PicklingError: Can't pickle local object
+        'WeakKeyDictionary.__init__.<locals>.remove')."""
+        import pickle
+
+        from torch.fx._graph_pickler import _ShapeEnvPickleData
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        local_env = ShapeEnv()
+        foreign_env = ShapeEnv()
+        self._populate_foreign_cache(local_env, foreign_env)
+
+        data = _ShapeEnvPickleData(local_env)
+        # The WeakKeyDictionary must not be carried in the payload.
+        self.assertNotIn("foreign_unbacked_symbol_cache", data.data)
+        # And the payload must pickle without error.
+        pickle.dumps(data)
+
+    def test_shape_env_pickle_data_roundtrip_restores_empty_cache(self):
+        """After unpickle onto a fresh fake_mode's ShapeEnv, the destination
+        keeps its own empty foreign_unbacked_symbol_cache (the WeakKeyDictionary
+        never crosses the boundary)."""
+        import pickle
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx._graph_pickler import _ShapeEnvPickleData, _UnpickleState
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        local_env = ShapeEnv()
+        foreign_env = ShapeEnv()
+        self._populate_foreign_cache(local_env, foreign_env)
+
+        data = _ShapeEnvPickleData(local_env)
+        # Roundtrip the payload dict itself to prove it is picklable.
+        restored_data = pickle.loads(pickle.dumps(data))
+
+        dst_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=dst_env)
+        state = _UnpickleState(fake_mode)
+        restored_env = restored_data.unpickle(state)
+
+        self.assertIs(restored_env, dst_env)
+        # Destination keeps its own empty cache; nothing was clobbered.
+        self.assertEqual(len(restored_env.foreign_unbacked_symbol_cache), 0)
+
+
 if __name__ == "__main__":
     from torch.testing._internal.common_utils import run_tests
 
