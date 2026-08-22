@@ -54,6 +54,17 @@ def test_basic_matrix():
     check(runners == ["l-x86iavx512-16-128", "l-x86iavx512-8-64"])
 
 
+def test_onnx_config_is_preserved():
+    matrix = """{ include: [
+      { config: "onnx", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
+    ]}"""
+    result = run(matrix)
+    check(result.returncode == 0, result.stderr)
+    output = parse_output(result.stdout)
+    check(output["include"][0]["config"] == "onnx")
+    check(output["include"][0]["runner"] == "l-x86iavx512-16-128")
+
+
 def test_matrix_with_prefix():
     matrix = """{ include: [
       { config: "default", shard: 1, num_shards: 7, runner: "mt-linux.4xlarge" },
