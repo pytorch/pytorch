@@ -50,3 +50,38 @@ TEST(TestHeaderOnlyArrayRef, TestFromRange) {
     EXPECT_EQ(vec[i + 3], res_vec[i]);
   }
 }
+
+TEST(TestHeaderOnlyArrayRef, TestEqualityOperators) {
+  std::vector<int> vec = {1, 2, 3, 4};
+  std::vector<int> same_vec = {1, 2, 3, 4};
+  std::vector<int> diff_vec = {1, 2, 3, 5};
+  std::vector<int> short_vec = {1, 2, 3};
+
+  HeaderOnlyArrayRef<int> arr(vec);
+  HeaderOnlyArrayRef<int> same_arr(same_vec);
+  HeaderOnlyArrayRef<int> diff_arr(diff_vec);
+  HeaderOnlyArrayRef<int> short_arr(short_vec);
+
+  // HeaderOnlyArrayRef vs HeaderOnlyArrayRef
+  EXPECT_TRUE(arr == same_arr);
+  EXPECT_FALSE(arr != same_arr);
+  EXPECT_FALSE(arr == diff_arr);
+  EXPECT_TRUE(arr != diff_arr);
+  EXPECT_FALSE(arr == short_arr);
+  EXPECT_TRUE(arr != short_arr);
+
+  // HeaderOnlyArrayRef should agree with .equals()
+  EXPECT_EQ(arr == same_arr, arr.equals(same_arr));
+  EXPECT_EQ(arr == diff_arr, arr.equals(diff_arr));
+
+  // HeaderOnlyArrayRef vs std::vector (both orderings)
+  EXPECT_TRUE(arr == same_vec);
+  EXPECT_TRUE(same_vec == arr);
+  EXPECT_FALSE(arr != same_vec);
+  EXPECT_FALSE(same_vec != arr);
+
+  EXPECT_FALSE(arr == diff_vec);
+  EXPECT_FALSE(diff_vec == arr);
+  EXPECT_TRUE(arr != diff_vec);
+  EXPECT_TRUE(diff_vec != arr);
+}

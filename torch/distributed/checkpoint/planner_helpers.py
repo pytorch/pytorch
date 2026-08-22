@@ -30,6 +30,12 @@ from .planner import (
     WriteItem,
     WriteItemType,
 )
+from .protocol import (
+    _copy_checkpointable_tensor_metadata,
+    _get_checkpointable_tensor_chunks,
+    _is_checkpointable_tensor,
+    CheckpointableTensor,
+)
 from .resharding import (
     _check_shard_metadata_pair_overlap,
     _shards_get_overlap_region_wrt_saved_tensor,
@@ -218,6 +224,26 @@ def _create_write_item_for_tensor(fqn: str, tensor: torch.Tensor) -> WriteItem:
     )
 
 
+def _get_checkpointable_tensor_write_items(
+    fqn: str, tensor: CheckpointableTensor
+) -> list[WriteItem]:
+    if not isinstance(tensor, torch.Tensor):
+        raise TypeError("CheckpointableTensor must also be a torch.Tensor")
+    properties = TensorProperties.create_from_tensor(tensor)
+    return [
+        WriteItem(
+            index=MetadataIndex(fqn, chunk.offsets, idx),
+            type=WriteItemType.SHARD,
+            tensor_data=TensorWriteData(
+                chunk=chunk,
+                properties=properties,
+                size=torch.Size(tensor.global_shape),
+            ),
+        )
+        for idx, chunk in enumerate(_get_checkpointable_tensor_chunks(tensor))
+    ]
+
+
 def _create_write_item_for_bytesio(fqn: str, bytes: Any):
     return WriteItem(
         index=MetadataIndex(fqn),
@@ -384,6 +410,10 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
                 _create_write_item_for_shard(fqn, obj, shard_md)
                 for shard_md in obj.metadata().shards_metadata
             )
+        elif _is_checkpointable_tensor(obj):
+            # Avoid treating a local shard as a plain Tensor: the WriteItems
+            # carry both local chunk metadata and the global tensor size.
+            requests.extend(_get_checkpointable_tensor_write_items(fqn, obj))
         elif isinstance(obj, torch.Tensor):
             requests.append(_create_write_item_for_tensor(fqn, obj))
         else:
@@ -394,12 +424,14 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
 def _create_write_items(fqn: str, object: Any) -> list[WriteItem]:
     if hasattr(object, "__create_write_items__"):
         # DTensor implements _Checkpointable
-        return object.__create_write_items__(fqn, object)
+        return object.__create_write_items__(fqn, object)  # type: ignore[attr-defined]
     elif isinstance(object, ShardedTensor):
         return [
             _create_write_item_for_shard(fqn, object, shard.metadata)
             for shard in object.local_shards()
         ]
+    elif _is_checkpointable_tensor(object):
+        return _get_checkpointable_tensor_write_items(fqn, object)
     elif isinstance(object, torch.Tensor):
         return [_create_write_item_for_tensor(fqn, object)]
     else:
@@ -421,6 +453,8 @@ def _create_chunk_list(tensor: torch.Tensor) -> list[ChunkStorageMetadata]:
     if hasattr(tensor, "__create_chunk_list__"):
         # DTensor implements _Checkpointable
         local_chunks = tensor.__create_chunk_list__()  # type: ignore[attr-defined]
+    elif _is_checkpointable_tensor(tensor):
+        local_chunks = _get_checkpointable_tensor_chunks(tensor)
     elif isinstance(tensor, ShardedTensor):
         local_chunks = [
             _chunk_for_shard(shard.metadata) for shard in tensor.local_shards()
@@ -502,6 +536,8 @@ def _init_state_dict(state_dict: dict[str, Any]) -> Any:
                 torch.device, _get_device_module(device_type).current_device()
             )
             tensor = torch.empty_like(value, device=device)
+            if _is_checkpointable_tensor(value):
+                _copy_checkpointable_tensor_metadata(value, tensor)
             return tensor
         else:
             return value

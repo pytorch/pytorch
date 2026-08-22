@@ -146,7 +146,7 @@ class EventList(list):
         s1 and e1 would be start and end of the child event's interval. And
         s2 and e2 start and end of the parent event's interval
 
-        Example: In event list [[0, 10], [1, 3], [3, 4]] would have make [0, 10]
+        Example: In event list [[0, 10], [1, 3], [3, 4]] would make [0, 10]
         be a parent of two other intervals.
 
         If for any reason two intervals intersect only partially, this function
@@ -304,15 +304,16 @@ class EventList(list):
             for evt in self:
                 if evt.trace_name is None:
                     continue
+                name_json = json.dumps(evt.trace_name)
                 f.write(
-                    '{{"name": "{}", '
+                    '{{"name": {}, '
                     '"ph": "X", '
                     '"ts": {}, '
                     '"dur": {}, '
                     '"tid": {}, '
                     '"pid": "CPU functions", '
                     '"args": {{}}}}, '.format(
-                        evt.trace_name,
+                        name_json,
                         evt.time_range.start,
                         evt.time_range.elapsed_us(),
                         evt.thread
@@ -324,7 +325,7 @@ class EventList(list):
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
                     f.write(
-                        f'{{"name": "{evt.trace_name}", '
+                        f'{{"name": {name_json}, '
                         '"ph": "s", '
                         f'"ts": {evt.time_range.start}, '
                         f'"tid": {evt.thread}, '
@@ -378,6 +379,7 @@ class EventList(list):
         group_by_input_shapes=False,
         group_by_stack_n=0,
         group_by_overload_name=False,
+        include_python_functions=False,
     ):
         """Averages all function events over their keys.
 
@@ -392,6 +394,13 @@ class EventList(list):
 
             group_by_overload_name: Differentiate operators by their overload name e.g. aten::add.Tensor
             and aten::add.out will be aggregated separately
+
+            include_python_functions: include Python function events (e.g. individual
+                Python callsite entries captured with ``with_stack=True``) in the
+                averages. By default these are excluded because they tend to appear as
+                misleading hotspots (e.g. ``threading.py: wait``) that obscure the
+                real operator-level breakdown. Set to ``True`` to restore the raw
+                per-callsite view.
 
         Returns:
             An EventList containing FunctionEventAvg objects.
@@ -421,6 +430,8 @@ class EventList(list):
             return tuple(key)
 
         for evt in self:
+            if evt.is_python_function and not include_python_functions:
+                continue
             stats[
                 get_key(
                     evt, group_by_input_shapes, group_by_stack_n, group_by_overload_name
@@ -568,6 +579,8 @@ class EventMetadata(NamedTuple):
     graph_node_id: int | None
     stream: int | None
     context: int | None
+    channel: int | None
+    channel_type: int | None
     # Memory fields
     bytes: int | None
     bandwidth_gb_s: float | None
@@ -589,11 +602,6 @@ class EventMetadata(NamedTuple):
     dst_rank: int | None
     seq: int | None
     is_async: bool | None
-    # CUPTI channel and channel type for the activity, when surfaced by
-    # kineto's per-event metadata. Optional so events that don't carry
-    # them deserialize without error.
-    channel: int | None = None
-    channel_type: int | None = None
 
 
 def _to_str(v: str) -> str:
@@ -620,6 +628,8 @@ _EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
     "graph node id": ("graph_node_id", int),
     "stream": ("stream", int),
     "context": ("context", int),
+    "channel": ("channel", int),
+    "channel_type": ("channel_type", int),
     "bytes": ("bytes", int),
     "memory bandwidth (GB/s)": ("bandwidth_gb_s", float),
     "Collective name": ("collective_name", _to_str),
@@ -699,6 +709,10 @@ class FunctionEvent(FormattedTimesMixin):
         is_legacy (bool): Whether this is from the legacy profiler.
         flops (int): Estimated floating point operations.
         is_user_annotation (bool): Whether this is a user-annotated region.
+        metadata (Dict[str, Any]): Additional metadata keyed by the field names
+            used in exported traces. Use
+            ``_ExperimentalConfig(expose_kineto_event_metadata=True)`` to expose
+            Kineto activity metadata. Available fields vary by activity and backend.
         metadata_json (str): Deprecated. Use event_metadata instead.
         event_metadata (EventMetadata): Additional metadata in structured format.
         structured_input_shapes (List[List[int] | List[List[int]]]): Like ``input_shapes``
@@ -769,6 +783,7 @@ class FunctionEvent(FormattedTimesMixin):
         python_id=-1,
         python_parent_id=-1,
         python_module_id=-1,
+        typed_metadata=None,
     ):
         self.id: int = id
         self.node_id: int = node_id
@@ -818,6 +833,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.flow_start: bool | None = flow_start
         self.external_id: int = external_id
         self.linked_correlation_id: int = linked_correlation_id
+        self.metadata: dict[str, Any] | None = typed_metadata
         self.event_metadata: EventMetadata | None = (
             _build_metadata(extra_meta) if extra_meta else None
         )
