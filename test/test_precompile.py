@@ -379,6 +379,21 @@ def _precompile_calls_method(obj, x, k):
     return obj.f(x) + k
 
 
+@torch._dynamo.allow_in_graph
+def _precompile_unkeyable(t):
+    """Not on AOTAutogradCache's allowlist, so it refuses to key the graph --
+    standing in for the get_external_object_by_index a sharded model emits."""
+    return t
+
+
+def _precompile_calls_unkeyable(model, x):
+    # On BOTH sides of the break, so the capture produces two graphs the cache
+    # will not key -- which is what makes their fallback keys collide.
+    y = _precompile_unkeyable(x)
+    torch._dynamo.graph_break()
+    return model(_precompile_unkeyable(y)).sum()
+
+
 def _precompile_reads_flag(x):
     return x * getattr(x, "my_flag", 1)
 
@@ -3381,6 +3396,62 @@ class TestPrecompile(TestCase):
             self.assertEqual(loaded.serve_time_compiles(), 0)
             loaded(model, uncovered)
             self.assertGreater(loaded.serve_time_compiles(), 0)
+
+    def test_capture_records_a_graph_the_cache_will_not_key(self):
+        # AOTAutogradCache refuses to KEY a graph calling anything outside its
+        # allowlist, and a refusal means it never saves -- so the bundled
+        # artifact was never recorded and the capture ended with nothing to
+        # serialize. Any sharded model hits this: threading a process group or
+        # a stream into a graph goes through exactly such a call.
+        model, x = torch.nn.Linear(8, 4).eval(), torch.randn(3, 8)
+        with torch.no_grad():
+            want = _precompile_calls_unkeyable(model, x)
+            code, cache = torch.compiler.precompile(
+                _precompile_calls_unkeyable,
+                backend="inductor",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                require_complete=False,
+                example_inputs=[(model, x)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(model, x), want)
+
+    def test_unkeyable_graphs_in_one_capture_do_not_collide(self):
+        # The fallback key has to be unique per CALL. The keyed lookup still
+        # runs, so every graph in one capture shares a keyspace even though the
+        # artifact is addressed by backend id -- and Dynamo save/restores Python
+        # random state around each frame it compiles, so a random()-based key
+        # was the SAME for every graph and the second one hit the first's entry.
+        import torch._functorch._aot_autograd.autograd_cache as autograd_cache
+
+        keys = []
+        real = autograd_cache.autograd_cache_key
+
+        def record(*args, **kwargs):
+            result = real(*args, **kwargs)
+            keys.append(result[0] if isinstance(result, tuple) else result)
+            return result
+
+        model, x = torch.nn.Linear(8, 4).eval(), torch.randn(3, 8)
+        with (
+            mock.patch.object(autograd_cache, "autograd_cache_key", record),
+            torch.no_grad(),
+        ):
+            torch.compiler.precompile(
+                _precompile_calls_unkeyable,
+                backend="inductor",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                require_complete=False,
+                example_inputs=[(model, x)],
+            )
+        self.assertTrue(keys)
+        self.assertEqual(len(set(keys)), len(keys))
 
     def test_capture_runs_each_example_once(self):
         # Learning the guard policy from a throwaway first capture would run
