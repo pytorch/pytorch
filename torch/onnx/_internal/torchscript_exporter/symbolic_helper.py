@@ -1424,7 +1424,7 @@ def _arange_cast_helper(
     else:
         if not isinstance(dtype, int):
             raise AssertionError(f"Expected dtype to be int, got {type(dtype)}")
-        # TODO(justinchuby): Check if dtype is indeed a int.
+        # TODO(justinchuby): Check if dtype is indeed an int.
         scalar_type = _type_utils.JitScalarType(dtype)
 
     start = g.op("Cast", start, to_i=scalar_type.onnx_type()) if start else None

@@ -1,17 +1,108 @@
+# Scope the vendored QuACK object cache to Inductor and make compile-only safe.
+#
+# PyTorch needs generated FlexGEMM precompile workers and runtime execution to
+# share an Inductor-owned cache without redirecting unrelated QuACK callers. This
+# patch adds a context-local cache-dir override, renames user-visible cache log
+# messages for the vendored package, and keeps cache fingerprinting rooted in
+# torch._vendor.quack.
+#
+
+--- a/cache/__init__.py
++++ b/cache/__init__.py
+@@ -72,8 +72,9 @@
+ import os
+ import sys
+ import types
++from contextlib import contextmanager
+ from pathlib import Path
+-from typing import List, Optional
++from typing import Iterator, List, Optional
+
+ # ---------------------------------------------------------------------------
+ # Runtime flags. Source of truth.
+@@ -93,6 +94,24 @@
+
+ CACHE_ENABLED: bool = os.getenv("QUACK_CACHE_ENABLED", "1") == "1"
+ CACHE_DIR: Optional[str] = os.getenv("QUACK_CACHE_DIR", None)
++_CACHE_DIR_OVERRIDE: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
++    "quack_cache_dir_override", default=None
++)
++
++
++@contextmanager
++def cache_dir_override(cache_dir: Optional[str]) -> Iterator[None]:
++    token = _CACHE_DIR_OVERRIDE.set(cache_dir)
++    try:
++        yield
++    finally:
++        _CACHE_DIR_OVERRIDE.reset(token)
++
++
++def get_cache_dir() -> Optional[str]:
++    override = _CACHE_DIR_OVERRIDE.get()
++    return CACHE_DIR if override is None else override
++
+
+ # Stack depth for compile-only mode. ``compile_only_mode()`` pushes
+ # (depth += 1) on enter and pops (reset to prior token) on exit, so:
+@@ -207,6 +226,8 @@
+     "LOCK_TIMEOUT",
+     "FileLock",
+     "get_cache_path",
++    "cache_dir_override",
++    "get_cache_dir",
+     # Compile-only cache warming.
+     "CompileOnlyFakeTensorMode",
+     "CompileOnlyStrictError",
 --- a/cache/jit.py
 +++ b/cache/jit.py
-@@ -36 +36 @@
+@@ -33,7 +33,7 @@
+ # `quack.cache` (the package itself) holds the mutable runtime flags as a
+ # single source of truth; reads happen via attribute access on `_state` so we
+ # always see the live value, not a snapshot taken at module import.
 -import quack.cache as _state  # noqa: E402  (intentional partial-import; see __init__.py)
 +import torch._vendor.quack.cache as _state  # noqa: E402  (intentional partial-import; see __init__.py)
-@@ -52 +52 @@
+
+
+ EXPORT_FUNC_NAME = "func"
+@@ -46,10 +46,10 @@
+
+
+ def get_cache_path() -> Path:
+-    if _state.CACHE_DIR is not None:
+-        cache_dir = Path(_state.CACHE_DIR)
++    if (cache_dir_override := _state.get_cache_dir()) is not None:
++        cache_dir = Path(cache_dir_override)
+     else:
 -        cache_dir = Path(tempfile.gettempdir()) / getuser() / "quack_cache"
 +        cache_dir = Path(tempfile.gettempdir()) / getuser() / "torch_vendor_quack_cache"
-@@ -78 +78 @@
+     cache_dir.mkdir(parents=True, exist_ok=True)
+     return cache_dir
+
+@@ -75,7 +75,7 @@
+     # Hash the entire `quack` package, not just `quack/cache/`. Resolving via
+     # the top-level package import keeps the fingerprint stable regardless of
+     # where inside the package this file lives.
 -    import quack as _quack
 +    import torch._vendor.quack as _quack
-@@ -256 +256 @@
+
+     _hash_source_dir(h, Path(_quack.__file__).resolve().parent)
+     for extra_dir in _state.EXTRA_SOURCE_DIRS:
+@@ -236,7 +236,7 @@
+                         function_name=EXPORT_FUNC_NAME,
+                     )
+                 except Exception as e:
 -                    print(f"quack cache: export failed for key {sha}: {e}")
 +                    print(f"torch._vendor.quack cache: export failed for key {sha}: {e}")
-@@ -264 +264 @@
+                 cache[cache_key] = compiled_fn
+                 return _noop_kernel if compile_only else compiled_fn
+         except RuntimeError as e:
+@@ -244,7 +244,7 @@
+             # Fall back to in-process compile, no disk write. Better to do
+             # the work twice than to fail the test.
+             print(
 -                f"quack cache: lock timeout for key {sha}: {e}; "
 +                f"torch._vendor.quack cache: lock timeout for key {sha}: {e}; "
+                 f"falling back to in-process compile without disk cache"
+             )
+             misses += 1

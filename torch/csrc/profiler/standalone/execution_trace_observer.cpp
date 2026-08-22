@@ -171,7 +171,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   // RecordFunction callback in sync with the state.
   RunState state_{RunState::uninitialized};
 
-  // All tensors and operators have an unique id assigned. Increment id for each
+  // All tensors and operators have a unique id assigned. Increment id for each
   // new tensor or operator node.
   // 0 -> uninitialized
   // 1 -> root ID
@@ -217,7 +217,7 @@ struct FunctionCallContext : public ObserverContext { // NOLINT
       }
       i++;
     }
-    result += "}";
+    result += '}';
     return result;
   }
 };
@@ -316,7 +316,7 @@ static void writeJsonNode(
 static std::string timeString(const std::time_t timepoint) {
   std::ostringstream oss;
   oss << std::put_time(std::localtime(&timepoint), "%Y-%m-%d %X"); // NOLINT
-  return oss.str();
+  return std::move(oss).str();
 }
 
 static bool initExecutionTraceStart(ExecutionTraceObserver& ob) {
@@ -455,8 +455,7 @@ convertIValue(
           tensor.numel() != 0) {
         enableRecordFunction(false);
 
-        if (ob.nodeListForSavingIntegerTensor.find(functionName) !=
-                ob.nodeListForSavingIntegerTensor.end() &&
+        if (ob.nodeListForSavingIntegerTensor.contains(functionName) &&
             !ob.resourceDir.empty()) {
           std::string tensor_dump_file_name = ob.resourceDir + "/nid_" +
               std::to_string(opId) + "_tid_" + std::to_string(tensorIndex) +
@@ -588,7 +587,7 @@ static void appendValueInfo(
     std::vector<std::string>& strides,
     std::vector<std::string>& types,
     std::vector<std::string>& values) {
-  auto tuple = convertIValue(
+  auto [tensor_shape, tensor_stride, tensor_type, tensor_value] = convertIValue(
       ob,
       functionName,
       opId,
@@ -597,10 +596,10 @@ static void appendValueInfo(
       isInput,
       val,
       true);
-  shapes.push_back(std::get<0>(tuple));
-  strides.push_back(std::get<1>(tuple));
-  types.push_back(std::get<2>(tuple));
-  values.push_back(std::get<3>(tuple));
+  shapes.push_back(std::move(tensor_shape));
+  strides.push_back(std::move(tensor_stride));
+  types.push_back(std::move(tensor_type));
+  values.push_back(std::move(tensor_value));
 }
 
 static void handleKernelBackendInfo(
@@ -608,7 +607,7 @@ static void handleKernelBackendInfo(
     const RecordFunction& fn) {
   // triton kernel related information are in kwinputs
   const auto& kwinputs = fn.kwinputs();
-  if (kwinputs.find("kernel_backend") != kwinputs.end()) {
+  if (kwinputs.contains("kernel_backend")) {
     fc.kernelBackend = kwinputs.at("kernel_backend").toStringRef();
     if (fc.kernelBackend == "triton") {
       fc.kernelFile = kwinputs.at("kernel_file").toStringRef();
@@ -633,7 +632,7 @@ static void handleKernelBackendInfo(
   }
 }
 
-// Additional attributes for commounication collectives
+// Additional attributes for communication collectives
 inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   std::vector<std::string> attrs;
 
@@ -806,7 +805,7 @@ static std::string json_str_escape(const std::string& str) {
       ostream << ch;
     }
   }
-  return ostream.str();
+  return std::move(ostream).str();
 }
 
 static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
@@ -905,11 +904,11 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
   // Check if the observer is already initialized.
   if (ObserverManager::get() == nullptr) {
     ObserverManager::push(std::make_shared<ExecutionTraceObserver>());
-    auto& ob = *ObserverManager::get();
-    ob.pid = processId();
+    auto ob = ObserverManager::get();
+    ob->pid = processId();
     // Set output
-    ob.fileName = output_file_path;
-    if (!initExecutionTraceStart(ob)) {
+    ob->fileName = output_file_path;
+    if (!initExecutionTraceStart(*ob)) {
       return false;
     }
 
@@ -918,7 +917,7 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
     auto env_variable = c10::utils::get_env(
         "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE");
     if (env_variable.has_value()) {
-      ob.record_integral_tensor_range = true;
+      ob->record_integral_tensor_range = true;
     }
 
     // check if the environment variable is set to force recording integer
@@ -929,29 +928,29 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
       std::istringstream stream(env_variable.value());
       std::string token;
       while (std::getline(stream, token, ',')) {
-        ob.nodeListForSavingIntegerTensor.insert(token);
+        ob->nodeListForSavingIntegerTensor.insert(token);
       }
     }
 
-    std::size_t ext_pos = ob.fileName.rfind(".json");
+    std::size_t ext_pos = ob->fileName.rfind(".json");
     if (ext_pos != std::string::npos) {
-      ob.resourceDir = ob.fileName;
+      ob->resourceDir = ob->fileName;
       // 5 is the length of ".json"
-      ob.resourceDir.replace(ext_pos, 5, "_resources/");
-      VLOG(1) << "Execution trace resource directory: " << ob.resourceDir
+      ob->resourceDir.replace(ext_pos, 5, "_resources/");
+      VLOG(1) << "Execution trace resource directory: " << ob->resourceDir
               << '\n';
     } else {
       LOG(WARNING)
           << "Execution trace output file does not end with \".json\".";
     }
 
-    ob.cbHandle = addGlobalCallback(
+    ob->cbHandle = addGlobalCallback(
         RecordFunctionCallback(&onFunctionEnter, &onFunctionExit)
             .needsInputs(true)
             .needsOutputs(true)
             .needsIds(true));
     // Default to disabled.
-    ob.setState(ExecutionTraceObserver::RunState::disabled);
+    ob->setState(ExecutionTraceObserver::RunState::disabled);
 
     VLOG(1) << "PyTorch Execution Trace: added observer, output="
             << output_file_path;
@@ -987,21 +986,21 @@ void removeExecutionTraceObserver() {
 
 void enableExecutionTraceObserver() {
   LOG(WARNING) << "Enabling Execution Trace Observer";
-  auto& ob = *ObserverManager::get();
+  auto ob = ObserverManager::get();
   // Make sure we are not already enabled.
-  if (ob.getState() == ExecutionTraceObserver::RunState::enabled) {
+  if (ob->getState() == ExecutionTraceObserver::RunState::enabled) {
     LOG(WARNING)
         << "Trying to enable Execution Trace Observer when it's already enabled.";
   } else {
-    ob.setState(ExecutionTraceObserver::RunState::enabled);
+    ob->setState(ExecutionTraceObserver::RunState::enabled);
   }
 }
 
 void disableExecutionTraceObserver() {
   LOG(WARNING) << "Disabling Execution Trace Observer";
-  auto& ob = *ObserverManager::get();
-  if (ob.getState() != ExecutionTraceObserver::RunState::disabled) {
-    ob.setState(ExecutionTraceObserver::RunState::disabled);
+  auto ob = ObserverManager::get();
+  if (ob->getState() != ExecutionTraceObserver::RunState::disabled) {
+    ob->setState(ExecutionTraceObserver::RunState::disabled);
   } else {
     LOG(WARNING)
         << "Trying to disable Execution Trace Observer when it's already disabled.";

@@ -1,3 +1,4 @@
+# Owner(s): ["module: rocm"]
 name: build-linux-magma-rocm
 
 on:

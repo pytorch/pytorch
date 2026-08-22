@@ -18,6 +18,7 @@ from torch.types import FileLike
 
 
 log = logging.getLogger(__name__)
+AOTI_PACKAGE_DEVICE_ERROR = "Cannot load AOTInductor package for device"
 
 
 def compile_so(aoti_dir: str, aoti_files: list[str], so_path: str) -> str:
@@ -116,7 +117,9 @@ def load_package(
         if model_name not in pt2_contents.aoti_runners:
             raise RuntimeError(f"Model {model_name} not found in package")
         return pt2_contents.aoti_runners[model_name]
-    except RuntimeError:
+    except RuntimeError as e:
+        if AOTI_PACKAGE_DEVICE_ERROR in str(e):
+            raise
         log.warning("Loading outdated pt2 file. Please regenerate your package.")
 
     if isinstance(path, (io.IOBase, IO)):
