@@ -4,6 +4,7 @@
 #include <ATen/ops/mm.h>
 #endif
 
+#include <ATen/EmptyTensor.h>
 #include <ATen/native/Resize.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/inductor/inductor_ops.h>
@@ -42,7 +43,6 @@ Tensor _alloc_from_pool(
     IntArrayRef stride) {
   TORCH_CHECK(self.storage_offset() == 0);
   auto itemsize = static_cast<int64_t>(c10::elementSize(dtype));
-  TORCH_CHECK(itemsize > 0, "invalid dtype for _alloc_from_pool: ", dtype);
   TORCH_CHECK(
       offset_bytes >= 0,
       "_alloc_from_pool: offset_bytes must be non-negative, got ",
@@ -57,8 +57,23 @@ Tensor _alloc_from_pool(
   auto storage_offset = offset_bytes / itemsize;
   at::native::checkAsStridedArgs(size, stride, storage_offset);
   auto data_type = caffe2::TypeMeta::fromScalarType(dtype);
-  at::native::checkInBoundsForStorage(
-      size, stride, storage_offset, data_type, self.storage());
+  // Own message: checkInBoundsForStorage reports "setStorage:", which is
+  // misleading for this op.
+  const auto needed = at::detail::computeStorageNbytes(
+      size,
+      stride,
+      static_cast<size_t>(itemsize),
+      static_cast<size_t>(storage_offset));
+  TORCH_CHECK(
+      needed <= self.storage().nbytes(),
+      "_alloc_from_pool: sizes ",
+      size,
+      ", strides ",
+      stride,
+      ", storage offset ",
+      storage_offset,
+      " are out of bounds for storage of size ",
+      self.storage().nbytes());
   // based on alias_with_sizes_and_strides from TensorShape.cpp
   Tensor self_ = at::detail::make_tensor<TensorImpl>(
       // c10::TensorImpl::VIEW,
