@@ -293,10 +293,9 @@ c10::intrusive_ptr<Node> grad_accumulator(const Variable& self) {
   if (!autograd_meta) {
     return nullptr;
   }
-  if (autograd_meta->grad_fn_) {
-    throw std::logic_error(
-        "grad_accumulator() should be only called on leaf Variables");
-  }
+  TORCH_CHECK(
+      !autograd_meta->grad_fn_,
+      "grad_accumulator() should be only called on leaf Variables");
   if (!autograd_meta->requires_grad_) {
     return nullptr;
   }
@@ -898,7 +897,19 @@ at::Tensor ChainedViewFunc::operator()(const at::Tensor& input_base) const {
 
 std::vector<at::Tensor> ChainedViewFunc::call_multi_output(
     const at::Tensor& input_base) const {
-  return second->call_multi_output((*first)(input_base));
+  if (second->has_multi_output()) {
+    return second->call_multi_output((*first)(input_base));
+  }
+  return first->call_multi_output(input_base);
+}
+
+at::Tensor ChainedViewFunc::apply_after_multi_output(
+    const at::Tensor& output) const {
+  if (second->has_multi_output()) {
+    return second->apply_after_multi_output(output);
+  }
+  TORCH_INTERNAL_ASSERT(first->has_multi_output());
+  return (*second)(first->apply_after_multi_output(output));
 }
 
 std::unique_ptr<ViewFunc> ChainedViewFunc::clone_and_set(

@@ -2034,6 +2034,9 @@ class TensorBase(metaclass=_TensorMeta):
         tensor_visitor_fn: Callable[[Tensor], Tensor] | None = None,
     ): ...
     def _view_func_multi_output(self, new_base: Tensor) -> list[Tensor]: ...
+    def _view_func_apply_after_multi_output(
+        self, output: Tensor
+    ) -> Tensor | None: ...
     ${tensor_method_hints}
 
 _TensorBase = TensorBase

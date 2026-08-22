@@ -40,7 +40,13 @@ void initModule(PyObject* module) {
          const std::vector<std::shared_ptr<at::functionalization::ViewMeta>>&
              sequence) {
         TORCH_CHECK(
-            !sequence.empty() && sequence.back()->is_multi_output,
+            !sequence.empty(),
+            "expected a ViewMeta sequence ending in a multi-output view");
+        for (const auto i : c10::irange(sequence.size())) {
+          TORCH_CHECK(sequence[i], "expected a non-null ViewMeta at index ", i);
+        }
+        TORCH_CHECK(
+            sequence.back()->is_multi_output,
             "expected a ViewMeta sequence ending in a multi-output view");
         at::Tensor current = base;
         for (const auto i : c10::irange(sequence.size() - 1)) {
@@ -77,6 +83,11 @@ void initModule(PyObject* module) {
           "is_multi_output",
           [](const std::shared_ptr<at::functionalization::ViewMeta>& meta) {
             return meta->is_multi_output;
+          })
+      .def_property_readonly(
+          "out_index",
+          [](const std::shared_ptr<at::functionalization::ViewMeta>& meta) {
+            return meta->out_index;
           });
 
   // Bindings for `ViewMeta` specializations manually implemented.

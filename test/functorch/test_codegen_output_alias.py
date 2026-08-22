@@ -210,12 +210,12 @@ class TestCodegenOutputAlias(TestCase):
             @torch.compile(backend="aot_eager")
             def f(x):
                 views = x.unbind(0)
-                return views[2], x.sin(), views[0]
+                return views[2].unsqueeze(1), x.sin(), views[0].unsqueeze(0)
 
             x = torch.randn(4, 3, requires_grad=True)
             outs = f(x)
 
-        self.assertEqual(outs, (x[2], x.sin(), x[0]))
+        self.assertEqual(outs, (x[2].unsqueeze(1), x.sin(), x[0].unsqueeze(0)))
         self.assertIs(outs[0]._base, x)
         self.assertIs(outs[2]._base, x)
         for out in (outs[1], outs[0], outs[2]):

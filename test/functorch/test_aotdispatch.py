@@ -246,6 +246,32 @@ class AOTTestCase(TestCase):
                     self.assertTensorMetadataEqual(actual_inner, expected_inner)
 
 
+_pack_body_calls: list[int] = []
+
+
+@torch.fx.wrap
+def _alloc_unbacked_symint(t):
+    _pack_body_calls.append(1)
+    torch.all(torch.isfinite(t)).item()
+    return t
+
+
+# `type(c) is`, not isinstance: immutable_list / immutable_dict subclass
+# list / dict, so isinstance cannot tell them apart.
+@torch.fx.wrap
+def _unwrap_exact_list(c):
+    if type(c) is not list:
+        raise AssertionError(f"expected a plain list, got {type(c).__name__}")
+    return c[0]
+
+
+@torch.fx.wrap
+def _unwrap_exact_dict(c):
+    if type(c) is not dict:
+        raise AssertionError(f"expected a plain dict, got {type(c).__name__}")
+    return c["t"]
+
+
 class TestPythonKey(AOTTestCase):
     def test_make_fx(self, device):
         def f(x):
@@ -2015,7 +2041,7 @@ def forward(self, primals_1):
 
     def test_output_aliases_input_multi_output_view_should_raise_autograd_error(self):
         def f1(a):
-            return list(a.unbind(0))
+            return [out.unsqueeze(0) for out in a.unbind(0)]
 
         f1_compiled = aot_function(f1, nop)
 
@@ -2176,51 +2202,232 @@ def forward(self, primals_1):
         self.assertEqual(inp.grad, inp.cos() + torch.ones_like(inp))
 
     def test_separate_multi_output_view_calls_are_not_grouped(self):
+        class OpCounterMode(TorchDispatchMode):
+            def __init__(self, op):
+                super().__init__()
+                self.op = op
+                self.count = 0
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func == self.op:
+                    self.count += 1
+                return func(*args, **(kwargs or {}))
+
         def f(a):
-            first = a.unbind(0)
-            second = a.unbind(0)
+            first = tuple(out.unsqueeze(0) for out in a.unbind(0))
+            second = tuple(out.unsqueeze(0) for out in a.unbind(0))
             return *first, *second
 
         f_compiled = aot_function(f, nop)
+        f_compiled(torch.randn(4, 3, requires_grad=True))
         inp = torch.randn(4, 3, requires_grad=True)
-        outs = f_compiled(inp)
+        mode = OpCounterMode(torch.ops.aten.unbind.int)
+        with mode:
+            outs = f_compiled(inp)
+        self.assertEqual(mode.count, 4)
         first, second = outs[:4], outs[4:]
-        self.assertTrue(all(o.grad_fn is first[0].grad_fn for o in first))
-        self.assertTrue(all(o.grad_fn is second[0].grad_fn for o in second))
-        self.assertIsNot(first[0].grad_fn, second[0].grad_fn)
+        first_nodes = [o.grad_fn.next_functions[0][0] for o in first]
+        second_nodes = [o.grad_fn.next_functions[0][0] for o in second]
+        self.assertTrue(all(node is first_nodes[0] for node in first_nodes))
+        self.assertTrue(all(node is second_nodes[0] for node in second_nodes))
+        self.assertIsNot(first_nodes[0], second_nodes[0])
 
-    def test_multi_output_view_replay_prefix_and_suffix(self):
+    def test_multi_output_view_meta_replay_rejects_null(self):
+        with self.assertRaisesRegex(RuntimeError, "non-null ViewMeta"):
+            torch._C._functionalization.apply_multi_output_view_meta_sequence(
+                torch.ones(2),
+                [None],  # type: ignore[list-item]
+            )
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_replay_prefix_and_suffix(
+        self, view_replay_for_aliased_outputs
+    ):
+        class OpCounterMode(TorchDispatchMode):
+            def __init__(self, op):
+                super().__init__()
+                self.op = op
+                self.count = 0
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func == self.op:
+                    self.count += 1
+                return func(*args, **(kwargs or {}))
+
         def prefix(a):
             return a.transpose(0, 1).unbind(0)
 
-        def suffix(a):
-            return tuple(out.unsqueeze(0) for out in a.unbind(0))
+        def prefix_and_suffix(a):
+            views = a.transpose(0, 1).unbind(0)
+            suffix_views = tuple(
+                out.unsqueeze(0).transpose(0, 1) if i % 2 == 0 else out.unsqueeze(0)
+                for i, out in enumerate(views)
+            )
+            return *suffix_views, a.sin()
 
-        with torch._functorch.config.patch(view_replay_for_aliased_outputs=True):
+        def nested_multi_output_views(a):
+            rows = a.unbind(0)
+            first = rows[0].split(2, 0)
+            second = rows[1].split(2, 0)
+            return (
+                first[2].unsqueeze(0),
+                second[0].unsqueeze(1),
+                first[0].unsqueeze(0),
+                second[2].unsqueeze(1),
+                a.sin(),
+            )
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
             prefix_compiled = aot_function(prefix, nop)
             prefix_inp = torch.randn(3, 4, requires_grad=True)
             prefix_outs = prefix_compiled(prefix_inp)
             self.assertEqual(prefix_outs, prefix(prefix_inp))
+            if view_replay_for_aliased_outputs:
+                self.assertTrue(
+                    all(out.grad_fn is prefix_outs[0].grad_fn for out in prefix_outs)
+                )
+
+            suffix_compiled = aot_function(prefix_and_suffix, nop)
+            suffix_compiled(torch.randn(3, 4, requires_grad=True))
+            suffix_inp = torch.randn(3, 4, requires_grad=True)
+            mode = OpCounterMode(torch.ops.aten.unbind.int)
+            with mode:
+                suffix_outs = suffix_compiled(suffix_inp)
+            self.assertEqual(suffix_outs, prefix_and_suffix(suffix_inp))
+            self.assertLessEqual(mode.count, 2)
+
+            suffix_aliases = suffix_outs[:-1]
+
+            def find_unbind_node(out):
+                node = out.grad_fn
+                while "UnbindBackward" not in type(node).__name__:
+                    next_nodes = [edge[0] for edge in node.next_functions if edge[0]]
+                    self.assertEqual(len(next_nodes), 1)
+                    node = next_nodes[0]
+                return node
+
+            shared_unbind_nodes = [find_unbind_node(out) for out in suffix_aliases]
             self.assertTrue(
-                all(out.grad_fn is prefix_outs[0].grad_fn for out in prefix_outs)
+                all(node is shared_unbind_nodes[0] for node in shared_unbind_nodes)
             )
 
-            # A view after the multi-output operation has a different terminal
-            # ViewFunc for each output, so it safely uses per-output replay.
-            suffix_compiled = aot_function(suffix, nop)
-            suffix_inp = torch.randn(4, 3, requires_grad=True)
-            suffix_outs = suffix_compiled(suffix_inp)
-            self.assertEqual(suffix_outs, suffix(suffix_inp))
-            self.assertTrue(
-                all(
-                    out.grad_fn is not suffix_outs[0].grad_fn for out in suffix_outs[1:]
-                )
-            )
+            suffix_outs[-1].sum().backward()
+            for out in suffix_aliases:
+                out.sum().backward()
+            self.assertEqual(suffix_inp.grad, suffix_inp.cos() + 1)
+
+            nested_compiled = aot_function(nested_multi_output_views, nop)
+            nested_compiled(torch.randn(2, 6, requires_grad=True))
+            nested_inp = torch.randn(2, 6, requires_grad=True)
+            nested_outs = nested_compiled(nested_inp)
+            self.assertEqual(nested_outs, nested_multi_output_views(nested_inp))
+
+            def find_split_node(out):
+                node = out.grad_fn
+                while "SplitBackward" not in type(node).__name__:
+                    next_nodes = [edge[0] for edge in node.next_functions if edge[0]]
+                    self.assertEqual(len(next_nodes), 1)
+                    node = next_nodes[0]
+                return node
+
+            split_nodes = [find_split_node(out) for out in nested_outs[:-1]]
+            self.assertIs(split_nodes[0], split_nodes[2])
+            self.assertIs(split_nodes[1], split_nodes[3])
+            self.assertIsNot(split_nodes[0], split_nodes[1])
+
+            nested_outs[-1].sum().backward()
+            for out in nested_outs[:-1]:
+                out.sum().backward()
+            expected_grad = nested_inp.cos()
+            expected_grad[:, :2].add_(1)
+            expected_grad[:, 4:].add_(1)
+            self.assertEqual(nested_inp.grad, expected_grad)
 
             sum(out.sum() for out in prefix_outs).backward()
-            sum(out.sum() for out in suffix_outs).backward()
             self.assertEqual(prefix_inp.grad, torch.ones_like(prefix_inp))
-            self.assertEqual(suffix_inp.grad, torch.ones_like(suffix_inp))
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @patch("torch._functorch.config.debug_assert", True)
+    def test_synthetic_base_metadata_mutation_multi_output_view(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, b):
+            a.add_(2)
+            b.transpose_(0, 1)
+            return *a.unbind(0), a.sin()
+
+        def make_inputs():
+            leaf = torch.arange(15.0, requires_grad=True)
+            base = leaf.reshape(5, 3) + 1
+            return leaf, base[1:], base[:4]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            _, warm_a, warm_b = make_inputs()
+            compiled_f(warm_a, warm_b)
+
+            ref_leaf, ref_a, ref_b = make_inputs()
+            ref_outs = f(ref_a, ref_b)
+
+            leaf, a, b = make_inputs()
+            outs = compiled_f(a, b)
+
+        self.assertEqual(outs, ref_outs)
+        self.assertEqual(a, ref_a)
+        self.assertEqual(b, ref_b)
+        self.assertTensorMetadataEqual(b, ref_b)
+        self.assertEqual(len(outs), 5)
+
+        aliases = outs[:-1]
+        if view_replay_for_aliased_outputs:
+            self.assertTrue(all("UnbindBackward" in str(o.grad_fn) for o in aliases))
+            self.assertTrue(all(o.grad_fn is aliases[0].grad_fn for o in aliases))
+
+        sum(out.sum() for out in ref_outs).backward()
+        sum(out.sum() for out in outs).backward()
+        self.assertEqual(leaf.grad, ref_leaf.grad)
+
+        def fails_before_mutation(a, b, index):
+            out = a.index_select(0, index)
+            a.add_(2)
+            b.transpose_(0, 1)
+            return out
+
+        failing_compiled_f = aot_function(fails_before_mutation, nop)
+        _, warm_a, warm_b = make_inputs()
+        failing_compiled_f(warm_a, warm_b, torch.tensor([0]))
+
+        error_leaf, error_a, error_b = make_inputs()
+        saved_loss = error_a.square().sum()
+        versions = (error_a._version, error_b._version)
+        with self.assertRaisesRegex(IndexError, "out of range"):
+            failing_compiled_f(error_a, error_b, torch.tensor([99]))
+        self.assertEqual((error_a._version, error_b._version), versions)
+        saved_loss.backward()
+        self.assertIsNotNone(error_leaf.grad)
+
+        with (
+            torch.inference_mode(),
+            torch._functorch.config.patch(
+                debug_assert=False,
+                view_replay_for_aliased_outputs=view_replay_for_aliased_outputs,
+            ),
+        ):
+            inference_compiled_f = aot_function(f, nop)
+
+            warm_base = torch.arange(15.0).reshape(5, 3) + 1
+            inference_compiled_f(warm_base[1:], warm_base[:4])
+
+            ref_base = torch.arange(15.0).reshape(5, 3) + 1
+            ref_outs = f(ref_base[1:], ref_base[:4])
+            base = torch.arange(15.0).reshape(5, 3) + 1
+            outs = inference_compiled_f(base[1:], base[:4])
+
+        self.assertEqual(outs, ref_outs)
 
     def test_output_aliases_intermediate_multi_output_view(self):
         # All aliased outs are from multi-output views, so AOTAutograd will hide the aliasing from autograd.
@@ -5043,6 +5250,74 @@ def forward(self, tangents_1):
                     y.sum().backward()
             except torch._dynamo.exc.BackendCompilerFailed as e:
                 raise e.inner_exception from e
+
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
+    @parametrize("pack_out", ["tensor", "list", "dict"])
+    def test_saved_tensors_hooks_gm_data_dependent_probe(self, pack_out):
+        # Regression: pack GraphModule bodies that allocate a fresh unbacked
+        # SymInt (e.g. via `.item()` / `bool(<fake_tensor>)` / nonzero) used
+        # to leak into `pending_fresh_unbacked_symbols` because
+        # `maybe_inline_graph_saved_tensors_hooks` ran the hook without a
+        # ProxyTorchDispatchMode, leaving no tracker to bind the symbol.
+        #
+        # The list / dict variants additionally pin the immutable_list /
+        # immutable_dict -> list / dict normalization of the pack output. Their
+        # unpack hooks check `type(c) is list` / `type(c) is dict`, which is the
+        # only way the container type is observable.
+
+        def fn(x, w):
+            return torch.matmul(x, w).sin()
+
+        # `allocs_per_body` is how many times each variant's pack body calls
+        # _alloc_unbacked_symint, so the assertion below is in units of pack
+        # body executions regardless of variant.
+        if pack_out == "tensor":
+            allocs_per_body = 2
+
+            def pack(x):
+                x = _alloc_unbacked_symint(x)
+                return _alloc_unbacked_symint(x)
+
+            def unpack(packed):
+                return packed
+
+        elif pack_out == "list":
+            allocs_per_body = 1
+
+            def pack(x):
+                return [_alloc_unbacked_symint(x)]
+
+            def unpack(packed):
+                return _unwrap_exact_list(packed)
+
+        else:
+            allocs_per_body = 1
+
+            def pack(x):
+                return {"t": _alloc_unbacked_symint(x)}
+
+            def unpack(packed):
+                return _unwrap_exact_dict(packed)
+
+        pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
+            pack, unpack, "pack_hash", "unpack_hash"
+        )
+        x = torch.randn(8, 16, requires_grad=True)
+        w = torch.randn(16, 16, requires_grad=True)
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        _pack_body_calls.clear()
+        with torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm):
+            out = compiled(x, w)
+            out.sum().backward()
+
+        # `fn` saves 3 tensors, and the pack hook is now only traced -- not
+        # additionally executed to obtain an example value. Re-adding that
+        # second execution doubles this count, which is the regression this
+        # pins.
+        pack_body_runs, remainder = divmod(len(_pack_body_calls), allocs_per_body)
+        self.assertEqual(remainder, 0)
+        self.assertEqual(pack_body_runs, 3)
 
     def test_mark_activations_dynamic_with_nested(self):
         # The flattened tensors of the nested tensor aren't

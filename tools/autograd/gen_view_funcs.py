@@ -271,6 +271,7 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
         op_call += f"[{view_idx_name}]"
 
     multi_output_decl = (
+        "virtual bool has_multi_output() const override { return true; }\n"
         "virtual std::vector<at::Tensor> call_multi_output("
         "const at::Tensor&) const override;"
         if is_multi_output

@@ -4747,6 +4747,10 @@ module_db: list[ModuleInfo] = [
                                 "test_forward", dtypes=[torch.bfloat16]),
                    DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=2e-1, rtol=5e-2)}), "TestModule",
                                 "test_save_load", device_type="cuda", dtypes=[torch.bfloat16]),
+                   # nll_loss2d_forward_xpu is nondeterministic (bf16 atomicAdd
+                   # across batch blocks); matches the CUDA override above.
+                   DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=2e-1, rtol=5e-2)}), "TestModule",
+                                "test_save_load", device_type="xpu", dtypes=[torch.bfloat16]),
                ),
                skips=(
                    # The chunked reduction='none' backward recomputes grads

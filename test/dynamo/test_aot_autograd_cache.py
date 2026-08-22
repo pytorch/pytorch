@@ -844,7 +844,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     )
     def test_multi_output_view_replay(self):
         def fn(a):
-            return a.unbind(0)
+            return tuple(out.unsqueeze(i % 2) for i, out in enumerate(a.unbind(0)))
 
         compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
 
@@ -852,7 +852,10 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self._clear_dynamo_and_codecache()
             inp = torch.rand(4, 3, requires_grad=True)
             outs = compiled_fn(inp)
-            self.assertTrue(all(o.grad_fn is outs[0].grad_fn for o in outs))
+            shared_unbind_nodes = [o.grad_fn.next_functions[0][0] for o in outs]
+            self.assertTrue(
+                all(node is shared_unbind_nodes[0] for node in shared_unbind_nodes)
+            )
             for out in outs:
                 out.sum().backward()
             self.assertEqual(inp.grad, torch.ones_like(inp))

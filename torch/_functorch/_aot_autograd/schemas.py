@@ -116,6 +116,10 @@ class OutputAliasInfo:
     # under no_grad() that inherit requires_grad from their base without having a
     # grad_fn. Use when constructing tangent lists for torch.autograd.grad().
     requires_grad_for_backward: bool
+    # Lazy conjugate/negative metadata can be erased from compiled placeholder
+    # outputs, so preserve the trace-time values for alias reconstruction.
+    is_conj: bool
+    is_neg: bool
     # Sequence of ViewMeta objects.
     #
     # Provides us the means to re-run view functions on other tensors.
@@ -126,9 +130,8 @@ class OutputAliasInfo:
     view_meta_sequence: ViewMetaSequence | None = None
     # Differentiable input aliases produced by the same multi-output view op
     # share a group id. The output index identifies the corresponding sibling
-    # returned by that op. Runtime alias regeneration uses these fields to
-    # replay the op once for the whole group instead of once per output. The
-    # multi-output op must be terminal; descendant views use per-output replay.
+    # returned by that op. Runtime alias regeneration finds the operation in
+    # each ViewMeta chain, replays it once, then applies each output's suffix.
     multi_output_view_group: int | None = None
     multi_output_view_index: int | None = None
 
