@@ -685,6 +685,7 @@ class CompilePackage:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
         self._observed_scopes: dict[types.CodeType, list[dict[str, object]]] = {}
+        self._live_guard_leaves: dict[int, list[frozenset[tuple[str, str]]]] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[_InstalledGlobal]] = {}
@@ -833,10 +834,16 @@ class CompilePackage:
     def observed_scopes(self) -> list[list[dict[str, object]]]:
         return [self._observed_scopes.get(code, []) for code in self._codes]
 
+    def live_guard_leaves(
+        self, entry: _DynamoCodeCacheEntry
+    ) -> Sequence[frozenset[tuple[str, str]]]:
+        return self._live_guard_leaves.get(id(entry), ())
+
     def add_guarded_code(
         self,
         guards_state: bytes,
         dynamo_code: types.CodeType,
+        live_guard_leaves: frozenset[tuple[str, str]] = frozenset(),
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_guarded_code")
@@ -847,6 +854,9 @@ class CompilePackage:
             dynamo_code=SerializedCode.from_code_object(dynamo_code),
         )
         self._current_entry.guarded_codes.append(guarded_code_entry)
+        self._live_guard_leaves.setdefault(id(self._current_entry), []).append(
+            live_guard_leaves
+        )
         for backend_id in _backend_ids_from_code(dynamo_code):
             self._add_backend_id(backend_id)
 

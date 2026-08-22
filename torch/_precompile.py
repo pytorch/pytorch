@@ -1476,6 +1476,16 @@ _DYNAMO_UNMODELLED_GUARD_TYPES = frozenset(
         "TORCH_FUNCTION_STATE",
     }
 )
+_DYNAMO_ENVIRONMENT_GUARD_TYPES = frozenset(
+    {
+        "AUTOGRAD_SAVED_TENSORS_HOOKS",
+        "DEFAULT_DEVICE",
+        "DETERMINISTIC_ALGORITHMS",
+        "GRAD_MODE",
+        "GLOBAL_STATE",
+        "TORCH_FUNCTION_STATE",
+    }
+)
 _DYNAMO_VALUE_GUARD_TYPES = frozenset({"CONSTANT_MATCH", "EQUALS_MATCH"})
 _DYNAMO_OBJ_ID = re.compile(r"(?<=, )\d+(?=\), type=)")
 _DYNAMO_SAVED_HOOK_IDS = re.compile(
@@ -1556,13 +1566,23 @@ def _dynamo_guard_value(entry: Any) -> str:
                 get_tensor_guard_code_part,
             )
 
+            pytype = getattr(value, "pytype", type(value))
+            is_python_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                value, torch._subclasses.FakeTensor
+            )
+            if is_python_fake and pytype is type(value):
+                pytype = torch.Tensor
+            dispatch_keys = getattr(value, "dispatch_keys", None)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(value)
+
             return get_tensor_guard_code_part(
                 value,
                 "",
                 convert_to_concrete_values(value.size()),
                 convert_to_concrete_values(value.stride()),
-                type(value),
-                torch._C._dispatch_keys(value),
+                pytype,
+                dispatch_keys,
             )
         except Exception:
             return f"type={type(value).__name__}, dtype={value.dtype}, <unrenderable>"
@@ -1612,6 +1632,7 @@ class _DynamoCapturedGuardSet:
     facts: tuple[GuardFact, ...]
     dropped: frozenset[tuple[str, str]]
     risky_dropped: frozenset[tuple[str, str]]
+    environment: frozenset[tuple[str, str]]
 
 
 def _dynamo_frame_invariants(
@@ -1719,12 +1740,18 @@ def _filter_dynamo_guards(
     runtime_global_scope: dict[str, object],
     guarded_codes: Sequence[Any],
     captured: Sequence[_DynamoCapturedGuardSet],
+    live_leaf_sets: Sequence[frozenset[tuple[str, str]]],
 ) -> _DynamoGuardFinalization:
-    """Drop guards proven invariant across the frozen capture variants."""
+    """Rebuild, validate, and minimize guards from frozen capture state."""
     import dataclasses
     import functools
 
-    from torch._dynamo.guards import CheckFunctionManager, GuardBuilder
+    from torch._dynamo.guards import (
+        _companion_attribute_guards,
+        CheckFunctionManager,
+        GuardBuilder,
+        strip_local_scope,
+    )
     from torch._dynamo.output_graph import OutputGraphCommon
     from torch._dynamo.package import load_guard_manager, load_guards_state
     from torch._guards import GuardsSet
@@ -1768,6 +1795,11 @@ def _filter_dynamo_guards(
             "precompile tracer='dynamo' did not record one guard set for every "
             "captured variant."
         )
+    if len(states) != len(live_leaf_sets):
+        raise PrecompileError(
+            "precompile tracer='dynamo' did not record one live guard tree for "
+            "every captured variant."
+        )
     slots = {
         (fact.guard_type, fact.source)
         for record in captured
@@ -1792,15 +1824,29 @@ def _filter_dynamo_guards(
     filtered_states: list[bytes] = []
     kept_slots: list[frozenset[tuple[str, str]]] = []
     policy_dropped: set[tuple[str, str]] = set()
-    for state in states:
+    for state, record, live_leaves in zip(
+        states, captured, live_leaf_sets, strict=True
+    ):
+        live_facts: dict[tuple[str, str], set[GuardFact]] = {}
+        for fact in record.facts:
+            if fact.enforced:
+                live_facts.setdefault((fact.guard_type, fact.source), set()).add(fact)
         kept_guards = [
             guard
             for guard in state.output_graph.guards
-            if required_guard(guard) or _dynamo_guard_slot(guard) in varying_slots
+            if _dynamo_guard_slot(guard) not in record.environment
+            and (required_guard(guard) or _dynamo_guard_slot(guard) in varying_slots)
         ]
         kept_aot_guards = list(state.output_graph.aotautograd_guards)
+        environment_sources = {source for _, source in record.environment}
         kept_key_order = sorted(
-            state.output_graph.guard_on_key_order, key=lambda source: source.name
+            (
+                source
+                for source in state.output_graph.guard_on_key_order
+                if _normalize_dynamo_guard_text(strip_local_scope(source.name))
+                not in environment_sources
+            ),
+            key=lambda source: source.name,
         )
 
         output_graph = dataclasses.replace(
@@ -1816,6 +1862,26 @@ def _filter_dynamo_guards(
             if any(guard.create_fn_name() == "SHAPE_ENV" for guard in kept_guards)
             else None
         )
+        failures: list[tuple[Any, Exception]] = []
+        drifted: list[tuple[Any, GuardFact]] = []
+
+        def keep_unchanged_guards(entries: Sequence[Any]) -> list[bool]:
+            for entry in entries:
+                fact = _dynamo_guard_fact(entry, enforced=True)
+                slot = (fact.guard_type, fact.source)
+                if fact not in live_facts.get(slot, set()):
+                    drifted.append((entry.orig_guard, fact))
+            companions = _companion_attribute_guards(
+                [entry.orig_guard for entry in entries],
+                [
+                    (guard, RuntimeError("the rebuilt guard changed"))
+                    for guard, _ in drifted
+                ],
+            )
+            dropped = {id(guard) for guard, _ in drifted}
+            dropped.update(id(guard) for guard, _ in companions)
+            return [id(entry.orig_guard) not in dropped for entry in entries]
+
         check_fn = CheckFunctionManager(
             target_code,
             OutputGraphCommon(output_graph),
@@ -1824,18 +1890,84 @@ def _filter_dynamo_guards(
             save_guards=True,
             strict_error=True,
             guard_build_local_state=state.local_state,
+            serialization_guard_filter_fn=keep_unchanged_guards,
+            collect_guard_failures=failures,
         )
+        failed_slots = {_dynamo_guard_slot(guard) for guard, _ in failures}
+        input_failures = failed_slots - record.environment
+        if input_failures:
+            guard, error = next(
+                (guard, error)
+                for guard, error in failures
+                if _dynamo_guard_slot(guard) in input_failures
+            )
+            raise PrecompileError(
+                "precompile tracer='dynamo' cannot rebuild input-derived guard "
+                f"{_dynamo_guard_slot(guard)!r}: {type(error).__name__}: {error}"
+            ) from error
+        input_drift = [
+            (guard, fact)
+            for guard, fact in drifted
+            if _dynamo_guard_slot(guard) not in record.environment
+        ]
+        if input_drift:
+            guard, fact = input_drift[0]
+            raise PrecompileError(
+                "precompile tracer='dynamo' rebuilt input-derived guard "
+                f"{_dynamo_guard_slot(guard)!r} with a changed predicate: "
+                f"{fact.render()}"
+            )
         if check_fn.guards_state is None:
             raise AssertionError("guards_state must not be None")
         filtered_state = load_guards_state(check_fn.guards_state)
-        manager_for(filtered_state)
+        rebuilt = manager_for(filtered_state)
+        extra_leaves = rebuilt.leaf_fingerprint() - live_leaves
+        if extra_leaves:
+            examples = ", ".join(
+                f"{guard_type}: {payload}"
+                for guard_type, payload in sorted(extra_leaves)[:3]
+            )
+            raise PrecompileError(
+                "precompile tracer='dynamo' rebuilt a guard tree with changed "
+                f"input-derived checks: {examples}"
+            )
         filtered_states.append(check_fn.guards_state)
-        final_slots = frozenset(_dynamo_guard_slot(guard) for guard in kept_guards)
+        final_slots = frozenset(
+            _dynamo_guard_slot(guard) for guard in filtered_state.output_graph.guards
+        )
         kept_slots.append(final_slots)
         policy_dropped.update(
             {_dynamo_guard_slot(guard) for guard in state.output_graph.guards}
             - final_slots
         )
+
+    facts_by_variant = [
+        {
+            slot: frozenset(
+                dataclasses.replace(fact, enforced=True)
+                for fact in record.facts
+                if (fact.guard_type, fact.source) == slot
+            )
+            for slot in {(fact.guard_type, fact.source) for fact in record.facts}
+        }
+        for record in captured
+    ]
+    for index, facts in enumerate(facts_by_variant):
+        for earlier in range(index):
+            if not any(
+                facts_by_variant[earlier].get(slot) != facts.get(slot)
+                for slot in kept_slots[earlier]
+            ):
+                differing = sorted(
+                    slot
+                    for slot in facts_by_variant[earlier].keys() | facts.keys()
+                    if facts_by_variant[earlier].get(slot) != facts.get(slot)
+                )
+                raise PrecompileError(
+                    "precompile tracer='dynamo' dropped guards that can affect "
+                    f"dispatch between captured variants {earlier} and {index}: "
+                    f"{differing}"
+                )
 
     return _DynamoGuardFinalization(
         states=tuple(filtered_states),
@@ -2169,6 +2301,12 @@ def _dynamo_input_object_ids(
         for example in example_inputs
         for value in (*example.args, *example.kwargs.values())
     ]
+    if isinstance(fn, types.FunctionType):
+        stack.extend(fn.__defaults__ or ())
+        stack.extend((fn.__kwdefaults__ or {}).values())
+    elif isinstance(fn, types.MethodType):
+        stack.extend(fn.__func__.__defaults__ or ())
+        stack.extend((fn.__func__.__kwdefaults__ or {}).values())
     if isinstance(fn, torch.nn.Module):
         stack.append(fn)
 
@@ -2490,17 +2628,17 @@ def _precompile_dynamo(
                 )
                 for guard in guards
             ]
-            # Values reachable from explicit inputs may legitimately vary. An
-            # unsupported value reached only through other state belongs to the
-            # caller-promised invariant environment and must not poison the artifact.
+            # Explicit inputs, defaults, and values derived across graph breaks may
+            # vary. Known process state, globals, and unsupported values outside that
+            # input closure belong to the caller-promised invariant environment.
             environment_assumptions = [
-                guard.source_has_unsupported_value
-                and guard.source_root_id is not None
-                and (
-                    guard.source_root_is_module
-                    or guard.source_root_id not in input_object_ids
+                guard.guard_type in _DYNAMO_ENVIRONMENT_GUARD_TYPES
+                or (
+                    guard.source_root_id is not None
+                    and guard.source_root_id not in input_object_ids
+                    and (not guard.has_value or id(guard.value) not in input_object_ids)
+                    and (guard.is_global or guard.source_has_unsupported_value)
                 )
-                and (not guard.has_value or id(guard.value) not in input_object_ids)
                 for guard in guards
             ]
             chosen = (
@@ -2571,6 +2709,27 @@ def _precompile_dynamo(
                     facts=tuple(facts),
                     dropped=frozenset(dropped),
                     risky_dropped=frozenset(risky),
+                    environment=frozenset(
+                        slot
+                        for slot in {
+                            (
+                                entry.guard_type,
+                                _normalize_dynamo_guard_text(entry.name),
+                            )
+                            for entry in guards
+                        }
+                        if all(
+                            is_environment
+                            for entry, is_environment in zip(
+                                guards, environment_assumptions, strict=True
+                            )
+                            if (
+                                entry.guard_type,
+                                _normalize_dynamo_guard_text(entry.name),
+                            )
+                            == slot
+                        )
+                    ),
                 )
             )
             return decisions
@@ -2715,6 +2874,7 @@ def _precompile_dynamo(
                 runtime_globals,
                 code.guarded_codes,
                 captured_guard_sets.get(id(code), ()),
+                package.live_guard_leaves(code),
             )
             filtered_guard_states = finalized.states
             kept_by_entry[id(code)] = list(finalized.kept_slots)
