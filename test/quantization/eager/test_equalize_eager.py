@@ -7,10 +7,15 @@ import torch.ao.quantization._equalize as _equalize
 import torch.nn as nn
 from torch.ao.quantization.fuse_modules import fuse_modules
 from torch.testing._internal.common_quantization import QuantizationTestCase
-from torch.testing._internal.common_utils import raise_on_run_directly
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+)
 
 
 class TestEqualizeEager(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def checkChannelsEqualized(self, tensor1, tensor2, output_axis, input_axis):
         """Checks the channel ranges of tensor1, tensor2 are the same,
         which is an indication that equalization has been applied correctly
