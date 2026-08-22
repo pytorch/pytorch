@@ -2598,6 +2598,53 @@ def module_inputs_torch_nn_MaxPool1d(module_info, device, dtype, requires_grad, 
     ]
 
 
+def module_error_inputs_torch_nn_MaxPool1d(module_info, device, dtype, requires_grad, training, **kwargs):
+    """
+    Error inputs for MaxPool1d that test error messages for invalid inputs.
+    """
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    too_large = 2**63 - 1
+
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(too_large),
+                forward_input=FunctionInput(make_input((1, 1, 4))),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"kernel_size causes integer overflow"
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(1, stride=too_large),
+                forward_input=FunctionInput(make_input((1, 1, 4))),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"stride causes integer overflow"
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(1, padding=too_large),
+                forward_input=FunctionInput(make_input((1, 1, 4))),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"padding causes integer overflow"
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(1, dilation=too_large),
+                forward_input=FunctionInput(make_input((1, 1, 4))),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"dilation causes integer overflow"
+        ),
+    ]
+
+
 def module_inputs_torch_nn_MaxPool2d(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -4559,6 +4606,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.MaxPool1d,
                module_inputs_func=module_inputs_torch_nn_MaxPool1d,
+               module_error_inputs_func=module_error_inputs_torch_nn_MaxPool1d,
                ),
     ModuleInfo(torch.nn.MaxPool2d,
                module_inputs_func=module_inputs_torch_nn_MaxPool2d,
