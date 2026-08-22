@@ -7752,6 +7752,31 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
+    def test_auto_functionalized_v2_cudagraph_args_error(self):
+        for mode_cls in (
+            CUDAGraphCaptureControlFlowOpDispatchMode,
+            ControlFlowOpWarmupDispatchMode,
+        ):
+            for args in ((), (torch.ops.higher_order.while_loop,) * 2):
+                with (
+                    self.subTest(mode=mode_cls.__name__, num_args=len(args)),
+                    self.assertRaisesRegex(
+                        AssertionError,
+                        "auto_functionalized_v2 must receive exactly one "
+                        f"positional operator argument, got {len(args)}",
+                    ),
+                ):
+                    mode_cls().__torch_dispatch__(
+                        torch.ops.higher_order.auto_functionalized_v2,
+                        (),
+                        args,
+                        {},
+                    )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
     def test_while_loop_cudagraph_body_pytree_mismatch_error(self):
         def cond_fn(iteration):
             return iteration < 1
