@@ -971,6 +971,11 @@ class MultiProcessTestCase(TestCase):
         return self.id().split(".")[-1]
 
     def _start_processes(self, proc) -> None:
+        # Choose the rendezvous port once, in the parent, before spawning any
+        # rank; the ranks inherit it via os.environ. A fixed port collides when
+        # distributed tests run concurrently (sharded CI, or containers sharing
+        # a network namespace) and rank 0 dies with EADDRINUSE at init.
+        os.environ["MASTER_PORT"] = str(find_free_port())
         self.processes = []
         for rank in range(int(self.world_size)):
             parent_conn, child_conn = torch.multiprocessing.Pipe()
@@ -1736,7 +1741,7 @@ def _dynamo_dist_per_rank_init(
         backend = c10d.get_default_backend_for_device(device_type)
 
     os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "6789"
+    os.environ.setdefault("MASTER_PORT", "6789")
     if init_pg:
         if fake_pg:
             store = torch.testing._internal.distributed.fake_pg.FakeStore()
