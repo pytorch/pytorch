@@ -218,7 +218,7 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, KeysView, Sequence
+    from collections.abc import Generator, Iterator, KeysView, Sequence
 
     from sympy import Symbol
 
@@ -724,6 +724,54 @@ class GuardManagerWrapper:
                     self.get_manager_line(child_mgr, f"accessed_by={accessor.repr()}")
                 )
                 self.construct_manager_string(child_mgr, body)
+
+    def leaf_fingerprint(self) -> set[tuple[str, str]]:
+        """The leaf guards this tree checks, as comparable (class, payload).
+
+        Used to tell a tree rebuilt from a pickle apart from the tree the live
+        capture built. Only LEAVES: a node line carries the type of the guarded
+        value, which is a Tensor live and a FakeTensor reconstructed, so it
+        differs on every artifact. Depth is excluded for the same reason -- the
+        same guard can sit at a different depth without meaning anything
+        different.
+        """
+        found: set[tuple[str, str]] = set()
+
+        def payload(guard: LeafGuard) -> Iterator[str]:
+            for part in guard.verbose_code_parts():
+                # Drop the provenance comment; mask raw id()s, which differ per
+                # process; and mask the generated names of the subclass-metadata
+                # helpers, which embed one.
+                text = part.split("  # ", 1)[0]
+                text = re.sub(r"___check_metadata\S*", "___check_metadata", text)
+                yield re.sub(r"\d{6,}", "N", text)
+
+        def walk(mgr: GuardManager) -> None:
+            for guard in mgr.get_leaf_guards():
+                # Relational guards are installed by compile_check_fn, which
+                # runs for the runtime builder only, so they appear on one side
+                # of the comparison and not the other.
+                if isinstance(guard, RelationalGuard):
+                    continue
+                # A lambda's identity is its generated name, which is not stable
+                # across a rebuild -- a tensor subclass installs a metadata
+                # lambda on one side and not the other for no reason the
+                # comparison can see.
+                if type(guard).__name__ == "LAMBDA_GUARD":
+                    continue
+                found.update((type(guard).__name__, p) for p in payload(guard))
+            if isinstance(mgr, DictGuardManager):
+                for key_mgr, val_mgr in mgr.get_key_value_managers().values():
+                    for sub in (key_mgr, val_mgr):
+                        if sub is not None:
+                            walk(sub)
+            for child in mgr.get_child_managers():
+                walk(child)
+
+        walk(self.root)
+        # A capture under FakeTensorMode records the pytype it will run with, so
+        # the live tree says FakeTensor where the rebuilt one says Tensor.
+        return {(cls, p.replace(", FakeTensor,", ", Tensor,")) for cls, p in found}
 
     def __str__(self) -> str:
         with self._preserve_printed_relational_guards():
@@ -4138,6 +4186,22 @@ def _get_unsupported_types() -> tuple[type, ...]:
     return ret
 
 
+# Set while a precompile capture is running, to the leaves every LIVE guard
+# build produced. A rebuild from the artifact is compared against it, and a leaf
+# the live build never made means reconstruction lost something the guard reads.
+_LIVE_LEAF_GUARDS: set[tuple[str, str]] | None = None
+
+
+@contextlib.contextmanager
+def record_live_guard_leaves() -> Generator[set[tuple[str, str]], None, None]:
+    global _LIVE_LEAF_GUARDS
+    previous, _LIVE_LEAF_GUARDS = _LIVE_LEAF_GUARDS, set()
+    try:
+        yield _LIVE_LEAF_GUARDS
+    finally:
+        _LIVE_LEAF_GUARDS = previous
+
+
 @contextlib.contextmanager
 def _quiet(logger: logging.Logger) -> Generator[None, None, None]:
     disabled = logger.disabled
@@ -5206,6 +5270,12 @@ class CheckFunctionManager:
                     **builder.guard_tree_values,
                     **serialization_builder.guard_tree_values,
                 }
+            # Only from a LIVE build. Recording a reconstruction's leaves would
+            # let a reconstruction bug whitelist itself.
+            if _LIVE_LEAF_GUARDS is not None and not output_graph.skip_guards_check:
+                _LIVE_LEAF_GUARDS.update(
+                    serialization_builder.guard_manager.leaf_fingerprint()
+                )
 
             self.guard_manager = guard_manager
             self.compile_check_fn(builder, runtime_guards, guard_fail_fn)
