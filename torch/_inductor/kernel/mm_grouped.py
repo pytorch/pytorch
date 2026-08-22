@@ -115,14 +115,10 @@ def early_config_prune(g, m, dtsize, configs, named_args):
 
 
 def gluon_grouped_mm_configs(dtype_AB, k_is_varying):
-    import torch._inductor.config as config
     from torch._inductor.template_heuristics.gluon import get_grouped_mm_configs
-
-    exhaustive = config.max_autotune_gemm_search_space == "EXHAUSTIVE"
 
     gluon_configs = get_grouped_mm_configs(
         dtype_AB=dtype_AB,
-        exhaustive=exhaustive,
         k_is_varying=k_is_varying,
     )
 

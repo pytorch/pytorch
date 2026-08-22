@@ -96,7 +96,6 @@ def compute_stage_variants_gluon(
 
 def get_grouped_mm_configs(
     dtype_AB,
-    exhaustive: bool = False,
     k_is_varying: bool = False,
 ) -> list[GluonGroupedMMConfig]:
     """
@@ -106,7 +105,6 @@ def get_grouped_mm_configs(
 
     Args:
         dtype_AB: Data type for A and B matrices
-        exhaustive: If True, use the full search space
         k_is_varying: Whether offs partitions K
 
     Returns:
@@ -118,28 +116,23 @@ def get_grouped_mm_configs(
     # where a group's K can be far smaller than the tile. The store is
     # searched both ways: TMA needs a C staging buffer, which costs a
     # pipeline stage, so which wins is shape-dependent.
-    if exhaustive:
-        block_combos = list(itertools.product([64, 128], [32, 64, 128, 256]))
-        BLOCK_K_vals = [32, 64, 128, 256]
-        NUM_STORE_WARP_vals = [8]
-        GROUP_SIZE_N_vals = [1, 4, 8, 16]
-        USE_TMA_STORE_vals = [False, True]
-        buffer_configs_per_combo = 1
-    else:
-        block_combos = [
-            (64, 32),
-            (64, 64),
-            (64, 128),
-            (64, 256),
-            (128, 64),
-            (128, 128),
-            (128, 256),
-        ]
-        BLOCK_K_vals = [32, 64, 128] if k_is_varying else [64, 128]
-        NUM_STORE_WARP_vals = [8]
-        GROUP_SIZE_N_vals = [1, 8]
-        USE_TMA_STORE_vals = [False, True]
-        buffer_configs_per_combo = 1
+    #
+    # No EXHAUSTIVE variant: a wider space (more BLOCK_K/BLOCK_M/
+    # BLOCK_N/GROUP_SIZE_N values) measured no improvement over this.
+    block_combos = [
+        (64, 32),
+        (64, 64),
+        (64, 128),
+        (64, 256),
+        (128, 64),
+        (128, 128),
+        (128, 256),
+    ]
+    BLOCK_K_vals = [32, 64, 128] if k_is_varying else [64, 128]
+    NUM_STORE_WARP_vals = [8]
+    GROUP_SIZE_N_vals = [1, 8]
+    USE_TMA_STORE_vals = [False, True]
+    buffer_configs_per_combo = 1
 
     configs = []
     for (
