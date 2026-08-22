@@ -1,21 +1,23 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-import unittest
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
-    TEST_CUDA,
-    TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
 )
 from torch.utils.checkpoint import checkpoint
@@ -32,12 +34,10 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
-
-def get_cur_mem(rank, result, prefix):
+def get_cur_mem(rank, device_type, result, prefix):
     """Collect memory allocated values in a result dict in MB"""
-    if TEST_CUDA:
+    if device_type == "cuda":
         torch._C._cuda_clearCublasWorkspaces()
     result[prefix] = round(torch.accelerator.memory_allocated() / 1024 / 1024)
 
@@ -108,11 +108,16 @@ def create_model(with_fsdp, with_checkpoint, model_hidden_dim):
 
 
 class TestFSDPMemory(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self):
         return 2
 
-    def _dist_train(self, with_checkpoint, expected, model_hidden_dim, iterations):
+    def _dist_train(
+        self, device, with_checkpoint, expected, model_hidden_dim, iterations
+    ):
+        device_type = torch.device(device).type
         gpu_id = self.rank
         batch = torch.randn(size=(2, 3, 224, 224)).to(device_type)
 
@@ -131,24 +136,24 @@ class TestFSDPMemory(FSDPTest):
 
         results = {}  # results of memory stats
         for iteration in range(iterations):
-            get_cur_mem(gpu_id, results, f"iter {iteration}: start")
+            get_cur_mem(gpu_id, device_type, results, f"iter {iteration}: start")
 
             out = model(batch)
-            get_cur_mem(gpu_id, results, f"iter {iteration}: after fwd")
+            get_cur_mem(gpu_id, device_type, results, f"iter {iteration}: after fwd")
 
             out = sum(o.sum() for o in out[0])
             fake_loss = criterion(out, torch.tensor(0.0).to(device_type))
-            get_cur_mem(gpu_id, results, f"iter {iteration}: after loss")
+            get_cur_mem(gpu_id, device_type, results, f"iter {iteration}: after loss")
 
             fake_loss.backward()
-            get_cur_mem(gpu_id, results, f"iter {iteration}: after bwd")
+            get_cur_mem(gpu_id, device_type, results, f"iter {iteration}: after bwd")
 
             optimizer.step()
-            get_cur_mem(gpu_id, results, f"iter {iteration}: after step")
+            get_cur_mem(gpu_id, device_type, results, f"iter {iteration}: after step")
 
             # It is important to use `set_to_none` below, not optimizer.zero_grad() to reclaim memory.
             model.zero_grad(set_to_none=True)
-            get_cur_mem(gpu_id, results, f"iter {iteration}: done")
+            get_cur_mem(gpu_id, device_type, results, f"iter {iteration}: done")
 
         def cmp(results, expected):
             ret = ""
@@ -162,10 +167,11 @@ class TestFSDPMemory(FSDPTest):
         output = cmp(results, expected)
         self.assertEqual(output, "")
 
-    @unittest.skipIf(TEST_HPU, "Memory will be different for CUDA and HPU, skipping")
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize("ckpt", ["no_ckpt", "ckpt"])
-    def test_fsdp_memory(self, ckpt):
+    def test_fsdp_memory(self, device, ckpt):
+        device_type = torch.device(device).type
         # hidden_dim 128: model size ~4MB
         model_hidden_dim = 128
 
@@ -226,6 +232,7 @@ class TestFSDPMemory(FSDPTest):
         with_ckpt = ckpt == "ckpt"
 
         self._dist_train(
+            device,
             with_ckpt,
             expected,
             model_hidden_dim,
@@ -233,6 +240,6 @@ class TestFSDPMemory(FSDPTest):
         )
 
 
-instantiate_parametrized_tests(TestFSDPMemory)
+instantiate_device_type_tests(TestFSDPMemory, globals(), only_for=("cuda",))
 if __name__ == "__main__":
     run_tests()
