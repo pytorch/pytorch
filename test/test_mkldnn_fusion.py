@@ -6,7 +6,7 @@ from typing import NamedTuple
 import torch
 from torch import nn
 
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import HardwareClassification, run_tests, skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase
 
 from test_tensorexpr import warmup_and_run_forward
@@ -25,6 +25,8 @@ CONV_TRANSPOSE_MODULES = {2: torch.nn.ConvTranspose2d}
 @skipIfTorchDynamo("too slow")
 @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
 class TestMkldnnFusion(JitTestCase):
+    hw_classification = HardwareClassification.CPU
+
     def assertFused(self, graph, fused_patterns):
         for pat in fused_patterns:
             self.assertGraphContainsExactly(graph, pat, 0)
