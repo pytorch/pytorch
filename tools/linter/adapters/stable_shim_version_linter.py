@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import re
 import sys
 from pathlib import Path
@@ -45,8 +44,6 @@ def get_added_lines(filename: str) -> set[int]:
     Returns:
         Set of line numbers (1-indexed) that are new additions.
     """
-    import subprocess
-
     added_lines = set()
 
     def parse_diff(diff_output: str) -> set[int]:
@@ -70,16 +67,8 @@ def get_added_lines(filename: str) -> set[int]:
 
     try:
         # Check uncommitted changes (working directory vs HEAD)
-        result = subprocess.run(
-            ["git", "diff", "HEAD", filename],
-            cwd=REPO_ROOT,
-            env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            added_lines.update(parse_diff(result.stdout))
+        result = run_git_object_command(["diff", "HEAD", "--", filename])
+        added_lines.update(parse_diff(result.stdout))
 
         # Get merge-base with origin/main to check all PR commits
         merge_base = merge_base_with_main()
