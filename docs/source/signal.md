@@ -34,5 +34,6 @@ The `torch.signal` module, modeled after SciPy's [signal](https://docs.scipy.org
     hamming
     hann
     kaiser
+    kaiser_bessel_derived
     nuttall
 ```

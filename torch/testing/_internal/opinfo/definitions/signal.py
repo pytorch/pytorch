@@ -116,6 +116,46 @@ def reference_inputs_kaiser_window(op_info, device, dtype, requires_grad, **kwar
         yield SampleInput(size, sym=True, **kw)
 
 
+def sample_inputs_kaiser_bessel_derived_window(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    r"""Sample inputs for the Kaiser-Bessel derived window.
+
+    The window is only defined for even lengths and symmetric shapes, so unlike
+    the generic window sampler we yield even sizes with ``sym=True`` only.
+    """
+    kwargs.pop("include_conjugated_inputs", None)
+    for size in range(0, 12, 2):
+        yield SampleInput(
+            size,
+            sym=True,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+            **kwargs,
+        )
+
+
+def reference_inputs_kaiser_bessel_derived_window(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    yield from sample_inputs_kaiser_bessel_derived_window(
+        op_info, device, dtype, requires_grad, **kwargs
+    )
+
+    cases = (
+        (8, {"beta": 2}),
+        (16, {"beta": 12}),
+        (32, {"beta": 30}),
+        (64, {"beta": 35}),
+        (128, {"beta": 41.2}),
+        (256, {"beta": 100}),
+    )
+
+    for size, kw in cases:
+        yield SampleInput(size, sym=True, **kw)
+
+
 def reference_inputs_general_cosine_window(
     op_info, device, dtype, requires_grad, **kwargs
 ):
@@ -236,6 +276,33 @@ def error_inputs_kaiser_window(op_info, device, **kwargs):
     # Tests for negative beta
     yield ErrorInput(
         SampleInput(3, beta=-1, dtype=torch.float32, device=device, **kwargs),
+        error_type=ValueError,
+        error_regex="beta must be non-negative, got: -1 instead.",
+    )
+
+
+def error_inputs_kaiser_bessel_derived_window(op_info, device, **kwargs):
+    # Common error inputs. These use M=3 (odd) but trip the dtype/layout checks
+    # first, since _window_function_checks runs before the even-length check.
+    yield from error_inputs_window(op_info, device, beta=12, **kwargs)
+
+    # Asymmetric (periodic) windows are undefined for the KBD window.
+    yield ErrorInput(
+        SampleInput(4, sym=False, beta=12, dtype=torch.float32, device=device),
+        error_type=ValueError,
+        error_regex="Kaiser-Bessel derived windows are only defined for symmetric shapes",
+    )
+
+    # Odd lengths are undefined for the KBD window.
+    yield ErrorInput(
+        SampleInput(3, sym=True, beta=12, dtype=torch.float32, device=device),
+        error_type=ValueError,
+        error_regex="Kaiser-Bessel derived windows are only defined for even length, got: M=3",
+    )
+
+    # Negative beta is rejected by the underlying Kaiser window.
+    yield ErrorInput(
+        SampleInput(4, beta=-1, dtype=torch.float32, device=device),
         error_type=ValueError,
         error_regex="beta must be non-negative, got: -1 instead.",
     )
@@ -424,6 +491,19 @@ op_db: list[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_window, beta=12.0),
         reference_inputs_func=partial(reference_inputs_kaiser_window, beta=12.0),
         error_inputs_func=error_inputs_kaiser_window,
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.kaiser_bessel_derived",
+        ref=reference_signal_window(scipy.signal.windows.kaiser_bessel_derived)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=partial(
+            sample_inputs_kaiser_bessel_derived_window, beta=12.0
+        ),
+        reference_inputs_func=partial(
+            reference_inputs_kaiser_bessel_derived_window, beta=12.0
+        ),
+        error_inputs_func=error_inputs_kaiser_bessel_derived_window,
     ),
     make_signal_windows_opinfo(
         name="signal.windows.general_cosine",
