@@ -1596,6 +1596,154 @@ class WhileLoopTests(TestCase):
                 dynamic=False,
             )
 
+    def test_while_loop_effect_provenance(self):
+        inv = torch.linalg.inv
+
+        def fn(matrix, post, count, return_loop):
+            def cond(i, out):
+                return i < count
+
+            def body(i, out):
+                return i + 1, out + inv(matrix).contiguous()
+
+            carries = (torch.zeros_like(count), torch.zeros_like(matrix))
+            loop_result = torch.while_loop(cond, body, carries)[1]
+            return loop_result if return_loop else inv(post).contiguous()
+
+        backend = torch._dynamo.testing.InductorAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        matrix = torch.tensor([[2.0, 1.0], [1.0, 3.0]])
+        post = torch.tensor([[3.0, 0.0], [0.0, 4.0]])
+        actual = compiled(matrix, post, torch.tensor(2), True)
+        self.assertEqual(actual, 2 * inv(matrix))
+        singular = torch.tensor([[1.0, 2.0], [2.0, 4.0]])
+        actual = compiled(singular, post, torch.tensor(0), False)
+        self.assertEqual(actual, inv(post))
+        with self.assertRaisesRegex(torch.linalg.LinAlgError, "singular"):
+            compiled(singular, post, torch.tensor(1), False)
+
+        with_effect_nodes = backend.inductor_graphs[-1].graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.with_effects
+        )
+        loop_op = torch.ops.higher_order.while_loop
+        loop = next(node for node in with_effect_nodes if node.args[1] is loop_op)
+        self.assertEqual(len(loop.args[4]), 2)
+        # The loop participates in the ordered chain: the effect that follows
+        # it consumes the loop's token output.
+        check_errors = torch.ops.aten._linalg_check_errors.default
+        post_effect = next(n for n in with_effect_nodes if n.args[1] is check_errors)
+        # Both effects belong to one ordered chain: one consumes the getitem of
+        # the other. The direction depends on effect-discovery order.
+        post_token, loop_token = post_effect.args[0], loop.args[0]
+        chained = (
+            isinstance(post_token, torch.fx.Node) and post_token.args[:1] == (loop,)
+        ) or (
+            isinstance(loop_token, torch.fx.Node)
+            and loop_token.args[:1] == (post_effect,)
+        )
+        self.assertTrue(chained)
+
+    @requires_gpu
+    def test_while_loop_effect_provenance_gpu(self):
+        inv = torch.linalg.inv
+
+        def fn(matrix, count):
+            def cond(i, out):
+                return i < count
+
+            def body(i, out):
+                return i + 1, out + inv(matrix).contiguous()
+
+            carries = (torch.zeros_like(count), torch.zeros_like(matrix))
+            return torch.while_loop(cond, body, carries)[1]
+
+        compiled = torch.compile(fn, fullgraph=True)
+        matrix = torch.tensor([[2.0, 1.0], [1.0, 3.0]], device=GPU_TYPE)
+        count = torch.tensor(2, device=GPU_TYPE)
+        self.assertEqual(compiled(matrix, count), 2 * inv(matrix))
+
+    def test_while_loop_effect_empty_leading_carry(self):
+        inv = torch.linalg.inv
+
+        def fn(matrix, count):
+            buf = torch.zeros(0)
+            acc = torch.zeros_like(matrix)
+            i0 = torch.zeros_like(count)
+
+            def cond(buf, acc, i):
+                return i < count
+
+            def body(buf, acc, i):
+                return buf.clone(), acc + inv(matrix).contiguous(), i + 1
+
+            buf_out, acc_out, _ = torch.while_loop(cond, body, (buf, acc, i0))
+            return buf_out, acc_out
+
+        backend = torch._dynamo.testing.InductorAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        matrix = torch.tensor([[2.0, 1.0], [1.0, 3.0]])
+        buf_out, acc_out = compiled(matrix, torch.tensor(2))
+        self.assertEqual(buf_out, torch.zeros(0))
+        self.assertEqual(acc_out, 2 * inv(matrix))
+        singular = torch.tensor([[1.0, 2.0], [2.0, 4.0]])
+        with self.assertRaisesRegex(torch.linalg.LinAlgError, "singular"):
+            compiled(singular, torch.tensor(1))
+
+        with_effect_nodes = backend.inductor_graphs[0].graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.with_effects
+        )
+        loop_op = torch.ops.higher_order.while_loop
+        loop = next(node for node in with_effect_nodes if node.args[1] is loop_op)
+        # The zero-element user carry must survive as a user carry; only the
+        # marker-designated token is stripped.
+        self.assertEqual(len(loop.args[4]), 3)
+
+    def test_while_loop_effect_nested(self):
+        inv = torch.linalg.inv
+
+        def fn(matrix, count):
+            i0 = torch.zeros_like(count)
+            acc = torch.zeros_like(matrix)
+
+            def cond(i, out):
+                return i < count
+
+            def body(i, out):
+                def inner_cond(j, o):
+                    return j < count
+
+                def inner_body(j, o):
+                    return j + 1, o + inv(matrix).contiguous()
+
+                j0 = torch.zeros_like(i)
+                inner = torch.while_loop(inner_cond, inner_body, (j0, out))
+                return i + 1, inner[1]
+
+            return torch.while_loop(cond, body, (i0, acc))[1]
+
+        compiled = torch.compile(fn, fullgraph=True)
+        matrix = torch.tensor([[2.0, 1.0], [1.0, 3.0]])
+        self.assertEqual(compiled(matrix, torch.tensor(2)), 4 * inv(matrix))
+        singular = torch.tensor([[1.0, 2.0], [2.0, 4.0]])
+        with self.assertRaisesRegex(torch.linalg.LinAlgError, "singular"):
+            compiled(singular, torch.tensor(1))
+
+    def test_while_loop_body_alias_error(self):
+        def fn(matrix, count):
+            i0 = torch.zeros_like(count)
+
+            def cond(i, out):
+                return i < count
+
+            def body(i, out):
+                return i + 1, out
+
+            return torch.while_loop(cond, body, (i0, matrix))[1]
+
+        compiled = torch.compile(fn, fullgraph=True)
+        with self.assertRaisesRegex(Exception, "alias"):
+            compiled(torch.ones(2, 2), torch.tensor(1))
+
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
