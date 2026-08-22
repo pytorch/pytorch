@@ -66,7 +66,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
+        "nvidia-nvshmem-cu12==3.7.2; platform_system == 'Linux' | "
         "nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Linux'"
     ),
     "13.0": (
@@ -75,7 +75,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+        "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     ),
     "13.2": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | "
@@ -83,7 +83,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+        "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     ),
     "13.4": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.0rc1; platform_system == 'Linux' | "
@@ -91,7 +91,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cudnn-cu13==9.25.0.15; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+        "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     ),
     # dependency on latest patch version for (major, minor)
     "7.14": ("rocm[libraries,device-all]==7.14.*"),
