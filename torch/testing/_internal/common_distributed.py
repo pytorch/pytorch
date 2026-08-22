@@ -188,10 +188,10 @@ TEST_SKIPS = {
 class DistTestCases:
     # Backends that do not support a specific collective
     skip_collective = {}
-    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc", "xccl"}
+    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc", "xccl", "hccl"}
     skip_collective["reduce"] = set()
-    skip_collective["sendrecv anysource"] = {"nccl", "ucc", "xccl"}
-    skip_collective["cpu barrier"] = {"nccl", "ucc", "xccl"}
+    skip_collective["sendrecv anysource"] = {"nccl", "ucc", "xccl", "hccl"}
+    skip_collective["cpu barrier"] = {"nccl", "ucc", "xccl", "hccl"}
 
     # Sets showing that something is implemented
     backend_feature = {}
@@ -199,7 +199,12 @@ class DistTestCases:
     backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
     backend_feature["ddp"] = {"nccl", "gloo", "ucc", "xccl"}
     backend_feature["subgroup"] = {"nccl", "gloo", "ucc", "xccl"}
-    backend_feature["plugin"] = set()
+    # Dynamic discovery of third-party backends (e.g., hccl from torch_npu)
+    _BUILTIN_BACKENDS = {"nccl", "gloo", "ucc", "mpi"}
+    try:
+        backend_feature["plugin"] = set(c10d.Backend.backend_list) - _BUILTIN_BACKENDS
+    except AttributeError:
+        backend_feature["plugin"] = set()
     if TEST_HPU:
         backend_feature["hpu"] = {"hccl"}
     if TEST_XPU:
@@ -562,7 +567,7 @@ def requires_accelerator_dist_backend(backends=None):
         {
             "nccl": c10d.is_nccl_available,
             "xccl": c10d.is_xccl_available,
-            "hccl": lambda: TEST_HPU,
+            "hccl": lambda: TEST_HPU or (hasattr(torch, 'npu') and torch.npu.is_available()),
         }.get(backend, lambda: False)()
         for backend in backends
     )
@@ -807,11 +812,13 @@ def init_multigpu_helper(world_size: int, backend: str):
     On a single node, all visible GPUs are evenly
     divided to subsets, each process only uses a subset.
     """
-    nGPUs = torch.cuda.device_count()
-    if TEST_HPU:
-        nGPUs = torch.hpu.device_count()
-    if TEST_XPU:
-        nGPUs = torch.xpu.device_count()
+    acc = torch.accelerator.current_accelerator()
+    if acc is not None:
+        device_type = acc.type
+        device_module = torch.get_device_module(device_type)
+        nGPUs = device_module.device_count()
+    else:
+        nGPUs = 0
     visible_devices = range(nGPUs)
 
     # If rank is less than or equal to number of available GPU's
@@ -1306,6 +1313,8 @@ class DistributedTestBase(MultiProcessTestCase):
         if "cuda" in device:
             return "nccl"
         elif "hpu" in device:  # intel gaudi
+            return "hccl"
+        elif "npu" in device:  # ascend npu
             return "hccl"
         elif "xpu" in device:
             return "xccl"
