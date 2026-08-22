@@ -10,7 +10,10 @@
 #include <ATen/core/boxing/BoxedKernel.h>
 
 #include <c10/util/Metaprogramming.h>
+#include <cstddef>
+#include <memory>
 #include <type_traits>
+#include <utility>
 
 namespace c10::impl {
 
@@ -76,18 +79,6 @@ using can_unbox = std::conjunction<
         std::is_same<void, T>>,
     std::negation<std::is_lvalue_reference<T>>>;
 
-//
-// boxArgs - utility for pushing unboxed args onto IValue stack
-//
-template <class... Args>
-torch::jit::Stack boxArgs(Args... args) {
-  // TODO Reuse stack vector instead of allocating?
-  torch::jit::Stack stack;
-  stack.reserve(sizeof...(Args));
-  torch::jit::push(stack, std::forward<Args>(args)...);
-  return stack;
-}
-
 template <class T>
 inline constexpr size_t boxed_size_one() {
   static_assert(
@@ -103,43 +94,86 @@ inline constexpr size_t boxed_size_one<c10::TensorOptions>() {
   return 4;
 }
 
-// NOTE: this could probably be simplified with C++17 fold expressions.
-template <typename...>
-struct BoxedSize : std::integral_constant<size_t, 0> {};
-template <class T, class... Args>
-struct BoxedSize<T, Args...>
-    : std::integral_constant<
-          size_t,
-          boxed_size_one<T>() + BoxedSize<Args...>::value> {};
-
 template <class... Args>
-static inline constexpr size_t boxed_size() {
-  return BoxedSize<Args...>::value;
+consteval size_t boxed_size() {
+  return (size_t{0} + ... + boxed_size_one<Args>());
 }
 
+// dest is only advanced past a slot once its IValue is fully constructed,
+// so cleanup code (e.g. detail::BoxedBuffer) never destroys an
+// unconstructed slot if a constructor throws.
 template <typename T>
-C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(IValue*& dest, T& arg) {
-  new (dest++) IValue(arg);
+C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(IValue*& dest, T&& arg) {
+  if constexpr (std::is_same_v<std::decay_t<T>, c10::TensorOptions>) {
+    boxToStack(dest, c10::typeMetaToScalarType(arg.dtype()));
+    boxToStack(dest, arg.layout());
+    boxToStack(dest, arg.device());
+    boxToStack(dest, arg.pinned_memory());
+  } else {
+    std::construct_at(dest, std::forward<T>(arg));
+    ++dest;
+  }
 }
 
-C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(
-    IValue*& dest,
-    c10::TensorOptions options) {
-  new (dest++) IValue(c10::typeMetaToScalarType(options.dtype()));
-  new (dest++) IValue(options.layout());
-  new (dest++) IValue(options.device());
-  new (dest++) IValue(options.pinned_memory());
-}
-
-inline void boxArgsToStack(IValue*& /*unused*/) {}
-
-template <typename T, typename... Args>
+template <typename... Args>
 C10_ALWAYS_INLINE_UNLESS_MOBILE void boxArgsToStack(
     IValue*& dest,
-    T& arg,
-    Args&... args) {
-  boxToStack(dest, arg);
-  boxArgsToStack(dest, args...);
+    Args&&... args) {
+  (boxToStack(dest, std::forward<Args>(args)), ...);
+}
+
+//
+// boxArgs - utility for boxing unboxed args into an IValue stack
+//
+// The args are boxed into a stack-local buffer and moved into the returned
+// vector by a shared non-template helper, so each instantiation only emits
+// the type-dependent IValue constructions. This keeps the per-signature
+// code size of BoxedKernelWrapper instantiations small (there are hundreds
+// of them in libtorch).
+//
+
+// Moves [begin, end) into a freshly allocated Stack. Destroying the
+// (then moved-from) IValues is left to the caller's BoxedBuffer.
+TORCH_API torch::jit::Stack boxedBufferToStack(IValue* begin, IValue* end);
+
+// Destroys [begin, end). Out of line so that each boxArgs instantiation
+// emits a single call instead of its own unrolled sequence of inlined
+// IValue destructors.
+TORCH_API void destroyBoxedBuffer(IValue* begin, IValue* end) noexcept;
+
+namespace detail {
+// Uninitialized storage for N boxed IValues. The destructor destroys
+// [begin, end): cheap moved-from IValues after a successful
+// boxedBufferToStack, or the constructed prefix if boxing or the Stack
+// allocation threw.
+template <size_t N>
+struct BoxedBuffer final {
+  // See Dispatcher::callWithDispatchKeySlowPath for why this is not an
+  // std::array<IValue, N>.
+  // NOLINTNEXTLINE(*array*)
+  alignas(IValue) std::byte storage[N * sizeof(IValue)];
+  IValue* begin;
+  IValue* end;
+
+  BoxedBuffer() : begin(reinterpret_cast<IValue*>(storage)), end(begin) {}
+  BoxedBuffer(const BoxedBuffer&) = delete;
+  BoxedBuffer& operator=(const BoxedBuffer&) = delete;
+  ~BoxedBuffer() {
+    destroyBoxedBuffer(begin, end);
+  }
+};
+} // namespace detail
+
+template <class... Args>
+torch::jit::Stack boxArgs(Args&&... args) {
+  constexpr size_t num_boxed = boxed_size<Args...>();
+  if constexpr (num_boxed == 0) {
+    return torch::jit::Stack();
+  } else {
+    detail::BoxedBuffer<num_boxed> buffer;
+    boxArgsToStack(buffer.end, std::forward<Args>(args)...);
+    return boxedBufferToStack(buffer.begin, buffer.end);
+  }
 }
 
 //
