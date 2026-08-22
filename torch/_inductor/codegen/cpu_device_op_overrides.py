@@ -5,7 +5,7 @@ from textwrap import dedent
 from .common import DeviceIdx, DeviceOpOverrides, register_device_op_overrides
 
 
-class CpuDeviceOpOverrides(DeviceOpOverrides):
+class NoOpDeviceOpOverrides(DeviceOpOverrides):
     def import_get_raw_stream_as(self, name: str) -> str:
         return dedent(
             """
@@ -25,6 +25,11 @@ class CpuDeviceOpOverrides(DeviceOpOverrides):
 
     def device_guard(self, device_idx: DeviceIdx) -> str:
         return "torch._ops.contextlib.nullcontext()"
+
+
+class CpuDeviceOpOverrides(NoOpDeviceOpOverrides):
+    def aten_device_type(self) -> str:
+        return "at::kCPU"
 
 
 register_device_op_overrides("cpu", CpuDeviceOpOverrides())
