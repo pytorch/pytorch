@@ -1609,6 +1609,69 @@ class TestDistributions(DistributionsTestCase):
         )
         self.assertEqual(Bernoulli(p).sample((2,)).size(), (2, 2, 3, 5))
 
+    def test_bernoulli_boundary_log_prob(self):
+        # Regression test for gh-186825: when ``Bernoulli`` is constructed via
+        # ``probs`` at the exact boundary values ``p=0`` or ``p=1``, log_prob
+        # must return exact ``-inf`` for impossible events and exact ``0.0`` for
+        # certain events, instead of the dtype-dependent ``log(eps)`` values
+        # produced by the BCE-with-clamped-logits path. Mirrors the existing
+        # boundary handling in ``Geometric.log_prob`` and matches
+        # ``scipy.stats.bernoulli``.
+        for dtype in (torch.float32, torch.float64):
+            p0 = torch.tensor(0.0, dtype=dtype)
+            p1 = torch.tensor(1.0, dtype=dtype)
+            neg_inf = torch.tensor(float("-inf"), dtype=dtype)
+            zero = torch.tensor(0.0, dtype=dtype)
+            one_f = torch.tensor(1.0, dtype=dtype)
+
+            # Impossible boundary events: log_prob == -inf.
+            self.assertEqual(
+                Bernoulli(p0).log_prob(one_f),
+                neg_inf,
+            )
+            self.assertEqual(
+                Bernoulli(p1).log_prob(zero),
+                neg_inf,
+            )
+            # Certain boundary events: log_prob == 0.
+            self.assertEqual(
+                Bernoulli(p0).log_prob(zero),
+                zero,
+            )
+            self.assertEqual(
+                Bernoulli(p1).log_prob(one_f),
+                zero,
+            )
+
+            # Batched tensor probs at the boundary, broadcasting against a
+            # tensor value. Indices: [p=0, v=1], [p=1, v=0], [p=0, v=0],
+            # [p=1, v=1].
+            probs = torch.tensor([0.0, 1.0, 0.0, 1.0], dtype=dtype)
+            vals = torch.tensor([1.0, 0.0, 0.0, 1.0], dtype=dtype)
+            expected = torch.tensor(
+                [float("-inf"), float("-inf"), 0.0, 0.0], dtype=dtype
+            )
+            self.assertEqual(
+                Bernoulli(probs=probs).log_prob(vals),
+                expected,
+                atol=0,
+                rtol=0,
+            )
+
+            # Sanity: an interior probs value is unaffected by the boundary
+            # correction (the fix only runs at p == 0 / p == 1).
+            self.assertEqual(
+                Bernoulli(probs=torch.tensor(0.5, dtype=dtype)).log_prob(one_f),
+                torch.tensor(math.log(0.5), dtype=dtype),
+            )
+
+            # Laziness guard: distributions constructed with ``logits`` (not
+            # ``probs``) do not apply the boundary correction. ``probs`` must
+            # not be materialized on logits-constructed instances.
+            logits_b = Bernoulli(logits=torch.tensor(0.0, dtype=dtype))
+            self.assertNotIn("probs", logits_b.__dict__)
+            logits_b.log_prob(one_f)
+
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
     def test_geometric(self):
