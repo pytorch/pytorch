@@ -245,8 +245,6 @@ docs/source/scripts/lr_scheduler_images/
 
 # build, distribute, and bins (+ python proto bindings)
 build/
-# Allow tools/build/bazel for build support.
-!tools/build/bazel
 build_host_protoc
 build_android
 build_ios
@@ -304,9 +302,6 @@ cmake-build-debug
 
 # Scratch space for agent-authored throwaway files
 agent_space/
-
-# Downloaded bazel
-tools/bazel
 
 # Visual Studio Code files
 .vs
