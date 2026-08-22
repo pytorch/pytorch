@@ -29,6 +29,18 @@ _TRITON_REQUIRED_VERSION_MAJOR = 3
 _TRITON_MINIMUM_VERSION_MINOR = 6
 
 
+def _available_triton_version() -> Version | None:
+    import torch
+
+    distributions = (
+        ("triton-rocm", "triton") if torch.version.hip is not None else ("triton",)
+    )
+    for distribution in distributions:
+        if version := _available_version(distribution):
+            return version
+    return None
+
+
 @functools.cache
 def _check_runtime_available() -> tuple[bool, Version | None]:
     """
@@ -46,7 +58,7 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
     reason = _unavailable_reason(deps)
     if reason is None:
         available = True
-        version = _available_version("triton")
+        version = _available_triton_version()
     else:
         # info, not warning: see cutedsl_utils._check_runtime_available for
         # rationale (missing optional deps is the common case; surface via

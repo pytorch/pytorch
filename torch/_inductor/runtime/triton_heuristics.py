@@ -38,7 +38,11 @@ from torch._inductor.config import triton as inductor_triton_config
 from torch._prims_common import compute_required_storage_length
 from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._triton import get_triton_version, has_triton_stable_tma_api
+from torch.utils._triton import (
+    get_triton_version,
+    has_triton_stable_tma_api,
+    HIP_MAX_GRID_THREADS,
+)
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
@@ -3799,7 +3803,7 @@ def _check_max_grid_x(size_hints, x, num_warps, *, warp_size: int = 32):
     if torch.version.hip:
         # HIP has a 2^31-1 limit on total threads (num_blocks * num_warps * warp_size)
         while (
-            (num_blocks * num_warps * warp_size) > max_grid_x
+            (num_blocks * num_warps * warp_size) > HIP_MAX_GRID_THREADS
             and x < size_hints["x"]
             and x < max_block_x
         ):
