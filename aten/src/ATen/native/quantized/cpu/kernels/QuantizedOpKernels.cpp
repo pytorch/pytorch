@@ -2943,7 +2943,7 @@ void quantized_normalize_kernel(
     const scalar_t* X_data = X.const_data_ptr<scalar_t>();
     const float* gamma_data = gamma.defined() ? gamma.const_data_ptr<float>() : nullptr;
     const float* beta_data = beta.defined() ? beta.const_data_ptr<float>() : nullptr;
-    scalar_t* Y_data = Y->data_ptr<scalar_t>();
+    scalar_t* Y_data = Y->mutable_data_ptr<scalar_t>();
     const bool gamma_null = gamma_data == nullptr;
     const bool beta_null = beta_data == nullptr;
     int64_t x_zp = X.q_zero_point();
@@ -3231,7 +3231,7 @@ void quantized_groupnorm_nhwc_kernel(
     const scalar_t* X_data = X.const_data_ptr<scalar_t>();
     const float* gamma_data = gamma.defined() ? gamma.const_data_ptr<float>() : nullptr;
     const float* beta_data = beta.defined() ? beta.const_data_ptr<float>() : nullptr;
-    scalar_t* Y_data = Y->data_ptr<scalar_t>();
+    scalar_t* Y_data = Y->mutable_data_ptr<scalar_t>();
     const bool gamma_null = gamma_data == nullptr;
     const bool beta_null = beta_data == nullptr;
     int64_t x_zp = X.q_zero_point();
