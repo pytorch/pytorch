@@ -15,6 +15,16 @@
 @end
 
 namespace at::mps {
+
+// Number of MPSGraph encodes to accumulate into one command buffer before
+// committing and releasing it. See executeMPSGraph() for why this is needed.
+// 8 was picked by measurement on an M4: it keeps a 20k iteration LSTM loop
+// flat at ~185 MB where the unbounded version reaches 16 GB, and it is the
+// fastest setting measured on large graphs, where the memory pressure costs
+// more time than the extra command buffers do. Larger values stop bounding
+// memory on big graphs (64 leaves a 1024 hidden, 100 step LSTM at 13 GB).
+constexpr uint64_t kEncodesPerCommandBuffer = 8;
+
 //-----------------------------------------------------------------
 //  MPSStream
 //-----------------------------------------------------------------
@@ -248,6 +258,23 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
       profiler.endProfileKernel(mpsGraph, this, _syncType);
     } else {
       synchronize(_syncType);
+    }
+
+    // MPSGraph allocates scratch buffers for a graph's internal intermediates
+    // straight from the device, so they never pass through MPSAllocator. That
+    // scratch is retained by the command buffer it was encoded into and is only
+    // reclaimed once the buffer completes and is released. With
+    // commitAndContinue enabled, commit() calls commitAndContinue on the same
+    // MPSCommandBuffer and never releases it, so only commitAndWait() ever
+    // drops it. A loop that does not synchronize therefore holds one scratch
+    // allocation per encode for the life of the process (see #145374).
+    // Committing and releasing the command buffer every so often lets the
+    // driver reclaim that memory. flush() does not wait on the GPU and the next
+    // encode creates a fresh command buffer, so this does not stall the
+    // pipeline.
+    if (_enableCommitAndContinue && ++_encodesSinceFlush >= kEncodesPerCommandBuffer) {
+      flush();
+      _encodesSinceFlush = 0;
     }
   });
 }
