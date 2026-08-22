@@ -861,6 +861,21 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.GetAttrVariable(self, name, source=source)
         if self.value is collections.OrderedDict:
             return variables.GetAttrVariable(self, name, py_type=type(cls_attr))
+        if source is None and isinstance(cls_attr, (list, dict, set)):
+            # No source means the class has no way to be reconstructed from
+            # a root -- built inside the compiled region (LOAD_BUILD_CLASS),
+            # or otherwise reached sourcelessly (e.g. via SourcelessBuilder).
+            # Either way a fresh VT would be built on every read, and each VT
+            # tracks its own contents, so a mutation made through an earlier
+            # read would be lost. In CPython cls.attr returns the same object
+            # every time, so memoize to match. Does not cover a mutable
+            # container nested inside an immutable one (e.g. a tuple of
+            # lists), which isn't caught by the isinstance check above. For
+            # a class that pre-existed the region and is only reached
+            # sourcelessly, the memo keeps in-region reads consistent with
+            # each other, but the mutation is still never replayed onto the
+            # real object -- there's no source to write it back through.
+            return tx.output.side_effects.build_sourceless_cls_attr(tx, cls_attr)
         return VariableTracker.build(tx, cls_attr, source)
 
     def invoke_cls_descriptor_get(
@@ -3641,6 +3656,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source = self.get_source_by_walking_mro(tx, name)
         elif not source and self.cls_source is not None:
             source = AttrSource(self.cls_source, name)
+        if source is None and isinstance(type_attr, (list, dict, set)):
+            # Same memoization as UserDefinedClassVariable.resolve_cls_plain_attr,
+            # for a mutable class attribute read through an instance. A class
+            # with a cls_source (defined outside the compiled region) keys on
+            # that instead; this path is for a class reached with no source.
+            return tx.output.side_effects.build_sourceless_cls_attr(tx, type_attr)
         return VariableTracker.build(tx, type_attr, source)
 
     def invoke_descriptor_get(
