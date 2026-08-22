@@ -9111,6 +9111,18 @@ class TestNNDeviceType(NNTestCase):
             ], device=device)
             F.fold(tensor_data, 16, 7318349394477056)
 
+        # Host-side overflow guard on the derived sliding-window arithmetic:
+        # adversarial kernel/dilation/padding must be rejected rather than
+        # overflowing int64 into a spuriously valid count (see gh-189667).
+        with self.assertRaisesRegex(RuntimeError, r"Sliding-window count overflowed"):
+            F.unfold(
+                torch.zeros(1, 3, 3, 3, device=device),
+                kernel_size=(2**63 - 2, 2**63 - 2),
+                dilation=(10**12, 10**12),
+                padding=(10**12, 10**12),
+                stride=(10**12, 10**12),
+            )
+
     @onlyCUDA
     @dtypes(torch.float, torch.double)
     def test_rnn_fused(self, device, dtype):
