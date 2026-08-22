@@ -6,11 +6,17 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.utils import _triton as triton_utils
 
 
 class TestTritonUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _run_triton_backend_load_failure(self, exc, env):
         driver_mod = importlib.import_module("triton.runtime.driver")
         fake_driver = SimpleNamespace(

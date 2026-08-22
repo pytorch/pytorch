@@ -41,6 +41,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TestCase,
     xfailIfNoAcceleratorTriton,
@@ -50,6 +51,8 @@ from torch.utils._sympy.functions import Identity
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_python_subprocess_env_prioritizes_loaded_torch(self):
         torch_package_root = os.path.dirname(
             os.path.dirname(os.path.abspath(torch.__file__))
@@ -337,18 +340,24 @@ class TestUtils(TestCase):
             )
             self.assertEqual(flops, expected)
 
+
+class TestDeviceTflops(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @xfailIfNoAcceleratorTriton
-    @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
-    def test_get_device_tflops(self, dtype):
-        ret = get_device_tflops(dtype)
+    def test_get_device_tflops(self, device, dtype):
+        with torch.cuda.device(device):
+            ret = get_device_tflops(dtype)
         self.assertTrue(type(ret) is float)
 
 
-instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestDeviceTflops, globals(), only_for=("cuda",))
 
 
 class TestLoadTemplate(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_load_template_uses_utf8(self):
         # load_template must decode templates as UTF-8 regardless of the ambient
         # locale. On a host whose default encoding is ascii, reading a template
@@ -381,6 +390,8 @@ class TestLoadTemplate(TestCase):
 
 
 class TestRuntimeEstimation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_get_compute_time_units(self):
         """TFLOPS-to-FLOPS/s conversion must use 1e12, not 1e15."""
         from unittest.mock import patch
@@ -410,6 +421,8 @@ class TestRuntimeEstimation(TestCase):
 class TestFP4Support(TestCase):
     """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
 
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(
         not torch.cuda.is_available()
         or importlib.util.find_spec("cutlass_api") is None,
@@ -429,6 +442,25 @@ class TestFP4Support(TestCase):
         result_fp32 = cutlass_api.utils.cutlass_type_from_torch_type(torch.float32)
         self.assertEqual(result_fp32, cutlass.Float32)
 
+
+class TestRandStridedFP4(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_rand_strided_fp4(self, device):
+        from torch._dynamo.testing import rand_strided
+
+        t = rand_strided((16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device=device)
+        self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(t.shape, (16, 32))
+        self.assertTrue(t.is_cuda)
+
+
+instantiate_device_type_tests(TestRandStridedFP4, globals(), only_for=("cuda",))
+
+
+class TestFP4SupportCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def test_rand_strided_fp4(self):
         """rand_strided should produce valid FP4 tensors."""
         from torch._dynamo.testing import rand_strided
@@ -438,18 +470,11 @@ class TestFP4Support(TestCase):
         self.assertEqual(t.shape, (4, 8))
         self.assertEqual(t.stride(), (8, 1))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_rand_strided_fp4_cuda(self):
-        from torch._dynamo.testing import rand_strided
-
-        t = rand_strided((16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device="cuda")
-        self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
-        self.assertEqual(t.shape, (16, 32))
-        self.assertTrue(t.is_cuda)
-
 
 class TestTritonTypeMapping(TestCase):
     """Tests for acc_type() dtype conversions."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_acc_type(self):
         from torch._inductor.kernel.mm_common import acc_type
@@ -469,6 +494,8 @@ class TestTritonTypeMapping(TestCase):
 
 
 class TestFakeTensorUpdater(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _get_faketensormode(
         graph: torch.fx.GraphModule,
