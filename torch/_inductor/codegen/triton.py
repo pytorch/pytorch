@@ -6285,15 +6285,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._handle_pdl_before_access(self.post_loop_store, var)
 
         if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
+            block_descriptor, other = self.codegen_block_ptr(name, var, indexing)
             self.post_loop_store.writeline(
                 DeferredLine(
                     name,
                     self.codegen_block_ptr_store_line(
                         name,
                         indexing,
-                        indexing.format(var),
+                        block_descriptor,
                         value,
-                        f", boundary_check={indexing.boundary_check()!r}",
+                        other,
                     ),
                 )
             )
