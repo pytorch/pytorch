@@ -23,16 +23,17 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
-    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
-    requires_cuda,
     run_tests,
     TestCase,
 )
@@ -205,7 +206,6 @@ class TestDebugModeLogSerialization(TestCase):
         self.assertTrue(any(math.isinf(mismatch["hash2"]) for mismatch in mismatches))
 
 
-@requires_cuda
 class TestDTensorDebugMode(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -1325,17 +1325,17 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         super().setUp()
         self._spawn_processes()
 
-    def _init_process_group(self):
+    def _init_process_group(self, device_type):
         """Initialize NCCL process group for each spawned process."""
-        torch.cuda.set_device(self.rank)
+        torch.get_device_module(device_type).set_device(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            "nccl",
+            dist.get_default_backend_for_device(device_type),
             world_size=self.world_size,
             rank=self.rank,
             store=store,
         )
-        self.device = f"cuda:{self.rank}"
+        self.device = torch.device(device_type, self.rank)
 
     def _destroy_process_group(self):
         """Destroy the process group."""
@@ -1349,14 +1349,12 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
             pass
 
     @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_allgather_base(self):
-        self._init_process_group()
-        tensor = torch.ones(10, 10, device=torch.device(self.device)) * (self.rank + 1)
+    @deviceCountAtLeast(2)
+    def test_allgather_base(self, devices):
+        self._init_process_group(torch.device(devices[0]).type)
+        tensor = torch.ones(10, 10, device=self.device) * (self.rank + 1)
         # Output size must be world_size * input_size
-        output_tensor = torch.zeros(
-            10 * self.world_size, 10, device=torch.device(self.device)
-        )
+        output_tensor = torch.zeros(10 * self.world_size, 10, device=self.device)
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
             dist.all_gather_single(output_tensor, tensor)
@@ -1375,15 +1373,13 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         self._destroy_process_group()
 
     @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_allgather_base_async_op(self):
+    @deviceCountAtLeast(2)
+    def test_allgather_base_async_op(self, devices):
         """Test all_gather_into_tensor with async_op=True."""
-        self._init_process_group()
-        tensor = torch.ones(10, 10, device=torch.device(self.device)) * (self.rank + 1)
+        self._init_process_group(torch.device(devices[0]).type)
+        tensor = torch.ones(10, 10, device=self.device) * (self.rank + 1)
         # Output size must be world_size * input_size
-        output_tensor = torch.zeros(
-            10 * self.world_size, 10, device=torch.device(self.device)
-        )
+        output_tensor = torch.zeros(10 * self.world_size, 10, device=self.device)
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
             # Call with async_op=True returns a work handle
@@ -1410,10 +1406,10 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         self._destroy_process_group()
 
     @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_allgather_functional_with_async_collective_tensor(self):
-        self._init_process_group()
-        tensor = torch.ones(10, 10, device=torch.device(self.device)) * (self.rank + 1)
+    @deviceCountAtLeast(2)
+    def test_allgather_functional_with_async_collective_tensor(self, devices):
+        self._init_process_group(torch.device(devices[0]).type)
+        tensor = torch.ones(10, 10, device=self.device) * (self.rank + 1)
 
         # Use functional collectives which return AsyncCollectiveTensor
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
@@ -1442,6 +1438,11 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
 instantiate_device_type_tests(
     TestDTensorDebugMode,
+    globals(),
+    only_for=["cuda"],
+)
+instantiate_device_type_tests(
+    TestDTensorDebugModeNCCLBackend,
     globals(),
     only_for=["cuda"],
 )
