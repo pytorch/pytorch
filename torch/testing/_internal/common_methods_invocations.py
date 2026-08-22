@@ -241,7 +241,7 @@ def error_inputs_hsplit(op_info, device, **kwargs):
                 f"is not divisible by the split_size 0!")
     yield ErrorInput(SampleInput(make_arg((S, S, S)), 0), error_regex=err_msg2)
 
-    # Incorrect type for indices_or_section argument
+    # Incorrect type for indices_or_sections argument
     err_msg3 = ("received an invalid combination of arguments.")
     yield ErrorInput(
         SampleInput(make_arg((S, S, S)), "abc"),
@@ -259,7 +259,7 @@ def error_inputs_vsplit(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(make_arg(S, S, S), 0),
                      error_regex=err_msg2)
 
-    # Incorrect type for indices_or_section argument
+    # Incorrect type for indices_or_sections argument
     err_msg3 = ("received an invalid combination of arguments.")
     yield ErrorInput(SampleInput(make_arg(S, S, S), "abc"),
                      error_type=TypeError, error_regex=err_msg3)
