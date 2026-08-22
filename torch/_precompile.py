@@ -444,6 +444,15 @@ class PrecompiledCallable:
     def _package(self) -> Any:
         return self._compiled._package
 
+    def serve_time_compiles(self) -> int:
+        """Graphs this artifact compiled while SERVING, rather than serving.
+
+        An installed artifact answers a guard miss by compiling, so a climbing
+        count means it is covering less of the workload than the capture
+        measured. Zero is the number to gate a job on.
+        """
+        return self._compiled.serve_time_compiles()
+
 
 def _serve_parameters(serve: Callable[..., object]) -> frozenset[str]:
     """An artifact carries its driver frozen, so a _serve emitted before this
@@ -526,6 +535,10 @@ class _InstalledArtifact:
 
     def __exit__(self, *exc: object) -> None:
         self.unload()
+
+    def serve_time_compiles(self) -> int:
+        inner = self._inner
+        return inner.serve_time_compiles() if inner is not None else 0
 
     def unload(self) -> None:
         inner, self._inner = self._inner, None
@@ -1727,16 +1740,32 @@ _MULTIGRAPH_GENERATED_HEADER = """\
 #     exec(open("this_file.py").read(), ns)
 #     out = ns["forward"](model, my_input)      # same args as the captured callable
 #
-# Nothing is installed onto your code objects and no frame evaluator is involved, so
-# loading this mutates no global state. The flip side is that there is no compiler
-# behind it: a call no captured variant covers RAISES rather than compiling a new one.
-#
 # Sections below are labelled. What is OPAQUE is base64 of pickled Dynamo state --
 # the guard trees and the transformed bytecode -- because those have no readable
 # source form. The compiled subgraphs DO have one and are emitted as source; only a
 # subgraph the backend could not render (an eager fx graph, a training graph) falls
 # back to the blob. Everything else is meant to be read and reviewed.
 """
+
+
+# What the artifact does to the process, which differs by serving mode and was
+# previously described only for the standalone one -- in a banner emitted on both.
+_SERVING_NOTES = {
+    "standalone": """\
+# Nothing is installed onto your code objects and no frame evaluator is involved, so
+# loading this mutates no global state. The flip side is that there is no compiler
+# behind it: a call no captured variant covers RAISES rather than compiling a new one.
+""",
+    "installed": """\
+# This artifact SERVES BY INSTALLING onto the live code objects, so loading and then
+# entering it mutates global state, which unload() and __exit__ take back out. And
+# there IS a compiler behind it: a call no captured variant covers is compiled fresh
+# at serve time rather than refused. That is what makes a graph-breaking model
+# servable at all, but it means the artifact can quietly serve less and less of
+# itself -- watch for the "serving compiled a NEW graph" warning, or read
+# serve_time_compiles() on the loaded object.
+""",
+}
 
 
 def _b64(payload: object) -> str:
@@ -1806,7 +1835,7 @@ def _build_multigraph_python_source(
     from torch._dynamo.package import SerializedCode
 
     frames = _multigraph_frames(entry)
-    parts = [_MULTIGRAPH_GENERATED_HEADER, ""]
+    parts = [_MULTIGRAPH_GENERATED_HEADER, _SERVING_NOTES[serving_mode], ""]
     parts.append("# " + "=" * 70)
     parts.append("# 1. What was captured (readable)")
     parts.append("# " + "=" * 70)
