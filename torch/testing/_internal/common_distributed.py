@@ -1898,6 +1898,16 @@ class MultiProcContinuousTest(TestCase):
             timeout=cls.timeout,
         )
         cls.pg = c10d.distributed_c10d._get_default_group()
+        # Set the per-rank device for the current accelerator backend.
+        accelerator = torch.accelerator.current_accelerator()
+        if accelerator is not None:
+            device_type = accelerator.type
+            if (
+                device_type != "hpu"
+                and cls.backend_str()
+                == c10d.get_default_backend_for_device(device_type)
+            ):
+                torch.accelerator.set_device_index(rank)
 
     @classmethod
     def _run_test_given_id(cls, test_id: str, **kwargs) -> None:
