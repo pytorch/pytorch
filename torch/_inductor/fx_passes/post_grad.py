@@ -1029,7 +1029,14 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
 
 def pointless_cumsum_non_scalar_check(match: Match) -> bool:
     # Scalar cumsum is already handled directly by lowering.cumsum.
-    return len(match.kwargs["shape"]) > 0
+    if len(match.kwargs["shape"]) == 0:
+        return False
+    # A symbolic fill_value arrives as an fx Node, which the replacement's int() and
+    # * both reject. A boolean full stays folded: bool(Node) is True, the correct
+    # saturation for every nonzero fill, and the fallback drops the bool cast entirely.
+    return is_boolean_dtype(match.kwargs["dtype"]) or not isinstance(
+        match.kwargs["fill_value"], torch.fx.Node
+    )
 
 
 @register_graph_pattern(
