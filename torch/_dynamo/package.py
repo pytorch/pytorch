@@ -25,7 +25,7 @@ import platform
 import shutil
 import sys
 import types
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import nullcontext
 from typing import Any, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
@@ -631,9 +631,12 @@ class CompilePackage:
         fn: Callable[..., Any] | None,
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
+        serialization_guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]]
+        | None = None,
     ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
+        self._observed_scopes: dict[types.CodeType, list[dict[str, object]]] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
@@ -644,6 +647,7 @@ class CompilePackage:
         self._cached_backends: dict[_BackendId, Any] = {}
         self._source_info: SourceInfo = SourceInfo(inlined_sources=set())
         self._resume_codes: set[types.CodeType] = set()
+        self.serialization_guard_filter_fn = serialization_guard_filter_fn
         self._initialized = False
         if fn is not None:
             self.initialize(fn, dynamo, ignore_inlined_sources)
@@ -753,7 +757,9 @@ class CompilePackage:
         )
 
     @contextlib.contextmanager
-    def code_context(self, code: types.CodeType) -> Generator[None, None, None]:
+    def code_context(
+        self, code: types.CodeType, local_scope: dict[str, object] | None = None
+    ) -> Generator[None, None, None]:
         if self._current_entry is not None:
             raise AssertionError("_current_entry is already set in code_context")
 
@@ -763,12 +769,17 @@ class CompilePackage:
             self._add_user_function(code)
 
         entry = self._codes[code]
+        if local_scope is not None:
+            self._observed_scopes.setdefault(code, []).append(dict(local_scope))
         self._current_entry = entry
         try:
             yield
         finally:
             entry.has_compile_id = True
             self._current_entry = None
+
+    def observed_scopes(self) -> list[list[dict[str, object]]]:
+        return [self._observed_scopes.get(code, []) for code in self._codes]
 
     def add_guarded_code(
         self,
