@@ -13,29 +13,34 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import assert_close
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON
 
 
 class TestVarianceReductionHeuristic(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
 
-    def _skip_if_not_cuda(self):
-        if GPU_TYPE != "cuda":
+    def _skip_if_not_accel(self):
+        if GPU_TYPE != "cuda" or GPU_TYPE != "privateuseone":
             self.skipTest("CUDA-specific variance heuristic")
 
     def _dtypes(self):
         dtypes = [torch.float16]
-        if torch.cuda.is_bf16_supported():
+        caps = torch.accelerator.get_device_capability()
+        if torch.bfloat16 in caps.get("supported_dtypes", set()):
             dtypes.append(torch.bfloat16)
         return dtypes
 
     def test_var_mean_uses_two_step_for_non_split_reductions(self):
-        self._skip_if_not_cuda()
+        self._skip_if_not_accel()
 
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
@@ -52,7 +57,7 @@ class TestVarianceReductionHeuristic(TestCase):
             self.assertNotIn("welford_reduce", source_code)
 
     def test_var_mean_keeps_welford_for_float32_reductions(self):
-        self._skip_if_not_cuda()
+        self._skip_if_not_accel()
 
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
@@ -66,7 +71,7 @@ class TestVarianceReductionHeuristic(TestCase):
 
     @config.patch("triton.force_cooperative_reductions", True)
     def test_var_mean_keeps_welford_for_small_reductions(self):
-        self._skip_if_not_cuda()
+        self._skip_if_not_accel()
 
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
@@ -89,7 +94,7 @@ class TestVarianceReductionHeuristic(TestCase):
         }
     )
     def test_var_mean_keeps_welford_for_split_reductions(self):
-        self._skip_if_not_cuda()
+        self._skip_if_not_accel()
 
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
@@ -137,6 +142,8 @@ class _TestingHeuristics(InductorChoices):
 )
 @instantiate_parametrized_tests
 class CooperativeReductionTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         torch._inductor.metrics.generated_kernel_count = 0
@@ -241,7 +248,7 @@ class CooperativeReductionTests(TestCase):
             self.assertIn("cooperative_reduction_grid", source_code)
         else:
             self.assertIn("@triton_heuristics.cooperative_reduction", source_code)
-        if GPU_TYPE == "cuda":
+        if GPU_TYPE == "cuda" or GPU_TYPE == "privateuseone":
             self.assertIn("'launch_cooperative_grid': True", source_code)
         if "async_compile.multi_kernel" not in source_code:
             self.assertEqual(
@@ -350,6 +357,8 @@ class MultiKernelCooperativeReductionTests(CooperativeReductionTests):
 )
 @instantiate_parametrized_tests
 class TestFixedConfigs(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _check(self, fn, args, *, persistent=False, cooperative=True, cfg):
         expected = fn(*args)
         heuristic = _TestingHeuristics(
@@ -472,8 +481,12 @@ class TestFixedConfigs(TestCase):
         self._check(fn, args, persistent=persistent, cfg=cfg)
 
 
+instantiate_device_type_tests(
+    TestVarianceReductionHeuristic, globals(), allow_xpu=True, allow_mps=True, except_for="cpu"
+)
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_GPU:
+    if HAS_TRITON:
         run_tests(needs="filelock")
