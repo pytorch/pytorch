@@ -3959,6 +3959,28 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 )
                 filtered_nodes = [n for n in filtered_nodes if n not in indirect_nodes]
 
+        # Avoid hoisting source-independent masks across their SDPA consumers.
+        masked_sdpa_ops = (
+            torch.ops.aten._scaled_dot_product_cudnn_attention.default,
+            torch.ops.aten._scaled_dot_product_efficient_attention.default,
+            torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default,
+        )
+        filtered_nodes = [
+            node
+            for node in filtered_nodes
+            if _real_dep_names(node.read_writes.reads)
+            or not any(
+                not use.is_weak
+                and isinstance(use.node, ExternKernelSchedulerNode)
+                and isinstance(use.node.node, ir.ExternKernel)
+                and use.node.node.op_overload in masked_sdpa_ops
+                and len(use.node.node.inputs) > 3
+                and use.node.node.input_name(3) == output.get_name()
+                for output in node.get_outputs()
+                for use in output.users
+            )
+        ]
+
         return filtered_nodes
 
     @staticmethod
