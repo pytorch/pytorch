@@ -5,10 +5,16 @@ import tempfile
 from backend import get_custom_backend_library_path, Model, to_custom_backend
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestCustomBackend(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Load the library containing the custom backend.
