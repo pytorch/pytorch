@@ -4,6 +4,7 @@ import binascii
 import functools
 import os
 import re
+import sys
 import unittest
 import unittest.mock as mock
 from unittest.mock import patch
@@ -1243,8 +1244,15 @@ class DecoratorTests(PytreeRegisteringTestCase):
             def _(x, /, *, newline=True):
                 return b""
 
-        @torch._dynamo.substitute_in_graph(binascii.b2a_base64)
-        def polyfill(data, /, *, newline=True):
+        def polyfill(
+            data,
+            /,
+            *,
+            padded=True,
+            alphabet=binascii.BASE64_ALPHABET,
+            wrapcol=0,
+            newline=True,
+        ):
             buffer = []
             cipher = []
             for byte in data:
@@ -1280,8 +1288,17 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 cipher.append("\n")
             return "".join(cipher).encode()
 
+        if sys.version_info < (3, 15):
+
+            def wrapper(data, /, *, newline=True):
+                return polyfill(data, newline=newline)
+
+        else:
+            wrapper = polyfill
+        torch._dynamo.substitute_in_graph(binascii.b2a_base64)(wrapper)
+
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = polyfill
+        fn = binascii.b2a_base64
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         out = fn(b"abc")
         opt_out = opt_fn(b"abc")
@@ -1293,7 +1310,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         counters.clear()
 
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = polyfill
+        fn = wrapper
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         out = fn(b"abc")
         opt_out = opt_fn(b"abc")
