@@ -32,11 +32,18 @@ from torch.distributed.checkpoint.planner import (
 )
 from torch.distributed.checkpoint.storage import WriteResult
 from torch.futures import Future
-from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
+)
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
@@ -76,14 +83,18 @@ class TestModule(torch.nn.Module):
 
 
 class TestDistributedCheckpointing(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
-    @requires_accelerator_dist_backend()
-    def test_tensor_metadata_with_missing_rank_spec(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_tensor_metadata_with_missing_rank_spec(self, device) -> None:
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -99,9 +110,11 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
-    @requires_accelerator_dist_backend()
-    def test_default_metadata(self) -> None:
-        device = f"{device_type}:{dist.get_rank()}"
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_default_metadata(self, device) -> None:
+        device = f"{torch.device(device).type}:{dist.get_rank()}"
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -236,39 +249,12 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
         return True
 
 
-class TestDistributedFailure(ShardedTensorTestBase):
-    def get_spec(self):
-        return ChunkShardingSpec(
-            dim=0,
-            placements=[
-                f"rank:{r}/{device_type}:{r}" for r in range(dist.get_world_size())
-            ],
-        )
-
-    @with_comms(init_rpc=False, backend=backend)
-    @skip_if_lt_x_gpu(2)
-    @requires_accelerator_dist_backend()
-    def test_dummy_writer_works(self) -> None:
-        state_dict = {
-            "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
-            "replicated": torch.rand(10, 10),
-            "bytes": [1, 2, 3, 4],
-        }
-
-        save_state_dict(state_dict, FaultyStorageWriter({}))
-
-    @with_comms(init_rpc=False, backend=backend)
-    @skip_if_lt_x_gpu(2)
-    @requires_accelerator_dist_backend()
-    def test_dummy_reader_works(self) -> None:
-        state_dict = {
-            "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
-            "replicated": torch.rand(10, 10),
-            "bytes": [1, 2, 3, 4],
-        }
-        metadata = _create_default_local_metadata(state_dict)
-
-        load_state_dict(state_dict, FaultyStorageReader(metadata, {}))
+class _FailureTestMixin:
+    """Drives the faulty save/load paths for both the distributed tests in
+    ``TestDistributedFailure`` and the no-dist ones in ``TestNoDistFailure``,
+    which are separate classes so that each can carry an honest
+    ``hw_classification``.
+    """
 
     def _test_dist_failure(self, callback, kwargs):
         bad_ranks = next(iter(kwargs.values())) if len(kwargs) > 0 else []
@@ -322,10 +308,53 @@ class TestDistributedFailure(ShardedTensorTestBase):
 
         self._test_dist_failure(_load, kwargs)
 
+
+class TestDistributedFailure(_FailureTestMixin, ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def get_spec(self):
+        return ChunkShardingSpec(
+            dim=0,
+            placements=[
+                f"rank:{r}/{device_type}:{r}" for r in range(dist.get_world_size())
+            ],
+        )
+
+    @with_comms(init_rpc=False, backend=backend)
+    @skip_if_lt_x_gpu(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_dummy_writer_works(self, device) -> None:
+        state_dict = {
+            "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
+            "replicated": torch.rand(10, 10),
+            "bytes": [1, 2, 3, 4],
+        }
+
+        save_state_dict(state_dict, FaultyStorageWriter({}))
+
+    @with_comms(init_rpc=False, backend=backend)
+    @skip_if_lt_x_gpu(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_dummy_reader_works(self, device) -> None:
+        state_dict = {
+            "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
+            "replicated": torch.rand(10, 10),
+            "bytes": [1, 2, 3, 4],
+        }
+        metadata = _create_default_local_metadata(state_dict)
+
+        load_state_dict(state_dict, FaultyStorageReader(metadata, {}))
+
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend()
-    def test_save_error_handling(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_save_error_handling(self, device) -> None:
         state_dict = {
             "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
             "replicated": torch.rand(10, 10),
@@ -343,23 +372,12 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_save(state_dict, coordinator=1, fail_set_up_storage_writer=[1])
         self._test_save(state_dict, coordinator=1, fail_finish=[1])
 
-    def test_save_error_handling_no_dist(self) -> None:
-        state_dict = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
-
-        self.assertFalse(dist.is_initialized())
-
-        self._test_save(state_dict, fail_set_up_storage_writer=[0])
-        self._test_save(state_dict, fail_finish=[0])
-        self._test_save(state_dict, fail_prepare_global_plan=[0])
-
-        self._test_save(state_dict, fail_prepare_local_plan=[0])
-        self._test_save(state_dict, fail_write_data=[0])
-        self._test_save(state_dict, fail_write_data_async=[0])
-
     @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend()
-    def test_load_error_handling(self) -> None:
+    @requires_capabilities(
+        Capability.distributed.backend,
+    )
+    def test_load_error_handling(self, device) -> None:
         state_dict = {
             "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
             "replicated": torch.rand(10, 10),
@@ -385,6 +403,28 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_load(state_dict, coordinator=3, fail_read_data_async=[2])
         self._test_load(state_dict, coordinator=1, fail_prepare_global_plan=[1])
 
+
+class TestNoDistFailure(_FailureTestMixin, TestCase):
+    # These tests assert that no process group is initialized and reference no
+    # device at all, so they are GENERIC and stay un-instantiated. Keeping
+    # them in the ACCELERATOR class above would stop them from being
+    # generated (and run) on CPU-only hosts once ``except_for="cpu"`` filters
+    # that class out.
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_save_error_handling_no_dist(self) -> None:
+        state_dict = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
+
+        self.assertFalse(dist.is_initialized())
+
+        self._test_save(state_dict, fail_set_up_storage_writer=[0])
+        self._test_save(state_dict, fail_finish=[0])
+        self._test_save(state_dict, fail_prepare_global_plan=[0])
+
+        self._test_save(state_dict, fail_prepare_local_plan=[0])
+        self._test_save(state_dict, fail_write_data=[0])
+        self._test_save(state_dict, fail_write_data_async=[0])
+
     def test_load_error_handling_no_dist(self) -> None:
         state_dict = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
         self._test_load(state_dict)
@@ -396,5 +436,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_load(state_dict, fail_read_data_async=[0])
 
 
+instantiate_device_type_tests(TestDistributedCheckpointing, globals(), except_for="cpu")
+instantiate_device_type_tests(TestDistributedFailure, globals(), except_for="cpu")
 if __name__ == "__main__":
     run_tests()
