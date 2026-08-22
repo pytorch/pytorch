@@ -967,6 +967,32 @@ class TestCppExtensionUtils(TestCase):
     def test_cc_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("cc"))
 
+    def test_ninja_build_key_is_stable_and_discriminating(self):
+        key = torch.utils.cpp_extension._ninja_build_key
+        objects = ["build/temp/a.o", "build/temp/b.o"]
+        cflags = ["-O3", "-std=c++17"]
+
+        # Stable, so an incremental rebuild lands on the same directory and
+        # reuses ninja's log instead of recompiling everything.
+        self.assertEqual(key(objects, cflags), key(objects, cflags))
+
+        # A missing flag list and an empty one describe the same build.
+        self.assertEqual(key(objects, None), key(objects, []))
+
+        # Different objects mean a different build file.
+        self.assertNotEqual(key(objects, cflags), key(objects[:1], cflags))
+
+        # Same objects but different flags also mean a different build file:
+        # a project may compile one source set twice under different defines
+        # and get identical object paths both times.
+        self.assertNotEqual(
+            key(objects, cflags), key(objects, cflags + ["-D__STOCHASTIC_MODE__"])
+        )
+
+        # The parts must not run together, so moving an entry across the
+        # boundary between two lists changes the key.
+        self.assertNotEqual(key(["a"], ["b"]), key(["a", "b"], []))
+
 
 class TestTraceback(TestCase):
     def test_basic(self):

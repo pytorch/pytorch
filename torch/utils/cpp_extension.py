@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import glob
+import hashlib
 import importlib
 import importlib.abc
 import importlib.util
@@ -2438,6 +2439,18 @@ def _get_hipcc_path():
     else:
         return _join_rocm_home('bin', 'hipcc')
 
+def _ninja_build_key(*parts: list[str] | None) -> str:
+    """Short stable digest of everything that determines a build.ninja's contents."""
+    digest = hashlib.sha256()
+    for part in parts:
+        # A None flag list and an empty one mean the same thing to the writer.
+        for item in (part or ()):
+            digest.update(item.encode())
+            digest.update(b'\0')
+        digest.update(b'\1')
+    return digest.hexdigest()[:16]
+
+
 def _write_ninja_file_and_compile_objects(
         sources: list[str],
         objects,
@@ -2466,6 +2479,18 @@ def _write_ninja_file_and_compile_objects(
         raise AssertionError(
             "cannot have both SYCL and CUDA files in the same extension"
         )
+    # setuptools gives every extension of a project the same output directory, and
+    # ninja keeps .ninja_log / .ninja_deps beside build.ninja, so a concurrent
+    # `build_ext -j` has those clobber one another. Give each invocation its own
+    # subdirectory, keyed on every input that decides the file's contents. A digest
+    # rather than a fresh temporary directory keeps the path stable across runs, so
+    # incremental rebuilds still find ninja's log.
+    build_directory = os.path.join(
+        build_directory,
+        '.ninja-' + _ninja_build_key(
+            sources, objects, cflags, post_cflags, cuda_cflags, cuda_post_cflags,
+            cuda_dlink_post_cflags, sycl_cflags, sycl_post_cflags,
+            sycl_dlink_post_cflags))
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
         logger.debug('Emitting ninja build file %s...', build_file_path)
