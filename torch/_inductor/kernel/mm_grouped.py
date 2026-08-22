@@ -6,6 +6,7 @@ from typing import Any
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
+from torch._inductor.codegen.gluon.gluon_template import GluonTemplate
 from torch._inductor.heuristics.template.cutedsl import get_groupgemm_configs
 from torch._inductor.runtime.triton_compat import tl
 from torch._inductor.virtualized import V
@@ -22,11 +23,13 @@ from ..select_algorithm import (
 from ..utils import (
     _descriptor_shape_fits_in_int32,
     _tma_descriptor_max_offset_fits_in_int32,
+    can_use_tma,
     get_gpu_shared_memory,
     get_num_sms,
     has_free_symbols,
     use_aten_gemm_kernels,
     use_blackwell_cutedsl_grouped_mm,
+    use_gluon_template,
     use_nv_universal_gemm_template,
     use_triton_template,
 )
@@ -111,16 +114,60 @@ def early_config_prune(g, m, dtsize, configs, named_args):
     return pruned_configs
 
 
+def gluon_grouped_mm_configs(dtype_AB, k_is_varying):
+    from torch._inductor.template_heuristics.gluon import get_grouped_mm_configs
+
+    gluon_configs = get_grouped_mm_configs(
+        dtype_AB=dtype_AB,
+        k_is_varying=k_is_varying,
+    )
+
+    configs = []
+    for gluon_config in gluon_configs:
+        configs.append(
+            Config(
+                kwargs={
+                    "BLOCK_M": gluon_config.BLOCK_M,
+                    "BLOCK_N": gluon_config.BLOCK_N,
+                    "BLOCK_K": gluon_config.BLOCK_K,
+                    "NUM_LOAD_BUFFERS": gluon_config.NUM_LOAD_BUFFERS,
+                    "NUM_ACC_BUFFERS": gluon_config.NUM_ACC_BUFFERS,
+                    "NUM_STORE_WARPS": gluon_config.NUM_STORE_WARPS,
+                    "GROUP_SIZE_N": gluon_config.GROUP_SIZE_N,
+                    "USE_TMA_STORE": gluon_config.USE_TMA_STORE,
+                    "NUM_SMS": get_num_sms(),
+                },
+                num_stages=1,  # Dummy value, the kernel uses NUM_LOAD_BUFFERS/NUM_ACC_BUFFERS for this purpose.
+                num_warps=gluon_config.NUM_STORE_WARPS,
+            ),
+        )
+
+    return configs
+
+
+gluon_grouped_mm_template = GluonTemplate(
+    name="gluon_grouped_mm",
+    grid=persistent_grouped_mm_grid,
+    source=load_kernel_template(
+        "gluon_mm_grouped", helpers=["helper_assign_maybe_constexpr"]
+    ),
+)
+
+
 triton_grouped_mm_template = TritonTemplate(
     name="grouped_mm",
     grid=persistent_grouped_mm_grid,
-    source=load_kernel_template("triton_mm_grouped"),
+    source=load_kernel_template(
+        "triton_mm_grouped", helpers=["helper_assign_maybe_constexpr"]
+    ),
 )
 
 triton_scaled_grouped_mm_template = TritonTemplate(
     name="scaled_grouped_mm",
     grid=persistent_grouped_mm_grid,
-    source=load_kernel_template("triton_mm_grouped"),
+    source=load_kernel_template(
+        "triton_mm_grouped", helpers=["helper_assign_maybe_constexpr"]
+    ),
 )
 
 cutedsl_grouped_mm_template = CuteDSLTemplate(
@@ -285,6 +332,49 @@ def can_use_triton_kernel(
         return offs is None
 
 
+def can_use_gluon_kernel(
+    mat_a: TensorBox,
+    mat_b: TensorBox,
+    offs: TensorBox | None,
+    bias: TensorBox | None,
+    scale_result: TensorBox | None,
+    layout: Layout,
+) -> bool:
+    if not torch.cuda.is_available() or torch.version.hip:
+        return False
+
+    # Check for Blackwell GPU (SM 10.0 or 10.3)
+    major, minor = torch.cuda.get_device_capability()
+    if not (major == 10 and minor in [0, 3]):
+        return False
+
+    if not has_triton():
+        return False
+
+    try:
+        from triton.experimental import gluon  # noqa: F401
+    except ImportError:
+        return False
+
+    if bias is not None or scale_result is not None:
+        return False
+
+    # A and B always load via TMA, and USE_TMA_STORE lets any output
+    # shape store via TMA, so every operand must satisfy it.
+    if not can_use_tma(mat_a, mat_b, output_layout=layout):
+        return False
+
+    # FIXME: Reconsider rejecting dynamic shapes here, as CuTeDSL does.
+    # We accept them to match Triton, but they cost performance: with
+    # symbolic shapes autotuning cannot compare shape-dependent
+    # configs, so it settles on a more conservative one.
+
+    if len(mat_a.get_size()) == 2 or len(mat_b.get_size()) == 2:
+        return offs is not None
+    else:
+        return offs is None
+
+
 def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
     if m1_is_2d:
         if m2_is_2d:
@@ -303,6 +393,7 @@ def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
         end_hint / noffs_hint
     )
     offs[:-1] = (offs[:-1] / alignment).round() * alignment
+    offs = offs.clamp(max=end_hint)  # Ensure non-decreasing up to end_hint
     offs[-1] = end_hint
     return offs.to(dtype=offs_box.get_dtype(), device=offs_box.get_device())
 
@@ -410,6 +501,8 @@ def _tuned_grouped_mm_common(
             g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
             k = V.graph.sizevars.check_equals(k1, k2)
             a_is_2d, b_is_2d = False, False
+    a_is_k_major = mat_a.get_stride()[-1] == 1
+    b_is_k_major = mat_b.get_stride()[-2] == 1
 
     scaled = scale_a is not None
 
@@ -419,9 +512,6 @@ def _tuned_grouped_mm_common(
         and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
         and (not scaled or has_scaled_grouped_mm_triton_support(mat_a, mat_b))
     ):
-        a_is_k_major = mat_a.get_stride()[-1] == 1
-        b_is_k_major = mat_b.get_stride()[-2] == 1
-
         triton_has_make_tensor_descriptor = hasattr(tl, "make_tensor_descriptor")
         triton_has_experimental_make_tensor_descriptor = hasattr(
             tl, "_experimental_make_tensor_descriptor"
@@ -494,6 +584,31 @@ def _tuned_grouped_mm_common(
             input_nodes,
             accumulator_type=torch.float32,
         )
+
+    if (
+        is_nonzero
+        and use_gluon_template(layout)
+        and can_use_gluon_kernel(mat_a, mat_b, offs, bias, scale_result, layout)
+        and not scaled
+    ):
+        kwargs = {
+            "A_IS_2D": a_is_2d,
+            "B_IS_2D": b_is_2d,
+            "A_IS_K_MAJOR": a_is_k_major,
+            "B_IS_K_MAJOR": b_is_k_major,
+        }
+        for config in gluon_grouped_mm_configs(
+            dtype_AB=mat_a.get_dtype(),
+            k_is_varying=a_is_2d and b_is_2d,
+        ):
+            gluon_grouped_mm_template.maybe_append_choice(
+                choices,
+                input_nodes=input_nodes,
+                layout=layout,
+                num_stages=config.num_stages,
+                num_warps=config.num_warps,
+                **(kwargs | config.kwargs),
+            )
 
     input_gen_fns = {}
     if offs is not None:

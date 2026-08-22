@@ -8261,6 +8261,7 @@ class TritonScheduling(SIMDScheduling):
             BackendFeature.SCAN,
             BackendFeature.SORT,
             BackendFeature.TRITON_TEMPLATES,
+            BackendFeature.GLUON_TEMPLATES,
             BackendFeature.TUPLE_REDUCTION,
         ]
     )
@@ -8381,8 +8382,14 @@ class TritonScheduling(SIMDScheduling):
             if fused_name:
                 fused_name = V.choices.customize_fused_kernel_name(fused_name, src_code)
             kernel_category = get_kernel_category_by_source_code(src_code)[:3]
+            backend_prefix = "gluon" if "@gluon.jit" in src_code else "triton"
             kernel_name = "_".join(
-                ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
+                [
+                    backend_prefix,
+                    kernel_category,
+                    fused_name,
+                    wrapper.next_kernel_suffix(),
+                ]
             )
             if config.aot_inductor.model_name_for_generated_files:
                 # When AOTI compiles multiple submodules, we need to use the model name to
