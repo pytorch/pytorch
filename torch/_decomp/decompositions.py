@@ -278,7 +278,8 @@ def gelu_backward(grad: Tensor, self: Tensor, approximate: str = "none"):
     else:
         kAlpha = M_SQRT1_2
         kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5
-        cdf = 0.5 * (1 + torch.erf(self * kAlpha))
+        # 1 + erf(x) = erfc(-x)
+        cdf = 0.5 * torch.erfc(self * -kAlpha)
         pdf = kBeta * torch.exp(self * self * -0.5)
         return grad * (cdf + self * pdf)
 

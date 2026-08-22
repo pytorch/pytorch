@@ -1,5 +1,6 @@
 import ast
 import itertools
+import re
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -21,18 +22,29 @@ from ...virtualized import V
 
 _ACCUMULATOR_ARG_NAME = "accum"
 
-# 1/sqrt(2) (M_SQRT1_2), the constant Inductor's gelu decomposition multiplies
-# the input by before applying erf.
+# 1/sqrt(2) (M_SQRT1_2). Inductor's gelu decomposition computes
+# x * 0.5 * erfc(x * -1/sqrt(2)) (gh-187806); the 1 + erf(x * 1/sqrt(2)) form
+# still appears when user code spells gelu out manually.
 _GELU_ERF_INV_SQRT2 = 0.7071067811865476
 
 
-def _is_close_constant(node: ast.expr, value: float, tol: float = 1e-6) -> bool:
-    return (
+def _const_value(node: ast.expr) -> "float | None":
+    # ast.parse represents negative literals as USub(Constant), so unwrap.
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        inner = _const_value(node.operand)
+        return None if inner is None else -inner
+    if (
         isinstance(node, ast.Constant)
         and isinstance(node.value, (int, float))
         and not isinstance(node.value, bool)
-        and abs(float(node.value) - value) < tol
-    )
+    ):
+        return float(node.value)
+    return None
+
+
+def _is_close_constant(node: ast.expr, value: float, tol: float = 1e-6) -> bool:
+    v = _const_value(node)
+    return v is not None and abs(v - value) < tol
 
 
 def _mult_factors(node: ast.expr) -> list[ast.expr]:
@@ -100,6 +112,40 @@ def _match_gelu_erf(node: ast.expr) -> "ast.expr | None":
     return None
 
 
+def _match_gelu_erfc(node: ast.expr) -> "ast.expr | None":
+    """Match gelu's erfc decomposition ``x * 0.5 * erfc(x * -1/sqrt(2))`` and
+    return the inner argument ``x``. Matching is commutativity-aware for the
+    multiplications.
+    """
+    factors = _mult_factors(node)
+    if len(factors) != 3:
+        return None
+    half = next((f for f in factors if _is_close_constant(f, 0.5)), None)
+    if half is None:
+        return None
+    rest = [f for f in factors if f is not half]
+
+    def match_erfc(f: ast.expr) -> "ast.expr | None":
+        # Match ``erfc(x * -1/sqrt(2))`` and return ``x``.
+        erfc_call = _match_call(f, "erfc")
+        if erfc_call is None:
+            return None
+        erfc_factors = _mult_factors(erfc_call.args[0])
+        if len(erfc_factors) != 2 or not any(
+            _is_close_constant(g, -_GELU_ERF_INV_SQRT2) for g in erfc_factors
+        ):
+            return None
+        return next(
+            g for g in erfc_factors if not _is_close_constant(g, -_GELU_ERF_INV_SQRT2)
+        )
+
+    for i, f in enumerate(rest):
+        erfc_x = match_erfc(f)
+        if erfc_x is not None and _same(erfc_x, rest[1 - i]):
+            return rest[1 - i]
+    return None
+
+
 def _match_silu(node: ast.expr) -> "ast.expr | None":
     """Match SiLU decomposition ``x / (1 + exp(0.0 - x))`` and return ``x``.
 
@@ -152,17 +198,20 @@ class _ActivationPattern:
     # ``name`` must be a functor the CUTLASS EVT frontend binds natively (see
     # ``ast_op_to_bindings`` in the cutlass python_ast frontend).
     name: str
-    # Cheap substring guard so we only parse epilogues that may contain the
-    # decomposition (a primitive that the activation expands into).
-    trigger: str
+    # Cheap pre-parse guard for a primitive the activation expands into, also
+    # checked post-fold to confirm the primitive was consumed. A word-boundary
+    # regex rather than a substring: "erf" must not match inside "erfc" or
+    # inside unrelated identifiers.
+    trigger: re.Pattern[str]
     match: Callable[[ast.expr], "ast.expr | None"]
 
 
 # Activations that Inductor decomposes but CUTLASS can emit as a single functor.
 # Add new entries here to re-fuse additional decomposed activations.
 _ACTIVATION_PATTERNS: tuple[_ActivationPattern, ...] = (
-    _ActivationPattern("gelu", "erf", _match_gelu_erf),
-    _ActivationPattern("silu", "0.0 -", _match_silu),
+    _ActivationPattern("gelu", re.compile(r"\berfc\b"), _match_gelu_erfc),
+    _ActivationPattern("gelu", re.compile(r"\berf\b"), _match_gelu_erf),
+    _ActivationPattern("silu", re.compile(re.escape("0.0 -")), _match_silu),
 )
 
 
@@ -177,7 +226,7 @@ def _fuse_activations(code: str) -> str:
     activations whose primitives are unsupported (e.g. the ``erf`` in gelu) and
     reduces the compute-node count for the rest.
     """
-    active = [p for p in _ACTIVATION_PATTERNS if p.trigger in code]
+    active = [p for p in _ACTIVATION_PATTERNS if p.trigger.search(code)]
     if not active:
         return code
     try:
@@ -278,7 +327,7 @@ def _fuse_activations(code: str) -> str:
     # bail out and return the original code so the CUTLASS frontend rejects the
     # epilogue cleanly rather than emitting an unsupported functor.
     for p in active:
-        if p.trigger in folded:
+        if p.trigger.search(folded):
             return code
 
     return folded
@@ -380,6 +429,10 @@ class CutlassEVTOpsMixIn:
     @staticmethod
     def erf(x0: str) -> str:
         return CutlassEVTOpsMixIn._prefix_un_op("erf", x0)
+
+    @staticmethod
+    def erfc(x0: str) -> str:
+        return CutlassEVTOpsMixIn._prefix_un_op("erfc", x0)
 
     @staticmethod
     def silu(x0: str) -> str:

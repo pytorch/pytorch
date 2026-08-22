@@ -709,10 +709,10 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(10, 10, device=device, requires_grad=True)
 
         fw_compiler = functools.partial(
-            count_ops, freq=1, op=torch.ops.aten.erf.default
+            count_ops, freq=1, op=torch.ops.aten.erfc.default
         )
         bw_compiler = functools.partial(
-            count_ops, freq=1, op=torch.ops.aten.erf.default
+            count_ops, freq=1, op=torch.ops.aten.erfc.default
         )
         backend = aot_autograd(
             fw_compiler=fw_compiler,
