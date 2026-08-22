@@ -18031,6 +18031,40 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         else:
             FileCheck().check("torch.ops.aten.add").run(code[0])
 
+    @requires_gpu_and_triton
+    def test_lite_mode_triton_kernel_no_clone(self):
+        # `decompose_triton_kernel_wrapper_functional` lowers the functional HOP to
+        # "clone(s) + the mutation node", and documents that it relies on the
+        # reinplacing pass having already marked which of those clones are
+        # unnecessary. Lite mode disables post-grad passes, so it used to run only
+        # the decomposition -- and every user-defined Triton kernel then paid a full
+        # device-to-device copy of its freshly allocated, still-uninitialised output.
+        # Reinplacing now runs first in lite mode, so no clone is emitted.
+        from torch.testing._internal.triton_utils import add_kernel
+
+        def f(x, y):
+            out = torch.zeros_like(x)
+            n_elements = out.numel()
+            add_kernel[(n_elements,)](x, y, out, n_elements, BLOCK_SIZE=16)
+            return out
+
+        x = torch.randn(64, device=GPU_TYPE)
+        y = torch.randn(64, device=GPU_TYPE)
+
+        opt_f = torch.compile(f, mode="lite")
+        result, code = run_and_get_code(opt_f, x, y)
+        self.assertEqual(result, f(x, y))
+
+        # Anchor: the kernel really made it into the generated code, so the no-clone
+        # assertion below cannot pass vacuously.
+        self.assertIn("add_kernel", code[0])
+        # The buffer the kernel writes is allocated immediately before the call and
+        # never read beforehand, so reinplacing must drop it from `tensors_to_clone`
+        # and the decomposition must emit no copy at all.
+        self.assertNotIn(
+            "aoti_torch_clone" if config.cpp_wrapper else "aten.clone", code[0]
+        )
+
     @lowering.force_fallback(aten.sort.default)
     def test_size_asserts_for_multi_output_fallback(self):
         @torch.compile
