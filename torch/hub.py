@@ -886,11 +886,18 @@ def load_state_dict_from_url(
         filename = file_name
     cached_file = os.path.join(model_dir, filename)
     if not os.path.exists(cached_file):
-        sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
         hash_prefix = None
         if check_hash:
             r = HASH_REGEX.search(filename)  # r is Optional[Match[str]]
             hash_prefix = r.group(1) if r else None
+            # A missing or short prefix would silently skip or weaken verification
+            if hash_prefix is None or len(hash_prefix) < 8:
+                raise RuntimeError(
+                    "check_hash=True requires the filename to follow the "
+                    f"'filename-<sha256>.ext' convention with at least eight "
+                    f"hex digits of the SHA256 hash, got {filename!r}"
+                )
+        sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
         download_url_to_file(url, cached_file, hash_prefix, progress=progress)
 
     if _is_legacy_zip_format(cached_file):
