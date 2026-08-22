@@ -2,8 +2,11 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include <ATen/mps/MPSDevice.h>
 #include <c10/core/DeviceGuard.h>
@@ -26,6 +29,7 @@ typedef id<MTLComputeCommandEncoder> MTLComputeCommandEncoder_t;
 typedef id<MTLSharedEvent> MTLSharedEvent_t;
 typedef id<MTLDevice> MTLDevice_t;
 typedef id<MTLBuffer> MTLBuffer_t;
+@class MPSRecordingEncoder;
 #else
 #include <dispatch/dispatch.h>
 typedef void* MPSCommandBuffer_t;
@@ -98,6 +102,138 @@ class TORCH_API MPSStream {
                        SyncType syncType = SyncType::NONE);
   void addCompletedHandler(MTLCommandBufferHandler block);
 
+  // Graph capture: record a sequence of MPSGraph ops on the first pass and
+  // replay them all in a single dispatch_sync on subsequent passes.
+  // Multiple independent captures may be alive at once, each identified by
+  // the handle captureBegin() returns; recording itself is exclusive (only
+  // one capture may be actively recording at a time).
+  // Constraints (same as torch.cuda.graph):
+  //   - inputs must be updated in-place via .copy_() between replay calls
+  //   - tensor shapes and allocations must not change between replays
+  //   - profiling must be disabled during capture
+  uint64_t captureBegin();
+  // Takes the id so one capture cannot end another's recording.
+  void captureEnd(uint64_t captureId);
+  // Releases the capture identified by `captureId` (retained buffers/executables).
+  // Returns false if it was not live, so a destructor can distinguish an
+  // already-freed handle from a real failure without a separate lookup.
+  bool captureFree(uint64_t captureId);
+  // Releases every live capture and stops any capture currently recording.
+  void captureReset();
+  void replay(uint64_t captureId);
+
+  // Returns true if a capture is currently being recorded.
+  // _activeCaptureId is std::atomic<uint64_t> so this is safe to call from any thread.
+  bool captureMode() const {
+    return _activeCaptureId.load(std::memory_order_acquire) != 0;
+  }
+
+  // Fail loud when an op that cannot be captured runs inside a capture block.
+  // Our own Metal shaders are recorded, since MPSRecordingEncoder intercepts the
+  // encoder calls that issue them. Ops that instead hand encoding to an
+  // MPS-framework kernel (e.g. MPSMatrix*/MPSNDArray* via
+  // encodeToCommandEncoder:/encodeToCommandBuffer:) drive the encoder through
+  // selectors the proxy does not override, so the work runs but is never recorded;
+  // the same applies to ops that fall back to CPU. Replay would silently drop
+  // them and produce wrong results, the worst failure mode for users, so such ops
+  // call this to raise a clear error instead.
+  void assertCapturable(const char* op) const {
+    TORCH_CHECK(!captureMode(),
+                op,
+                " is not supported inside a torch.mps.metal_graph() capture: it uses a path "
+                "(opaque MPS-framework kernel encode or CPU fallback) that cannot be recorded for "
+                "replay. Run it outside the capture block.");
+  }
+
+  // Returns 0 if `captureId` does not refer to a live capture (never captured, or
+  // already freed). Queue-confined: every mutation of _captures happens on
+  // _serialQueue, so the read must too.
+  size_t capturedStepCount(uint64_t captureId) const;
+
+  // Owning handle for one capture, so captured resources are released when the
+  // owner goes out of scope rather than only on an explicit free. This is what
+  // backs torch.mps.MetalGraph and gives it the same ownership semantics as
+  // torch.cuda.CUDAGraph: dropping the object releases the capture.
+  //
+  // The stream is captured at captureBegin() time and reused for replay and
+  // release, so a graph recorded on one stream is never replayed against a
+  // different stream's capture table.
+  class TORCH_API MetalGraph {
+   public:
+    MetalGraph() = default;
+    ~MetalGraph() {
+      reset();
+    }
+    // Non-copyable: two owners of one capture id would double-free it.
+    MetalGraph(const MetalGraph&) = delete;
+    MetalGraph& operator=(const MetalGraph&) = delete;
+    MetalGraph(MetalGraph&& other) noexcept : _id(other._id), _stream(other._stream) {
+      other._id = 0;
+      other._stream = nullptr;
+    }
+    MetalGraph& operator=(MetalGraph&& other) noexcept {
+      if (this != &other) {
+        reset();
+        _id = other._id;
+        _stream = other._stream;
+        other._id = 0;
+        other._stream = nullptr;
+      }
+      return *this;
+    }
+
+    void captureBegin();
+    void captureEnd();
+    void replay();
+    // Releases the capture. Safe to call more than once, and on a graph that
+    // never captured anything.
+    void reset();
+    size_t stepCount() const;
+    bool isCaptured() const {
+      return _id != 0;
+    }
+
+   private:
+    uint64_t _id = 0; // 0 = nothing captured
+    MPSStream* _stream = nullptr;
+  };
+
+  struct CapturedMetalKernel {
+    void* pso = nullptr; // id<MTLComputePipelineState>, retained
+    struct BufferBinding {
+      void* buffer; // id<MTLBuffer>
+      size_t offset;
+      unsigned index;
+      size_t bufferLength; // recorded buffer length for replay validation
+    };
+    struct BytesBinding {
+      std::vector<uint8_t> data;
+      unsigned index;
+    };
+    struct ThreadgroupMemoryBinding {
+      size_t length;
+      unsigned index;
+    };
+    // useResource:usage: declares a resource accessed only indirectly (e.g. via
+    // a raw GPU address embedded in an argument buffer) so Metal can track it
+    // for residency/hazards; it is not implied by setBuffer/setBytes, so it
+    // must be captured and reissued separately on replay.
+    struct ResourceUsage {
+      void* resource; // id<MTLResource>, retained
+      unsigned long usage; // MTLResourceUsage bitmask
+    };
+    std::vector<BufferBinding> buffers;
+    std::vector<BytesBinding> bytes;
+    std::vector<ThreadgroupMemoryBinding> threadgroupMemory;
+    std::vector<ResourceUsage> resourceUsages;
+    uint64_t gridX = 0, gridY = 0, gridZ = 0;
+    uint64_t tgX = 0, tgY = 0, tgZ = 0;
+    bool useThreadgroups = false; // true = dispatchThreadgroups, false = dispatchThreads
+  };
+
+  // Called by MPSRecordingEncoder to push a finalized Metal kernel recording.
+  void pushCapturedMetalKernel(std::unique_ptr<CapturedMetalKernel> kernel);
+
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const {
     return _stream.device_index();
@@ -130,6 +266,47 @@ class TORCH_API MPSStream {
   bool _enableCommitAndContinue = true;
   // Buffer that contains last raised error
   MTLBuffer_t _errorBuffer = nil;
+
+  // Graph capture state.
+  // Each entry in _captures stores one vector of steps (one per
+  // executeMPSGraph call OR raw Metal kernel dispatch) recorded during a
+  // capture pass, keyed by the handle captureBegin() returned for it.
+  // On replay the same buffers are re-bound: callers must update input
+  // data in-place (via .copy_()) between replay calls to supply new batches.
+
+  struct CapturedStep {
+    enum class Kind { MPSGraph, MetalKernel, BlitCopy };
+    Kind kind = Kind::MPSGraph;
+    // MPSGraph fields
+    void* exe = nullptr; // MPSGraphExecutable*, owned by this step (released in releaseCapturedStep)
+#ifdef __OBJC__
+    NSArray<MPSGraphTensorData*>* inputsArray = nil;
+    NSArray<MPSGraphTensorData*>* resultsArray = nil;
+#else
+    void* inputsArray = nullptr;
+    void* resultsArray = nullptr;
+#endif
+    // Metal kernel fields
+    std::unique_ptr<CapturedMetalKernel> metalKernel;
+    // Blit copy fields (buffer-to-buffer copy recorded from MPSStream::copy).
+    void* blitSrc = nullptr; // id<MTLBuffer>, retained
+    void* blitDst = nullptr; // id<MTLBuffer>, retained
+    size_t blitLength = 0;
+    size_t blitSrcOffset = 0;
+    size_t blitDstOffset = 0;
+  };
+  std::atomic<uint64_t> _activeCaptureId{0}; // 0 = no capture currently recording
+  std::unordered_map<uint64_t, std::vector<CapturedStep>> _captures;
+  uint64_t _nextCaptureId = 1; // allocated only inside _serialQueue dispatches
+
+  // Release retained Objective-C refs held by a captured step (PSO + bound
+  // MTLBuffers for MetalKernel steps, inputs/results arrays for MPSGraph steps).
+  static void releaseCapturedStep(CapturedStep& step);
+#ifdef __OBJC__
+  MPSRecordingEncoder* _recordingEncoder = nil;
+#else
+  void* _recordingEncoder = nullptr;
+#endif
 
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();

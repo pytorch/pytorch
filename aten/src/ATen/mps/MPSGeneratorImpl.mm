@@ -2,6 +2,7 @@
 
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
+#include <ATen/mps/MPSStream.h>
 #include <algorithm>
 
 namespace at {
@@ -36,6 +37,20 @@ void MPSGeneratorImpl::set_current_seed(uint64_t seed) {
 }
 
 void MPSGeneratorImpl::set_offset(uint64_t offset) {
+  // Every RNG-consuming MPS op advances the generator through here, except LSTM
+  // dropout, which calls update_philox_counters() below directly. The philox
+  // seed and offset reach the kernel via setBytes (or, for LSTM, an MPSGraph
+  // feed), which a capture records as fixed data, so a replayed randn/dropout
+  // would reproduce the capture pass's numbers exactly instead of drawing fresh
+  // ones. CUDA handles this by re-seeding per replay (CUDAGraph's
+  // replay_prologue); MPS has no equivalent yet, so fail loud rather than hand
+  // back silently non-random results.
+  TORCH_CHECK(!mps::getCurrentMPSStream()->captureMode(),
+              "Random number generation is not supported inside a torch.mps.metal_graph() "
+              "capture: the philox seed and offset are baked into the recorded dispatch, so "
+              "every replay would produce identical values rather than fresh randomness. "
+              "Generate random tensors outside the capture block (and update them in-place "
+              "between replays if they need to vary).");
   engine_.set_offset(offset);
 }
 
@@ -55,6 +70,16 @@ uint64_t MPSGeneratorImpl::seed() {
 
 // See Note [Acquire lock when using random generators]
 void MPSGeneratorImpl::update_philox_counters() {
+  // LSTM dropout's only entry point into the generator: it feeds the resulting
+  // state into the LSTM's MPSGraph directly rather than going through
+  // set_offset(), so it needs its own capture guard for the same reason
+  // set_offset() has one above -- a captured LSTM's dropout mask would
+  // otherwise be frozen across replays instead of drawing fresh values.
+  TORCH_CHECK(!mps::getCurrentMPSStream()->captureMode(),
+              "Random number generation is not supported inside a torch.mps.metal_graph() "
+              "capture: LSTM dropout state is baked into the recorded dispatch, so every "
+              "replay would reuse the capture pass's dropout mask. Run LSTM with dropout "
+              "outside the capture block.");
   // calling engine_() would call operator() of philox_engine class to
   // get each of the four newly generated counter values (see PhiloxRNGEngine.h).
   for (int i = 1; i <= 4; i++) {
