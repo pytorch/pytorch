@@ -21,22 +21,23 @@ from torch.distributed.pipelining.schedules import (
 )
 from torch.distributed.tensor import DTensor
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
-    requires_nccl,
     skip_if_lt_x_gpu,
 )
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_MULTIACCELERATOR,
     TEST_WITH_ROCM,
 )
-
-
-device_type = "cuda"
 
 
 # MLP Layer
@@ -96,14 +97,7 @@ def loss_fn(y, target, scale=1e-4):
 
 
 class ComposabilityTest(MultiProcContinuousTest):
-    @classmethod
-    def backend_str(cls) -> str:
-        # Testing with NCCL backend
-        return "nccl"
-
-    @property
-    def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _rand_microbatches(self, dp_mesh, num_microbatches, dim, dtype=torch.float32):
         full = [
@@ -195,9 +189,9 @@ class ComposabilityTest(MultiProcContinuousTest):
             )
         return pipeline_schedule, partial_models, offsets
 
-    @requires_nccl()
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Test requires 4+ GPUs")
     @parametrize(
         "ScheduleClass",
         [
@@ -206,17 +200,19 @@ class ComposabilityTest(MultiProcContinuousTest):
             ScheduleInterleavedZeroBubble,
         ],
     )
-    def test_pp_ddp(self, ScheduleClass):
+    def test_pp_ddp(self, ScheduleClass, device):
         if ScheduleClass == ScheduleInterleavedZeroBubble:
             # TODO: DDP + InterleavedZeroBubble is not currently supported due to issue with DDP reducer not triggering
             # https://github.com/pytorch/pytorch/issues/144530
             return
 
+        device_type = torch.device(device).type
+        self.device = torch.device(device_type, self.rank)
         torch.get_device_module(device_type).set_device(self.device)
         mesh_shape = (self.world_size // 2, 2)
         mesh_dim_names = ("dp", "pp")
         device_mesh = init_device_mesh(
-            "cuda", mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
+            device_type, mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
         )
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
@@ -276,9 +272,9 @@ class ComposabilityTest(MultiProcContinuousTest):
                 ref_p = ref_parameters[name]
                 torch.testing.assert_close(p.grad, ref_p.grad)
 
-    @requires_nccl()
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
     @parametrize(
         "ScheduleClass",
@@ -289,15 +285,17 @@ class ComposabilityTest(MultiProcContinuousTest):
             ScheduleInterleavedZeroBubble,
         ],
     )
-    def test_pp_fsdp(self, dp_type, ScheduleClass):
+    def test_pp_fsdp(self, dp_type, ScheduleClass, device):
         if TEST_WITH_ROCM:
             return
 
+        device_type = torch.device(device).type
+        self.device = torch.device(device_type, self.rank)
         torch.get_device_module(device_type).set_device(self.device)
         mesh_shape = (self.world_size // 2, 2)
         mesh_dim_names = ("dp", "pp")
         device_mesh = init_device_mesh(
-            "cuda", mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
+            device_type, mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
         )
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
@@ -387,20 +385,22 @@ class ComposabilityTest(MultiProcContinuousTest):
                     p.grad.full_tensor(), ref_p.grad, atol=5e-5, rtol=2e-2
                 )
 
-    @requires_nccl()
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
-    def test_pp_fsdp_unshard_reshard_runtime(self, dp_type):
+    def test_pp_fsdp_unshard_reshard_runtime(self, dp_type, device):
         """Test FSDP UNSHARD/RESHARD functionality using _PipelineScheduleRuntime with custom schedules."""
         if TEST_WITH_ROCM:
             return
 
+        device_type = torch.device(device).type
+        self.device = torch.device(device_type, self.rank)
         torch.get_device_module(device_type).set_device(self.device)
         mesh_shape = (self.world_size, 1)
         mesh_dim_names = ("dp", "pp")
         device_mesh = init_device_mesh(
-            "cuda", mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
+            device_type, mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
         )
         pp_group = device_mesh["pp"].get_group()
         dp_mesh = device_mesh["dp"]
@@ -535,6 +535,9 @@ class ComposabilityTest(MultiProcContinuousTest):
         check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
 
 
-instantiate_parametrized_tests(ComposabilityTest)
+instantiate_device_type_tests(
+    ComposabilityTest, globals(), except_for="cpu"
+)
+
 if __name__ == "__main__":
     run_tests()
