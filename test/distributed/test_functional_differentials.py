@@ -440,7 +440,8 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
 
     @parametrize("device", devices)
     @parametrize("scatter_dim", [0, 1])
-    def test_reduce_scatter_tensor_backward(self, device, scatter_dim):
+    @parametrize("reduce_op", ["sum", "avg"])
+    def test_reduce_scatter_tensor_backward(self, device, scatter_dim, reduce_op):
         """Test reduce_scatter_tensor backward does all_gather.
 
         Both tensor AND gradients are VARYING (different across ranks).
@@ -459,21 +460,22 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             )
 
         output = fcols.reduce_scatter_single(
-            input_tensor, "sum", scatter_dim=scatter_dim, group=group_name
+            input_tensor, reduce_op, scatter_dim=scatter_dim, group=group_name
         )
 
         # Backward with ones
         output.sum().backward()
 
-        # Gradient should be all_gather of ones
+        # Gradient should be all_gather of ones, scaled for avg.
         self.assertIsNotNone(input_tensor.grad)
         self.assertEqual(input_tensor.grad.shape, input_tensor.shape)
 
-        # All gradients should be 1 (gathered from all ranks)
-        expected_grad = torch.ones_like(input_tensor)
+        # Average reduction scales each gathered gradient by the group size.
+        expected_value = 1 / self.world_size if reduce_op == "avg" else 1
+        expected_grad = torch.full_like(input_tensor, expected_value)
         self.assertEqual(input_tensor.grad, expected_grad)
 
-        # Backward is all_gather (sum)
+        # Backward is all_gather, scaled for avg.
         grad_outputs = torch.rand_like(output, device=device)
         (grad_input,) = torch.autograd.grad(
             output, input_tensor, grad_outputs=grad_outputs
@@ -481,6 +483,8 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         expected_grad_input = fcols.all_gather_single(
             grad_outputs, scatter_dim, group=group_name
         )
+        if reduce_op == "avg":
+            expected_grad_input = expected_grad_input / self.world_size
         self.assertEqual(grad_input, expected_grad_input)
 
     @parametrize("device", devices)
@@ -576,10 +580,11 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             self.assertEqual(input_tensor.grad, expected_grad)
 
     @parametrize("device", devices)
-    def test_reduce_scatter_tensor_coalesced_backward(self, device):
+    @parametrize("reduce_op", ["sum", "avg"])
+    def test_reduce_scatter_tensor_coalesced_backward(self, device, reduce_op):
         """Test reduce_scatter_tensor_coalesced backward does all_gather on each gradient.
 
-        Tensors AND gradients are VARYING (different across ranks).
+        Tensors are VARYING (different across ranks).
         Forward reduces and scatters each tensor, backward gathers each gradient.
         """
         group_name = dist.group.WORLD.group_name
@@ -591,17 +596,18 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         scatter_dims = [0, 0]
 
         outputs = fcols.reduce_scatter_single_coalesced(
-            input_tensors, "sum", scatter_dims, group=group_name
+            input_tensors, reduce_op, scatter_dims, group=group_name
         )
 
         # Backward with ones
         loss = sum(output.sum() for output in outputs)
         loss.backward()
 
-        # Each gradient should be all_gather of ones
+        # Each gradient should be all_gather of ones, scaled for avg.
         for input_tensor in input_tensors:
             self.assertIsNotNone(input_tensor.grad)
-            expected_grad = torch.ones_like(input_tensor)
+            expected_value = 1 / self.world_size if reduce_op == "avg" else 1
+            expected_grad = torch.full_like(input_tensor, expected_value)
             self.assertEqual(input_tensor.grad, expected_grad)
 
     # ============================================================
