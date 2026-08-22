@@ -4337,6 +4337,102 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         # Different value -> different hash
         self.assertNotEqual(data_a, data_c)
 
+    def test_stabilize_weakref_containers(self):
+        """
+        Test that _stabilize_tensor_subclass_metadata converts weakref
+        containers (WeakValueDictionary, WeakKeyDictionary, WeakSet) to
+        picklable equivalents. These containers are not picklable because
+        their __init__ defines a local callback function that pickle
+        cannot resolve.
+        """
+        import weakref
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = AOTAutogradCachePickler(gm)
+
+        v1, v2, v3 = torch.nn.Module(), torch.nn.Module(), torch.nn.Module()
+
+        wvd = weakref.WeakValueDictionary({"k": v1})
+        wkd = weakref.WeakKeyDictionary({v2: "val"})
+        ws = weakref.WeakSet([v3])
+
+        metadata = {"wvd": wvd, "wkd": wkd, "ws": ws, "normal": "value"}
+        result = pickler._stabilize_tensor_subclass_metadata(metadata)
+
+        self.assertIsInstance(result["wvd"], dict)
+        self.assertIsInstance(result["wkd"], dict)
+        self.assertIsInstance(result["ws"], set)
+        self.assertEqual(len(result["wvd"]), 1)
+        self.assertEqual(len(result["wkd"]), 1)
+        self.assertEqual(len(result["ws"]), 1)
+        self.assertEqual(result["normal"], "value")
+
+        pickle.dumps(result)
+
+    def test_tensor_subclass_with_weakref_metadata_cache_key(self):
+        """
+        Test that a tensor subclass whose __tensor_flatten__ returns metadata
+        containing a WeakValueDictionary can generate a stable cache key.
+        Regression test for https://github.com/pytorch/pytorch/issues/189293
+        """
+        import weakref
+
+        from torch.utils._python_dispatch import return_and_correct_aliasing
+
+        class WeakRefMetaTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, weak_meta=None):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls, data.shape, dtype=data.dtype, device=data.device
+                )
+
+            def __init__(self, data, weak_meta=None):
+                self._data = data
+                self._weak_meta = weak_meta or weakref.WeakValueDictionary()
+
+            def __tensor_flatten__(self):
+                return ["_data"], {"weak_meta": self._weak_meta}
+
+            @classmethod
+            def __tensor_unflatten__(
+                cls, inner_tensors, metadata, outer_size, outer_stride
+            ):
+                return cls(inner_tensors["_data"], weak_meta=metadata.get("weak_meta"))
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                def unwrap(t):
+                    return t._data if isinstance(t, WeakRefMetaTensor) else t
+
+                def wrap(t):
+                    if isinstance(t, torch.Tensor):
+                        return WeakRefMetaTensor(t)
+                    return t
+
+                out = func(
+                    *torch.utils._pytree.tree_map(unwrap, args),
+                    **torch.utils._pytree.tree_map(unwrap, kwargs or {}),
+                )
+                out_wrapped = torch.utils._pytree.tree_map(wrap, out)
+                if isinstance(out_wrapped, WeakRefMetaTensor):
+                    return return_and_correct_aliasing(func, args, kwargs, out_wrapped)
+                return out_wrapped
+
+        v = torch.nn.Module()
+        weak_meta = weakref.WeakValueDictionary({"k": v})
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = AOTAutogradCachePickler(gm)
+        t = WeakRefMetaTensor(torch.randn(4, 4), weak_meta=weak_meta)
+
+        hash_val = pickler._default_stable_hash_for_caching(t)
+        self.assertIsInstance(hash_val, str)
+        self.assertTrue(len(hash_val) > 0)
+
+        # Same tensor should produce the same hash
+        hash_val2 = pickler._default_stable_hash_for_caching(t)
+        self.assertEqual(hash_val, hash_val2)
+
 
 def _subprocess_gen_dtensor_cache_key(queue):
     """

@@ -16,6 +16,7 @@ import pickle
 import shutil
 import time
 import traceback
+import weakref
 import uuid
 from copy import copy
 from typing import Any, TYPE_CHECKING
@@ -731,10 +732,17 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             return tuple(self._stabilize_tensor_subclass_metadata(x) for x in obj)
         if isinstance(obj, list):
             return [self._stabilize_tensor_subclass_metadata(x) for x in obj]
-        if isinstance(obj, dict):
+        if isinstance(
+            obj, (dict, weakref.WeakValueDictionary, weakref.WeakKeyDictionary)
+        ):
             return {
-                k: self._stabilize_tensor_subclass_metadata(v) for k, v in obj.items()
+                self._stabilize_tensor_subclass_metadata(
+                    k
+                ): self._stabilize_tensor_subclass_metadata(v)
+                for k, v in obj.items()
             }
+        if isinstance(obj, weakref.WeakSet):
+            return {self._stabilize_tensor_subclass_metadata(x) for x in obj}
         return obj
 
     def _default_stable_hash_for_caching(self, tensor: torch.Tensor) -> str:
