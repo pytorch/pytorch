@@ -58,3 +58,29 @@ class EtcdServerTest(unittest.TestCase):
             self.assertEqual(1, rdzv_info.world_size)
         finally:
             server.stop()
+
+
+class FindFreePortTest(unittest.TestCase):
+    """Tests for find_free_port() error handling."""
+
+    def test_find_free_port_returns_listening_socket(self):
+        from torch.distributed.elastic.rendezvous.etcd_server import find_free_port
+
+        s = find_free_port()
+        try:
+            self.assertIsNotNone(s)
+            self.assertGreater(s.getsockname()[1], 0)
+        finally:
+            s.close()
+
+    @unittest.mock.patch("socket.socket")
+    def test_find_free_port_no_unbound_local_error_when_socket_fails(
+        self, mock_socket_cls
+    ):
+        """socket.socket() raising OSError must not cause UnboundLocalError."""
+        from torch.distributed.elastic.rendezvous.etcd_server import find_free_port
+
+        mock_socket_cls.side_effect = OSError("Address family not supported")
+
+        with self.assertRaises(RuntimeError):
+            find_free_port()
