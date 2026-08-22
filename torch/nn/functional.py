@@ -7163,9 +7163,8 @@ def grouped_mm(
             ``weight.transpose(-2, -1)`` as ``mat_b``.
         offs: Optional 1D tensor of monotonically increasing ``int32`` offsets that
             delimit the jagged dimension of any 2D operand. ``offs[i]`` marks the end
-            of group ``i`` and ``offs[-1]`` must be strictly less than the total
-            length of that operand's sliced dimension; elements beyond ``offs[-1]``
-            are ignored.
+            of group ``i`` and ``offs[-1]`` must be less than or equal to the
+            total length of that operand's sliced dimension.
         bias: Optional tensor that is added to the grouped outputs. Bias is not
             jagged and must be broadcastable to the result shape of each group.
         out_dtype: Optional dtype that controls the accumulation/output dtype.
@@ -7175,6 +7174,17 @@ def grouped_mm(
     Returns:
         A tensor containing the concatenated results of each per-group GEMM with
         shape inferred from the operands and ``offs``.
+
+    Examples::
+
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> mat_a = torch.randn(32, 64, device="cuda", dtype=torch.bfloat16)  # (M, K)
+        >>> weight = torch.randn(2, 8, 64, device="cuda", dtype=torch.bfloat16)  # (num_groups, N, K)
+        >>> mat_b = weight.transpose(-2, -1)  # (num_groups, K, N)
+        >>> offs = torch.tensor([16, 32], device="cuda", dtype=torch.int32)
+        >>> out = F.grouped_mm(mat_a, mat_b, offs=offs)
+        >>> out.shape
+        torch.Size([32, 8])
     """
 
     return torch._grouped_mm(mat_a, mat_b, offs=offs, bias=bias, out_dtype=out_dtype)
