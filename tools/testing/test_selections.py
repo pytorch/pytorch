@@ -46,23 +46,29 @@ THRESHOLD = 60 * 10  # 10 minutes
 
 # See Note [ROCm parallel CI testing]
 # Special logic for ROCm GHA runners to query number of GPUs available.
+# hipInfo gcnArchName lines also contain " gfx", so the same count works on Windows.
 if IS_ROCM and not IS_MEM_LEAK_CHECK:
-    try:
-        # This is the same logic used in GHA health check, see .github/templates/common.yml.j2
-        lines = (
-            subprocess.check_output(["rocminfo"], encoding="ascii").strip().split("\n")
-        )
-        count = 0
-        for line in lines:
-            if " gfx" in line:
-                count += 1
-        if count == 0:
-            raise AssertionError("There must be at least 1 GPU")
-        # Limiting to 8 GPUs(PROCS)
-        NUM_PROCS = min(count, 8)
-    except subprocess.CalledProcessError:
-        # The safe default for ROCm GHA runners is to run tests serially.
-        NUM_PROCS = 1
+    gpu_info_cmds = ["hipInfo", "rocminfo"] if os.name == "nt" else ["rocminfo"]
+    for gpu_info_cmd in gpu_info_cmds:
+        try:
+            # This is the same logic used in GHA health check, see .github/templates/common.yml.j2
+            lines = (
+                subprocess.check_output([gpu_info_cmd], encoding="ascii")
+                .strip()
+                .split("\n")
+            )
+            count = 0
+            for line in lines:
+                if " gfx" in line:
+                    count += 1
+            if count == 0:
+                raise AssertionError("There must be at least 1 GPU")
+            # Limiting to 8 GPUs(PROCS)
+            NUM_PROCS = min(count, 8)
+            break
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            # The safe default for ROCm GHA runners is to run tests serially.
+            NUM_PROCS = 1
 
 
 class ShardJob:
