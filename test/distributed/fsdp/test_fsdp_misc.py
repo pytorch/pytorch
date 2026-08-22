@@ -44,6 +44,7 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
@@ -79,6 +80,8 @@ class MyModel(nn.Module):
 
 
 class TestFSDPMiscMultiProcess(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -538,6 +541,103 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                     ]
 
     @skip_if_lt_x_gpu(2)
+    def test_fsdp_cpu_init_stays_on_cpu(self):
+        # Move me to MT test once warning logging and backward collective issue
+        # is resolved.
+        """Tests that passing a CPU module to FSDP preserves that the wrapped
+        module is on CPU after FSDP initialization, albeit after logging a
+        warning, and that FSDP moves CPU input to GPU before the forward."""
+        torch.accelerator.set_device_index(self.rank)
+        regex = "passed-in `module` is on CPU"
+        context = self.assertWarnsRegex(
+            expected_warning=UserWarning, expected_regex=regex
+        )
+        with context:
+            nested_wrapped_module = NestedWrappedModule.init(
+                self.process_group,
+                FSDPInitMode.RECURSIVE,
+                DEVICEInitMode.DEVICE_NEVER,
+            )
+            fsdp_model = FSDP(nested_wrapped_module, self.process_group)
+        devices = {p.device for p in fsdp_model.parameters()}
+        self.assertEqual(1, len(devices))
+        self.assertEqual(torch.device("cpu"), devices.pop())
+        fsdp_model = fsdp_model.to(device=device_type)
+        # Ensure fwd + backward can be performed after moving to CUDA.
+        # CPU input also tests that input is correctly moved to appropriate
+        # CUDA device.
+        inp = fsdp_model.module.get_input(device=torch.device("cpu"))
+        fsdp_model(*inp).sum().backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_cpu_init_with_sync_module_states(self):
+        """
+        Tests that passing ``sync_module_states=True`` raises an error for
+        a CPU module since the synchronization requires GPU communication,
+        while additionally passing ``device_id`` does not raise an error, even
+        when the model has CPU buffers.
+        """
+
+        def init_nested_wrapped_module():
+            return NestedWrappedModule.init(
+                self.process_group,
+                FSDPInitMode.NO_FSDP,
+                DEVICEInitMode.DEVICE_NEVER,
+            )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "The module has CPU parameters or buffers when `sync_module_states=True`",
+        ):
+            FSDP(
+                init_nested_wrapped_module(),
+                self.process_group,
+                sync_module_states=True,
+            )
+
+        # Check that `device_id` with `sync_module_states=True` works
+        nested_wrapped_module = init_nested_wrapped_module()
+        nested_wrapped_module.buf = nn.Buffer(
+            torch.ones((2, 2), device="cpu") * self.rank
+        )
+        nested_wrapped_module.module[0].buf = nn.Buffer(
+            torch.ones((3, 2), device="cpu") * self.rank
+        )
+        nested_wrapped_module = FSDP(
+            nested_wrapped_module,
+            self.process_group,
+            auto_wrap_policy=ModuleWrapPolicy({nn.Linear}),
+            device_id=torch.accelerator.current_device_index(),
+            sync_module_states=True,
+        )
+        # Each rank's buffers should be 0s since rank 0 is the source, and they
+        # should be on GPU since we specified `device_id`
+        self.assertEqual(
+            nested_wrapped_module.buf.device,
+            torch.device(device_type, torch.accelerator.current_device_index()),
+        )
+        self.assertEqual(nested_wrapped_module.buf, torch.zeros((2, 2)))
+        self.assertEqual(
+            nested_wrapped_module.module.module[0].buf.device,
+            torch.device(device_type, torch.accelerator.current_device_index()),
+        )
+        self.assertEqual(
+            nested_wrapped_module.module.module[0].buf, torch.zeros((3, 2))
+        )
+
+
+class TestFSDPMiscCPUTraining(FSDPTestContinuous):
+    hw_classification = HardwareClassification.CPU
+
+    @property
+    def world_size(self):
+        return 2
+
+    @property
+    def process_group(self):
+        return dist.distributed_c10d._get_default_group()
+
+    @skip_if_lt_x_gpu(2)
     def test_fsdp_cpu_training(self):
         """Tests FSDP training on CPU."""
         gloo_pg = dist.new_group(backend="gloo")
@@ -631,93 +731,10 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
             for name, param in model.named_parameters():
                 self.assertEqual(param, ref_params[clean_tensor_name(name)] + delta)
 
-    @skip_if_lt_x_gpu(2)
-    def test_fsdp_cpu_init_stays_on_cpu(self):
-        # Move me to MT test once warning logging and backward collective issue
-        # is resolved.
-        """Tests that passing a CPU module to FSDP preserves that the wrapped
-        module is on CPU after FSDP initialization, albeit after logging a
-        warning, and that FSDP moves CPU input to GPU before the forward."""
-        torch.accelerator.set_device_index(self.rank)
-        regex = "passed-in `module` is on CPU"
-        context = self.assertWarnsRegex(
-            expected_warning=UserWarning, expected_regex=regex
-        )
-        with context:
-            nested_wrapped_module = NestedWrappedModule.init(
-                self.process_group,
-                FSDPInitMode.RECURSIVE,
-                DEVICEInitMode.DEVICE_NEVER,
-            )
-            fsdp_model = FSDP(nested_wrapped_module, self.process_group)
-        devices = {p.device for p in fsdp_model.parameters()}
-        self.assertEqual(1, len(devices))
-        self.assertEqual(torch.device("cpu"), devices.pop())
-        fsdp_model = fsdp_model.to(device=device_type)
-        # Ensure fwd + backward can be performed after moving to CUDA.
-        # CPU input also tests that input is correctly moved to appropriate
-        # CUDA device.
-        inp = fsdp_model.module.get_input(device=torch.device("cpu"))
-        fsdp_model(*inp).sum().backward()
-
-    @skip_if_lt_x_gpu(2)
-    def test_cpu_init_with_sync_module_states(self):
-        """
-        Tests that passing ``sync_module_states=True`` raises an error for
-        a CPU module since the synchronization requires GPU communication,
-        while additionally passing ``device_id`` does not raise an error, even
-        when the model has CPU buffers.
-        """
-
-        def init_nested_wrapped_module():
-            return NestedWrappedModule.init(
-                self.process_group,
-                FSDPInitMode.NO_FSDP,
-                DEVICEInitMode.DEVICE_NEVER,
-            )
-
-        with self.assertRaisesRegex(
-            ValueError,
-            "The module has CPU parameters or buffers when `sync_module_states=True`",
-        ):
-            FSDP(
-                init_nested_wrapped_module(),
-                self.process_group,
-                sync_module_states=True,
-            )
-
-        # Check that `device_id` with `sync_module_states=True` works
-        nested_wrapped_module = init_nested_wrapped_module()
-        nested_wrapped_module.buf = nn.Buffer(
-            torch.ones((2, 2), device="cpu") * self.rank
-        )
-        nested_wrapped_module.module[0].buf = nn.Buffer(
-            torch.ones((3, 2), device="cpu") * self.rank
-        )
-        nested_wrapped_module = FSDP(
-            nested_wrapped_module,
-            self.process_group,
-            auto_wrap_policy=ModuleWrapPolicy({nn.Linear}),
-            device_id=torch.accelerator.current_device_index(),
-            sync_module_states=True,
-        )
-        # Each rank's buffers should be 0s since rank 0 is the source, and they
-        # should be on GPU since we specified `device_id`
-        self.assertEqual(
-            nested_wrapped_module.buf.device,
-            torch.device(device_type, torch.accelerator.current_device_index()),
-        )
-        self.assertEqual(nested_wrapped_module.buf, torch.zeros((2, 2)))
-        self.assertEqual(
-            nested_wrapped_module.module.module[0].buf.device,
-            torch.device(device_type, torch.accelerator.current_device_index()),
-        )
-        self.assertEqual(
-            nested_wrapped_module.module.module[0].buf, torch.zeros((3, 2))
-        )
-
 
 class TestFSDPMiscMultiThread(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -935,8 +952,10 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             def __init__(self, rank):
                 super().__init__()
                 self.rank = rank
-                self.a = nn.Linear(1, 1).cuda(self.rank)
-                self.b = nn.Linear(1, 1).cuda((self.rank + 1) % dist.get_world_size())
+                self.a = nn.Linear(1, 1).to(torch.device(device_type, self.rank))
+                self.b = nn.Linear(1, 1).to(
+                    torch.device(device_type, (self.rank + 1) % dist.get_world_size())
+                )
 
         with self.assertRaisesRegex(
             RuntimeError, "FSDP only supports single device modules"
@@ -969,7 +988,8 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         context = (
             (
                 self.assertRaisesRegex(
-                    ValueError, f"Inconsistent.*cuda:{self.rank} vs cuda:0"
+                    ValueError,
+                    f"Inconsistent.*{device_type}:{self.rank} vs {device_type}:0",
                 )
             )
             if self.rank != 0
@@ -1089,6 +1109,8 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
 
 
 class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 1
@@ -1151,7 +1173,7 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         with self.assertRaisesRegex(
             RuntimeError,
             "An FSDP-managed module unexpectedly has parameters on cpu. Make "
-            "sure to move the module to cuda:0 before training.",
+            f"sure to move the module to {device_type}:0 before training.",
         ):
             fsdp_model(inp)
 
@@ -1163,8 +1185,8 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         with self.assertRaisesRegex(
             RuntimeError,
             "An FSDP-managed module with parameter CPU offloading enabled has "
-            "parameters on cuda:0. Make sure to not move the module from CPU "
-            "when offloading parameters.",
+            f"parameters on {device_type}:0. Make sure to not move the module "
+            "from CPU when offloading parameters.",
         ):
             fsdp_model(inp)
 
