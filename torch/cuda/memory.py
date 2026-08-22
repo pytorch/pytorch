@@ -649,6 +649,53 @@ def memory_snapshot(mempool_id=None, include_traces=True):
         )["segments"]
 
 
+def _restore_expandable_segments(
+    segments: list[dict[str, Any]],
+    mempool_id: tuple[int, int],
+    device: "Device" = None,
+) -> None:
+    r"""Re-create expandable segments at the virtual addresses they had in a
+    previous process, and map back the ranges they had mapped.
+
+    ``segments`` are entries from :func:`memory_snapshot` taken in the earlier
+    process. Each is re-reserved at the address it had, which the driver honors
+    because the reservation is large (see Note [Expandable Segment Reserved
+    Address]); the address does not have to have been predictable when it was
+    recorded. The restored ranges become free blocks in ``mempool_id``, so
+    ``UntypedStorage._resize_with_addr_`` can then place a tensor back at its
+    original address.
+
+    Call this before anything else allocates, and keep the pool alive (e.g. hold
+    the :class:`MemPool`) for as long as the restored addresses are in use.
+
+    .. warning::
+        Internal API, subject to change. Requires
+        ``PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True``.
+    """
+    device_index = _get_device_index(device, optional=True)
+    # Group the snapshot's per-mapped-run entries back into whole segments: a
+    # segment with holes is reported as several runs sharing one base address.
+    runs: dict[tuple[bool, int], list[tuple[int, int]]] = {}
+    for seg in segments:
+        if not seg["is_expandable"]:
+            raise ValueError(
+                f"segment at {seg['address']:#x} is not an expandable segment, so its "
+                "address cannot be reproduced; set expandable_segments:True when saving"
+            )
+        key = (seg["segment_type"] == "small", seg["expandable_segment_base"])
+        offset = seg["address"] - seg["expandable_segment_base"]
+        runs.setdefault(key, []).append((offset, seg["total_size"]))
+
+    for (is_small, base), ranges in runs.items():
+        torch._C._cuda_restoreExpandableSegment(
+            device_index,
+            mempool_id,
+            is_small,
+            base,
+            sorted(ranges),
+        )
+
+
 def memory_summary(device: "Device" = None, abbreviated: bool = False) -> str:
     r"""Return a human-readable printout of the current memory allocator statistics for a given device.
 

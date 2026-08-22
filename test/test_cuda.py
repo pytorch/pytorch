@@ -5747,6 +5747,125 @@ print(ret)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+@unittest.skipIf(TEST_WITH_ROCM, "expandable segment bases are CUDA-only")
+@unittest.skipIf(TEST_CUDAMALLOCASYNC, "not using the native caching allocator")
+class TestExpandableSegmentBase(TestCase):
+    """Each snapshot entry reports the base of the reservation it lives in, which
+    is what a later process asks for to get the same addresses back. See Note
+    [Expandable Segment Reserved Address].
+    """
+
+    def test_runs_in_one_segment_share_a_base(self):
+        # Freeing the middle allocation leaves a hole, so one reservation is
+        # reported as several runs -- all of them naming the same base.
+        script = """
+import json, torch
+# 40 MiB is two whole 20 MiB mapping granules, so freeing the middle
+# allocation really unmaps and leaves a hole.
+keep = [torch.empty(40 << 20, dtype=torch.uint8, device="cuda") for _ in range(3)]
+del keep[1]
+torch.cuda.empty_cache()
+torch.cuda.synchronize()
+print(json.dumps([
+    {k: s[k] for k in ("address", "expandable_segment_base")}
+    for s in torch.cuda.memory_snapshot()
+    if s["is_expandable"] and s["segment_type"] == "large"
+]))
+"""
+        env = os.environ.copy()
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        out = subprocess.check_output([sys.executable, "-c", script], env=env)
+        runs = json.loads(out.decode().strip().splitlines()[-1])
+        self.assertGreater(len(runs), 1)
+        bases = {r["expandable_segment_base"] for r in runs}
+        self.assertEqual(len(bases), 1)
+        self.assertEqual(min(r["address"] for r in runs), bases.pop())
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+@unittest.skipIf(TEST_WITH_ROCM, "restoring at a fixed address is CUDA-only")
+@unittest.skipIf(TEST_CUDAMALLOCASYNC, "not using the native caching allocator")
+class TestExpandableSegmentRestore(TestCase):
+    """A segment's virtual address, and the tensors inside it, can be brought
+    back in a fresh process. See Note [Expandable Segment Reserved Address].
+    """
+
+    _SAVE = """
+import json, torch
+pool = torch.cuda.MemPool()
+with torch.cuda.use_mem_pool(pool):
+    a = torch.arange(1 << 20, dtype=torch.float32, device="cuda")
+    b = torch.full((1 << 18,), 7.5, device="cuda")
+torch.cuda.synchronize()
+print(json.dumps({
+    "segments": torch.cuda.memory_snapshot(mempool_id=pool.id, include_traces=False),
+    "tensors": [
+        {"addr": t.data_ptr(), "nbytes": t.numel() * t.element_size(), "numel": t.numel()}
+        for t in (a, b)
+    ],
+}))
+"""
+
+    # Restores the segments, then places tensors back at their recorded
+    # addresses and round-trips a pattern through them.
+    _RESTORE = """
+import json, sys, torch
+spec = json.load(open(sys.argv[1]))
+pool = torch.cuda.MemPool()
+torch.cuda.memory._restore_expandable_segments(spec["segments"], pool.id)
+result = []
+with torch.cuda.use_mem_pool(pool):
+    for i, t in enumerate(spec["tensors"]):
+        x = torch.empty(0, dtype=torch.float32, device="cuda")
+        x.untyped_storage()._resize_with_addr_(t["nbytes"], t["addr"])
+        x.resize_(t["numel"])
+        x.fill_(i + 1)
+        result.append({"addr": x.data_ptr(), "sum": x.sum().item(), "numel": x.numel()})
+torch.cuda.synchronize()
+print(json.dumps(result))
+"""
+
+    def _run(self, script, *args):
+        env = os.environ.copy()
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        out = subprocess.check_output([sys.executable, "-c", script, *args], env=env)
+        return json.loads(out.decode().strip().splitlines()[-1])
+
+    def test_tensors_come_back_at_their_original_addresses(self):
+        saved = self._run(self._SAVE)
+        self.assertGreater(len(saved["segments"]), 0)
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
+            json.dump(saved, f)
+            f.flush()
+            restored = self._run(self._RESTORE, f.name)
+
+        self.assertEqual(len(restored), len(saved["tensors"]))
+        for i, (want, got) in enumerate(zip(saved["tensors"], restored)):
+            self.assertEqual(got["addr"], want["addr"])
+            self.assertEqual(got["numel"], want["numel"])
+            # the memory is usable, not just addressable
+            self.assertEqual(got["sum"], (i + 1) * want["numel"])
+
+    def test_restore_fails_loudly_when_the_address_is_taken(self):
+        # cuMemAddressReserve reports success while placing the reservation
+        # somewhere else, so restoring onto an address this process already holds
+        # has to raise rather than hand back the wrong memory.
+        script = """
+import json, torch
+t = torch.empty(1 << 22, device="cuda")
+torch.cuda.synchronize()
+seg = dict(next(s for s in torch.cuda.memory_snapshot() if s["is_expandable"]))
+pool = torch.cuda.MemPool()
+try:
+    torch.cuda.memory._restore_expandable_segments([seg], pool.id)
+    print(json.dumps("no error"))
+except RuntimeError as e:
+    print(json.dumps(str(e)))
+"""
+        self.assertIn("could not reserve", self._run(script))
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @unittest.skipIf(
     TEST_WITH_ROCM and EXPANDABLE_SEGMENTS,
     "expandable_segments mode is not supported on ROCm",

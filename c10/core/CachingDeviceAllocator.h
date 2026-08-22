@@ -103,6 +103,13 @@ struct SegmentInfo {
   void* stream = nullptr; // Records the address of the underlying stream
   bool is_large = false;
   bool is_expandable = false;
+  // For an expandable segment whose virtual address the allocator placed on a
+  // fixed grid, the (bucket, slot) that produced it, so a later process can
+  // re-reserve the same address. bucket is -1 when the address was not placed.
+  // Base of the whole expandable reservation this segment is a mapped run of,
+  // so a caller can express the run as an offset without knowing the grid
+  // layout. 0 for non-expandable segments.
+  size_t expandable_segment_base = 0;
   MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
   std::shared_ptr<GatheredContext> context_when_allocated;
