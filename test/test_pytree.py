@@ -1095,6 +1095,73 @@ if "optree" in sys.modules:
         serialized_spec = python_pytree.treespec_dumps(spec)
         self.assertIsInstance(serialized_spec, str)
 
+    def test_pytree_serialize_tuple_mapping_key(self):
+        # A tuple mapping key is a valid pytree, but JSON has no tuple type, so
+        # naive serialization turns the key into a list, which is unhashable and
+        # breaks the round-trip in tree_unflatten. See #188648.
+        for tree in [
+            {(1, 2): 0},
+            OrderedDict({(1, 2): 0, ("a", "b"): 1}),
+            {(1, (2, 3)): 0},  # nested tuple key
+            {"scalar": 0, (1, 2): 1},  # mix of hashable and tuple keys
+            defaultdict(list, {(1, 2): [0]}),
+        ]:
+            leaves, spec = python_pytree.tree_flatten(tree)
+            roundtrip_spec = python_pytree.treespec_loads(
+                python_pytree.treespec_dumps(spec)
+            )
+            self.assertEqual(spec, roundtrip_spec)
+            # The reconstructed spec must still unflatten (tuple keys stay hashable).
+            self.assertEqual(
+                python_pytree.tree_unflatten(leaves, roundtrip_spec), tree
+            )
+
+    def test_pytree_serialize_tuple_key_is_backward_compatible(self):
+        # Specs that contain no tuple keys must serialize byte-for-byte as before,
+        # so previously serialized specs keep loading.
+        spec = python_pytree.tree_structure({"a": 0, "b": {"c": 1}})
+        serialized_spec = python_pytree.treespec_dumps(spec)
+        self.assertNotIn("__tuple__", serialized_spec)
+        self.assertEqual(spec, python_pytree.treespec_loads(serialized_spec))
+
+    def test_pytree_serialize_custom_context_with_tuple_marker(self):
+        # The tuple escaping used to fix tuple mapping keys is scoped to the
+        # built-in mapping contexts (dict / OrderedDict / defaultdict) only. A
+        # custom node that uses the generic JSON context path (no custom
+        # to/from_dumpable_context) whose serialized context legitimately IS the
+        # tuple-escape marker dict must round-trip completely UNCHANGED -- the
+        # dict must stay a dict and never be turned into the tuple (1, 2).
+        class DummyType:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        marker_context = {"__tuple__": [1, 2]}
+        python_pytree.register_pytree_node(
+            DummyType,
+            lambda dummy: ([dummy.x, dummy.y], dict(marker_context)),
+            lambda xs, context: DummyType(*xs),
+            serialized_type_name=(
+                "test_pytree.test_pytree_serialize_custom_context_"
+                "with_tuple_marker.DummyType"
+            ),
+        )
+        try:
+            spec = python_pytree.tree_structure(DummyType(1, 2))
+            # Sanity check: the context really is the marker dict.
+            self.assertEqual(spec._context, marker_context)
+
+            roundtrip_spec = python_pytree.treespec_loads(
+                python_pytree.treespec_dumps(spec)
+            )
+            # The generic/custom context path must not apply tuple unescaping, so
+            # the context stays a dict and is not corrupted into a tuple.
+            self.assertIsInstance(roundtrip_spec._context, dict)
+            self.assertEqual(roundtrip_spec._context, marker_context)
+            self.assertEqual(spec, roundtrip_spec)
+        finally:
+            python_pytree._deregister_pytree_node(DummyType)
+
     def test_pytree_serialize_namedtuple(self):
         Point1 = namedtuple("Point1", ["x", "y"])
         python_pytree._register_namedtuple(
