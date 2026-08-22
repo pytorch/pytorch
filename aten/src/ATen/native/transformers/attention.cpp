@@ -956,9 +956,49 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     }
 
 
-    // MQA/GQA handling
-    auto [key_expanded, value_expanded] = pre_process_group_query_attention_input(query, key_acc, value_acc, enable_gqa);
-    auto attn = at::matmul(query, key_expanded.transpose(-2, -1) * scaling_factor);
+    // MQA/GQA handling. When query has more heads than key/value, the math
+    // reference historically materialized repeated key/value with
+    // repeat_interleave. Instead, split the query heads into (kv_heads, group)
+    // and broadcast key/value over the group dimension, so the repeated
+    // key/value tensors are never allocated. Softmax/masking still run on the
+    // [..., q_heads, L, S] shape. Nested inputs keep the repeat path since the
+    // grouped view/broadcast semantics don't apply to them.
+    const bool gqa_broadcast = enable_gqa && !query.is_nested() &&
+        !key_acc.is_nested() && !value_acc.is_nested() &&
+        (query.sym_size(-3) != key_acc.sym_size(-3) ||
+         query.sym_size(-3) != value_acc.sym_size(-3));
+
+    // Broadcast a's query heads against v's kv heads: reshape a to
+    // (..., kv_heads, group, *, *) and unsqueeze v to (..., kv_heads, 1, *, *).
+    auto grouped_matmul = [](const at::Tensor& a, const at::Tensor& v) {
+      const auto a_heads = a.sym_size(-3);
+      const auto v_heads = v.sym_size(-3);
+      return at::matmul(
+                 a.unflatten_symint(-3, {v_heads, a_heads / v_heads}),
+                 v.unsqueeze(-3))
+          .flatten(-4, -3);
+    };
+
+    at::Tensor attn;
+    at::Tensor key_expanded, value_expanded;
+    if (gqa_broadcast) {
+      const auto q_num_heads = query.sym_size(-3);
+      const auto k_num_heads = key_acc.sym_size(-3);
+      const auto v_num_heads = value_acc.sym_size(-3);
+      TORCH_CHECK(
+          q_num_heads % k_num_heads == 0 && q_num_heads % v_num_heads == 0,
+          "Number of heads in key and value must divide the number of heads in query");
+      auto scaled_key_t =
+          (key_acc.transpose(-2, -1) * scaling_factor).unsqueeze(-3);
+      auto query_grouped =
+          query.unflatten_symint(-3, {k_num_heads, q_num_heads / k_num_heads});
+      attn = at::matmul(query_grouped, scaled_key_t).flatten(-4, -3);
+    } else {
+      std::tie(key_expanded, value_expanded) =
+          pre_process_group_query_attention_input(
+              query, key_acc, value_acc, enable_gqa);
+      attn = at::matmul(query, key_expanded.transpose(-2, -1) * scaling_factor);
+    }
     if (attn_mask.has_value()) {
       if (at::areAnyTensorSubclassLike({attn, *attn_mask})) {
         attn = attn.add(*attn_mask);
@@ -974,13 +1014,18 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         TORCH_WARN_ONCE("Dropout mask should only be used for testing purposes.");
         attn = attn.masked_fill(dropout_mask->logical_not(), 0.0);
         auto dropout_scaling = 1.0 / (1 - dropout_p);
-        return std::make_tuple(at::matmul(attn, value_expanded * dropout_scaling).to(origin_dtype), attn.to(origin_dtype));
+        auto out = gqa_broadcast
+            ? grouped_matmul(attn, value_acc * dropout_scaling)
+            : at::matmul(attn, value_expanded * dropout_scaling);
+        return std::make_tuple(out.to(origin_dtype), attn.to(origin_dtype));
       } else {
         attn = at::dropout(attn, dropout_p, true);
       }
     }
 
-    return std::make_tuple(at::matmul(attn, value_expanded).to(origin_dtype), attn.to(origin_dtype));
+    auto out = gqa_broadcast ? grouped_matmul(attn, value_acc)
+                             : at::matmul(attn, value_expanded);
+    return std::make_tuple(out.to(origin_dtype), attn.to(origin_dtype));
 }
 
 std::tuple<at::Tensor, at::Tensor>
