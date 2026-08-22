@@ -29,24 +29,14 @@ from torch.ao import quantization
 from torch.autograd import Variable
 from torch.onnx import OperatorExportTypes
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfNoLapack
-
-
-if torch.cuda.is_available():
-
-    def toC(x):
-        return x.cuda()
-
-else:
-
-    def toC(x):
-        return x
-
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import skipIfNoLapack, HardwareClassification
 
 BATCH_SIZE = 2
 
 
 class TestModels(pytorch_test_common.ExportTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     opset_version = 9  # Caffe2 doesn't support the default.
     keep_initializers_as_inputs = False
 
@@ -67,128 +57,133 @@ class TestModels(pytorch_test_common.ExportTestCase):
                 opset_version=self.opset_version,
             )
 
-    def test_ops(self):
+    def test_ops(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(DummyNet()), toC(x))
+        self.exportTest(DummyNet().to(device), x.to(device))
 
-    def test_prelu(self):
+    def test_prelu(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(PReluNet(), x)
 
     @skipScriptTest()
-    def test_concat(self):
+    def test_concat(self, device):
         input_a = Variable(torch.randn(BATCH_SIZE, 3))
         input_b = Variable(torch.randn(BATCH_SIZE, 3))
-        inputs = ((toC(input_a), toC(input_b)),)
-        self.exportTest(toC(ConcatNet()), inputs)
+        inputs = ((input_a.to(device), input_b.to(device)),)
+        self.exportTest(ConcatNet().to(device), inputs)
 
-    def test_permute(self):
+    def test_permute(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 3, 10, 12))
         self.exportTest(PermuteNet(), x)
 
     @skipScriptTest()
-    def test_embedding_sequential_1(self):
+    def test_embedding_sequential_1(self, device):
         x = Variable(torch.randint(0, 10, (BATCH_SIZE, 3)))
         self.exportTest(EmbeddingNetwork1(), x)
 
     @skipScriptTest()
-    def test_embedding_sequential_2(self):
+    def test_embedding_sequential_2(self, device):
         x = Variable(torch.randint(0, 10, (BATCH_SIZE, 3)))
         self.exportTest(EmbeddingNetwork2(), x)
 
     @unittest.skip("This model takes too much memory")
-    def test_srresnet(self):
+    def test_srresnet(self, device):
         x = Variable(torch.randn(1, 3, 224, 224).fill_(1.0))
         self.exportTest(
-            toC(SRResNet(rescale_factor=4, n_filters=64, n_blocks=8)), toC(x)
+            SRResNet(rescale_factor=4, n_filters=64, n_blocks=8).to(device),
+            x.to(device),
         )
 
     @skipIfNoLapack
-    def test_super_resolution(self):
+    def test_super_resolution(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 1, 224, 224).fill_(1.0))
-        self.exportTest(toC(SuperResolutionNet(upscale_factor=3)), toC(x), atol=1e-6)
+        self.exportTest(
+            SuperResolutionNet(upscale_factor=3).to(device), x.to(device), atol=1e-6
+        )
 
-    def test_alexnet(self):
+    def test_alexnet(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(alexnet()), toC(x))
+        self.exportTest(alexnet().to(device), x.to(device))
 
-    def test_mnist(self):
+    def test_mnist(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 1, 28, 28).fill_(1.0))
-        self.exportTest(toC(MNIST()), toC(x))
+        self.exportTest(MNIST().to(device), x.to(device))
 
     @unittest.skip("This model takes too much memory")
-    def test_vgg16(self):
+    def test_vgg16(self, device):
         # VGG 16-layer model (configuration "D")
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(vgg16()), toC(x))
+        self.exportTest(vgg16().to(device), x.to(device))
 
     @unittest.skip("This model takes too much memory")
-    def test_vgg16_bn(self):
+    def test_vgg16_bn(self, device):
         # VGG 16-layer model (configuration "D") with batch normalization
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(vgg16_bn()), toC(x))
+        self.exportTest(vgg16_bn().to(device), x.to(device))
 
     @unittest.skip("This model takes too much memory")
-    def test_vgg19(self):
+    def test_vgg19(self, device):
         # VGG 19-layer model (configuration "E")
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(vgg19()), toC(x))
+        self.exportTest(vgg19().to(device), x.to(device))
 
     @unittest.skip("This model takes too much memory")
-    def test_vgg19_bn(self):
+    def test_vgg19_bn(self, device):
         # VGG 19-layer model (configuration "E") with batch normalization
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(vgg19_bn()), toC(x))
+        self.exportTest(vgg19_bn().to(device), x.to(device))
 
-    def test_resnet(self):
+    def test_resnet(self, device):
         # ResNet50 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(resnet50()), toC(x), atol=1e-6)
+        self.exportTest(resnet50().to(device), x.to(device), atol=1e-6)
 
     # This test is numerically unstable. Sporadic single element mismatch occurs occasionally.
-    def test_inception(self):
+    def test_inception(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 3, 299, 299))
-        self.exportTest(toC(inception_v3()), toC(x), acceptable_error_percentage=0.01)
+        self.exportTest(
+            inception_v3().to(device), x.to(device), acceptable_error_percentage=0.01
+        )
 
-    def test_squeezenet(self):
+    def test_squeezenet(self, device):
         # SqueezeNet: AlexNet-level accuracy with 50x fewer parameters and
         # <0.5MB model size
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         sqnet_v1_0 = SqueezeNet(version=1.1)
-        self.exportTest(toC(sqnet_v1_0), toC(x))
+        self.exportTest(sqnet_v1_0.to(device), x.to(device))
 
         # SqueezeNet 1.1 has 2.4x less computation and slightly fewer params
         # than SqueezeNet 1.0, without sacrificing accuracy.
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         sqnet_v1_1 = SqueezeNet(version=1.1)
-        self.exportTest(toC(sqnet_v1_1), toC(x))
+        self.exportTest(sqnet_v1_1.to(device), x.to(device))
 
-    def test_densenet(self):
+    def test_densenet(self, device):
         # Densenet-121 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(densenet121()), toC(x), rtol=1e-2, atol=1e-5)
+        self.exportTest(densenet121().to(device), x.to(device), rtol=1e-2, atol=1e-5)
 
     @skipScriptTest()
-    def test_dcgan_netD(self):
+    def test_dcgan_netD(self, device):
         netD = _netD(1)
         netD.apply(weights_init)
         input = Variable(torch.empty(bsz, 3, imgsz, imgsz).normal_(0, 1))
-        self.exportTest(toC(netD), toC(input))
+        self.exportTest(netD.to(device), input.to(device))
 
     @skipScriptTest()
-    def test_dcgan_netG(self):
+    def test_dcgan_netG(self, device):
         netG = _netG(1)
         netG.apply(weights_init)
         input = Variable(torch.empty(bsz, nz, 1, 1).normal_(0, 1))
-        self.exportTest(toC(netG), toC(input))
+        self.exportTest(netG.to(device), input.to(device))
 
     @skipIfUnsupportedMinOpsetVersion(10)
-    def test_fake_quant(self):
+    def test_fake_quant(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(FakeQuantNet()), toC(x))
+        self.exportTest(FakeQuantNet().to(device), x.to(device))
 
     @skipIfUnsupportedMinOpsetVersion(10)
-    def test_qat_resnet_pertensor(self):
+    def test_qat_resnet_pertensor(self, device):
         # Quantize ResNet50 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         qat_resnet50 = resnet50()
@@ -208,10 +203,10 @@ class TestModels(pytorch_test_common.ExportTestCase):
                 module.calculate_qparams()
         qat_resnet50.apply(torch.ao.quantization.disable_observer)
 
-        self.exportTest(toC(qat_resnet50), toC(x))
+        self.exportTest(qat_resnet50.to(device), x.to(device))
 
     @skipIfUnsupportedMinOpsetVersion(13)
-    def test_qat_resnet_per_channel(self):
+    def test_qat_resnet_per_channel(self, device):
         # Quantize ResNet50 model
         x = torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0)
         qat_resnet50 = resnet50()
@@ -230,58 +225,62 @@ class TestModels(pytorch_test_common.ExportTestCase):
                 module.calculate_qparams()
         qat_resnet50.apply(torch.ao.quantization.disable_observer)
 
-        self.exportTest(toC(qat_resnet50), toC(x))
+        self.exportTest(qat_resnet50.to(device), x.to(device))
 
     @skipScriptTest(skip_before_opset_version=15, reason="None type in outputs")
-    def test_googlenet(self):
+    def test_googlenet(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(googlenet()), toC(x), rtol=1e-3, atol=1e-5)
+        self.exportTest(googlenet().to(device), x.to(device), rtol=1e-3, atol=1e-5)
 
-    def test_mnasnet(self):
+    def test_mnasnet(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(mnasnet1_0()), toC(x), rtol=1e-3, atol=1e-5)
+        self.exportTest(mnasnet1_0().to(device), x.to(device), rtol=1e-3, atol=1e-5)
 
-    def test_mobilenet(self):
+    def test_mobilenet(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(mobilenet_v2()), toC(x), rtol=1e-3, atol=1e-5)
+        self.exportTest(mobilenet_v2().to(device), x.to(device), rtol=1e-3, atol=1e-5)
 
     @skipScriptTest()  # prim_data
-    def test_shufflenet(self):
-        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(shufflenet_v2_x1_0()), toC(x), rtol=1e-3, atol=1e-5)
-
-    @skipIfUnsupportedMinOpsetVersion(11)
-    def test_fcn(self):
+    def test_shufflenet(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(
-            toC(fcn_resnet101(weights=None, weights_backbone=None)),
-            toC(x),
+            shufflenet_v2_x1_0().to(device), x.to(device), rtol=1e-3, atol=1e-5
+        )
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_fcn(self, device):
+        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
+        self.exportTest(
+            fcn_resnet101(weights=None, weights_backbone=None).to(device),
+            x.to(device),
             rtol=1e-3,
             atol=1e-5,
         )
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    def test_deeplab(self):
+    def test_deeplab(self, device):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(
-            toC(deeplabv3_resnet101(weights=None, weights_backbone=None)),
-            toC(x),
+            deeplabv3_resnet101(weights=None, weights_backbone=None).to(device),
+            x.to(device),
             rtol=1e-3,
             atol=1e-5,
         )
 
-    def test_r3d_18_video(self):
+    def test_r3d_18_video(self, device):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
-        self.exportTest(toC(r3d_18()), toC(x), rtol=1e-3, atol=1e-5)
+        self.exportTest(r3d_18().to(device), x.to(device), rtol=1e-3, atol=1e-5)
 
-    def test_mc3_18_video(self):
+    def test_mc3_18_video(self, device):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
-        self.exportTest(toC(mc3_18()), toC(x), rtol=1e-3, atol=1e-5)
+        self.exportTest(mc3_18().to(device), x.to(device), rtol=1e-3, atol=1e-5)
 
-    def test_r2plus1d_18_video(self):
+    def test_r2plus1d_18_video(self, device):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
-        self.exportTest(toC(r2plus1d_18()), toC(x), rtol=1e-3, atol=1e-5)
+        self.exportTest(r2plus1d_18().to(device), x.to(device), rtol=1e-3, atol=1e-5)
 
+
+instantiate_device_type_tests(TestModels, globals())
 
 if __name__ == "__main__":
     common_utils.run_tests()
