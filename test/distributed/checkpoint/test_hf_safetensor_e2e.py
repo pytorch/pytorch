@@ -3,6 +3,7 @@
 import importlib
 import json
 import os
+import unittest
 
 import torch
 import torch.distributed.checkpoint as dist_cp
@@ -13,20 +14,26 @@ from torch.distributed.checkpoint.quantized_hf_storage import (
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard, zeros
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     run_tests,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    skip_if_lt_x_gpu,
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
-CHECKPOINT_DIR = "checkpoint"
+HAS_SAFETENSORS = importlib.util.find_spec("safetensors") is not None
 
 
 class MyTestModule(torch.nn.Module):
@@ -37,14 +44,13 @@ class MyTestModule(torch.nn.Module):
         self.emb = torch.nn.EmbeddingBag(5, 10)
 
 
+@unittest.skipUnless(HAS_SAFETENSORS, "safetensors is not installed")
 class TestSingleRankSaveLoad(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @with_temp_dir
     def test_save(self) -> None:
-        try:
-            from safetensors.torch import load_file
-        except ImportError:
-            print("safetensors not installed")
-            return
+        from safetensors.torch import load_file
 
         CHECKPOINT_DIR = self.temp_dir
 
@@ -67,11 +73,7 @@ class TestSingleRankSaveLoad(TestCase):
 
     @with_temp_dir
     def test_load(self) -> None:
-        try:
-            from safetensors.torch import save_file
-        except ImportError:
-            print("safetensors not installed")
-            return
+        from safetensors.torch import save_file
 
         CHECKPOINT_DIR = self.temp_dir
 
@@ -96,11 +98,7 @@ class TestSingleRankSaveLoad(TestCase):
 
     @with_temp_dir
     def test_load_into_empty_dict(self) -> None:
-        try:
-            from safetensors.torch import save_file
-        except ImportError:
-            print("safetensors not installed")
-            return
+        from safetensors.torch import save_file
 
         CHECKPOINT_DIR = self.temp_dir
 
@@ -123,10 +121,6 @@ class TestSingleRankSaveLoad(TestCase):
 
     @with_temp_dir
     def test_load_with_multiple_threads(self) -> None:
-        if importlib.util.find_spec("safetensors") is None:
-            print("safetensors not installed")
-            return
-
         CHECKPOINT_DIR = self.temp_dir
 
         state_dict_to_save = MyTestModule().state_dict()
@@ -164,11 +158,7 @@ class TestSingleRankSaveLoad(TestCase):
     @with_temp_dir
     def test_quantized_checkpoint_loading(self) -> None:
         """Test end-to-end saving a quantizaed checkpoint and loading it."""
-        try:
-            from safetensors.torch import save_file
-        except ImportError:
-            print("safetensors not installed")
-            return
+        from safetensors.torch import save_file
 
         CHECKPOINT_DIR = self.temp_dir
 
@@ -274,58 +264,69 @@ class TestSingleRankSaveLoad(TestCase):
             )
 
 
-class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
+def _test_consolidate_to_one_file(test_case, device) -> None:
+    import safetensors
+
+    device_type = torch.device(device).type
+    global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
+    mesh_shape = (test_case.world_size,)
+    mesh_1d = init_device_mesh(device_type, mesh_shape)
+
+    rows_per_rank = global_tensor.shape[0] // test_case.world_size
+    start_row = test_case.rank * rows_per_rank
+    end_row = start_row + rows_per_rank
+    local_tensor = global_tensor[start_row:end_row].clone().to(device_type)
+
+    dtensor = DTensor.from_local(
+        local_tensor,
+        device_mesh=mesh_1d,
+        placements=[Shard(0)],
+        shape=global_tensor.shape,
+        stride=(4, 1),
+    )
+
+    state_dict_to_save = {"dtensor": dtensor}
+    dist_cp.save(
+        state_dict=state_dict_to_save,
+        storage_writer=dist_cp.HuggingFaceStorageWriter(
+            path=test_case.temp_dir,
+            save_distributed=True,
+            enable_consolidation=True,
+        ),
+    )
+    dist.barrier()
+
+    if test_case.rank == 0:
+        file_path = os.path.join(test_case.temp_dir, "model-00001-of-00001.safetensors")
+        loaded_dict = safetensors.torch.load_file(file_path)
+        test_case.assertEqual(loaded_dict.keys(), {"dtensor"})
+        test_case.assertTrue(torch.equal(loaded_dict["dtensor"], global_tensor))
+
+    dist.barrier()
+
+
+@unittest.skipUnless(HAS_SAFETENSORS, "safetensors is not installed")
+class _CPUHFSafetensorsTestBase(DTensorTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @property
+    def device_type(self) -> str:
+        return "cpu"
+
+    @property
+    def backend(self) -> str:
+        return "gloo"
+
+
+class TestDistributedHFSafetensorsConsolidation(_CPUHFSafetensorsTestBase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
     def test_consolidate_to_one_file(self) -> None:
-        if importlib.util.find_spec("safetensors") is None:
-            print("safetensors not installed")
-            return
-
-        import safetensors
-
-        global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
-        mesh_shape = (self.world_size,)
-        mesh_1d = init_device_mesh(self.device_type, mesh_shape)
-
-        # Create local tensor with row-wise sharding
-        rows_per_rank = global_tensor.shape[0] // self.world_size
-        start_row = self.rank * rows_per_rank
-        end_row = start_row + rows_per_rank
-        local_tensor = global_tensor[start_row:end_row].clone()
-
-        # Create DTensor with row-wise sharding
-        dtensor = DTensor.from_local(
-            local_tensor,
-            device_mesh=mesh_1d,
-            placements=[Shard(0)],
-            shape=global_tensor.shape,
-            stride=(4, 1),
-        )
-
-        global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
-
-        checkpoint_dir = self.temp_dir
-
-        state_dict_to_save = {"dtensor": dtensor}
-        dist_cp.save(
-            state_dict=state_dict_to_save,
-            storage_writer=dist_cp.HuggingFaceStorageWriter(
-                path=checkpoint_dir,
-                save_distributed=True,
-                enable_consolidation=True,
-            ),
-        )
-        dist.barrier()
-
-        if self.rank == 0:
-            file_path = os.path.join(checkpoint_dir, "model-00001-of-00001.safetensors")
-            loaded_dict = safetensors.torch.load_file(file_path)
-            self.assertEqual(loaded_dict.keys(), {"dtensor"})
-            self.assertTrue(torch.equal(loaded_dict["dtensor"], global_tensor))
-
-        dist.barrier()
+        _test_consolidate_to_one_file(self, "cpu")
 
 
 ONE_D_PLACEMENTS = [
@@ -350,78 +351,67 @@ for p1 in TWO_D_PLACEMENTS:
             TWO_D_TO_TWO_D_PLACEMENTS.append((p1, p2))
 
 
+def _test_1d_to_1d_reshard_placement_change(test_case, device) -> None:
+    device_type = torch.device(device).type
+    for original_placement, new_placement in ONE_D_TO_ONE_D_PLACEMENTS:
+        global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
+        mesh_shape = (test_case.world_size,)
+        device_mesh = init_device_mesh(device_type, mesh_shape)
+        dtensor = distribute_tensor(
+            global_tensor, device_mesh, placements=original_placement
+        )
+        state_dict_to_save = {"dtensor": dtensor}
+
+        dist_cp.save(
+            state_dict=state_dict_to_save,
+            storage_writer=dist_cp.HuggingFaceStorageWriter(
+                path=test_case.temp_dir,
+                save_distributed=True,
+            ),
+        )
+
+        zero_dtensor = zeros([4, 4], device_mesh=device_mesh, placements=new_placement)
+        state_dict_to_load = {"dtensor": zero_dtensor}
+
+        dist_cp.load(
+            state_dict=state_dict_to_load,
+            storage_reader=dist_cp.HuggingFaceStorageReader(test_case.temp_dir),
+        )
+
+        state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
+            device_mesh,
+            placements=[Replicate()],
+        )
+        test_case.assertEqual(global_tensor, state_dict_to_load["dtensor"].to_local())
+
+        state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
+            device_mesh,
+            placements=original_placement,
+        )
+        test_case.assertEqual(
+            state_dict_to_save["dtensor"].to_local(),
+            state_dict_to_load["dtensor"].to_local(),
+        )
+
+
 @instantiate_parametrized_tests
-class TestDTensorReshardPlacementChange(DTensorTestBase):
+class TestDTensorReshardPlacementChange(_CPUHFSafetensorsTestBase):
     """
     Test DCP reshard for DTensor with placements changes and without world_size change and mesh_tensor change.
     """
 
+    @property
+    def world_size(self) -> int:
+        return 4
+
     @with_comms
-    @skip_if_lt_x_gpu(2)
     @with_temp_dir
     def test_1d_to_1d_reshard_placement_change(self) -> None:
-        if importlib.util.find_spec("safetensors") is None:
-            print("safetensors not installed")
-            return
-
-        CHECKPOINT_DIR = self.temp_dir
-
-        for one_d_to_one_d_placements in ONE_D_TO_ONE_D_PLACEMENTS:
-            original_placement, new_placement = one_d_to_one_d_placements
-
-            global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
-            mesh_shape = (self.world_size,)
-            device_mesh = init_device_mesh(self.device_type, mesh_shape)
-            dtensor = distribute_tensor(
-                global_tensor, device_mesh, placements=original_placement
-            )
-            state_dict_to_save = {"dtensor": dtensor}
-
-            dist_cp.save(
-                state_dict=state_dict_to_save,
-                storage_writer=dist_cp.HuggingFaceStorageWriter(
-                    path=CHECKPOINT_DIR,
-                    save_distributed=True,
-                ),
-            )
-
-            zero_dtensor = zeros(
-                [4, 4], device_mesh=device_mesh, placements=new_placement
-            )
-            state_dict_to_load = {"dtensor": zero_dtensor}
-
-            dist_cp.load(
-                state_dict=state_dict_to_load,
-                storage_reader=dist_cp.HuggingFaceStorageReader(
-                    CHECKPOINT_DIR,
-                ),
-            )
-
-            # materialize the whole tensor to compare with the original global_tensor
-            state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
-                device_mesh,
-                placements=[Replicate()],
-            )
-            self.assertEqual(global_tensor, state_dict_to_load["dtensor"].to_local())
-
-            # redistribute the tensor back to its original placement for comparison.
-            state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
-                device_mesh,
-                placements=original_placement,
-            )
-            self.assertEqual(
-                state_dict_to_save["dtensor"].to_local(),
-                state_dict_to_load["dtensor"].to_local(),
-            )
+        _test_1d_to_1d_reshard_placement_change(self, "cpu")
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
     @with_temp_dir
     def test_2d_to_2d_reshard_placement_change(self) -> None:
-        if importlib.util.find_spec("safetensors") is None:
-            print("safetensors not installed")
-            return
-
         CHECKPOINT_DIR = self.temp_dir
         for two_d_to_two_d_placements in TWO_D_TO_TWO_D_PLACEMENTS:
             original_placement, new_placement = two_d_to_two_d_placements
@@ -468,19 +458,18 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
             )
 
 
-class TestDTensorReshardMeshChange(DTensorTestBase):
+class TestDTensorReshardMeshChange(_CPUHFSafetensorsTestBase):
     """
     Test DCP reshard for DTensor with placements changes and mesh_tensor change.
     """
 
+    @property
+    def world_size(self) -> int:
+        return 4
+
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
     def test_1d_to_2d_reshard_mesh_change(self) -> None:
-        if importlib.util.find_spec("safetensors") is None:
-            print("safetensors not installed")
-            return
-
         CHECKPOINT_DIR = self.temp_dir
         for placements_1d in ONE_D_PLACEMENTS:
             global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
@@ -526,12 +515,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(4)
     def test_2d_to_1d_reshard_mesh_change(self) -> None:
-        if importlib.util.find_spec("safetensors") is None:
-            print("safetensors not installed")
-            return
-
         CHECKPOINT_DIR = self.temp_dir
         for placements_2d in TWO_D_PLACEMENTS:
             global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
@@ -578,15 +562,10 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
     def test_dtensor_checkpoint_resharding_with_empty_shard(self):
         """
         Test dtensor checkpoint resharding with dtensor containing empty shards.
         """
-        if importlib.util.find_spec("safetensors") is None:
-            print("safetensors not installed")
-            return
-
         tensor = torch.rand(1).to(self.device_type)
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         dtensor = distribute_tensor(tensor, mesh, [Shard(0)])
@@ -608,6 +587,43 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             storage_reader=dist_cp.HuggingFaceStorageReader(self.temp_dir),
         )
 
+
+class TestHFSafetensorsAcceleratorSmoke(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    @requires_capabilities(
+        Capability.lib.safetensors,
+        Capability.distributed.backend,
+        Capability.distributed.dtensor,
+    )
+    @with_comms
+    @with_temp_dir
+    def test_consolidate_to_one_file(self, device) -> None:
+        _test_consolidate_to_one_file(self, device)
+
+    @skip_if_lt_x_gpu(2)
+    @requires_capabilities(
+        Capability.lib.safetensors,
+        Capability.distributed.backend,
+        Capability.distributed.dtensor,
+    )
+    @with_comms
+    @with_temp_dir
+    def test_1d_to_1d_reshard_placement_change(self, device) -> None:
+        _test_1d_to_1d_reshard_placement_change(self, device)
+
+
+instantiate_device_type_tests(
+    TestHFSafetensorsAcceleratorSmoke,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
