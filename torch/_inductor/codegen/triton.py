@@ -5495,6 +5495,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     f"{triton_reduction_fn}({value}, {dim}{reduction_ordering})",
                     value.shape,
                 )
+                if reduction_type == "sum" and getattr(
+                    dtype, "is_floating_point", False
+                ):
+                    result = f"({result} + 0.0)"
 
             if result_type is not None:
                 result = f"{result}.to({self.dtype_to_str(result_type)})"

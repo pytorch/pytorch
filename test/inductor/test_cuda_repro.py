@@ -3519,6 +3519,42 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.common(fn4, [y])
 
+    def test_kl_div_reduction_signbit_parity_187721(self):
+        # https://github.com/pytorch/pytorch/issues/187721
+        def fn(input_t, target_t):
+            y = F.kl_div(input_t, target_t, reduction="mean", log_target=True)
+            sign_val = torch.copysign(
+                torch.tensor(1.0, device=input_t.device, dtype=torch.float32), y
+            )
+            return sign_val, y
+
+        for dtype in [torch.float16, torch.bfloat16, torch.float32]:
+            input_t = torch.tensor([1000.0, 1000.0], dtype=dtype, device=device_type)
+            target_t = torch.tensor([-1000.0, -1000.0], dtype=dtype, device=device_type)
+
+            eager_sign, eager_y = fn(input_t, target_t)
+            compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            compiled_sign, compiled_y = compiled_fn(input_t, target_t)
+
+            self.assertEqual(eager_sign, compiled_sign)
+            self.assertEqual(eager_y.signbit(), compiled_y.signbit())
+
+        def fn_sum(x):
+            y = torch.sum(x)
+            sign_val = torch.copysign(
+                torch.tensor(1.0, device=x.device, dtype=torch.float32), y
+            )
+            return sign_val, y
+
+        for dtype in [torch.float16, torch.bfloat16, torch.float32]:
+            x = torch.tensor([-0.0, -0.0], dtype=dtype, device=device_type)
+            eager_sign, eager_y = fn_sum(x)
+            compiled_fn = torch.compile(fn_sum, backend="inductor", fullgraph=True)
+            compiled_sign, compiled_y = compiled_fn(x)
+
+            self.assertEqual(eager_sign, compiled_sign)
+            self.assertEqual(eager_y.signbit(), compiled_y.signbit())
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
