@@ -642,7 +642,7 @@ class TestProfilerTree(TestCase):
                                 aten::resolve_conj
                                 aten::resolve_conj
                                 aten::resolve_conj
-                              aten::view
+                              aten::_unsafe_view
                     nn.Module: ReLU_1
                       torch/nn/modules/module.py(...): _call_impl
                         <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
@@ -688,7 +688,7 @@ class TestProfilerTree(TestCase):
                                 aten::resolve_conj
                                 aten::resolve_conj
                                 aten::resolve_conj
-                              aten::view
+                              aten::_unsafe_view
                     nn.Module: ReLU_1
                       torch/nn/modules/module.py(...): _call_impl
                         <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
