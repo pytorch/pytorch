@@ -586,6 +586,25 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         if torch.cuda.is_available():
             torch.cuda.ipc_collect()
 
+    def test_queue_module(self):
+        """Queue and SimpleQueue pass tensors through shared memory."""
+        from torch.multiprocessing.queue import Queue, SimpleQueue
+
+        ctx = mp.get_context()
+        q = SimpleQueue(ctx=ctx)
+        x = torch.zeros(2, 2)
+        q.put(x)
+        y = q.get()
+        self.assertEqual(y, x)
+        y.fill_(7)
+        self.assertEqual(x, torch.full((2, 2), 7))
+
+        q = Queue(ctx=ctx)
+        q.put(torch.ones(2, 2))
+        self.assertEqual(q.get(), torch.ones(2, 2))
+        q.close()
+        q.join_thread()
+
     def _test_preserve_sharing(self, ctx=mp, repeat=1):
         def do_test():
             x = torch.randn(5, 5)
