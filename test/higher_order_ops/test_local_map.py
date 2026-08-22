@@ -30,6 +30,7 @@ if torch.distributed.is_available():
     from torch.distributed.tensor.placement_types import Replicate, Shard
 
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -216,6 +217,8 @@ def get_local_mapped_functions(mesh):
 
 
 class TestLocalMap(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
