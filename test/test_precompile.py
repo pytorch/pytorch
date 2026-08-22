@@ -328,6 +328,43 @@ class _PrecompileTrainMod(torch.nn.Module):
         return torch.relu(self.b(torch.relu(self.a(x))))
 
 
+class _PrecompileFusedMatmul(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, w):
+        ctx.save_for_backward(x, w)
+        return x @ w
+
+    @staticmethod
+    def backward(ctx, grad):
+        x, w = ctx.saved_tensors
+        return grad @ w.t(), x.t() @ grad
+
+
+# The shape a hand-fused Triton kernel is reached through in practice: a
+# module-level alias of .apply, selected by config among several impls.
+_precompile_fused_matmul = _PrecompileFusedMatmul.apply
+
+
+class _PrecompileCallsAliasedApply(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.randn(8, 8))
+
+    def forward(self, x):
+        return _precompile_fused_matmul(x, self.w).relu()
+
+
+class _PrecompileCallsCustomOp(torch.nn.Module):
+    """The same math as _PrecompileCallsAliasedApply, as a registered op."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.randn(8, 8))
+
+    def forward(self, x):
+        return torch.ops.mlprecompile.fused_matmul(x, self.w).relu()
+
+
 # A tensor carrying side metadata as a plain Python attribute -- APS hangs a CPU
 # twin on a GPU tensor this way, and torch itself hangs _dynamo_dynamic_indices.
 # Reconstruction rebuilds a tensor from its metadata alone, so a guard whose
@@ -1972,6 +2009,41 @@ class TestPrecompile(TestCase):
         self.assertEqual(session.summary().guarded_codes, 3)
         with self.assertRaisesRegex(PrecompileError, "can affect dispatch"):
             session.artifact()
+
+    def test_custom_op_captures_where_an_aliased_autograd_function_cannot(self):
+        # An autograd.Function reached through a module-level alias of .apply
+        # guards on the identity of the class and its two staticmethods.
+        # CLASS_MATCH and CLOSURE_MATCH cannot be serialized -- there is no
+        # portable spelling of "this exact object" -- so they are dropped, and
+        # an alias is a config-selected slot, so the drop is risky. Registering
+        # the same math as a custom op replaces all three with an operator
+        # looked up by qualified name, which serializes.
+        x = torch.randn(8, 8, requires_grad=True)
+        with self.assertRaisesRegex(PrecompileError, "can affect dispatch"):
+            torch.compiler.precompile(
+                _PrecompileCallsAliasedApply(),
+                backend="eager",
+                tracer="dynamo",
+                training=True,
+                example_inputs=[(x,)],
+            )
+
+        torch._dynamo.reset()
+        with torch.library._scoped_library("mlprecompile", "FRAGMENT") as lib:
+            lib.define("fused_matmul(Tensor x, Tensor w) -> Tensor")
+            lib.impl("fused_matmul", torch.mm, "CompositeExplicitAutograd")
+            lib.impl("fused_matmul", torch.mm, "Meta")
+            model = _PrecompileCallsCustomOp()
+            code, cache = torch.compiler.precompile(
+                model,
+                backend="eager",
+                tracer="dynamo",
+                example_inputs=[(x,)],
+            )
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load(code, cache)
+            with torch.no_grad():
+                self.assertEqual(loaded(model, x), model(x))
 
     def test_multi_graph_custom_guard_filter_fails_closed(self):
         x = torch.linspace(-1, 1, 4)
