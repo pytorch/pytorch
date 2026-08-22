@@ -62,6 +62,24 @@ _WEIGHT_TEMPLATE = {
     "fontcolor": "#000000",
 }
 
+
+def _escape_dot_label(s: str) -> str:
+    # dot builds a "record" label out of these characters, so any of them coming
+    # from graph content (op targets, arg reprs, source lines) has to be escaped.
+    # Otherwise dot discards the label's fields, substitutes the node name, and
+    # reports `Error: bad label format` on stderr, e.g.
+    # https://gist.github.com/SungMinCho/1a017aab662c75d805c5954d62c5aabc
+    #
+    # Backslash goes first because it is the escape character itself: a Windows
+    # path in a parsed stack trace (`C:\lib\foo.py`) otherwise has its `\l` read
+    # as dot's left-justify directive, which silently splits the line instead of
+    # erroring.
+    s = s.replace("\\", "\\\\")
+    for char in "{}|<>":
+        s = s.replace(char, "\\" + char)
+    return s
+
+
 if HAS_PYDOT:
 
     @compatibility(is_backward_compatible=False)
@@ -204,10 +222,7 @@ if HAS_PYDOT:
             else:
                 ret = _get_qualified_name(target)
 
-            # Escape "{" and "}" to prevent dot files like:
-            # https://gist.github.com/SungMinCho/1a017aab662c75d805c5954d62c5aabc
-            # which triggers `Error: bad label format (...)` from dot
-            return ret.replace("{", r"\{").replace("}", r"\}")
+            return _escape_dot_label(ret)
 
         # shorten path to avoid drawing long boxes
         # for full path = '/home/weif/pytorch/test.py'
@@ -231,10 +246,10 @@ if HAS_PYDOT:
         ) -> str:
             def _get_str_for_args_kwargs(arg: tuple[Any, ...] | dict[str, Any]) -> str:
                 if isinstance(arg, tuple):
-                    prefix, suffix = r"|args=(\l", r",\n)\l"
+                    name, open_, close = "args", "(", ")"
                     arg_strs_list = [_format_arg(a, max_list_len=8) for a in arg]
                 elif isinstance(arg, dict):
-                    prefix, suffix = r"|kwargs={\l", r",\n}\l"
+                    name, open_, close = "kwargs", r"\{", r"\}"
                     arg_strs_list = [
                         f"{k}: {_format_arg(v, max_list_len=8)}" for k, v in arg.items()
                     ]
@@ -246,10 +261,21 @@ if HAS_PYDOT:
                     arg_strs_list = [a for a in arg_strs_list if "%" not in a]
                 if len(arg_strs_list) == 0:
                     return ""
-                arg_strs = prefix + r",\n".join(arg_strs_list) + suffix
-                if len(arg_strs_list) == 1:
-                    arg_strs = arg_strs.replace(r"\l", "").replace(r"\n", "")
-                return arg_strs.replace("{", r"\{").replace("}", r"\}")
+                escaped = [_escape_dot_label(a) for a in arg_strs_list]
+                # The one-item form omits the line breaks rather than stripping
+                # them back out afterwards: content is escaped by now, so a
+                # `.replace(r"\l", "")` over the assembled string would eat the
+                # `\l` out of an escaped backslash (`C:\lib` -> `C:\\lib`) too.
+                if len(escaped) == 1:
+                    return f"|{name}={open_}{escaped[0]},{close}"
+                return (
+                    f"|{name}={open_}"
+                    + r"\l"
+                    + r",\n".join(escaped)
+                    + r",\n"
+                    + close
+                    + r"\l"
+                )
 
             label = "{" + f"name=%{node.name}|op_code={node.op}\n"
 
@@ -260,7 +286,7 @@ if HAS_PYDOT:
                 if hasattr(leaf_module, "__constants__"):
                     extra = r"\n".join(
                         [
-                            f"{c}: {getattr(leaf_module, c)}"
+                            _escape_dot_label(f"{c}: {getattr(leaf_module, c)}")
                             for c in leaf_module.__constants__  # type: ignore[union-attr]
                         ]  # type: ignore[union-attr]
                     )
@@ -302,11 +328,11 @@ if HAS_PYDOT:
             if parse_stack_trace and node.stack_trace is not None:
                 parsed_stack_trace = _parse_stack_trace(node.stack_trace)
                 if parsed_stack_trace is not None:
-                    fname = self._shorten_file_name(parsed_stack_trace.file)
-                    label += (
-                        f"|file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}"
-                        + r"\n"
+                    fname = _escape_dot_label(
+                        self._shorten_file_name(parsed_stack_trace.file)
                     )
+                    code = _escape_dot_label(parsed_stack_trace.code)
+                    label += f"|file={fname}:{parsed_stack_trace.lineno} {code}" + r"\n"
 
             return label + "}"
 
@@ -449,8 +475,11 @@ if HAS_PYDOT:
                         leaf_module.named_buffers(),
                     ):
                         pname1 = node.name + "." + pname
+                        # `register_parameter` / `register_buffer` reject only
+                        # "." and "", so a name like `a|b` would split a field
+                        # here the same way an unescaped arg would.
                         label1 = (
-                            pname1 + "|op_code=get_" + "parameter"
+                            _escape_dot_label(pname1) + "|op_code=get_" + "parameter"
                             if isinstance(ptensor, torch.nn.Parameter)
                             else "buffer" + r"\l"
                         )
