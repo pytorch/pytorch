@@ -73,6 +73,21 @@ def cpp_string_literal(s: str) -> str:
     return f'"{escaped}"'
 
 
+def _launch_pdl_cpp_literal(triton_meta: TritonMeta | None) -> str:
+    """Resolve Triton's effective per-kernel PDL launch option."""
+    if triton_meta is None:
+        return "false"
+
+    backend_options = triton_meta.get("backend_options") or {}
+    launch_pdl = backend_options.get("launch_pdl", triton_meta.get("launch_pdl", False))
+    if not isinstance(launch_pdl, bool):
+        raise TypeError(
+            "launch_pdl must be a concrete bool, "
+            f"got {launch_pdl!r} ({type(launch_pdl).__name__})"
+        )
+    return "true" if launch_pdl else "false"
+
+
 def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
     """Generate a C header defining macros for each lazy-compiled kernel.
 
@@ -611,11 +626,17 @@ class DeferredTritonCallWrapper:
         )
         call_args_str = self._generate_lazy_scratch(prefix, wrapper, call_args_str)
 
+        launch_pdl = (
+            _launch_pdl_cpp_literal(self.triton_meta)
+            if wrapper.device == "cuda"
+            else None
+        )
+        launch_pdl_arg = f", {launch_pdl}" if launch_pdl is not None else ""
         common_launch_args = (
             f"grid_0, grid_1, grid_2,"
             f" {kernel_name}_result.num_warps,"
             f" {kernel_name}_result.shared_mem,"
-            f" kernel_args_, stream_"
+            f" kernel_args_, stream_{launch_pdl_arg}"
         )
         # stream_ comes from the generated wrapper signature on both JIT and
         # AOTI sides.
@@ -649,6 +670,7 @@ class DeferredTritonCallWrapper:
                     *launch_kernel_args,
                     "kernel_args_",
                     "stream_",
+                    *([launch_pdl] if launch_pdl is not None else []),
                 ],
                 num_warps=f"{kernel_name}_result.num_warps",
                 shared_mem=f"{kernel_name}_result.shared_mem",
@@ -919,6 +941,8 @@ class DeferredTritonCallWrapper:
             "kernel_args_",
             "stream_",
         ]
+        if wrapper.device == "cuda":
+            launch_kernel_args.append(_launch_pdl_cpp_literal(triton_meta))
 
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",

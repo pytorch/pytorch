@@ -139,10 +139,48 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     uint32_t numWarps,
                     uint32_t sharedMemBytes,
                     void* args[],
-                    cudaStream_t stream) {
+                    cudaStream_t stream,
+                    bool launchPdl) {
+            #if defined(USE_ROCM)
+                if (launchPdl) {
+                    throw std::runtime_error(
+                        "AOTInductor PDL launch is not supported on ROCm");
+                }
                 CUDA_DRIVER_CHECK(cuLaunchKernel(
                     func, gridX, gridY, gridZ, __WARP_SIZE__*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
                 ));
+            #else
+                if (!launchPdl) {
+                    CUDA_DRIVER_CHECK(cuLaunchKernel(
+                        func, gridX, gridY, gridZ, __WARP_SIZE__*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
+                    ));
+                    return;
+                }
+
+            #if defined(CUDA_VERSION) && CUDA_VERSION >= 11080
+                CUlaunchAttribute launchAttr{};
+                launchAttr.id =
+                    CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION;
+                launchAttr.value.programmaticStreamSerializationAllowed = 1;
+
+                CUlaunchConfig launchConfig{};
+                launchConfig.gridDimX = gridX;
+                launchConfig.gridDimY = gridY;
+                launchConfig.gridDimZ = gridZ;
+                launchConfig.blockDimX = __WARP_SIZE__ * numWarps;
+                launchConfig.blockDimY = 1;
+                launchConfig.blockDimZ = 1;
+                launchConfig.sharedMemBytes = sharedMemBytes;
+                launchConfig.hStream = stream;
+                launchConfig.attrs = &launchAttr;
+                launchConfig.numAttrs = 1;
+                CUDA_DRIVER_CHECK(
+                    cuLaunchKernelEx(&launchConfig, func, args, nullptr));
+            #else
+                throw std::runtime_error(
+                    "AOTInductor PDL launch requires CUDA 11.8 or newer");
+            #endif
+            #endif
             }
         """
         if torch.version.hip is not None and torch.cuda.is_available():
