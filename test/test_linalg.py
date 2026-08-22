@@ -4221,8 +4221,8 @@ class TestLinalg(TestCase):
 
 
     @precisionOverride({torch.float32: 5e-6, torch.complex64: 5e-6})
+    @onlyCPU
     @skipCPUIfNoLapack
-    @skipCUDAIfNoCusolver
     @dtypes(*floating_and_complex_types())
     def test_qr_piv(self, device, dtype):
         def run_test(tensor_dims, mode):
@@ -4299,8 +4299,8 @@ class TestLinalg(TestCase):
             # check r
             self.assertEqual(r, exp_r)
 
+    @onlyCPU
     @skipCPUIfNoLapack
-    @skipCUDAIfNoCusolver
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_qr_piv_vs_scipy(self, device, dtype):
@@ -4371,7 +4371,7 @@ class TestLinalg(TestCase):
                 else:
                     b.backward()
 
-    @skipCUDAIfNoCusolver
+    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.float)
     def test_linalg_qr_piv_autograd(self, device, dtype):
@@ -4445,7 +4445,7 @@ class TestLinalg(TestCase):
         # check r
         self.assertEqual(r, exp_r)
 
-    @skipCUDAIfNoCusolver
+    @onlyCPU
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -4737,7 +4737,7 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "qr received unrecognized mode 'hello'"):
             torch.linalg.qr(t2, mode='hello')
 
-    @skipCUDAIfNoCusolver
+    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.float)
     def test_qr_piv_error_cases(self, device, dtype):
