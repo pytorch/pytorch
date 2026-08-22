@@ -134,9 +134,11 @@ class BaseListVariable(VariableTracker):
 
     @staticmethod
     def cls_for(obj: Any) -> type:
+        # Exact-type dispatch; subclasses of these types are not supported.
         return {
             iter: ListIteratorVariable,
             list: ListVariable,
+            bytearray: ByteArrayVariable,
             slice: SliceVariable,
             torch.Size: SizeVariable,
             tuple: TupleVariable,
@@ -370,7 +372,7 @@ class BaseListVariable(VariableTracker):
             raise_observed_exception(type(e), tx, args=list(e.args))
         # self.items is a list, so we can't go through VariableTracker.build (which would wrap in a list variable)
         kwargs: dict[str, Any] = {}
-        if issubclass(self.python_type(), list):
+        if issubclass(self.python_type(), (list, bytearray)):
             kwargs["mutation_type"] = ValueMutationNew()
         return type(self)(new_items, **kwargs)
 
@@ -1960,6 +1962,47 @@ class TupleVariable(BaseListVariable):
         return hash(tuple(raw_hashes)), is_fake
 
 
+class ByteArrayVariable(BaseListVariable):
+    _cpython_type = bytearray
+
+    def __init__(self, items: list[VariableTracker], **kwargs: Any) -> None:
+        super().__init__(items, **kwargs)
+
+    def python_type(self) -> type[bytearray]:  # type: ignore[type-arg]
+        return bytearray
+
+    def tp_richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        return self._seq_richcompare(tx, other, op, bytearray)
+
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return ByteArrayIteratorVariable(self.items, mutation_type=ValueMutationNew())
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.append_output(codegen.create_load_python_module(bytearray))  # type: ignore[arg-type]
+        )
+        codegen.foreach(self.items)
+        codegen.append_output(create_build_tuple(len(self.items)))
+        codegen.extend_output(create_call_function(1, False))
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        items = ", ".join(item.reconstruct_pycode(codegen) for item in self.items)
+        return f"bytearray([{items}])"
+
+    def is_hashable(self) -> bool:
+        return False
+
+    def hash_impl(self, tx: "InstructionTranslatorBase"):
+        from ..exc import raise_type_error
+
+        raise_type_error(tx, "unhashable type: 'bytearray'")
+
+
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""
 
@@ -2449,6 +2492,13 @@ class TupleIteratorVariable(BaseListIteratorVariable):
         if self.index > 0:
             raise NotImplementedError
         return iter(tuple(x.as_python_constant() for x in self.items))
+
+
+class ByteArrayIteratorVariable(BaseListIteratorVariable):
+    _cpython_type = type(iter(bytearray()))
+
+    def python_type(self) -> type:
+        return type(iter(bytearray()))
 
 
 class DequeIteratorVariable(BaseListIteratorVariable):
