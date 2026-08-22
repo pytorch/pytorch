@@ -111,13 +111,25 @@ from torch.hub import tqdm
 from torch.testing import make_tensor
 
 
+def _get_current_accelerator_type() -> str:
+    """Return the device type of the accelerator in use, or "" if there is none."""
+    acc = torch.accelerator.current_accelerator(check_available=True)
+    return "" if acc is None else acc.type
+
+
 def _get_device_name() -> str:
-    """Return the current accelerator device name for use as a Triton tuning cache key."""
-    if torch.cuda.is_available():
-        return torch.cuda.get_device_name()
-    if torch.xpu.is_available():
-        return torch.xpu.get_device_name()
-    return ""
+    """Return the current accelerator device name for use as a Triton tuning cache key.
+
+    Backends expose ``torch.<device_type>.get_device_name``; one that does not is
+    treated as unnamed, which is how an absent accelerator has always been keyed.
+    """
+    device_type = _get_current_accelerator_type()
+    if not device_type:
+        return ""
+    get_device_name = getattr(
+        torch.get_device_module(device_type), "get_device_name", None
+    )
+    return "" if get_device_name is None else get_device_name()
 
 
 def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=False):
@@ -486,12 +498,13 @@ def create_blocked_tensor(B, M, N, blocksize, sparsity, dtype, device):
 
 
 def optimize_scatter_mm(
-    m, k, n, bm, bk, dtype=torch.float16, device="cuda", sparsity=0.5, force=False
+    m, k, n, bm, bk, dtype=torch.float16, device=None, sparsity=0.5, force=False
 ):
     import triton
 
     from torch.sparse._triton_ops import bsr_scatter_mm, bsr_scatter_mm_indices_data
 
+    device = device or _get_current_accelerator_type()
     key = (m, k, n, bm, bk)
 
     version = (0, dtype, sparsity)
@@ -774,12 +787,13 @@ def optimize_bsr_dense_addmm(
     use_right_alpha=False,
     dtype=torch.float16,
     out_dtype=None,
-    device="cuda",
+    device=None,
     sparsity=0.5,
     force=False,
     verbose=False,
     opname=None,
 ):
+    device = device or _get_current_accelerator_type()
     torch.manual_seed(0)
     bsr = create_blocked_tensor(
         0, m, k, (bm, bk), sparsity, dtype, device
@@ -810,8 +824,10 @@ def optimize_bsr_dense_addmm(
     )
 
 
-def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
+def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True, device=None):
     import itertools
+
+    device = device or _get_current_accelerator_type()
 
     sizes_lst = [
         256,
@@ -847,7 +863,15 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                     continue
                 if op == "scatter_mm":
                     optimize_scatter_mm(
-                        M, K, N, BM, BK, force=force, sparsity=sparsity, dtype=dtype
+                        M,
+                        K,
+                        N,
+                        BM,
+                        BK,
+                        force=force,
+                        sparsity=sparsity,
+                        dtype=dtype,
+                        device=device,
                     )
                 elif op in {"bsr_dense_addmm", "_int_bsr_dense_addmm"}:
                     if M == K and N == 50432:
@@ -865,6 +889,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                             force=force,
                             sparsity=sparsity,
                             dtype=dtype,
+                            device=device,
                             verbose=verbose,
                             opname=op,
                         )
@@ -894,9 +919,9 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
             for sparsity1 in sparsity_lst:
                 torch.manual_seed(0)
                 bsr = create_blocked_tensor(
-                    0, M, K, (BM, BK), sparsity1, dtype, device="cuda"
+                    0, M, K, (BM, BK), sparsity1, dtype, device
                 ).to_sparse_bsr((BM, BK))
-                dense = make_tensor(K, N, dtype=dtype, device="cuda")
+                dense = make_tensor(K, N, dtype=dtype, device=device)
                 meta_lst = []
                 for sparsity in sparsity_lst:
                     meta = get_meta(op, key, version=(0, dtype, sparsity), exact=True)
