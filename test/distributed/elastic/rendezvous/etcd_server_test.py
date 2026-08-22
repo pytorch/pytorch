@@ -6,12 +6,14 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import os
+import socket
 import sys
 import unittest
+from unittest import mock
 
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
-from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer, find_free_port
 
 
 if os.getenv("CIRCLECI"):
@@ -20,6 +22,43 @@ if os.getenv("CIRCLECI"):
 
 
 class EtcdServerTest(unittest.TestCase):
+    @mock.patch(
+        "torch.distributed.elastic.rendezvous.etcd_server.socket.getaddrinfo"
+    )
+    @mock.patch("torch.distributed.elastic.rendezvous.etcd_server.socket.socket")
+    def test_find_free_port_skips_socket_creation_error(
+        self, mock_socket, mock_getaddrinfo
+    ):
+        mock_getaddrinfo.return_value = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("localhost", 0)),
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("localhost", 0)),
+        ]
+        expected_socket = mock.Mock()
+        mock_socket.side_effect = [OSError("socket failed"), expected_socket]
+
+        self.assertIs(find_free_port(), expected_socket)
+        self.assertEqual(2, mock_socket.call_count)
+        expected_socket.bind.assert_called_once_with(("localhost", 0))
+        expected_socket.listen.assert_called_once_with(0)
+
+    @mock.patch(
+        "torch.distributed.elastic.rendezvous.etcd_server.socket.getaddrinfo"
+    )
+    @mock.patch("torch.distributed.elastic.rendezvous.etcd_server.socket.socket")
+    def test_find_free_port_raises_runtime_error_when_all_attempts_fail(
+        self, mock_socket, mock_getaddrinfo
+    ):
+        mock_getaddrinfo.return_value = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("localhost", 0)),
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("localhost", 0)),
+        ]
+        mock_socket.side_effect = OSError("socket failed")
+
+        with self.assertRaisesRegex(RuntimeError, "Failed to create a socket"):
+            find_free_port()
+
+        self.assertEqual(2, mock_socket.call_count)
+
     def test_etcd_server_start_stop(self):
         server = EtcdServer()
         server.start()
