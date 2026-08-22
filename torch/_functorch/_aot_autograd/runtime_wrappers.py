@@ -12,6 +12,7 @@ import copy
 import functools
 import itertools
 import pprint
+import threading
 import typing
 import warnings
 import weakref
@@ -3337,6 +3338,9 @@ class _AOTDispatchAutogradFunctionFactory:
     spec: AOTDispatchAutogradCompileSpec
 
     def build(self) -> type[torch.autograd.Function]:
+        sink = getattr(_aot_dispatch_autograd_capture_tls, "sink", None)
+        if sink is not None:
+            sink.append(self.spec)
         compile_id = CompileContext.current_compile_id()
         compile_id_str = str(compile_id) if compile_id is not None else None
         self.spec.fw_metadata.compile_id_str = compile_id_str
@@ -3618,6 +3622,22 @@ class _AOTDispatchAutogradFunctionFactory:
                 )
 
         return CompiledFunction
+
+
+_aot_dispatch_autograd_capture_tls = threading.local()
+
+
+@contextlib.contextmanager
+def capture_aot_dispatch_autograd_specs(
+    into: list[AOTDispatchAutogradCompileSpec],
+) -> Generator[None, None, None]:
+    """Record autograd-function specs built on this thread within the context."""
+    previous = getattr(_aot_dispatch_autograd_capture_tls, "sink", None)
+    _aot_dispatch_autograd_capture_tls.sink = into
+    try:
+        yield
+    finally:
+        _aot_dispatch_autograd_capture_tls.sink = previous
 
 
 # This is wrapped in a class just for namespacing purposes

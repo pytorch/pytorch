@@ -203,6 +203,56 @@ class TestAOTCompileToPython(TestCase):
                     load_from_python(src, cache)(_flat_inputs(m, x))[0], m(x)
                 )
 
+    def test_training_graph_composes_forward_and_backward(self):
+        # grad_enabled with inputs that require grad makes AOTAutograd emit a
+        # JOINT forward+backward: two dense graphs, bridged by an autograd
+        # Function the composer emits (its forward/backward bodies are
+        # AOTAutograd's own codegen'd source). The served output must therefore
+        # carry grad_fn and its .backward() must run the compiled backward.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        for p in m.parameters():
+            p.grad = None
+        m(x).sum().backward()
+        expected = {n: p.grad.detach().clone() for n, p in m.named_parameters()}
+
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        # Both inductor modules and the backward wrappers are inlined as source.
+        self.assertIn("_inner_call_fw", src)
+        self.assertIn("_inner_call_bw", src)
+        self.assertIn("def _backward_prologue(", src)
+        self.assertIn("class _CompiledFunction(torch.autograd.Function):", src)
+        self.assertNotIn("pickle.loads", src)
+
+        out = _exec(src)(_flat_inputs(m, x))
+        out = out[0] if isinstance(out, (list, tuple)) else out
+        self.assertIsNotNone(out.grad_fn)
+        for p in m.parameters():
+            p.grad = None
+        out.sum().backward()
+        for name, param in m.named_parameters():
+            self.assertEqual(param.grad, expected[name])
+
+    def test_training_forward_and_backward_do_not_share_names(self):
+        # The two inductor modules are spliced into ONE namespace and both define
+        # call / Runner / their kernels. A module resolves those as late-bound
+        # globals when INVOKED, so without per-module renaming the forward runs
+        # the backward's kernels -- which surfaces as an arity error, or worse.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        tree = ast.parse(src)
+        names = [
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+        ]
+        self.assertEqual(len(names), len(set(names)), f"duplicate top-level: {names}")
+
     def test_linear_addmm_runs_like_eager(self):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
