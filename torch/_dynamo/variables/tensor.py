@@ -65,7 +65,7 @@ from ..exc import (
 )
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, SyntheticLocalSource, TypeSource
+from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
     fqn,
@@ -178,8 +178,10 @@ def _contains_graph_intermediate(
         nonlocal found
         if (
             isinstance(vt, TensorVariable)
-            # Sources can describe in-graph views (for example, x.real), so an
-            # FX placeholder is the authoritative graph-input boundary.
+            # Sources can describe in-graph views (for example, x.real). A
+            # sourced placeholder is only an input boundary for this trace;
+            # relationships severed by an earlier graph break are already
+            # outside the scope of this check.
             and (vt.source is None or vt.proxy.node.op != "placeholder")
             and (vt.requires_grad or vt.has_grad_fn)
         ):
@@ -771,15 +773,6 @@ class TensorVariable(VariableTracker):
                 raise UnknownPropertiesDuringBackwardTrace(
                     f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"
                 )
-
-        if name == "__class__":
-            # Carry provenance on the class, mirroring BuiltinVariable.call_type.
-            # A sourced class self-guards when observed downstream (e.g.
-            # `w.__class__ is SomeType`), which keeps type observation sound even
-            # when the input's own class guard is relaxed (see
-            # VariableBuilder.wrap_tensor and ACT input polymorphism).
-            source = self.source and TypeSource(self.source)
-            return VariableTracker.build(tx, self.python_type(), source)
 
         handler = getattr(self, f"method_attr_{name}", None)
         result = handler(tx) if handler is not None else None
@@ -1443,6 +1436,8 @@ class TensorVariable(VariableTracker):
         Deduplicates by proxy.node.
         Returns list of unique leaf tensor variables.
         """
+        from ..source import SyntheticLocalSource
+
         result = []
         seen_nodes: set[torch.fx.Node] = set()
         for var in vars_iter:
@@ -1516,21 +1511,11 @@ class TensorVariable(VariableTracker):
         TODO: Support non-leaf tensors by fixing .grad access on non-leaf in Dynamo.
         """
         if not config.trace_autograd_ops:
-            backward_inputs = (
-                inputs if inputs is not None else tx.output.leaf_var_creation_order
-            )
-            skip_frame = (
-                _contains_graph_intermediate(backward_inputs)
-                or tx.has_live_graph_intermediate()
-            )
             unimplemented(
                 gb_type="Unsupported Tensor.backward() call",
                 context=f"call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
                 explanation="Dynamo currently does not support tracing `Tensor.backward()` when trace_autograd_ops is off.",
                 hints=["Set torch._dynamo.trace_autograd_ops=True"],
-                skip_frame=skip_frame,
-                preserve_skip_frame_after_inline=skip_frame,
-                apply_to_code=not skip_frame,
             )
 
         if not self.requires_grad and not self.has_grad_fn:
@@ -3698,6 +3683,16 @@ class DataPtrVariable(VariableTracker):
             context=f"tp_richcompare_impl {self} {op} {other}",
             explanation="Dynamo can only trace data pointer comparisons "
             "when it can prove both operands have the same data pointer.",
+            hints=[],
+        )
+
+    def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        """DataPtr nb_bool: mirrors long_bool, but the address is runtime-only."""
+        unimplemented(
+            gb_type="Data pointer truth value",
+            context=f"nb_bool_impl {self}",
+            explanation="Dynamo cannot decide the truth value of a data pointer "
+            "because the address is only known at runtime.",
             hints=[],
         )
 

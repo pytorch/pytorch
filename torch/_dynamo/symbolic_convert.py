@@ -188,9 +188,11 @@ from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
+    DequeIteratorVariable,
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .variables.misc import (
@@ -1139,6 +1141,8 @@ def break_graph_if_unsupported(
                         from_exc=excp,
                         skip_frame=preserve_skip_frame,
                         preserve_skip_frame_after_inline=preserve_skip_frame,
+                        # Only a preserved whole-frame skip may remain
+                        # invocation-scoped; replacement graph breaks are cached.
                         apply_to_code=(
                             excp.apply_to_code if preserve_skip_frame else True
                         ),
@@ -1631,12 +1635,35 @@ class InstructionTranslatorBase(
     def has_live_graph_intermediate(self) -> bool:
         """Return whether a differentiable intermediate must cross this break."""
 
+        # Note [Liveness scan for eager autograd graph breaks]
+        # AOTAutograd does not preserve edges between differentiably related
+        # outputs of the current compiled prefix. A false negative here can
+        # therefore silently change gradients. These roots cover the persistent
+        # stores currently known to carry values across the break: the current and
+        # inlined parent frames, active exception state, modified pre-existing
+        # objects (including globals), active context managers, backward state,
+        # tensor hooks, saved tensors, and suspended local generators. New
+        # persistent VariableTracker storage must extend this list.
+
         def get_live_values(tx: InstructionTranslatorBase) -> list[Any]:
             values: list[Any] = [
                 tx.stack,
                 tx.symbolic_cellvars,
-                tx.symbolic_globals,
+                [tx.exn_vt_stack[i] for i in range(len(tx.exn_vt_stack))],
+                tx.active_generic_context_managers,
+                [
+                    entry.with_context
+                    for entry in tx.block_stack
+                    if entry.with_context is not None
+                ],
             ]
+            if tx.exn_vt_stack._current_exception is not None:
+                values.append(tx.exn_vt_stack._current_exception)
+            if isinstance(tx, InliningGeneratorInstructionTranslator):
+                # A suspended generator detaches its exception segment from the
+                # shared stack, but those exception values remain live in the
+                # generator frame.
+                values.append(tx.gi_exc_state.items)
             instruction = tx.current_instruction
             if instruction not in tx.instructions:
                 # Before Python 3.11, creating a local generator does not run its
@@ -1656,13 +1683,19 @@ class InstructionTranslatorBase(
             cur_tx = cur_tx.parent
 
         side_effects = self.output.side_effects
-        pre_existing_vars = [
+        modified_existing_vars = [
             var
             for var in side_effects.id_to_variable.values()
             if not isinstance(var.mutation_type, AttributeMutationNew)
+            and side_effects.is_modified(var)
         ]
         live_values.extend(
-            [pre_existing_vars, self.output.backward_state, side_effects.tensor_hooks]
+            [
+                modified_existing_vars,
+                self.output.backward_state,
+                side_effects.tensor_hooks,
+                side_effects.save_for_backward,
+            ]
         )
 
         # LocalGeneratorObjectVariable deliberately excludes its instruction
@@ -3486,6 +3519,14 @@ class InstructionTranslatorBase(
             [obj, VariableTracker.build(self, inst.argval)],
             {},
         )
+
+    def DELETE_DEREF(self, inst: Instruction) -> None:
+        if inst.argval not in self.cell_and_freevars():
+            raise AssertionError(
+                "expected inst.argval in self.cell_and_freevars() to be true"
+            )
+        cell = self._cellvar(inst.argval)
+        self.output.side_effects.store_cell(cell, variables.DeletedVariable())
 
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
         # Only check side_effects — a pure dict lookup with no observable
@@ -6636,7 +6677,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        if not isinstance(tos, ListIteratorVariable):
+        iter_vts = (ListIteratorVariable, TupleIteratorVariable, DequeIteratorVariable)
+        if not isinstance(tos, iter_vts):
             self.pop()
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)

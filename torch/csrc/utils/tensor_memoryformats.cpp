@@ -25,16 +25,13 @@ PyObject* getTHPMemoryFormat(at::MemoryFormat memory_format) {
 
 void initializeMemoryFormats() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
-  if (!torch_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(torch_module);
 
   auto add_memory_format = [&](at::MemoryFormat format, const char* name) {
     std::string module_name = "torch.";
     THPObjectPtr memory_format(THPMemoryFormat_New(format, module_name + name));
-    if (PyModule_AddObjectRef(torch_module, name, memory_format.get()) != 0) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(
+        PyModule_AddObjectRef(torch_module, name, memory_format.get()) == 0);
     memory_format_registry[static_cast<size_t>(format)] =
         memory_format.release();
   };

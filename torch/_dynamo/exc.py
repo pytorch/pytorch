@@ -150,8 +150,11 @@ class TorchDynamoException(RuntimeError):
             instead of the default behavior. This allows exceptions to signal specific
             execution strategies (e.g., SKIP, RUN_ONLY) without requiring separate
             exception types for control flow.
-        apply_to_code: Whether the frame execution strategy should be cached on the
-            code object and applied to future invocations.
+        apply_to_code: Whether frame_exec_strategy should be cached on the code
+            object and applied to future invocations. If frame_exec_strategy is
+            unset, False requests a non-cached SKIP/DEFAULT strategy while True
+            uses normal exception handling. If it is set, the supplied strategy
+            is either cached or limited to the current invocation accordingly.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:

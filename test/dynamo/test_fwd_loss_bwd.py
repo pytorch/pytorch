@@ -2,6 +2,7 @@
 
 import copy
 import re
+import sys
 import textwrap
 
 import torch
@@ -404,6 +405,43 @@ class <lambda>(torch.nn.Module):
         )
 
     @skipIfCrossRef
+    def test_autograd_grad_generator_exception_state_intermediate_skips_initial_frame(
+        self,
+    ):
+        class Carry(Exception):
+            pass
+
+        def stash(out, derived):
+            try:
+                raise Carry(out, derived)
+            except Carry:
+                del out, derived
+                yield None
+                exc = sys.exc_info()[1]
+                if exc is None:
+                    raise AssertionError("expected active exception") from None
+                yield exc.args
+
+        def fn(w):
+            out = w * 2
+            derived = out * 3
+            gen = stash(out, derived)
+            del out, derived
+            next(gen)
+            torch.autograd.grad((w * 4).sum(), w)
+            saved_out, saved_derived = next(gen)
+            return torch.autograd.grad(
+                saved_derived,
+                saved_out,
+                grad_outputs=torch.ones_like(saved_derived),
+                allow_unused=True,
+            )[0]
+
+        self._check_autograd_ops_disabled(
+            fn, torch.randn(4, requires_grad=True), frame_count=0
+        )
+
+    @skipIfCrossRef
     def test_autograd_grad_attribute_intermediate_skips_initial_frame(self):
         class Box:
             pass
@@ -447,6 +485,84 @@ class <lambda>(torch.nn.Module):
             globals().pop("_test_autograd_loss", None)
 
     @skipIfCrossRef
+    @parametrize("container_type", ["dict", "set"])
+    def test_autograd_grad_container_key_intermediate_skips_initial_frame(
+        self, container_type
+    ):
+        def fn(w):
+            out = w * 2
+            live = {out: None} if container_type == "dict" else {out}
+            torch.autograd.grad((w * 3).sum(), w)
+            saved = next(iter(live))
+            grad_out = torch.autograd.grad(saved.sum(), saved)[0]
+            return torch.autograd.grad(saved, w, grad_outputs=grad_out)[0]
+
+        self._check_autograd_ops_disabled(
+            fn, torch.randn(4, requires_grad=True), frame_count=0
+        )
+
+    @skipIfCrossRef
+    def test_autograd_grad_save_for_backward_intermediate_skips_initial_frame(self):
+        backend = CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(backend=backend)
+        def helper(ctx, w):
+            out = w * 2
+            derived = out * 3
+            ctx.save_for_backward(out, derived)
+            torch.autograd.grad((w * 4).sum(), w)
+
+        class SavePair(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, w):
+                with torch.enable_grad():
+                    helper(ctx, w)
+                return w * 6
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                saved_out, saved_derived = ctx.saved_tensors
+                grad_out = torch.autograd.grad(
+                    saved_derived,
+                    saved_out,
+                    grad_outputs=grad_output,
+                )[0]
+                return grad_out * 2
+
+        x = torch.randn(4, requires_grad=True)
+        with torch._dynamo.config.patch(trace_autograd_ops=False):
+            SavePair.apply(x).sum().backward()
+
+        self.assertEqual(x.grad, torch.full_like(x, 6))
+        self.assertEqual(backend.frame_count, 0)
+
+    @skipIfCrossRef
+    def test_autograd_grad_exception_state_intermediate_skips_initial_frame(self):
+        class Carry(Exception):
+            pass
+
+        def fn(w):
+            out = w * 2
+            derived = out * 3
+            try:
+                raise Carry(out, derived)
+            except Carry:
+                torch.autograd.grad((w * 4).sum(), w)
+                exc = sys.exc_info()[1]
+                if exc is None:
+                    raise AssertionError("expected active exception") from None
+                saved_out, saved_derived = exc.args
+                return torch.autograd.grad(
+                    saved_derived,
+                    saved_out,
+                    grad_outputs=torch.ones_like(saved_derived),
+                )[0]
+
+        self._check_autograd_ops_disabled(
+            fn, torch.randn(4, requires_grad=True), frame_count=0
+        )
+
+    @skipIfCrossRef
     def test_autograd_grad_skip_is_invocation_scoped(self):
         def fn(w, use_grad):
             out = w * 2
@@ -468,95 +584,6 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(backend.frame_count, 1)
 
     @skipIfCrossRef
-    def test_tensor_backward_intermediate_skips_frame(self):
-        def fn(w):
-            out = w * 2
-            out.sum().backward(inputs=[out])
-            return out.grad
-
-        self._check_autograd_ops_disabled(
-            fn, torch.randn(4, requires_grad=True), frame_count=0
-        )
-
-    @skipIfCrossRef
-    def test_tensor_backward_live_intermediate_skips_initial_frame(self):
-        def fn(w):
-            out = w * 2
-            loss = out.sum()
-            torch.autograd.grad(loss, w, retain_graph=True)
-            loss.backward(inputs=[out])
-            return out.grad
-
-        self._check_autograd_ops_disabled(
-            fn, torch.randn(4, requires_grad=True), frame_count=0
-        )
-
-    @skipIfCrossRef
-    def test_tensor_backward_parent_live_intermediate_skips_initial_frame(self):
-        def helper(loss, w):
-            loss.backward(inputs=[w], retain_graph=True)
-
-        def fn(w):
-            out = w * 2
-            loss = out.sum()
-            helper(loss, w)
-            loss.backward(inputs=[out])
-            return out.grad
-
-        self._check_autograd_ops_disabled(
-            fn, torch.randn(4, requires_grad=True), frame_count=0
-        )
-
-    @skipIfCrossRef
-    def test_tensor_backward_internal_leaf_skips_frame(self):
-        def fn(x):
-            leaf = (x * 2).detach().requires_grad_()
-            (leaf * 3).sum().backward()
-            return leaf.grad
-
-        self._check_autograd_ops_disabled(fn, torch.randn(4), frame_count=0)
-
-    @skipIfCrossRef
-    def test_tensor_backward_graph_input_keeps_prefix_compiled(self):
-        def fn(w):
-            (w * 2).sum().backward(inputs=[w])
-            return w.grad
-
-        self._check_autograd_ops_disabled(
-            fn, torch.randn(4, requires_grad=True), frame_count=1
-        )
-
-    @skipIfCrossRef
-    def test_autograd_backward_intermediate_skips_frame(self):
-        def fn(w):
-            out = w * 2
-            torch.autograd.backward(out.sum(), inputs=[out])
-            return out.grad
-
-        self._check_autograd_ops_disabled(
-            fn, torch.randn(4, requires_grad=True), frame_count=0
-        )
-
-    @skipIfCrossRef
-    def test_autograd_backward_internal_leaf_skips_frame(self):
-        def fn(x):
-            leaf = (x * 2).detach().requires_grad_()
-            torch.autograd.backward((leaf * 3).sum())
-            return leaf.grad
-
-        self._check_autograd_ops_disabled(fn, torch.randn(4), frame_count=0)
-
-    @skipIfCrossRef
-    def test_autograd_backward_graph_input_keeps_prefix_compiled(self):
-        def fn(w):
-            torch.autograd.backward((w * 2).sum(), inputs=[w])
-            return w.grad
-
-        self._check_autograd_ops_disabled(
-            fn, torch.randn(4, requires_grad=True), frame_count=1
-        )
-
-    @skipIfCrossRef
     @torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False)
     def test_autograd_grad_in_graph_parameter_skips_frame(self):
         def fn(x):
@@ -573,16 +600,6 @@ class <lambda>(torch.nn.Module):
             return torch.autograd.grad((w * 2).sum(), w)[0]
 
         self._check_autograd_ops_disabled(fn, torch.randn(4), frame_count=1)
-
-    @skipIfCrossRef
-    @torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False)
-    def test_tensor_backward_in_graph_parameter_skips_frame(self):
-        def fn(x):
-            w = torch.nn.Parameter(torch.ones(4, 4))
-            (x @ w).sum().backward(inputs=[w])
-            return w.grad
-
-        self._check_autograd_ops_disabled(fn, torch.randn(2, 4), frame_count=0)
 
     @skipIfCrossRef
     def test_autograd_grad_single_tensor(self):
