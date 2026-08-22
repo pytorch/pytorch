@@ -10,7 +10,6 @@ import warnings
 from triton import runtime
 
 import torch
-
 from torch._inductor.utils import run_and_get_code
 
 
@@ -309,9 +308,7 @@ def _config_matches_source(gluon_config, src):
     # "'BLOCK_M': 128".
     for field in dataclasses.fields(gluon_config):
         value = getattr(gluon_config, field.name)
-        pattern = (
-            rf"\b{field.name}\b['\"]?\s*(?::\s*[\w.]+\s*)?[:=]\s*{value}\b"
-        )
+        pattern = rf"\b{field.name}\b['\"]?\s*(?::\s*[\w.]+\s*)?[:=]\s*{value}\b"
         if not re.search(pattern, src):
             return False
     return True

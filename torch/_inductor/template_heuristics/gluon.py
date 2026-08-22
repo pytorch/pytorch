@@ -11,6 +11,7 @@ class GluonGroupedMMConfig:
     NUM_ACC_BUFFERS: int
     NUM_STORE_WARPS: int = 4
     GROUP_SIZE_N: int = 1
+    USE_TMA_STORE: bool = False
 
 
 def compute_stage_variants_gluon(
@@ -96,7 +97,6 @@ def compute_stage_variants_gluon(
 def get_grouped_mm_configs(
     dtype_AB,
     exhaustive: bool = False,
-    uses_c_smem: bool = True,
     k_is_varying: bool = False,
 ) -> list[GluonGroupedMMConfig]:
     """
@@ -107,7 +107,6 @@ def get_grouped_mm_configs(
     Args:
         dtype_AB: Data type for A and B matrices
         exhaustive: If True, use the full search space
-        uses_c_smem: Whether the kernel allocates the C staging buffer
         k_is_varying: Whether offs partitions K
 
     Returns:
@@ -116,12 +115,15 @@ def get_grouped_mm_configs(
     # NUM_STORE_WARPS measured under 1% across 4/8/16, and the deepest
     # pipeline that fits won on every shape tried, so neither earns a
     # search dimension. BLOCK_K=32 only wins when offs partitions K,
-    # where a group's K can be far smaller than the tile.
+    # where a group's K can be far smaller than the tile. The store is
+    # searched both ways: TMA needs a C staging buffer, which costs a
+    # pipeline stage, so which wins is shape-dependent.
     if exhaustive:
         block_combos = list(itertools.product([64, 128], [32, 64, 128, 256]))
         BLOCK_K_vals = [32, 64, 128, 256]
         NUM_STORE_WARP_vals = [8]
         GROUP_SIZE_N_vals = [1, 4, 8, 16]
+        USE_TMA_STORE_vals = [False, True]
         buffer_configs_per_combo = 1
     else:
         block_combos = [
@@ -136,14 +138,22 @@ def get_grouped_mm_configs(
         BLOCK_K_vals = [32, 64, 128] if k_is_varying else [64, 128]
         NUM_STORE_WARP_vals = [8]
         GROUP_SIZE_N_vals = [1, 8]
+        USE_TMA_STORE_vals = [False, True]
         buffer_configs_per_combo = 1
 
     configs = []
-    for (BLOCK_M, BLOCK_N), BLOCK_K, num_store_warps, group_size_n in itertools.product(
+    for (
+        (BLOCK_M, BLOCK_N),
+        BLOCK_K,
+        num_store_warps,
+        group_size_n,
+        use_tma_store,
+    ) in itertools.product(
         block_combos,
         BLOCK_K_vals,
         NUM_STORE_WARP_vals,
         GROUP_SIZE_N_vals,
+        USE_TMA_STORE_vals,
     ):
         buffer_variants = compute_stage_variants_gluon(
             BLOCK_M,
@@ -151,7 +161,7 @@ def get_grouped_mm_configs(
             BLOCK_K,
             dtype=dtype_AB,
             max_configs=buffer_configs_per_combo,
-            uses_c_smem=uses_c_smem,
+            uses_c_smem=use_tma_store,
         )
 
         for num_load_buffers, num_acc_buffers in buffer_variants:
@@ -164,6 +174,7 @@ def get_grouped_mm_configs(
                     NUM_ACC_BUFFERS=num_acc_buffers,
                     NUM_STORE_WARPS=num_store_warps,
                     GROUP_SIZE_N=group_size_n,
+                    USE_TMA_STORE=use_tma_store,
                 )
             )
 

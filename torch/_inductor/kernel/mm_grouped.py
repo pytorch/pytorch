@@ -23,6 +23,7 @@ from ..select_algorithm import (
 from ..utils import (
     _descriptor_shape_fits_in_int32,
     _tma_descriptor_max_offset_fits_in_int32,
+    can_use_tma,
     get_gpu_shared_memory,
     get_num_sms,
     has_free_symbols,
@@ -113,7 +114,7 @@ def early_config_prune(g, m, dtsize, configs, named_args):
     return pruned_configs
 
 
-def gluon_grouped_mm_configs(dtype_AB, uses_c_smem, k_is_varying):
+def gluon_grouped_mm_configs(dtype_AB, k_is_varying):
     import torch._inductor.config as config
     from torch._inductor.template_heuristics.gluon import get_grouped_mm_configs
 
@@ -122,7 +123,6 @@ def gluon_grouped_mm_configs(dtype_AB, uses_c_smem, k_is_varying):
     gluon_configs = get_grouped_mm_configs(
         dtype_AB=dtype_AB,
         exhaustive=exhaustive,
-        uses_c_smem=uses_c_smem,
         k_is_varying=k_is_varying,
     )
 
@@ -138,6 +138,7 @@ def gluon_grouped_mm_configs(dtype_AB, uses_c_smem, k_is_varying):
                     "NUM_ACC_BUFFERS": gluon_config.NUM_ACC_BUFFERS,
                     "NUM_STORE_WARPS": gluon_config.NUM_STORE_WARPS,
                     "GROUP_SIZE_N": gluon_config.GROUP_SIZE_N,
+                    "USE_TMA_STORE": gluon_config.USE_TMA_STORE,
                     "NUM_SMS": get_num_sms(),
                 },
                 num_stages=1,  # Dummy value, the kernel uses NUM_LOAD_BUFFERS/NUM_ACC_BUFFERS for this purpose.
@@ -341,6 +342,7 @@ def can_use_gluon_kernel(
     offs: TensorBox | None,
     bias: TensorBox | None,
     scale_result: TensorBox | None,
+    layout: Layout,
 ) -> bool:
     if not torch.cuda.is_available() or torch.version.hip:
         return False
@@ -359,6 +361,11 @@ def can_use_gluon_kernel(
         return False
 
     if bias is not None or scale_result is not None:
+        return False
+
+    # A and B always load via TMA, and USE_TMA_STORE lets any output
+    # shape store via TMA, so every operand must satisfy it.
+    if not can_use_tma(mat_a, mat_b, output_layout=layout):
         return False
 
     # FIXME: Reconsider rejecting dynamic shapes here, as CuTeDSL does.
@@ -585,7 +592,7 @@ def _tuned_grouped_mm_common(
     if (
         is_nonzero
         and use_gluon_template(layout)
-        and can_use_gluon_kernel(mat_a, mat_b, offs, bias, scale_result)
+        and can_use_gluon_kernel(mat_a, mat_b, offs, bias, scale_result, layout)
         and not scaled
     ):
         kwargs = {
@@ -594,12 +601,8 @@ def _tuned_grouped_mm_common(
             "A_IS_K_MAJOR": a_is_k_major,
             "B_IS_K_MAJOR": b_is_k_major,
         }
-        # The C staging buffer is only allocated on the TMA store path,
-        # i.e. when C is not 2D.
-        uses_c_smem = a_is_2d == b_is_2d
         for config in gluon_grouped_mm_configs(
             dtype_AB=mat_a.get_dtype(),
-            uses_c_smem=uses_c_smem,
             k_is_varying=a_is_2d and b_is_2d,
         ):
             gluon_grouped_mm_template.maybe_append_choice(
