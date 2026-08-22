@@ -1964,6 +1964,30 @@ optim_db: list[OptimizerInfo] = [
         supported_impls=(),
         not_og_supported_flags=(),
         supports_complex=False,
+        decorators=(
+            # Muon's Newton-Schulz orthogonalization runs in bfloat16 and the
+            # fused addmm kernel rounds differently on CPU vs XPU (both valid
+            # within bf16 precision).  This 1-ULP bf16 rounding difference
+            # (~3.9e-3) amplifies through 5 polynomial iterations, producing
+            # errors in the orthogonalized update that are then scaled by
+            # adjusted_lr — so the final absolute diff is linear in lr.
+            # atol=7e-4 is sufficient for the current optim_inputs_func_muon
+            # configs (max lr=0.01); any config with lr >= 0.1 will exceed
+            # this tolerance and require a larger atol.
+            # rtol stays at float32 default.
+            # Empirically validated: 3000 seeds on Arc B580, worst diff = 4.66e-4.
+            # See: https://github.com/intel/torch-xpu-ops/issues/4263
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=7e-4, rtol=1.3e-6),
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_cross_device",
+                device_type="xpu",
+            ),
+        ),
         skips=(
             # Note on numerical differences: `compile` applies different matmul tuning,
             # which leads to deviations compared to eager mode. In the Newton-Schulz
