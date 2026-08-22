@@ -255,7 +255,7 @@ class TestFlopCounter(TestCase):
         weight = torch.randn(1, 1, 1, 1, requires_grad=True)
         assert_equivalence(lambda: F.conv2d(x, weight).sum().backward(), 8)
 
-        for in_channels, out_channels, groups in [
+        for in_channels, out_channels, _groups in [
             (1, 1, 1),
             (1, 3, 1),
             (3, 1, 1),
