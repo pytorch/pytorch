@@ -51,31 +51,31 @@ def extract_graph(fx_g, _, graph_cell):
 class TestCompileOnOneRank(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def _assert_graphs_identical_across_ranks(self, local_graph_code):
+    def _assert_graphs_identical_across_ranks(self, local_graph_code, device_type):
         """Gather compiled graph code from all ranks and assert they are identical."""
         self.assertIsNotNone(local_graph_code, "Graph was not captured")
 
         graph_bytes = local_graph_code.encode("utf-8")
         graph_tensor = torch.tensor(
-            list(graph_bytes), dtype=torch.uint8, device=self.device_type
+            list(graph_bytes), dtype=torch.uint8, device=device_type
         )
 
         # Pad to same length across ranks
         local_len = torch.tensor(
-            [len(graph_bytes)], dtype=torch.int64, device=self.device_type
+            [len(graph_bytes)], dtype=torch.int64, device=device_type
         )
         all_lens = [
-            torch.zeros(1, dtype=torch.int64, device=self.device_type)
+            torch.zeros(1, dtype=torch.int64, device=device_type)
             for _ in range(self.world_size)
         ]
         dist.all_gather(all_lens, local_len)
         max_len = int(max(l.item() for l in all_lens))
 
-        padded_tensor = torch.zeros(max_len, dtype=torch.uint8, device=self.device_type)
+        padded_tensor = torch.zeros(max_len, dtype=torch.uint8, device=device_type)
         padded_tensor[: len(graph_bytes)] = graph_tensor
 
         all_graphs = [
-            torch.zeros(max_len, dtype=torch.uint8, device=self.device_type)
+            torch.zeros(max_len, dtype=torch.uint8, device=device_type)
             for _ in range(self.world_size)
         ]
         dist.all_gather(all_graphs, padded_tensor)
@@ -121,7 +121,7 @@ class TestCompileOnOneRank(DTensorTestBase):
 
     @with_comms
     @compiler_config.patch(compile_on_one_rank=True)
-    def test_compiled_rowwise_embedding_graph_consistency(self):
+    def test_compiled_rowwise_embedding_graph_consistency(self, device):
         """Test that compiled graphs are identical across all ranks.
 
         When rowwise sharded embeddings are compiled with torch.compile, the
@@ -134,7 +134,8 @@ class TestCompileOnOneRank(DTensorTestBase):
         These values should be symbolic/dynamic, not baked-in literals, to
         ensure graph consistency across ranks.
         """
-        mesh = self.build_device_mesh()
+        device_type = torch.device(device).type
+        mesh = init_device_mesh(device_type, (self.world_size,))
 
         class Network(nn.Module):
             def __init__(self, num_embeddings, embedding_dim, device):
@@ -150,7 +151,7 @@ class TestCompileOnOneRank(DTensorTestBase):
         num_embeddings = 256
         embedding_dim = 64
 
-        model = Network(num_embeddings, embedding_dim, device=self.device_type)
+        model = Network(num_embeddings, embedding_dim, device=device_type)
 
         parallelize_module(
             model,
@@ -166,15 +167,16 @@ class TestCompileOnOneRank(DTensorTestBase):
         compiled_model, fw_graph_cell = self._compile_and_capture_graph(model)
 
         torch.manual_seed(42)
-        inp = torch.randint(0, num_embeddings, (64, 16), device=self.device_type)
+        inp = torch.randint(0, num_embeddings, (64, 16), device=device_type)
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
 
         compiled_model(replicated_inp)
-        self._assert_graphs_identical_across_ranks(fw_graph_cell[0])
+        self._assert_graphs_identical_across_ranks(fw_graph_cell[0], device_type)
 
     @with_comms
     @compiler_config.patch(compile_on_one_rank=True)
-    def test_all_reduce_with_explicit_pg_input(self):
+    def test_all_reduce_with_explicit_pg_input(self, device):
+        device_type = torch.device(device).type
         pg = dist.distributed_c10d._get_default_group()
 
         def f(t, group):
@@ -182,19 +184,18 @@ class TestCompileOnOneRank(DTensorTestBase):
             dist.all_reduce(t, group=group)
             return t + 1
 
-        x = torch.arange(4, dtype=torch.float32, device=self.device_type)
+        x = torch.arange(4, dtype=torch.float32, device=device_type)
         opt = torch.compile(f, backend="inductor", fullgraph=True)
         out = opt(x, pg)
         self.assertEqual(out, f(x, pg))
 
     @with_comms
     @compiler_config.patch(compile_on_one_rank=True)
-    def test_compiled_dtensor_rng_op_graph_consistency(self):
+    def test_compiled_dtensor_rng_op_graph_consistency(self, device):
         """Compiled random ops on sharded DTensors should produce identical graphs."""
-        mesh = self.build_device_mesh()
-        dt = DTensor.from_local(
-            torch.empty(8, 4, device=self.device_type), mesh, [Shard(0)]
-        )
+        device_type = torch.device(device).type
+        mesh = init_device_mesh(device_type, (self.world_size,))
+        dt = DTensor.from_local(torch.empty(8, 4, device=device_type), mesh, [Shard(0)])
 
         fw_graph_cell = [None]
         fw_compiler = functools.partial(extract_graph, graph_cell=fw_graph_cell)
@@ -211,11 +212,11 @@ class TestCompileOnOneRank(DTensorTestBase):
         )
 
         compiled_f(dt)
-        self._assert_graphs_identical_across_ranks(fw_graph_cell[0])
+        self._assert_graphs_identical_across_ranks(fw_graph_cell[0], device_type)
 
     @with_comms
     @compiler_config.patch(compile_on_one_rank=True)
-    def test_all_reduce_with_implicit_world_group(self):
+    def test_all_reduce_with_implicit_world_group(self, device):
         """`dist.all_reduce(t)` with no `group=` (implicit `dist.group.WORLD`)
         should compile under compile_on_one_rank=True.
 
@@ -236,7 +237,8 @@ class TestCompileOnOneRank(DTensorTestBase):
             dist.all_reduce(t)
             return t + 1
 
-        x = torch.arange(4, dtype=torch.float32, device=self.device_type)
+        device_type = torch.device(device).type
+        x = torch.arange(4, dtype=torch.float32, device=device_type)
         opt = torch.compile(f, backend="aot_eager", fullgraph=True)
         out = opt(x)
         self.assertEqual(out, f(x))
@@ -579,8 +581,8 @@ class TestCompileOnOneRankCUDA(TestCase):
                         difflib.unified_diff(
                             norm(code0).splitlines(keepends=True),
                             norm(code1).splitlines(keepends=True),
-                            fromfile="cuda:0",
-                            tofile="cuda:1",
+                            fromfile=str(devices[0]),
+                            tofile=str(devices[1]),
                         )
                     )
                     self.fail(
@@ -939,6 +941,12 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
         self.assertTrue(_baked_pg_constants(gm))
 
 
+instantiate_device_type_tests(
+    TestCompileOnOneRank,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 instantiate_device_type_tests(
     TestCompileOnOneRankDeviceAsParameter,
     globals(),

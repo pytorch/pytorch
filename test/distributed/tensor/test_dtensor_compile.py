@@ -52,16 +52,13 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
-    skipXPUIf,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_LINUX,
     parametrize,
     run_tests,
-    skipIfHpu,
     skipIfTorchDynamo,
     skipIfXpu,
     TEST_WITH_SLOW,
@@ -75,10 +72,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
-
-
-dev_type = torch.device(get_devtype())
 
 
 class PytreeTuple(torch._custom_class_base.CustomClassBase):
@@ -722,7 +717,6 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res.sum().backward()
         self.assertEqual(x.grad, x_ref.grad)
 
-    @skipIfHpu
     def test_dtensor_dynamic(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -744,7 +738,6 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
-    @skipIfHpu
     def test_dtensor_dynamic_slice(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -766,8 +759,6 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
-    @skipIfHpu
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1981")
     def test_dtensor_dynamic_loss_parallel_log_softmax(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -1146,7 +1137,6 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x3), opt_fn(x3))
         self.assertEqual(cnt.frame_count, 2)
 
-    @skipIfHpu
     def test_dtensor_partial_placement_redistribute_unbalanced_correct_strides(self):
         # Partial -> Shard on an unbalanced tensor results in:
         # - A contiguous DTensor
@@ -1393,7 +1383,6 @@ def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.D
         # This should not throw a BypassAOTAutogradCache error
         check_cacheable(backend.graphs[0])
 
-    @skipIfHpu
     def test_dynamo_dtensor_from_local_redistribute_async(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -1465,7 +1454,6 @@ def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.D
         res = opt_fn(x_dt)
         self.assertEqual(ref, res)
 
-    @skipIfHpu
     def test_graph_input_is_async(self):
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
@@ -2155,8 +2143,8 @@ class outer_fn(torch.nn.Module):
         self.assertNotEqual(h0, h1)
 
 
-class TestDTensorCompileCUDA(torch._dynamo.test_case.TestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestDTensorStandaloneCompileAccelerator(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
         super().setUp()
@@ -2175,9 +2163,7 @@ class TestDTensorCompileCUDA(torch._dynamo.test_case.TestCase):
     def world_size(self) -> int:
         return 2
 
-    @unittest.skipIf(not HAS_GPU, "standalone_compile requires GPU and triton")
-    @skipIfXpu(msg="standalone_compile coverage is CUDA-only")
-    @skip_if_lt_x_gpu(1)
+    @unittest.skipIf(not has_triton(), "Triton is not available")
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_aot_standalone_compile_dtensor_to_dtype_layout(self, device):
         from torch._inductor import standalone_compile
@@ -2866,10 +2852,11 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @with_comms
     @parametrize("is_seq_parallel", [True, False])
     @parametrize("use_ca", [True, False])
-    def test_tp_compile_fullgraph(self, is_seq_parallel, use_ca):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+    def test_tp_compile_fullgraph(self, is_seq_parallel, use_ca, device):
+        device_type = torch.device(device).type
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
 
-        model = SimpleModel(self.device_type)
+        model = SimpleModel(device_type)
 
         colwise_style = (
             ColwiseParallel(input_layouts=Shard(0))
@@ -2915,7 +2902,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         )
         rng_seed = self.rank if is_seq_parallel else 0
         torch.manual_seed(rng_seed)
-        inp = torch.rand(20, 10, device=self.device_type)
+        inp = torch.rand(20, 10, device=device_type)
         out = model(inp)
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         compiled_mod = torch.compile(model, backend=cnt, fullgraph=True)
@@ -2928,19 +2915,20 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("use_ca", [True, False])
-    def test_2d_fsdp_tp_compile(self, use_ca):
+    def test_2d_fsdp_tp_compile(self, use_ca, device):
+        device_type = torch.device(device).type
         data_parallel_size = 2
-        model = SimpleModel(self.device_type)
+        model = SimpleModel(device_type)
         model_copy = copy.deepcopy(model)
 
         # 2-D mesh is [dp, tp]
         twod_mesh = init_device_mesh(
-            self.device_type,
+            device_type,
             (data_parallel_size, self.world_size // data_parallel_size),
             mesh_dim_names=["dp", "tp"],
         )
 
-        inp = torch.rand(20, 10, device=self.device_type)
+        inp = torch.rand(20, 10, device=device_type)
         parallelize_plan = {
             "mlp_0.net1": ColwiseParallel(),
             "mlp_0.net2": RowwiseParallel(),
@@ -2950,7 +2938,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         tp_model = parallelize_module(model, twod_mesh["tp"], parallelize_plan)
         eager_2d = FSDP(
             tp_model,
-            device_id=dev_type.type,
+            device_id=device_type,
             use_orig_params=True,
             device_mesh=twod_mesh["dp"],
         )
@@ -2962,7 +2950,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         )
         fsdp_2d = FSDP(
             tp_model2,
-            device_id=dev_type.type,
+            device_id=device_type,
             use_orig_params=True,
             device_mesh=twod_mesh["dp"],
         )
@@ -2980,20 +2968,21 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("use_ca", [True, False])
-    def test_2d_fsdp_tp_ac_compile(self, use_ca):
+    def test_2d_fsdp_tp_ac_compile(self, use_ca, device):
+        device_type = torch.device(device).type
         dp_degree = 2
         tp_degree = self.world_size // dp_degree
-        model = SimpleModel(self.device_type)
+        model = SimpleModel(device_type)
         model_copy = copy.deepcopy(model)
 
         # 2-D mesh is [dp, tp]
         mesh_2d = init_device_mesh(
-            self.device_type,
+            device_type,
             mesh_shape=(dp_degree, tp_degree),
             mesh_dim_names=("dp", "tp"),
         )
 
-        inp = torch.rand(20, 10, device=self.device_type)
+        inp = torch.rand(20, 10, device=device_type)
         parallelize_plan = {
             "mlp_0.net1": ColwiseParallel(),
             "mlp_0.net2": RowwiseParallel(),
@@ -3035,10 +3024,9 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("use_ca", [True, False])
-    def test_compile_dtensor_redistribute_backward(self, use_ca):
-        mesh = DeviceMesh(
-            device_type=self.device_type, mesh=torch.arange(self.world_size)
-        )
+    def test_compile_dtensor_redistribute_backward(self, use_ca, device):
+        device_type = torch.device(device).type
+        mesh = DeviceMesh(device_type=device_type, mesh=torch.arange(self.world_size))
 
         def fn(x, y):
             dt = DTensor.from_local(x.reshape(2, 4), mesh, [Shard(0)], run_check=False)
@@ -3049,12 +3037,16 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         opt_fn = torch.compile(fn, backend=aot_eager_graph, fullgraph=True)
 
-        x_ref = torch.arange(8, requires_grad=True, dtype=torch.float32)
-        y_ref = torch.arange(8, requires_grad=True, dtype=torch.float32)
+        x_ref = torch.arange(
+            8, requires_grad=True, dtype=torch.float32, device=device_type
+        )
+        y_ref = torch.arange(
+            8, requires_grad=True, dtype=torch.float32, device=device_type
+        )
         ref = fn(x_ref, y_ref)
 
-        x = torch.arange(8, requires_grad=True, dtype=torch.float32)
-        y = torch.arange(8, requires_grad=True, dtype=torch.float32)
+        x = torch.arange(8, requires_grad=True, dtype=torch.float32, device=device_type)
+        y = torch.arange(8, requires_grad=True, dtype=torch.float32, device=device_type)
         res = opt_fn(x, y)
 
         self.assertEqual(res, ref)
@@ -3068,8 +3060,9 @@ class TestDTensorCompileE2E(DTensorTestBase):
         self.assertEqual(y_ref.grad, y.grad)
 
     @with_comms
-    def test_compile_embedding_redistribute(self):
-        mesh = self.build_device_mesh()
+    def test_compile_embedding_redistribute(self, device):
+        device_type = torch.device(device).type
+        mesh = init_device_mesh(device_type, (self.world_size,))
 
         class Network(nn.Module):
             def __init__(self, embedding, mesh):
@@ -3082,8 +3075,8 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 x = x.redistribute(self.mesh, [Shard(1)])
                 return x
 
-        embedding = torch.nn.Embedding(10, 20, device=self.device_type)
-        inp = torch.randint(0, 10, (8,), device=self.device_type)
+        embedding = torch.nn.Embedding(10, 20, device=device_type)
+        inp = torch.randint(0, 10, (8,), device=device_type)
         ref_out = embedding(inp)
         sharded_net = torch.compile(Network(embedding, mesh))
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
@@ -3091,12 +3084,13 @@ class TestDTensorCompileE2E(DTensorTestBase):
         self.assertEqual(output.full_tensor(), ref_out)
 
     @with_comms
-    def test_unbacked_illegal_views(self):
+    def test_unbacked_illegal_views(self, device):
         """Test that views with unbacked shapes match eager behavior"""
-        device_mesh = self.build_device_mesh()
+        device_type = torch.device(device).type
+        device_mesh = init_device_mesh(device_type, (self.world_size,))
 
         def create_dt(shard_dim):
-            tensor = torch.randn(8, 8, 8)
+            tensor = torch.randn(8, 8, 8, device=device_type)
             dt = distribute_tensor(tensor, device_mesh, [Shard(shard_dim)])
             for i in range(3):
                 torch._dynamo.decorators.mark_unbacked(dt, i)
@@ -3131,15 +3125,16 @@ class TestDTensorCompileE2E(DTensorTestBase):
             flatten(dt)
 
     @with_comms
-    def test_split_with_symint_split_size(self):
+    def test_split_with_symint_split_size(self, device):
         """
         Test that split works with symbolic integer split_size when using
         torch.compile with dynamic=True.
         """
-        mesh = self.build_device_mesh()
+        device_type = torch.device(device).type
+        mesh = init_device_mesh(device_type, (self.world_size,))
         placements = [Replicate()]
 
-        global_tensor = torch.randn(8, 8, device=self.device_type)
+        global_tensor = torch.randn(8, 8, device=device_type)
         input_dt = distribute_tensor(global_tensor, mesh, placements)
 
         def split_fn(x, split_size):
@@ -3157,20 +3152,19 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 self.assertEqual(dt_chunk.full_tensor(), tensor_chunk)
 
     @with_comms
-    def test_dtensor_processgroup_backward(self):
+    def test_dtensor_processgroup_backward(self, device):
         """Test that ProcessGroups are correctly handled in backward graph."""
         from torch._functorch.aot_autograd import aot_function
 
+        device_type = torch.device(device).type
         with patch("torch.compiler.config.compile_on_one_rank", True):
-            mesh = self.build_device_mesh()
+            mesh = init_device_mesh(device_type, (self.world_size,))
 
             def fn(dt):
                 out = dt.redistribute(mesh, [Replicate()])
                 return out.sum()
 
-            local_tensor = torch.randn(
-                4, 8, device=self.device_type, requires_grad=True
-            )
+            local_tensor = torch.randn(4, 8, device=device_type, requires_grad=True)
             dt_input = DTensor.from_local(
                 local_tensor, mesh, [Shard(0)], run_check=False
             )
@@ -3214,18 +3208,19 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 )
 
     @with_comms
-    def test_dtensor_processgroup_extraction(self):
+    def test_dtensor_processgroup_extraction(self, device):
         """Test that with compile_on_one_rank, DeviceMesh becomes a graph input
         and ProcessGroups are extracted in-graph as placeholders."""
         from torch._functorch.aot_autograd import aot_function
 
+        device_type = torch.device(device).type
         with patch("torch.compiler.config.compile_on_one_rank", True):
-            mesh = self.build_device_mesh()
+            mesh = init_device_mesh(device_type, (self.world_size,))
 
             def fn(dt):
                 return dt.redistribute(mesh, [Replicate()])
 
-            local_tensor = torch.randn(4, 8, device=self.device_type)
+            local_tensor = torch.randn(4, 8, device=device_type)
             dt_input = DTensor.from_local(
                 local_tensor, mesh, [Shard(0)], run_check=False
             )
@@ -3263,21 +3258,22 @@ class TestDTensorCompileE2E(DTensorTestBase):
             )
 
     @with_comms
-    def test_dtensor_processgroup_deduplication(self):
+    def test_dtensor_processgroup_deduplication(self, device):
         """Test that multiple DTensors sharing the same ProcessGroup only pass
         it once as a graph placeholder."""
         from torch._functorch.aot_autograd import aot_function
 
+        device_type = torch.device(device).type
         with patch("torch.compiler.config.compile_on_one_rank", True):
-            mesh = self.build_device_mesh()
+            mesh = init_device_mesh(device_type, (self.world_size,))
 
             def fn(dt1, dt2):
                 out1 = dt1.redistribute(mesh, [Replicate()])
                 out2 = dt2.redistribute(mesh, [Replicate()])
                 return out1 + out2
 
-            local1 = torch.randn(4, 8, device=self.device_type)
-            local2 = torch.randn(4, 8, device=self.device_type)
+            local1 = torch.randn(4, 8, device=device_type)
+            local2 = torch.randn(4, 8, device=device_type)
             dt1 = DTensor.from_local(local1, mesh, [Shard(0)], run_check=False)
             dt2 = DTensor.from_local(local2, mesh, [Shard(0)], run_check=False)
 
@@ -3334,8 +3330,9 @@ class TestDTensorACCompile(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_tp_ac_compile_dtensor_inner_symbol(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+    def test_tp_ac_compile_dtensor_inner_symbol(self, device):
+        device_type = torch.device(device).type
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
 
         # Embedding produces a DTensor whose inner/outer sizes get
         # independent symbols (outer = global seq_len, inner = local
@@ -3349,7 +3346,7 @@ class TestDTensorACCompile(DTensorTestBase):
             def forward(self, ids):
                 return self.block(self.embed(ids))
 
-        model = EmbedBlock(32, 10, self.device_type)
+        model = EmbedBlock(32, 10, device_type)
 
         parallelize_module(
             model,
@@ -3374,14 +3371,14 @@ class TestDTensorACCompile(DTensorTestBase):
 
         model.block.compile(backend="aot_eager", fullgraph=True)
 
-        ids1 = torch.randint(0, 32, (4, 20), device=self.device_type)
+        ids1 = torch.randint(0, 32, (4, 20), device=device_type)
         out1 = model(ids1)
         out1.sum().backward()
         model.zero_grad()
 
         # Different seq_len triggers dynamic-shape recompilation where
         # the DTensor inner symbol gets lifted through the AC HOP.
-        ids2 = torch.randint(0, 32, (4, 25), device=self.device_type)
+        ids2 = torch.randint(0, 32, (4, 25), device=device_type)
         out2 = model(ids2)
         out2.sum().backward()
 
@@ -3393,9 +3390,22 @@ instantiate_device_type_tests(
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestDTensorCompileCUDA,
+    TestDTensorStandaloneCompileAccelerator,
     globals(),
-    only_for=["cuda"],
+    except_for=["cpu", "hpu", "privateuse1"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDTensorCompileE2E,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDTensorACCompile,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
 )
 
 
