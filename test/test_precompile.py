@@ -1585,7 +1585,7 @@ class TestPrecompile(TestCase):
         self.assertEqual(len(guard_summaries), 2)
         for guard_types, _, _, has_shape_guards in guard_summaries:
             self.assertIn("TENSOR_MATCH", guard_types)
-            self.assertIn("GLOBAL_STATE", guard_types)
+            self.assertNotIn("GLOBAL_STATE", guard_types)
             self.assertTrue(has_shape_guards)
 
         for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
@@ -1704,6 +1704,97 @@ class TestPrecompile(TestCase):
         )
         loaded = torch.compiler.precompile.load(code, cache)
         self.assertEqual(loaded(x), _precompile_dynamo_reads_tensor_flag(x))
+
+    def test_tracer_dynamo_rejects_unrebuildable_input_guard(self):
+        from unittest import mock
+
+        from torch._dynamo.guards import GuardsStatePickler
+
+        carry = GuardsStatePickler._carried_tensor_attributes
+
+        def omit_cpu_copy(self, tensor):
+            state = carry(self, tensor)
+            if state is not None:
+                state.pop("_cpu_copy", None)
+            return state or None
+
+        model = _PrecompileDynamoReadsTensorAttribute()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        with (
+            mock.patch.object(
+                GuardsStatePickler, "_carried_tensor_attributes", omit_cpu_copy
+            ),
+            self.assertRaisesRegex(PrecompileError, "input-derived guard"),
+        ):
+            torch.compiler.precompile(
+                _precompile_dynamo_call_module,
+                example_inputs=[(model, x)],
+                tracer="dynamo",
+                backend="eager",
+                require_no_risky_drops=False,
+            )
+
+    def test_tracer_dynamo_rejects_drifted_input_guard(self):
+        from unittest import mock
+
+        from torch._dynamo.guards import GuardsStatePickler
+
+        restore = GuardsStatePickler._restore_tensor_attributes.__func__
+
+        def _restore_tensor_attributes(cls, tensor, state):
+            state = dict(state)
+            if "_cpu_copy" in state:
+                state["_cpu_copy"] = torch.randn(2)
+            restore(cls, tensor, state)
+
+        model = _PrecompileDynamoReadsTensorAttribute()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        with (
+            mock.patch.object(
+                GuardsStatePickler,
+                "_restore_tensor_attributes",
+                classmethod(_restore_tensor_attributes),
+            ),
+            self.assertRaisesRegex(PrecompileError, "input-derived guard.*changed"),
+        ):
+            torch.compiler.precompile(
+                _precompile_dynamo_call_module,
+                example_inputs=[(model, x)],
+                tracer="dynamo",
+                backend="eager",
+                require_no_risky_drops=False,
+            )
+
+    def test_tracer_dynamo_rejects_guard_leaf_drift(self):
+        from unittest import mock
+
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        fingerprint = GuardManagerWrapper.leaf_fingerprint
+        calls = 0
+
+        def drift_after_capture(self):
+            nonlocal calls
+            calls += 1
+            result = fingerprint(self)
+            if calls > 1:
+                return result | {("TEST_GUARD", "changed after serialization")}
+            return result
+
+        with (
+            mock.patch.object(
+                GuardManagerWrapper, "leaf_fingerprint", drift_after_capture
+            ),
+            self.assertRaisesRegex(PrecompileError, "changed input-derived checks"),
+        ):
+            torch.compiler.precompile(
+                _precompile_dynamo_dynamic,
+                example_inputs=[(torch.randn(4),)],
+                tracer="dynamo",
+                backend="eager",
+            )
 
     def test_tracer_dynamo_wrapper_subclass_requires_grad(self):
         from torch.testing._internal.two_tensor import TwoTensor
@@ -3280,7 +3371,7 @@ class TestPrecompile(TestCase):
         )
         for guard_types, _, _, _ in summaries:
             self.assertIn("TENSOR_MATCH", guard_types)
-            self.assertIn("GLOBAL_STATE", guard_types)
+            self.assertNotIn("GLOBAL_STATE", guard_types)
         x = torch.randn(4)
         self.assertEqual(loaded(x, 2), _precompile_dynamo_scalar(x, 2))
         self.assertEqual(loaded(x, 4), _precompile_dynamo_scalar(x, 4))
