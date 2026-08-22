@@ -176,6 +176,8 @@ _FunctionId = NewType("_FunctionId", str)  # __resume_at
 
 @dataclasses.dataclass
 class _PreparedInstall:
+    """The pure work for install(), computed early by prepare()."""
+
     backends: dict[_BackendId, Any]
     managers: dict[tuple[types.CodeType, int], "GuardManagerWrapper"]
 
@@ -1074,19 +1076,18 @@ class CompilePackage:
                             raise RuntimeError(
                                 f"Backend {backend_id} is not found in the given backends"
                             )
-                        with dynamo_timed(
-                            "after_deserialization", phase_name="backend_compile"
-                        ):
-                            backend = (
-                                prepared.backends[backend_id]
-                                if prepared is not None
-                                else backends[backend_id].after_deserialization()
-                            )
-                            self._install_global(
-                                module,
-                                backend_id,
-                                torch._dynamo.disable(backend),
-                            )
+                        if prepared is not None:
+                            backend = prepared.backends[backend_id]
+                        else:
+                            with dynamo_timed(
+                                "after_deserialization", phase_name="backend_compile"
+                            ):
+                                backend = backends[backend_id].after_deserialization()
+                        self._install_global(
+                            module,
+                            backend_id,
+                            torch._dynamo.disable(backend),
+                        )
 
                     if not entry.guarded_codes:
                         if self._installed_precompile_region_id < 0:
@@ -1156,7 +1157,13 @@ class CompilePackage:
                             self._installed_precompile_probe = target_code
 
     def prepare(self, backends: dict[_BackendId, Any]) -> None:
-        """Deserialize backends and build guard trees without installing them."""
+        """Do install()'s pure work now and leave it for install() to consume.
+
+        Backend deserialization and guard construction can reject an artifact that
+        does not fit this host, but neither operation mutates interpreter state. Moving
+        them to load time surfaces those failures before the first served call without
+        paying for the work twice.
+        """
         managers = {}
         for code, entry in self._codes.items():
             if entry.bypassed or not entry.guarded_codes:
@@ -1168,13 +1175,11 @@ class CompilePackage:
                 managers[(target_code, index)] = load_guard_manager(
                     guards_state, target_code, runtime_global_scope
                 )
-        self._prepared = _PreparedInstall(
-            backends={
-                backend_id: artifact.after_deserialization()
-                for backend_id, artifact in backends.items()
-            },
-            managers=managers,
-        )
+        deserialized = {}
+        for backend_id, artifact in backends.items():
+            with dynamo_timed("after_deserialization", phase_name="backend_compile"):
+                deserialized[backend_id] = artifact.after_deserialization()
+        self._prepared = _PreparedInstall(backends=deserialized, managers=managers)
 
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()

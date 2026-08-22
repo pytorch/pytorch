@@ -2028,14 +2028,12 @@ def _filter_dynamo_guards(
         rebuilt_leaves = frozenset(
             normalize_leaf(leaf) for leaf in rebuilt.leaf_fingerprint()
         )
-        missing_leaves = expected_leaves - rebuilt_leaves
-        extra_leaves = rebuilt_leaves - expected_leaves
-        if missing_leaves or extra_leaves:
-            changed_leaves = [
-                *(f"missing {leaf}" for leaf in sorted(missing_leaves)),
-                *(f"extra {leaf}" for leaf in sorted(extra_leaves)),
-            ]
-            examples = ", ".join(changed_leaves[:3])
+        changed_leaves = expected_leaves ^ rebuilt_leaves
+        if changed_leaves:
+            examples = ", ".join(
+                f"{source or '<root>'}: {guard_type}: {payload}"
+                for source, guard_type, payload in sorted(changed_leaves)[:3]
+            )
             raise PrecompileError(
                 "precompile tracer='dynamo' rebuilt a guard tree with changed "
                 f"input-derived checks: {examples}"
@@ -2891,10 +2889,10 @@ def _precompile_dynamo(
         region = context._isolate_recompiles_id
         compiled = context(fn)
         saved_grads = _dynamo_example_grads(fn, examples)
-        with torch.no_grad():
-            for tensor, _ in saved_grads.values():
-                tensor.grad = None
         try:
+            with torch.no_grad():
+                for tensor, _ in saved_grads.values():
+                    tensor.grad = None
             for example in examples:
                 try:
                     compiled(*example.args, **example.kwargs)
