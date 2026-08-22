@@ -115,7 +115,6 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
 )
-from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
 
 from .. import config, graph_break_hints, mutation_guard, replay_record, trace_rules
@@ -662,7 +661,7 @@ class GraphArg:
     # TODO: storing a SymInt here but not a FakeTensor is a pretty strange
     # thing to do.  Probably should have example (which stores an int) and
     # fake_example
-    _example: Any
+    _example: object
     # When True, this indicates that this GraphArg is a Python quantity (e.g.,
     # a float or int) which we pass to the FX graph as a Tensor.  This
     # controls how we codegen calls into the Dynamo graph: we will call
@@ -707,7 +706,11 @@ class GraphArg:
                 raise AssertionError("TensorWeakRef expired unexpectedly")
             return r
         else:
-            return self._example
+            # The declared return type is known-incomplete: torch.ScriptObject
+            # and list-of-tensor graphargs also reach here, and output_graph.py
+            # reads them back (1827, 3424, 3441). Do not tighten `_example` to
+            # this union without fixing those paths first.
+            return cast("torch.SymInt | BackwardState | None", self._example)
 
     def __post_init__(self) -> None:
         if isinstance(self._example, torch.Tensor):
@@ -2772,25 +2775,29 @@ class VariableBuilder:
                         f"{int_spec!r} (expected int, IntVar, or None)"
                     )
 
-            if is_dynamic_source(self.source.name):
+            # Precedence, highest first: static-sources, dynamic-sources,
+            # unbacked-sources, dynamic-values.
+            if is_static_source(self.source.name):
+                log.debug("%s marked static via static-sources list", self.source.name)
+                self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                return ConstantVariable.create(value=value, source=self.source)
+            elif is_dynamic_source(self.source.name):
                 log.debug(
                     "%s marked dynamic via dynamic-sources list", self.source.name
                 )
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
-
-            if is_dynamic_value(value):
+            elif is_unbacked_source(self.source.name):
+                log.debug(
+                    "%s marked unbacked via unbacked-sources list", self.source.name
+                )
+                return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
+            elif is_dynamic_value(value):
                 log.debug(
                     "%s marked dynamic via dynamic-values list (value=%s)",
                     self.source.name,
                     value,
                 )
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
-
-            if is_unbacked_source(self.source.name):
-                log.debug(
-                    "%s marked unbacked via unbacked-sources list", self.source.name
-                )
-                return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
 
             if not config.specialize_int:
                 # unspecializing int by default, but still
@@ -4199,7 +4206,8 @@ def handle_traced_output(
         ]
         or (
             # TODO: this is a little sus, because we didn't check what the self is
-            proxy.node.op == "call_method" and proxy.node.target == "bit_length"
+            proxy.node.op == "call_method"
+            and proxy.node.target in {"bit_length", "__index__"}
         )
     ):
         set_example_value(proxy.node, example_value)
@@ -4408,6 +4416,21 @@ def get_dynamic_sources() -> list[tuple[str, int | None]]:
     return _DYNAMIC_SOURCES
 
 
+def _match_source_list(
+    sources: list[tuple[str, int | None]], source_name: str, dim: int | None
+) -> str | None:
+    """Return the matching entry, pretty printed, or None if nothing matches.
+
+    Unlike the ``is_*_source`` wrappers this does not log, so it is safe to call
+    when merely resolving precedence between the source lists.
+    """
+    for pattern, pat_dim in sources:
+        if pattern == source_name or re.match(pattern, source_name):
+            if dim is None or pat_dim is None or pat_dim == dim:
+                return pattern if pat_dim is None else f"{pattern}:{pat_dim}"
+    return None
+
+
 def is_dynamic_source(source_name: str, dim: int | None = None) -> bool:
     """Check whether ``source_name`` is in the dynamic-sources list.
 
@@ -4419,23 +4442,16 @@ def is_dynamic_source(source_name: str, dim: int | None = None) -> bool:
     If ``dim`` is given, returns True only when a matching entry either has no
     dim qualifier ("all dims dynamic") or its dim qualifier equals ``dim``.
     """
-    dynamic_sources = get_dynamic_sources()
-    for pattern, pat_dim in dynamic_sources:
-        if pattern == source_name or re.match(pattern, source_name):
-            if dim is None or pat_dim is None or pat_dim == dim:
-                pretty = pattern if pat_dim is None else f"{pattern}:{pat_dim}"
-                log.debug(
-                    "%s was marked dynamic due to dynamic-sources entry: %s",
-                    source_name,
-                    pretty,
-                )
-                symbolic_shape_log.info(
-                    "%s was marked dynamic due to dynamic-sources entry: %s",
-                    source_name,
-                    pretty,
-                )
-                return True
-    return False
+    entry = _match_source_list(get_dynamic_sources(), source_name, dim)
+    if entry is None:
+        return False
+    log.debug(
+        "%s was marked dynamic due to dynamic-sources entry: %s", source_name, entry
+    )
+    symbolic_shape_log.info(
+        "%s was marked dynamic due to dynamic-sources entry: %s", source_name, entry
+    )
+    return True
 
 
 def record_automatic_dynamic(
@@ -4501,17 +4517,59 @@ def is_unbacked_source(source_name: str, dim: int | None = None) -> bool:
 
     See :func:`is_dynamic_source` for the ``dim`` argument semantics.
     """
-    unbacked_sources = get_unbacked_sources()
-    for pattern, pat_dim in unbacked_sources:
-        if pattern == source_name or re.match(pattern, source_name):
-            if dim is None or pat_dim is None or pat_dim == dim:
-                log.debug(
-                    "%s was marked unbacked due to unbacked-sources entry: %s",
-                    source_name,
-                    pattern if pat_dim is None else f"{pattern}:{pat_dim}",
-                )
-                return True
-    return False
+    entry = _match_source_list(get_unbacked_sources(), source_name, dim)
+    if entry is None:
+        return False
+    log.debug(
+        "%s was marked unbacked due to unbacked-sources entry: %s", source_name, entry
+    )
+    return True
+
+
+# Same per-dim suffix syntax as _DYNAMIC_SOURCES: optional ":N" restricts the
+# match to dim N of the matched tensor.
+_STATIC_SOURCES: list[tuple[str, int | None]] | None = None
+_STATIC_SOURCES_CONFIG_HASH: int | None = None
+
+
+def get_static_sources() -> list[tuple[str, int | None]]:
+    global _STATIC_SOURCES, _STATIC_SOURCES_CONFIG_HASH
+
+    current_hash = hash(torch.compiler.config.static_sources)
+
+    # If we have already calculated the sources and the config hasn't changed, return cached result
+    if _STATIC_SOURCES is not None and _STATIC_SOURCES_CONFIG_HASH == current_hash:
+        return _STATIC_SOURCES
+
+    # Config has changed or first time, (re)calculate the sources
+    _STATIC_SOURCES = [
+        _parse_source_entry(s)
+        for s in torch.compiler.config.static_sources.replace(" ", "").split(",")
+        if s
+    ]
+    _STATIC_SOURCES_CONFIG_HASH = current_hash
+
+    return _STATIC_SOURCES
+
+
+def is_static_source(source_name: str, dim: int | None = None) -> bool:
+    """Check whether ``source_name`` is in the static-sources list.
+
+    Precedence against the dynamic-/unbacked-sources lists is resolved by the
+    callers, which check static-sources first.
+
+    See :func:`is_dynamic_source` for the ``dim`` argument semantics.
+    """
+    entry = _match_source_list(get_static_sources(), source_name, dim)
+    if entry is None:
+        return False
+    log.debug(
+        "%s was marked static due to static-sources entry: %s", source_name, entry
+    )
+    symbolic_shape_log.info(
+        "%s was marked static due to static-sources entry: %s", source_name, entry
+    )
+    return True
 
 
 # Cache for the parsed `torch.compiler.config.dynamic_values` config.
@@ -4559,6 +4617,8 @@ def _automatic_dynamic(
     outer_only: bool = False,
     tensor_spec: TensorSpec | None = None,
 ) -> SymbolicContext:
+    from ..decorators import _dim_range_to_value_ranges, _get_dim_range
+
     # strided NT not supported
     if e.is_nested and not isinstance(
         e, torch.nested._internal.nested_tensor.NestedTensor
@@ -4766,11 +4826,27 @@ def _automatic_dynamic(
             config.automatic_dynamic_shapes and frame_state_entry.is_stride_dynamic(i)
         )
 
-        if is_dynamic_source(name, i):
+        # Precedence, highest first: static-sources, dynamic-sources,
+        # unbacked-sources, dynamic-values.
+        unbacked_via_source = False
+        if is_static_source(name, i):
+            log.debug("%s dim %d marked static via static-sources list", name, i)
+            marked_static = True
+            automatic_dynamic_size = False
+            automatic_dynamic_stride = False
+            # Weak/propagated dynamism is a hint (maybe_mark_dynamic, or AOTAutograd
+            # propagating dynamism across a graph break), so the explicit static
+            # request wins. A hard mark_dynamic still takes precedence, matching
+            # the precedence mark_static has.
+            marked_weak_dynamic = False
+        elif is_dynamic_source(name, i):
             log.debug("%s dim %d marked dynamic via dynamic-sources list", name, i)
             automatic_dynamic_size = True
-
-        if is_dynamic_value(e.size(i)):
+        elif is_unbacked_source(name, i):
+            log.debug("%s dim %d marked unbacked via unbacked-sources list", name, i)
+            unbacked_via_source = True
+            automatic_dynamic_size = True
+        elif is_dynamic_value(e.size(i)):
             log.debug(
                 "%s dim %d marked dynamic via dynamic-values list (value=%s)",
                 name,
@@ -4779,12 +4855,52 @@ def _automatic_dynamic(
             )
             automatic_dynamic_size = True
 
-        if is_unbacked_source(name, i):
-            log.debug("%s dim %d marked unbacked via unbacked-sources list", name, i)
-            automatic_dynamic_size = True
-
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
 
+        # Constraint policy has two independent axes, do not conflate them:
+        #
+        #   kind                        what it requires
+        #   --------------------------  ------------------------------------------------
+        #   None                        nothing, the dim may be narrowed or even fully
+        #                               specialized, silently
+        #   RelaxedUnspecConstraint     weak, the dim must not collapse to a single
+        #                               value, any further narrowing by guards is fine
+        #   StrictMinMaxConstraint(vr)  strong, no guard is allowed unless vr already
+        #                               implies it, so narrowing below vr violates it
+        #
+        #   warn_only                   reaction when the requirement is violated
+        #   --------------------------  ------------------------------------------------
+        #   False                       raise ConstraintViolationError
+        #   True                        log a warning and keep compiling
+        #
+        # The two axes are orthogonal: RelaxedUnspecConstraint(warn_only=False), what
+        # mark_dynamic uses without min/max, is a loose requirement that is strictly
+        # enforced, while StrictMinMaxConstraint(vr, warn_only=True) is a tight
+        # requirement that is only advisory.
+        #
+        # A constraint only controls enforcement. Whether the dim is symbolic at all is
+        # decided further down from marked_dynamic / marked_weak_dynamic, and
+        # constraint_stride is what picks DimDynamic.DYNAMIC for a stride (its own
+        # symbol) over DimDynamic.INFER_STRIDE (stride derived from the sizes).
+        #
+        # TODO: the chain below leans on the automatic dynamic fall-through for dims that
+        # do not match any branch, which is fragile: that branch also decides
+        # constraint_stride and records automatic_dynamic_shapes feature usage for dims
+        # that are dynamic because the user marked them. Refactor to handle every case
+        # explicitly, each with its own constraint_size/constraint_stride, and document
+        # the resulting DimDynamic per case in a table here:
+        #   mark_dynamic, with and without a range
+        #   mark_dynamic under config.allow_ignore_mark_dynamic, which today drops a
+        #     declared range entirely instead of degrading it to warn_only
+        #   maybe_mark_dynamic, with and without a range
+        #   dims that are only _dynamo_propagated_dynamic_indices, which should keep
+        #     plain automatic dynamic behavior and no user constraint
+        #   pure automatic dynamic, and no marking at all
+        # Until then the automatic_dynamic_shapes feature usage recorded below is skewed:
+        # a weakly marked dim with a declared range takes its own branch and records
+        # nothing, while the same dim without a range falls through and records usage,
+        # even though neither is dynamic because of automatic dynamic shapes.
+        #
         # We will process constraints first, as they will imply that we
         # have a dynamic dimension
         # Precedence: export constraints > eager constraints
@@ -4795,27 +4911,47 @@ def _automatic_dynamic(
             if marked_dynamic and not config.allow_ignore_mark_dynamic:
                 # constraint_stride is deliberaly kept None because no easy way to provide value ranges for mark dynamic
                 constraint_stride = None
-                if hasattr(e, "_dynamo_dynamic_range"):
-                    dim_range = [
-                        dr for dr in e._dynamo_dynamic_range if dr.dim == i
-                    ].pop()
-                    if dim_range.min is None and dim_range.max is None:
-                        constraint_size = RelaxedUnspecConstraint(warn_only=False)
-                    else:
-                        from torch.fx.experimental.symbolic_shapes import (
-                            StrictMinMaxConstraint,
-                        )
-
-                        constraint_size = StrictMinMaxConstraint(
-                            vr=ValueRanges(lower=dim_range.min, upper=dim_range.max),
-                            warn_only=False,
-                        )
-                else:
+                dim_range = _get_dim_range(e, i)
+                if dim_range is None:
                     constraint_size = RelaxedUnspecConstraint(warn_only=False)
+                else:
+                    from torch.fx.experimental.symbolic_shapes import (
+                        StrictMinMaxConstraint,
+                    )
+
+                    constraint_size = StrictMinMaxConstraint(
+                        vr=_dim_range_to_value_ranges(dim_range),
+                        warn_only=False,
+                    )
+            elif (
+                marked_weak_dynamic and (dim_range := _get_dim_range(e, i)) is not None
+            ):
+                # Only dims with a declared range are handled here. A weakly dynamic dim
+                # without one, which includes every dim that is weakly dynamic only
+                # because of _dynamo_propagated_dynamic_indices, keeps taking the
+                # automatic dynamic branch below as it did before ranges existed.
+                from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+
+                constraint_size = StrictMinMaxConstraint(
+                    vr=_dim_range_to_value_ranges(dim_range),
+                    warn_only=True,
+                )
+                # Strides are unrelated to the declared range, so decide them exactly as
+                # they would be for this dim if no range had been declared.
+                # TODO this is hazy, marked_static loses to a weak marking for the size
+                # yet still suppresses the stride constraint here. Maintaining existing
+                # behavior for now, the refactor above should settle it.
+                if not marked_static and automatic_dynamic_stride:
+                    constraint_stride = RelaxedUnspecConstraint(warn_only=True)
             elif marked_strict_unbacked:
                 constraint_size = RelaxedUnspecConstraint(warn_only=False)
             elif not marked_static and automatic_dynamic:
-                set_feature_use("dynamo.automatic_dynamic_shapes", True)
+                if not marked_weak_dynamic:
+                    # A weakly marked dim is dynamic because it was marked, automatic
+                    # dynamic shapes only supplies its constraints, so its usage is not
+                    # recorded. Keeps the reporting independent of whether the marking
+                    # declared a range.
+                    set_feature_use("dynamo.automatic_dynamic_shapes", True)
                 if automatic_dynamic_size:
                     constraint_size = RelaxedUnspecConstraint(warn_only=True)
                 if automatic_dynamic_stride:
@@ -4833,7 +4969,7 @@ def _automatic_dynamic(
         constraint_sizes.append(constraint_size)
         constraint_strides.append(constraint_stride)
 
-        if marked_unbacked or is_unbacked_source(name, i):
+        if marked_unbacked or unbacked_via_source:
             dynamic_size = DimDynamic.UNBACKED
         elif (
             constraint_size is not None

@@ -7,7 +7,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/irange.h>
-#include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/add_if_then_else.h>
@@ -23,6 +22,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <initializer_list>
 #include <iostream>
@@ -867,7 +867,7 @@ void BlockInfo::prepare_for_memory_planner(
       // Types are stored in the underlying TorchScript IR
       bool is_tensor_type = out_v->type()->castRaw<TensorType>();
       if (opts.manage_output_tensors && is_tensor_type &&
-          graph_output_values.find(out_v) == graph_output_values.end() &&
+          !graph_output_values.contains(out_v) &&
           value_group_.isOutputAlias(out_v)) {
         managed_output_tensor_values_.insert(out_v);
         continue;
@@ -1570,9 +1570,9 @@ void BlockRunner::benchmark(
     std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
               << results.percent_per_node_type[kind] << "%. " << kind << " ("
               << results.instances_per_node_type[kind] << " nodes";
-    if (results.out_nodes.count(kind)) {
+    if (results.out_nodes.contains(kind)) {
       std::cout << ", out variant)" << '\n';
-    } else if (results.native_nodes.count(kind)) {
+    } else if (results.native_nodes.contains(kind)) {
       std::cout << ", native)" << '\n';
     } else {
       std::cout << ')' << '\n';
@@ -1660,7 +1660,7 @@ float BlockRunner::benchmark_model(
       }
     }
   }
-  caffe2::Timer timer;
+  const auto start = std::chrono::high_resolution_clock::now();
   for ([[maybe_unused]] const auto _n_run : c10::irange(main_runs)) {
     const auto num_args = static_cast<uint32_t>(args_list.size());
     for (const auto j : c10::irange(num_args)) {
@@ -1670,7 +1670,9 @@ float BlockRunner::benchmark_model(
       }
     }
   }
-  float millis = timer.MilliSeconds();
+  const float millis = std::chrono::duration<float, std::milli>(
+                           std::chrono::high_resolution_clock::now() - start)
+                           .count();
   return millis /
       (static_cast<float>(main_runs) * static_cast<float>(args_list.size()));
 }
@@ -1796,21 +1798,23 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   c10::InferenceMode mode;
 
   // setup time
-  caffe2::Timer timer;
+  using hr_clock = std::chrono::high_resolution_clock;
+  using float_millis = std::chrono::duration<float, std::milli>;
+  auto start = hr_clock::now();
 
   set_inputs(args_list[0], is_kwargs_empty ? empty_kwargs : kwargs_list[0]);
 
-  results.setup_time = timer.MilliSeconds();
+  results.setup_time = float_millis(hr_clock::now() - start).count();
 
   // The first iteration profiles each node's output Tensors' sizes and
   // initializes the memory planner with the profile information. Following
   // iterations just use the already established memory planning.
-  timer.Start();
+  start = hr_clock::now();
   operator()(args_list[0], is_kwargs_empty ? empty_kwargs : kwargs_list[0]);
   if (manage_output_tensors) {
     deallocateOutputTensors();
   }
-  results.first_iter_time = timer.MilliSeconds();
+  results.first_iter_time = float_millis(hr_clock::now() - start).count();
 
   // warmup runs
   for ([[maybe_unused]] const auto _n_run : c10::irange(warmup_runs)) {
@@ -1829,21 +1833,21 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
     for (const auto j : c10::irange(num_args)) {
       set_inputs(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
 
-      timer.Start();
+      start = hr_clock::now();
       if (planner_) {
         planner_->allocate();
       }
-      float millis = timer.MilliSeconds();
+      float millis = float_millis(hr_clock::now() - start).count();
       results.memory_alloc_time += millis;
       const auto num_nodes = static_cast<uint32_t>(nodes_.size());
       for (const auto k : c10::irange<uint32_t>(num_nodes)) {
-        timer.Start();
+        start = hr_clock::now();
         nodes_[k].run();
-        millis = timer.MilliSeconds();
+        millis = float_millis(hr_clock::now() - start).count();
         results.time_per_node[k] += millis;
         verify_and_correct_memory_overlap(nodes_[k]);
       }
-      timer.Start();
+      start = hr_clock::now();
       create_memory_planner();
       planner_->deallocate();
       // clean up owning refs of input tensors
@@ -1851,10 +1855,10 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
       if (manage_output_tensors) {
         deallocateOutputTensors();
       }
-      millis = timer.MilliSeconds();
+      millis = float_millis(hr_clock::now() - start).count();
       results.memory_dealloc_time += millis;
 
-      timer.Start();
+      start = hr_clock::now();
       // no need to keep references of outputs in static runtime anymore
       c10::IValue output;
       if (static_module_.num_outputs() > 1) {
@@ -1867,7 +1871,7 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
       output = std::move(*outputs_[0]);
       // release outputs explicitly to measure the time it takes
       output = IValue();
-      millis = timer.MilliSeconds();
+      millis = float_millis(hr_clock::now() - start).count();
       results.output_dealloc_time += millis;
     }
   }
@@ -1936,7 +1940,7 @@ bool BlockRunner::check_for_memory_leak(
           val->debugName() + " of node " + std::to_string(n) +
           " which has kind " + pnode.node()->kind().toQualString() +
           " was not cleaned up";
-      if (output_ivalues.count(ival) == 0) {
+      if (!output_ivalues.contains(ival)) {
         // check for intermediates
         if (!ival->isNone()) {
           TORCH_CHECK(
@@ -2031,7 +2035,7 @@ bool BlockRunner::isManagedOutputTensorValue(const Value* value) const {
     return false;
   }
   const auto& managed_outputs = block_info_.managed_output_tensor_values();
-  return managed_outputs.find(value) != managed_outputs.end();
+  return managed_outputs.contains(value);
 }
 
 void BlockRunner::disableManageOutputTensors() {

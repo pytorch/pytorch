@@ -7,12 +7,6 @@ import torch
 from torch.utils._pytree import tree_map
 import unittest
 
-from torch.fx.operator_schemas import normalize_function
-from torch._subclasses.schema_check_mode import SchemaCheckMode
-from torch.utils._python_dispatch import TorchDispatchMode
-from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_device_type import ops, OpDTypes, instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
@@ -20,6 +14,12 @@ from torch.testing._internal.common_utils import (
     slowTestIf,
     TEST_WITH_TORCHDYNAMO,
 )
+from torch.fx.operator_schemas import normalize_function
+from torch._subclasses.schema_check_mode import SchemaCheckMode
+from torch.utils._python_dispatch import TorchDispatchMode
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_device_type import ops, OpDTypes, instantiate_device_type_tests
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 

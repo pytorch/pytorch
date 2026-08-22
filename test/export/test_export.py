@@ -10234,6 +10234,44 @@ def forward(self, x):
             ]:
                 self.assertFalse(hasattr(tensor, attr))
 
+    def test_maybe_mark_dynamic_ranges(self) -> None:
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.cos() * x.shape[0]
+
+        class Narrowing(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] < 5:
+                    return x.sin()
+                return x.cos() * x.shape[0]
+
+        def exported_dim_range(mod, size, strict):
+            x = torch.randn(size)
+            torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+            ep = torch.export.export(mod, (x,), strict=strict)
+            placeholder = next(n for n in ep.graph.nodes if n.op == "placeholder")
+            sym_size = placeholder.meta["val"].shape[0]
+            vr = sym_size.node.shape_env.var_to_range[sym_size.node.expr]
+            return (vr.lower, vr.upper)
+
+        # Strict and non strict export raise different exception types.
+        range_errors = (
+            torch._dynamo.exc.UserError,
+            torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+        )
+
+        for strict in (True, False):
+            with self.subTest(strict=strict):
+                # The declared range is honored.
+                self.assertEqual(exported_dim_range(Foo(), 4, strict), (2, 5))
+
+                # A guard may narrow the declared range.
+                self.assertEqual(exported_dim_range(Narrowing(), 4, strict), (2, 4))
+
+                # The range is never extended to fit the input.
+                with self.assertRaisesRegex(range_errors, r"6 not in range \[2, 5\]"):
+                    exported_dim_range(Foo(), 6, strict)
+
     @testing.expectedFailureCppRuntime
     def test_while_loop_index_assertions(self):
         from torch._higher_order_ops import while_loop
@@ -14483,6 +14521,34 @@ def forward(self, c_submod_params, x):
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
+
+    def test_cond_dynamic_shape_trunc_div_one_output_metadata(self):
+        class M(torch.nn.Module):
+            def forward(self, x, flag):
+                def true_fn(x):
+                    ori_size = (
+                        math.trunc(x.shape[-2] / 1),
+                        math.trunc(x.shape[-1] / 1),
+                    )
+                    new_size = (
+                        math.trunc(x.shape[-2] + 0.5),
+                        math.trunc(x.shape[-1] + 0.5),
+                    )
+                    x = F.interpolate(x, size=new_size, mode="bilinear")
+                    return F.interpolate(x, size=ori_size, mode="bilinear")
+
+                def false_fn(x):
+                    return x.clone()
+
+                return torch.cond(flag, true_fn, false_fn, [x])
+
+        inputs = (torch.rand(1, 3, 28, 28), torch.tensor([True]))
+        dynamic_shapes = {
+            "x": {2: Dim.DYNAMIC, 3: Dim.DYNAMIC},
+            "flag": None,
+        }
+        ep = export(M(), inputs, dynamic_shapes=dynamic_shapes, strict=False)
+        self.assertEqual(ep.module()(*inputs).shape, inputs[0].shape)
 
     @testing.expectedFailureStrictV2
     def test_unflatten_multiple_graphs_shared_submodule(self):
