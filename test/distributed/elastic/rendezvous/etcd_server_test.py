@@ -11,7 +11,10 @@ import unittest
 
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
-from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.rendezvous.etcd_server import (
+    EtcdServer,
+    find_free_port,
+)
 
 
 if os.getenv("CIRCLECI"):
@@ -34,6 +37,46 @@ class EtcdServerTest(unittest.TestCase):
             self.assertIsNotNone(server.get_client().version)
         finally:
             server.stop()
+
+    def test_find_free_port_socket_failure_raises_runtime_error(self):
+        with unittest.mock.patch(
+            "socket.getaddrinfo", return_value=[(2, 1, 6, "", ("127.0.0.1", 0))]
+        ), unittest.mock.patch(
+            "socket.socket", side_effect=OSError("socket failed")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Failed to create a socket"):
+                find_free_port()
+
+    def test_find_free_port_retries_next_address(self):
+        addrs = [
+            (2, 1, 6, "", ("127.0.0.1", 0)),
+            (2, 1, 6, "", ("127.0.0.1", 0)),
+        ]
+        second = unittest.mock.Mock()
+        with unittest.mock.patch(
+            "socket.getaddrinfo", return_value=addrs
+        ) as mock_getaddrinfo, unittest.mock.patch("socket.socket", side_effect=[
+            OSError("first address failed"),
+            second,
+        ]) as mock_socket:
+            result = find_free_port()
+        self.assertEqual(mock_getaddrinfo.call_count, 1)
+        self.assertEqual(mock_socket.call_count, 2)
+        self.assertIs(result, second)
+        second.bind.assert_called_once()
+        second.listen.assert_called_once()
+
+    def test_find_free_port_all_addresses_fail_raises_runtime_error(self):
+        addrs = [
+            (2, 1, 6, "", ("127.0.0.1", 0)),
+            (2, 1, 6, "", ("127.0.0.1", 0)),
+        ]
+        with unittest.mock.patch(
+            "socket.getaddrinfo", return_value=addrs
+        ), unittest.mock.patch("socket.socket", side_effect=OSError("socket failed")) as mock_socket:
+            with self.assertRaisesRegex(RuntimeError, "Failed to create a socket"):
+                find_free_port()
+        self.assertEqual(mock_socket.call_count, len(addrs))
 
     def test_etcd_server_with_rendezvous(self):
         server = EtcdServer()
