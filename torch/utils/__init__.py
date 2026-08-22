@@ -15,6 +15,7 @@ from torch.utils import (
 from torch.utils.backend_registration import (
     generate_methods_for_privateuse1_backend,
     rename_privateuse1_backend,
+    skip_cea_decomposition_for_privateuse1,
 )
 from torch.utils.cpp_backtrace import get_cpp_backtrace
 from torch.utils.throughput_benchmark import ThroughputBenchmark
