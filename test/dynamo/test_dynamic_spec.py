@@ -569,19 +569,31 @@ class TestShapeVarCompile(TestCase):
             with torch.compiler._non_strict_tracing_context():
                 compiled(n)
 
-    def test_raw_unbacked_symint_input_graph_breaks_outside_non_strict(self):
+    def test_raw_unbacked_symint_compiles(self):
+        # Regression test for GH#187547: a raw scalar unbacked SymInt reaching
+        # Dynamo (e.g. BlockMask.seq_lengths in flex_attention) used to
+        # trigger "Attempted to wrap unbacked SymInt".  After lifting the
+        # _is_non_strict_tracing() gate in VariableBuilder._wrap, raw
+        # unbacked SymInts are transferred into Dynamo's ShapeEnv, matching
+        # non-strict behavior.
+        from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
+        @torch.compile(backend="eager", fullgraph=True)
         def fn(n):
-            return torch.ones((n,))
+            return n + 1
 
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        n = ShapeEnv().create_unbacked_symint()
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Attempted to wrap unbacked SymInt",
-        ):
-            compiled(n)
+        # Foreign ShapeEnv path (fresh ShapeEnv not yet seen by Dynamo).
+        n_foreign = ShapeEnv().create_unbacked_symint()
+        out_foreign = fn(n_foreign)
+        self.assertIsInstance(out_foreign, torch.SymInt)
+
+        # Same ShapeEnv path (as used by FlexAttention under FakeTensorMode).
+        shape_env = ShapeEnv()
+        n_same = shape_env.create_unbacked_symint()
+        with FakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True):
+            out_same = fn(n_same)
+        self.assertIsInstance(out_same, torch.SymInt)
 
     def test_none_entry_is_static(self):
         """A ``None`` entry is implicit static.
