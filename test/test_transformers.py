@@ -6540,6 +6540,11 @@ class TestAttnBias(NNTestCase):
         bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shape
         make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
         make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
+        if causal_variant == CausalVariant.LOWER_RIGHT and seq_len_q > seq_len_kv:
+            self.skipTest(
+                "Lower right causal mask will produce NaNs in the output when seq_len_q > seq_len_kv!"
+            )
+
         forw_tol = Tolerances(1e-3, 1e-3)
         grad_tol = Tolerances(5e-3, 5e-3)
 
@@ -6570,6 +6575,10 @@ class TestAttnBias(NNTestCase):
         bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shape
         make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
         make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
+        if causal_variant == CausalVariant.LOWER_RIGHT and seq_len_q > seq_len_kv:
+            self.skipTest(
+                "Lower right causal mask will produce NaNs in the output when seq_len_q > seq_len_kv!"
+            )
         forw_tol = Tolerances(1e-3, 1e-3)
         grad_tol = Tolerances(5e-3, 5e-3)
 
