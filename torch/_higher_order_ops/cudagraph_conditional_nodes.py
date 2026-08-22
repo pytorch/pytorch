@@ -39,13 +39,11 @@ class CUDAGraphCaptureControlFlowOpDispatchMode(TorchDispatchMode):
                 return while_loop_node(*args, **kwargs)
         # This case is used when torch.cond() or torch.while_loop()
         # are rewritten to accept input mutations
-        if (
-            func is torch.ops.higher_order.auto_functionalized_v2
-            and len(args) > 0
-            and _is_control_flow_op(args[0])
-        ):
-            with self:
-                return auto_functionalized_v2_dense(*args, **kwargs)
+        if func is torch.ops.higher_order.auto_functionalized_v2:
+            mutable_op = _get_auto_functionalized_v2_op(args)
+            if _is_control_flow_op(mutable_op):
+                with self:
+                    return auto_functionalized_v2_dense(*args, **kwargs)
         return func(*args, **kwargs)
 
 
@@ -124,15 +122,23 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
                     while_loop_node(*args, **kwargs)
 
                 return func(*args, **kwargs)
-        elif (
-            func is torch.ops.higher_order.auto_functionalized_v2
-            and len(args) > 0
-            and _is_control_flow_op(args[0])
-        ):
-            with self:
-                return auto_functionalized_v2_dense(*args, **kwargs)
+        elif func is torch.ops.higher_order.auto_functionalized_v2:
+            mutable_op = _get_auto_functionalized_v2_op(args)
+            if _is_control_flow_op(mutable_op):
+                with self:
+                    return auto_functionalized_v2_dense(*args, **kwargs)
+            return func(*args, **kwargs)
         else:
             return func(*args, **kwargs)
+
+
+def _get_auto_functionalized_v2_op(args):
+    if len(args) != 1:
+        raise AssertionError(
+            "auto_functionalized_v2 must receive exactly one positional operator "
+            f"argument, got {len(args)}"
+        )
+    return args[0]
 
 
 def _is_control_flow_op(func: object) -> bool:
