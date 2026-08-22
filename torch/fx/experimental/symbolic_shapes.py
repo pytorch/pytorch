@@ -7053,18 +7053,21 @@ class ShapeEnv:
         """
         To be used by compile_fx to deserialize symexprs
         """
-        args = {
-            str(e): SymInt(
+        args = {}
+        for symbol in self.var_to_range:
+            val = self.backed_var_to_val.get(symbol)
+            # Unbacked symbols have no hint, and nested-tensor symbols hint to a
+            # SingletonInt which has no integer value; both bind hintless.
+            hint = int(val) if isinstance(val, (sympy.Integer, sympy.Float)) else None
+            args[str(symbol)] = SymInt(
                 SymNode(
-                    e,
+                    symbol,
                     self,
                     int,
-                    int(val),
-                    fx_node=self._create_fx_placeholder_and_z3var(e, int),
+                    hint,
+                    fx_node=self._create_fx_placeholder_and_z3var(symbol, int),
                 )
             )
-            for e, val in self.backed_var_to_val.items()
-        }
         return eval(code, SYMPY_INTERP, args)
 
     def evaluate_guards_expression(self, code: str, args: Sequence[object]) -> bool:

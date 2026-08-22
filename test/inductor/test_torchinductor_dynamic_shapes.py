@@ -370,10 +370,17 @@ class TestInductorDynamic(DynamicShapesTestCase):
         )
         self.assertEqual(fn(arg0_test, arg1_test), compiled_fn(arg0_test, arg1_test))
 
-    # pad_dynamic_shapes is off by default and is what lets inductor pad a
+    # Each flag is required for the divergent layout this test needs:
+    # pad_dynamic_shapes (off by default) is what lets inductor pad a
     # symbolically-shaped buffer at all; comprehensive_padding is on by default
-    # but is env-controlled, so pin it too.
-    @torch._inductor.config.patch(comprehensive_padding=True, pad_dynamic_shapes=True)
+    # but env-controlled, so pin it; disable_padding_cpu would otherwise make
+    # compile_fx force comprehensive_padding back off on CPU, leaving the CPU
+    # variant unable to fail.
+    @torch._inductor.config.patch(
+        comprehensive_padding=True,
+        pad_dynamic_shapes=True,
+        disable_padding_cpu=False,
+    )
     def test_saved_activation_symbolic_stride_backward(self, device):
         # A saved activation's stride must stay symbolic under dynamic shapes.
         # Without the fix it freezes at the first input's hint (128*112 =

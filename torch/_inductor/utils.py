@@ -3854,17 +3854,10 @@ def set_tracing_context_output_strides(
                 def map_expr(e: Any) -> float | int | SymInt | SymFloat | SymBool:
                     if shape_env is None:
                         return int(e)
-                    # Keep the stride symbolic; evaluate_symexpr collapses it to
-                    # the first input's hint, which then gets frozen into the
-                    # backward graph's saved-activation placeholder.
-                    #
-                    # deserialize_symexpr binds every symbol in backed_var_to_val
-                    # via int(val) and raises when a value is itself symbolic
-                    # (nested tensors). Those graphs keep the old behaviour.
-                    try:
-                        return shape_env.deserialize_symexpr(e)
-                    except TypeError:
-                        return int(shape_env.evaluate_symexpr(e))
+                    # Keep the stride symbolic. evaluate_symexpr would collapse it
+                    # to the current hint, which then gets frozen into the backward
+                    # graph's saved-activation placeholder.
+                    return shape_env.deserialize_symexpr(e)
 
                 context.output_strides.append(
                     tuple(map_expr(e) for e in exprs)  # type: ignore[misc]
