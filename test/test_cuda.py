@@ -624,6 +624,38 @@ print(t.is_pinned())
         device_properties_no_argument = torch.cuda.get_device_properties()
         self.assertEqual(current_device_properties, device_properties_no_argument)
 
+    def test_cuda_get_device_properties_cache(self):
+        torch.cuda._get_device_properties_cached.cache_clear()
+        self.addCleanup(torch.cuda._get_device_properties_cached.cache_clear)
+        get_device_properties = torch.cuda._get_device_properties
+
+        with patch.object(
+            torch.cuda, "_get_device_properties", wraps=get_device_properties
+        ) as get_device_properties_mock:
+            with torch.cuda.device(0):
+                properties = torch.cuda.get_device_properties()
+                self.assertIs(properties, torch.cuda.get_device_properties(None))
+                self.assertIs(properties, torch.cuda.get_device_properties("cuda"))
+                self.assertIs(properties, torch.cuda.get_device_properties(0))
+                self.assertIs(
+                    properties,
+                    torch.cuda.get_device_properties(torch.device("cuda", 0)),
+                )
+            get_device_properties_mock.assert_called_once_with(0)
+
+            if torch.cuda.device_count() > 1:
+                with torch.cuda.device(1):
+                    other_properties = torch.cuda.get_device_properties()
+                    self.assertIs(
+                        other_properties, torch.cuda.get_device_properties("cuda")
+                    )
+                self.assertEqual(get_device_properties_mock.call_count, 2)
+                get_device_properties_mock.assert_called_with(1)
+
+                with torch.cuda.device(0):
+                    self.assertIs(properties, torch.cuda.get_device_properties())
+                self.assertEqual(get_device_properties_mock.call_count, 2)
+
     @unittest.skipIf(
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
     )
