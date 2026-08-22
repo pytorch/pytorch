@@ -995,6 +995,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::broadcast(
   assertRootTensor(
       invalidArgument, opts.rootTensor, static_cast<int64_t>(inputs.size()));
   assertDense(invalidArgument, inputs);
+  assertContiguous(invalidArgument, inputs);
   assertTypeAndSizesMatch(invalidArgument, inputs);
 
   const auto& device = inputs[0].device();
@@ -1352,6 +1353,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce(
       invalidArgument, opts.rootTensor, static_cast<int64_t>(inputs.size()));
   assertSingleElement(invalidArgument, inputs);
   assertDense(invalidArgument, inputs);
+  assertContiguous(invalidArgument, inputs);
 
   const auto& device = inputs[0].device();
   switch (device.type()) {
@@ -1643,6 +1645,8 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather(
   }
 
   assertDense(invalidArgument, inputs);
+  assertContiguous(invalidArgument, inputs);
+  assertContiguous(invalidArgument, outputs[0]);
 
   // Expect all input/output tensors to have the same type and sizes
   const auto& options = inputs[0].options();
@@ -1798,6 +1802,8 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
   }
 
   assertDense(invalidArgument, input_list);
+  assertContiguous(invalidArgument, input_list);
+  assertContiguous(invalidArgument, output_lists[0]);
 
   auto tag = nextTag();
   auto context = getContext(tag);
@@ -1988,10 +1994,10 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::gather(
   assertRootRank(invalidArgument, opts.rootRank, size_);
   assertSingleElementInput(invalidArgument, inputs);
   assertDense(invalidArgument, inputs);
-
+  assertContiguous(invalidArgument, inputs);
   if (getRank() == opts.rootRank) {
     assertGatherOutputTensorList(invalidArgument, outputs, getSize());
-
+    assertContiguous(invalidArgument, outputs[0]);
     const auto& options = inputs[0].options();
     const auto& sizes = inputs[0].sizes();
     assertTypeAndSizesMatch(invalidArgument, outputs[0], options, sizes);
@@ -2188,9 +2194,11 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::scatter(
   assertRootRank(invalidArgument, opts.rootRank, size_);
   assertSingleElementOutput(invalidArgument, outputs);
   assertDense(invalidArgument, outputs);
+  assertContiguous(invalidArgument, outputs);
 
   if (getRank() == opts.rootRank) {
     assertScatterInputTensorList(invalidArgument, inputs, getSize());
+    assertContiguous(invalidArgument, inputs[0]);
     const auto& options = outputs[0].options();
     const auto& sizes = outputs[0].sizes();
     assertTypeAndSizesMatch(invalidArgument, inputs[0], options, sizes);
@@ -2439,7 +2447,9 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::all_to_all_single(
       outputTensor.device() == inputTensor.device(),
       "output tensor and input tensor must be on the same type of device");
   assertDense(invalidArgument, {outputTensor});
+  assertContiguous(invalidArgument, {outputTensor});
   assertDense(invalidArgument, {inputTensor});
+  assertContiguous(invalidArgument, {inputTensor});
 
   if (!inputTensor.is_contiguous(inputTensor.suggest_memory_format())) {
     C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
@@ -2635,7 +2645,9 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall(
       invalidArgument, outputTensors.size(), inputTensors.size(), getSize());
 
   assertDense(invalidArgument, inputTensors);
+  assertContiguous(invalidArgument, inputTensors);
   assertDense(invalidArgument, outputTensors);
+  assertContiguous(invalidArgument, outputTensors);
 
   // Check that all tensors are on the same device
   assertSameDevice(invalidArgument, inputTensors);
