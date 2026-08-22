@@ -7480,6 +7480,31 @@ for dtype in (torch.int32, torch.int64):
         compiled_out = compiled(mean, std)
         self.assertNotEqual(eager_out, compiled_out)
 
+    @parametrize("mean_is_tensor", (False, True))
+    def test_normal_tensor_std_validation(self, mean_is_tensor):
+        if self.device != "cpu":
+            raise unittest.SkipTest("tensor std errors are asynchronous on GPU")
+
+        def fn(mean, std):
+            return torch.normal(mean, std)
+
+        mean = torch.zeros(4, device=self.device) if mean_is_tensor else 0.0
+        std = torch.full((4,), 0.5, device=self.device)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        result, (code,) = run_and_get_code(compiled, mean, std)
+        self.assertEqual(result.shape, std.shape)
+        # The std >= 0 check is compiled into the kernel; normal itself
+        # does not fall back to eager.
+        self.assertIn("normal expects all elements of std >= 0.0", code)
+        self.assertNotIn("torch.ops.aten.normal", code)
+
+        std.fill_(-1.0)
+        with self.assertRaisesRegex(
+            RuntimeError, r"normal expects all elements of std >= 0\.0"
+        ):
+            compiled(mean, std)
+
     def test_embedding(self):
         m = torch.nn.Sequential(
             torch.nn.Embedding(10, 4, padding_idx=0),
