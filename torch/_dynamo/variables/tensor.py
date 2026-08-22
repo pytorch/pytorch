@@ -316,8 +316,11 @@ class TensorVariable(VariableTracker):
         for k in ("_size", "stride", "is_contiguous"):
             if k not in specialized_props:
                 setattr(self, k, None)
+        # class_type is not resynced: a non-traceable tensor subclass lives only on
+        # the VariableTracker, so the fake tensor would resolve it to torch.Tensor.
         for k, v in specialized_props.items():
-            setattr(self, k, v)
+            if k != "class_type":
+                setattr(self, k, v)
 
     def _get_fake_version(self) -> int | None:
         """Get the current version of self's fake tensor, or None if unavailable."""
