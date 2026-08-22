@@ -8985,6 +8985,11 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
                 t.fill_(0)
             yield make_input(s), t, dict(ignore_index=num_classes // 2, reduction=reduction)
             yield make_input(s), t, dict(ignore_index=num_classes // 2, reduction=reduction, weight=make_weight())
+            if not (reduction == "mean" and len(s) == 1):
+                t = make_target(s)
+                t.reshape(-1)[0] = -100
+                yield make_input(s), t, dict(ignore_index=-100, reduction=reduction)
+                yield make_input(s), t, dict(ignore_index=-100, reduction=reduction, weight=make_weight())
             # Test ignoring all the targets
             # If "mean", nll returns NaN, so it's not differentiable at those points
             if reduction != "mean":
@@ -8995,6 +9000,9 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     target = torch.tensor([-1, 2], device=device, dtype=torch.long)
     yield SampleInput(make_input(shape), args=(target,), kwargs={'ignore_index': -1})
+
+    target = torch.tensor([num_classes, 2], device=device, dtype=torch.long)
+    yield SampleInput(make_input(shape), args=(target,), kwargs={'ignore_index': num_classes})
 
 
 def sample_inputs_binary_cross_entropy_with_logits(

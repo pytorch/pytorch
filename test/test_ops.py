@@ -2725,6 +2725,22 @@ class TestRefsOpsInfo(TestCase):
                 lambda msg: f"{msg}\nDid not find {op} in torch._decomp.decomposition_table.values()",
             )
 
+    def test_nll_loss_ignore_index_nonfinite(self, device):
+        input = torch.tensor(
+            [[float("nan"), float("inf"), float("-inf")], [1.0, 2.0, 3.0]],
+            device=device,
+        )
+        target = torch.tensor([-100, 1], device=device)
+
+        for reduction in ("none", "mean", "sum"):
+            expected = torch.nn.functional.nll_loss(
+                input, target, ignore_index=-100, reduction=reduction
+            )
+            actual = torch._refs.nn.functional.nll_loss(
+                input, target, ignore_index=-100, reduction=reduction
+            )
+            self.assertEqual(actual, expected)
+
 
 fake_skips = (
     "aminmax",  # failing input
