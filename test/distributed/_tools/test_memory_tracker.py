@@ -1,6 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 import os
+import pickle
+import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
+
+import hypothesis.strategies as st
+from hypothesis import example, given, settings
 
 import torch
 import torch.nn as nn
@@ -9,6 +16,64 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestMemoryTracker(TestCase):
+    @settings(max_examples=10, deadline=200000)
+    @given(
+        memory_values=st.lists(
+            st.floats(
+                min_value=0.0,
+                max_value=1_000_000.0,
+                allow_nan=False,
+                allow_infinity=False,
+            ),
+            min_size=2,
+            max_size=10,
+        )
+    )
+    @example(memory_values=[1.0, 3.0])
+    def test_save_and_load(self, memory_values):
+        tracker = MemoryTracker()
+        tracker.memories_allocated = {
+            index: (f"operation_{index}", value)
+            for index, value in enumerate(memory_values)
+        }
+        tracker.memories_active = {
+            index: (f"operation_{index}", value + 1.0)
+            for index, value in enumerate(memory_values)
+        }
+        tracker.memories_reserved = {
+            index: (f"operation_{index}", value + 2.0)
+            for index, value in enumerate(memory_values)
+        }
+        tracker._op_index = len(memory_values)
+
+        with redirect_stdout(StringIO()) as expected_output:
+            tracker.summary()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = os.path.join(temp_dir, "memory.trace")
+            tracker.save_stats(path)
+
+            loaded_tracker = MemoryTracker()
+            loaded_tracker.load(path)
+            with redirect_stdout(StringIO()) as loaded_output:
+                loaded_tracker.summary()
+
+            with open(path, "rb") as f:
+                legacy_stats = pickle.load(f)
+            legacy_stats.pop("op_index")
+            with open(path, "wb") as f:
+                pickle.dump(legacy_stats, f, pickle.HIGHEST_PROTOCOL)
+
+            legacy_tracker = MemoryTracker()
+            legacy_tracker.load(path)
+            with redirect_stdout(StringIO()) as legacy_output:
+                legacy_tracker.summary()
+
+            self.assertEqual(loaded_tracker._op_index, tracker._op_index)
+            self.assertEqual(legacy_tracker._op_index, tracker._op_index)
+            self.assertEqual(loaded_output.getvalue(), expected_output.getvalue())
+            self.assertEqual(legacy_output.getvalue(), expected_output.getvalue())
+
     @unittest.skipIf(not torch.accelerator.is_available(), "no accelerator")
     def test_local_model(self):
         """
