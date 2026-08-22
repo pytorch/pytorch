@@ -691,17 +691,25 @@ std::tuple<at::Tensor, at::Tensor> pre_process_group_query_attention_input(
   const auto k_num_heads = key.sym_size(-3);
   const auto v_num_heads = value.sym_size(-3);
 
-  bool all_equal = q_num_heads == k_num_heads && k_num_heads == v_num_heads;
-  bool key_divisible = q_num_heads % k_num_heads == 0;
-  bool value_divisible = q_num_heads % v_num_heads == 0;
-  TORCH_CHECK(all_equal || (key_divisible && value_divisible),
-              "Number of heads in key and value must divide the number of heads in ");
-
-  if (all_equal){
+  const auto all_equal = q_num_heads.sym_eq(k_num_heads).sym_and(
+      k_num_heads.sym_eq(v_num_heads));
+  if (TORCH_GUARD_OR_FALSE(all_equal)) {
     return std::make_tuple(key, value);
   }
-  auto repeat_key_shape = query.sym_size(-3) / key.sym_size(-3);
-  auto repeat_value_shape = query.sym_size(-3) / value.sym_size(-3);
+
+  // For unbacked head counts, take the general repeat path and defer the
+  // divisibility requirements to runtime instead of guarding on their values.
+  TORCH_SYM_CHECK(
+      k_num_heads.sym_gt(0).sym_and(v_num_heads.sym_gt(0)),
+      "Number of heads in key and value must be greater than 0");
+  TORCH_SYM_CHECK(
+      (q_num_heads % k_num_heads)
+          .sym_eq(0)
+          .sym_and((q_num_heads % v_num_heads).sym_eq(0)),
+      "Number of heads in key and value must divide the number of heads in query");
+
+  auto repeat_key_shape = q_num_heads / k_num_heads;
+  auto repeat_value_shape = q_num_heads / v_num_heads;
 
   at::Tensor key_repeated = key.repeat_interleave_symint(repeat_key_shape, -3);
   at::Tensor value_repeated = value.repeat_interleave_symint(repeat_value_shape, -3);

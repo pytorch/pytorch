@@ -304,7 +304,7 @@ inline bool check_attn_mask_shape(sdp_params const& params, bool debug) {
   // determined without guarding on unbacked symbolic ints.
   auto dim_compatible = [](const c10::SymInt& mask_dim,
                            const c10::SymInt& target_dim) -> bool {
-    if (TORCH_STATICALLY_KNOWN_TRUE(mask_dim == target_dim)) {
+    if (TORCH_GUARD_OR_FALSE(mask_dim.sym_eq(target_dim))) {
       return true;
     }
     auto mask_int = mask_dim.maybe_as_int();
@@ -377,34 +377,44 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
   const auto q_num_heads = params.query.sym_size(-3);
   const auto k_num_heads = params.key.sym_size(-3);
   const auto v_num_heads = params.value.sym_size(-3);
-  const bool same_kv_heads = k_num_heads == v_num_heads;
 
-  if (requires_same_num_heads && !same_kv_heads){
-    if (debug) {
-      TORCH_WARN(
-          "Both fused kernels require key and value to have the same num_heads and batch_size but got: ",
-          "Key sizes: ",
-          params.key.sizes(),
-          ", Value sizes: ",
-          params.value.sizes(),
-          ", Query sizes: ",
-          params.query.sizes(),
-          " instead.");
+  if constexpr (requires_same_num_heads) {
+    if (!TORCH_GUARD_OR_FALSE(k_num_heads.sym_eq(v_num_heads))) {
+      if (debug) {
+        TORCH_WARN(
+            "Both fused kernels require key and value to have the same num_heads. Got Key num_heads: ",
+            k_num_heads,
+            ", Value num_heads: ",
+            v_num_heads,
+            ", Query num_heads: ",
+            q_num_heads,
+            " instead.");
+      }
+      return false;
     }
-    return false;
   }
+
   // Check if grouped query attention is supported and validate the number of
-  // heads
-  if (q_num_heads % k_num_heads != 0 || (!requires_same_num_heads && (q_num_heads % v_num_heads != 0))) {
+  // heads. An unbacked head count cannot prove that a fused kernel is legal,
+  // so conservatively reject it and fall back to math.
+  bool valid_num_heads =
+      TORCH_GUARD_OR_FALSE(k_num_heads.sym_gt(0)) &&
+      TORCH_GUARD_OR_FALSE((q_num_heads % k_num_heads).sym_eq(0));
+  if constexpr (!requires_same_num_heads) {
+    valid_num_heads = valid_num_heads &&
+        TORCH_GUARD_OR_FALSE(v_num_heads.sym_gt(0)) &&
+        TORCH_GUARD_OR_FALSE((q_num_heads % v_num_heads).sym_eq(0));
+  }
+  if (!valid_num_heads) {
     if (debug) {
       TORCH_WARN(
           "The number of heads in key/value must divide number of heads in query.",
-          "Got input Key sizes(): ",
-          params.key.sym_size(-3),
-          ", Value sizes(): ",
-          params.value.sym_size(-3),
-          ", Query sizes(): ",
-          params.query.sym_size(-3),
+          "Got Key num_heads: ",
+          k_num_heads,
+          ", Value num_heads: ",
+          v_num_heads,
+          ", Query num_heads: ",
+          q_num_heads,
           " instead.");
     }
     return false;
@@ -420,30 +430,28 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
   // This is expected to be called after check_tensor_shapes ensuring that the
   // size() calls won't error since the inputs are all 4 dimensional
 
-  auto q_batch_size = params.query.sym_size(0);
-  auto k_batch_size = params.key.sym_size(0);
-  auto v_batch_size = params.value.sym_size(0);
+  const auto q_batch_size = params.query.sym_size(0);
+  const auto k_batch_size = params.key.sym_size(0);
+  const auto v_batch_size = params.value.sym_size(0);
 
-  bool same_batch_size =
-      q_batch_size == k_batch_size && q_batch_size == v_batch_size;
+  const bool same_batch_size =
+      TORCH_GUARD_OR_FALSE(q_batch_size.sym_eq(k_batch_size)) &&
+      TORCH_GUARD_OR_FALSE(q_batch_size.sym_eq(v_batch_size));
 
-  auto q_num_heads = params.query.sym_size(-3);
-  auto k_num_heads = params.key.sym_size(-3);
-  auto v_num_heads = params.value.sym_size(-3);
-
-  bool same_num_heads =
-      q_num_heads == k_num_heads && q_num_heads == v_num_heads;
+  const auto q_num_heads = params.query.sym_size(-3);
+  const auto k_num_heads = params.key.sym_size(-3);
+  const auto v_num_heads = params.value.sym_size(-3);
 
   if (!same_batch_size){
     if(debug) {
       TORCH_WARN(
           "For dense inputs, both fused kernels require query, key and value to have the same batch_size. ",
-          "Query.sizes(): ",
-          params.query.sizes(),
-          ", Key.sizes(): ",
-          params.key.sizes(),
-          ", Value.sizes(): ",
-          params.value.sizes(),
+          "Got Query batch_size: ",
+          q_batch_size,
+          ", Key batch_size: ",
+          k_batch_size,
+          ", Value batch_size: ",
+          v_batch_size,
           " instead. To broadcast dense inputs, try using unsqueeze and expand_to before passing them into the kernel.");
     }
     return false;
@@ -454,10 +462,15 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
   }
 
   // same num heads condition for non-gqa case
+  const bool same_num_heads =
+      TORCH_GUARD_OR_FALSE(q_num_heads.sym_eq(k_num_heads)) &&
+      TORCH_GUARD_OR_FALSE(q_num_heads.sym_eq(v_num_heads));
   if (!same_num_heads){
     if constexpr (supports_mqa) {
       const bool broadcastable_num_heads =
-          q_num_heads > 0 && k_num_heads == 1 && v_num_heads == 1;
+          TORCH_GUARD_OR_FALSE(q_num_heads.sym_gt(0)) &&
+          TORCH_GUARD_OR_FALSE(k_num_heads.sym_eq(1)) &&
+          TORCH_GUARD_OR_FALSE(v_num_heads.sym_eq(1));
       if (broadcastable_num_heads) {
         return true;
       }
@@ -465,12 +478,12 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
     if (debug) {
       TORCH_WARN(
           "For dense input, both fused kernels require query, key and value to have the same num_heads. ",
-          "Query.sizes(): ",
-          params.query.sizes(),
-          ", Key sizes(): ",
-          params.key.sizes(),
-          ", Value sizes(): ",
-          params.value.sizes(),
+          "Got Query num_heads: ",
+          q_num_heads,
+          ", Key num_heads: ",
+          k_num_heads,
+          ", Value num_heads: ",
+          v_num_heads,
           " instead. To broadcast dense inputs, try using unsqueeze and expand_to before passing them into the kernel.");
     }
     return false;
@@ -524,9 +537,11 @@ inline bool check_batch_size_nested(sdp_params const& params, bool debug) {
 inline bool check_nonzero_sequence_lengths_dense(sdp_params const& params, bool debug) {
   // In some cases people will pass in 0 sized tensors, this will
   // cause the fused path to error with unaligned mask
-  bool zero_seq_len_q = params.query.sym_size(-2) == 0;
-  bool zero_seq_len_k = params.key.sym_size(-2) == 0;
-  if (zero_seq_len_q || zero_seq_len_k) {
+  const bool nonzero_seq_len_q =
+      TORCH_GUARD_OR_FALSE(params.query.sym_size(-2).sym_ne(0));
+  const bool nonzero_seq_len_k =
+      TORCH_GUARD_OR_FALSE(params.key.sym_size(-2).sym_ne(0));
+  if (!(nonzero_seq_len_q && nonzero_seq_len_k)) {
     if (debug) {
       TORCH_WARN(
           "All fused kernels do not support zero seq_len_q or seq_len_kv.");
@@ -543,18 +558,22 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
 
   // This function checks that the last dimension of the inputs to
   // fused_attention have stride 1
-  bool qkv_strides_equal_1 = params.query.sym_stride(-1) == 1 &&
-      params.key.sym_stride(-1) == 1 && params.value.sym_stride(-1) == 1;
+  bool qkv_strides_equal_1 =
+      TORCH_GUARD_OR_FALSE(params.query.sym_stride(-1).sym_eq(1)) &&
+      TORCH_GUARD_OR_FALSE(params.key.sym_stride(-1).sym_eq(1)) &&
+      TORCH_GUARD_OR_FALSE(params.value.sym_stride(-1).sym_eq(1));
 
   // https://github.com/pytorch/pytorch/issues/116333
   // If the head_dim is size 1 the stride won't matter, but we
   // check this condition before padding the head_dim to 1
   if (ignore_singleton_dim){
-    qkv_strides_equal_1 = qkv_strides_equal_1 || params.query.sym_size(-1) == 1;
+    qkv_strides_equal_1 = qkv_strides_equal_1 ||
+        TORCH_GUARD_OR_FALSE(params.query.sym_size(-1).sym_eq(1));
   }
   bool is_cpu = params.query.device().type() == c10::DeviceType::CPU;
   bool mask_stride_equal_1 = params.attn_mask.has_value()
-      ? params.attn_mask.value().sym_stride(-1) == 1
+      ? TORCH_GUARD_OR_FALSE(
+            params.attn_mask.value().sym_stride(-1).sym_eq(1))
       : true;
   bool mask_stride_valid = is_cpu ? true : mask_stride_equal_1;
   if (!(qkv_strides_equal_1 && mask_stride_valid)) {

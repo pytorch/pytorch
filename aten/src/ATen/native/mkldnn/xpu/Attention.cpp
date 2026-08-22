@@ -4,7 +4,7 @@
 #include <ATen/native/transformers/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/native/transformers/xpu/sdp_utils.h>
-#include <torch/library.h>
+#include <torch/library.h> // NOLINT(misc-header-include-cycle)
 #include <array>
 #include <utility>
 
@@ -13,7 +13,7 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
-  if (query_size_last != key_size_last) {
+  if (!TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(key_size_last))) {
     if (debug) {
       TORCH_WARN(
           "OneDNN attention requires q,k to have the same last dimension.",
@@ -28,7 +28,7 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
 
   constexpr int MAX_HEAD_DIM = 576;
   const auto max_size_last = query_size_last.max(value_size_last);
-  if (max_size_last > MAX_HEAD_DIM) {
+  if (!TORCH_GUARD_OR_FALSE(max_size_last.sym_le(MAX_HEAD_DIM))) {
     if (debug) {
       TORCH_WARN(
           "OneDNN attention requires q,k,v to have head dimension less than ",
@@ -98,11 +98,16 @@ bool check_head_dim_size_mem_efficient(
     sdp::sdp_params const& params,
     bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
+  const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
   const int64_t alignment = minimum_gemm_alignment(params);
-  if (!(query_size_last == params.key.sym_size(-1) &&
-        query_size_last % alignment == 0 && query_size_last > 0 &&
-        value_size_last % alignment == 0 && value_size_last > 0)) {
+  const bool valid_alignment =
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(key_size_last)) &&
+      TORCH_GUARD_OR_FALSE((query_size_last % alignment).sym_eq(0)) &&
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_gt(0)) &&
+      TORCH_GUARD_OR_FALSE((value_size_last % alignment).sym_eq(0)) &&
+      TORCH_GUARD_OR_FALSE(value_size_last.sym_gt(0));
+  if (!valid_alignment) {
     if (debug) {
       TORCH_WARN(
           "Mem efficient attention requires last dimension of inputs to be divisible by ",
@@ -111,9 +116,9 @@ bool check_head_dim_size_mem_efficient(
           "Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
-          params.key.sym_size(-1),
+          key_size_last,
           ", Value.size(-1): ",
-          params.value.sym_size(-1),
+          value_size_last,
           " instead.");
     }
     return false;
@@ -254,6 +259,8 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
 } // namespace
 
 namespace at::native {
+// Referenced by native_functions.yaml and REGISTER_XPU_DISPATCH below.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 int64_t _fused_sdp_choice_xpu(
     const at::Tensor& query_,
     const at::Tensor& key,
@@ -293,6 +300,8 @@ std::tuple<
     at::Tensor,
     at::Tensor,
     at::Tensor>
+// Referenced by native_functions.yaml.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 _scaled_dot_product_fused_attention_overrideable_xpu(
     const at::Tensor& query,
     const at::Tensor& key,
