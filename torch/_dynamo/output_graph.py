@@ -4404,6 +4404,9 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy: fx.Proxy) -> LazyProxy | fx.Proxy:
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
+        # (A stale cross-tracer cached proxy used to reach this via
+        # wrap_symfloat; see the fix in
+        # https://github.com/pytorch/pytorch/issues/193194.)
         if self.parent is None:
             raise AssertionError(
                 "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
