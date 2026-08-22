@@ -17,7 +17,7 @@ if(NOT __AOTRITON_INCLUDED)
       "manylinux_2_28"  # rocm7.1
       "manylinux_2_28"  # rocm7.2
       "manylinux_2_28"  # rocm7.14
-      "manylinux_2_28"  # rocm7.15
+      "manylinux_2_28"  # rocm10.0
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.4"
@@ -25,7 +25,7 @@ if(NOT __AOTRITON_INCLUDED)
       "rocm7.1"
       "rocm7.2"
       "rocm7.14"
-      "rocm7.15"
+      "rocm10.0"
       )
   if(DEFINED ENV{PYTORCH_AOTRITON_COMMIT})
     set(__AOTRITON_CI_COMMIT "$ENV{PYTORCH_AOTRITON_COMMIT}")
@@ -38,7 +38,7 @@ if(NOT __AOTRITON_INCLUDED)
       "f061a997679d8529a7b196b0ffb39912145ede217e515e1ee9ef5673b56d9e41"  # rocm7.1
       "1cdeebb7ef61ab691fba1d81da919b9db5d8bef28269c892a30bd13a0495b7a0"  # rocm7.2
       "7a139797c16b002fd5d9bcd706d36dc9819bb108877150f8186da21d0590eaa6"  # rocm7.14
-      "f024225d8b6063f7d95974e5957cb20893a1579a9a73b22b60426441331bc021"  # rocm7.15
+      "f024225d8b6063f7d95974e5957cb20893a1579a9a73b22b60426441331bc021"  # rocm10.0
       )
   set(__AOTRITON_IMAGE_LIST
       "amd-gfx90a"
@@ -62,16 +62,16 @@ if(NOT __AOTRITON_INCLUDED)
     set(__AOTRITON_BUILD_VARIANTS "+asan")
     set(__AOTRITON_MANYLINUX_LIST
         "manylinux_2_28"  # rocm7.14
-        "manylinux_2_28"  # rocm7.15
+        "manylinux_2_28"  # rocm10.0
         )
     # ASAN only supports rocm7.14
     set(__AOTRITON_ROCM_LIST
         "rocm7.14"
-        "rocm7.15"
+        "rocm10.0"
         )
     set(__AOTRITON_SHA256_LIST
         "3f5cfba6c42261a3e3b44022c66083ec859fcc98296faa4646b65373fead3448"  # rocm7.14+asan
-        "7a7928d881d6341fc0b8ffb3ad7077f62438a8412ec57f97fb4b4dfbc73b3e64"  # rocm7.15+asan
+        "7a7928d881d6341fc0b8ffb3ad7077f62438a8412ec57f97fb4b4dfbc73b3e64"  # rocm10.0+asan
         )
     # ASAN only supports gfx942+gfx950
     set(__AOTRITON_IMAGE_LIST
@@ -287,11 +287,11 @@ if(NOT __AOTRITON_INCLUDED)
     add_dependencies(__caffe2_aotriton aotriton_external)
     message(STATUS "Using AOTriton compiled from source directory ${__AOTRITON_EXTERN_PREFIX}")
   else()
-    set(__AOTRITON_SYSTEM_ROCM "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}")
+    set(__AOTRITON_SYSTEM_ROCM "${ROCM_VERSION_DEV_MAJOR}.${ROCM_VERSION_DEV_MINOR}")
     list(FIND __AOTRITON_ROCM_LIST "rocm${__AOTRITON_SYSTEM_ROCM}" __AOTRITON_RUNTIME_INDEX)
     # Always build aotriton runtime from source on Windows due to lack of pre-built binaries
     if(${__AOTRITON_RUNTIME_INDEX} LESS 0 OR WIN32)
-      message(STATUS "Cannot find AOTriton runtime for ROCM ${__AOTRITON_SYSTEM_ROCM}. \
+      message(STATUS "Cannot find AOTriton runtime for ROCm ${__AOTRITON_SYSTEM_ROCM}. \
       Build runtime from source")
       aotriton_build_from_source(ON aotriton_runtime)
     else()
