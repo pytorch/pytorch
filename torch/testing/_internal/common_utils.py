@@ -2588,6 +2588,24 @@ def skipIfRocmVersionAtLeast(version=None):
         )
     return lazy_skip_if(_should_skip, f"ROCm version at least {version}: known failure")
 
+# Skips a test on ROCm for specific major.minor versions, given as a list of
+# tuples/lists. Prefer this over skipIfRocmVersionAtLeast when a failure is
+# confined to known releases (possibly non-contiguous) and later versions may
+# already be fixed, e.g. skipIfRocmVersionIn([(7, 14), (10, 0)]).
+# Mirrors skipCUDAVersionIn. Built on lazy_skip_if for methods and classes.
+def skipIfRocmVersionIn(versions: list | None = None):
+    normalized = {tuple(v) for v in (versions or [])}
+
+    def _should_skip():
+        if not TEST_WITH_ROCM:
+            return False
+        rocm_version_tuple = getRocmVersion()
+        return rocm_version_tuple in normalized
+
+    return lazy_skip_if(
+        _should_skip, f"ROCm version in {sorted(normalized)}: known failure"
+    )
+
 def skipIfNotMiopenSuggestNHWC(fn):
     return lazy_skip_if(
         lambda: not TEST_WITH_MIOPEN_SUGGEST_NHWC,
