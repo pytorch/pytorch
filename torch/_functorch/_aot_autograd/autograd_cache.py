@@ -262,10 +262,14 @@ def check_node_safe(node: Node) -> None:
                 f"expected method_target to be Node, got {type(method_target)}"
             )
         if not is_tensor(method_target):
-            module = getattr(method_target, "__module__", None)
-            name = getattr(method_target, "__name__", None)
+            # Name the receiver AND the method: the receiver's str() is its node
+            # name, so on its own this read as a rejected function called
+            # "getitem". __module__/__name__ were read off the Node, which
+            # reports torch.fx.node and None for every graph.
             raise BypassAOTAutogradCache(
-                f"Unsupported call_method target {method_target}. \nMethod module: {module}, \nMethod name: {name}"
+                f"Unsupported call_method {method_name!r} on node "
+                f"'{method_target}' ({method_target.op} {method_target.target}), "
+                f"which has no example_value and so is not known to be a Tensor"
             )
         if (
             type(method_name) is not str
