@@ -22,7 +22,10 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         return TEST_GPU_NUM
 
     def init_pg(self, backend="nccl"):
-        if backend not in ["nccl", "gloo", "mpi", "hccl", "xccl"]:
+        # Ask the distributed framework rather than matching a fixed list, so a
+        # backend registered by an out-of-tree device is accepted the same way
+        # the built-in ones are.
+        if not dist.is_backend_available(backend):
             raise RuntimeError(f"Backend {backend} not supported!")
 
         dist.init_process_group(
@@ -32,8 +35,15 @@ class ShardedTensorTestBase(MultiProcessTestCase):
             init_method=f"file://{self.file_name}",
         )
 
-        # set device for nccl pg for collectives
-        if backend == "nccl" or backend == "xccl":
+        # Set the per-rank device when the process group runs on the current
+        # accelerator's own backend. gloo is excluded: it is the default backend
+        # for cpu and mps, and carries no per-rank accelerator device index.
+        accelerator = torch.accelerator.current_accelerator()
+        if (
+            accelerator is not None
+            and backend != dist.Backend.GLOO
+            and backend == dist.get_default_backend_for_device(accelerator)
+        ):
             torch.accelerator.set_device_index(self.rank)
 
     def init_rpc(self):
@@ -94,14 +104,10 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        # Skip test if backend requires accelerator but not enough devices available
+        # Skip non-Gloo tests if an accelerator is unavailable or undersized.
         acc = torch.accelerator.current_accelerator()
-        if backend in ["nccl", "xccl", "hccl"]:
-            if (
-                acc is None
-                or backend != dist.get_default_backend_for_device(acc)
-                or torch.accelerator.device_count() < self.world_size
-            ):
+        if backend != dist.Backend.GLOO:
+            if acc is None or torch.accelerator.device_count() < self.world_size:
                 sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
         self.init_comms(init_rpc=init_rpc, backend=backend)
         func(self, *args, **kwargs)
