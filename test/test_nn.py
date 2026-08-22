@@ -12273,6 +12273,37 @@ if __name__ == '__main__':
 
 
 
+    @onlyCUDA
+    @parametrize_test("target_value", [-1_000_000_000_000, 4])
+    def test_multilabel_margin_loss_out_of_bounds_target(self, device, target_value):
+        # Test for issue #191567
+        # Run in a different process to prevent the device-side assert from affecting other tests
+        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
+#!/usr/bin/env python3
+
+import torch
+import torch.nn.functional as F
+from torch.testing._internal.common_utils import (run_tests, TestCase)
+
+class TestThatContainsCUDAAssert(TestCase):
+    def test_multilabel_margin_loss_out_of_bounds_target(self):
+        device = '{str(device)}'
+        input = torch.zeros(4, device=device)
+        target = torch.tensor([{target_value}, -1, -1, -1], device=device)
+        F.multilabel_margin_loss(input, target, reduction="none")
+        torch.cuda.synchronize()
+
+
+if __name__ == '__main__':
+    run_tests()
+        """)
+        # CUDA says "device-side assert triggered"
+        # ROCm says "unspecified launch failure", or HSA_STATUS_ERROR_EXCEPTION
+        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
+        has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
+        self.assertTrue(has_cuda_assert or has_hip_assert,
+                        lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}")
+
     def test_cross_entropy_loss_prob_target_all_reductions(self, device):
         # Test with k-dimensional loss.
         for k in range(5):
