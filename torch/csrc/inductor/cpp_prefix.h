@@ -366,8 +366,7 @@ inline V minimum_preserve_signbit_vec(const V& a, const V& b) {
   if constexpr (std::is_floating_point_v<T>) {
     // For +/- zero ties the result sign must be negative, which is exactly
     // the bitwise OR of the two values.
-    auto both_zero =
-        (a == V(static_cast<T>(0))) & (b == V(static_cast<T>(0)));
+    auto both_zero = (a == V(static_cast<T>(0))) & (b == V(static_cast<T>(0)));
     result = V::blendv(result, a | b, both_zero);
   }
   return result;
@@ -380,8 +379,7 @@ inline V maximum_preserve_signbit_vec(const V& a, const V& b) {
   if constexpr (std::is_floating_point_v<T>) {
     // For +/- zero ties the result sign must be positive, which is exactly
     // the bitwise AND of the two values.
-    auto both_zero =
-        (a == V(static_cast<T>(0))) & (b == V(static_cast<T>(0)));
+    auto both_zero = (a == V(static_cast<T>(0))) & (b == V(static_cast<T>(0)));
     result = V::blendv(result, a & b, both_zero);
   }
   return result;
