@@ -21,13 +21,19 @@ from torch._inductor.pattern_matcher import (
 )
 from torch._inductor.utils import is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    requires_capabilities,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skipIfTorchDynamo,
-    skipIfXpu,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
 
 invoke_quant_tracer = InvokeQuant()
@@ -35,6 +41,8 @@ invoke_quant_tracer = InvokeQuant()
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeQuant(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     backend = ""
 
     def test_simple(self):
@@ -125,14 +133,20 @@ class TestInvokeQuant(TestCase):
 
 
 class TestInvokeQuantEager(TestInvokeQuant):
+    hw_classification = HardwareClassification.CPU
+
     backend = "eager"
 
 
 class TestInvokeQuantAotEager(TestInvokeQuant):
+    hw_classification = HardwareClassification.CPU
+
     backend = "aot_eager"
 
 
 class TestInvokeQuantInductor(TestInvokeQuant):
+    hw_classification = HardwareClassification.CPU
+
     backend = "inductor"
 
     def test_pattern_matching(self):
@@ -183,14 +197,20 @@ class TestInvokeQuantInductor(TestInvokeQuant):
             torch.compile(fn_no_match)(x, y, z)
             self.assertTrue(counter == 1)
 
-    @skipIfXpu(
-        msg="MM Triton template fusion for XPU not work because the fusion"
-        " can not speedup, unskip until #146568 fixed."
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
+class TestInvokeQuantInductorPrologue(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_capabilities(Capability.lib.triton)
+    @onlyAccelerator
+    @skipXPUIf(
+        True,
+        "MM Triton template fusion does not speed up on XPU; see #146568.",
     )
-    @requires_gpu()
     @config.patch(prologue_fusion=True)
-    def test_prologue(self):
-        if not is_big_gpu():
+    def test_prologue(self, device):
+        if not is_big_gpu(torch.device(device)):
             raise unittest.SkipTest("requires large gpu to max-autotune")
 
         def gn(x, y):
@@ -204,16 +224,12 @@ class TestInvokeQuantInductor(TestInvokeQuant):
                 @ z
             )
 
-        x = torch.randn(
-            64, 64, requires_grad=False, device=GPU_TYPE, dtype=torch.float16
-        )
+        x = torch.randn(64, 64, requires_grad=False, device=device, dtype=torch.float16)
         # make this a no-op to ensure equivalent numerics
         y = torch.randn(
-            64, 64, requires_grad=False, device=GPU_TYPE, dtype=torch.float16
+            64, 64, requires_grad=False, device=device, dtype=torch.float16
         ).fill_(1.0)
-        z = torch.randn(
-            64, 64, requires_grad=False, device=GPU_TYPE, dtype=torch.float16
-        )
+        z = torch.randn(64, 64, requires_grad=False, device=device, dtype=torch.float16)
         ref = gn(x, y) @ z
 
         x_clone = x.clone().detach().requires_grad_(False)
@@ -232,6 +248,11 @@ class TestInvokeQuantInductor(TestInvokeQuant):
 
 
 del TestInvokeQuant
+instantiate_device_type_tests(
+    TestInvokeQuantInductorPrologue,
+    globals(),
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
