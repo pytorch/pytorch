@@ -2124,6 +2124,15 @@ class MultiProcContinuousTest(TestCase):
         for process in cls.processes:
             process.join()
 
+        # Assert each worker exited cleanly so a teardown-time crash (e.g. a
+        # SIGSEGV raised from an atexit handler after the tests themselves
+        # passed) surfaces as a failure instead of being silently ignored.
+        for i, process in enumerate(cls.processes):
+            if process.exitcode != 0:
+                raise RuntimeError(
+                    f"Worker {i} exited with code {process.exitcode} during teardown"
+                )
+
         # Clear up the rendezvous file
         try:
             os.remove(cls.rdvz_file)

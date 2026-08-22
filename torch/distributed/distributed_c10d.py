@@ -3143,6 +3143,8 @@ def destroy_process_group(
     else:
         pg = group
 
+    print("GRP", pg)
+
     if pg is None:
         raise AssertionError("Process group cannot be None")
     if _world.pg_map.get(pg, None) is None:
@@ -3234,6 +3236,8 @@ def destroy_process_group(
             except Exception:
                 pass
         _unregister_process_group(pg.group_name)
+
+    print("After clean up", GroupMember.WORLD)
 
 
 def _abort_process_group(
