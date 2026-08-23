@@ -368,7 +368,7 @@ class UniformValueConstantFolder(ConstantFolder):
             if not isinstance(tensor_val, torch.Tensor):
                 continue
 
-            def is_zero_int(arg: Any) -> bool:
+            def is_zero_int(arg: object) -> bool:
                 return isinstance(arg, int) and arg == 0
 
             if not any(is_zero_int(a) for a in op.args):
