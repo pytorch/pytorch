@@ -2054,6 +2054,13 @@ class triton:
     # annotations on a best-effort basis. Requires cuda-python and CUDA >= 13.1.
     cudagraph_kernel_annotations: bool = False
 
+    # Use compute-node tracking (Loops.inner_fn tracing) for kernel FQN
+    # attribution instead of the origins-walk. Opt-in for validation; the
+    # old origins-walk remains the default until AIB confirms this is correct.
+    # Only takes effect when cudagraph_kernel_annotations=True.
+    # Removed (along with the old path) before merging to the PR branch.
+    cudagraph_fqn_compute_tracking: bool = False
+
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
