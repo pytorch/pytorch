@@ -44,14 +44,14 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     bytes_to_scalar, parametrize, noncontiguous_like,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
     xfailIfS390X, set_warn_always_context, decorateIf, isRocmArchAnyOf,
-    IS_MACOS,
+    IS_MACOS, HardwareClassification,
 )
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     expectedFailureXLA,
     instantiate_device_type_tests,
-    onlyCUDA, onlyAccelerator,
+    onlyAccelerator,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIf, skipCUDAIfNotRocm,
     skipXLA)
@@ -87,6 +87,63 @@ AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
 
 is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
+
+
+def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn,
+                                        memory_format, compare_data=True, default_is_preserve=False):
+
+    if memory_format not in (torch.channels_last, torch.channels_last_3d):
+        raise AssertionError(f"unexpected memory_format: {memory_format}")
+
+    # xc is a channels last tensor
+    xc = input_generator_fn(device)
+    # xc is not memory dense, but looks like channels last
+    # We don't preserve non-dense striding
+    if not TEST_WITH_TORCHINDUCTOR:
+        if memory_format == torch.channels_last:
+            xc = xc[..., ::2, ::2]
+        else:
+            xc = xc[..., ::2, ::2, ::2]
+
+    clone = transformation_fn(xc, memory_format=torch.preserve_format)
+
+
+    self.assertFalse(clone.is_contiguous())
+    self.assertTrue(clone.is_contiguous(memory_format=memory_format))
+    if not TEST_WITH_TORCHINDUCTOR:
+        self.assertFalse(xc.is_contiguous())
+        self.assertFalse(xc.is_contiguous(memory_format=memory_format))
+    if compare_data:
+        self.assertEqual(xc, clone.to(xc))
+
+    xc = input_generator_fn(device)
+    clone = transformation_fn(xc, memory_format=torch.contiguous_format)
+    self.assertTrue(clone.is_contiguous())
+    self.assertFalse(clone.is_contiguous(memory_format=memory_format))
+    if compare_data:
+        self.assertEqual(xc, clone.to(xc))
+
+    xc = input_generator_fn(device)
+    clone = transformation_fn(xc)
+
+    if default_is_preserve:
+        self.assertFalse(clone.is_contiguous())
+        self.assertTrue(clone.is_contiguous(memory_format=memory_format))
+    else:
+        self.assertTrue(clone.is_contiguous())
+        self.assertFalse(clone.is_contiguous(memory_format=memory_format))
+    if compare_data:
+        self.assertEqual(xc, clone.to(xc))
+
+    # TODO copy _like constructors to stride permutation instead of just layout
+    if not TEST_WITH_TORCHINDUCTOR:
+        x = torch.randn((3, 4, 5, 6, 7, 8, 9), device=device)
+        for _ in range(10):
+            permutation = list(range(len(x.shape)))
+            random.shuffle(permutation)
+            x = x.permute(permutation)
+            self.assertEqual(x.stride(), transformation_fn(x, memory_format=torch.preserve_format).stride())
+
 
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
@@ -4883,61 +4940,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(samples_1.dim(), 2, msg="wrong number of dimensions")
             self.assertEqual(samples_1.size(1), n_sample, msg="wrong number of samples")
 
-    def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn,
-                                            memory_format, compare_data=True, default_is_preserve=False):
-
-        if memory_format not in (torch.channels_last, torch.channels_last_3d):
-            raise AssertionError(f"unexpected memory_format: {memory_format}")
-
-        # xc is a channels last tensor
-        xc = input_generator_fn(device)
-        # xc is not memory dense, but looks like channels last
-        # We don't preserve non-dense striding
-        if not TEST_WITH_TORCHINDUCTOR:
-            if memory_format == torch.channels_last:
-                xc = xc[..., ::2, ::2]
-            else:
-                xc = xc[..., ::2, ::2, ::2]
-
-        clone = transformation_fn(xc, memory_format=torch.preserve_format)
-
-
-        self.assertFalse(clone.is_contiguous())
-        self.assertTrue(clone.is_contiguous(memory_format=memory_format))
-        if not TEST_WITH_TORCHINDUCTOR:
-            self.assertFalse(xc.is_contiguous())
-            self.assertFalse(xc.is_contiguous(memory_format=memory_format))
-        if compare_data:
-            self.assertEqual(xc, clone.to(xc))
-
-        xc = input_generator_fn(device)
-        clone = transformation_fn(xc, memory_format=torch.contiguous_format)
-        self.assertTrue(clone.is_contiguous())
-        self.assertFalse(clone.is_contiguous(memory_format=memory_format))
-        if compare_data:
-            self.assertEqual(xc, clone.to(xc))
-
-        xc = input_generator_fn(device)
-        clone = transformation_fn(xc)
-
-        if default_is_preserve:
-            self.assertFalse(clone.is_contiguous())
-            self.assertTrue(clone.is_contiguous(memory_format=memory_format))
-        else:
-            self.assertTrue(clone.is_contiguous())
-            self.assertFalse(clone.is_contiguous(memory_format=memory_format))
-        if compare_data:
-            self.assertEqual(xc, clone.to(xc))
-
-        # TODO copy _like constructors to stride permutation instead of just layout
-        if not TEST_WITH_TORCHINDUCTOR:
-            x = torch.randn((3, 4, 5, 6, 7, 8, 9), device=device)
-            for _ in range(10):
-                permutation = list(range(len(x.shape)))
-                random.shuffle(permutation)
-                x = x.permute(permutation)
-                self.assertEqual(x.stride(), transformation_fn(x, memory_format=torch.preserve_format).stride())
-
     def test_memory_format_to(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):
@@ -4952,8 +4954,8 @@ class TestTorchDeviceType(TestCase):
             (torch.channels_last_3d, (4, 3, 8, 8, 8)))
 
         for mf, shape in formats_shapes:
-            self._test_memory_format_transformations(
-                device, get_generator(mf, shape), transformation_fn, mf, default_is_preserve=True)
+            _test_memory_format_transformations(
+                self, device, get_generator(mf, shape), transformation_fn, mf, default_is_preserve=True)
 
     def test_memory_format_type(self, device):
         def get_generator(memory_format, shape):
@@ -4969,8 +4971,8 @@ class TestTorchDeviceType(TestCase):
             (torch.channels_last_3d, (4, 3, 8, 8, 8)))
 
         for mf, shape in formats_shapes:
-            self._test_memory_format_transformations(
-                device, get_generator(mf, shape), transformation_fn, mf, default_is_preserve=True)
+            _test_memory_format_transformations(
+                self, device, get_generator(mf, shape), transformation_fn, mf, default_is_preserve=True)
 
     def test_memory_format_clone(self, device):
         def get_generator(memory_format, shape):
@@ -4986,8 +4988,8 @@ class TestTorchDeviceType(TestCase):
             (torch.channels_last_3d, (4, 3, 8, 8, 8)))
 
         for mf, shape in formats_shapes:
-            self._test_memory_format_transformations(
-                device, get_generator(mf, shape), transformation_fn, mf, True, default_is_preserve=True)
+            _test_memory_format_transformations(
+                self, device, get_generator(mf, shape), transformation_fn, mf, True, default_is_preserve=True)
 
     def test_memory_format_factory_like_functions_preserve(self, device):
         def get_generator(memory_format, shape):
@@ -5011,8 +5013,8 @@ class TestTorchDeviceType(TestCase):
 
         for mf, shape, in formats_shapes:
             for transformation_fn in transformation_fns:
-                self._test_memory_format_transformations(
-                    device, get_generator(mf, shape), transformation_fn, mf, compare_data=False, default_is_preserve=True)
+                _test_memory_format_transformations(
+                    self, device, get_generator(mf, shape), transformation_fn, mf, compare_data=False, default_is_preserve=True)
 
     def test_memory_format_type_shortcuts(self, device):
         def get_generator(memory_format, shape, dtype):
@@ -5038,36 +5040,13 @@ class TestTorchDeviceType(TestCase):
 
         for mf, shape in formats_shapes:
             for fn_name in shortcuts:
-                self._test_memory_format_transformations(
-                    device, get_generator(mf, shape, torch.float32), get_fn(fn_name), mf, default_is_preserve=True)
+                _test_memory_format_transformations(
+                    self, device, get_generator(mf, shape, torch.float32), get_fn(fn_name), mf, default_is_preserve=True)
 
         # Test 'float' separately to avoid float->float no-op.
         for mf, shape in formats_shapes:
-            self._test_memory_format_transformations(
-                device, get_generator(mf, shape, torch.float64), get_fn('float'), mf, default_is_preserve=True)
-
-    @onlyCUDA
-    def test_memory_format_cpu_and_cuda_ops(self, device):
-        def get_generator(memory_format, shape):
-            def input_generator_fn(device):
-                return torch.randn(shape, device=device, dtype=torch.float32).contiguous(memory_format=memory_format)
-            return input_generator_fn
-
-        def transformation_cpu_fn(tensor, **kwargs):
-            return tensor.cpu(**kwargs)
-
-        def transformation_cuda_fn(tensor, **kwargs):
-            return tensor.cuda(**kwargs)
-
-        formats_shapes = (
-            (torch.channels_last, (4, 3, 8, 8)),
-            (torch.channels_last_3d, (4, 3, 8, 8, 8)))
-
-        for mf, shape in formats_shapes:
-            self._test_memory_format_transformations(
-                'cuda', get_generator(mf, shape), transformation_cpu_fn, mf, default_is_preserve=True)
-            self._test_memory_format_transformations(
-                'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
+            _test_memory_format_transformations(
+                self, device, get_generator(mf, shape, torch.float64), get_fn('float'), mf, default_is_preserve=True)
 
     # FIXME: move to test_serialization
     @onlyNativeDeviceTypes
@@ -6434,6 +6413,7 @@ class TestTorchDeviceType(TestCase):
 
 class TestTorchCPUDevice(TestCase):
     exact_dtype = True
+    hw_classification = HardwareClassification.CPU
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @dtypes(*get_all_qint_dtypes())
@@ -6447,6 +6427,29 @@ class TestTorchCPUDevice(TestCase):
 
 class TestTorchCUDADevice(TestCase):
     exact_dtype = True
+    hw_classification = HardwareClassification.CUDA
+
+    def test_memory_format_cpu_and_cuda_ops(self, device):
+        def get_generator(memory_format, shape):
+            def input_generator_fn(device):
+                return torch.randn(shape, device=device, dtype=torch.float32).contiguous(memory_format=memory_format)
+            return input_generator_fn
+
+        def transformation_cpu_fn(tensor, **kwargs):
+            return tensor.cpu(**kwargs)
+
+        def transformation_cuda_fn(tensor, **kwargs):
+            return tensor.cuda(**kwargs)
+
+        formats_shapes = (
+            (torch.channels_last, (4, 3, 8, 8)),
+            (torch.channels_last_3d, (4, 3, 8, 8, 8)))
+
+        for mf, shape in formats_shapes:
+            _test_memory_format_transformations(
+                self, 'cuda', get_generator(mf, shape), transformation_cpu_fn, mf, default_is_preserve=True)
+            _test_memory_format_transformations(
+                self, 'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
 
     # For testing in64 support in upsample_nearest3d
     @skipIfRocmArch(MI200_ARCH)
@@ -7024,6 +7027,7 @@ class TestDevicePrecision(TestCase):
 
 
 class TestDevicePrecisionCUDADevice(TestCase):
+    hw_classification = HardwareClassification.CUDA
     exact_dtype = True
 
     # FIXME: move to indexing test suite
