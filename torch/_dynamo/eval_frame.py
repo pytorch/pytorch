@@ -58,7 +58,7 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     get_eval_frame_isolate_recompiles_id,
-    reset_code,
+    reset_code as _reset_code,
     set_code_exec_strategy,
     set_eval_frame,
     set_eval_frame_isolate_recompiles_id,
@@ -688,6 +688,12 @@ class OptimizedModule(torch.nn.Module):
         return orig_mod_attrs + [
             attr for attr in super().__dir__() if attr not in orig_mod_attrs
         ]
+
+
+def reset_code(code: types.CodeType) -> None:
+    with convert_frame.compile_lock:
+        _reset_code(code)
+        convert_frame.reset_frame_exec_strategy_cache()
 
 
 def remove_from_cache(f: Any) -> None:

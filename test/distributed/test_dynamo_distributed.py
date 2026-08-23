@@ -415,6 +415,56 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         opt_model()
 
     @patch.object(config, "optimize_ddp", True)
+    def test_ddp_optimizer_shares_instance_skip_cache(self):
+        class Selector(nn.ModuleList):
+            def __init__(self) -> None:
+                super().__init__([nn.Linear(4, 4), nn.Linear(4, 4)])
+                self.idx = 0
+
+            def forward(self, x):
+                y = self[self.idx](x)
+                self.idx = 1 - self.idx
+                return y
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.selector = Selector()
+
+            def forward(self, x):
+                return self.selector(x)
+
+        ref_model = FakeDDP(Model())
+        model = copy.deepcopy(ref_model)
+        cnt = CompileCounter()
+        opt_model = torch.compile(model, backend=cnt)
+        x = torch.randn(2, 4)
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
+
+        self.assertEqual(ref_model(x), opt_model(x))
+        frames_after_first = torch._dynamo.utils.counters["frames"]["total"]
+        stores_after_first = torch._dynamo.utils.counters["frame_exec_strategy_cache"][
+            "store"
+        ]
+        hits_after_first = torch._dynamo.utils.counters["frame_exec_strategy_cache"][
+            "hit"
+        ]
+        for _ in range(3):
+            self.assertEqual(ref_model(x), opt_model(x))
+        frames_after_repeats = torch._dynamo.utils.counters["frames"]["total"]
+
+        self.assertGreater(frames_after_first, frames_before)
+        self.assertEqual(frames_after_repeats, frames_after_first)
+        self.assertEqual(
+            torch._dynamo.utils.counters["frame_exec_strategy_cache"]["store"],
+            stores_after_first,
+        )
+        self.assertGreater(
+            torch._dynamo.utils.counters["frame_exec_strategy_cache"]["hit"],
+            hits_after_first,
+        )
+
+    @patch.object(config, "optimize_ddp", True)
     def test_symbol_splitting(self):
         class Model(nn.Module):
             def __init__(self) -> None:
