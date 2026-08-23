@@ -14,6 +14,7 @@
 
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/functorch/DynamicLayer.h>
+#include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
@@ -78,21 +79,6 @@ inline void check_legacy_fn_attr_access(
       "is a legacy access pattern that is no longer supported. For examples "
       "on how to use new‑style autograd functions, see "
       "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
-}
-
-// TODO: We shouldn't need to call this function because the engine
-// can already persist the errors for us. This still seems to be
-// needed for the DistEngine however.
-//
-// python test/distributed/rpc/test_tensorpipe_agent.py -k
-// test_backward_autograd_engine_error
-//
-// See Note [ Persisting PyErr state across autograd engine threads ]
-void throw_python_error() {
-  python_error err;
-  err.persist();
-  // NOLINTNEXTLINE(hicpp-exception-baseclass)
-  throw std::move(err);
 }
 
 PyObject* materialize_needs_input_grad(THPFunction* self) {
@@ -588,6 +574,7 @@ static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
   Py_VISIT(self->dirty_tensors);
   Py_VISIT(self->compiled_autograd_backward_state);
   Py_VISIT(self->saved_for_forward);
+  Py_VISIT(self->output_grad_dtypes);
   return traverse_node(self->cdata, visit, arg);
 }
 
@@ -598,6 +585,7 @@ static int THPFunction_clear(THPFunction* self) {
   Py_CLEAR(self->dirty_tensors);
   Py_CLEAR(self->compiled_autograd_backward_state);
   Py_CLEAR(self->saved_for_forward);
+  Py_CLEAR(self->output_grad_dtypes);
   return 0;
 }
 
@@ -641,6 +629,7 @@ static PyObject* THPFunction_new(
   self->materialize_non_diff_grads = true;
   self->clear_saved_tensors_on_access = false;
   self->saved_tensors_accessed_and_cleared = false;
+  self->output_grad_dtypes = nullptr;
   torch::utils::PyObjectPreservation::init_fresh_nonatomic(*self->cdata, obj);
   return obj;
 }
@@ -659,9 +648,8 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction* self) {
 
   THPFunction_assert(
       PyTuple_Check(self->dirty_tensors),
-      "autograd "
-      "internal error: dirty_tensors attribute is expected to be a tuple "
-      "but is ",
+      "autograd internal error: dirty_tensors attribute is expected to be a "
+      "tuple but is %s",
       THPUtils_typename(self->dirty_tensors));
   Py_ssize_t num_dirty = PyTuple_GET_SIZE(self->dirty_tensors);
   dirty_inputs.reserve(num_dirty);
@@ -669,10 +657,8 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction* self) {
     PyObject* obj = PyTuple_GET_ITEM(self->dirty_tensors, i);
     THPFunction_assert(
         THPVariable_Check(obj),
-        "mark_dirty can "
-        "only accept variables, but argument ",
+        "mark_dirty can only accept variables, but argument %zd is of type %s",
         i,
-        " is of type ",
         THPUtils_typename(obj));
 
     const auto& tensor = THPVariable_Unpack(obj);
@@ -686,6 +672,60 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction* self) {
 
 static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
     THPFunction* self);
+
+// Parse and consume positional grad-dtype declarations.
+static std::optional<std::vector<std::optional<at::ScalarType>>>
+_parse_output_grad_dtypes(
+    THPFunction* self,
+    Py_ssize_t num_outputs,
+    const std::vector<std::optional<Variable>>& raw_output_vars,
+    const std::unordered_set<at::TensorImpl*>& non_differentiable) {
+  PyObject* dtypes = self->output_grad_dtypes;
+  if (dtypes == nullptr) {
+    return std::nullopt;
+  }
+  THPFunction_assert(
+      PyTuple_Check(dtypes),
+      "set_output_grad_dtype expects the declarations to be a tuple, but got: "
+      "%s",
+      THPUtils_typename(dtypes));
+  THPFunction_assert(
+      PyTuple_GET_SIZE(dtypes) == num_outputs,
+      "set_output_grad_dtype expected the number of declarations to match the "
+      "number of outputs: the Function returned %zd values but %zd "
+      "declarations were provided",
+      num_outputs,
+      PyTuple_GET_SIZE(dtypes));
+  std::vector<std::optional<at::ScalarType>> result;
+  result.reserve(num_outputs);
+  for (const auto i : c10::irange(num_outputs)) {
+    PyObject* d = PyTuple_GET_ITEM(dtypes, i);
+    if (d == Py_None) {
+      result.emplace_back(std::nullopt);
+      continue;
+    }
+    THPFunction_assert(
+        THPDtype_Check(d),
+        "set_output_grad_dtype expects each declaration to be a torch.dtype or "
+        "None, but got %s",
+        THPUtils_typename(d));
+    const auto& raw_output_var = raw_output_vars[i];
+    THPFunction_assert(
+        raw_output_var.has_value() &&
+            non_differentiable.count(raw_output_var->unsafeGetTensorImpl()) ==
+                0 &&
+            isDifferentiableType(raw_output_var->scalar_type()),
+        "set_output_grad_dtype: got a concrete dtype for output %zd, but that "
+        "output is not a differentiable tensor (it is a non-tensor, was marked "
+        "non-differentiable, or has a non-differentiable dtype). Pass None for "
+        "output %zd instead.",
+        i,
+        i);
+    result.emplace_back(reinterpret_cast<THPDtype*>(d)->scalar_type);
+  }
+  Py_CLEAR(self->output_grad_dtypes);
+  return result;
+}
 
 // Given a Python tuple of raw output tensors (raw_output), set each of
 // the corresponding entries in a different Python tuple (outputs) with
@@ -704,7 +744,8 @@ static void _wrap_outputs(
     PyObject* raw_output,
     PyObject* outputs,
     bool is_executable,
-    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context) {
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
+    c10::intrusive_ptr<Node>& attached_node) {
   auto cdata_if_executable = is_executable ? self->cdata : nullptr;
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (is_executable) {
@@ -726,6 +767,9 @@ static void _wrap_outputs(
       raw_output_vars.emplace_back();
     }
   }
+
+  auto output_grad_dtypes = _parse_output_grad_dtypes(
+      self, num_outputs, raw_output_vars, non_differentiable);
 
   _jvp_fn_t jvp_user_function = [self](
                                     variable_list inputs,
@@ -817,7 +861,8 @@ static void _wrap_outputs(
       jvp_user_function,
       to_save_if_setup_context,
       view_as_self_fn,
-      self->pure_view);
+      self->pure_view,
+      attached_node);
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
@@ -834,13 +879,26 @@ static void _wrap_outputs(
         // If one of the grad outputs is undefined, a correctly-shaped zeros
         // should be used instead. To construct these for NJT, zeros_like() must
         // be used until we have factory function support.
+        //
+        // Match differentiability to what mark_non_differentiable recorded,
+        // which is keyed on the raw output's TensorImpl.
+        const auto& raw_output_var = raw_output_vars[i];
+        TORCH_INTERNAL_ASSERT(raw_output_var.has_value());
         bool is_differentiable =
-            (non_differentiable.count(wrapped_output->unsafeGetTensorImpl()) ==
-                 0 &&
-             isDifferentiableType(wrapped_output->scalar_type()));
+            non_differentiable.count(raw_output_var->unsafeGetTensorImpl()) ==
+                0 &&
+            isDifferentiableType(raw_output_var->scalar_type());
         bool use_zeros_like =
             is_differentiable && num_outputs > 1 && wrapped_output->is_nested();
         self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
+        // Set each differentiable output's grad_dtype, defaulting to its dtype.
+        if (is_differentiable) {
+          const auto grad_dtype = output_grad_dtypes.has_value()
+              ? (*output_grad_dtypes)[i]
+              : std::optional<at::ScalarType>(raw_output_var->scalar_type());
+          cdata_if_executable->mutable_input_metadata(i).set_grad_dtype(
+              grad_dtype);
+        }
       }
       PyTuple_SetItem(
           outputs, i, THPVariable_Wrap(std::move(wrapped_output.value())));
@@ -859,8 +917,8 @@ static void _get_tensors_to_save(
     // to_save_if_setup_context, the actual saving is not done here.
     THPFunction_assert(
         PyTuple_Check(self->saved_for_forward),
-        "autograd internal "
-        "error: saved_for_forward attribute is expected to be a tuple but is ",
+        "autograd internal error: saved_for_forward attribute is expected to "
+        "be a tuple but is %s",
         THPUtils_typename(self->saved_for_forward));
     Py_ssize_t num_saved_for_forward =
         PyTuple_GET_SIZE(self->saved_for_forward);
@@ -875,8 +933,8 @@ static void _get_tensors_to_save(
   if (self->to_save) {
     THPFunction_assert(
         PyTuple_Check(self->to_save),
-        "autograd internal "
-        "error: to_save attribute is expected to be a tuple but is ",
+        "autograd internal error: to_save attribute is expected to be a tuple "
+        "but is %s",
         THPUtils_typename(self->to_save));
 
     Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
@@ -953,9 +1011,8 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
 
   THPFunction_assert(
       PyTuple_Check(self->non_differentiable),
-      "autograd "
-      "internal error: non_differentiable attribute is expected to be a "
-      "tuple but is ",
+      "autograd internal error: non_differentiable attribute is expected to be "
+      "a tuple but is %s",
       THPUtils_typename(self->non_differentiable));
   Py_ssize_t num_nondiff = PyTuple_GET_SIZE(self->non_differentiable);
   set.reserve(num_nondiff);
@@ -963,8 +1020,7 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
     PyObject* t = PyTuple_GET_ITEM(self->non_differentiable, i);
     THPFunction_assert(
         THPVariable_Check(t),
-        "mark_non_differentiable "
-        "only accepts variable arguments, but got ",
+        "mark_non_differentiable only accepts variable arguments, but got %s",
         THPUtils_typename(t));
     set.insert(THPVariable_Unpack(t).unsafeGetTensorImpl());
   }
@@ -1252,13 +1308,15 @@ PyObject* process_outputs(
       is_executable);
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
+  c10::intrusive_ptr<Node> attached_node;
   _wrap_outputs(
       grad_fn,
       unpacked.input_vars,
       raw_output,
       outputs,
       is_executable,
-      to_save_if_setup_context);
+      to_save_if_setup_context,
+      attached_node);
   _trace_post_record(
       node, op_obj, unpacked.input_vars, outputs, is_inplace, unpack_output);
 
@@ -1267,6 +1325,10 @@ PyObject* process_outputs(
   // we save them.
   if (is_executable) {
     _save_variables(tensors_to_save, grad_fn, outputs.get(), num_outputs);
+    // Fire only after saved variables are stored on the node.
+    if (attached_node) {
+      fire_node_creation_hooks(attached_node);
+    }
   } else {
     // Remove unnecessary attributes
     Py_CLEAR(grad_fn->to_save);
@@ -1803,8 +1865,8 @@ PyObject* THPFunction_apply(
       }
       THPObjectPtr setup_context_fn(
           PyObject_GetAttrString(cls, "setup_context"));
-      auto result =
-          PyObject_CallObject(setup_context_fn, ctx_input_output_tuple);
+      THPObjectPtr result(
+          PyObject_CallObject(setup_context_fn, ctx_input_output_tuple));
       if (!result) {
         return nullptr;
       }
@@ -2189,6 +2251,11 @@ static struct PyGetSetDef THPFunction_properties[] = {
     {"dirty_tensors",
      &getObject<&THPFunction::dirty_tensors>,
      &setObject<&THPFunction::dirty_tensors>,
+     nullptr,
+     nullptr},
+    {"output_grad_dtypes",
+     &getObject<&THPFunction::output_grad_dtypes>,
+     &setObject<&THPFunction::output_grad_dtypes>,
      nullptr,
      nullptr},
     {"saved_for_forward",

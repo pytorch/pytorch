@@ -4200,7 +4200,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         # for higher dim input sizes.
         # See https://github.com/pytorch/pytorch/issues/141112
         B, D, max_seq_len = 64, 512, 100
-        torch.cuda._clear_cublas_workspaces()
+        torch._C._cuda_clearCublasWorkspaces()
         m = torch.nn.Linear(D, D, device=device)
         nt = torch.nested.as_nested_tensor(
             [
@@ -7359,8 +7359,6 @@ torch.cuda.synchronize()
     )
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @onlyCUDA
-    # flash_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
-    @skipIfRocm
     @skipIfTorchDynamo()
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):
@@ -7847,8 +7845,6 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    # efficient_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
-    @skipIfRocm
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_compile_preserves_metadata_cache(self, device, dtype):
         # shape (B, *, D)
@@ -8249,6 +8245,30 @@ torch.cuda.synchronize()
             any("L['nt'].stride()" in code for code in guard_code),
             "\n".join(guard_code),
         )
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    def test_compile_jagged_recompile_on_outer_batch_dim(self, device, dtype):
+        # Recompiling on a changed batch size makes the outer dim symbolic, and
+        # jagged NJT records no source for it, which used to break guard issuing.
+        def make_nt(batch):
+            return torch.nested.nested_tensor(
+                [
+                    torch.randn(2 + (i % 3), 3, device=device, dtype=dtype)
+                    for i in range(batch)
+                ],
+                layout=torch.jagged,
+            )
+
+        def f(nt):
+            if nt.size(0) == 8:
+                return nt.values().sum() * 3
+            return nt.values().sum()
+
+        compiled_f = torch.compile(f, fullgraph=True)
+        nt8, nt16 = make_nt(8), make_nt(16)
+        self.assertEqual(compiled_f(nt8), f(nt8))
+        self.assertEqual(compiled_f(nt16), f(nt16))
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
@@ -8872,14 +8892,11 @@ BACKWARD_SKIPS_AND_XFAILS = [
         ),
         name="clone_wrong_nested_int_for_gradient",
     ),
-    # some min / max ops use masked_fill_ underneath sometimes, which isn't implemented
+    # copysign uses masked_fill_ underneath, which isn't implemented
     XFailRule(
         error_type=NotImplementedError,
         error_msg="aten.masked_fill_.Scalar",
-        op_match_fn=lambda device, op: (
-            op.full_name
-            in {"max.binary", "min.binary", "minimum", "maximum", "copysign"}
-        ),
+        op_match_fn=lambda device, op: op.full_name == "copysign",
         name="unimplemented_masked_fill",
     ),
     XFailRule(

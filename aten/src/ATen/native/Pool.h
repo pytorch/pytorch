@@ -101,7 +101,8 @@ std::pair<T, T> _pooling_same_mode_padding_lr(
   }
 
   auto left = total_padding / 2;
-  return {left, total_padding - left};
+  auto right = total_padding - left;
+  return {std::move(left), std::move(right)};
 }
 
 inline std::pair<int64_t, int64_t> pooling_same_mode_padding_lr(

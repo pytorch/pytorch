@@ -50,6 +50,7 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     GRADCHECK_NONDET_TOL,
     gradgradcheck,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_LINUX,
@@ -58,6 +59,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     set_default_dtype,
+    skipIfRocmVersionAtLeast,
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
@@ -87,6 +89,7 @@ if TEST_SCIPY:
 
 
 class TestConvolutionNN(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -1181,6 +1184,8 @@ class TestConvolutionNN(NNTestCase):
 
 
 class TestConvolutionNNDeviceType(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipMPS
     @expectedFailureXPU
     def test_slow_conv_transpose3d_kernel_size_mismatch(self, device):
@@ -3299,6 +3304,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
 
+    @skipIfRocmVersionAtLeast([7, 14])
     @onlyAccelerator
     @largeTensorTest("12GB")
     @serialTest()
@@ -4015,6 +4021,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         and _get_cudnn_version() is not None
         and (91000 < _get_cudnn_version() < 91500)
     )
+    @expectedFailureMPS
     def test_depthwise_conv_64bit_indexing(self, device):
         x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
             memory_format=torch.channels_last
@@ -4097,6 +4104,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 class TestConvolutionNNCUDA(NNTestCase):
     """CUDA/cuDNN-specific convolution tests."""
 
+    hw_classification = HardwareClassification.CUDA
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 

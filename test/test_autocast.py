@@ -11,11 +11,18 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     onlyMPS,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
 class TestAutocastCPU(TestAutocast):
+    hw_classification = HardwareClassification.CPU
+
     def setUp(self):
         super().setUp()
         self.autocast_lists = AutocastCPUTestLists(torch.device("cpu"))
@@ -233,6 +240,8 @@ class WeightDTypeCastCounterMode(TorchDispatchMode):
 
 
 class TestAutocastDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyAccelerator
     def test_cast_cache_is_global(self, device):
         """
@@ -319,6 +328,8 @@ class TestAutocastDevice(TestCase):
 
 
 class TestTorchAutocast(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_autocast_fast_dtype(self):
         gpu_fast_dtype = torch.get_autocast_dtype(device_type="cuda")
         cpu_fast_dtype = torch.get_autocast_dtype(device_type="cpu")
@@ -351,6 +362,8 @@ class TestTorchAutocast(TestCase):
 
 
 class TestTorchAutocastDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_autocast_nograd_caching_issue_158232(self, device):
         dtype = torch.get_autocast_dtype(device_type=device)
         model = torch.nn.Linear(2, 2).to(device)

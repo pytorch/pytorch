@@ -106,9 +106,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TRIAGE_HOOK_DEBUG_LOG: /tmp/triage_hooks.log
+          TRIAGE_ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
         with:
           use_bedrock: "true"
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Allow pytorch-bot (opens the DISABLED-test issues) past the
+          # action's bot gate. Widen to "*" if other bots start opening issues.
+          allowed_bots: "pytorch-bot"
           claude_args: |
             --model global.anthropic.claude-sonnet-5
             --mcp-config /tmp/mcp-config/mcp-servers.json

@@ -947,6 +947,14 @@ class InputReader:
 #     works too" but this is delicate so we don't do it
 
 
+def _serialize_storage_nbytes(nbytes: int | torch.SymInt) -> str:
+    if isinstance(nbytes, torch.SymInt):
+        from torch.fx.experimental.symbolic_shapes import SymExprPrinter
+
+        return SymExprPrinter().doprint(nbytes.node.expr)
+    return repr(nbytes)
+
+
 class InputWriter:
     def __init__(self, save_dir: str | None, *, stable_hash: bool = False) -> None:
         self._lines: list[str] = []
@@ -1003,11 +1011,12 @@ class InputWriter:
         if _device_or_default(None) != device:
             maybe_device = f", device={device!r}"
         nbytes = untyped_storage.nbytes()
+        nbytes_source = _serialize_storage_nbytes(nbytes)
         storage_hash = None
         if self.store is not None and untyped_storage.device.type != "meta":
             storage_hash = self.store.write_storage(untyped_storage)
         self._lines.append(
-            f"{v} = reader.storage({storage_hash!r}, {nbytes!r}{maybe_device}{maybe_dtype_hint})"
+            f"{v} = reader.storage({storage_hash!r}, {nbytes_source}{maybe_device}{maybe_dtype_hint})"
         )
         self.seen_storages[ws] = v
         return v
@@ -1044,7 +1053,7 @@ class InputWriter:
             + f")  # {name}"
         )
 
-    def unsupported(self, name: str, arg: Any) -> None:
+    def unsupported(self, name: str, arg: object) -> None:
         # NB: Try hard not to /print/ a tensor, that will be very slow
         self._lines.append(
             f"reader.unsupported({name!r})  # unsupported type for dumping: {type(arg)}"
@@ -1070,7 +1079,7 @@ class InputWriter:
         )
 
     # TODO: this doesn't actually symint atm
-    def symint(self, name: str, val: Any) -> None:
+    def symint(self, name: str, val: object) -> None:
         if isinstance(val, torch.SymInt):
             expr_str = str(val.node.expr)
             hint = val.node.hint

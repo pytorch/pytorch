@@ -46,8 +46,10 @@ from torch.testing._internal.common_dtype import (
     integral_types,
 )
 from torch.testing._internal.common_methods_invocations import (
-    binary_ufuncs, op_db, foreach_unary_op_db, foreach_binary_op_db,
-    foreach_pointwise_op_db, foreach_reduce_op_db, foreach_other_op_db)
+    binary_ufuncs,
+    foreach_op_db,
+    op_db,
+)
 from torch.testing._internal.opinfo.core import S, SampleInput
 from torchgen.yaml_utils import YamlLoader
 from torchgen.model import OperatorName
@@ -80,15 +82,6 @@ u8 = torch.uint8
 u16 = torch.uint16
 u32 = torch.uint32
 u64 = torch.uint64
-
-foreach_op_db = (
-    foreach_unary_op_db +
-    foreach_binary_op_db +
-    foreach_pointwise_op_db +
-    foreach_reduce_op_db +
-    foreach_other_op_db
-)
-
 
 class TestMetaConverter(TestCase):
     def assertSameVersionCounter(self, m1, m2):
@@ -1761,6 +1754,18 @@ class TestMeta(TestCase):
                 self._norm_backwards_test_helper(torch.ops.aten.native_group_norm_backward,
                                                  args, output_mask, expected_shapes)
 
+    def test_group_norm_channels_last(self):
+        input = torch.empty((2, 32, 8, 8), device="meta").contiguous(
+            memory_format=torch.channels_last
+        )
+        output, mean, rstd = torch.native_group_norm(input, None, None, 2, 32, 64, 4, 1e-5)
+        self.assertTrue(output.is_contiguous(memory_format=torch.channels_last))
+
+        grad_input, _, _ = torch.ops.aten.native_group_norm_backward(
+            torch.empty_like(output), input, mean, rstd, None, 2, 32, 64, 4, (True, False, False)
+        )
+        self.assertTrue(grad_input.is_contiguous(memory_format=torch.channels_last))
+
     @onlyCPU
     @parametrize("output_mask", list(itertools.product([True], [True, False], [True, False])))
     def test_batch_norm_backward(self, output_mask):
@@ -2202,6 +2207,32 @@ class TestMeta(TestCase):
         self.assertEqual(cpu_output_dtype, meta_output_dtype)
         self.assertEqual(cpu_logsumexp_dtype, meta_logsumexp_dtype)
 
+    def test_flash_attention_mixed_head_dim_metadata(self):
+        q_bshd = torch.empty(1, 128, 2, 192, device="meta", dtype=torch.float16)
+        k_bshd = torch.empty_like(q_bshd)
+        v_bshd = torch.empty(1, 128, 2, 128, device="meta", dtype=torch.float16)
+        q, k, v = (tensor.transpose(1, 2) for tensor in (q_bshd, k_bshd, v_bshd))
+
+        output = torch.ops.aten._scaled_dot_product_flash_attention(q, k, v)[0]
+        self.assertEqual(output.shape, v.shape)
+        self.assertEqual(output.stride(), v.stride())
+
+        expanded_q = q[:1, :1].expand(2, 4, -1, -1)
+        expanded_k = k[:1, :1].expand(2, 4, -1, -1)
+        expanded_v = v[:1, :1].expand(2, 4, -1, -1)
+        output = torch.ops.aten._scaled_dot_product_flash_attention(
+            expanded_q, expanded_k, expanded_v
+        )[0]
+        self.assertEqual(output.shape, expanded_v.shape)
+        self.assertEqual(output.stride(), (16384, 32768, 128, 1))
+
+        output = torch.ops.aten._flash_attention_forward(
+            q_bshd, k_bshd, v_bshd, None, None, 128, 128, 0.0, False, False
+        )[0]
+        self.assertEqual(output.shape, v_bshd.shape)
+        self.assertEqual(output.stride(), v_bshd.stride())
+
+
 class TestMetaKernelConv(TestCase):
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_convolution_backward_meta_kernel_channels_last(self):
@@ -2266,6 +2297,52 @@ class TestMetaKernelRegistrations(TestCase):
             torch.ops.aten.aminmax.out(
                 inp, dim=-1, keepdim=False, min=out_min, max=out_max
             )
+
+    def test_grid_sampler_2d_cpu_fallback_meta(self):
+        # The meta kernels' whole contract is output metadata, so compare
+        # shape/stride/dtype against eager for the forward and both backward
+        # outputs. Covers contiguous, channels_last and non-contiguous inputs.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def check(inp, grid):
+            expected = torch._grid_sampler_2d_cpu_fallback(inp, grid, 0, 0, True)
+            grad_out = torch.randn_like(expected)
+            bwd = torch.ops.aten._grid_sampler_2d_cpu_fallback_backward
+            exp_gi, exp_gg = bwd(grad_out, inp, grid, 0, 0, True)
+            with FakeTensorMode() as mode:
+                f_inp, f_grid = mode.from_tensor(inp), mode.from_tensor(grid)
+                f_out = torch._grid_sampler_2d_cpu_fallback(f_inp, f_grid, 0, 0, True)
+                f_gi, f_gg = bwd(
+                    mode.from_tensor(grad_out), f_inp, f_grid, 0, 0, True
+                )
+            for fake, real in ((f_out, expected), (f_gi, exp_gi), (f_gg, exp_gg)):
+                self.assertEqual(fake.shape, real.shape)
+                self.assertEqual(fake.stride(), real.stride())
+                self.assertEqual(fake.dtype, real.dtype)
+
+        inp = torch.randn(2, 3, 4, 5)
+        grid = torch.rand(2, 6, 7, 2) * 2 - 1
+        check(inp, grid)
+        check(inp.contiguous(memory_format=torch.channels_last), grid)
+        check(inp.transpose(2, 3).contiguous().transpose(2, 3), grid)
+
+        # The C++ impls run check_grid_sampler_common/_2d themselves, so the
+        # metas must reject the same inputs rather than silently returning a
+        # shape eager would refuse to compute. Use 5D input and grid: the last
+        # grid dim still equals input.ndim - 2, so check_grid_sampler_common
+        # passes and only check_grid_sampler_2d can reject it.
+        bad_inp, bad_grid = torch.randn(2, 3, 4, 5, 6), torch.rand(2, 6, 7, 8, 3)
+        bwd = torch.ops.aten._grid_sampler_2d_cpu_fallback_backward
+        msg = "expected 4D input"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch._grid_sampler_2d_cpu_fallback(bad_inp, bad_grid, 0, 0, True)
+        with FakeTensorMode() as mode:
+            f_inp, f_grid = mode.from_tensor(bad_inp), mode.from_tensor(bad_grid)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch._grid_sampler_2d_cpu_fallback(f_inp, f_grid, 0, 0, True)
+            # the backward meta runs the same checks
+            with self.assertRaisesRegex(RuntimeError, msg):
+                bwd(mode.from_tensor(torch.randn(2, 3, 6, 7)), f_inp, f_grid, 0, 0, True)
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_make_dep_token(self):

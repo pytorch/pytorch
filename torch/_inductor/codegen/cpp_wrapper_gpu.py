@@ -227,7 +227,7 @@ class _LazyTritonCompileKickoffLine(DeferredLineBase):
     def __call__(self) -> str | None:
         return self.line if self.lazy_kernel_names else None
 
-    def _new_line(self, line: str) -> Self:
+    def _new_line(self, line: str) -> _LazyTritonCompileKickoffLine:
         return _LazyTritonCompileKickoffLine(self.lazy_kernel_names, line)
 
 
@@ -1145,6 +1145,13 @@ class CppWrapperGpu(CppWrapperCpu):
             # For a dual-wrapper-mode const graph, only the standalone JIT
             # output needs this header content. The AOTI const body is spliced
             # into the main AOTI source, which has its own kernel driver.
+            # super().write_header() early-returns for const graphs before it
+            # can call add_device_include, so emit the JIT device include here;
+            # otherwise the kernel driver's CUfunction/CUmodule/uint32_t types
+            # have no declaring header and fail to compile under -nostdinc.
+            for device in V.graph.device_types:
+                if device != "meta":
+                    self.header.splice_jit(self.get_device_include_path_jit(device))
             self.header.splice_jit(kernel_driver)
         else:
             self.header.splice(kernel_driver)
@@ -1189,6 +1196,12 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def _ensure_aoti_stream_helpers_emitted(self) -> None:
         if self._aoti_stream_helpers_emitted:
+            return
+        # The stream/event helpers in streams.h are CUDA-specific (cudaEvent_t,
+        # cudaStream_t, cudaEventRecord, ...). Guarding here on the device type
+        # prevents the CUDA-only symbols from being emitted into XPU generated
+        # code, where SYCL in-order queues handle event ordering implicitly.
+        if self.device == "xpu":
             return
         self._aoti_stream_helpers_emitted = True
         with open(
@@ -1264,6 +1277,8 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def _emit_stream_op_inline(self, kernel_name: str | None, args: list[str]) -> bool:
         if kernel_name is None or not V.graph.aot_mode:
+            return False
+        if self.device == "xpu":
             return False
         if kernel_name in AOTI_UNSUPPORTED_STREAM_OP_REASONS:
             raise NotImplementedError(
