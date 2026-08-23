@@ -3,6 +3,7 @@
 """End-to-end nested-reduction behavior and kernel-form tests."""
 
 import re
+from collections.abc import Callable
 
 import torch
 import torch._inductor.config as inductor_config
@@ -2643,7 +2644,7 @@ class _InternalsBase:
         num_deallocs: int | None = None,
         min_xblock: int | None = None,
         min_rblock: int | None = None,
-        extra_checks: FileCheck | None = None,
+        extra_checks: FileCheck | Callable[[str], None] | None = None,
     ) -> None:
         wrapper_code, kernel_code = capture(
             *capture_args,
@@ -2676,7 +2677,10 @@ class _InternalsBase:
             min_rblock=min_rblock,
         )
         if extra_checks is not None:
-            extra_checks.run(kernel_code)
+            if callable(extra_checks):
+                extra_checks(kernel_code)
+            else:
+                extra_checks.run(kernel_code)
 
     def test_layernorm_block_amax_kernel_form(self):
         self.assert_single_kernel_form(
@@ -2868,15 +2872,15 @@ class _InternalsBase:
             )
         else:
             # Non-SM100 devices (XPU, older CUDA, ROCm, CPU) use the software
-            # fallback: assert the mantissa mask (0x7FFFFF = 8388607) is emitted
-            # and the PTX instruction is absent. check_count(x, 0, exactly=True)
-            # expands to a single CHECK_NOT over the rest of the kernel, unlike
-            # check_not(...).check(...), which only asserts absence in the prefix
-            # up to the "8388607" match (a cvt.rp.satfinite emitted afterwards
-            # would go undetected).
-            extra_checks = FileCheck().check("8388607").check_count(
-                "cvt.rp.satfinite", 0, exactly=True
-            )
+            # fallback: assert the PTX instruction is absent across the whole
+            # kernel and the mantissa mask (0x7FFFFF = 8388607) is emitted.
+            # A FileCheck().check_not(...).check(...) would only assert absence
+            # in the prefix up to the next match (a cvt.rp.satfinite emitted
+            # after the mask would go undetected), so use a callable for a
+            # whole-source assertNotIn.
+            def extra_checks(kernel_code):
+                self.assertNotIn("cvt.rp.satfinite", kernel_code)
+                self.assertIn("8388607", kernel_code)
         self.assert_single_kernel_form(
             _capture_rmsnorm_mxfp8_scale_swizzle_sources,
             128,
