@@ -77,7 +77,8 @@ def _current_compile_id() -> Any:
 
 class _DrainResult(Enum):
     DRAINED = 0
-    SHUTDOWN_REQUESTED = 1
+    QUIESCE_CANCELLED = 1
+    SHUTDOWN_REQUESTED = 2
 
 
 def _pack_msg(msg_header: MsgHeader, job_id: int, length: int) -> bytes:
@@ -694,7 +695,7 @@ class SubprocMain:
         if self.pool is None:
             return _DrainResult.DRAINED
         drain_result = self._drain_inflight_until_shutdown()
-        if drain_result == _DrainResult.SHUTDOWN_REQUESTED:
+        if drain_result != _DrainResult.DRAINED:
             return drain_result
         self._shutdown_pool(terminate_workers=False)
         return _DrainResult.DRAINED
@@ -708,8 +709,8 @@ class SubprocMain:
                     if not self._inflight:
                         return _DrainResult.DRAINED
 
-                # Preserve quiesce ordering, but allow final shutdown to preempt
-                # long-running compiler work instead of waiting behind QUIESCE.
+                # Preserve quiesce ordering, but continue servicing control
+                # messages while waiting for the current work to finish.
                 if not selector.select(timeout=0.05):
                     continue
 
@@ -717,7 +718,19 @@ class SubprocMain:
                 if msg_header in (MsgHeader.SHUTDOWN, MsgHeader.ERROR):
                     self._shutdown()
                     return _DrainResult.SHUTDOWN_REQUESTED
-                self.deferred_messages.append((msg_header, job_id, data))
+                if msg_header == MsgHeader.QUIESCE:
+                    # A repeated request is already satisfied by this drain. Do
+                    # not defer it ahead of later work, since that would restart
+                    # quiescing before the work could cancel this request.
+                    continue
+                if msg_header in (MsgHeader.JOB, MsgHeader.WAKEUP):
+                    # New work makes this quiesce obsolete. Keep the current pool
+                    # alive so the work is not serialized behind a slow compile,
+                    # while still avoiding a second pool with overlapping work.
+                    self.deferred_messages.append((msg_header, job_id, data))
+                    return _DrainResult.QUIESCE_CANCELLED
+                self._shutdown()
+                return _DrainResult.SHUTDOWN_REQUESTED
 
     def _shutdown(self) -> None:
         self._watchdog_stop.set()
@@ -753,10 +766,13 @@ class SubprocMain:
         # Clock starts before _start_pool/_warm_process_pool, so the first job's
         # reported elapsed intentionally includes cold pool creation and the fork
         # of the workers -- that wait is real and worth surfacing.
+        if not self.running:
+            return
         with self._inflight_lock:
             self._inflight[job_id] = time.monotonic()
         for _ in range(_BROKEN_POOL_MAX_SUBMIT_ATTEMPTS):
             if not self.running:
+                self._remove_inflight(job_id)
                 return
             try:
                 self._submit_inner(job_id, data)
@@ -833,10 +849,15 @@ class SubprocMain:
                 pass
             return MsgHeader.JOB_ERROR, b""
 
+    def _remove_inflight(self, job_id: int) -> None:
+        with self._inflight_lock:
+            self._inflight.pop(job_id, None)
+
     def _send_result(self, job_id: int, msg_header: MsgHeader, payload: bytes) -> None:
         try:
             with self.write_lock:
                 if not self.running:
+                    self._remove_inflight(job_id)
                     return
                 _send_msg(self.write_pipe, msg_header, job_id, payload)
         except BaseException:
@@ -847,8 +868,7 @@ class SubprocMain:
             finally:
                 _exit_sidecar()
             return
-        with self._inflight_lock:
-            self._inflight.pop(job_id, None)
+        self._remove_inflight(job_id)
 
     def _submit_inner(self, job_id: int, data: bytes) -> None:
         def callback(fut: Future[Any]) -> None:
@@ -857,6 +877,7 @@ class SubprocMain:
             # here leaves the parent's future pending forever with nothing sent
             # and nothing logged on the parent side.
             if not self.running:
+                self._remove_inflight(job_id)
                 return
             try:
                 msg_header, payload = self._result_payload(job_id, fut)

@@ -14,7 +14,7 @@ import unittest
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from concurrent.futures.process import BrokenProcessPool
 from threading import Event
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
@@ -50,6 +50,7 @@ def _wait_for_path(path, timeout):
     return True
 
 
+@instantiate_parametrized_tests
 class TestSubprocControlPipe(TestCase):
     def test_recv_msg_reassembles_short_reads(self):
         class OneByteReader(io.BytesIO):
@@ -113,6 +114,83 @@ class TestSubprocControlPipe(TestCase):
                 main._drain_inflight_until_shutdown(),
                 _DrainResult.SHUTDOWN_REQUESTED,
             )
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    @parametrize(
+        "msg_header,job_id,data",
+        [
+            subtest((MsgHeader.WAKEUP, -1, b""), name="wakeup"),
+            subtest((MsgHeader.JOB, 11, b"payload"), name="job"),
+        ],
+    )
+    def test_new_work_cancels_repeated_quiesce(self, msg_header, job_id, data):
+        read_fd, write_fd = os.pipe()
+        with os.fdopen(read_fd, "rb", buffering=0) as read_pipe:
+            with os.fdopen(write_fd, "wb", buffering=0) as command_pipe:
+                _send_msg(command_pipe, MsgHeader.QUIESCE)
+                _send_msg(command_pipe, MsgHeader.QUIESCE)
+                _send_msg(command_pipe, msg_header, job_id, data)
+                # Backstop for implementations that keep draining after
+                # receiving new work instead of cancelling the quiesce.
+                _send_msg(command_pipe, MsgHeader.SHUTDOWN)
+
+            main = SubprocMain(
+                SubprocPickler(),
+                SubprocKind.FORK,
+                1,
+                read_pipe,
+                io.BytesIO(),
+            )
+            pool = object()
+            main.pool = pool  # type: ignore[assignment]
+            with main._inflight_lock:
+                main._inflight[7] = time.monotonic()
+
+            with patch.object(main, "_shutdown") as shutdown:
+                self.assertEqual(main._quiesce(), _DrainResult.QUIESCE_CANCELLED)
+
+            shutdown.assert_not_called()
+            self.assertIs(main.pool, pool)
+            self.assertEqual(main._next_msg(), (msg_header, job_id, data))
+            self.assertEqual(_recv_msg(read_pipe)[0], MsgHeader.SHUTDOWN)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_completed_quiesce_waits_for_pool_shutdown(self):
+        read_fd, write_fd = os.pipe()
+        with os.fdopen(read_fd, "rb", buffering=0) as read_pipe:
+            with os.fdopen(write_fd, "wb", buffering=0):
+                main = SubprocMain(
+                    SubprocPickler(),
+                    SubprocKind.FORK,
+                    1,
+                    read_pipe,
+                    io.BytesIO(),
+                )
+                pool = Mock()
+                finalizer = Mock()
+                main.pool = pool
+                main.pool_finalizer = finalizer
+
+                self.assertEqual(main._quiesce(), _DrainResult.DRAINED)
+
+                pool.shutdown.assert_called_once_with(wait=True)
+                finalizer.cancel.assert_called_once_with()
+                self.assertIsNone(main.pool)
+
+    def test_stopped_main_does_not_keep_inflight_entries(self):
+        main = SubprocMain(
+            SubprocPickler(), SubprocKind.FORK, 1, io.BytesIO(), io.BytesIO()
+        )
+        main.running = False
+
+        main.submit(7, b"")
+        with main._inflight_lock:
+            self.assertNotIn(7, main._inflight)
+            main._inflight[8] = time.monotonic()
+
+        main._send_result(8, MsgHeader.JOB, b"")
+        with main._inflight_lock:
+            self.assertNotIn(8, main._inflight)
 
 
 class TestCompileWorker(TestCase):
@@ -478,7 +556,7 @@ class TestCompileWorker(TestCase):
 
 class TestCompileWorkerQuiesceOrdering(TestCase):
     @skipIfWindows(msg="pass_fds not supported on Windows.")
-    def test_quiesce_drains_inflight_work_before_wakeup(self):
+    def test_new_work_cancels_quiesce(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             started_path = os.path.join(tmpdir, "started")
             release_path = os.path.join(tmpdir, "release")
@@ -513,6 +591,7 @@ class TestCompileWorkerQuiesceOrdering(TestCase):
                 self.assertTrue(_wait_for_path(started_path, 60.0))
 
                 pool.quiesce()
+                pool.quiesce()
                 pool.wakeup()
                 fast = pool.submit(
                     subprocess.call,
@@ -524,7 +603,7 @@ class TestCompileWorkerQuiesceOrdering(TestCase):
                     ],
                 )
 
-                self.assertEqual(slow.result(timeout=60.0), 1)
+                self.assertEqual(slow.result(timeout=60.0), 0)
                 self.assertEqual(fast.result(timeout=60.0), 0)
             finally:
                 pool.shutdown()
