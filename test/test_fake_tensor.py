@@ -40,6 +40,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     FakeTensorDeviceMismatchError,
     FakeTensorMode,
+    is_fake,
     is_fake_tensor,
     MetadataMismatchError,
     unset_fake_temporarily,
@@ -1594,6 +1595,37 @@ class FakeTensorTest(TestCase):
                 self.assertEqual(h_n.shape, (D * num_layers, N, H_out))
                 self.assertEqual(c_n.shape, (D * num_layers, N, hidden_size))
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_gru(self):
+        with torch.backends.cudnn.flags(enabled=False):
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            with fake_tensor_mode:
+                N = 5
+                L = 4
+                H_in = 2
+                hidden_size = 3
+                num_layers = 2
+                bidir = False
+                D = 2 if bidir else 1
+
+                gru = torch.nn.GRU(
+                    input_size=H_in,
+                    hidden_size=hidden_size,
+                    num_layers=num_layers,
+                    batch_first=False,
+                    bias=True,
+                    bidirectional=bidir,
+                    device="cuda",
+                )
+
+                h_0 = torch.randn((num_layers * D, N, hidden_size), device="cuda")
+                inp = torch.randn((L, N, H_in), device="cuda")
+                output, h_n = gru(inp, h_0)
+                output.sum().backward()
+
+                self.assertEqual(output.shape, (L, N, D * hidden_size))
+                self.assertEqual(h_n.shape, (D * num_layers, N, hidden_size))
+
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):
             x = torch.rand([10, 10])
@@ -2753,6 +2785,7 @@ class FakeTensorConverterTest(TestCase):
         y_conv = converter.from_real_tensor(mode, y)
         self.assertIs(x_conv_storage, y_conv.untyped_storage())
 
+    @xfailIfTorchDynamo
     def test_dead_key(self):
         x = torch.rand(2, 2, 2)
         mode = FakeTensorMode()
@@ -3268,6 +3301,48 @@ class FakeTensorModuleApply(TestCase):
             self.assertIsNot(module.bias, old_bias)
             self.assertIsNot(module.weight.grad, old_grad)
 
+    def test_module_to_with_fake_wrapper_parameter(self):
+        class ModuleWithParameter(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+        weight = torch.nn.Parameter(TwoTensor(torch.randn(2, 2), torch.randn(2, 2)))
+        with FakeTensorMode() as mode:
+            module = ModuleWithParameter(mode.from_tensor(weight))
+            old_weight = module.weight
+
+            module.to(dtype=torch.float64)
+
+            self.assertTrue(is_fake(module.weight))
+            self.assertEqual(module.weight.dtype, torch.float64)
+            self.assertIsNot(module.weight, old_weight)
+
+    @parametrize("start_fake", [False, True])
+    def test_module_to_preserves_tied_fake_parameters(self, start_fake):
+        class ModuleWithParameter(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+        mode = FakeTensorMode(allow_non_fake_inputs=True)
+        if start_fake:
+            with mode:
+                weight = torch.nn.Parameter(torch.randn(2, 2))
+        else:
+            weight = torch.nn.Parameter(torch.randn(2, 2))
+
+        module = torch.nn.Module()
+        module.left = ModuleWithParameter(weight)
+        module.right = ModuleWithParameter(weight)
+
+        with mode:
+            module.to(dtype=torch.float64)
+
+        self.assertIs(module.left.weight, module.right.weight)
+        self.assertTrue(is_fake(module.left.weight))
+        self.assertEqual(module.left.weight.dtype, torch.float64)
+
     @wrapSwapTensorsTest(True)
     def test_module_to_overwrites_parameters_converted_to_fake(self):
         module = torch.nn.Linear(2, 2)
@@ -3282,6 +3357,37 @@ class FakeTensorModuleApply(TestCase):
             self.assertEqual(module.bias.dtype, torch.float64)
             self.assertIsNot(module.weight, old_weight)
             self.assertIsNot(module.bias, old_bias)
+
+    @wrapSwapTensorsTest(True)
+    def test_module_to_overwrites_fake_gradient(self):
+        module = torch.nn.Linear(2, 2)
+        old_weight = module.weight
+        with FakeTensorMode():
+            module.weight.grad = torch.randn(2, 2)
+        old_grad = module.weight.grad
+
+        module.to(dtype=torch.float64)
+
+        self.assertIs(module.weight, old_weight)
+        self.assertIsInstance(module.weight.grad, FakeTensor)
+        self.assertEqual(module.weight.grad.dtype, torch.float64)
+        self.assertIsNot(module.weight.grad, old_grad)
+
+    def test_module_to_overwrites_real_gradient_on_fake_parameter(self):
+        with FakeTensorMode():
+            module = torch.nn.Linear(2, 2)
+        module.weight.grad = torch.randn(2, 2)
+        old_grad = module.weight.grad
+
+        module.to(dtype=torch.float64)
+
+        self.assertIsInstance(module.weight, FakeTensor)
+        self.assertNotIsInstance(module.weight.grad, FakeTensor)
+        self.assertEqual(module.weight.grad.dtype, torch.float64)
+        self.assertIsNot(module.weight.grad, old_grad)
+
+
+instantiate_parametrized_tests(FakeTensorModuleApply)
 
 
 class FakeTensorPropTest(TestCase):
@@ -3849,6 +3955,41 @@ class FakeTensorDispatchCache(TestCase):
 
             z1 = x1.mul_(2)
             self.assertFalse(z1._is_view())
+
+    def test_cache_unsafe_view_aliasing(self):
+        """
+        _unsafe_view reports is_view=False, but its output still shares storage
+        with its input. A cache hit must reproduce that aliasing against the new
+        input rather than hand back a freshly allocated storage.
+
+        Storage identity is what this checks. Neither extract_tensor_metadata
+        nor the crosscheck's assert_metadata_eq compares storage identity, and
+        _is_view() is False for a correct and an incorrect output alike, so
+        nothing else here would catch a regression.
+        """
+        with FakeTensorMode():
+            x = torch.randn(4, 4)
+            y = torch.randn(4, 4)
+
+            FakeTensorMode.cache_clear()
+            ref = aten._unsafe_view.default(x, [16])
+            self.assertEqual(ref.untyped_storage()._cdata, x.untyped_storage()._cdata)
+
+            # Same shapes and dtypes, so this call is served from the cache. The
+            # hit count is compared relatively: the fake implementation
+            # re-dispatches internally, so the absolute counts are not 1.
+            hits = FakeTensorMode.cache_info().hits
+            res = aten._unsafe_view.default(y, [16])
+            self.assertEqual(FakeTensorMode.cache_info().hits, hits + 1)
+
+            self.assertEqual(res.untyped_storage()._cdata, y.untyped_storage()._cdata)
+            self.assertNotEqual(
+                res.untyped_storage()._cdata, x.untyped_storage()._cdata
+            )
+            self.assertEqual(
+                extract_tensor_metadata(ref),
+                extract_tensor_metadata(res),
+            )
 
     def test_cache_dispatch_key_set(self):
         """

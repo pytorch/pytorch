@@ -11,7 +11,7 @@ from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import Self
 
 import torch
-from torch import device, dtype, Tensor
+from torch import device, dtype, memory_format, Tensor
 from torch._prims_common import DeviceLikeType
 from torch.nn.parameter import Buffer, Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -108,6 +108,23 @@ class _WrappedHook:
                     "You are trying to revive the hook of a dead Module!"
                 )
             self.module = weakref.ref(state["module"])
+
+
+class _ModuleApplyFn:
+    """Carry conversion state through recursive ``Module._apply`` calls.
+
+    ``Module._apply`` passes the same callable through child module overrides, so
+    this wrapper lets every base implementation reuse the replacement created for
+    a tied fake parameter. The wrapper and its memo live for one top-level
+    conversion and are discarded when that conversion returns.
+    """
+
+    def __init__(self, fn: Callable[[Tensor], Tensor]) -> None:
+        self.fn = fn
+        self.fake_parameter_memo: dict[int, tuple[Parameter, Parameter]] = {}
+
+    def __call__(self, tensor: Tensor) -> Tensor:
+        return self.fn(tensor)
 
 
 r"""This tracks hooks common to all modules that are executed before/after
@@ -928,6 +945,9 @@ class Module:
         )
 
     def _apply(self, fn, recurse=True):
+        if not isinstance(fn, _ModuleApplyFn):
+            fn = _ModuleApplyFn(fn)
+
         if recurse:
             for module in self.children():
                 module._apply(fn)
@@ -936,18 +956,24 @@ class Module:
         # is in dynamo's MOD_SKIPLIST, revisit later for c++
         from torch._subclasses.fake_tensor import FakeTensor
 
-        def has_fake_tensor(tensor, tensor_applied) -> bool:
-            return (
-                isinstance(tensor, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-                or isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
-                    tensor_applied, FakeTensor
+        def contains_fake_tensor(tensor) -> bool:
+            if isinstance(tensor, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+                return True
+            if is_traceable_wrapper_subclass(tensor):
+                attrs, _ = tensor.__tensor_flatten__()
+                return any(
+                    contains_fake_tensor(getattr(tensor, attr)) for attr in attrs
                 )
-            )
+            return False
 
-        def compute_should_use_set_data(tensor, tensor_applied) -> bool:
-            if torch._has_compatible_shallow_copy_type(
-                tensor, tensor_applied
-            ) and not has_fake_tensor(tensor, tensor_applied):
+        def has_fake_tensor(tensor, tensor_applied) -> bool:
+            return contains_fake_tensor(tensor) or contains_fake_tensor(tensor_applied)
+
+        def compute_should_use_set_data(tensor, tensor_applied, has_fake) -> bool:
+            if (
+                torch._has_compatible_shallow_copy_type(tensor, tensor_applied)
+                and not has_fake
+            ):
                 # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
                 # and the future behavior is to overwrite the existing tensor. However,
@@ -967,17 +993,28 @@ class Module:
         for key, param in self._parameters.items():
             if param is None:
                 continue
+            if (memoized := fn.fake_parameter_memo.get(id(param))) is not None:
+                memoized_param, replacement = memoized
+                if memoized_param is not param:
+                    raise AssertionError(
+                        "parameter memo contained an unexpected tensor"
+                    )
+                self._parameters[key] = replacement
+                continue
             # Tensors stored in modules are graph leaves, and we don't want to
             # track autograd history of `param_applied`, so we have to use
             # `with torch.no_grad():`
             with torch.no_grad():
                 param_applied = fn(param)
-            p_should_use_set_data = compute_should_use_set_data(param, param_applied)
+            p_has_fake_tensor = has_fake_tensor(param, param_applied)
+            p_should_use_set_data = compute_should_use_set_data(
+                param, param_applied, p_has_fake_tensor
+            )
 
             # Some subclasses need swap_tensors because they may have multiple
             # child tensors. FakeTensorMode memoizes tensors with weakrefs, so
             # fake tensors must use the overwrite path instead.
-            p_should_use_swap_tensors = not has_fake_tensor(param, param_applied) and (
+            p_should_use_swap_tensors = not p_has_fake_tensor and (
                 should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
             )
 
@@ -1012,14 +1049,20 @@ class Module:
 
                 out_param = Parameter(param_applied, param.requires_grad)
                 self._parameters[key] = out_param
+                if p_has_fake_tensor:
+                    fn.fake_parameter_memo[id(param)] = (param, out_param)
 
             if param_grad is not None:
                 with torch.no_grad():
                     grad_applied = fn(param_grad)
+                g_has_fake_tensor = has_fake_tensor(param_grad, grad_applied)
                 g_should_use_set_data = compute_should_use_set_data(
-                    param_grad, grad_applied
+                    param_grad, grad_applied, g_has_fake_tensor
                 )
-                if p_should_use_swap_tensors:
+                g_should_use_swap_tensors = (
+                    p_should_use_swap_tensors and not g_has_fake_tensor
+                )
+                if g_should_use_swap_tensors:
                     grad_applied.requires_grad_(param_grad.requires_grad)
                     try:
                         torch.utils.swap_tensors(param_grad, grad_applied)
@@ -1028,9 +1071,7 @@ class Module:
                             f"_apply(): Couldn't swap {self._get_name()}.{key}.grad"
                         ) from e
                     out_param.grad = param_grad
-                elif g_should_use_set_data:
-                    if out_param.grad is None:
-                        raise AssertionError("out_param.grad must not be None")
+                elif g_should_use_set_data and out_param.grad is not None:
                     out_param.grad.data = grad_applied
                 else:
                     if not param_grad.is_leaf:
@@ -1261,6 +1302,9 @@ class Module:
     @overload
     def to(self, tensor: Tensor, non_blocking: bool = ...) -> Self: ...
 
+    @overload
+    def to(self, memory_format: memory_format) -> Self: ...
+
     def to(self, *args, **kwargs):
         r"""Move and/or cast the parameters and buffers.
 
@@ -1382,10 +1426,14 @@ class Module:
                     non_blocking,
                 )
             except NotImplementedError as e:
-                if str(e) == "Cannot copy out of meta tensor; no data!":
+                message = str(e)
+                base_message = "Cannot copy out of meta tensor; no data!"
+                if message.startswith(base_message):
+                    diagnostic_suffix = message[len(base_message) :]
                     raise NotImplementedError(
-                        f"{e} Please use torch.nn.Module.to_empty() instead of torch.nn.Module.to() "
-                        f"when moving module from meta to a different device."
+                        f"{base_message} Please use torch.nn.Module.to_empty() instead of "
+                        f"torch.nn.Module.to() when moving module from meta to a different device."
+                        f"{diagnostic_suffix}"
                     ) from None
                 else:
                     raise
