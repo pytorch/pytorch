@@ -533,6 +533,23 @@ class TestCudagraphFqnAnnotations(TestCase):
             print(f"  annotation: {s!r}")
         self.assertTrue(all_strs, "expected non-empty annotations")
 
+        # Verify no annotation spans FQNs from two different layer indices.
+        # Cross-layer bleed is the specific regression this fix prevents.
+        import re as _re
+
+        for s in all_strs:
+            layer_indices = {
+                m.group(1)
+                for part in s.split(" + ")
+                for m in [_re.search(r"L\.layers\.(\d+)", part)]
+                if m
+            }
+            self.assertLessEqual(
+                len(layer_indices),
+                1,
+                f"annotation spans multiple layers (cross-layer bleed): {s!r}",
+            )
+
 
 class TestGraphViewHelpers(TestCase):
     """Unit tests for _clean_stack_name and _strip_instance_suffix."""
