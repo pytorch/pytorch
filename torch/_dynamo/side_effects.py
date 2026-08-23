@@ -1710,9 +1710,22 @@ def _codegen_cell_mutation(ctx: SideEffectReplayContext) -> None:
     # Emit more readable and performant bytecode.
     # TODO generalize this for cells created during inlining.
     if var in ctx.side_effects.store_attr_mutations:
-        contents_var = ctx.side_effects.load_cell(var)
-        cg(contents_var)
-        ctx.suffixes.append([cg.create_store_deref(var.local_name)])
+        contents_var = ctx.side_effects.load_attr(var, "cell_contents", deleted_ok=True)
+        if isinstance(contents_var, variables.DeletedVariable):
+            # DELETE_DEREF on an already-empty cell raises NameError, and the
+            # real cell may be empty at replay time (e.g. a fresh MAKE_CELL
+            # cell whose store happened only in the traced region), so store a
+            # dummy value first to make the delete unconditional.
+            ctx.suffixes.append(
+                [
+                    create_instruction("LOAD_CONST", argval=None),
+                    cg.create_store_deref(var.local_name),
+                    create_instruction("DELETE_DEREF", argval=var.local_name),
+                ]
+            )
+        else:
+            cg(contents_var)
+            ctx.suffixes.append([cg.create_store_deref(var.local_name)])
         ctx.log(var)
 
 
@@ -1939,7 +1952,20 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             ctx.suffixes.append([create_instruction("STORE_GLOBAL", argval=name)])
             side_effect_occurred = True
         elif isinstance(value, variables.DeletedVariable):
-            if (
+            if isinstance(var, variables.CellVariable):
+                # Cells created during inlining (no local_name) are rebuilt via
+                # make_cell(), which leaves None in the cell; existing cells
+                # keep their pre-graph contents. Replay the DELETE_DEREF by
+                # emptying the cell so later reads raise NameError.
+                cg.add_push_null(
+                    lambda: cg.load_import_from(utils.__name__, "clear_cell")
+                )
+                cg(var.source)  # type: ignore[attr-defined]
+                ctx.suffixes.append(
+                    [*create_call_function(1, False), create_instruction("POP_TOP")]
+                )
+                side_effect_occurred = True
+            elif (
                 isinstance(var, variables.UserDefinedObjectVariable)
                 and mutation_kind is AttrMutationKind.INSTANCE_DICT
             ):
@@ -2017,13 +2043,18 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
 
 @register_side_effect_replay_handler(
     name="list_iterator_mutation",
-    matcher=lambda ctx: isinstance(ctx.var, variables.ListIteratorVariable),
+    # Lazy: builder imports side_effects while variables/ is still initializing.
+    matcher=lambda ctx: isinstance(
+        ctx.var, (variables.ListIteratorVariable, variables.TupleIteratorVariable)
+    ),
     priority=30,
 )
 def _codegen_list_iterator_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
-    if not isinstance(var, variables.ListIteratorVariable):
+    if not isinstance(
+        var, (variables.ListIteratorVariable, variables.TupleIteratorVariable)
+    ):
         raise AssertionError(type(var))
     for _ in range(var.index):
         cg.add_push_null(lambda: cg.load_import_from(utils.__name__, "iter_next"))
