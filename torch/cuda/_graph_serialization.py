@@ -47,6 +47,7 @@ on expandable segments (cuBLASLt is fine).
 
 from __future__ import annotations
 
+import bisect
 import ctypes
 import json
 import warnings
@@ -715,3 +716,341 @@ def save_hook(
         save(cuda_graph, path, tensors=tensors() if tensors else None, save_fn=save_fn)
 
     return _hook
+
+
+class RestoredCUDAGraph:
+    """A graph rebuilt by :func:`load`, replayable but not a :class:`CUDAGraph`.
+
+    ``CUDAGraph`` owns its ``cudaGraph_t`` in C++ and there is no way to hand it an
+    externally built one, so a restored graph cannot be presented as one without a
+    C++ addition. This exposes the part that matters -- :meth:`replay` -- and owns
+    everything the graph's nodes point at: the loaded libraries (unloading one
+    would invalidate its kernels), the recreated events, the memory pool, and a
+    holder per reconstructed allocation. Dropping any of those out from under a
+    live graph is a use-after-free, which is why they are kept here rather than
+    left to the caller.
+    """
+
+    def __init__(
+        self,
+        graph: int,
+        exec_graph: int,
+        pool: Any,
+        holders: list[Any],
+        libraries: list[Any],
+        events: list[Any],
+    ) -> None:
+        self._graph = graph
+        self._exec = exec_graph
+        self._pool = pool
+        self._holders = holders
+        self._libraries = libraries
+        self._events = events
+
+    def replay(self) -> None:
+        """Launch the restored graph on the current stream."""
+        import torch
+
+        driver = _driver()
+        _chk(driver.cuGraphLaunch(self._exec, torch.cuda.current_stream().cuda_stream))
+
+    def raw_cuda_graph(self) -> int:
+        return self._graph
+
+    def raw_cuda_graph_exec(self) -> int:
+        return self._exec
+
+
+def _topological_order(count: int, edges: list[list[int]]) -> list[int]:
+    """Node indices such that every node follows its dependencies.
+
+    Nodes are created without dependencies and wired up afterwards, so this is not
+    needed to make handles exist in time. It earns its place by rejecting a cyclic
+    edge list with a message that says so, rather than leaving the driver to fail
+    the bulk cuGraphAddDependencies with INVALID_VALUE, and by making the order
+    nodes are built in a property of the graph rather than of the archive.
+    """
+    successors: dict[int, list[int]] = {}
+    indegree = [0] * count
+    for parent, child in edges:
+        successors.setdefault(parent, []).append(child)
+        indegree[child] += 1
+    ready = [i for i in range(count) if indegree[i] == 0]
+    order = []
+    while ready:
+        node = ready.pop()
+        order.append(node)
+        for child in successors.get(node, ()):
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                ready.append(child)
+    if len(order) != count:
+        raise UnserializableGraph("the saved graph's edges contain a cycle")
+    return order
+
+
+def _add_edges(
+    driver: Any,
+    graph: Any,
+    made: dict[int, Any],
+    edges: list[list[int]],
+    edge_data: list[list[int]],
+) -> None:
+    """Reconnect the saved topology, keeping each edge's ports and type.
+
+    ``edge_data`` names only the edges that are not ordinary, as
+    ``[edge index, from_port, to_port, type]``; the rest are zero, an ordinary
+    dependency. One call per distinct edge data, because the driver applies the
+    first entry to the whole call -- see Note [Edge data].
+    """
+    if not edges:
+        return
+    ports = {
+        position: (from_port, to_port, kind)
+        for position, from_port, to_port, kind in edge_data
+    }
+    groups: dict[tuple[int, int, int], list[int]] = {}
+    for position in range(len(edges)):
+        groups.setdefault(ports.get(position, (0, 0, 0)), []).append(position)
+
+    for (from_port, to_port, kind), members in groups.items():
+        datum = driver.CUgraphEdgeData()
+        datum.from_port = from_port
+        datum.to_port = to_port
+        datum.type = kind
+        _chk(
+            driver.cuGraphAddDependencies(
+                graph,
+                [made[edges[position][0]] for position in members],
+                [made[edges[position][1]] for position in members],
+                [datum] * len(members),
+                len(members),
+            )
+        )
+
+
+def load(
+    path: str,
+    *,
+    load_fn: Callable[[], dict[str, Any]] | None = None,
+) -> tuple[RestoredCUDAGraph, dict[str, Any]]:
+    """Rebuild a graph saved by :func:`save`, and return it with its named tensors.
+
+    Must run before anything else allocates on the device: the whole point is to
+    reclaim the exact virtual addresses the graph was captured against, and an
+    allocation made first can take them.
+
+    ``load_fn`` supplies contents for the named tensors and must return them on the
+    **CPU**. The archive carries no data (parameters evolve after capture, so bytes
+    written then would be stale), so anything whose contents matter comes from here
+    -- and it has to be host memory, because materialising a checkpoint straight to
+    the device would allocate over the addresses being reclaimed.
+    """
+    import torch
+
+    driver = _driver()
+    # PyTorchFileReader addresses records relative to the archive root, stripping
+    # the zip's own directory prefix, so names go in exactly as they were written.
+    reader = torch._C.PyTorchFileReader(path)
+
+    def record(name: str) -> bytes:
+        return bytes(reader.get_record(name))
+
+    manifest = json.loads(record(MANIFEST_PATH))
+    if manifest["version"] != ARCHIVE_VERSION:
+        raise UnserializableGraph(
+            f"archive version {manifest['version']} is not {ARCHIVE_VERSION}"
+        )
+
+    # Contents first, while nothing has touched the device yet.
+    contents = load_fn() if load_fn is not None else {}
+
+    device = manifest["device"]
+    pool = torch.cuda.MemPool()
+    torch.cuda.memory._restore_expandable_segments(
+        [{**segment, "is_expandable": True} for segment in manifest["segments"]],
+        pool.id,
+        device,
+    )
+
+    # Put each allocation back exactly as it was: a block that was allocated has to
+    # be allocated again, or a later allocation could be handed an address the graph
+    # writes to.
+    holders: list[Any] = []
+    blocks: list[tuple[int, int, Any]] = []
+    with torch.cuda.use_mem_pool(pool):
+        for segment in manifest["segments"]:
+            for block in segment["blocks"]:
+                if not block["state"].startswith("active"):
+                    continue
+                holder = torch.empty(0, dtype=torch.uint8, device=device)
+                holder.untyped_storage()._resize_with_addr_(
+                    block["size"], block["address"]
+                )
+                holders.append(holder)
+                blocks.append((block["address"], block["size"], holder))
+
+    # Sorted once and bisected per tensor: scanning every block for each named
+    # tensor is quadratic, and a graph with thousands of parameters has thousands
+    # of each.
+    blocks.sort(key=lambda entry: entry[0])
+    starts = [entry[0] for entry in blocks]
+
+    def view_for(rec: dict[str, Any]) -> Any:
+        dtype = getattr(torch, str(rec["dtype"]).rsplit(".", 1)[-1])
+        index = bisect.bisect_right(starts, rec["address"]) - 1
+        if index >= 0:
+            address, size, holder = blocks[index]
+            if rec["address"] < address + size:
+                offset = rec["address"] - address
+                itemsize = torch._utils._element_size(dtype)
+                if offset % itemsize:
+                    raise UnserializableGraph(
+                        f"tensor at {rec['address']:#x} is not aligned to its dtype"
+                    )
+                out = torch.empty(0, dtype=dtype, device=device)
+                out.set_(
+                    holder.untyped_storage(),
+                    offset // itemsize + rec["storage_offset"],
+                    tuple(rec["shape"]),
+                    tuple(rec["stride"]),
+                )
+                return out
+        raise UnserializableGraph(
+            f"no restored allocation covers the tensor at {rec['address']:#x}"
+        )
+
+    tensors: dict[str, Any] = {}
+    for index, rec in enumerate(manifest["tensors"]):
+        name = rec.get("name", str(index))
+        tensors[name] = view_for(rec)
+        if name in contents:
+            tensors[name].copy_(contents[name])
+
+    # Kernels come back by name out of the archived cubins.
+    libraries: list[Any] = []
+    functions: dict[str, int] = {}
+    wanted = set(manifest["kernels"])
+    for module_id in sorted(set(manifest["kernels"].values())):
+        image = record(f"{CUBIN_DIR}/{module_id}.cubin")
+        err, library = driver.cuLibraryLoadData(image, [], [], 0, [], [], 0)
+        if err != driver.CUresult.CUDA_SUCCESS:
+            raise UnserializableGraph(f"could not load cubin {module_id}: {err.name}")
+        libraries.append(library)
+        for name in list(wanted):
+            found, kernel = driver.cuLibraryGetKernel(library, name.encode())
+            if found == driver.CUresult.CUDA_SUCCESS:
+                functions[name] = int(_chk(driver.cuKernelGetFunction(kernel)))
+                wanted.discard(name)
+    if wanted:
+        raise UnserializableGraph(f"cubins do not contain kernels {sorted(wanted)}")
+
+    # Fresh events: only the identity was recorded, so ordering inside the graph is
+    # reproduced and any interaction with an outside event is not. Timing is
+    # disabled because the flags of the original cannot be recovered and nothing
+    # can observe these.
+    events = [
+        _chk(driver.cuEventCreate(driver.CUevent_flags.CU_EVENT_DISABLE_TIMING))
+        for _ in range(manifest.get("num_events", 0))
+    ]
+
+    graph = _chk(driver.cuGraphCreate(0))
+    func_attr = driver.CUfunction_attribute
+    launch_attr = driver.CUlaunchAttributeID
+    made: dict[int, Any] = {}
+    keep: list[Any] = []
+    # Nodes are created unattached and wired up in one pass at the end, because a
+    # dependency's ports and type can only be supplied to cuGraphAddDependencies,
+    # not to the cuGraphAdd*Node calls.
+    deps: list[Any] = []
+    for index in _topological_order(len(manifest["nodes"]), manifest["edges"]):
+        node = manifest["nodes"][index]
+        kind = node["type"]
+        if kind == "kernel":
+            function = functions[node["name"]]
+            for attr_name, value in node["func_attrs"].items():
+                attr = getattr(func_attr, attr_name, None)
+                if attr is not None:
+                    driver.cuFuncSetAttribute(function, attr, value)
+            params = driver.CUDA_KERNEL_NODE_PARAMS()
+            params.func = function
+            params.gridDimX, params.gridDimY, params.gridDimZ = node["grid"]
+            params.blockDimX, params.blockDimY, params.blockDimZ = node["block"]
+            params.sharedMemBytes = node["shared_mem_bytes"]
+            if node["args"]:
+                blobs = [
+                    ctypes.create_string_buffer(bytes.fromhex(a), len(a) // 2)
+                    for a in node["args"]
+                ]
+                slots = (ctypes.c_void_p * len(blobs))(
+                    *[ctypes.cast(b, ctypes.c_void_p) for b in blobs]
+                )
+                keep += [blobs, slots]
+                params.kernelParams = ctypes.addressof(slots)
+            elif node["packed_args"] is not None:
+                packed = bytes.fromhex(node["packed_args"])
+                blob = ctypes.create_string_buffer(packed, len(packed))
+                size = ctypes.c_size_t(len(packed))
+                extra = (ctypes.c_void_p * 5)(
+                    ctypes.c_void_p(2),
+                    ctypes.cast(ctypes.byref(size), ctypes.c_void_p),
+                    ctypes.c_void_p(1),
+                    ctypes.cast(blob, ctypes.c_void_p),
+                    ctypes.c_void_p(0),
+                )
+                keep += [blob, size, extra]
+                params.extra = ctypes.addressof(extra)
+            # a kernel taking no arguments leaves kernelParams and extra null
+            handle = _chk(driver.cuGraphAddKernelNode(graph, deps, 0, params))
+            for attr_name, pad in node["node_attrs"].items():
+                attr = getattr(launch_attr, attr_name, None)
+                if attr is None:
+                    continue
+                value = driver.CUkernelNodeAttrValue()
+                raw = bytes.fromhex(pad)
+                ctypes.memmove(int(value.getPtr()), raw, len(raw))
+                driver.cuGraphKernelNodeSetAttribute(handle, attr, value)
+        elif kind == "memcpy":
+            fields = node["params"]
+            copy = driver.CUDA_MEMCPY3D()
+            for key, value in fields.items():
+                if key in ("srcMemoryType", "dstMemoryType"):
+                    setattr(copy, key, driver.CUmemorytype(value))
+                elif key in ("srcDevice", "dstDevice"):
+                    setattr(copy, key, driver.CUdeviceptr(value))
+                else:
+                    setattr(copy, key, value)
+            context = _chk(driver.cuCtxGetCurrent())
+            handle = _chk(driver.cuGraphAddMemcpyNode(graph, deps, 0, copy, context))
+        elif kind == "memset":
+            fields = node["params"]
+            fill = driver.CUDA_MEMSET_NODE_PARAMS()
+            fill.dst = driver.CUdeviceptr(fields["dst"])
+            fill.value = fields["value"]
+            fill.elementSize = fields["elementSize"]
+            fill.width = fields["width"]
+            fill.height = fields["height"]
+            fill.pitch = fields["pitch"]
+            context = _chk(driver.cuCtxGetCurrent())
+            handle = _chk(driver.cuGraphAddMemsetNode(graph, deps, 0, fill, context))
+        elif kind == "event_record":
+            handle = _chk(
+                driver.cuGraphAddEventRecordNode(graph, deps, 0, events[node["event"]])
+            )
+        elif kind == "event_wait":
+            handle = _chk(
+                driver.cuGraphAddEventWaitNode(graph, deps, 0, events[node["event"]])
+            )
+        else:
+            handle = _chk(driver.cuGraphAddEmptyNode(graph, deps, 0))
+        made[index] = handle
+
+    _add_edges(driver, graph, made, manifest["edges"], manifest["edge_data"])
+    exec_graph = _chk(driver.cuGraphInstantiate(graph, 0))
+    del keep
+    return (
+        RestoredCUDAGraph(
+            int(graph), int(exec_graph), pool, holders, libraries, events
+        ),
+        tensors,
+    )

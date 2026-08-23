@@ -300,6 +300,81 @@ class TestCUDAGraphSave(TestCase):
             _collect_nodes(driver, int(graph))
         chk(driver.cuGraphDestroy(graph))
 
+    def test_non_default_edges_survive_the_rebuild(self):
+        """An edge's ports and type are reproduced, not flattened to ordinary.
+
+        Rebuilding a PROGRAMMATIC edge as an ordinary one is still correct, but the
+        consumer kernel loses the right to start before the producer has retired --
+        the graph replays more slowly than the one that was saved, silently.
+        """
+        from torch.cuda._graph_serialization import _add_edges, _collect_nodes
+
+        driver, chk = self._raw_graph_env()
+        major, minor = torch.cuda.get_device_capability()
+        ptx = f""".version 8.7
+.target sm_{major}{minor}
+.address_size 64
+.visible .entry edge_probe() {{ ret; }}
+""".encode()
+        library = chk(driver.cuLibraryLoadData(ptx, [], [], 0, [], [], 0))
+        self.addCleanup(driver.cuLibraryUnload, library)
+        kernel = chk(driver.cuLibraryGetKernel(library, b"edge_probe"))
+        function = chk(driver.cuKernelGetFunction(kernel))
+
+        def kernel_node(graph):
+            params = driver.CUDA_KERNEL_NODE_PARAMS()
+            params.func = function
+            params.gridDimX = params.gridDimY = params.gridDimZ = 1
+            params.blockDimX = params.blockDimY = params.blockDimZ = 1
+            params.sharedMemBytes = 0
+            return chk(driver.cuGraphAddKernelNode(graph, [], 0, params))
+
+        def edge(from_port, kind):
+            data = driver.CUgraphEdgeData()
+            data.from_port = from_port
+            data.type = kind
+            return data
+
+        programmatic = int(driver.CU_GRAPH_KERNEL_NODE_PORT_PROGRAMMATIC)
+        launch_order = int(driver.CU_GRAPH_KERNEL_NODE_PORT_LAUNCH_ORDER)
+        dep_programmatic = int(
+            driver.CUgraphDependencyType.CU_GRAPH_DEPENDENCY_TYPE_PROGRAMMATIC
+        )
+
+        source = chk(driver.cuGraphCreate(0))
+        self.addCleanup(driver.cuGraphDestroy, source)
+        a, b, c = (kernel_node(source) for _ in range(3))
+        # One call per edge: cuda.bindings applies the first CUgraphEdgeData in a
+        # list to every edge in the call, so a mixed batch would build three
+        # identical edges and quietly test nothing.
+        for parent, child, data in (
+            (a, b, edge(programmatic, dep_programmatic)),
+            (a, c, edge(launch_order, 0)),
+            (b, c, edge(0, 0)),
+        ):
+            chk(driver.cuGraphAddDependencies(source, [parent], [child], [data], 1))
+
+        nodes, edges, edge_data, _ = _collect_nodes(driver, int(source))
+        self.assertEqual(len(nodes), 3)
+        self.assertEqual(len(edges), 3)
+        # the ordinary edge is not recorded; the other two are, by position
+        self.assertEqual(len(edge_data), 2)
+        self.assertEqual(
+            sorted(datum[1:] for datum in edge_data),
+            sorted([[programmatic, 0, dep_programmatic], [launch_order, 0, 0]]),
+        )
+
+        rebuilt = chk(driver.cuGraphCreate(0))
+        self.addCleanup(driver.cuGraphDestroy, rebuilt)
+        made = {i: kernel_node(rebuilt) for i in range(len(nodes))}
+        _add_edges(driver, rebuilt, made, edges, edge_data)
+
+        _nodes, rebuilt_edges, rebuilt_data, _ = _collect_nodes(driver, int(rebuilt))
+        self.assertEqual(sorted(rebuilt_edges), sorted(edges))
+        self.assertEqual(sorted(rebuilt_data), sorted(edge_data))
+        # and the result is a graph the driver will actually accept
+        chk(driver.cuGraphInstantiate(rebuilt, 0))
+
     def test_event_nodes_keep_record_and_wait_paired(self):
         # A CUevent handle is process-local, so only the identity is recorded: nodes
         # sharing an event must share an index, and distinct events must not
@@ -349,6 +424,108 @@ class TestCUDAGraphSave(TestCase):
             )
             out = self._run(script, expect_success=False)
             self.assertIn("no cubins were captured", out)
+
+
+@skipIfRocm
+@requires_cuda
+@requires_cuda_python_bindings
+@unittest.skipIf(
+    not _kernel_capture_available(), "requires cupti-python and a usable CUPTI"
+)
+class TestCUDAGraphLoad(TestCase):
+    """A saved graph replays in a process that never captured it.
+
+    Both halves run in subprocesses: saving needs capture armed before any CUDA
+    work, and loading must happen before anything else allocates, since the whole
+    point is to reclaim the addresses the graph was captured against.
+    """
+
+    _SAVE = """
+import torch
+from torch.cuda import _graph_kernel_capture as cap
+assert cap.start()
+torch.manual_seed(0)
+a = torch.randn(512, 512, device="cuda", dtype=torch.bfloat16)
+out = torch.empty(512, 512, device="cuda", dtype=torch.bfloat16)
+
+def work():
+    torch.mm(a, a, out=out)
+
+stream = torch.cuda.Stream()
+stream.wait_stream(torch.cuda.current_stream())
+with torch.cuda.stream(stream):
+    for _ in range(3):
+        work()
+torch.cuda.current_stream().wait_stream(stream)
+graph = torch.cuda.CUDAGraph(keep_graph=True)
+with torch.cuda.graph(graph):
+    work()
+graph.replay()
+torch.cuda.synchronize()
+cap.stop()
+graph.save({archive!r}, tensors={{"a": a, "out": out}})
+torch.save({{"a": a.cpu(), "out": out.cpu()}}, {state!r})
+"""
+
+    _LOAD = """
+import json
+import torch
+from torch.cuda._graph_serialization import load
+
+held = {{}}
+
+def load_fn():
+    # contents must be materialised on the host: allocating on the device here
+    # would take the addresses being reclaimed
+    held["state"] = torch.load({state!r}, map_location="cpu")
+    assert all(not v.is_cuda for v in held["state"].values())
+    return {{"a": held["state"]["a"]}}
+
+graph, tensors = load({archive!r}, load_fn=load_fn)
+addresses = {{k: v.data_ptr() for k, v in tensors.items()}}
+tensors["out"].zero_()
+graph.replay()
+torch.cuda.synchronize()
+print(json.dumps({{
+    "addresses": addresses,
+    "matches": torch.equal(tensors["out"].cpu(), held["state"]["out"]),
+    "names": sorted(tensors),
+}}))
+"""
+
+    def _run(self, script):
+        env = os.environ.copy()
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        proc = subprocess.run(
+            [sys.executable, "-c", script], env=env, capture_output=True
+        )
+        output = proc.stdout.decode() + proc.stderr.decode()
+        if proc.returncode != 0:
+            self.fail(f"subprocess failed:\n{output}")
+        return output
+
+    def test_replays_in_a_process_that_never_captured(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = os.path.join(tmp, "graph.ptcg")
+            state = os.path.join(tmp, "state.pt")
+            self._run(self._SAVE.format(archive=archive, state=state))
+            manifest, _records = self._manifest(archive)
+            saved = {t["name"]: t["address"] for t in manifest["tensors"]}
+
+            out = self._run(self._LOAD.format(archive=archive, state=state))
+            result = json.loads(out.strip().splitlines()[-1])
+
+            self.assertEqual(result["names"], ["a", "out"])
+            # the addresses are reclaimed, not merely allocated somewhere
+            self.assertEqual(result["addresses"], saved)
+            # and replaying reproduces the output bit for bit, from contents that
+            # arrived on the host rather than in the archive
+            self.assertTrue(result["matches"])
+
+    def _manifest(self, path):
+        with zipfile.ZipFile(path) as archive:
+            name = next(n for n in archive.namelist() if n.endswith("manifest.json"))
+            return json.loads(archive.read(name)), archive.namelist()
 
 
 if __name__ == "__main__":
