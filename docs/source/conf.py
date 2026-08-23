@@ -1755,7 +1755,6 @@ coverage_ignore_classes = [
     # torch.multiprocessing.pool
     "Pool",
     # torch.multiprocessing.queue
-    "ConnectionWrapper",
     "Queue",
     "SimpleQueue",
     # torch.multiprocessing.reductions
