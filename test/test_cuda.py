@@ -40,6 +40,7 @@ from torch.testing._internal.common_cuda import (
     _create_scaling_case,
     _get_torch_cuda_version,
     blas_library_context,
+    has_device_side_assert,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     PLATFORM_SUPPORTS_WORKQUEUE_CONFIG,
     SM70OrLater,
@@ -2015,17 +2016,7 @@ except RuntimeError as e:
         except subprocess.TimeoutExpired:
             p.kill()
             out, err = p.communicate()
-        expected_messages = [
-            "device-side assert triggered",  # CUDA
-            "Assertion",  # CUDA
-            "HSA_STATUS_ERROR_EXCEPTION",  # ROCm with TORCH_USE_HIP_DSA
-            "Device-side assertion",  # ROCm with TORCH_USE_HIP_DSA
-            # ROCm without TORCH_USE_HIP_DSA returns a launch failure instead
-            # of a proper device-side assertion, but still catches the error
-            "hipErrorLaunchFailure",
-            "unspecified launch failure",
-        ]
-        self.assertTrue(any(msg in out or msg in err for msg in expected_messages))
+        self.assertTrue(has_device_side_assert(out) or has_device_side_assert(err))
 
     @unittest.skipIf(
         not TEST_CUDAMALLOCASYNC, "requires the cudaMallocAsync allocator backend"
@@ -2116,16 +2107,8 @@ class TestThatContainsCUDAAssertFailure(TestCase):
 if __name__ == '__main__':
     run_tests()
 """)
-        # CUDA raises cudaErrorAssert (710) with "device-side assert triggered"
-        # ROCm with TORCH_USE_HIP_DSA raises a proper device-side assertion
-        # ROCm without TORCH_USE_HIP_DSA raises hipErrorLaunchFailure (719)
-        # which still catches the error but with less specific messaging
-        is_cuda_assert = "device-side assert triggered" in stderr
-        is_hip_assert = "hipErrorLaunchFailure" in stderr
-        is_hip_assert = is_hip_assert or "unspecified launch failure" in stderr
-        is_hip_assert = is_hip_assert or "HSA_STATUS_ERROR_EXCEPTION" in stderr
         self.assertTrue(
-            is_cuda_assert or is_hip_assert,
+            has_device_side_assert(stderr),
             lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
         )
 

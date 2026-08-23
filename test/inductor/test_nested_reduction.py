@@ -2322,6 +2322,38 @@ class NestedReductionInternalsNonPersistentTest(_InternalsBase, TestCase):
     force_persistent_outer_reduction = False
 
 
+class NestedReductionAOTITest(TestCase):
+    __unittest_skip__ = not HAS_GPU
+
+    def test_rmsnorm_block_amax(self):
+        B, D, G = 8, 1024, 32
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                normalized = _rmsnorm(x)
+                block_amax = normalized.reshape(B, D // G, G).abs().amax(dim=-1)
+                return normalized, block_amax
+
+        model = Model()
+        x = torch.randn(B, D, device=GPU_TYPE)
+        expected = model(x)
+        metrics.reset()
+        with fresh_inductor_cache():
+            exported = torch.export.export(model, (x,))
+            package_path = torch._inductor.aoti_compile_and_package(
+                exported,
+                inductor_configs={
+                    "loop_ordering_after_fusion": True,
+                    "triton.nested_reduction": True,
+                },
+            )
+            compiled = torch._inductor.aoti_load_package(package_path)
+            actual = compiled(x)
+
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+
+
 if __name__ == "__main__":
     if HAS_GPU:
         run_tests()

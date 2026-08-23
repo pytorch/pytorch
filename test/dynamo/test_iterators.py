@@ -471,6 +471,37 @@ class TestIterators(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(list(gen()), [1, 2, 3])
 
+    def test_tuple_iterator_not_a_list_iterator(self):
+        """tuple iterators must not subclass ListIteratorVariable (CPython parity).
+
+        In CPython, tuple_iterator is not a subclass of list_iterator; the VTs
+        should mirror that.
+        """
+        from torch._dynamo.variables.lists import (
+            ListIteratorVariable,
+            TupleIteratorVariable,
+        )
+
+        self.assertFalse(issubclass(TupleIteratorVariable, ListIteratorVariable))
+        self.assertIs(TupleIteratorVariable._cpython_type, type(iter(())))
+        self.assertIs(ListIteratorVariable._cpython_type, type(iter([])))
+
+    @make_dynamo_test
+    def test_yield_from_tuple_iterator(self):
+        """yield from over a tuple iterator still traces after the VT split."""
+
+        def gen():
+            yield from iter((1, 2, 3))
+
+        self.assertEqual(list(gen()), [1, 2, 3])
+
+    @make_dynamo_test
+    def test_tuple_iterator_python_type(self):
+        """type(iter(tuple)) inside compile must be tuple_iterator, not list_iterator."""
+        it = iter((1, 2, 3))
+        self.assertIs(type(it), type(iter(())))
+        self.assertIsNot(type(it), type(iter([])))
+
     @make_dynamo_test
     def test_comprehensions_with_iterator(self):
         """Test different comprehension types with iterators"""
