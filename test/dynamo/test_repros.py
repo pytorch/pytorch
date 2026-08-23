@@ -4722,8 +4722,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
 
-        compiled_fn = torch.compile(func, backend=cnt, fullgraph=True)
         requires_grad = func is not func1
+        compiled_fn = torch.compile(func, backend=cnt, fullgraph=not requires_grad)
         for _ in range(5):
             # Inputs
             eager_a = torch.ones([6], requires_grad=requires_grad)
@@ -4749,8 +4749,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(eager_a.grad, compiled_a.grad)
 
         # Prove guarding works - we run the compiled_fn 5 times
-        # frame_count should stay at 1.
-        self.assertEqual(cnt.frame_count, 1)
+        # frame_count should remain stable after the first run.
+        self.assertEqual(cnt.frame_count, 2 if func is func3 else 1)
+        if requires_grad:
+            graph_break_reasons = "\n".join(
+                torch._dynamo.utils.counters["graph_break"].keys()
+            )
+            self.assertIn(
+                "setattr() on Tensor.data with different shape", graph_break_reasons
+            )
 
     def test_tensor_set_data_mismatched_dtype(self):
         def func(x, y):
@@ -6628,14 +6635,11 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         self.assertEqual(ref, res)
 
     @parametrize(
-        "parameter_kind,dynamic",
-        [
-            ("parameter_subclass", False),
-            ("parameter", True),
-            ("tensor_subclass", False),
-        ],
+        "tensor_kind",
+        ["tensor", "parameter", "parameter_subclass", "tensor_subclass"],
     )
-    def test_parameter_data_different_shape_graph_breaks(self, parameter_kind, dynamic):
+    @parametrize("dynamic", [False, True])
+    def test_tensor_data_different_shape_graph_breaks(self, tensor_kind, dynamic):
         class ParameterSubclass(torch.nn.Parameter):
             pass
 
@@ -6647,28 +6651,39 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                if parameter_kind == "parameter_subclass":
-                    self.param = ParameterSubclass(torch.randn(3))
-                elif parameter_kind == "tensor_subclass":
-                    self.param = torch.nn.Parameter(TensorSubclass(torch.randn(3)))
+                if tensor_kind == "tensor":
+                    self.tensor = torch.randn(3, requires_grad=True)
+                elif tensor_kind == "parameter_subclass":
+                    self.tensor = ParameterSubclass(torch.randn(3))
+                elif tensor_kind == "tensor_subclass":
+                    self.tensor = torch.nn.Parameter(TensorSubclass(torch.randn(3)))
                 else:
-                    self.param = torch.nn.Parameter(torch.randn(3))
+                    self.tensor = torch.nn.Parameter(torch.randn(3))
 
             def forward(self, x):
-                self.param.data = x
-                return (self.param * x).sum()
+                self.tensor.data = x
+                return (self.tensor * x).sum()
+
+        x = torch.randn(5)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Tensor.data with different shape",
+        ):
+            torch.compile(
+                Model(), backend="aot_eager", dynamic=dynamic, fullgraph=True
+            )(x)
 
         model = Model()
-        x = torch.randn(5)
         counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         actual = torch.compile(model, backend=counter, dynamic=dynamic)(x)
 
         self.assertEqual(actual, (x * x).sum())
         actual.backward()
-        self.assertEqual(model.param.grad, x)
+        self.assertEqual(model.tensor.grad, x)
         self.assertGreater(counter.op_count, 0)
 
-    def test_parameter_data_same_shape_dynamic_fullgraph(self):
+    def test_parameter_data_unproven_same_shape_graph_breaks(self):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -6676,17 +6691,84 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
 
             def forward(self, x):
                 self.param.data = x
-                return (self.param * x).sum()
+                return self.param.sin()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Tensor.data with different shape",
+        ):
+            torch.compile(Model(), backend="aot_eager", dynamic=True, fullgraph=True)(
+                torch.randn(3)
+            )
+
+    @torch._dynamo.config.patch(force_parameter_static_shapes=False)
+    def test_parameter_data_same_shape_dynamic_fullgraph(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self):
+                self.param.data = self.param.data.clone()
+                return self.param.sin().sum()
 
         model = Model()
-        x = torch.randn(3)
+        torch._dynamo.mark_dynamic(model.param, 0)
         counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        actual = torch.compile(model, backend=counter, dynamic=True, fullgraph=True)(x)
+        compiled = torch.compile(model, backend=counter, dynamic=True, fullgraph=True)
 
+        expected = model.param.sin().sum()
+        self.assertEqual(compiled(), expected)
+        self.assertEqual(counter.frame_count, 1)
+
+        model.param.data = torch.randn(5)
+        expected = model.param.sin().sum()
+        self.assertEqual(compiled(), expected)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertGreater(counter.op_count, 0)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_parameter_data_unbacked_shape_graph_breaks(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, x, length):
+                self.param.data = x[: length.item()]
+                return self.param.sum()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Tensor.data with different shape",
+        ):
+            torch.compile(Model(), backend="aot_eager", fullgraph=True)(
+                torch.randn(5), torch.tensor(4)
+            )
+
+    def test_parameter_data_different_shape_local_no_grad_graph_breaks(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, x):
+                with torch.no_grad():
+                    self.param.data = x
+                return (self.param * x).sum()
+
+        x = torch.randn(5)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Tensor.data with different shape",
+        ):
+            torch.compile(Model(), backend="aot_eager", fullgraph=True)(x)
+
+        model = Model()
+        actual = torch.compile(model, backend="aot_eager")(x)
         self.assertEqual(actual, (x * x).sum())
         actual.backward()
         self.assertEqual(model.param.grad, x)
-        self.assertGreater(counter.op_count, 0)
 
     def test_deepspeed_zero3_partitioned_parameter_hooks(self):
         class FakeZeRO:
@@ -6748,6 +6830,12 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
 
         self.assertEqual(actual, expected)
         self.assertGreater(counter.op_count, 0)
+        graph_break_reasons = "\n".join(
+            torch._dynamo.utils.counters["graph_break"].keys()
+        )
+        self.assertIn(
+            "setattr() on Tensor.data with different shape", graph_break_reasons
+        )
         for param in model.parameters():
             self.assertEqual(param.shape, torch.Size([0]))
 
