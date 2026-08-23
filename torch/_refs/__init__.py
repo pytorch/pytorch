@@ -28,6 +28,7 @@ from torch._prims_common import (
     FloatLike,
     FloatWithoutSymFloat,
     IntLike,
+    IntWithoutSymInt,
     is_contiguous_for_memory_format_or_false,
     is_contiguous_or_false,
     is_weakly_lesser_type,
@@ -2035,6 +2036,29 @@ def clamp(
         msg = "clamp called but both min and max are none!"
         raise ValueError(msg)
 
+    if utils.is_integer_dtype(a.dtype):
+        # A lower bound below the dtype's range (or an upper bound above it) is a
+        # no-op and is dropped. The opposite case would force every element to an
+        # unrepresentable value, so it is rejected.
+        limits = torch.iinfo(a.dtype)
+        if isinstance(min, IntWithoutSymInt):
+            if min > limits.max:
+                raise RuntimeError(
+                    f"Clamp min value {min} is outside the representable range of {a.dtype}"
+                )
+            if min < limits.min:
+                min = None
+        if isinstance(max, IntWithoutSymInt):
+            if max < limits.min:
+                raise RuntimeError(
+                    f"Clamp max value {max} is outside the representable range of {a.dtype}"
+                )
+            if max > limits.max:
+                max = None
+        if min is None and max is None:
+            # Both bounds were dropped as no-ops; return a fresh tensor.
+            return torch.clone(a)
+
     if min is not None:
         a_isnan = torch.isnan(a)
         condition = torch.bitwise_or(torch.ge(a, min), a_isnan)  # type: ignore[arg-type]
@@ -2539,6 +2563,13 @@ def amin(
     *,
     out: Tensor | None = None,
 ) -> TensorLikeType:
+    if out is not None:
+        torch._check(
+            a.dtype == out.dtype,
+            lambda: f"Expected the dtype for input and out to match, but got "
+            f"{a.dtype} for input's dtype and {out.dtype} for out's dtype.",
+        )
+
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
@@ -2563,6 +2594,13 @@ def amax(
     *,
     out: Tensor | None = None,
 ) -> TensorLikeType:
+    if out is not None:
+        torch._check(
+            a.dtype == out.dtype,
+            lambda: f"Expected the dtype for input and out to match, but got "
+            f"{a.dtype} for input's dtype and {out.dtype} for out's dtype.",
+        )
+
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None

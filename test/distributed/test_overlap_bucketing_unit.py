@@ -1,8 +1,10 @@
 # Owner(s): ["module: inductor"]
 import json
 import os
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._dynamo
@@ -1588,6 +1590,109 @@ class TestFusibleNodeOverlap(InductorTestCase):
             str(out.graph)
         )
         self.assertEqual(len(scheduler.collective_info), 1)
+
+
+class TestOverlapSchedulingNoMemoryLimit(InductorTestCase):
+    """Test overlap scheduling without a memory-increase limit."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=4, store=store)
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group()
+
+    def test_no_memory_limit(self):
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        group_name = dist.distributed_c10d._get_default_group().group_name
+
+        def func(x, w):
+            all_gather = torch.ops._c10d_functional.all_gather_into_tensor(
+                x, 4, group_name
+            )
+            all_gather = torch.ops._c10d_functional.wait_tensor(all_gather)
+            return all_gather @ w
+
+        gm = make_fx(func, tracing_mode="fake")(torch.randn(8, 16), torch.randn(16, 16))
+
+        with (
+            patch(
+                "torch.utils._runtime_estimation.get_transfer_time", return_value=0.0
+            ),
+            patch(
+                "torch._inductor.fx_passes.overlap_scheduling.get_collective_do_bench",
+                return_value=lambda fn, *args, **kwargs: 0.01,
+            ),
+        ):
+            schedule_overlap_bucketing(
+                gm,
+                max_memory_increase_gb=None,
+                max_memory_increase_ratio=None,
+            )
+        self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
+
+    def test_no_memory_limit_prefetches_across_compute_gap(self):
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        group_name = dist.distributed_c10d._get_default_group().group_name
+
+        def func(a, b, w):
+            all_gather = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, 4, group_name
+            )
+            first = b @ w
+            second = first @ w
+            all_gather = torch.ops._c10d_functional.wait_tensor(all_gather)
+            return second.sum() + (all_gather @ w).sum()
+
+        gm = make_fx(func, tracing_mode="fake")(
+            torch.randn(8, 16), torch.randn(8, 16), torch.randn(16, 16)
+        )
+
+        with (
+            patch(
+                "torch.utils._runtime_estimation.get_transfer_time", return_value=0.0
+            ),
+            patch(
+                "torch._inductor.fx_passes.overlap_scheduling.get_collective_do_bench",
+                return_value=lambda fn, *args, **kwargs: 0.01,
+            ),
+        ):
+            scheduler = OverlapScheduler(
+                gm,
+                max_in_flight_gb=5.0,
+                max_compute_pre_fetch=200,
+                collective_bucketing=False,
+                insert_overlap_deps=False,
+                compute_overlap_multipler=1.0,
+                max_coll_distance=200,
+                custom_runtime_estimation=None,
+                collective_estimator="analytical",
+                max_memory_increase_gb=None,
+                max_memory_increase_ratio=None,
+            )
+            scheduler.run()
+
+        (ag,) = gm.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        # A finite domination index is the precondition for the budget loop
+        # that used to raise IndexError when uncapped.
+        self.assertNotEqual(scheduler.compute_index_domination[ag], sys.maxsize)
+        # Positive index guarantees a non-empty budget-loop range on first eval.
+        self.assertGreater(scheduler.compute_index_domination[ag], 0)
+        # The collective is actually prefetched across the compute gap.
+        self.assertTrue(scheduler.collective_info[ag].hiding_nodes)
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
