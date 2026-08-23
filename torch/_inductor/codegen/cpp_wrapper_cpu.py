@@ -2333,6 +2333,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{name}", {name}));'
             )
 
+    def _codegen_runtime_assert(self, code: IndentedBuffer, stmt: str) -> None:
+        if V.graph.aot_mode:
+            guarded = f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
+            if V.graph.is_dual_wrapper_mode:
+                # The environment gate is AOTI-only. JIT mirrors the Python
+                # wrapper and emits assertions selected by the compile-time
+                # size_asserts/alignment_asserts configuration unconditionally.
+                code.writeline_jit(stmt)
+                code.writeline_aot(guarded)
+            else:
+                code.writeline(guarded)
+        else:
+            code.writeline(stmt)
+
     def _codegen_assert_size_stride(
         self,
         code: IndentedBuffer,
@@ -2348,17 +2362,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f', {self.codegen_dtype(dtype)}, "{dtype}"' if dtype is not None else ""
         )
         stmt = f'assert_size_stride({name}, {size}, {stride}, "{op_name}"{dtype_args});'
-        if V.graph.aot_mode:
-            guarded = f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
-            if V.graph.is_dual_wrapper_mode:
-                # _check_aoti_runtime_check_inputs_env() is AOTI-only; the JIT
-                # side gets the plain assert.
-                code.writeline_jit(stmt)
-                code.writeline_aot(guarded)
-            else:
-                code.writeline(guarded)
-        else:
-            code.writeline(stmt)
+        self._codegen_runtime_assert(code, stmt)
 
     def _codegen_assert_size_stride_grouped(
         self, code: IndentedBuffer, asserts: list[tuple[str, str, str]], op_name: str
@@ -2372,15 +2376,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.aot_mode and V.graph.is_const_graph:
             return
         stmt = f'assert_alignment({name}, {alignment}, "{op_name}");'
-        if V.graph.aot_mode:
-            guarded = f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
-            if V.graph.is_dual_wrapper_mode:
-                code.writeline_jit(stmt)
-                code.writeline_aot(guarded)
-            else:
-                code.writeline(guarded)
-        else:
-            code.writeline(stmt)
+        self._codegen_runtime_assert(code, stmt)
 
     def codegen_device(self, device):
         if device.type not in DEVICE_TO_ATEN:
@@ -3087,14 +3083,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 expr = arg.node.expr if isinstance(arg, torch.SymInt) else arg
                 new_int_args.append(cexpr(expr))
             elif isinstance(arg_type, torch.NumberType):
-                # Scalar of type int
-                if not isinstance(arg, (int, float, bool)):
-                    raise AssertionError(
-                        f"expected arg to be int, float, or bool, got {type(arg)}"
-                    )
-                # Only treat int Scalar as dynamic
-                if isinstance(arg, int):
-                    new_int_args.append(str(arg))
+                # A symbolic scalar (SymInt) bound to a Scalar slot is a dynamic int64
+                # runtime arg, mirroring the SymIntType branch above. The host proxy
+                # executor's NumberType case accepts the resulting as_sym_int tag.
+                if isinstance(arg, torch.SymInt):
+                    new_int_args.append(cexpr(arg.node.expr))
+                else:
+                    # Scalar of type int
+                    if not isinstance(arg, (int, float, bool)):
+                        raise AssertionError(
+                            f"expected arg to be int, float, or bool, got {type(arg)}"
+                        )
+                    # Only treat int Scalar as dynamic. `bool` is an int subclass
+                    # but is serialized as_bool and prefilled statically, so it
+                    # must not be counted here.
+                    if type(arg) is int:
+                        new_int_args.append(str(arg))
             elif isinstance(arg, ir.TorchBindObject):
                 # torchbind objects are loaded in proxy executor
                 pass
@@ -3152,7 +3156,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
                     )
 
-        for arg, arg_type in zip(raw_args, arg_types):
+        # serialize_inputs (which produced V.extern_kernel_nodes[-1]) omits unprovided
+        # kwarg-only default args, and the host proxy executor prefills those statically
+        # rather than consuming them as runtime (dynamic) args. raw_args still carries their
+        # default values (appended via ordered_kwargs), so counting them into new_int_args /
+        # new_tensor_args here would desync num_ints/num_tensors from what the host consumes
+        # ("Mismatch between ints consumed and num_ints" at runtime). Skip exactly those --
+        # kwarg-only schema args whose name was not serialized.
+        serialized_input_names = OrderedSet(
+            [inp.name for inp in V.extern_kernel_nodes[-1].node.inputs]
+        )
+        for arg, arg_type, schema_arg in zip(raw_args, arg_types, schema.arguments):
+            if schema_arg.kwarg_only and schema_arg.name not in serialized_input_names:
+                continue
             if arg is not None:
                 if isinstance(arg_type, torch.OptionalType):
                     fill_args(arg, arg_type.getElementType())

@@ -599,9 +599,18 @@ inline void assert_alignment(
     return;
   }
 
+  // Note [Runtime alignment assertions]
+  // `tensor_is_aligned` and the legacy Python-wrapper assertion use the
+  // storage offset as a compile-time proxy under the usual allocator-aligned
+  // base-storage assumption. A fallback operator can return arbitrary external
+  // storage, so cpp_wrapper must validate the actual address that generated
+  // kernels consume. The pointer-specific diagnostic below is intentional:
+  // storage_offset can be zero even when an external base pointer is
+  // misaligned.
   const auto data_ptr =
       reinterpret_cast<std::uintptr_t>(get_data_ptr_wrapper(tensor));
-  if (data_ptr % alignment != 0) {
+  const auto misalignment = data_ptr % alignment;
+  if (misalignment != 0) {
     int64_t storage_offset = 0;
     AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_storage_offset(tensor, &storage_offset));
@@ -615,8 +624,8 @@ inline void assert_alignment(
       msg << "\nError in op: " << op_name;
     }
     msg << "\nExpect the tensor to be " << alignment
-        << " bytes aligned. Data pointer is misaligned by "
-        << data_ptr % alignment << " bytes (storage_offset=" << storage_offset
+        << " bytes aligned. Data pointer is misaligned by " << misalignment
+        << " bytes (storage_offset=" << storage_offset
         << ", itemsize=" << itemsize << ")";
     AOTI_RUNTIME_CHECK(false, std::move(msg).str());
   }

@@ -1451,9 +1451,18 @@ def target_assert_size_stride_str(
     return f"{size_str}, {stride_str}"
 
 
-def target_assert_alignment_regex():
-    op_name_literal = r'"[^"]+"' if config.cpp_wrapper else r"'[^']+'"
-    return rf"assert_alignment\s*\(\s*[^,]+,\s*[^,]+,\s*{op_name_literal}\s*\)"
+def target_assert_alignment_regex(
+    cpp_wrapper: bool, op_name: str | None = None, alignment: int = 16
+):
+    if op_name is None:
+        op_name_literal = r'"[^"]+"' if cpp_wrapper else r"'[^']+'"
+    else:
+        quote = '"' if cpp_wrapper else "'"
+        op_name_literal = re.escape(f"{quote}{op_name}{quote}")
+    return (
+        rf"assert_alignment\s*\(\s*[^,]+,\s*{alignment},\s*"
+        rf"{op_name_literal}\s*\)"
+    )
 
 
 @instantiate_parametrized_tests
@@ -13521,6 +13530,37 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(code.count("triton_helpers.rand_eager_kernel"), 1)
         self.assertEqual(code.count("tl.rand("), 0)
 
+    @xfail_if_mps  # Only works for Triton on CUDA
+    @config.patch(align_random_eager=True)
+    def test_align_random_eager_randn(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("Only valid for CUDA!")
+
+        @torch.compile
+        def fn():
+            return torch.randn([4096], device=self.device)
+
+        torch.manual_seed(1234)
+        result, (code,) = run_and_get_code(fn)
+        self.assertEqual(result.shape, (4096,))
+        self.assertEqual(code.count("triton_helpers.rand_eager_kernel"), 0)
+
+        x = torch.empty(4096, device=self.device)
+
+        @torch.compile
+        def fn_like(t):
+            return torch.randn_like(t)
+
+        torch.manual_seed(5678)
+        result_like = fn_like(x)
+        self.assertEqual(result_like.shape, x.shape)
+
+        for t in (result, result_like):
+            self.assertGreater((t < 0).sum().item(), 0)
+            self.assertGreater((t > 1).sum().item(), 0)
+            self.assertTrue(-0.2 < t.mean().item() < 0.2)
+            self.assertTrue(0.7 < t.std().item() < 1.3)
+
     @xfail_if_mps  # Only works for triton
     def test_randint_kernel_count(self):
         if self.device != GPU_TYPE:
@@ -16221,9 +16261,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if not is_dynamic_shape_enabled():
             if code and len(code) > 0 and "assert_alignment(" in code[0]:
                 try:
-                    FileCheck().check_regex(target_assert_alignment_regex()).run(
-                        code[0]
-                    )
+                    FileCheck().check_regex(
+                        target_assert_alignment_regex(config.cpp_wrapper)
+                    ).run(code[0])
                 except Exception as e:
                     print(f"Failed regex match for assert_alignment: {e}")
                     print(code[0])
@@ -17935,6 +17975,75 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         FileCheck().check("torch.ops.aten.sum").check(".item()").run(code[0])
         # `.item()` took the DynamicScalar lowering, not a generic fallback kernel
         self.assertNotIn("_local_scalar_dense", code[0])
+
+    def test_lite_mode_sym_size(self):
+        # aten.sym_size.int (`x.size(dim)` under a dynamic shape) returns a SymInt,
+        # which cannot be serialized as a generic fallback kernel.
+        # skip_fallback_due_to_dynamic_shape routes it to its symbolic (no-kernel)
+        # handling instead, so lite mode does not hit the "Unsupported return type
+        # torch.SymIntType" wall (which handle_single_output raises for a SymInt
+        # fallback-kernel output).
+        def f(x):
+            n = x.size(0)
+            return x + n
+
+        x = torch.randn(64, device=self.device)
+        torch._dynamo.mark_dynamic(x, 0)
+        opt_f = torch.compile(f, mode="lite")
+
+        # Compiles and matches eager. Without the skip_fallback_due_to_dynamic_shape
+        # entry for sym_size.int, this raises "Unsupported return type torch.SymIntType"
+        # under the cpp wrapper (AOTI) serialization path.
+        result, code = run_and_get_code(opt_f, x)
+        self.assertEqual(result, f(x))
+
+        # The surrounding elementwise op still falls back (lite mode is active); the
+        # sym_size.int node did not become a generic fallback kernel. Lite mode sets
+        # use_dce=False, so a fallback kernel would survive into the generated code
+        # even with nothing consuming its buffer.
+        self.assertNotIn("sym_size", code[0])
+        if config.cpp_wrapper:
+            # `aten.add.Tensor` is in torchgen's inductor_fallback_ops, so its
+            # fallback is emitted through the device c-shim
+            # (aoti_torch_cpu_add_Tensor / aoti_torch_cuda_add_Tensor) rather
+            # than the generic aoti_torch_call_dispatcher path.
+            FileCheck().check_regex(r"aoti_torch_\w+_add_Tensor\(").run(code[0])
+        else:
+            FileCheck().check("torch.ops.aten.add").run(code[0])
+
+    def test_lite_mode_sym_stride(self):
+        # aten.sym_stride.int (`x.stride(dim)` under a dynamic shape) returns a SymInt,
+        # like sym_size.int, and cannot be serialized as a generic fallback kernel.
+        # skip_fallback_due_to_dynamic_shape routes it to its symbolic (no-kernel)
+        # handling so lite mode does not hit the "Unsupported return type
+        # torch.SymIntType" wall. Use a 2D tensor with a dynamic inner dim so stride(0)
+        # is symbolic (for a 1D/contiguous tensor stride(0) is the constant 1).
+        def f(x):
+            s = x.stride(0)
+            return x + s
+
+        x = torch.randn(4, 8, device=self.device)
+        torch._dynamo.mark_dynamic(x, 1)
+        opt_f = torch.compile(f, mode="lite")
+
+        # Compiles and matches eager. Without the skip_fallback_due_to_dynamic_shape
+        # entry for sym_stride.int, this raises "Unsupported return type torch.SymIntType"
+        # under the cpp wrapper (AOTI) serialization path.
+        result, code = run_and_get_code(opt_f, x)
+        self.assertEqual(result, f(x))
+
+        # The surrounding elementwise op still falls back (lite mode is active); the
+        # sym_stride.int node did not become a generic fallback kernel. Lite mode sets
+        # use_dce=False, so a fallback kernel would survive into the generated code
+        # even with nothing consuming its buffer.
+        self.assertNotIn("sym_stride", code[0])
+        if config.cpp_wrapper:
+            # Same as test_lite_mode_sym_size: `aten.add.Tensor` is in torchgen's
+            # inductor_fallback_ops, so its fallback goes through the device
+            # c-shim, not the generic aoti_torch_call_dispatcher path.
+            FileCheck().check_regex(r"aoti_torch_\w+_add_Tensor\(").run(code[0])
+        else:
+            FileCheck().check("torch.ops.aten.add").run(code[0])
 
     @lowering.force_fallback(aten.sort.default)
     def test_size_asserts_for_multi_output_fallback(self):

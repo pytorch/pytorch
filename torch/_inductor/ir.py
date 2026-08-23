@@ -662,7 +662,7 @@ class IRNode:
     def wrap_for_lowering(self) -> IRNode:
         return TensorBox.create(self)
 
-    def _post_init_setattr(self, attr: str, value: Any) -> None:
+    def _post_init_setattr(self, attr: str, value: object) -> None:
         # Intended for use in __post_init__ for enforcing an invariant on a dataclass
         # If you must, can also be used for setting provenance info
         # We would like to try and minimize these usages though
@@ -3842,7 +3842,7 @@ class SqueezeView(BaseView):
 
         return new_size, reindex
 
-    def __init__(self, data: Any) -> None:
+    def __init__(self, data: object) -> None:
         raise AssertionError("use SqueezeView.create()")
 
 
@@ -5210,7 +5210,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
         return self.real_layout().storage_size()
 
     def get_buffer(self) -> Buffer:
-        def unwrap_views(target: Any) -> Any:
+        def unwrap_views(target: object) -> object:
             if isinstance(target, MutationLayoutSHOULDREMOVE):
                 return unwrap_views(target.target)
             if isinstance(target, BaseView):
@@ -7226,7 +7226,7 @@ class ExternKernel(InputsKernel):
     def get_read_writes(self) -> dependencies.ReadWrites:
         read_writes = super().get_read_writes()
 
-        def add_ir_read(value: Any) -> None:
+        def add_ir_read(value: object) -> None:
             if isinstance(value, IRNode):
                 name = value.maybe_get_name()
                 if name is not None:
@@ -7987,8 +7987,14 @@ class ExternKernel(InputsKernel):
         n_args = len(args)
         n_pos_args = len(self.arg_properties)
         # For cpp wrapper, if some positional args are not provided, we need to check
-        # if they're in the kwargs or use their default value
-        if n_args < n_pos_args:
+        # if they're in the kwargs or use their default value. This is schema-based and
+        # only applies to OpOverloads: for HigherOrderOperators (and other non-OpOverload
+        # kernels) collect_arg_kwarg_properties fills arg_properties with empty placeholder
+        # dicts (one per flattened input, not the positional-arg count), so they have no
+        # "name"/"default_value" to fill from and the args/kwargs from unflatten_args are
+        # already complete. e.g. triton_kernel_wrapper_functional passes all its tensors via
+        # kwargs (n_args == 0), which would otherwise index empty dicts here -> KeyError.
+        if n_args < n_pos_args and isinstance(self.op_overload, torch._ops.OpOverload):
             log.debug(
                 "%s has %d unprovided positional arguments. "
                 "Will check if they are in the keyword arguments or will use default values.",
@@ -8165,15 +8171,23 @@ class ExternKernel(InputsKernel):
         wrapper.write_assert_size_stride(name, size, stride, op_name, dtype)
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
+        # Preserve the existing Python-wrapper behavior for inplace-view
+        # results. Only cpp_wrapper needs get_assert_name() to spell the check
+        # with the mutated input handle because its shim declares no output.
         if config.alignment_asserts:
             name = self.get_assert_name()
+            # For cpp_wrapper inplace-view ops, `name` is the mutated input
+            # variable used to spell the runtime check, while self.get_name()
+            # describes the post-mutation result whose layout was classified.
+            # Keep the alignment decision tied to that result layout.
             aligned = self.get_name() not in V.graph.unaligned_buffers
             op_name = self.get_op_name()
             if aligned:
                 wrapper.write_assert_alignment(name, GPU_ALIGN_BYTES, op_name)
             else:
-                wrapper.writeline(
-                    f"{wrapper.comment} buffer {name} (op: {op_name}) is assumed to be not aligned"
+                wrapper.make_comment(
+                    f"{wrapper.comment} buffer {name} (op: {op_name}) "
+                    "is assumed to be not aligned"
                 )
 
     def codegen_memory_tracking(self, wrapper: PythonWrapperCodegen) -> None:
@@ -12224,6 +12238,16 @@ class _WaitKernel(_CollectiveKernel):
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_wait_tensor")
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        if (
+            self.op_overload is torch.ops._c10d_functional.wait_tensors.default
+            and V.graph.cpp_wrapper
+        ):
+            from .exc import CppWrapperCodegenError
+
+            raise CppWrapperCodegenError(
+                "_c10d_functional.wait_tensors is not supported with "
+                "C++ wrapper/AOTInductor"
+            )
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         wrapper.generate_extern_kernel_alloc(self)
 
@@ -12231,7 +12255,15 @@ class _WaitKernel(_CollectiveKernel):
             self.codegen_size_asserts(wrapper)
 
     def get_volatile_reads(self) -> Sequence[IRNode]:
-        inp = self.inputs[0]
+        volatile_reads: list[IRNode] = []
+        for inp in pytree.tree_leaves(self.inputs):
+            if not isinstance(inp, IRNode):
+                raise AssertionError("Expected isinstance(inp, IRNode)")
+            volatile_reads.extend(self._get_volatile_reads(inp))
+        return volatile_reads
+
+    @staticmethod
+    def _get_volatile_reads(inp: IRNode) -> Sequence[IRNode]:
         if not isinstance(inp, IRNode):
             raise AssertionError("Expected isinstance(inp, IRNode)")
         if isinstance(inp, _CollectiveKernel):
@@ -12258,20 +12290,26 @@ class _WaitKernel(_CollectiveKernel):
             return []
 
     @classmethod
-    def create_wait(cls, kernel: _OpOverloads, inp: TensorBox) -> None:
+    def create_wait(
+        cls, kernel: _OpOverloads, inp: TensorBox | list[TensorBox]
+    ) -> None:
         with V.graph.fake_mode:
             result = cls.process_kernel(kernel, inp)
         if result.unbacked_bindings:
             raise AssertionError(f"{kernel} {result.unbacked_bindings}")
+        inps = pytree.tree_leaves(inp)
+        if not inps:
+            raise AssertionError(f"{kernel} requires at least one tensor")
+        device = inps[0].get_device()
         packed = cls(
-            NoneLayout(device=inp.get_device()),
+            NoneLayout(device=device),
             kernel,
             result.tensor_args,
             result.non_tensor_args,
             result.unflatten_args,
         )
-        packed.mutation_outputs.append(
-            MutationOutput(NoneLayout(device=inp.get_device()), inp, packed)
+        packed.mutation_outputs.extend(
+            MutationOutput(NoneLayout(device=device), tensor, packed) for tensor in inps
         )
 
     def get_read_writes(self) -> dependencies.ReadWrites:

@@ -1,35 +1,102 @@
 # Owner(s): ["module: inductor"]
 
-import os
 import sys
 import unittest
+from types import SimpleNamespace
 
 import torch
-from torch._inductor import config
+from torch._inductor import config, ir
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_cpp_code
+from torch._inductor.utils import GPU_ALIGN_BYTES, run_and_get_cpp_code
+from torch._inductor.virtualized import V
+from torch.testing import FileCheck
+from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.inductor_utils import RUN_CPU
 
 
-libtest = torch.library.Library(  # noqa: SCOPED_LIBRARY
-    "test_cpp_wrapper_asserts", "FRAGMENT"
+try:
+    try:
+        from .test_torchinductor import (
+            define_custom_op_for_test,
+            target_assert_alignment_regex,
+        )
+    except ImportError:
+        from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+            define_custom_op_for_test,
+            target_assert_alignment_regex,
+        )
+except unittest.SkipTest:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
+
+
+@unittest.skipIf(
+    IS_MACOS or not RUN_CPU, "requires a supported CPU cpp_wrapper test configuration"
 )
-ids = set()
-
-
-def define_custom_op_for_test(id_, fn, fn_meta):
-    if id_ not in ids:
-        libtest.define(f"{id_}(Tensor self) -> Tensor")
-        libtest.impl(id_, fn, "CPU")
-        libtest.impl(id_, fn_meta, "Meta")
-        ids.add(id_)
-
-
-def unique_op_name(name):
-    return f"{name}_{os.getpid()}"
-
-
-@unittest.skipIf(sys.platform == "darwin", "CPU cpp_wrapper tests are not run on macOS")
 class CppWrapperAssertTests(InductorTestCase):
+    def test_inplace_view_alignment_uses_result_classification(self):
+        class FakeInplaceViewExternKernel:
+            @staticmethod
+            def get_assert_name():
+                return "mutated_input"
+
+            @staticmethod
+            def get_name():
+                return "extern_result"
+
+            @staticmethod
+            def get_op_name():
+                return "torch.ops.aten.set_.source_Tensor"
+
+        class RecordingWrapper:
+            comment = "//"
+
+            def __init__(self):
+                self.asserts = []
+                self.comments = []
+
+            def write_assert_alignment(self, name, alignment, op_name):
+                self.asserts.append((name, alignment, op_name))
+
+            def make_comment(self, comment):
+                self.comments.append(comment)
+
+        wrapper = RecordingWrapper()
+        graph = SimpleNamespace(unaligned_buffers={"extern_result"})
+        with config.patch(alignment_asserts=True), V.set_graph_handler(graph):
+            ir.ExternKernel.codegen_alignment_asserts(
+                FakeInplaceViewExternKernel(), wrapper
+            )
+
+        self.assertEqual(wrapper.asserts, [])
+        self.assertEqual(
+            wrapper.comments,
+            [
+                "// buffer mutated_input (op: torch.ops.aten.set_.source_Tensor) "
+                "is assumed to be not aligned"
+            ],
+        )
+
+        wrapper = RecordingWrapper()
+        graph = SimpleNamespace(unaligned_buffers={"mutated_input"})
+        with config.patch(alignment_asserts=True), V.set_graph_handler(graph):
+            ir.ExternKernel.codegen_alignment_asserts(
+                FakeInplaceViewExternKernel(), wrapper
+            )
+
+        self.assertEqual(
+            wrapper.asserts,
+            [
+                (
+                    "mutated_input",
+                    GPU_ALIGN_BYTES,
+                    "torch.ops.aten.set_.source_Tensor",
+                )
+            ],
+        )
+        self.assertEqual(wrapper.comments, [])
+
     @config.patch(
         cpp_wrapper=True,
         fx_graph_cache=False,
@@ -43,17 +110,22 @@ class CppWrapperAssertTests(InductorTestCase):
         def foo_meta(x):
             return torch.empty_like(x)
 
-        op_name = unique_op_name("foo_assert_codegen")
+        op_name = "cpp_wrapper_assert_codegen"
         define_custom_op_for_test(op_name, foo, foo_meta)
 
         def fn(x):
             a = torch.nn.functional.relu(x)
-            return getattr(torch.ops.test_cpp_wrapper_asserts, op_name)(a)
+            return getattr(torch.ops.test, op_name)(a)
 
         _, code = run_and_get_cpp_code(torch.compile(fn), torch.randn(16, 32))
-        self.assertIn("assert_size_stride(buf", code)
-        self.assertIn("assert_alignment(buf", code)
-        self.assertIn(f"torch.ops.test_cpp_wrapper_asserts.{op_name}.default", code)
+        qualified_op_name = f"torch.ops.test.{op_name}.default"
+        FileCheck().check("assert_size_stride(").check_regex(
+            target_assert_alignment_regex(
+                cpp_wrapper=True,
+                op_name=qualified_op_name,
+                alignment=GPU_ALIGN_BYTES,
+            )
+        ).run(code)
 
     @config.patch(
         cpp_wrapper=True,
@@ -68,12 +140,12 @@ class CppWrapperAssertTests(InductorTestCase):
         def slice2d_meta(x):
             return torch.empty_like(x)[..., 0:-16]
 
-        op_name = unique_op_name("slice2d_incorrect_meta_assert")
+        op_name = "cpp_wrapper_slice2d_incorrect_meta_assert"
         define_custom_op_for_test(op_name, slice2d, slice2d_meta)
 
         def fn(x):
             a = torch.nn.functional.relu(x)
-            b = getattr(torch.ops.test_cpp_wrapper_asserts, op_name)(a)
+            b = getattr(torch.ops.test, op_name)(a)
             return torch.cos(b)
 
         compiled = torch.compile(fn)
@@ -93,30 +165,30 @@ class CppWrapperAssertTests(InductorTestCase):
     )
     def test_fallback_output_alignment_assert_checks_data_pointer(self):
         def misaligned_base(x):
-            storage = bytearray(x.numel() * x.element_size() + 16)
+            storage = bytearray(x.numel() * x.element_size() + GPU_ALIGN_BYTES)
             base = torch.frombuffer(storage, dtype=torch.uint8)
-            offset = 1 if (base.data_ptr() + 1) % 16 else 2
-            result = torch.frombuffer(
+            offset = 1 if (base.data_ptr() + 1) % GPU_ALIGN_BYTES else 2
+            return torch.frombuffer(
                 storage,
                 dtype=x.dtype,
                 count=x.numel(),
                 offset=offset,
             ).reshape(x.shape)
-            if result.storage_offset() != 0:
-                raise AssertionError("expected external storage_offset to be zero")
-            if result.data_ptr() % 16 == 0:
-                raise AssertionError("expected external storage to be misaligned")
-            return result
 
         def misaligned_base_meta(x):
             return torch.empty_like(x)
 
-        op_name = unique_op_name("misaligned_base_assert")
+        sample = torch.randn(8, 24)
+        eager_result = misaligned_base(sample)
+        self.assertEqual(eager_result.storage_offset(), 0)
+        self.assertNotEqual(eager_result.data_ptr() % GPU_ALIGN_BYTES, 0)
+
+        op_name = "cpp_wrapper_misaligned_base_assert"
         define_custom_op_for_test(op_name, misaligned_base, misaligned_base_meta)
 
         def fn(x):
             a = torch.nn.functional.relu(x)
-            return torch.cos(getattr(torch.ops.test_cpp_wrapper_asserts, op_name)(a))
+            return torch.cos(getattr(torch.ops.test, op_name)(a))
 
         compiled = torch.compile(fn)
         expected_error = (
@@ -125,7 +197,7 @@ class CppWrapperAssertTests(InductorTestCase):
             r"\(storage_offset=0, itemsize=4\)"
         )
         with self.assertRaisesRegex(RuntimeError, expected_error):
-            compiled(torch.randn(8, 24))
+            compiled(sample)
 
 
 if __name__ == "__main__":

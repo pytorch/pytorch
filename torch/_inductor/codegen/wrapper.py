@@ -1444,7 +1444,7 @@ class AssertAlignmentLine(WrapperLine):
 
     @staticmethod
     def codegen_fx(converter: FxConverter) -> FxConversionFunc:
-        return converter._generate_assert_size_stride
+        return converter._generate_assert_alignment
 
 
 @dataclasses.dataclass
