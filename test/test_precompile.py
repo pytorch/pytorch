@@ -449,6 +449,16 @@ def _precompile_dynamo_dealias_marked_returns_step(x):
     )
 
 
+@torch._dynamo.disable
+def _precompile_mutation_replay_backward(output):
+    output.backward()
+
+
+def _precompile_mutation_replay_step(weight, value):
+    torch.ops.precompile_mutation_replay.opaque_add_(weight, value)
+    _precompile_mutation_replay_backward((weight * value).sum())
+
+
 def _precompile_dynamo_autograd_grad(module, x, target):
     loss = torch.nn.functional.mse_loss(module(x), target)
     return torch.autograd.grad(loss, tuple(module.parameters()))
@@ -5223,6 +5233,77 @@ class TestPrecompile(TestCase):
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the CUDA lowering, not just CPU.
+
+    def test_dynamo_training_replays_mutation_onto_restricted_view(self, device):
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, tensor):
+                return tensor
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 3
+
+        def opaque_add_(weight, value):
+            weight.data.add_(value)
+
+        with torch.library._scoped_library(
+            "precompile_mutation_replay", "FRAGMENT"
+        ) as lib:
+            lib.define("opaque_add_(Tensor(a!) weight, Tensor value) -> ()")
+            lib.impl("opaque_add_", opaque_add_, "CompositeExplicitAutograd")
+            lib.impl("opaque_add_", lambda weight, value: None, "Meta")
+
+            example_base = make_tensor(
+                (4,), device=device, dtype=torch.float32, requires_grad=True
+            )
+            example_weight = example_base * 1.0
+            example_value = make_tensor(
+                (4,), device=device, dtype=torch.float32, requires_grad=True
+            )
+            code, cache = torch.compiler.precompile(
+                _precompile_mutation_replay_step,
+                example_inputs=[(example_weight, example_value)],
+                tracer="dynamo",
+                backend="inductor",
+                training=True,
+            )
+            self.assertIn(
+                "from torch._functorch._aot_autograd.standalone_runtime import "
+                "_replay_input_mutation",
+                code,
+            )
+            self.assertNotIn(
+                "runtime_wrappers import _replay_input_mutation",
+                code,
+            )
+
+            for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
+                ref_base = make_tensor(
+                    (4,), device=device, dtype=torch.float32, requires_grad=True
+                )
+                actual_base = ref_base.detach().clone().requires_grad_()
+                ref_value = make_tensor(
+                    (4,), device=device, dtype=torch.float32, requires_grad=True
+                )
+                actual_value = ref_value.detach().clone().requires_grad_()
+                ref_weight = Scale.apply(ref_base * 1.0)
+                actual_weight = Scale.apply(actual_base * 1.0)
+                ref_version = ref_weight._version
+                actual_version = actual_weight._version
+
+                _precompile_mutation_replay_step(ref_weight, ref_value)
+                with loaded:
+                    loaded(actual_weight, actual_value)
+                    self.assertEqual(loaded.serve_time_compiles(), 0)
+
+                self.assertEqual(actual_base.grad, ref_base.grad)
+                self.assertEqual(actual_value.grad, ref_value.grad)
+                self.assertEqual(actual_weight, ref_weight)
+                self.assertEqual(
+                    actual_weight._version - actual_version,
+                    ref_weight._version - ref_version,
+                )
 
     def test_torch_compile_training_preserves_undefined_tangent(self, device):
         model = _PrecompileDynamoIndependentOutputs().to(device)

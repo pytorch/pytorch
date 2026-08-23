@@ -2443,6 +2443,57 @@ def forward(self, primals_1):
     return (add,)""",
         )
 
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_input_mutation_replayed_onto_restricted_view(self, backend):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, tensor):
+                return tensor
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 3
+
+        def opaque_add_(weight, value):
+            weight.data.add_(value)
+
+        with torch.library._scoped_library("aotmut", "FRAGMENT") as lib:
+            lib.define("opaque_add_(Tensor(a!) weight, Tensor value) -> ()")
+            lib.impl("opaque_add_", opaque_add_, "CompositeExplicitAutograd")
+            lib.impl("opaque_add_", lambda weight, value: None, "Meta")
+
+            def body(weight, value):
+                torch.ops.aotmut.opaque_add_(weight, value)
+                return (weight * value).sum()
+
+            def run(fn, restricted):
+                torch.manual_seed(0)
+                base = torch.randn(4, requires_grad=True)
+                value = torch.randn(4, requires_grad=True)
+                weight = base * 1.0
+                if restricted:
+                    weight = Scale.apply(weight)
+                version = weight._version
+                fn(weight, value).backward()
+                result = base.grad, value.grad, weight.detach().clone()
+                return result, weight._version - version
+
+            reference = run(body, True)
+            torch._dynamo.reset()
+            self.assertEqual(run(torch.compile(body, backend=backend), True), reference)
+
+            torch._dynamo.reset()
+            counter = CompileCounterWithBackend(backend)
+            compiled = torch.compile(body, backend=counter, fullgraph=True)
+            ordinary, ordinary_version = run(compiled, False)
+            ordinary_ref, _ = run(body, False)
+            self.assertEqual(ordinary, ordinary_ref)
+            self.assertEqual(ordinary_version, 1)
+            self.assertEqual(run(compiled, True), reference)
+            self.assertEqual(counter.frame_count, 1)
+
     def test_input_mutation_requires_grad_no_grad(self):
         def f(a):
             with torch.no_grad():

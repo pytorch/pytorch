@@ -237,6 +237,25 @@ def _identity(x: Any) -> Any:
     return x
 
 
+def _replay_input_mutation(orig: torch.Tensor, updated: torch.Tensor) -> None:
+    """Replay a functionalized input mutation onto the caller's tensor.
+
+    Opaque ops can mutate storage without participating in autograd or bumping the
+    version counter. Replaying that write with a tracked ``copy_`` rejects views
+    returned by custom autograd Functions, while changing their creation metadata
+    would alter backward semantics. Detect this unguarded property per runtime call.
+    """
+    if (
+        orig._is_view()
+        and torch._C._autograd._get_creation_meta(orig)
+        != torch._C._autograd.CreationMeta.DEFAULT
+    ):
+        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
+            orig.copy_(updated)
+    else:
+        orig.copy_(updated)
+
+
 class AliasOfInputHandler:
     def __init__(
         self,
@@ -1080,7 +1099,11 @@ def _create_runtime_wrapper(
             args="orig_inputs, updated_inputs",
             artifact_name="mutation_epilogue",
         )
-        buf.bind(torch=torch, _unwrap_tensoralias=_unwrap_tensoralias)
+        buf.bind(
+            torch=torch,
+            _replay_input_mutation=_replay_input_mutation,
+            _unwrap_tensoralias=_unwrap_tensoralias,
+        )
         wrote_body = False
         with buf.indent():
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
@@ -1136,7 +1159,7 @@ def _create_runtime_wrapper(
                             )
                             buf.writeline(f"raise RuntimeError({msg_name})")
                         else:
-                            buf.writeline(f"{oi}.copy_({ui})")
+                            buf.writeline(f"_replay_input_mutation({oi}, {ui})")
             if not wrote_body:
                 buf.writeline("pass")
 
