@@ -1016,9 +1016,14 @@ class DictTests(torch._dynamo.test_case.TestCase):
             node for node in backend.graphs[0].graph.nodes if node.name == "sin"
         )
         module_paths = [path for path, _ in sin_node.meta["nn_module_stack"].values()]
-        self.assertEqual(module_paths, ["L['key'].get_base()"])
+        key_source = (
+            "L['args'][1]"
+            if torch._dynamo.config.debug_force_nested_calls
+            else "L['key']"
+        )
+        self.assertEqual(module_paths, [f"{key_source}.get_base()"])
 
-    def test_attr_proxy_local_global_reuse_guard(self):
+    def test_attr_proxy_cross_scope_reuse_guard(self):
         class Cell(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1031,22 +1036,43 @@ class DictTests(torch._dynamo.test_case.TestCase):
         global_proxy = tracer.proxy_type(first, "global")
         other_global_proxy = tracer.proxy_type(second, "other")
 
-        def fn(proxy, x):
+        def local_proxy_first(proxy, x):
             proxy.value = x
             return _attr_proxy_global.value + 1  # noqa: F821
 
         counter = torch._dynamo.testing.CompileCounter()
-        with patch.dict(fn.__globals__, {"_attr_proxy_global": global_proxy}):
-            opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        with patch.dict(
+            local_proxy_first.__globals__, {"_attr_proxy_global": global_proxy}
+        ):
+            opt_fn = torch.compile(local_proxy_first, backend=counter, fullgraph=True)
 
             self.assertEqual(opt_fn(local_proxy, torch.tensor(2.0)), torch.tensor(3.0))
             self.assertEqual(counter.frame_count, 1)
 
-            fn.__globals__["_attr_proxy_global"] = other_global_proxy
+            local_proxy_first.__globals__["_attr_proxy_global"] = other_global_proxy
             first.value = torch.tensor(-1.0)
             second.value = torch.tensor(-1.0)
 
             self.assertEqual(opt_fn(local_proxy, torch.tensor(5.0)), torch.tensor(0.0))
+            self.assertEqual(counter.frame_count, 2)
+
+        def global_proxy_first(module, x):
+            _attr_proxy_global.value = x  # noqa: F821
+            return module.value + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        with patch.dict(
+            global_proxy_first.__globals__, {"_attr_proxy_global": global_proxy}
+        ):
+            opt_fn = torch.compile(global_proxy_first, backend=counter, fullgraph=True)
+
+            self.assertEqual(opt_fn(first, torch.tensor(2.0)), torch.tensor(3.0))
+            self.assertEqual(counter.frame_count, 1)
+
+            first.value = torch.tensor(-1.0)
+            second.value = torch.tensor(-1.0)
+
+            self.assertEqual(opt_fn(second, torch.tensor(5.0)), torch.tensor(0.0))
             self.assertEqual(counter.frame_count, 2)
 
     def test_construct_user_dict_and_return(self):

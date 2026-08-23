@@ -145,6 +145,7 @@ from ..source import (
     GetItemSource,
     GradSource,
     is_constant_source,
+    is_from_attr_proxy_source,
     is_from_closure_source,
     is_from_global_source,
     is_from_nonlocal_source,
@@ -881,8 +882,6 @@ class VariableBuilder:
     def _reuse_tracked_variable(
         self,
         value: object,
-        *,
-        guard_if_no_dupe: bool = False,
     ) -> VariableTracker | None:
         if value not in self.tx.output.side_effects:
             return None
@@ -892,7 +891,9 @@ class VariableBuilder:
             dup_guard = make_dupe_guard(self.source, result.source)
             if dup_guard is not None:
                 self.install_guards(dup_guard)
-            elif guard_if_no_dupe:
+            elif is_from_attr_proxy_source(self.source) or (
+                result.source is not None and is_from_attr_proxy_source(result.source)
+            ):
                 if result.source is None:
                     raise AssertionError("Tracked AttrProxy module must have a source")
                 # make_dupe_guard cannot relate local and global sources. Reusing
@@ -2699,9 +2700,7 @@ class VariableBuilder:
                 self.source = AttrProxySource(self.source)
                 # _call_impl checked the AttrProxy identity, while side effects
                 # track the unwrapped module. Check again after normalization.
-                if (
-                    result := self._reuse_tracked_variable(value, guard_if_no_dupe=True)
-                ) is not None:
+                if (result := self._reuse_tracked_variable(value)) is not None:
                     return result
 
             freezing = is_parameter_freezing()
