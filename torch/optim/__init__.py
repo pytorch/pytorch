@@ -8,7 +8,10 @@ future.
 
 from torch.optim import lr_scheduler as lr_scheduler, swa_utils as swa_utils
 from torch.optim._adafactor import Adafactor as Adafactor
-from torch.optim._muon import Muon as Muon
+from torch.optim._muon import (
+    Muon as Muon,
+    param_groups_for_muon as param_groups_for_muon,
+)
 from torch.optim._stateless import (
     swap_in_optimizer_params_and_state as swap_in_optimizer_params_and_state,
 )
@@ -30,6 +33,7 @@ from torch.optim.sparse_adam import SparseAdam as SparseAdam
 
 Adafactor.__module__ = "torch.optim"
 Muon.__module__ = "torch.optim"
+param_groups_for_muon.__module__ = "torch.optim"
 swap_in_optimizer_params_and_state.__module__ = "torch.optim"
 
 
@@ -61,6 +65,7 @@ __all__ = [
     "Muon",
     "NAdam",
     "Optimizer",
+    "param_groups_for_muon",
     "RAdam",
     "RMSprop",
     "Rprop",
