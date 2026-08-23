@@ -1468,7 +1468,7 @@ def check_aliasing_and_input_mutation(
     supports_input_input_aliasing: bool,
     source_target: Optional["HigherOrderOperator"],
 ) -> None:
-    name = source_target.name if source_target else "<UNKNOWN>"
+    name = source_target.name() if source_target else "<UNKNOWN>"
     if not supports_input_mutation:
         mutation_info = subtracer.has_input_mutation()
         if mutation_info.has_mutation:
@@ -2285,6 +2285,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     # Set to False for HOPs that hard error on graph break (e.g., cond, map, scan); otherwise
     # HOPs will fall back to eager.
     _ALLOW_FALLBACK_TO_EAGER: bool = True
+    # Speculated HOP subgraphs are strict unless a concrete HOP explicitly
+    # opts into mutation or aliasing semantics.
+    supports_input_mutation: bool = False
+    supports_aliasing: bool = False
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -3799,8 +3803,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     # Shared implementation for wrapping HOPs. Concrete wrappers must opt in
     # when their runtime semantics permit body mutation or aliasing.
     _HOP_NAME = "wrapped higher order operator"
-    supports_input_mutation = False
-    supports_aliasing = False
     allow_side_effects = False
 
     def install_subgraph_in_output_graph(
@@ -6071,8 +6073,6 @@ class BaseHOPVariable(WrapHigherOrderVariable):
     # Generic fallback for BaseHOP instances not explicitly mapped
     # The actual HOP name comes from self.value._name at runtime
     _HOP_NAME = "base HOP (name not yet determined)"
-    supports_input_mutation = False
-    supports_aliasing = False
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -6116,8 +6116,6 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 
 class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.local_map_hop"
-    supports_input_mutation = False
-    supports_aliasing = False
 
     # Subclasses aren't supported by speculate_subgraph yet
     # So this HOP is only usable with plain tensors

@@ -443,7 +443,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         # Triton will ever win.
         #
         # To be conservative we increase this threshold for N/M by 2.
-        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "exhaustive"
+        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"
         if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
             templates_to_use.append(mm_template)
 

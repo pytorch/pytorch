@@ -351,7 +351,8 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "Encountered input mutation during higher order op tracing",
+            "(?s)Encountered input mutation during higher order op tracing.*"
+            "Found in register_hook",
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(
                 torch.randn(3, requires_grad=True)
@@ -380,6 +381,28 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                 for reason in graph_breaks
             )
         )
+
+    def test_register_post_accumulate_grad_hook_intermediate_unsupported(self):
+        def fn(x):
+            y = x.detach().requires_grad_()
+            y.register_post_accumulate_grad_hook(lambda tensor: None)
+            return (y * 2).sum()
+
+        error = "register_post_accumulate_grad_hook on an intermediate tensor"
+        with (
+            torch._dynamo.compiled_autograd._disable(),
+            self.assertRaisesRegex(RuntimeError, error),
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
+
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        with torch._dynamo.compiled_autograd._disable():
+            out = torch.compile(fn, backend="eager")(torch.randn(3))
+            out.backward()
+
+        graph_breaks = torch._dynamo.utils.counters["graph_break"]
+        self.assertTrue(any(error in reason for reason in graph_breaks))
 
     def test_hook_on_intermediate_with_container(self):
         glb_list = []

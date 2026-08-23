@@ -2113,6 +2113,17 @@
       ]
     }
   ],
+  "GB5821": [
+    {
+      "Gb_type": "register_post_accumulate_grad_hook on an intermediate tensor",
+      "Context": "str(self)",
+      "Explanation": "Dynamo cannot preserve post-accumulate hook semantics for an intermediate tensor without compiled autograd.",
+      "Hints": [
+        "Move the hook registration outside the compiled region.",
+        "Use compiled autograd if the hook must be registered inside it."
+      ]
+    }
+  ],
   "GB0139": [
     {
       "Gb_type": "Unsupported autograd.Function context method",
@@ -3521,7 +3532,7 @@
       "Context": "Backend: {name}\nException:{str(e)}\nTraceback:\n{self.root_tx.format_frame_summary()}",
       "Explanation": "Backend compiler `{name}` failed with {str(e)}. Adding a graph break.",
       "Hints": [
-        "Report an issue to the backend compiler repo."
+        "Set `fullgraph=False` to allow this backend fallback to run eagerly."
       ]
     }
   ],
@@ -3730,6 +3741,14 @@
       "Hints": [
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
       ]
+    }
+  ],
+  "GB9118": [
+    {
+      "Gb_type": "Data pointer truth value",
+      "Context": "nb_bool_impl {self}",
+      "Explanation": "Dynamo cannot decide the truth value of a data pointer because the address is only known at runtime.",
+      "Hints": []
     }
   ],
   "GB0233": [
@@ -5931,6 +5950,16 @@
       "Context": "str(self.bwd_graph)",
       "Explanation": "Expected backward function to be a function or method.",
       "Hints": []
+    }
+  ],
+  "GB2582": [
+    {
+      "Gb_type": "Missing nb_bool_impl override",
+      "Context": "nb_bool_impl {self}",
+      "Explanation": "{type(self).__name__} does not implement nb_bool_impl. Add a nb_bool_impl override to {type(self).__name__}.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
     }
   ],
   "GB0353": [

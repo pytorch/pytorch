@@ -65,7 +65,7 @@ from ..exc import (
 )
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, TypeSource
+from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
     fqn,
@@ -749,15 +749,6 @@ class TensorVariable(VariableTracker):
                 raise UnknownPropertiesDuringBackwardTrace(
                     f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"
                 )
-
-        if name == "__class__":
-            # Carry provenance on the class, mirroring BuiltinVariable.call_type.
-            # A sourced class self-guards when observed downstream (e.g.
-            # `w.__class__ is SomeType`), which keeps type observation sound even
-            # when the input's own class guard is relaxed (see
-            # VariableBuilder.wrap_tensor and ACT input polymorphism).
-            source = self.source and TypeSource(self.source)
-            return VariableTracker.build(tx, self.python_type(), source)
 
         handler = getattr(self, f"method_attr_{name}", None)
         result = handler(tx) if handler is not None else None
@@ -2136,6 +2127,19 @@ class TensorVariable(VariableTracker):
                         {},
                     ),
                 )
+
+            if name == "register_post_accumulate_grad_hook":
+                unimplemented(
+                    gb_type="register_post_accumulate_grad_hook on an intermediate tensor",
+                    context=str(self),
+                    explanation="Dynamo cannot preserve post-accumulate hook semantics "
+                    "for an intermediate tensor without compiled autograd.",
+                    hints=[
+                        "Move the hook registration outside the compiled region.",
+                        "Use compiled autograd if the hook must be registered inside it.",
+                    ],
+                )
+
             # Register the hook via a trampoline in the graph where the
             # tensor's proxy lives. During AOTAutograd's make_fx, the
             # trampoline calls tensor.register_hook(hook_fn). The hook
@@ -2143,6 +2147,8 @@ class TensorVariable(VariableTracker):
             # tracing, matching eager semantics. When inside a subgraph
             # (e.g. checkpoint), the node is created in the parent
             # graph so the hook is not confined to the HOP scope.
+            from torch._higher_order_ops.register_hook import register_hook_op
+
             from .higher_order_ops import speculate_subgraph
 
             tensor_proxy = self.as_proxy()
@@ -2159,12 +2165,12 @@ class TensorVariable(VariableTracker):
                         [self],
                         {},
                         "register_hook",
-                        source_target=None,
+                        source_target=register_hook_op,
                         enable_grad=None,
                         set_subgraph_inputs="automatic_with_forced_inputs",
                         restore_side_effects=True,
-                        # Hooks may return the incoming gradient unchanged, but
-                        # the register_hook contract forbids modifying it in place.
+                        # register_hook may return the incoming gradient unchanged,
+                        # but its contract forbids modifying that gradient in place.
                         supports_input_mutation=False,
                         supports_aliasing=True,
                     )
@@ -2184,8 +2190,6 @@ class TensorVariable(VariableTracker):
                 torch.fx.GraphModule(hook_nn_modules.nn_modules, hook_graph),
             )
             hook_node = target_tracer.create_proxy("get_attr", hook_name, (), {})
-
-            from torch._higher_order_ops.register_hook import register_hook_op
 
             p_args = (tensor_proxy, hook_node, *list(hook_freevars.keys()))
             hooked_proxy = target_tracer.create_proxy(
@@ -3672,6 +3676,16 @@ class DataPtrVariable(VariableTracker):
             context=f"tp_richcompare_impl {self} {op} {other}",
             explanation="Dynamo can only trace data pointer comparisons "
             "when it can prove both operands have the same data pointer.",
+            hints=[],
+        )
+
+    def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        """DataPtr nb_bool: mirrors long_bool, but the address is runtime-only."""
+        unimplemented(
+            gb_type="Data pointer truth value",
+            context=f"nb_bool_impl {self}",
+            explanation="Dynamo cannot decide the truth value of a data pointer "
+            "because the address is only known at runtime.",
             hints=[],
         )
 

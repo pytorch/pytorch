@@ -1226,7 +1226,6 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.invoke_subgraph"
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = True
-    supports_aliasing = False
     allow_side_effects = True
     # invoke_subgraph is NOT desugared in AOTAutograd, so the HOP input/output
     # shouldn't alias. For checkpoint HOP, we inline it so we don't need
