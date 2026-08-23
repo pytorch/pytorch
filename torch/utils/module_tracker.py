@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import logging
 import sys
 import weakref
@@ -14,6 +16,8 @@ from torch.utils._pytree import tree_flatten
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.utils.hooks import RemovableHandle
 
 
@@ -68,6 +72,10 @@ class ModuleTracker:
         self._seen_modules: weakref.WeakSet = weakref.WeakSet()
         self._has_callback = False
         self._hooks: list[RemovableHandle] = []
+        self._dynamo_runtime_module_checker: (
+            Callable[[torch.nn.Module], bool] | None
+        ) = None
+        self._dynamo_optimized_module_cls: type[torch.nn.Module] | None = None
 
     def _maybe_set_engine_callback(self) -> None:
         # This assumes no concurrent calls to backward
@@ -103,15 +111,21 @@ class ModuleTracker:
         # Dynamo registers compiler-owned modules at its backend and
         # compiled-autograd boundaries. Query lazily so eager ModuleTracker
         # users do not import Dynamo just for this check.
-        dynamo_utils = sys.modules.get("torch._dynamo.utils")
-        is_dynamo_runtime_module = getattr(
-            dynamo_utils, "is_dynamo_runtime_module", None
-        )
+        is_dynamo_runtime_module = self._dynamo_runtime_module_checker
+        if is_dynamo_runtime_module is None:
+            dynamo_utils = sys.modules.get("torch._dynamo.utils")
+            is_dynamo_runtime_module = getattr(
+                dynamo_utils, "is_dynamo_runtime_module", None
+            )
+            self._dynamo_runtime_module_checker = is_dynamo_runtime_module
         if is_dynamo_runtime_module is not None and is_dynamo_runtime_module(mod):
             return True
 
-        eval_frame = sys.modules.get("torch._dynamo.eval_frame")
-        optimized_module_cls = getattr(eval_frame, "OptimizedModule", None)
+        optimized_module_cls = self._dynamo_optimized_module_cls
+        if optimized_module_cls is None:
+            eval_frame = sys.modules.get("torch._dynamo.eval_frame")
+            optimized_module_cls = getattr(eval_frame, "OptimizedModule", None)
+            self._dynamo_optimized_module_cls = optimized_module_cls
         return optimized_module_cls is not None and isinstance(
             mod, optimized_module_cls
         )

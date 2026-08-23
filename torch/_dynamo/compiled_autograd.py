@@ -36,11 +36,11 @@ from torch._dynamo.external_utils import (
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import (
     counters,
+    dynamo_runtime_modules,
+    DynamoRuntimeModuleRef,
     get_chromium_event_logger,
     get_dynamo_runtime_module_refs,
     lazy_format_graph_code,
-    restore_dynamo_runtime_module_refs,
-    set_dynamo_runtime_module_refs,
     set_locals_to_steal,
 )
 from torch._functorch._aot_autograd.runtime_wrappers import (
@@ -63,6 +63,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.fx.node import Argument
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.types import FloatLikeType, IntLikeType
 from torch.utils._ordered_set import OrderedSet
@@ -1082,14 +1083,6 @@ class AutogradCompilerInstance:
 
         return []
 
-    def is_sym_node(self, node: Any) -> bool:
-        return (
-            isinstance(node, torch.fx.Node)
-            and node.op == "call_function"
-            and node.target
-            in [torch.ops.aten.sym_size.int, torch.ops.aten.sym_numel.default]
-        )
-
     def dce(self) -> None:
         # Most of these removed nodes would have been removed during Dynamo and AOTDispatch
         # Remove some of these nodes earlier to improve compilation speed
@@ -1243,6 +1236,10 @@ class AutogradCompilerInstance:
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
+        graph_runtime_module_refs = get_dynamo_runtime_module_refs(graph)
+        runtime_module_refs: tuple[DynamoRuntimeModuleRef, ...] = (
+            graph_runtime_module_refs
+        )
 
         def runtime_wrapper(
             compiled_fn: Callable[..., Any],
@@ -1272,15 +1269,7 @@ class AutogradCompilerInstance:
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
-                runtime_modules_prior = None
-                if (
-                    runtime_module_refs
-                    and torch.nn.modules.module._has_any_global_hook()
-                ):
-                    runtime_modules_prior = set_dynamo_runtime_module_refs(
-                        runtime_module_refs
-                    )
-                try:
+                with dynamo_runtime_modules(runtime_module_refs):
                     with _disable(), make_compile_context(self.id):
                         out = compiled_fn(
                             inputs, filtered_sizes, scalars, hooks, packed_inputs
@@ -1288,9 +1277,6 @@ class AutogradCompilerInstance:
                         if self.nan_checker:
                             self.nan_checker.check(out)
                         return out
-                finally:
-                    if runtime_modules_prior is not None:
-                        restore_dynamo_runtime_module_refs(runtime_modules_prior)
             finally:
                 in_compiled_autograd_region = False
 
@@ -1302,22 +1288,15 @@ class AutogradCompilerInstance:
             log_pt2_compile_event=True,
         )
         self.compile_context.__exit__(None, None, None)
-        graph_runtime_module_refs = get_dynamo_runtime_module_refs(graph)
-        runtime_modules_prior = None
-        if graph_runtime_module_refs and torch.nn.modules.module._has_any_global_hook():
-            runtime_modules_prior = set_dynamo_runtime_module_refs(
-                graph_runtime_module_refs
-            )
-        try:
+        with dynamo_runtime_modules(graph_runtime_module_refs):
             compiled_fn = self.compiler_fn(graph)
-        finally:
-            if runtime_modules_prior is not None:
-                restore_dynamo_runtime_module_refs(runtime_modules_prior)
-        runtime_module_refs = get_dynamo_runtime_module_refs(graph, compiled_fn)
+        runtime_module_refs = (
+            graph_runtime_module_refs + get_dynamo_runtime_module_refs(compiled_fn)
+        )
         return runtime_wrapper, compiled_fn
 
     @staticmethod
-    def get_all_nodes(args: Sequence[Any]) -> list[torch.fx.Node]:
+    def get_all_nodes(args: Sequence[Argument]) -> list[torch.fx.Node]:
         # filter out non-Node args, like None
         nodes = [n for n in args if type(n) is torch.fx.Node]
         return nodes

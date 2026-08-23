@@ -63,10 +63,35 @@ def transform(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
 
 @config.patch("verify_correctness", True)
 class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
+    def test_preserves_user_modules_during_verification(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.inner = torch.nn.Identity()
+
+            def forward(self, x):
+                return self.inner(x)
+
+        gm = torch.fx.symbolic_trace(Mod())
+        seen = []
+        handle = torch.nn.modules.module.register_module_forward_pre_hook(
+            lambda module, args: seen.append(
+                torch._dynamo.utils.is_dynamo_runtime_module(module)
+            )
+            if isinstance(module, torch.nn.Identity)
+            else None
+        )
+        try:
+            WrapperBackend(eager)(gm, [torch.randn(2, 2)])
+        finally:
+            handle.remove()
+
+        self.assertEqual(seen, [False, False])
+
     def test_preserves_serializable_backend_callable(self):
         gm = torch.fx.symbolic_trace(lambda x: x.sin())
         x = torch.randn(2, 2)
-        backend = WrapperBackend(eager, track_runtime_modules=True)
+        backend = WrapperBackend(eager)
 
         with torch._functorch.config.patch(force_autograd_cache=True):
             compiled_fn = backend(gm, [x])

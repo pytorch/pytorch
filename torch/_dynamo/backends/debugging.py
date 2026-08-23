@@ -34,7 +34,12 @@ import torch
 from functorch.compile import min_cut_rematerialization_partition
 from torch import _guards
 from torch._dynamo.output_graph import GraphCompileReason
-from torch._dynamo.utils import wrap_dynamo_runtime_module_call
+from torch._dynamo.utils import (
+    dynamo_runtime_modules,
+    DynamoRuntimeModuleRef,
+    get_dynamo_runtime_module_refs,
+    wrap_dynamo_runtime_module_call,
+)
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
 from torch._inductor.output_code import OutputCode
@@ -280,13 +285,19 @@ class AOTEagerOutputCode(OutputCode):
 
     gm: torch.fx.GraphModule | None = None
     _serialized_gm: bytes | None = dataclasses.field(default=None, init=False)
+    _runtime_module_refs: tuple[DynamoRuntimeModuleRef, ...] = dataclasses.field(
+        default=(), init=False, repr=False
+    )
+
+    def __post_init__(self) -> None:
+        if self.gm is not None:
+            self._runtime_module_refs = get_dynamo_runtime_module_refs(self.gm)
 
     def __call__(self, inputs: Any) -> Any:
         if self.gm is None:
             raise AssertionError("gm must not be None")
-        if torch.nn.modules.module._has_any_global_hook():
-            return wrap_dynamo_runtime_module_call(self.gm.forward, self.gm)(inputs)
-        return self.gm.forward(inputs)
+        with dynamo_runtime_modules(self._runtime_module_refs):
+            return self.gm.forward(inputs)
 
     def prepare_for_serialization(self) -> None:
         from torch.fx._graph_pickler import GraphPickler, Options
@@ -300,6 +311,7 @@ class AOTEagerOutputCode(OutputCode):
 
         self._serialized_gm = GraphPickler.dumps(self.gm, Options(ops_filter=None))
         self.gm = None
+        self._runtime_module_refs = ()
 
     def post_compile(self, *args: Any, **kwargs: Any) -> None:
         if self.gm is None and self._serialized_gm is not None:
@@ -316,6 +328,8 @@ class AOTEagerOutputCode(OutputCode):
             self.gm.graph.set_codegen(_BoxedCodeGen())
             self.gm.recompile()
             self._serialized_gm = None
+        if self.gm is not None:
+            self._runtime_module_refs = get_dynamo_runtime_module_refs(self.gm)
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass
@@ -349,7 +363,7 @@ def boxed_nop(
         return forward_fn(args)
 
     run._boxed_call = True  # type: ignore[attr-defined]
-    return wrap_dynamo_runtime_module_call(run, fx_g)
+    return wrap_dynamo_runtime_module_call(run, get_dynamo_runtime_module_refs(fx_g))
 
 
 def boxed_nop_with_mode(
@@ -372,7 +386,7 @@ def boxed_nop_with_mode(
             return forward_fn(args)
 
     run._boxed_call = True  # type: ignore[attr-defined]
-    return wrap_dynamo_runtime_module_call(run, fx_g)
+    return wrap_dynamo_runtime_module_call(run, get_dynamo_runtime_module_refs(fx_g))
 
 
 def fake_crossref_boxed_nop(
@@ -394,7 +408,7 @@ def fake_crossref_boxed_nop(
             return forward_fn(args)
 
     run._boxed_call = True  # type: ignore[attr-defined]
-    return wrap_dynamo_runtime_module_call(run, fx_g)
+    return wrap_dynamo_runtime_module_call(run, get_dynamo_runtime_module_refs(fx_g))
 
 
 def ignore_builtins(op: torch._ops.OpOverload) -> bool:

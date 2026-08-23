@@ -1308,6 +1308,7 @@ def _unpack_fast_types() -> tuple[type, ...]:
             variables.DequeVariable,
             variables.ListVariable,
             variables.ListIteratorVariable,
+            variables.TupleIteratorVariable,
             variables.DequeIteratorVariable,
             variables.RangeVariable,
             variables.SetVariable,
@@ -1536,6 +1537,12 @@ def make_cell(val: Any = None) -> types.CellType:
             f"Expected f.__closure__ to have exactly 1 element, got {len(f.__closure__)}"
         )
     return f.__closure__[0]
+
+
+def clear_cell(cell: types.CellType) -> None:
+    """Empty `cell` regardless of its current state (replays DELETE_DEREF)."""
+    cell.cell_contents = None
+    del cell.cell_contents
 
 
 def proxy_args_kwargs(args: Any, kwargs: Any) -> tuple[tuple[Any, ...], dict[str, Any]]:
@@ -3151,7 +3158,13 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
     if not isinstance(obj, dict):
         raise AssertionError(f"Expected obj to be a dict, got {type(obj)}")
     if istype(obj, (dict, OrderedDict)):
-        return obj.items()
+        # Snapshot into a list rather than returning the live items view. Callers
+        # consume this lazily while building VariableTrackers, and when obj is a
+        # frame-globals dict Dynamo may add or drop its own generated globals
+        # (e.g. __compiled_fn / __resume_at, removed by a CleanupHook firing at
+        # GC time) on that same dict mid-iteration, which a live view would turn
+        # into "dictionary changed size during iteration".
+        return list(obj.items())
     elif isinstance(obj, OrderedDict):
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
@@ -4732,17 +4745,50 @@ def nn_module_has_global_hooks() -> bool:
 DynamoRuntimeModuleRef = weakref.ReferenceType[torch.nn.Module]
 
 
+class _DynamoRuntimeModule(torch.nn.Module):
+    """Compiler-owned wrapper that declares its runtime module values."""
+
+    def _dynamo_runtime_module_values(self) -> tuple[Any, ...]:
+        return ()
+
+
 class _DynamoRuntimeModuleTLS(threading.local):
-    refs: tuple[DynamoRuntimeModuleRef, ...] = ()
+    def __init__(self) -> None:
+        self.refs: dict[int, DynamoRuntimeModuleRef] = {}
 
 
 _dynamo_runtime_module_tls = _DynamoRuntimeModuleTLS()
+_dynamo_runtime_module_null_context = contextlib.nullcontext()
+
+
+class _DynamoRuntimeModuleContext:
+    def __init__(self, refs: tuple[DynamoRuntimeModuleRef, ...]) -> None:
+        self.refs = refs
+        self.prior: dict[int, DynamoRuntimeModuleRef] = {}
+
+    def __enter__(self) -> None:
+        self.prior = _dynamo_runtime_module_tls.refs
+        current = self.prior.copy()
+        for ref in self.refs:
+            module = ref()
+            if module is not None:
+                current[id(module)] = ref
+        _dynamo_runtime_module_tls.refs = current
+
+    def __exit__(self, *args: Any) -> None:
+        _dynamo_runtime_module_tls.refs = self.prior
 
 
 def get_dynamo_runtime_module_refs(*values: Any) -> tuple[DynamoRuntimeModuleRef, ...]:
-    """Get weak references to modules used only for a compiled runtime call."""
-    refs = []
-    seen = set()
+    """Get weak references to exact compiler-owned module identities.
+
+    GraphModule ``get_attr`` subgraphs and ``_DynamoRuntimeModule`` call targets
+    are compiler-created too. Ordinary ``call_module`` children are user modules
+    and intentionally remain visible unless a caller supplies them explicitly.
+    """
+    refs: list[DynamoRuntimeModuleRef] = []
+    seen: set[int] = set()
+    pending: list[torch.nn.Module] = []
     for value in values:
         module = None
         if isinstance(value, torch.nn.Module):
@@ -4752,48 +4798,71 @@ def get_dynamo_runtime_module_refs(*values: Any) -> tuple[DynamoRuntimeModuleRef
         ) and isinstance(value.__self__, torch.nn.Module):
             module = value.__self__
 
-        if module is not None and id(module) not in seen:
-            seen.add(id(module))
-            refs.append(weakref.ref(module))
+        if module is not None:
+            pending.append(module)
+
+    while pending:
+        module = pending.pop()
+        if id(module) in seen:
+            continue
+        seen.add(id(module))
+        refs.append(weakref.ref(module))
+
+        if isinstance(module, torch.fx.GraphModule):
+            for node in module.graph.nodes:
+                if node.op not in ("call_module", "get_attr"):
+                    continue
+                try:
+                    submodule = module.get_submodule(str(node.target))
+                except AttributeError:
+                    continue
+                if (
+                    node.op == "get_attr"
+                    and isinstance(submodule, torch.fx.GraphModule)
+                ) or isinstance(submodule, _DynamoRuntimeModule):
+                    pending.append(submodule)
+
+        if isinstance(module, _DynamoRuntimeModule):
+            for value in module._dynamo_runtime_module_values():
+                if isinstance(value, torch.nn.Module):
+                    pending.append(value)
+                elif isinstance(
+                    value, (types.MethodType, types.BuiltinMethodType)
+                ) and isinstance(value.__self__, torch.nn.Module):
+                    pending.append(value.__self__)
     return tuple(refs)
 
 
-def set_dynamo_runtime_module_refs(
+def dynamo_runtime_modules(
     refs: tuple[DynamoRuntimeModuleRef, ...],
-) -> tuple[DynamoRuntimeModuleRef, ...]:
-    prior = _dynamo_runtime_module_tls.refs
-    _dynamo_runtime_module_tls.refs = prior + refs
-    return prior
+) -> AbstractContextManager[None]:
+    """Mark module identities as compiler-owned during a nested call.
 
-
-def restore_dynamo_runtime_module_refs(
-    refs: tuple[DynamoRuntimeModuleRef, ...],
-) -> None:
-    _dynamo_runtime_module_tls.refs = refs
+    The state is installed only while global module hooks are active to keep
+    ordinary compiled calls free of tracking overhead. Weak references avoid
+    extending the lifetime of backend-owned modules.
+    """
+    if not refs or not torch.nn.modules.module._has_any_global_hook():
+        return _dynamo_runtime_module_null_context
+    return _DynamoRuntimeModuleContext(refs)
 
 
 def is_dynamo_runtime_module(module: torch.nn.Module) -> bool:
-    return any(ref() is module for ref in _dynamo_runtime_module_tls.refs)
+    ref = _dynamo_runtime_module_tls.refs.get(id(module))
+    return ref is not None and ref() is module
 
 
 def wrap_dynamo_runtime_module_call(
-    fn: Callable[_P, R], *values: Any
+    fn: Callable[_P, R], refs: tuple[DynamoRuntimeModuleRef, ...]
 ) -> Callable[_P, R]:
     """Run ``fn`` with the supplied compiler-owned modules active."""
-    refs = get_dynamo_runtime_module_refs(*values)
     if not refs:
         return fn
 
     @functools.wraps(fn)
     def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> R:
-        runtime_modules_prior = None
-        if torch.nn.modules.module._has_any_global_hook():
-            runtime_modules_prior = set_dynamo_runtime_module_refs(refs)
-        try:
+        with dynamo_runtime_modules(refs):
             return fn(*args, **kwargs)
-        finally:
-            if runtime_modules_prior is not None:
-                restore_dynamo_runtime_module_refs(runtime_modules_prior)
 
     return wrapped
 
@@ -5614,7 +5683,7 @@ def nn_module_proxy(mod: Any) -> Any:
     return proxy
 
 
-class GmWrapper(torch.nn.Module):
+class GmWrapper(_DynamoRuntimeModule):
     def __init__(
         self, gm: torch.fx.GraphModule, unflatten_fn: Callable[[list[Any]], Any]
     ) -> None:
@@ -5626,6 +5695,9 @@ class GmWrapper(torch.nn.Module):
         # pyrefly: ignore [redefinition]
         args: list[Any] = list(args)
         return self.gm(*self.unflatten_fn(args))
+
+    def _dynamo_runtime_module_values(self) -> tuple[Any, ...]:
+        return (self.gm,)
 
 
 def flatten_graph_inputs(
@@ -5670,15 +5742,10 @@ def flatten_graph_inputs(
         flatten_fn = pytree.arg_tree_leaves
 
     gm_wrapper = GmWrapper(gm, unflatten_fn)
-    runtime_module_refs = get_dynamo_runtime_module_refs(gm_wrapper)
-    runtime_modules_prior = None
-    if runtime_module_refs and torch.nn.modules.module._has_any_global_hook():
-        runtime_modules_prior = set_dynamo_runtime_module_refs(runtime_module_refs)
-    try:
+    compile_module_refs = get_dynamo_runtime_module_refs(gm_wrapper, gm)
+    with dynamo_runtime_modules(compile_module_refs):
         compiled_fn = compile_gm(gm_wrapper, flat_inputs)
-    finally:
-        if runtime_modules_prior is not None:
-            restore_dynamo_runtime_module_refs(runtime_modules_prior)
+    runtime_module_refs = get_dynamo_runtime_module_refs(gm_wrapper, gm, compiled_fn)
 
     def wrapper(*args: Any) -> Any:
         flat_args = flatten_fn(args)
@@ -5688,14 +5755,8 @@ def flatten_graph_inputs(
             args[i].clear()
 
         # this call is boxed to avoid increasing refcount until we reach aot_module_simplified forward
-        runtime_modules_prior = None
-        if runtime_module_refs and torch.nn.modules.module._has_any_global_hook():
-            runtime_modules_prior = set_dynamo_runtime_module_refs(runtime_module_refs)
-        try:
+        with dynamo_runtime_modules(runtime_module_refs):
             return compiled_fn(flat_args)
-        finally:
-            if runtime_modules_prior is not None:
-                restore_dynamo_runtime_module_refs(runtime_modules_prior)
 
     return wrapper
 

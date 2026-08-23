@@ -152,6 +152,7 @@ from .utils import (
     compilation_time_metrics,
     count_calls,
     counters,
+    dynamo_runtime_modules,
     dynamo_timed,
     get_chromium_event_logger,
     get_dynamo_runtime_module_refs,
@@ -165,9 +166,7 @@ from .utils import (
     lazy_format_graph_code,
     LazyString,
     nn_module_proxy,
-    restore_dynamo_runtime_module_refs,
     same,
-    set_dynamo_runtime_module_refs,
     set_example_value,
 )
 from .variables.builder import (
@@ -371,24 +370,14 @@ class FakeRootModule(torch.nn.Module):
 
 
 class WrapperBackend:
-    def __init__(self, backend: CompilerFn, *, track_runtime_modules: bool) -> None:
+    def __init__(
+        self, backend: CompilerFn, *, track_runtime_modules: bool = True
+    ) -> None:
         self.backend: CompilerFn = backend
         self.track_runtime_modules = track_runtime_modules
         self.runtime_module_refs: tuple[
             weakref.ReferenceType[torch.nn.Module], ...
         ] = ()
-
-    def _set_runtime_modules(self, *values: Any):
-        if (
-            not self.track_runtime_modules
-            or not torch.nn.modules.module._has_any_global_hook()
-        ):
-            return None
-
-        refs = get_dynamo_runtime_module_refs(*values)
-        if not refs:
-            return None
-        return set_dynamo_runtime_module_refs(refs)
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
@@ -397,29 +386,35 @@ class WrapperBackend:
         self.restore = checkpoint_params(gm)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
-        runtime_modules_prior = self._set_runtime_modules(copy_gm)
-        try:
+        compile_refs = (
+            get_dynamo_runtime_module_refs(copy_gm)
+            if self.track_runtime_modules
+            else ()
+        )
+        with dynamo_runtime_modules(compile_refs):
             self.candidate = self.backend(copy_gm, example_inputs)
-        finally:
-            if runtime_modules_prior is not None:
-                restore_dynamo_runtime_module_refs(runtime_modules_prior)
 
         if self.candidate is None or self.candidate is self.gm.forward:
             return self.gm.forward
 
         if self.track_runtime_modules:
-            self.runtime_module_refs = get_dynamo_runtime_module_refs(
-                copy_gm, self.candidate
+            self.runtime_module_refs = compile_refs + get_dynamo_runtime_module_refs(
+                self.candidate
             )
 
         if not config.verify_correctness:
             return self.candidate
 
         # if verify_correctness=True
-        runtime_modules_prior = self._set_runtime_modules(copy_gm, self.candidate)
+        verify_refs = (
+            get_dynamo_runtime_module_refs(self.gm, self.candidate) + compile_refs
+            if self.track_runtime_modules
+            else ()
+        )
         try:
-            correct = self.gm.forward(*clone_inputs(example_inputs))
-            result = self.candidate(*clone_inputs(example_inputs))
+            with dynamo_runtime_modules(verify_refs):
+                correct = self.gm.forward(*clone_inputs(example_inputs))
+                result = self.candidate(*clone_inputs(example_inputs))
 
             # TODO: replace `same` function with the one in testing
             if same(correct, result):
@@ -431,8 +426,6 @@ class WrapperBackend:
             log.exception("error in verify_correctness")
             raise
         finally:
-            if runtime_modules_prior is not None:
-                restore_dynamo_runtime_module_refs(runtime_modules_prior)
             self.restore()
 
 
@@ -3330,18 +3323,11 @@ class OutputGraph(OutputGraphCommon):
                     compiler_fn, track_runtime_modules=not self.export
                 )
                 compiler_fn = wrapper_backend
-            runtime_modules_prior = None
-            if not self.export and torch.nn.modules.module._has_any_global_hook():
-                runtime_module_refs = get_dynamo_runtime_module_refs(gm)
-                if runtime_module_refs:
-                    runtime_modules_prior = set_dynamo_runtime_module_refs(
-                        runtime_module_refs
-                    )
-            try:
+            runtime_module_refs = (
+                () if self.export else get_dynamo_runtime_module_refs(gm)
+            )
+            with dynamo_runtime_modules(runtime_module_refs):
                 compiled_fn = compiler_fn(gm, example_inputs)
-            finally:
-                if runtime_modules_prior is not None:
-                    restore_dynamo_runtime_module_refs(runtime_modules_prior)
             _step_logger()(logging.INFO, f"done compiler function {name}")
             if not callable(compiled_fn):
                 raise AssertionError("compiler_fn did not return callable")
@@ -3361,8 +3347,12 @@ class OutputGraph(OutputGraphCommon):
                 context=f"Backend: {name}\nException:{str(e)}\nTraceback:\n{self.root_tx.format_frame_summary()}",
                 explanation=f"Backend compiler `{name}` failed with {str(e)}. Adding a graph break.",
                 hints=[
-                    "Report an issue to the backend compiler repo.",
+                    "Set `fullgraph=False` to allow this backend fallback to run eagerly.",
                 ],
+                # These exceptions are allowed backend fallbacks, not hard
+                # backend failures. Keep graph-break debug artifacts without
+                # warning users for every fallback graph.
+                log_warning=False,
             )
         except SkipFrame:
             # The backend compiler has requested that we skip the frame, instead of
@@ -4491,6 +4481,9 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy: fx.Proxy) -> LazyProxy | fx.Proxy:
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
+        # (A stale cross-tracer cached proxy used to reach this via
+        # wrap_symfloat; see the fix in
+        # https://github.com/pytorch/pytorch/issues/193194.)
         if self.parent is None:
             raise AssertionError(
                 "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
