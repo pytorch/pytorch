@@ -1718,7 +1718,7 @@ class TestPrecompile(TestCase):
         message = "\n".join(cm.output)
 
         self.assertIn("476 dropped guard(s)", message)
-        self.assertIn("SHAPE-BEARING (3)", message)
+        self.assertIn("COULD BEAR ON SHAPE (3)", message)
         # Each shape-bearing name survives the truncation, and each is named
         # ahead of the bulk that used to crowd it out.
         for name in ("impl.__defaults__", "impl.__defaults__[4]", "group_name"):

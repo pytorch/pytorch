@@ -1225,10 +1225,15 @@ def _warn_risky_drops(risky: Sequence[tuple[str, str]]) -> None:
 
     A guard-type-ordered cut is severity blind, and on a large model that is
     not cosmetic: a capture reporting 652 drops buried its one SEQUENCE_LENGTH
-    and three CONSTANT_MATCHes -- the only ones that can change what shape the
-    graph computes -- behind 392 CLOSURE_MATCHes on function identities. The
-    rest are slots to audit; these are the ones that can make a served graph
-    return the wrong thing.
+    and three CONSTANT_MATCHes -- the only types that can bear on shape at all
+    -- behind 392 CLOSURE_MATCHes on function identities.
+
+    Type is as far as this can go. Whether a guarded VALUE can differ at serve
+    time is the question a reader actually has, and the type does not answer
+    it: on that same model all four turned out to be reached through a class or
+    function definition, so they were compile-time constants and no batch could
+    change them. Ordering by type puts the candidates where they can be seen;
+    it does not rank them.
 
     Measured on stock models: torchvision resnet18 and mobilenet_v3 report
     none, timm's ViT reports one (a re-exported torch._assert) and
@@ -1254,10 +1259,20 @@ def _warn_risky_drops(risky: Sequence[tuple[str, str]]) -> None:
 
     shape_types = [t for t in by_type if t in _SHAPE_BEARING_GUARD_TYPES]
     other_types = [t for t in by_type if t not in _SHAPE_BEARING_GUARD_TYPES]
+    # Says "could" rather than "can", and points at the distinction that
+    # actually decides it. This is a classification by guard TYPE, and the
+    # question a reader has is whether the guarded VALUE can differ at serve
+    # time -- which the type does not answer. The first four this ordering
+    # surfaced on a real model were all reached through a class or function
+    # definition (__mro__ walks to __defaults__, __code__) and were therefore
+    # compile-time constants that no batch could change. Distinguishing those
+    # properly needs the structured source, not the name.
     shape_report = (
-        f" SHAPE-BEARING ({sum(len(by_type[t]) for t in shape_types)}), the ones "
-        f"that can make a served call run a graph traced for a different shape "
-        f"without missing a guard: {render(shape_types, 3)}."
+        f" COULD BEAR ON SHAPE ({sum(len(by_type[t]) for t in shape_types)}), "
+        f"unlike the rest, so check these first -- but check whether each one "
+        f"can actually differ at serve time: a guard reached through a class or "
+        f"function definition (an __mro__ walk, __defaults__, __code__) is a "
+        f"compile-time constant and cannot: {render(shape_types, 3)}."
         if shape_types
         else ""
     )
