@@ -16,7 +16,6 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
-#include <ATen/ops/aminmax.h>
 #include <ATen/ops/dequantize.h>                           // for dequantize
 #include <ATen/ops/quantize_per_tensor.h>
 #endif
@@ -89,9 +88,8 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_dynamic(
   float x_max = 0;
   // Otherwise...
   if (input.numel() > 0) {
-    auto [x_min_t, x_max_t] = at::aminmax(input);
-    x_min = x_min_t.item<float>();
-    x_max = x_max_t.item<float>();
+    x_min = input.min().item<float>();
+    x_max = input.max().item<float>();
   }
 
   // Input tensor is quantized as 8-bit unsigned values
@@ -141,9 +139,8 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_dynamic(
   // Find min/max of input
   float x_max = 0, x_min = 0;
   if (input.numel() > 0) {
-    auto [x_min_t, x_max_t] = at::aminmax(input);
-    x_min = x_min_t.item<float>();
-    x_max = x_max_t.item<float>();
+    x_min = input.min().item<float>();
+    x_max = input.max().item<float>();
   }
 
   // Input tensor is quantized as 8-bit unsigned values

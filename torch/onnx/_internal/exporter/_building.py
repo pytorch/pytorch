@@ -129,7 +129,7 @@ def _construct_named_inputs_and_attrs(
                     continue
 
             if isinstance(attribute, ir.Attr):
-                # Turn the attribute from an default value into an actual parameter for the node
+                # Turn the attribute from a default value into an actual parameter for the node
                 attr_copied = copy.copy(attribute)
                 # Make sure the name is the same as the parameter name and not the name of the default parameter
                 attr_copied.name = param.name

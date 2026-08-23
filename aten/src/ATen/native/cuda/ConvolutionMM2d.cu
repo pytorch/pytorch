@@ -99,7 +99,7 @@ void slow_conv2d_shape_check(
                   " but got ", gO_sizes[dimf]);
     } else if (bias.defined()) {
       const auto b_sizes = bias.sizes();
-      int64_t nOutputPlane = b_sizes.size() == 0 ? 1 : b_sizes[0];
+      int64_t nOutputPlane = b_sizes.empty() ? 1 : b_sizes[0];
       TORCH_CHECK(gO_sizes[dimf] == nOutputPlane,
                   "Expected grad_output dim ", dimf, " to have size ",
                   nOutputPlane, " but got ", gO_sizes[dimf]);

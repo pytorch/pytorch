@@ -66,8 +66,8 @@ struct TORCH_API ExperimentalConfig {
       bool record_python_gc_info = false,
       bool expose_kineto_event_metadata = false,
       std::string custom_profiler_config = "",
-      bool adjust_timestamps = false);
-  explicit operator bool() const;
+      bool adjust_timestamps = false,
+      bool trace_only = false);
 
   std::vector<std::string> profiler_metrics;
   bool profiler_measure_per_kernel;
@@ -84,9 +84,10 @@ struct TORCH_API ExperimentalConfig {
    */
   bool enable_cuda_sync_events;
   /*
-   * Controls whether or not timestamp adjustment for ProfilerStep and parent
-   * Python events occurs after profiling. This occurs at an O(n) cost and
-   * affects only the start of profiler step events.
+   * Deprecated no-op. Used to align ProfilerStep annotations with their parent
+   * Python event; removed because the alignment made downstream tools
+   * misreport step durations. Retained so the Python layer can detect it and
+   * warn, and so the constructor's argument order stays stable.
    */
   bool adjust_profiler_step;
   /*
@@ -132,6 +133,11 @@ struct TORCH_API ExperimentalConfig {
    * information instead of the original information.
    */
   bool adjust_timestamps;
+
+  // When true, __exit__ skips TransferEvents, build_tree, and
+  // materializeOpEvents. Only export_chrome_trace / save() will work;
+  // accessing events() raises an error.
+  bool trace_only;
 };
 
 struct TORCH_API ProfilerConfig {
@@ -174,11 +180,8 @@ struct TORCH_API ProfilerStateBase : public c10::MemoryReportingInfoBase {
   ProfilerStateBase& operator=(ProfilerStateBase&&) = delete;
   ~ProfilerStateBase() override;
 
-  static ProfilerStateBase* get(bool global);
-  static ProfilerStateBase* get() {
-    auto* out = get(/*global=*/true);
-    return out ? out : get(/*global=*/false);
-  }
+  static std::shared_ptr<ProfilerStateBase> getGlobal();
+  static ProfilerStateBase* getTLS();
 
   static void push(std::shared_ptr<ProfilerStateBase>&& state);
 

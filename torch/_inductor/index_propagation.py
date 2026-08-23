@@ -16,8 +16,7 @@ The underlying handler would just see:
     ops.load("buf0", x * 2)
 
 This is limited by the set of operators handled in the sympy expression
-printers. So simple operations like minimum and maximum cannot be translated to
-SymPy expressions yet, despite sympy.Min and sympy.Max existing.
+printers.
 
 """
 
@@ -99,6 +98,10 @@ class SymPyOps:
         return TypedExpr(value, dtype)
 
     @staticmethod
+    def value_expr(value: sympy.Expr | int, dtype: torch.dtype) -> TypedExpr:
+        return TypedExpr(value, dtype)
+
+    @staticmethod
     def to_dtype(
         value: TypedExpr,
         dtype: torch.dtype,
@@ -172,11 +175,15 @@ class SymPyOps:
     @staticmethod
     def minimum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
+        if result_type == torch.bool:
+            return NotImplemented
         return TypedExpr(Min(x.expr, y.expr), result_type)
 
     @staticmethod
     def maximum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
+        if result_type == torch.bool:
+            return NotImplemented
         return TypedExpr(Max(x.expr, y.expr), result_type)
 
 
@@ -190,9 +197,8 @@ class IndexPropVar:
         return IndexPropVar(expr, is_symbolic=True)
 
     def __post_init__(self):
-        assert not self.is_symbolic or isinstance(self.value, TypedExpr), (
-            "Symbolic IndexPropVar must contain a TypedExpr"
-        )
+        if not (not self.is_symbolic or isinstance(self.value, TypedExpr)):
+            raise AssertionError("Symbolic IndexPropVar must contain a TypedExpr")
 
 
 IndexPropResult: TypeAlias = IndexPropVar | tuple["IndexPropResult", ...]
@@ -237,6 +243,9 @@ class IndexPropagation(DefaultHandler):
             val = dtype_to_type(dtype)(expr)
             return self._inner.constant(val, dtype)
         return self._inner.index_expr(expr, dtype)
+
+    def value_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> IndexPropResult:
+        return self.wrap(self._inner.value_expr(expr, dtype))
 
     def unwrap(self, a: Any | IndexPropVar) -> Any:
         if isinstance(a, (list, tuple)):
@@ -288,7 +297,11 @@ class IndexPropagation(DefaultHandler):
 
         new_args = [unwrap(a) for a in args]
         new_kwargs = {k: unwrap(v) for k, v in kwargs.items()}
-        new_expr = getattr(SymPyOps, name)(*new_args, **new_kwargs)
+        try:
+            new_expr = getattr(SymPyOps, name)(*new_args, **new_kwargs)
+        except (OverflowError, ValueError):
+            # e.g. int(inf) raises OverflowError, int(nan) raises ValueError
+            return self.fallback(name, args, kwargs)
         is_valid_expr = new_expr is not NotImplemented and (
             # Inductor doesn't expect floating point in sympy expressions, but
             # allow floating point constants to be propagated

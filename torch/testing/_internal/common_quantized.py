@@ -468,7 +468,7 @@ def ceil_div(a, b):
 # more naturally.
 def from_blocked(input, input_scales, blocksize) -> torch.Tensor:
     # Matrix is in a 128x4 pattern, internally blocked as 32x4x4 nonsense.
-    # Output should be [input.size(0, input.size(1) // blocksize] scales
+    # Output should be [input.size(0), input.size(1) // blocksize] scales
     output_scales = torch.zeros(
         (input.size(0), input.size(1) // blocksize),
         device=input.device,
@@ -557,7 +557,7 @@ def pack_uint4(uint8_data) -> torch.Tensor:
     shape = uint8_data.shape
     if shape[-1] % 2 != 0:
         raise AssertionError(f"Expected shape[-1] to be divisible by 2, got {shape[-1]}")
-    uint8_data = uint8_data.contiguous().view(-1)
+    uint8_data = uint8_data.reshape(-1)
     return (uint8_data[1::2] << 4 | uint8_data[::2]).view(down_size(shape))
 
 
