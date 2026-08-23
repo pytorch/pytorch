@@ -3636,6 +3636,27 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
     fqn_map: dict[str, str] = V.graph.fx_fqn_map
     log.debug("get_fused_kernel_module_fqn: snodes=%d", len(scheduler_nodes))
 
+    if config.triton.cudagraph_fqn_compute_tracking:
+        extern_fqns: OrderedSet[str] = V.graph.fx_extern_fqns
+        module_names: OrderedSet[str] = OrderedSet()
+        for snode in scheduler_nodes:
+            if snode.node is None:
+                continue
+            data = getattr(snode.node, "data", None)
+            if isinstance(data, ir.Loops):
+                compute_nodes = data.collect_compute_fx_nodes()
+            else:
+                lowering_node = snode.node.get_lowering_fx_node()
+                compute_nodes = [lowering_node] if lowering_node is not None else []
+            for fx_node in compute_nodes:
+                fqn = fqn_map.get(fx_node.name)
+                if fqn and fqn not in extern_fqns:
+                    module_names.add(fqn)
+        result = (" + ".join(f"L.{fqn}" for fqn in module_names)) or None
+        log.debug("get_fused_kernel_module_fqn: result=%s (compute_tracking)", result)
+        return result
+
+    # Old origins-walk path (default until compute_tracking is validated).
     # Pass 1: derive block anchor prefixes from each snode's lowering_fx_node.
     # lowering_fx_node is the direct FX node lowered to produce the IR node,
     # giving clean block identity.
