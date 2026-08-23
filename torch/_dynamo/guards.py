@@ -327,8 +327,7 @@ class GuardManagerWrapper:
         self.cache_entry: CacheEntry | None = None
         self.extra_state: ExtraState | None = None
         self.id_matched_objs: dict[str, ReferenceType[object]] = {}
-        self.no_tensor_aliasing_sources: list[str] = []
-        self.no_tensor_aliasing_source_objects: list[Source] = []
+        self.no_tensor_aliasing_sources: list[Source] = []
 
         self.printed_relational_guards: set[RelationalGuard] = set()
 
@@ -5207,8 +5206,7 @@ class CheckFunctionManager:
         # when the CacheEntry is constructed
         self.guard_manager.cache_entry = None
         self.guard_manager.extra_state = None
-        self.guard_manager.no_tensor_aliasing_sources = no_tensor_aliasing_names
-        self.guard_manager.no_tensor_aliasing_source_objects = (
+        self.guard_manager.no_tensor_aliasing_sources = (
             builder.no_tensor_aliasing_sources
         )
 
@@ -5329,80 +5327,111 @@ def make_torch_function_mode_stack_guard(
 
 
 Scope = TypeAliasType("Scope", dict[str, object])
-_NO_TENSOR_ALIASING_LOOKUP_SOURCE_TYPES = (
-    ConstDictKeySource,
-    DefaultsSource,
-    DictGetItemSource,
-    DictSubclassGetItemSource,
-    GetItemSource,
-    ListGetItemSource,
-    NonSerializableSetGetItemSource,
-    TupleIteratorGetItemSource,
+_MISSING_SOURCE_MEMBER = object()
+_BUILTIN_GETITEM_METHODS = (
+    bytearray.__getitem__,
+    bytes.__getitem__,
+    collections.deque.__getitem__,
+    collections.OrderedDict.__getitem__,
+    dict.__getitem__,
+    list.__getitem__,
+    range.__getitem__,
+    str.__getitem__,
+    tuple.__getitem__,
 )
+_TUPLE_ITERATOR_TYPE = type(iter(()))
 
 
 class _GuardSourceLookupError(Exception):
-    def __init__(self, error: TypeError) -> None:
+    def __init__(self, error: Exception) -> None:
         super().__init__(str(error))
         self.error = error
 
 
-def _eval_guard_source(
-    source: Source,
-    global_scope: dict[str, Any],
-    scope: Scope,
-    cache: dict[Source, Any],
-) -> Any:
-    if source in cache:
-        return cache[source]
+def _has_builtin_getitem(value: Any) -> bool:
+    getitem = inspect.getattr_static(type(value), "__getitem__", None)
+    if not any(getitem is method for method in _BUILTIN_GETITEM_METHODS):
+        return False
+    return not (
+        isinstance(value, dict)
+        and inspect.getattr_static(type(value), "__missing__", None) is not None
+    )
 
-    source_type = type(source)
-    base_value: Any = None
-    if isinstance(source, ChainedSource):
-        base_value = _eval_guard_source(source.base, global_scope, scope, cache)
 
-    index: Any = None
-    if isinstance(source, (DictGetItemSource, DictSubclassGetItemSource)):
-        index = (
-            _eval_guard_source(source.index, global_scope, scope, cache)
-            if isinstance(source.index, Source)
-            else source.index
+def _is_unavailable_getitem_error(value: Any, error: Exception) -> bool:
+    return isinstance(error, (LookupError, TypeError)) and (
+        _has_builtin_getitem(value)
+        or (
+            isinstance(error, TypeError)
+            and inspect.getattr_static(type(value), "__getitem__", None) is None
         )
-    elif isinstance(source, GetItemSource):
-        index = source.unpack_slice() if source.index_is_slice else source.index
+    )
 
-    defaults: Any = None
-    if isinstance(source, DefaultsSource):
-        defaults = getattr(base_value, source.field)
 
-    try:
-        if source_type is ListGetItemSource:
-            value = list.__getitem__(base_value, index)
-        elif source_type is TupleIteratorGetItemSource:
-            value = tuple_iterator_getitem(base_value, index)
-        elif source_type is GetItemSource:
-            value = base_value[index]
-        elif source_type is ConstDictKeySource:
-            value = list(dict.keys(base_value))[cast(ConstDictKeySource, source).index]
-        elif source_type is NonSerializableSetGetItemSource:
-            value = set_getitem(
-                base_value, cast(NonSerializableSetGetItemSource, source).index
-            )
-        elif source_type is DictSubclassGetItemSource:
-            value = dict.__getitem__(base_value, index)
-        elif source_type is DictGetItemSource:
-            value = base_value[index]
-        elif source_type is DefaultsSource:
-            value = defaults[cast(DefaultsSource, source).idx_key]
+def _is_statically_missing_attribute(value: Any, member: str) -> bool:
+    return (
+        inspect.getattr_static(value, member, _MISSING_SOURCE_MEMBER)
+        is _MISSING_SOURCE_MEMBER
+        and inspect.getattr_static(type(value), "__getattr__", None) is None
+        and inspect.getattr_static(
+            type(value), "__getattribute__", object.__getattribute__
+        )
+        is object.__getattribute__
+    )
+
+
+def _raise_if_unavailable_guard_source(
+    source: Source,
+    base_value: Any,
+    error: Exception,
+) -> None:
+    unavailable = False
+    if isinstance(source, (GlobalSource, LocalSource)) and isinstance(error, KeyError):
+        unavailable = True
+    elif isinstance(source, AttrSource) and isinstance(error, AttributeError):
+        unavailable = _is_statically_missing_attribute(base_value, source.member)
+    elif isinstance(source, DefaultsSource):
+        if isinstance(error, AttributeError):
+            unavailable = _is_statically_missing_attribute(base_value, source.field)
         else:
-            value = source.get_value(global_scope, scope, cache)
-    except TypeError as e:
-        if source_type in _NO_TENSOR_ALIASING_LOOKUP_SOURCE_TYPES:
-            raise _GuardSourceLookupError(e) from e
-        raise
+            unavailable = isinstance(error, (LookupError, TypeError)) and (
+                base_value is None or _has_builtin_getitem(base_value)
+            )
+    elif isinstance(source, (ConstDictKeySource, ListGetItemSource)):
+        unavailable = isinstance(error, (LookupError, TypeError))
+    elif isinstance(source, NonSerializableSetGetItemSource):
+        unavailable = isinstance(error, (LookupError, TypeError)) and (
+            isinstance(base_value, (frozenset, set))
+            or (
+                isinstance(error, TypeError)
+                and inspect.getattr_static(type(base_value), "__iter__", None) is None
+            )
+        )
+    elif isinstance(source, TupleIteratorGetItemSource):
+        unavailable = isinstance(error, (LookupError, TypeError)) and isinstance(
+            base_value, _TUPLE_ITERATOR_TYPE
+        )
+    elif isinstance(source, DictSubclassGetItemSource):
+        if isinstance(source.index, Source):
+            unavailable = isinstance(error, TypeError) and not isinstance(
+                base_value, dict
+            )
+        else:
+            unavailable = _is_unavailable_getitem_error(base_value, error)
+    elif isinstance(source, DictGetItemSource):
+        if isinstance(source.index, Source):
+            unavailable = (
+                isinstance(error, TypeError)
+                and inspect.getattr_static(type(base_value), "__getitem__", None)
+                is None
+            )
+        else:
+            unavailable = _is_unavailable_getitem_error(base_value, error)
+    elif isinstance(source, GetItemSource):
+        unavailable = _is_unavailable_getitem_error(base_value, error)
 
-    cache[source] = value
-    return value
+    if unavailable:
+        raise _GuardSourceLookupError(error) from error
 
 
 def recompilation_reason_for_no_tensor_aliasing_guard(
@@ -5414,18 +5443,16 @@ def recompilation_reason_for_no_tensor_aliasing_guard(
     ids_to_source = collections.defaultdict(list)
     source_eval_failures: list[str] = []
     cache: dict[Source, Any] = {}
-    for tensor_source in guard_manager.no_tensor_aliasing_source_objects:
+    for tensor_source in guard_manager.no_tensor_aliasing_sources:
         tensor_source_name = tensor_source.name
         global_scope["__compile_source__"] = tensor_source_name
         try:
-            tensor = _eval_guard_source(tensor_source, global_scope, dict(scope), cache)
-        except (AttributeError, LookupError) as e:
-            # The compiled source path may no longer exist after container
-            # structure or object type changes; keep explaining other sources.
-            source_eval_failures.append(
-                f"{tensor_source_name} ({type(e).__name__}: {e})"
+            tensor = tensor_source.get_value(
+                global_scope,
+                dict(scope),
+                cache,
+                on_error=_raise_if_unavailable_guard_source,
             )
-            continue
         except _GuardSourceLookupError as e:
             # The compiled source path may no longer exist after container
             # structure or object type changes; keep explaining other sources.
