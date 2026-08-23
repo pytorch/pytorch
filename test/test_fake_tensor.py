@@ -40,6 +40,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     FakeTensorDeviceMismatchError,
     FakeTensorMode,
+    is_fake,
     is_fake_tensor,
     MetadataMismatchError,
     unset_fake_temporarily,
@@ -81,6 +82,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    wrapSwapTensorsTest,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.custom_op_db import custom_op_db
@@ -3247,12 +3249,10 @@ class FakeTensorOperatorInvariants(TestCase):
 
         self.assertEqual(mode.count, 0)
 
-    # PropagateRealTensors installs weakrefs
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/165387",
     )
-    @expectedFailurePropagateRealTensors
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_module_to(self):
         def _check_device(sd, device_type):
@@ -3267,6 +3267,127 @@ class FakeTensorOperatorInvariants(TestCase):
 
 
 make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
+
+
+class FakeTensorModuleApply(TestCase):
+    def test_module_to_same_dtype_with_fake_parameters(self):
+        with FakeTensorMode():
+            module = torch.nn.Linear(2, 2)
+            module.weight.grad = torch.empty_like(module.weight)
+
+            module.to(dtype=torch.float32)
+
+            self.assertIsInstance(module.weight, FakeTensor)
+            self.assertEqual(module.weight.dtype, torch.float32)
+            self.assertIsInstance(module.weight.grad, FakeTensor)
+            self.assertEqual(module.weight.grad.dtype, torch.float32)
+
+    @wrapSwapTensorsTest(True)
+    def test_module_to_overwrites_fake_parameters_when_swap_enabled(self):
+        with FakeTensorMode():
+            module = torch.nn.Linear(2, 2)
+            old_weight = module.weight
+            old_bias = module.bias
+            module.weight.grad = torch.empty_like(module.weight)
+            old_grad = module.weight.grad
+
+            module.to(dtype=torch.float64)
+
+            self.assertIsInstance(module.weight, FakeTensor)
+            self.assertEqual(module.weight.dtype, torch.float64)
+            self.assertEqual(module.bias.dtype, torch.float64)
+            self.assertEqual(module.weight.grad.dtype, torch.float64)
+            self.assertIsNot(module.weight, old_weight)
+            self.assertIsNot(module.bias, old_bias)
+            self.assertIsNot(module.weight.grad, old_grad)
+
+    def test_module_to_with_fake_wrapper_parameter(self):
+        class ModuleWithParameter(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+        weight = torch.nn.Parameter(TwoTensor(torch.randn(2, 2), torch.randn(2, 2)))
+        with FakeTensorMode() as mode:
+            module = ModuleWithParameter(mode.from_tensor(weight))
+            old_weight = module.weight
+
+            module.to(dtype=torch.float64)
+
+            self.assertTrue(is_fake(module.weight))
+            self.assertEqual(module.weight.dtype, torch.float64)
+            self.assertIsNot(module.weight, old_weight)
+
+    @parametrize("start_fake", [False, True])
+    def test_module_to_preserves_tied_fake_parameters(self, start_fake):
+        class ModuleWithParameter(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+        mode = FakeTensorMode(allow_non_fake_inputs=True)
+        if start_fake:
+            with mode:
+                weight = torch.nn.Parameter(torch.randn(2, 2))
+        else:
+            weight = torch.nn.Parameter(torch.randn(2, 2))
+
+        module = torch.nn.Module()
+        module.left = ModuleWithParameter(weight)
+        module.right = ModuleWithParameter(weight)
+
+        with mode:
+            module.to(dtype=torch.float64)
+
+        self.assertIs(module.left.weight, module.right.weight)
+        self.assertTrue(is_fake(module.left.weight))
+        self.assertEqual(module.left.weight.dtype, torch.float64)
+
+    @wrapSwapTensorsTest(True)
+    def test_module_to_overwrites_parameters_converted_to_fake(self):
+        module = torch.nn.Linear(2, 2)
+        old_weight = module.weight
+        old_bias = module.bias
+
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            module.to(dtype=torch.float64)
+
+            self.assertIsInstance(module.weight, FakeTensor)
+            self.assertEqual(module.weight.dtype, torch.float64)
+            self.assertEqual(module.bias.dtype, torch.float64)
+            self.assertIsNot(module.weight, old_weight)
+            self.assertIsNot(module.bias, old_bias)
+
+    @wrapSwapTensorsTest(True)
+    def test_module_to_overwrites_fake_gradient(self):
+        module = torch.nn.Linear(2, 2)
+        old_weight = module.weight
+        with FakeTensorMode():
+            module.weight.grad = torch.randn(2, 2)
+        old_grad = module.weight.grad
+
+        module.to(dtype=torch.float64)
+
+        self.assertIs(module.weight, old_weight)
+        self.assertIsInstance(module.weight.grad, FakeTensor)
+        self.assertEqual(module.weight.grad.dtype, torch.float64)
+        self.assertIsNot(module.weight.grad, old_grad)
+
+    def test_module_to_overwrites_real_gradient_on_fake_parameter(self):
+        with FakeTensorMode():
+            module = torch.nn.Linear(2, 2)
+        module.weight.grad = torch.randn(2, 2)
+        old_grad = module.weight.grad
+
+        module.to(dtype=torch.float64)
+
+        self.assertIsInstance(module.weight, FakeTensor)
+        self.assertNotIsInstance(module.weight.grad, FakeTensor)
+        self.assertEqual(module.weight.grad.dtype, torch.float64)
+        self.assertIsNot(module.weight.grad, old_grad)
+
+
+instantiate_parametrized_tests(FakeTensorModuleApply)
 
 
 class FakeTensorPropTest(TestCase):

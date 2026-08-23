@@ -17973,7 +17973,7 @@ def forward(self, x):
         pytree._deregister_pytree_node(torch.FunctionSchema)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_exception(self):
+    def test_non_strict_export_module_to_cuda(self):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -17982,7 +17982,7 @@ def forward(self, x):
                 self.register_buffer("param", torch.ones(4, 4))
 
             def forward(self, x):
-                token_ids = torch.randint(0, 10, (4,), device=x.device)
+                token_ids = torch.arange(4, device=x.device)
                 embedded = self.embedding(token_ids).sum()
                 return self.buffer.sum() + self.param.sum() + x.sum() + embedded
 
@@ -18009,13 +18009,10 @@ def forward(self, x):
                 return y
 
         with torch.no_grad():
-            with self.assertRaisesRegex(RuntimeError, "Couldn't swap Embedding.weight"):
-                _ = torch.export.export(
-                    BarBar(),
-                    (),
-                    {"x": torch.randn(4, 4, 4, device="cuda")},
-                    strict=False,
-                ).module()
+            model = BarBar()
+            x = torch.randn(4, 4, 4, device="cuda")
+            exported = torch.export.export(model, (), {"x": x}, strict=False).module()
+            self.assertEqual(exported(x=x), model(x))
 
     def test_export_for_training_with_state_dict_hooks(self):
         def _state_dict_pre_hook(mod, prefix, keep_vars):
