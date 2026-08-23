@@ -11,6 +11,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/cuda/ScaledBlasDeviceUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
@@ -474,11 +475,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   // Check sizes
   bool allowed_device = scaled_mm_arch_allowed();
   TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
-  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
-  TORCH_CHECK(
-      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+  check_mm_shapes(mat1, mat2, "_scaled_mm");
 
   // Check what type of scaling we are doing based on inputs. This list is sorted
   // by decreasing priority. We prefer "simpler" schemes as they are supported
