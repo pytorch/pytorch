@@ -31,6 +31,7 @@ from torch._higher_order_ops.print import print
 from torch._higher_order_ops.run_const_graph import run_const_graph
 from torch._higher_order_ops.scan import scan
 from torch._higher_order_ops.strict_mode import strict_mode
+from torch._higher_order_ops.switch import switch
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._higher_order_ops.while_loop import (
     while_loop,
@@ -48,6 +49,7 @@ from torch._higher_order_ops.wrap import (
 
 __all__ = [
     "cond",
+    "switch",
     "while_loop",
     "invoke_subgraph",
     "scan",

@@ -12,6 +12,7 @@ import torch
 import torch._guards
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
+from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch._inductor.utils import get_gpu_type
@@ -19,6 +20,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     guard_or_true,
     statically_known_true,
+    sym_eq,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
@@ -103,7 +105,14 @@ def remove_no_ops(
             if any(not isinstance(t, torch.Tensor) for t in (t1, t2)):
                 return False
             for field in fields:
-                if getattr(t1, field) != getattr(t2, field):
+                v1 = getattr(t1, field)
+                v2 = getattr(t2, field)
+                if field == "shape":
+                    # Shapes may contain unbacked SymInts; tuple `!=` would
+                    # force a guard. Conservatively treat unknown as "not equal".
+                    if not guard_or_false(sym_eq(v1, v2)):
+                        return False
+                elif v1 != v2:
                     return False
             return True
 
@@ -290,6 +299,11 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
                 break
             for unused in unused_views:
                 views.pop(unused)
+                if unused.op == "placeholder":
+                    # Placeholders are graph inputs; erasing one would silently
+                    # shrink the compiled function's arity while callers keep
+                    # passing the original argument count.
+                    continue
                 graph.erase_node(unused)
 
 
@@ -354,7 +368,7 @@ class UniformValueConstantFolder(ConstantFolder):
             if not isinstance(tensor_val, torch.Tensor):
                 continue
 
-            def is_zero_int(arg: Any) -> bool:
+            def is_zero_int(arg: object) -> bool:
                 return isinstance(arg, int) and arg == 0
 
             if not any(is_zero_int(a) for a in op.args):
@@ -977,6 +991,9 @@ def pointless_permute_pair(match: Match, arg, perm1, perm2):
 )
 def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
     """Convert bmm to mm when batch size is 1"""
+    # See Note [Preserving FlexGEMM body GEMMs].
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
+        return
 
     def repl(a, b):
         return torch.mm(a.squeeze(0), b.squeeze(0)).unsqueeze(0)

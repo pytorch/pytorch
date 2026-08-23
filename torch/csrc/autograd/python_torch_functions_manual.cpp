@@ -86,8 +86,7 @@ static PyObject* THPVariable_range(
         "because its behavior is inconsistent with Python's range builtin. "
         "Instead, use torch.arange, which produces values in [start, end).",
         1);
-    if (ret != 0)
-      throw python_error();
+    TORCH_CHECK_PYTHON(ret == 0);
     if (r.isNone(3)) {
       const auto options = TensorOptions()
                                .dtype(r.scalartype(4))
@@ -629,27 +628,23 @@ void initTorchFunctions(PyObject* module) {
   gatherTorchFunctions(torch_functions);
   THPVariableFunctions.tp_methods = torch_functions.data();
 
-  if (PyType_Ready(&THPVariableFunctions) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&THPVariableFunctions) >= 0);
   Py_INCREF(&THPVariableFunctions);
 
   // Steals
   Py_INCREF(&THPVariableFunctions);
-  if (PyModule_AddObject(
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(
           module,
           "_VariableFunctionsClass",
-          reinterpret_cast<PyObject*>(&THPVariableFunctions)) < 0) {
-    throw python_error();
-  }
+          reinterpret_cast<PyObject*>(&THPVariableFunctions)) >= 0);
   // PyType_GenericNew returns a new reference
   THPVariableFunctionsModule =
       PyType_GenericNew(&THPVariableFunctions, Py_None, Py_None);
   // PyModule_AddObject steals a reference
-  if (PyModule_AddObject(
-          module, "_VariableFunctions", THPVariableFunctionsModule) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(
+          module, "_VariableFunctions", THPVariableFunctionsModule) >= 0);
 
   // pybind registrations to torch module
   // TODO: move these from torch.* to torch._C.*
@@ -669,6 +664,13 @@ void initTorchFunctions(PyObject* module) {
             at::functionalization::impl::isFunctionalTensor(t));
         auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
         return impl->was_inductor_storage_resized();
+      });
+  py_module.def(
+      "_functionalize_was_shallow_copy_data", [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return impl->was_shallow_copy_data();
       });
   py_module.def(
       "_functionalize_inductor_storage_resized_counter",
@@ -793,13 +795,25 @@ void initTorchFunctions(PyObject* module) {
         // - non-differentiable aliasing: aliasing of subclass_x and subclass_y
         //   is defined recursively based on the aliasing of their inner
         //   tensors.
-        at::native::checkSetStorage(
-            dst,
-            src.storage(),
-            dst.sym_storage_offset(),
-            dst.sym_sizes(),
-            dst.sym_strides(),
-            /*check_offset_in_bounds=*/false);
+        if (dst.device() == src.device()) {
+          at::native::checkSetStorage(
+              dst,
+              src.storage(),
+              dst.sym_storage_offset(),
+              dst.sym_sizes(),
+              dst.sym_strides(),
+              /*check_offset_in_bounds=*/false);
+        } else {
+          TORCH_CHECK(
+              dst.sym_sizes() == src.sym_sizes() &&
+                  dst.sym_strides() == src.sym_strides() &&
+                  dst.dtype() == src.dtype(),
+              "cross-device .data requires matching dtype, sizes, "
+              "and strides");
+          dst.unsafeGetTensorImpl()->_change_backend_component_keys(
+              src.device());
+          dst.unsafeGetTensorImpl()->set_storage_keep_dtype(src.storage());
+        }
       });
   py_module.def("_is_functional_tensor", [](const at::Tensor& t) {
     return at::functionalization::impl::isFunctionalTensor(t);
@@ -849,6 +863,7 @@ void initTorchFunctions(PyObject* module) {
             auto new_grad_fn = c10::make_intrusive<torch::autograd::Error>(
                 "Cannot backprop through mirrored meta, file a bug in PyTorch");
             torch::autograd::set_history(dst_, new_grad_fn);
+            torch::autograd::fire_node_creation_hooks(new_grad_fn);
           }
         }
       });
