@@ -4814,7 +4814,7 @@ class SubgraphTracer(fx.Tracer):
 
         return MutationInfo(False, "", ())
 
-    def has_aliasing(self) -> AliasingInfo:
+    def has_aliasing(self, *, allow_input_input_aliasing: bool = False) -> AliasingInfo:
         from torch._dynamo.variables.higher_order_ops import get_tensor_storages
         from torch._higher_order_ops.utils import _collect_fake_inputs
 
@@ -4827,9 +4827,11 @@ class SubgraphTracer(fx.Tracer):
                     for storage in get_tensor_storages(example_value):
                         if storage in input_storages:
                             # input-input aliasing
-                            msg = f"Input-to-input aliasing detected at nodes {input_storages[storage]} and {node}"
-                            return AliasingInfo(True, msg)
-                        input_storages[storage] = node
+                            if not allow_input_input_aliasing:
+                                msg = f"Input-to-input aliasing detected at nodes {input_storages[storage]} and {node}"
+                                return AliasingInfo(True, msg)
+                        else:
+                            input_storages[storage] = node
             else:
                 break
 
