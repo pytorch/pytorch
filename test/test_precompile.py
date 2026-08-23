@@ -433,6 +433,22 @@ def _precompile_dynamo_async_collective_tangent_step(x, y):
     _precompile_dynamo_backward_one(first, second, True)
 
 
+@torch._dynamo.disable
+def _precompile_dynamo_backward_aliased_outputs(first, second, detached, independent):
+    if not first.requires_grad or not second.requires_grad:
+        raise AssertionError("differentiable view outputs must retain autograd history")
+    if detached.requires_grad or detached.grad_fn is not None:
+        raise AssertionError("the detached output must remain non-differentiable")
+    (first.sum() + second.sum() + independent.sum()).backward()
+
+
+def _precompile_dynamo_dealias_marked_returns_step(x):
+    value = x.sin()
+    _precompile_dynamo_backward_aliased_outputs(
+        value[0:4], value[4:8], value.detach(), x * 3
+    )
+
+
 def _precompile_dynamo_autograd_grad(module, x, target):
     loss = torch.nn.functional.mse_loss(module(x), target)
     return torch.autograd.grad(loss, tuple(module.parameters()))
@@ -5436,6 +5452,42 @@ class TestPrecompileNumerics(TestCase):
                 )
             finally:
                 os.unlink(artifact_path)
+
+    def test_dynamo_training_dealiases_non_differentiable_output(self, device):
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import fresh_cache
+
+        example = make_tensor(
+            (8,), device=device, dtype=torch.float32, requires_grad=True
+        )
+        counters.clear()
+        with fresh_cache():
+            code, cache = torch.compiler.precompile(
+                _precompile_dynamo_dealias_marked_returns_step,
+                example_inputs=[(example,)],
+                tracer="dynamo",
+                backend="inductor",
+                training=True,
+            )
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+        self.assertIn("7: (_inner_call_bw_0", code)
+        self.assertNotIn("23: (_inner_call_bw_0", code)
+        self.assertIn(
+            "from torch._functorch._aot_autograd.standalone_runtime import "
+            "_dealias_marked_returns",
+            code,
+        )
+        self.assertNotIn(
+            "runtime_wrappers import _dealias_marked_returns",
+            code,
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
+            x = make_tensor(
+                (8,), device=device, dtype=torch.float32, requires_grad=True
+            )
+            loaded(x)
+            self.assertEqual(x.grad, 3 + x.cos())
 
     @onlyCUDA
     def test_make_fx_autocast_tracks_graph_devices(self, device):
