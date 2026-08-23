@@ -233,6 +233,38 @@ def _identity(x: Any) -> Any:
     return x
 
 
+def _replay_input_mutation(orig: torch.Tensor, updated: torch.Tensor) -> None:
+    """Write a functionalized input mutation back onto the caller's tensor.
+
+    The tracked ``copy_`` this normally emits is stricter than the mutation it
+    stands in for. The op that really did the write can be invisible to
+    autograd -- FBGEMM's fused-optimizer kernels declare ``Tensor(a!)`` but
+    write through raw pointers, so nothing bumps a version counter and their
+    meta kernel writes nothing at all -- while the tensor being written can be
+    a view that refuses tracked in-place edits outright, which is what an
+    input returned as-is by a custom autograd.Function becomes (autograd
+    replaces it with an identity view stamped IN_CUSTOM_FUNCTION). Replaying
+    such a mutation the way it actually happened, invisibly, is the only sound
+    option: a tracked copy_ raises, and forcing one through by clearing
+    CreationMeta reroutes the base's history and silently drops the custom
+    Function's backward.
+
+    Decided per call rather than baked into the epilogue because nothing
+    guards it -- a graph traced against an ordinary tensor can be handed one
+    of these later, which for a serialized artifact means a different process.
+    """
+    # pybind11 hands back a fresh enum object each call, so this cannot be `is`.
+    if (
+        orig._is_view()
+        and torch._C._autograd._get_creation_meta(orig)
+        != torch._C._autograd.CreationMeta.DEFAULT
+    ):
+        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
+            orig.copy_(updated)
+    else:
+        orig.copy_(updated)
+
+
 class AliasOfInputHandler:
     def __init__(
         self,
@@ -1076,7 +1108,11 @@ def _create_runtime_wrapper(
             args="orig_inputs, updated_inputs",
             artifact_name="mutation_epilogue",
         )
-        buf.bind(torch=torch, _unwrap_tensoralias=_unwrap_tensoralias)
+        buf.bind(
+            torch=torch,
+            _unwrap_tensoralias=_unwrap_tensoralias,
+            _replay_input_mutation=_replay_input_mutation,
+        )
         wrote_body = False
         with buf.indent():
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
@@ -1131,7 +1167,7 @@ def _create_runtime_wrapper(
                             )
                             buf.writeline(f"raise RuntimeError({msg_name})")
                         else:
-                            buf.writeline(f"{oi}.copy_({ui})")
+                            buf.writeline(f"_replay_input_mutation({oi}, {ui})")
             if not wrote_body:
                 buf.writeline("pass")
 
