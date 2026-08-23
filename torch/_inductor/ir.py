@@ -1100,9 +1100,13 @@ class Loops(IRNode):
     def __post_init__(self) -> None:
         super().__post_init__()
         # Wrap inner_fn so that executing it under an active collect_compute_nodes
-        # sink records this node's lowering_fx_node.  Gated on the annotation
-        # feature to avoid overhead when the feature is off.
-        if not config.triton.cudagraph_kernel_annotations:
+        # sink records this node's lowering_fx_node.  Only installed when both
+        # annotation flags are on: the wrapper is only needed for
+        # collect_compute_fx_nodes, which only runs when compute_tracking is on.
+        if not (
+            config.triton.cudagraph_kernel_annotations
+            and config.triton.cudagraph_fqn_compute_tracking
+        ):
             return
         orig_inner_fn = self.inner_fn
 
