@@ -6,6 +6,7 @@ import json
 import math
 import operator
 import os
+import pickle
 import random
 import re
 import sys
@@ -608,7 +609,7 @@ class TestDistBackend(MultiProcessTestCase):
         if torch.cuda.is_available() and torch.cuda.device_count() < int(
             self.world_size
         ):
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
         try:
             pg_timeout_seconds = CUSTOM_PG_TIMEOUT.get(test_name, default_pg_timeout)
             timeout = timedelta(seconds=pg_timeout_seconds)
@@ -6843,7 +6844,10 @@ class DistributedTest:
 
             b = Bar()
             gather_objects = [b for _ in range(dist.get_world_size())]
-            with self.assertRaises(AttributeError):
+            # Pickling a local class fails; the exception type depends on the
+            # Python version: AttributeError on <=3.13, PicklingError on >=3.14
+            # (CPython gh-139806). pickle.PickleError covers PicklingError.
+            with self.assertRaises((AttributeError, pickle.PickleError)):
                 dist.all_gather_object(
                     [None for _ in range(dist.get_world_size())],
                     gather_objects[self.rank],

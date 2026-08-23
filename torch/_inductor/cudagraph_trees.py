@@ -129,8 +129,8 @@ else:
 log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 
 
-def format_inputs_log(inputs: list[Any]) -> str:
-    def format_item(i: int, inp: Any) -> str:
+def format_inputs_log(inputs: Sequence[object]) -> str:
+    def format_item(i: int, inp: object) -> str:
         if isinstance(inp, torch.Tensor):
             return (
                 f"[{i}]: Tensor(size={list(inp.size())}, stride={inp.stride()}, "
@@ -177,7 +177,7 @@ def clear_cublass_cache() -> None:
     it will be allocated to the cudagraph private pool and accounted for in the allocator for the duration of the
     program. There is no overhead to this on replay since cudagraphs removes allocation overhead.
     """
-    torch.cuda._clear_cublas_workspaces()
+    torch._C._cuda_clearCublasWorkspaces()
 
 
 @contextlib.contextmanager
@@ -383,7 +383,7 @@ def reset_cudagraph_trees() -> None:
     MarkStepBox.mark_step_counter = 0
 
 
-def get_obj(local: Any, attr_name: str) -> Any:
+def get_obj(local: threading.local, attr_name: str) -> Any:
     if hasattr(local, attr_name):
         return getattr(local, attr_name)
     if not torch._C._is_key_in_tls(attr_name):
@@ -824,7 +824,7 @@ class CUDAWarmupNode:
             )
 
         # sdpa returns cpu tensors when not recording cuda graph
-        def add_ref(o: Any) -> bool:
+        def add_ref(o: object) -> bool:
             return (
                 isinstance(o, torch.Tensor)
                 and o.is_cuda
