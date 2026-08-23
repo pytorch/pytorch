@@ -3363,7 +3363,7 @@ def index_add_(
 
 
 @register_decomposition(aten.index_add)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_add(
     x: TensorLike,
     dim: int,
@@ -3468,7 +3468,7 @@ def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 
 
 @register_decomposition(aten.index_copy)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return _index_copy(x, dim, index, tensor, inplace=False)
 
