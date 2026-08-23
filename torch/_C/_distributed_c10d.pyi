@@ -480,6 +480,9 @@ class ProcessGroup:
         XCCL = ...
         CUSTOM = ...
 
+    @overload
+    def __init__(self, rank: int, size: int) -> None: ...
+    @overload
     def __init__(
         self,
         store: Store,
@@ -816,8 +819,21 @@ class ProcessGroup:
     def group_desc(self) -> str: ...
 
 class FakeProcessGroup(Backend):
+    class Options(Backend.Options):
+        fake_option: int
+        error_on_collective: bool
+        simulate_uniform_ranks: bool
+
+        def __init__(self) -> None: ...
+
     @staticmethod
-    def _create_internal(rank: int, world_size: int) -> FakeProcessGroup: ...
+    def _create_internal(
+        rank: int,
+        world_size: int,
+        options: FakeProcessGroup.Options = ...,
+    ) -> FakeProcessGroup: ...
+    @property
+    def options(self) -> FakeProcessGroup.Options: ...
 
 class FakeWork(Work):
     seq_id: int
