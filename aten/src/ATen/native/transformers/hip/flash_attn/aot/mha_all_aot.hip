@@ -332,7 +332,7 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
   TORCH_CHECK(!paged_KV, "[ROCm] mha_varlen_fwd: block_table_ must be nullopt");
   TORCH_CHECK(!alibi_slopes_.has_value(), "[ROCm] mha_varlen_fwd: alibi_slopes_ must be nullopt");
 
-  at::cuda::CUDAGuard device_guard{(char)q.get_device()};
+  at::cuda::CUDAGuard device_guard{q.get_device()};
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   check_gpu_arch(stream);
 
@@ -535,8 +535,7 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
         const at::Tensor& philox_seed,
         const at::Tensor& philox_offset) {
   // Otherwise the kernel will be launched from cuda:0 device
-  // Cast to char to avoid compiler warning about narrowing
-  at::cuda::CUDAGuard device_guard{(char)q.get_device()};
+  at::cuda::CUDAGuard device_guard{q.get_device()};
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   check_gpu_arch(stream);
 
@@ -717,8 +716,7 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
   TORCH_CHECK(!alibi_slopes_.has_value(), "[ROCm] mha_varlen_fwd: alibi_slopes_ must be nullopt");
 
   // Otherwise the kernel will be launched from cuda:0 device
-  // Cast to char to avoid compiler warning about narrowing
-  at::cuda::CUDAGuard device_guard{(char)q.get_device()};
+  at::cuda::CUDAGuard device_guard{q.get_device()};
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   check_gpu_arch(stream);
 

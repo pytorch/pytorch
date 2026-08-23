@@ -33,7 +33,7 @@ static std::string getPythonName(const PyObject* obj_) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   PyObject* obj = const_cast<PyObject*>(obj_);
   auto v = py::getattr(obj, "__name__", py::str("<python_value>"));
-  // if this was a autograd.Function recover the name of the class
+  // if this was an autograd.Function recover the name of the class
   return py::str(v);
 }
 
@@ -503,7 +503,7 @@ void initPythonIRBindings(PyObject* module_) {
           [](Value& n) {
             std::stringstream ss;
             ss << n.debugName() << " defined in (" << *n.node() << ')';
-            return ss.str();
+            return std::move(ss).str();
           })
       .VS(type)
       .VS(setType)
@@ -514,7 +514,7 @@ void initPythonIRBindings(PyObject* module_) {
           "inferTypeFrom",
           py::overload_cast<const c10::intrusive_ptr<c10::ivalue::Object>&>(
               &Value::inferTypeFrom))
-      // skip owningGraph because it returns a raw pointer to a otherwise
+      // skip owningGraph because it returns a raw pointer to an otherwise
       // std::shared_ptr stored graph object, and would cause a double free
       .VS(unique)
       .VS(debugName)
@@ -594,7 +594,7 @@ void initPythonIRBindings(PyObject* module_) {
           [](Node& n) {
             std::stringstream ss;
             ss << n;
-            return ss.str();
+            return std::move(ss).str();
           })
       .def("sourceRange", [](Node& n) { return n.sourceRange().str(); })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
@@ -619,7 +619,7 @@ void initPythonIRBindings(PyObject* module_) {
             } else {
               ss << "(no schema)";
             }
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(
           "outputs",
@@ -812,7 +812,7 @@ void initPythonIRBindings(PyObject* module_) {
           [](Type& t) {
             std::ostringstream s;
             s << t;
-            return s.str();
+            return std::move(s).str();
           })
       .def(
           "containedTypes",

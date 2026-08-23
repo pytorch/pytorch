@@ -10,7 +10,7 @@ import torch
 
 
 def key(
-    seed: int, impl: str = "philox4x32-10", device: torch.device | None = None
+    seed: int, *, device: torch.device | None = None, impl: str = "philox4x32-10"
 ) -> torch.Tensor:
     r"""Create a PRNG key from a seed.
 
@@ -21,10 +21,10 @@ def key(
 
     Args:
         seed (int): The seed value for the PRNG.
-        impl (str): PRNG algorithm. Currently only ``"philox4x32-10"`` is
-            supported.
         device (:class:`torch.device`, optional): The desired device for the
             returned key. Default: ``cpu``.
+        impl (str): PRNG algorithm. Currently only ``"philox4x32-10"`` is
+            supported.
 
     Returns:
         A tensor representing the PRNG key.
@@ -72,20 +72,31 @@ def split(key: torch.Tensor, num: int = 2) -> torch.Tensor:
     return torch.ops.aten._philox_key_split(key, num)
 
 
-def fold_in(key: torch.Tensor, data: int) -> torch.Tensor:
-    r"""Deterministically derive a new key by folding in an integer.
+def fold_in(key: torch.Tensor, data: int | torch.Tensor) -> torch.Tensor:
+    r"""Deterministically derive a new key by folding in an integer value.
+
+    ``data`` may be a Python ``int`` or a single-item ``uint64`` tensor on the
+    same device as ``key``. Note that passing ``data`` as a tensor prevents it
+    from being baked into a captured CUDA graph, so the graph can be replayed
+    with a different value without recapture.
 
     Equivalent to ``split(key, data + 1)[data]``, but more efficient when
     only a single derived key is needed. Useful for associating a key with
     a loop iteration, layer index, or other integer identifier.
 
-    Supports batched keys: if ``key`` has shape ``(*batch, K)``, each key in
-    the batch is folded independently.
+    Supports batched keys: if ``key`` has shape ``(*batch, K)``, ``data`` is
+    folded into each key independently.
 
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
             :func:`fold_in`.
-        data (int): An integer to fold into the key, interpreted as uint64.
+        data (int or Tensor): The value to fold into the key, interpreted as
+            uint64. An ``int`` must be within the inclusive range
+            ``[-0x8000_0000_0000_0000, 0xffff_ffff_ffff_ffff]``. Negative inputs
+            are remapped to positive values with the formula
+            ``0x1_0000_0000_0000_0000 + data``. A tensor must have dtype
+            ``uint64``, contain a single value, and reside on the same device
+            as ``key``.
 
     Returns:
         A new key tensor with the same shape as ``key``.
@@ -100,6 +111,16 @@ def fold_in(key: torch.Tensor, data: int) -> torch.Tensor:
         >>> assert torch.equal(k0, keys[0])  # doctest: +SKIP
         >>> assert torch.equal(k1, keys[1])  # doctest: +SKIP
     """
+    if isinstance(data, torch.Tensor):
+        return torch.ops.aten._philox_key_fold_in.Tensor(key, data)
+    data = int(data)
+    if not -(1 << 63) <= data <= (1 << 64) - 1:
+        raise ValueError(
+            f"fold_in: int data must be in [-2**63, 2**64 - 1], got {data}"
+        )
+    # Reinterpret as signed int64 due to ATen op schema; kernel will cast back
+    if data >= (1 << 63):
+        data -= 1 << 64
     return torch.ops.aten._philox_key_fold_in(key, data)
 
 
