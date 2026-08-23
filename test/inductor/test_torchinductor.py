@@ -9553,6 +9553,59 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
         )
 
+    @parametrize("dtype", (torch.bfloat16, torch.float16))
+    def test_fmod_remainder_scalar_type_promotion_bf16_fp16(self, dtype):
+        if not self.is_dtype_supported(dtype):
+            self.skipTest(f"dtype {dtype} not supported on {self.device}")
+
+        def fn(x):
+            return torch.fmod(x, 1.7), torch.remainder(x, 1.7)
+
+        def scalar_first_fn(x):
+            return torch.remainder(1.7, x)
+
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        x = torch.tensor([1.7, 2.0], device=self.device, dtype=dtype)
+        expected = fn(x)
+        actual = compiled_fn(x)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+        opmath_expected = tuple(result.to(dtype) for result in fn(x.float()))
+        rounded_scalar = torch.tensor(1.7, device=self.device, dtype=dtype)
+        rounded_expected = (
+            torch.fmod(x, rounded_scalar),
+            torch.remainder(x, rounded_scalar),
+        )
+        scalar_reference = opmath_expected if self.device == "mps" else rounded_expected
+        self.assertEqual(expected, scalar_reference, atol=0, rtol=0)
+        for opmath_result, rounded_result in zip(
+            opmath_expected, rounded_expected, strict=True
+        ):
+            self.assertNotEqual(opmath_result[0], rounded_result[0], atol=0, rtol=0)
+
+        # remainder.Scalar_Tensor has no MTIA eager implementation.
+        if self.device == "mtia":
+            return
+
+        scalar_first_expected = scalar_first_fn(x)
+        scalar_first_actual = torch.compile(scalar_first_fn, fullgraph=True)(x)
+        self.assertEqual(scalar_first_actual, scalar_first_expected, atol=0, rtol=0)
+
+        scalar_first_opmath_expected = scalar_first_fn(x.float()).to(dtype)
+        scalar_first_rounded_expected = torch.remainder(rounded_scalar, x)
+        scalar_first_reference = (
+            scalar_first_opmath_expected
+            if self.device == "mps"
+            else scalar_first_rounded_expected
+        )
+        self.assertEqual(scalar_first_expected, scalar_first_reference, atol=0, rtol=0)
+        self.assertNotEqual(
+            scalar_first_opmath_expected[0],
+            scalar_first_rounded_expected[0],
+            atol=0,
+            rtol=0,
+        )
+
     @skip_if_halide  # log2 not implemented for halide
     def test_log2(self):
         def fn(x):
