@@ -22,6 +22,90 @@ namespace at::vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
+#if defined(CPU_CAPABILITY_SVE128) || defined(CPU_CAPABILITY_SVE256)
+// Implementation copied from Arm Optimized Routines:
+// https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/sve/expf.c
+static inline svfloat32_t exp_u20_fast_path(svfloat32_t values) {
+  // For |x| >= 0x1.5d5e2ap+6f (~87.34), exp(x) may overflow or become
+  // subnormal, which FEXPA does not handle accurately; callers should handle
+  // those inputs separately.
+  const svfloat32_t ln2_hi = svdup_n_f32(0x1.62e4p-1f);
+  const svfloat32_t ln2_lo = svdup_n_f32(0x1.7f7d1cp-20f);
+  const svfloat32_t c1 = svdup_n_f32(0.5f);
+  const svfloat32_t inv_ln2 = svdup_n_f32(0x1.715476p+0f);
+
+  const float shift = 0x1.803f8p17f;
+
+  /* n = round(x/(ln2/N)).  */
+  svfloat32_t z = svmad_x(svptrue_b32(), inv_ln2, values, shift);
+  svfloat32_t n = svsub_x(svptrue_b32(), z, shift);
+
+  /* r = x - n*ln2/N.  */
+  svfloat32_t r = values;
+  r = svmls_x(svptrue_b32(), r, n, ln2_hi);
+  r = svmls_x(svptrue_b32(), r, n, ln2_lo);
+
+  /* scale = 2^(n/N).  */
+  svfloat32_t scale = svexpa(svreinterpret_u32(z));
+
+  /* poly(r) = exp(r) - 1 ~= r + 0.5 r^2.  */
+  svfloat32_t r2 = svmul_x(svptrue_b32(), r, r);
+  svfloat32_t poly = svmla_x(svptrue_b32(), r, r2, c1);
+  return svmla_x(svptrue_b32(), scale, scale, poly);
+}
+
+// Implementation from Arm Optimized Routines:
+// https://github.com/ARM-software/optimized-routines/blob/v26.01/math/aarch64/experimental/sve/sv_expf_inline.h
+static inline svfloat32_t fexp_u20(svfloat32_t values) {
+  // fast exponential intended for cases where outputs will be downcasted to
+  // FP16 / BF16 (e.g. attention softmax).
+  // Accurate within 1 ULP for FP16
+  // Accurate within 1 ULP for BF16 for inputs in [-87.346, max_float] &
+  // clamps
+  //  inputs < -87.346 to zero.
+  // Implementation is similar to exp_u20, but:
+  // - approximates exp(r) - 1 as r instead of r + 0.5 r^2
+  // - does not split natural log (ln) into high / low parts
+  // - avoids special case code by clamping exp(x) to 0 for x < -87.346 and
+  // inf for x > 88.717
+
+  constexpr float upper_bound = 0x1.62dea4p+6f;
+  constexpr float lower_bound = -0x1.5d619ap+6f;
+
+  const svfloat32_t ln2 = svdup_n_f32(0x1.62e43p-1f);
+  const svfloat32_t inv_ln2 = svdup_n_f32(0x1.715476p+0f);
+
+  constexpr float shift = 0x1.803f8p17f;
+
+  // exp(x) = 2^n (1 + poly(r)), with 1 + poly(r) in [1/sqrt(2),sqrt(2)]
+  // x = ln2*n + r, with r in [-ln2/2, ln2/2] and poly(r) ~= r.
+
+  // n = round(x/(ln2/N))
+  svfloat32_t z = svmad_x(svptrue_b32(), inv_ln2, values, shift);
+  svfloat32_t n = svsub_x(svptrue_b32(), z, shift);
+
+  // n = round(x/(ln2/N))
+  svfloat32_t r = svmls_x(svptrue_b32(), values, n, ln2);
+
+  // scale = 2^(n/N)
+  svfloat32_t scale = svexpa(svreinterpret_u32(z));
+
+  // poly(r) = exp(r) - 1 ~= r
+  svfloat32_t y = svmla_x(svptrue_b32(), scale, scale, r);
+
+  // clamp to 0, inf
+  y = svsel_f32(
+      svcmplt_f32(svptrue_b32(), values, svdup_n_f32(lower_bound)),
+      svdup_n_f32(0.0f),
+      y);
+  y = svsel_f32(
+      svcmpgt_f32(svptrue_b32(), values, svdup_n_f32(upper_bound)),
+      svdup_n_f32(INFINITY),
+      y);
+  return y;
+}
+#endif
+
 #if defined(CPU_CAPABILITY_SVE256)
 
 template <>
@@ -181,9 +265,11 @@ class Vectorized<float> {
     return USE_SLEEF(
         Vectorized<float>(Sleef_acosfx_u10sve(values)), map(std::acos));
   }
+  // Sleef acoshf/sinhf/coshf overflow for large float inputs where the scalar
+  // C library returns finite results, because Sleef uses float-range
+  // intermediates internally while the scalar C library uses double precision.
   Vectorized<float> acosh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_acoshfx_u10sve(values)), map(std::acosh));
+    return map(std::acosh);
   }
   Vectorized<float> asin() const {
     return USE_SLEEF(
@@ -252,8 +338,6 @@ class Vectorized<float> {
     return USE_SLEEF(
         Vectorized<float>(Sleef_expm1fx_u10sve(values)), map(std::expm1));
   }
-  // Implementation copied from Arm Optimized Routines:
-  // https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/sve/expf.c
   Vectorized<float> exp_u20() const {
     // special case to handle special inputs that are too large or too small
     // i.e. where there's at least one element x, s.t. |x| >= 87.3...
@@ -261,80 +345,10 @@ class Vectorized<float> {
     if (svptest_any(svptrue_b32(), is_special_case)) {
       return exp();
     }
-    const svfloat32_t ln2_hi = svdup_n_f32(0x1.62e4p-1f);
-    const svfloat32_t ln2_lo = svdup_n_f32(0x1.7f7d1cp-20f);
-    const svfloat32_t c1 = svdup_n_f32(0.5f);
-    const svfloat32_t inv_ln2 = svdup_n_f32(0x1.715476p+0f);
-
-    const float shift = 0x1.803f8p17f;
-
-    /* n = round(x/(ln2/N)).  */
-    svfloat32_t z = svmad_x(svptrue_b32(), inv_ln2, values, shift);
-    svfloat32_t n = svsub_x(svptrue_b32(), z, shift);
-
-    /* r = x - n*ln2/N.  */
-    svfloat32_t r = values;
-    r = svmls_x(svptrue_b32(), r, n, ln2_hi);
-    r = svmls_x(svptrue_b32(), r, n, ln2_lo);
-
-    /* scale = 2^(n/N).  */
-    svfloat32_t scale = svexpa(svreinterpret_u32(z));
-
-    /* poly(r) = exp(r) - 1 ~= r + 0.5 r^2.  */
-    svfloat32_t r2 = svmul_x(svptrue_b32(), r, r);
-    svfloat32_t poly = svmla_x(svptrue_b32(), r, r2, c1);
-    return svmla_x(svptrue_b32(), scale, scale, poly);
+    return at::vec::exp_u20_fast_path(values);
   }
-  // Implementation from Arm Optimized Routines:
-  // https://github.com/ARM-software/optimized-routines/blob/v26.01/math/aarch64/experimental/sve/sv_expf_inline.h
   Vectorized<float> fexp_u20() const {
-    // fast exponential intended for cases where outputs will be downcasted to
-    // FP16 / BF16 (e.g. attention softmax).
-    // Accurate within 1 ULP for FP16
-    // Accurate within 1 ULP for BF16 for inputs in [-87.346, max_float] &
-    // clamps
-    //  inputs < -87.346 to zero.
-    // Implementation is similar to exp_u20, but:
-    // - approximates exp(r) - 1 as r instead of r + 0.5 r^2
-    // - does not split natural log (ln) into high / low parts
-    // - avoids special case code by clamping exp(x) to 0 for x < -87.346 and
-    // inf for x > 88.717
-
-    constexpr float upper_bound = 0x1.62dea4p+6f;
-    constexpr float lower_bound = -0x1.5d619ap+6f;
-
-    const svfloat32_t ln2 = svdup_n_f32(0x1.62e43p-1f);
-    const svfloat32_t inv_ln2 = svdup_n_f32(0x1.715476p+0f);
-
-    constexpr float shift = 0x1.803f8p17f;
-
-    // exp(x) = 2^n (1 + poly(r)), with 1 + poly(r) in [1/sqrt(2),sqrt(2)]
-    // x = ln2*n + r, with r in [-ln2/2, ln2/2] and poly(r) ~= r.
-
-    // n = round(x/(ln2/N))
-    svfloat32_t z = svmad_x(svptrue_b32(), inv_ln2, values, shift);
-    svfloat32_t n = svsub_x(svptrue_b32(), z, shift);
-
-    // n = round(x/(ln2/N))
-    svfloat32_t r = svmls_x(svptrue_b32(), values, n, ln2);
-
-    // scale = 2^(n/N)
-    svfloat32_t scale = svexpa(svreinterpret_u32(z));
-
-    // poly(r) = exp(r) - 1 ~= r
-    svfloat32_t y = svmla_x(svptrue_b32(), scale, scale, r);
-
-    // clamp to 0, inf
-    y = svsel_f32(
-        svcmplt_f32(svptrue_b32(), values, svdup_n_f32(lower_bound)),
-        svdup_n_f32(0.0f),
-        y);
-    y = svsel_f32(
-        svcmpgt_f32(svptrue_b32(), values, svdup_n_f32(upper_bound)),
-        svdup_n_f32(INFINITY),
-        y);
-
-    return y;
+    return at::vec::fexp_u20(values);
   }
   Vectorized<float> fmod(const Vectorized<float>& q) const {
     USE_SLEEF(
@@ -428,17 +442,18 @@ class Vectorized<float> {
     return USE_SLEEF(
         Vectorized<float>(Sleef_sinfx_u10sve(values)), map(std::sin));
   }
+  // Sleef sinhf/coshf overflow for large float inputs where std::sinh/cosh
+  // return finite results, because Sleef uses float-range intermediates
+  // internally while the scalar C library uses double precision.
   Vectorized<float> sinh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_sinhfx_u10sve(values)), map(std::sinh));
+    return map(std::sinh);
   }
   Vectorized<float> cos() const {
     return USE_SLEEF(
         Vectorized<float>(Sleef_cosfx_u10sve(values)), map(std::cos));
   }
   Vectorized<float> cosh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_coshfx_u10sve(values)), map(std::cosh));
+    return map(std::cosh);
   }
   Vectorized<float> ceil() const {
     return svrintp_f32_x(ptrue, values);
@@ -458,7 +473,18 @@ class Vectorized<float> {
   }
   // Implementation is picked from
   // https://github.com/ARM-software/ComputeLibrary/blob/v25.01/src/core/NEON/SVEMath.inl#L179
-  Vectorized<float> tanh() const {
+#if defined(TORCH_INDUCTOR_PRECOMPILE_HEADERS) && defined(__GNUC__) && \
+    !defined(__clang__) &&                                             \
+    ((__GNUC__ == 14 && __GNUC_MINOR__ < 4) ||                         \
+     (__GNUC__ == 15 && __GNUC_MINOR__ < 3))
+  // GCC 14/15 can ICE when compiling AArch64 SVE intrinsics with PCH enabled
+  // (GCC PR target/123457). The fix is expected in GCC 14.4 and 15.3, and is
+  // backported to only some 14.3 and 15.2 packages, so conservatively guard by
+  // upstream minor version.
+  __attribute__((optimize("O0")))
+#endif
+  Vectorized<float>
+  tanh() const {
     // Constants used for the tanh calculation.
     const svfloat32_t CONST_1 =
         svdup_n_f32(1.f); // Constant 1.0f for the tanh formula.

@@ -93,7 +93,7 @@ class _MinimizerBase:
     `run_a` and `run_b` will be used to run the same submodule and a function `compare_fn`
     will be used to compare the results.
 
-    Currently we provides two ways to traverse the graph and generate submodules.
+    Currently we provide two ways to traverse the graph and generate submodules.
         1. Sequential traversal: this will traverse the graph node by node and generate
            one submodule with one single node.
         2. Binary searching: this will do a binary search style traversal on the graph.
@@ -225,7 +225,7 @@ class _MinimizerBase:
         otherwise use a_input for run_a and b_input for run_b.
 
         Args:
-            main_module: Top-levlel fx module.
+            main_module: Top-level fx module.
             submod_path: Path to the submodule we want to run and compare results.
 
         Returns:

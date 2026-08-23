@@ -153,7 +153,7 @@ def argument_validation(f):
                 hint = hints[argument_name]
                 if not isinstance(value, IterDataPipe):
                     raise TypeError(
-                        f"Expected argument '{argument_name}' as a IterDataPipe, but found {type(value)}"
+                        f"Expected argument '{argument_name}' as an IterDataPipe, but found {type(value)}"
                     )
                 if not value.type.issubtype(hint.type):
                     raise TypeError(
