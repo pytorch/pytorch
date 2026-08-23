@@ -19,6 +19,20 @@ arming late silently misses whatever already loaded. And the copy has to happen
 inside the callback, because CUPTI only guarantees the pointer for the duration of
 the call.
 
+The lifecycle that follows from that::
+
+    start()  # before any CUDA work
+    ...  # capture every graph you intend to save
+    stop()  # disarm; releases the CUPTI subscription, keeps the images
+    graph.save(...)  # still works: saving reads the retained images
+    clear()  # return the host memory
+
+``stop()`` and :func:`clear` are separate for exactly that reason. Disarming early
+is safe in the sense that it fails loudly -- a graph captured afterwards refuses to
+save, naming the kernels it could not find -- but note ``start()`` after a
+``stop()`` cannot recover what loaded in between, so capture cannot be cycled
+around the interesting parts. It is once, early, until the last save.
+
 Costs, measured on GB200 over a workload loading 31 modules / 203 MB of cubin:
 dispatch alone is ~0.5 ms in total, copying the images adds ~18 ms. Images are
 kept keyed by CUPTI module id and are not deduplicated -- in that same workload

@@ -783,6 +783,48 @@ class CUDAGraph(_CUDAGraph):
         """
         return super().raw_cuda_graph()
 
+    def save(
+        self,
+        path: str,
+        *,
+        tensors: dict[str, torch.Tensor] | list[torch.Tensor] | None = None,
+        save_fn: Callable[[list[torch.Tensor]], None] | None = None,
+    ) -> None:
+        r"""Write this graph, the device code it launches and the memory it reads
+        to ``path``, so a later process can replay it without capturing.
+
+        The template must be live, so call this with ``keep_graph=True`` (at any
+        point before the graph is reset -- including after modifying it and before
+        :meth:`instantiate`), or from a post-instantiate hook. For the hook case
+        see :func:`torch.cuda.graphs.save_graph_hook`, which fires after the
+        capture-end hooks and after anything else that could still change the
+        template.
+
+        Requires cubin capture to have been armed before any CUDA work (see
+        ``torch.cuda._graph_kernel_capture.start``) and the whole process to use
+        ``PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True``.
+
+        Args:
+            path: archive to write.
+            tensors: CUDA tensors to bring back alongside the graph, typically the
+                static inputs and outputs. Their addresses are recorded so
+                :meth:`load` can place them where the graph expects them, and the
+                segments backing them travel with the archive even if they are
+                outside the graph's pools.
+            save_fn: called with ``tensors`` instead of writing their contents into
+                the archive, for callers with their own transport. The addresses
+                and metadata are recorded either way.
+
+        Raises:
+            UnserializableGraph: the graph holds state that cannot be reproduced --
+                a node type carrying process-local handles, a kernel argument
+                pointing outside the saved segments, a missing cubin, or memory
+                outside an expandable segment. The message names the reason.
+        """
+        from torch.cuda._graph_serialization import save as _save
+
+        _save(self, path, tensors=tensors, save_fn=save_fn)
+
     def raw_cuda_graph_exec(self) -> int:
         r"""Returns the underlying cudaGraphExec_t. ``instantiate`` must have been called if ``keep_graph`` is True, or ``capture_end`` must have been called if ``keep_graph`` is False. If you call ``instantiate()`` after ``raw_cuda_graph_exec()``, the previously returned cudaGraphExec_t will be destroyed. It is your responsibility not to use this object after destruction.
 
@@ -1064,6 +1106,28 @@ def export_dot(path: str, *, verbose: bool = True) -> Callable[[CUDAGraph], None
     return _hook
 
 
+def save_graph_hook(
+    path: str,
+    *,
+    tensors: Callable[[], dict[str, torch.Tensor] | list[torch.Tensor]] | None = None,
+    save_fn: Callable[[list[torch.Tensor]], None] | None = None,
+) -> Callable[[CUDAGraph], None]:
+    r"""Return a post-instantiate hook that calls :meth:`CUDAGraph.save`.
+
+    Register it with :meth:`CUDAGraph.register_post_instantiate_hook`. That is the
+    point after which nothing else changes the template -- it runs after the
+    capture-end hooks, and for ``keep_graph=True`` after any later modification --
+    and the template is still live there in both ``keep_graph`` modes.
+
+    ``tensors`` is a callable because a hook cannot be handed the tensors at
+    registration time. Hooks fire in registration order, so register this last if
+    another post-instantiate hook also mutates the graph.
+    """
+    from torch.cuda._graph_serialization import save_hook
+
+    return save_hook(path, tensors=tensors, save_fn=save_fn)
+
+
 def export_graph_data(path: str) -> Callable[[CUDAGraph], None]:
     r"""Return a post-instantiate hook that pickles :meth:`CUDAGraph.get_graph_data`
     to ``path``. Register it with :meth:`CUDAGraph.register_post_instantiate_hook`:
@@ -1181,6 +1245,7 @@ class graph:
         enable_annotations: bool = False,
         annotation_config: dict[str, typing.Any] | None = None,
         check_input_liveness: bool = False,
+        for_save: bool = False,
     ):
         self._annotation_config = _parse_annotation_config(annotation_config)
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
@@ -1203,6 +1268,7 @@ class graph:
         self.capture_error_mode = capture_error_mode
         self._enable_annotations = enable_annotations
         self.check_input_liveness = check_input_liveness
+        self._for_save = for_save
 
     def __enter__(self) -> None:
         # Free as much memory as we can for the graph
@@ -1219,6 +1285,17 @@ class graph:
         torch.cuda.empty_cache()
         # pyrefly: ignore [missing-attribute]
         torch._C._host_emptyCache()
+
+        if self._for_save:
+            # cuBLAS workspaces are per stream, so a stream warmed up outside this
+            # pool already has one, and capturing on it reuses that allocation --
+            # leaving the graph reading memory the pool does not own, which cannot
+            # be attributed and so cannot be saved. Dropping them here makes the
+            # capture allocate fresh ones inside the pool. Not done unconditionally:
+            # it throws away warmup work for captures nobody intends to serialize.
+            # Warming up on the capture stream with the pool already active avoids
+            # the problem without this.
+            torch._C._cuda_clearCublasWorkspaces()
 
         # Pick the annotation backend before capture_begin, so that failing to obtain CUPTI
         # raises without a capture already underway.

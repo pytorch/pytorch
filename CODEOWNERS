@@ -603,6 +603,7 @@
 # /test/test_cuda_compatibility.py
 # /test/test_cuda_expandable_segments.py
 # /test/test_cuda_graph_debug.py
+# /test/test_cuda_graph_serialization.py
 # /test/test_cuda_graph_utils.py
 # /test/test_cuda_multigpu.py
 # /test/test_cuda_nvml_based_avail.py
