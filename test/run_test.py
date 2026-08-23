@@ -113,6 +113,9 @@ TEST_CONFIG = os.getenv("TEST_CONFIG", "")
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 NUM_PYTEST_RERUNS = int(os.getenv("PYTORCH_NUM_PYTEST_RERUNS", "2"))
+# Process-level counterpart to NUM_PYTEST_RERUNS: how many times a failing test
+# is retried in a fresh process before it is called a consistent failure.
+NUM_PROCESS_RETRIES = int(os.getenv("PYTORCH_NUM_PROCESS_RETRIES", "2"))
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
 IS_SLOW = "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT
@@ -872,7 +875,7 @@ def run_test_retries(
             print_to_file(
                 "Test succeeded in new process, continuing with the rest of the tests"
             )
-        elif num_failures[current_failure] >= 3:
+        elif num_failures[current_failure] > NUM_PROCESS_RETRIES:
             # This is for log classifier so it can prioritize consistently
             # failing tests instead of reruns. [1:-1] to remove quotes
             print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
@@ -897,8 +900,12 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
-    consistent_failures = [x[1:-1] for x in num_failures if num_failures[x] >= 3]
-    flaky_failures = [x[1:-1] for x in num_failures if 0 < num_failures[x] < 3]
+    consistent_failures = [
+        x[1:-1] for x in num_failures if num_failures[x] > NUM_PROCESS_RETRIES
+    ]
+    flaky_failures = [
+        x[1:-1] for x in num_failures if 0 < num_failures[x] <= NUM_PROCESS_RETRIES
+    ]
     if len(flaky_failures) > 0:
         print_to_file(
             "The following tests failed and then succeeded when run in a new process"
@@ -1350,9 +1357,13 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         "-rfEX",
     ]
     if not is_cpp_test:
-        # C++ tests need to be run with pytest directly, not via python
-        # We have a custom pytest shard that conflicts with the normal plugin
-        pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
+        # C++ tests need to be run with pytest directly, not via python.
+        if options.pytest_xdist_workers is None:
+            # The custom pytest shard conflicts with xdist.
+            pytest_args.extend(["-p", "no:xdist"])
+        else:
+            pytest_args.extend(["-n", str(options.pytest_xdist_workers)])
+        pytest_args.append("--use-pytest")
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
@@ -1641,6 +1652,13 @@ def parse_args():
         "in the 2nd shard (the first number should not exceed the second)",
     )
     parser.add_argument(
+        "--pytest-xdist-workers",
+        type=int,
+        choices=range(1, 65),
+        metavar="N",
+        help="run non-serial tests with N pytest-xdist workers",
+    )
+    parser.add_argument(
         "--exclude-jit-executor",
         action="store_true",
         help="exclude tests that are run for a specific jit config",
@@ -1829,10 +1847,6 @@ def get_selected_tests(options) -> list[str]:
             "inductor/test_aot_inductor",
             "inductor/test_torchinductor_dynamic_shapes",
         ]
-    else:
-        # Exclude mps-only tests otherwise
-        options.exclude.extend(["test_mps", "test_metal"])
-
     if options.xpu:
         selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
     else:
@@ -2070,14 +2084,17 @@ def do_sharding(
 ) -> tuple[float, list[ShardedTest]]:
     which_shard, num_shards = get_sharding_opts(options)
 
-    # Do sharding
+    uses_xdist = options.pytest_xdist_workers is not None
+
+    # Xdist owns test-level concurrency, while test files run sequentially.
     shards = calculate_shards(
         num_shards,
         selected_tests,
         test_file_times,
         test_class_times=test_class_times,
-        must_serial=must_serial,
+        must_serial=(lambda _: True) if uses_xdist else must_serial,
         sort_by_time=sort_by_time,
+        allow_pytest_sharding=not uses_xdist,
     )
     return shards[which_shard - 1]
 
@@ -2130,6 +2147,8 @@ def run_tests(
 ) -> None:
     if len(selected_tests) == 0:
         return
+
+    uses_xdist = options.pytest_xdist_workers is not None
 
     # parallel = in parallel with other files
     # serial = this file on it's own.  The file might still be run in parallel with itself (ex test_ops)
@@ -2193,6 +2212,7 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
+            options_clone.pytest_xdist_workers = None
             options_clone.additional_args.extend(marker_args(None))
             failure = run_test_module(test, test_directory, options_clone)
             test_failed = handle_complete(failure)
@@ -2208,6 +2228,7 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
+            options_clone.pytest_xdist_workers = None
             options_clone.additional_args.extend(marker_args("serial"))
             failure = run_test_module(test, test_directory, options_clone)
             test_failed = handle_complete(failure)
@@ -2219,12 +2240,16 @@ def run_tests(
                 raise RuntimeError(failure.message + keep_going_message)
 
         # This is used later to constrain memory per proc on the GPU. On ROCm
-        # the number of procs is the number of GPUs, so we don't need to do this
-        os.environ["NUM_PARALLEL_PROCS"] = str(1 if torch.version.hip else NUM_PROCS)
+        # the number of procs is the number of GPUs, so we don't need to do this.
+        memory_processes = options.pytest_xdist_workers or NUM_PROCS
+        os.environ["NUM_PARALLEL_PROCS"] = str(
+            1 if torch.version.hip else memory_processes
+        )
 
         # See Note [ROCm parallel CI testing]
+        file_processes = 1 if uses_xdist else NUM_PROCS
         pool = get_context("spawn").Pool(
-            NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
+            file_processes, maxtasksperchild=None if torch.version.hip else 1
         )
 
         def parallel_test_completion_callback(failure):
