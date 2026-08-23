@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import torch
@@ -25,7 +26,7 @@ from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemm
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
-from ..ir import Buffer, ChoiceCaller, is_triton, Layout
+from ..ir import Buffer, ChoiceCaller, IRNode, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     fallback_handler,
@@ -43,6 +44,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    _IntLike,
     _use_cutlass_for_op,
     ceildiv,
     use_aten_gemm_kernels,
@@ -862,19 +864,22 @@ epilogue_scaling_types = [ScalingType.TensorWise, ScalingType.RowWise]
 main_loop_scaling_types = [ScalingType.BlockWise1x128, ScalingType.BlockWise128x128]
 
 
-def _is_tensorwise_scaling(sz: Any) -> bool:
+def _is_tensorwise_scaling(sz: Sequence[_IntLike]) -> bool:
     return (len(sz) == 0) or all(
         V.graph.sizevars.statically_known_equals(d, 1) for d in sz
     )
 
 
-def _is_rowwise_scaling(sz: Any, transpose: bool) -> bool:
+def _is_rowwise_scaling(sz: Sequence[_IntLike], transpose: bool) -> bool:
     idx = 0 if transpose else -1
     return V.graph.sizevars.statically_known_equals(sz[idx], 1)
 
 
 def _is_blockwise1xTILESIZE_scaling(
-    sz: Any, tensor_sz: Any, tile_size: int, transpose: bool
+    sz: Sequence[_IntLike],
+    tensor_sz: Sequence[_IntLike],
+    tile_size: int,
+    transpose: bool,
 ) -> bool:
     lhs = 1 if transpose else 0
     rhs = 0 if transpose else 1
@@ -885,15 +890,17 @@ def _is_blockwise1xTILESIZE_scaling(
     )
 
 
-def _is_blockwise128x128_scaling(sz: Any, tensor_sz: Any) -> bool:
+def _is_blockwise128x128_scaling(
+    sz: Sequence[_IntLike], tensor_sz: Sequence[_IntLike]
+) -> bool:
     return V.graph.sizevars.statically_known_equals(
         sz[0], ceildiv(tensor_sz[0], 128)
     ) and V.graph.sizevars.statically_known_equals(sz[1], ceildiv(tensor_sz[1], 128))
 
 
 def is_desired_scaling(
-    t: Any,
-    scale_size: torch.Tensor,
+    t: IRNode,
+    scale_size: Sequence[_IntLike],
     scaling_type: ScalingType,
     transpose: bool = False,
 ) -> bool:
@@ -912,7 +919,7 @@ def is_desired_scaling(
             raise AssertionError(f"Unsupported scaling type {scaling_type}")
 
 
-def get_tile_size(scale_option) -> int:
+def get_tile_size(scale_option: ScalingType) -> int:
     match scale_option:
         case ScalingType.BlockWise128x128:
             return 128
@@ -925,10 +932,10 @@ def get_tile_size(scale_option) -> int:
 
 
 def get_scaling_options(
-    mat_a: Any,
-    mat_b: Any,
-    scale_a_size: torch.Tensor,
-    scale_b_size: torch.Tensor,
+    mat_a: IRNode,
+    mat_b: IRNode,
+    scale_a_size: Sequence[_IntLike],
+    scale_b_size: Sequence[_IntLike],
 ) -> tuple[ScalingType, ScalingType]:
     for scale_option_a, scale_option_b in scaling_pairs:
         if is_desired_scaling(
