@@ -1487,6 +1487,7 @@ class _InternalsBase:
             def extra_checks(kernel_code):
                 self.assertNotIn("cvt.rp.satfinite", kernel_code)
                 self.assertIn("8388607", kernel_code)
+
         self.assert_single_kernel_form(
             _capture_rmsnorm_mxfp8_scale_swizzle_sources,
             128,
