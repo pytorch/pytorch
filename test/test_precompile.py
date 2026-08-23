@@ -5277,6 +5277,7 @@ class TestPrecompileNumerics(TestCase):
         self.assertIn("1: (_inner_call_bw_0", code)
         self.assertIn("2: (_inner_call_bw_1", code)
         self.assertIn("_AOT_DEFAULT_BACKWARD_VARIANT_s0 = None", code)
+        self.assertIn("KeptTangentInfo", code)
         self.assertEqual(code.count("Inner Inductor output code: BACKWARD variant"), 2)
 
         for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
