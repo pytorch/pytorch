@@ -500,7 +500,7 @@ def rmsprop(
 ) -> None:
     r"""Functional API that performs rmsprop algorithm computation.
 
-    See :class:`~torch.optim.RMSProp` for details.
+    See :class:`~torch.optim.RMSprop` for details.
     """
     # this check is slow during compilation, so we skip it
     # if it's strictly needed we can add this check back in dynamo
