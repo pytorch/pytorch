@@ -2058,7 +2058,7 @@ class triton:
     # attribution instead of the origins-walk. Opt-in for validation; the
     # old origins-walk remains the default until AIB confirms this is correct.
     # Only takes effect when cudagraph_kernel_annotations=True.
-    # Removed (along with the old path) before merging to the PR branch.
+    # Experimental; may be made the default and the old path removed in a future update.
     cudagraph_fqn_compute_tracking: bool = False
 
     # Always load full blocks (rather than broadcasting inside the block)
