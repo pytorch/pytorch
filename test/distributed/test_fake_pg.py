@@ -1046,6 +1046,10 @@ class TestFakePGUniformRanks(TestCase):
             rank, world_size=world_size, options=opts
         )
         store = FakeStore()
+        # This default group does NOT carry simulate_uniform_ranks; it exists
+        # only so tearDown has something to destroy. Every test below drives
+        # the returned backend directly -- routing through dist.* here would
+        # silently exercise the non-uniform path.
         dist.init_process_group(
             backend="fake", rank=rank, world_size=world_size, store=store
         )
@@ -1220,8 +1224,6 @@ class TestFakePGUniformRanks(TestCase):
         for output in outputs:
             self.assertEqual(output, torch.full((2,), 2.0))
 
-
-instantiate_parametrized_tests(TestFakePGUniformRanks)
 
 instantiate_parametrized_tests(TestFakePG)
 

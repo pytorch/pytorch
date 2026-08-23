@@ -33,6 +33,12 @@ class FakeWork : public Work {
     return true;
   }
 
+  // Real backends expose the output through both result() and getFuture();
+  // a caller using the former should not silently get nothing.
+  std::vector<at::Tensor> result() override {
+    return result_;
+  }
+
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
     if (result_.empty()) {
       auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
@@ -125,154 +131,6 @@ class FakeProcessGroup : public Backend {
         groupRank, static_cast<int>(ranks.size()), std::move(fakeOpts));
   }
 
-  // NOTE [FakeProcessGroup uniform-rank simulation]
-  // With Options::simulate_uniform_ranks the group models a world in which
-  // every rank holds data identical to this one. That single assumption makes
-  // every collective well defined from local inputs alone, which the default
-  // approximations are not: they ignore the reduce op entirely and fill
-  // all-to-all outputs without regard to the split structure, so a caller that
-  // reshapes collective output (TorchRec's KeyedJaggedTensor does) gets a
-  // wrongly sized tensor.
-  //
-  // The modeling cost is that ranks cannot diverge, so this cannot surface
-  // rank-divergence bugs. It is off by default; existing behavior is untouched.
-  bool uniformRanks() const {
-    return options_ != nullptr && options_->simulate_uniform_ranks;
-  }
-
-  // Combine `size_` identical contributions in place. Every reduce op has a
-  // closed form once the contributions are known to be equal, so the contract
-  // is total: no op falls back to a silently wrong approximation.
-  void applyUniformReduction(const at::Tensor& tensor, const ReduceOp& reduceOp)
-      const {
-    switch (reduceOp.op_) {
-      case ReduceOp::SUM:
-        tensor.mul_(size_);
-        return;
-      case ReduceOp::AVG:
-      case ReduceOp::MIN:
-      case ReduceOp::MAX:
-      case ReduceOp::BAND:
-      case ReduceOp::BOR:
-        // Averaging, taking an extremum, and bitwise AND/OR are all idempotent
-        // on equal operands, so each leaves the local value unchanged.
-        return;
-      case ReduceOp::PRODUCT:
-        // Overflows silently for integer dtypes once the world is more than a
-        // few ranks wide, and saturates to inf for floats. That matches what a
-        // real backend would produce for the same inputs, so it is left alone
-        // rather than clamped.
-        tensor.pow_(size_);
-        return;
-      case ReduceOp::BXOR:
-        // x ^ x == 0, so an even number of equal contributions cancels out
-        // entirely and an odd number leaves one behind.
-        if (size_ % 2 == 0) {
-          tensor.zero_();
-        }
-        return;
-      case ReduceOp::PREMUL_SUM: {
-        // Summing `factor * x` over `size_` equal ranks scales the local
-        // value by `size_ * factor`.
-        auto supplement =
-            c10::dynamic_intrusive_pointer_cast<PreMulSumSupplement>(
-                reduceOp.supplement_);
-        TORCH_CHECK(
-            supplement != nullptr,
-            "FakeProcessGroup: PREMUL_SUM was given without its scaling "
-            "factor. Build it with torch.distributed._make_nccl_premul_sum.");
-        if (supplement->tensor_factor.defined()) {
-          tensor.mul_(supplement->tensor_factor);
-        } else {
-          tensor.mul_(supplement->double_factor);
-        }
-        tensor.mul_(size_);
-        return;
-      }
-      default:
-        TORCH_CHECK(
-            false,
-            "FakeProcessGroup: unrecognized reduce op ",
-            static_cast<int>(reduceOp.op_),
-            " under simulate_uniform_ranks.");
-    }
-  }
-
-  // Fill `dst` by repeating `src`. Real backends write the whole slot;
-  // truncating would leave the tail uninitialized, and a caller that reshapes
-  // the output would then read garbage.
-  static void fillByTiling(const at::Tensor& dst, const at::Tensor& src) {
-    const auto dstNumel = dst.numel();
-    const auto srcNumel = src.numel();
-    if (dstNumel == 0) {
-      return;
-    }
-    if (srcNumel == 0) {
-      // This peer contributes nothing, so the slot receives nothing. Zero it
-      // rather than leaving whatever the caller's buffer happened to hold.
-      dst.zero_();
-      return;
-    }
-    int64_t written = 0;
-    while (written < dstNumel) {
-      const auto n = std::min(srcNumel, dstNumel - written);
-      dst.narrow(0, written, n).copy_(src.narrow(0, 0, n));
-      written += n;
-    }
-  }
-
-  // A flat 1-D view over `t`'s storage, for element-wise segment copies.
-  static at::Tensor flatView(const at::Tensor& t) {
-    return t.as_strided({t.numel()}, {1}, t.storage_offset());
-  }
-
-  // The contiguous segment of `flat` belonging to peer `index`, honoring the
-  // c10d convention that an empty split list means an equal division.
-  // Segment `index` of a flattened buffer. c10d split sizes count rows along
-  // dim 0, not elements, so each one scales by `rowSize` exactly as
-  // computeLengthsAndOffsets does for the real backends. Getting this wrong
-  // silently under-writes the output for anything that is not 1-D.
-  static at::Tensor splitSegment(
-      const at::Tensor& flat,
-      const std::vector<int64_t>& splitSizes,
-      int64_t index,
-      int64_t worldSize,
-      int64_t rowSize) {
-    if (splitSizes.empty()) {
-      // checkSplitSizes has already verified size(0) divides the world, so
-      // numel does too and this covers the buffer exactly.
-      const auto chunk = flat.numel() / worldSize;
-      return flat.narrow(0, chunk * index, chunk);
-    }
-    TORCH_CHECK(
-        static_cast<int64_t>(splitSizes.size()) >= worldSize,
-        "FakeProcessGroup: split list has ",
-        splitSizes.size(),
-        " entries for a world of ",
-        worldSize);
-    int64_t offset = 0;
-    for (int64_t i = 0; i < index; ++i) {
-      offset += splitSizes[i] * rowSize;
-    }
-    const auto length = splitSizes[index] * rowSize;
-    TORCH_CHECK(
-        offset + length <= flat.numel(),
-        "FakeProcessGroup: split segment [",
-        offset,
-        ", ",
-        offset + length,
-        ") exceeds the ",
-        flat.numel(),
-        "-element buffer");
-    return flat.narrow(0, offset, length);
-  }
-
-  // Elements per row along dim 0, matching computeLengthsAndOffsets.
-  static int64_t rowSizeOf(const at::Tensor& t) {
-    const auto dim0 = t.dim() > 0 ? t.size(0) : 0;
-    return dim0 ? t.numel() / dim0 : 1;
-  }
-
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) override {
@@ -285,7 +143,10 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override {
     checkCollectiveError();
-    if (uniformRanks()) {
+    // Real backends write the reduced value only into the root's tensor and
+    // leave every other rank's unspecified. Mirror that, so a caller that
+    // wrongly reads a non-root result fails here as it would in production.
+    if (uniformRanks() && rank_ == opts.rootRank) {
       at::AutoDispatchBelowAutograd guard;
       for (auto& tensor : tensors) {
         applyUniformReduction(tensor, opts.reduceOp);
@@ -673,6 +534,162 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Options> options_;
 
  private:
+
+  // NOTE [FakeProcessGroup uniform-rank simulation]
+  // With Options::simulate_uniform_ranks the group models a world in which
+  // every rank holds data identical to this one. That single assumption makes
+  // every collective well defined from local inputs alone, which the default
+  // approximations are not: they ignore the reduce op entirely and fill
+  // all-to-all outputs without regard to the split structure, so a caller that
+  // reshapes collective output (TorchRec's KeyedJaggedTensor does) gets a
+  // wrongly sized tensor.
+  //
+  // The modeling cost is that ranks cannot diverge, so this cannot surface
+  // rank-divergence bugs. It is off by default; existing behavior is untouched.
+  //
+  // Two collectives stay outside the contract because uniformity does not make
+  // them locally computable: `scatter` on a non-root rank has no access to the
+  // root's list at all, and `allreduce_sparse` cannot use the in-place ops the
+  // reductions are built from, so it raises rather than under-reduce.
+  bool uniformRanks() const {
+    return options_ != nullptr && options_->simulate_uniform_ranks;
+  }
+
+  // Combine `size_` identical contributions in place. Every reduce op has a
+  // closed form once the contributions are known to be equal, so the contract
+  // is total: no op falls back to a silently wrong approximation.
+  // `tensor` is an out parameter: every branch mutates it in place.
+  void applyUniformReduction(at::Tensor& tensor, const ReduceOp& reduceOp)
+      const {
+    switch (reduceOp.op_) {
+      case ReduceOp::SUM:
+        tensor.mul_(size_);
+        return;
+      case ReduceOp::AVG:
+      case ReduceOp::MIN:
+      case ReduceOp::MAX:
+      case ReduceOp::BAND:
+      case ReduceOp::BOR:
+        // Averaging, taking an extremum, and bitwise AND/OR are all idempotent
+        // on equal operands, so each leaves the local value unchanged.
+        return;
+      case ReduceOp::PRODUCT:
+        // Overflows silently for integer dtypes once the world is more than a
+        // few ranks wide, and saturates to inf for floats. That matches what a
+        // real backend would produce for the same inputs, so it is left alone
+        // rather than clamped.
+        tensor.pow_(size_);
+        return;
+      case ReduceOp::BXOR:
+        // x ^ x == 0, so an even number of equal contributions cancels out
+        // entirely and an odd number leaves one behind.
+        if (size_ % 2 == 0) {
+          tensor.zero_();
+        }
+        return;
+      case ReduceOp::PREMUL_SUM: {
+        // Summing `factor * x` over `size_` equal ranks scales the local
+        // value by `size_ * factor`.
+        auto supplement =
+            c10::dynamic_intrusive_pointer_cast<PreMulSumSupplement>(
+                reduceOp.supplement_);
+        TORCH_CHECK(
+            supplement != nullptr,
+            "FakeProcessGroup: PREMUL_SUM was given without its scaling "
+            "factor. Build it with torch.distributed._make_nccl_premul_sum.");
+        if (supplement->tensor_factor.defined()) {
+          // The factor may have been built on another device; real backends
+          // co-locate it internally rather than failing the multiply.
+          tensor.mul_(supplement->tensor_factor.to(tensor.device()));
+        } else {
+          tensor.mul_(supplement->double_factor);
+        }
+        tensor.mul_(size_);
+        return;
+      }
+      default:
+        TORCH_CHECK(
+            false,
+            "FakeProcessGroup: unrecognized reduce op ",
+            static_cast<int>(reduceOp.op_),
+            " under simulate_uniform_ranks.");
+    }
+  }
+
+  // Fill `dst` by repeating `src`. Real backends write the whole slot;
+  // truncating would leave the tail uninitialized, and a caller that reshapes
+  // the output would then read garbage.
+  static void fillByTiling(const at::Tensor& dst, const at::Tensor& src) {
+    const auto dstNumel = dst.numel();
+    const auto srcNumel = src.numel();
+    if (dstNumel == 0) {
+      return;
+    }
+    if (srcNumel == 0) {
+      // This peer contributes nothing, so the slot receives nothing. Zero it
+      // rather than leaving whatever the caller's buffer happened to hold.
+      dst.zero_();
+      return;
+    }
+    int64_t written = 0;
+    while (written < dstNumel) {
+      const auto n = std::min(srcNumel, dstNumel - written);
+      dst.narrow(0, written, n).copy_(src.narrow(0, 0, n));
+      written += n;
+    }
+  }
+
+  // A flat 1-D view over `t`'s storage, for element-wise segment copies.
+  static at::Tensor flatView(const at::Tensor& t) {
+    return t.as_strided({t.numel()}, {1}, t.storage_offset());
+  }
+
+  // The contiguous segment of `flat` belonging to peer `index`, honoring the
+  // c10d convention that an empty split list means an equal division.
+  // Segment `index` of a flattened buffer. c10d split sizes count rows along
+  // dim 0, not elements, so each one scales by `rowSize` exactly as
+  // computeLengthsAndOffsets does for the real backends. Getting this wrong
+  // silently under-writes the output for anything that is not 1-D.
+  static at::Tensor splitSegment(
+      const at::Tensor& flat,
+      const std::vector<int64_t>& splitSizes,
+      int64_t index,
+      int64_t worldSize,
+      int64_t rowSize) {
+    if (splitSizes.empty()) {
+      // checkSplitSizes has already verified size(0) divides the world, so
+      // numel does too and this covers the buffer exactly.
+      const auto chunk = flat.numel() / worldSize;
+      return flat.narrow(0, chunk * index, chunk);
+    }
+    TORCH_CHECK(
+        static_cast<int64_t>(splitSizes.size()) >= worldSize,
+        "FakeProcessGroup: split list has ",
+        splitSizes.size(),
+        " entries for a world of ",
+        worldSize);
+    int64_t offset = 0;
+    for (int64_t i = 0; i < index; ++i) {
+      offset += splitSizes[i] * rowSize;
+    }
+    const auto length = splitSizes[index] * rowSize;
+    TORCH_CHECK(
+        offset + length <= flat.numel(),
+        "FakeProcessGroup: split segment [",
+        offset,
+        ", ",
+        offset + length,
+        ") exceeds the ",
+        flat.numel(),
+        "-element buffer");
+    return flat.narrow(0, offset, length);
+  }
+
+  // Elements per row along dim 0, matching computeLengthsAndOffsets.
+  static int64_t rowSizeOf(const at::Tensor& t) {
+    const auto dim0 = t.dim() > 0 ? t.size(0) : 0;
+    return dim0 ? t.numel() / dim0 : 1;
+  }
   void checkCollectiveError() {
     TORCH_CHECK(
         !options_ || !options_->error_on_collective,
