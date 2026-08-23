@@ -1064,6 +1064,16 @@ class CacheabilityValidator:
         if self.fx_kwargs is not None:
             self._check_cache_key_object(self.fx_kwargs)
 
+    @staticmethod
+    def _is_cacheable_effectful_op(op: Any) -> bool:
+        if isinstance(op, torch._ops.OpOverload):
+            return op._name == "aten::_linalg_check_errors"
+        if isinstance(op, torch._ops.OpOverloadPacket):
+            return op._qualified_op_name == "aten::_linalg_check_errors"
+        if isinstance(op, str):
+            return op == "aten::_linalg_check_errors"
+        return False
+
     def validate_graph(self, include_constants: bool) -> None:
         for module in self.gm.modules():
             if not isinstance(module, torch.fx.GraphModule):
@@ -1073,6 +1083,12 @@ class CacheabilityValidator:
                     isinstance(node.target, torch._ops.HigherOrderOperator)
                     and not node.target.cacheable()
                 ):
+                    if (
+                        node.target is torch.ops.higher_order.with_effects
+                        and len(node.args) >= 2
+                        and self._is_cacheable_effectful_op(node.args[1])
+                    ):
+                        continue
                     self.bypass(
                         f"Can't cache HigherOrderOperator: {node.target.name()}"
                     )

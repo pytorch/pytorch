@@ -211,6 +211,15 @@ def check_node_safe(node: Node) -> None:
             or function_name in torch._inductor.config.unsafe_marked_cacheable_functions
         )
 
+    def is_cacheable_effectful_op(op: Any) -> bool:
+        if isinstance(op, torch._ops.OpOverload):
+            return op._name == "aten::_linalg_check_errors"
+        if isinstance(op, torch._ops.OpOverloadPacket):
+            return op._qualified_op_name == "aten::_linalg_check_errors"
+        if isinstance(op, str):
+            return op == "aten::_linalg_check_errors"
+        return False
+
     def is_cacheable_function(target: Callable[..., Any]) -> bool:
         if isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
             return True
@@ -221,6 +230,12 @@ def check_node_safe(node: Node) -> None:
         # Technically, FXGraphCache._check_for_hop already checks this,
         # but better to error earlier anyway
         if isinstance(target, torch._ops.HigherOrderOperator):
+            if (
+                target is torch.ops.higher_order.with_effects
+                and len(node.args) >= 2
+                and is_cacheable_effectful_op(node.args[1])
+            ):
+                return True
             return target.cacheable()
         is_builtin_fun_or_type = type(target).__name__ == "builtin_function_or_method"
         if is_builtin_fun_or_type:

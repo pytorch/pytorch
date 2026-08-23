@@ -3863,6 +3863,45 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(
             torch._dynamo.utils._torch_numpy_callable_cache_key(not_torch_numpy)
         )
+
+    def test_with_effects_linalg_check_errors_cacheable(self):
+        graph = torch.fx.Graph()
+        token = graph.placeholder("token")
+        info = graph.placeholder("info")
+        out = graph.call_function(
+            torch.ops.higher_order.with_effects,
+            (
+                token,
+                torch.ops.aten._linalg_check_errors.default,
+                info,
+                "cholesky",
+                False,
+            ),
+        )
+        graph.output(out)
+        gm = torch.fx.GraphModule({}, graph)
+
+        check_cacheable(gm)
+
+    def test_with_effects_other_effectful_op_bypassed(self):
+        graph = torch.fx.Graph()
+        token = graph.placeholder("token")
+        msg = graph.placeholder("msg")
+        out = graph.call_function(
+            torch.ops.higher_order.with_effects,
+            (
+                token,
+                torch.ops.aten._print.default,
+                msg,
+            ),
+        )
+        graph.output(out)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache, "Unsupported call_function target"
+        ):
+            check_cacheable(gm)
         cache_info = (
             torch._dynamo.utils._torch_numpy_callable_cache_key_by_id.cache_info()
         )

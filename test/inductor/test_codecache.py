@@ -5705,6 +5705,47 @@ class TestAutotuneCacheExtraOptions(TestCase):
         saved_data = mock_local_backend.put.call_args[0][1]
         self.assertNotIn("extra_options", saved_data)
 
+    def test_with_effects_linalg_check_errors_cacheable(self):
+        graph = torch.fx.Graph()
+        token = graph.placeholder("token")
+        info = graph.placeholder("info")
+        out = graph.call_function(
+            torch.ops.higher_order.with_effects,
+            (
+                token,
+                torch.ops.aten._linalg_check_errors.default,
+                info,
+                "cholesky",
+                False,
+            ),
+        )
+        graph.output(out)
+        gm = torch.fx.GraphModule({}, graph)
+
+        validator = CacheabilityValidator(gm, require_shape_env=False)
+        validator.validate_graph(include_constants=False)
+
+    def test_with_effects_other_effectful_op_bypassed(self):
+        graph = torch.fx.Graph()
+        token = graph.placeholder("token")
+        msg = graph.placeholder("msg")
+        out = graph.call_function(
+            torch.ops.higher_order.with_effects,
+            (
+                token,
+                torch.ops.aten._print.default,
+                msg,
+            ),
+        )
+        graph.output(out)
+        gm = torch.fx.GraphModule({}, graph)
+
+        validator = CacheabilityValidator(gm, require_shape_env=False)
+        with self.assertRaisesRegex(
+            BypassFxGraphCache, "Can't cache HigherOrderOperator: with_effects"
+        ):
+            validator.validate_graph(include_constants=False)
+
 
 if __name__ == "__main__":
     run_tests()
