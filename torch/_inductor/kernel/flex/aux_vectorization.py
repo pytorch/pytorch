@@ -9,7 +9,7 @@ import sympy
 
 import torch
 from torch.fx import GraphModule
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, Max, Min, ModularIndexing
 
 from ...codegen.cutedsl.lane_analysis import classify_lane_expr
 from ...ir import TensorBox
@@ -165,9 +165,9 @@ def select_score_mod_vec_size(
 ) -> int | None:
     """Select score_mod vector width for captured aux loads.
 
-    Wider score_mod.__vec_size__ values remain legal when score_mod has no
-    captured tensors. For captured tensors, direct vector loads are capped to
-    the SM100 CuTe score_mod aux-load path's supported width of 8.
+    A return value of None means there are no captured tensor loads constraining
+    score_mod.__vec_size__. For captured tensors, direct vector loads are capped
+    to the SM100 CuTe score_mod aux-load path's supported width of 8.
     """
     if not has_score_mod or not has_aux_tensors:
         return None
@@ -367,6 +367,29 @@ def fx_aux_index_to_sympy(
 
     args = index.args
     target = index.target
+    match target:
+        case torch.ops.aten.abs.default:
+            operand = fx_aux_index_to_sympy(args[0], index_symbols, node_to_sympy)
+            return None if operand is None else sympy.Abs(operand)
+        case torch.ops.aten.neg.default:
+            operand = fx_aux_index_to_sympy(args[0], index_symbols, node_to_sympy)
+            return None if operand is None else -operand
+        case torch.ops.aten.clamp.default:
+            operand = fx_aux_index_to_sympy(args[0], index_symbols, node_to_sympy)
+            if operand is None:
+                return None
+            lo = args[1] if len(args) > 1 else index.kwargs.get("min")
+            hi = args[2] if len(args) > 2 else index.kwargs.get("max")
+            for bound, combine in ((lo, Max), (hi, Min)):
+                if bound is not None:
+                    bound_expr = fx_aux_index_to_sympy(
+                        bound, index_symbols, node_to_sympy
+                    )
+                    if bound_expr is None:
+                        return None
+                    operand = combine(operand, bound_expr)
+            return operand
+
     if len(args) < 2:
         return None
     lhs = fx_aux_index_to_sympy(args[0], index_symbols, node_to_sympy)
@@ -380,6 +403,10 @@ def fx_aux_index_to_sympy(
             return V.graph.sizevars.simplify(lhs - rhs)
         case torch.ops.aten.mul.Tensor | torch.ops.aten.mul.Scalar:
             return V.graph.sizevars.simplify(lhs * rhs)
+        case torch.ops.aten.minimum.default:
+            return Min(lhs, rhs)
+        case torch.ops.aten.maximum.default:
+            return Max(lhs, rhs)
         case torch.ops.aten.remainder.Tensor | torch.ops.aten.remainder.Scalar:
             return ModularIndexing(lhs, 1, rhs)
         case torch.ops.aten.div.Tensor_mode if (

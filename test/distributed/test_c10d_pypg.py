@@ -12,7 +12,13 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch._C._distributed_c10d import _create_work_from_future
-from torch.distributed.distributed_c10d import _coalescing_manager, _get_default_group
+from torch.distributed.distributed_c10d import (
+    _coalescing_manager,
+    _get_default_group,
+    _register_process_group,
+    _unregister_process_group,
+    ReconfigureOptions,
+)
 from torch.futures import Future
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -314,6 +320,87 @@ class TestPyProcessGroup(TestCase):
         # dispatches back into Python; a raw C++ ProcessGroup would return the
         # base backend name ("undefined") instead.
         self.assertEqual(pg.name(), "store-pg")
+        self.assertEqual(pg.rank(), 0)
+        self.assertEqual(pg.size(), 1)
+
+    def test_all_gather_single(self):
+        # all_gather_into_tensor_out calls group->all_gather_single(...) in C++,
+        # which dispatches through the PyProcessGroup trampoline into the Python
+        # DummyProcessGroup.all_gather_single override (it copies the input into
+        # each chunk). Without the override the base impl needs a backend and
+        # raises, so a correct output proves the override the PR adds was hit.
+        pg = test_c10d_common.DummyProcessGroup(0, 1)
+        _register_process_group("test_all_gather_single", pg)
+        try:
+            input = torch.ones(2)
+            output = torch.empty(2)
+            torch.ops._c10d_functional.all_gather_into_tensor_out(
+                input, 1, "test_all_gather_single", out=output
+            )
+            torch.ops._c10d_functional.wait_tensor(output)
+            self.assertIn("all_gather_single", pg.collectives_called)
+            self.assertEqual(output, torch.ones(2))
+        finally:
+            _unregister_process_group("test_all_gather_single")
+
+    def test_reduce_scatter_single(self):
+        # No functional collective dispatches to reduce_scatter_single (they use
+        # the coalesced variant), so this is a direct sanity check that the
+        # override runs and forwards its buffers.
+        pg = test_c10d_common.DummyProcessGroup(0, 1)
+        input = torch.ones(2)
+        output = torch.zeros(2)
+        pg.reduce_scatter_single(output, input).wait()
+        self.assertIn("reduce_scatter_single", pg.collectives_called)
+        self.assertEqual(output, torch.ones(2))
+
+    # reduce / gather / scatter / alltoall share their Python name with the
+    # bound method, so a plain instance call hits the Python override directly
+    # (a sanity check that it runs and forwards its buffers; no functional
+    # collective dispatches to these as ProcessGroup virtuals). recvAnysource is
+    # bound under the non-shadowed name recv_anysource, so pg.recv_anysource()
+    # routes through the C++ virtual into the trampoline. DummyProcessGroup
+    # records each dispatched collective and applies a recognizable mutation
+    # (reduce adds 3, recvAnysource adds 4, gather/scatter/alltoall copy).
+    def test_reduce(self):
+        pg = test_c10d_common.DummyProcessGroup(0, 1)
+        tensor = torch.zeros(4)
+        pg.reduce([tensor]).wait()
+        self.assertIn("reduce", pg.collectives_called)
+        self.assertEqual(tensor, torch.zeros(4) + 3)
+
+    def test_gather(self):
+        pg = test_c10d_common.DummyProcessGroup(0, 1)
+        input = torch.arange(4, dtype=torch.float32)
+        output = torch.zeros(4)
+        pg.gather([[output]], [input]).wait()
+        self.assertIn("gather", pg.collectives_called)
+        self.assertEqual(output, input)
+
+    def test_scatter(self):
+        pg = test_c10d_common.DummyProcessGroup(0, 1)
+        input = torch.arange(4, dtype=torch.float32)
+        output = torch.zeros(4)
+        pg.scatter([output], [[input]]).wait()
+        self.assertIn("scatter", pg.collectives_called)
+        self.assertEqual(output, input)
+
+    def test_alltoall(self):
+        pg = test_c10d_common.DummyProcessGroup(0, 1)
+        input = torch.arange(4, dtype=torch.float32)
+        output = torch.zeros(4)
+        pg.alltoall([output], [input]).wait()
+        self.assertIn("alltoall", pg.collectives_called)
+        self.assertEqual(output, input)
+
+    def test_recv_anysource(self):
+        # recv_anysource is bound to the recvAnysource virtual under a different
+        # name, so this routes through the C++ trampoline into the override.
+        pg = test_c10d_common.DummyProcessGroup(0, 1)
+        tensor = torch.zeros(4)
+        pg.recv_anysource([tensor], 7).wait()
+        self.assertIn("recvAnysource", pg.collectives_called)
+        self.assertEqual(tensor, torch.zeros(4) + 4)
 
     def test_coalescing_manager(self):
         # The coalescing manager calls _start_coalescing / _end_coalescing, which
@@ -359,6 +446,19 @@ class TestPyProcessGroup(TestCase):
         self.assertEqual(opts.handles, ["a", "b"])
         self.assertEqual(opts.timeout, timeout)
         self.assertEqual(opts.hints, {"k": "v"})
+
+    def test_reconfigure_rejects_multiple_backends(self) -> None:
+        pg = dist.ProcessGroup(0, 1)
+        pg._register_backend(torch.device("cpu"), dist.ProcessGroup.BackendType.GLOO)
+        pg._register_backend(torch.device("cuda"), dist.ProcessGroup.BackendType.NCCL)
+
+        msg = "multiple backends"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            pg.supports_reconfigure
+        with self.assertRaisesRegex(RuntimeError, msg):
+            pg.get_reconfigure_handle()
+        with self.assertRaisesRegex(RuntimeError, msg):
+            pg.reconfigure(ReconfigureOptions())
 
     def test_window_delegation(self) -> None:
         pg = WindowProcessGroup(0, 1)

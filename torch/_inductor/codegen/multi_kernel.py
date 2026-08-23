@@ -439,7 +439,7 @@ class MultiKernelCall:
     #
     # An alternative that reused the multi-kernel cache does not work well
     # since during codegen of the second pass, it's very hard to know the
-    # path for the cache file. Also reading the cache file need do some IO
+    # path for the cache file. Also reading the cache file needs to do some IO
     # which can be slower.
     @staticmethod
     def record_choice(multi_kernel_name: str, picked_kernel_name: str):
