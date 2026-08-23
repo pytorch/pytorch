@@ -27,10 +27,20 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/full_like.h>
 #include <ATen/ops/linalg_eigh.h>
 #include <ATen/ops/linalg_eigvalsh.h>
+#include <ATen/ops/linalg_norm.h>
+#include <ATen/ops/linalg_svd.h>
 #include <ATen/ops/linalg_solve_triangular.h>
+#include <ATen/ops/matmul.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/reciprocal.h>
+#include <ATen/ops/sub.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #endif
 
@@ -1563,25 +1573,82 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
   }
 }
 
-void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singular_values*/, Tensor& infos, double /*rcond*/, std::string /*driver_name*/)  {
+void linalg_lstsq_gelsd(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond) {
+  auto m = A.size(-2);
+  auto n = A.size(-1);
+
+  if (m == 0 || n == 0) return;
+
+  ScalarType real_dtype = toRealValueType(A.scalar_type());
+
+  auto [U, S, Vh] = at::linalg_svd(A, /*full_matrices=*/false, std::nullopt);
+  singular_values.copy_(S);
+
+  Tensor tol;
+  if (rcond > 0 && rcond < 1) {
+    auto s_max = singular_values.select(-1, 0);
+    tol = at::mul(s_max, rcond);
+  } else {
+    tol = at::scalar_tensor(_get_epsilon(real_dtype) * static_cast<double>(std::max(m, n)), at::device(A.device()));
+  }
+
+  Tensor above_tol = singular_values.gt(tol.unsqueeze(-1));
+  rank.copy_((above_tol).sum(-1));
+
+  // Avoid dividing by zero by masking singular values that are not above the tolerance
+  Tensor S_safe = at::where(above_tol, singular_values, 1.0);
+  S_safe.unsqueeze_(-1);
+  above_tol.unsqueeze_(-1);
+  auto B_narrowed = B.narrow(-2, 0, m);
+  Tensor UhB = at::matmul(U.mH(), B_narrowed);
+  Tensor SpinvUhB = UhB.div(S_safe.to(A.scalar_type()));
+  // Zero out contributions from singular values below tolerance
+  SpinvUhB.masked_fill_(~above_tol, 0.0);
+
+  auto X = at::matmul(Vh.mH(), SpinvUhB);
+  if (m > n)
+  {
+    // The increase in runtime to compute the residual directly is not significant compared to the rest of the computation.
+    auto residual = at::sub(at::matmul(A, X), B_narrowed);
+    auto col_norms = at::linalg_norm(residual, 2, std::vector<int64_t>{-2}, false);
+    B.narrow(-2, n, m - n).zero_();
+    B.select(-2, m - 1).copy_(col_norms);
+  }
+  B.narrow(-2, 0, n).copy_(X);
+
+}
+
+void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name)  {
   auto m = a.size(-2);
   auto n = a.size(-1);
 
   _warn_once_magma_deprecation("linalg.lstsq");
-  // first handle the underdetermined case (m < n)
-  // this case is not supported by cuBLAS
-  if (m < n) {
-    linalg_lstsq_gels(a, b, infos);
-  } else { // m >= n
-    // On CUDA platform we use either cuBLAS or cuSOLVER here
-    // the batched vs looped dispatch is implemented based on the following performance results
-    // https://github.com/pytorch/pytorch/pull/54725#issuecomment-832234456
-    if (m <= 256 && batchCount(b) >= std::max<int64_t>(2, m / 16)) {
-      gels_batched_cublas(a, b, infos);
-    } else {
+
+  if (driver_name == "gels")
+  {
+    // first handle the underdetermined case (m < n)
+    // this case is not supported by cuBLAS
+    if (m < n) {
       linalg_lstsq_gels(a, b, infos);
+    } else { // m >= n
+      // On CUDA platform we use either cuBLAS or cuSOLVER here
+      // the batched vs looped dispatch is implemented based on the following performance results
+      // https://github.com/pytorch/pytorch/pull/54725#issuecomment-832234456
+      if (m <= 256 && batchCount(b) >= std::max<int64_t>(2, m / 16)) {
+        gels_batched_cublas(a, b, infos);
+      } else {
+        linalg_lstsq_gels(a, b, infos);
+      }
     }
+
+  } else if (driver_name == "gelsd") {
+    linalg_lstsq_gelsd(a, b, rank, singular_values, infos, rcond);
+
+  } else {
+    // this should never be reached since the driver is checked in get_default_lstsq_driver()
+    TORCH_CHECK(false, "linalg.lstsq: Does not support driver '", driver_name, "' on CUDA.");
   }
+
 }
 
 REGISTER_CUDA_DISPATCH(lstsq_stub, &lstsq_kernel)
