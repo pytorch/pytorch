@@ -1169,7 +1169,9 @@ def _autograd_cache_bypasses() -> int:
     return counters["aot_autograd"].get("autograd_cache_bypass", 0)
 
 
-def _missing_backends_message(total: int, missing: Sequence[object]) -> str:
+def _missing_backends_message(
+    total: int, missing: Sequence[object], backend: str = "inductor"
+) -> str:
     """Why some compiled subgraphs never reached the artifact.
 
     Reports the recorded/total split rather than asserting nothing was
@@ -1179,6 +1181,20 @@ def _missing_backends_message(total: int, missing: Sequence[object]) -> str:
     shown = ", ".join(str(b) for b in missing[:8])
     if len(missing) > 8:
         shown += f", ... ({len(missing) - 8} more)"
+    if backend not in ("inductor", "eager"):
+        # A session takes any backend Dynamo can resolve, but only these two
+        # leave something a served artifact can run: "eager" keeps the fx
+        # graphs and "inductor" bundles compiled code. Anything else captures
+        # cleanly and records nothing, so say so here rather than let it read
+        # as a defect in the model. aot_eager is the one people reach for,
+        # since it is how you isolate AOTAutograd.
+        return (
+            f"Precompilation recorded {total - len(missing)} of {total} "
+            f"compiled backend(s) because backend={backend!r} does not produce "
+            f"anything serializable; precompile can record only 'inductor' or "
+            f"'eager'. To isolate AOTAutograd without inductor, use plain "
+            f"torch.compile(backend='aot_eager') -- that needs no precompile."
+        )
     bypasses = _autograd_cache_bypasses()
     bypass_note = (
         f" It bypassed {bypasses} time(s) here, which rendering does for any "
@@ -2390,7 +2406,9 @@ class PrecompileSession:
             entry = self._package.cache_entry()
             missing = [b for b in entry.backend_ids if b not in recorded]
             raise PackageError(
-                _missing_backends_message(len(entry.backend_ids), missing)
+                _missing_backends_message(
+                    len(entry.backend_ids), missing, self._backend
+                )
             ) from e
         log.info("precompile: saved %s to %s", summary, path)
         return summary
@@ -2461,7 +2479,9 @@ class PrecompileSession:
         missing = [b for b in entry.backend_ids if b not in collected]
         if missing:
             raise PackageError(
-                _missing_backends_message(len(entry.backend_ids), missing)
+                _missing_backends_message(
+                    len(entry.backend_ids), missing, self._backend
+                )
             )
         return {str(b): collected[b] for b in entry.backend_ids}
 
