@@ -152,8 +152,12 @@ class profile:
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exist, at the moment, only for TorchScript models
-            and not eager mode models.
+
+            .. deprecated::
+                ``with_modules`` is deprecated and will be removed in a future version.
+                It only collects data for TorchScript models, which are themselves
+                deprecated, and does nothing in eager mode. Use ``with_stack=True``,
+                which records ``nn.Module`` events for eager models.
 
         use_kineto (bool, optional): experimental, enable profiling with Kineto profiler.
 
@@ -260,6 +264,22 @@ class profile:
             warn(
                 "profiler_metrics and profiler_measure_per_kernel are deprecated "
                 "and ignored. These options will be removed in a future release.",
+                FutureWarning,
+                stacklevel=2,
+            )
+        if experimental_config.adjust_profiler_step:
+            warn(
+                "adjust_profiler_step is deprecated and ignored. It will be "
+                "removed in a future release.",
+                FutureWarning,
+                stacklevel=2,
+            )
+        if with_modules:
+            warn(
+                "with_modules is deprecated and will be removed in a future release. "
+                "It only collects data for TorchScript models, which are themselves "
+                "deprecated, and does nothing in eager mode. Use with_stack=True, "
+                "which records nn.Module events for eager models.",
                 FutureWarning,
                 stacklevel=2,
             )
@@ -750,7 +770,10 @@ class profile:
                     device_corr_map[corr_id] = []
                 device_corr_map[corr_id].append(fe)
             elif corr_id == 0:
-                frontend_function_events.append(fe)
+                # Skip OVERHEAD events (profiler-internal host cost):
+                # they do no device work and would otherwise inflate reported device time.
+                if fe.activity_type != "overhead":
+                    frontend_function_events.append(fe)
             else:
                 raise RuntimeError(
                     f"Got negative correlation id {corr_id} in profiler post processing"
@@ -1178,7 +1201,7 @@ class emit_nvtx:
 
 
 def load_nvprof(path):
-    """Open an nvprof trace file and parses autograd annotations.
+    """Open an nvprof trace file and parse autograd annotations.
 
     Args:
         path (str): path to nvprof trace
