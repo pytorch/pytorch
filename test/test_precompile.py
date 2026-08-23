@@ -21,6 +21,7 @@ import torch.utils._pytree as _pytree
 from torch._dynamo import graph_break as _precompile_dynamo_break_here
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._precompile import PrecompileError
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
@@ -399,6 +400,37 @@ def _precompile_dynamo_wrong_call_module(module, x):
 
 def _precompile_dynamo_backward(module, x):
     module(x).sum().backward()
+
+
+class _PrecompileDynamoIndependentOutputs(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.left = torch.nn.Linear(4, 3)
+        self.right = torch.nn.Linear(4, 3)
+
+    def forward(self, x):
+        return self.left(x).sin(), self.right(x).cos()
+
+
+@torch._dynamo.disable
+def _precompile_dynamo_backward_one(first, second, use_first):
+    (first if use_first else second).sum().backward()
+
+
+def _precompile_dynamo_undefined_tangent_step(module, x, use_first):
+    first, second = module(x)
+    _precompile_dynamo_backward_one(first, second, use_first)
+
+
+def _precompile_dynamo_optional_tangent_step(x, y, use_first):
+    first, second = torch.ops.precompile_optional_tangents.split.default(x, y)
+    _precompile_dynamo_backward_one(first, second, use_first)
+
+
+def _precompile_dynamo_async_collective_tangent_step(x, y):
+    first = x.sin()
+    second = AsyncCollectiveTensor(y.cos())
+    _precompile_dynamo_backward_one(first, second, True)
 
 
 def _precompile_dynamo_autograd_grad(module, x, target):
@@ -5175,6 +5207,235 @@ class TestPrecompile(TestCase):
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the CUDA lowering, not just CPU.
+
+    def test_torch_compile_training_preserves_undefined_tangent(self, device):
+        model = _PrecompileDynamoIndependentOutputs().to(device)
+        x = make_tensor((2, 4), device=device, dtype=torch.float32)
+        compiled = torch.compile(model, backend="inductor", fullgraph=True)
+        compiled(x)[0].sum().backward()
+
+        self.assertIsNotNone(model.left.weight.grad)
+        self.assertIsNone(model.right.weight.grad)
+
+    def test_torch_compile_training_async_collective_undefined_tangent(self, device):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def compiled(x, y):
+            return x.sin(), AsyncCollectiveTensor(y.cos())
+
+        x = make_tensor((4,), device=device, dtype=torch.float32, requires_grad=True)
+        y = make_tensor((4,), device=device, dtype=torch.float32, requires_grad=True)
+        compiled(x, y)[0].sum().backward()
+
+        self.assertEqual(x.grad, x.cos())
+        self.assertIsNone(y.grad)
+
+    def test_dynamo_training_serializes_tangent_masks(self, device):
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import fresh_cache
+
+        torch.manual_seed(0)
+        model = _PrecompileDynamoIndependentOutputs().to(device)
+        x = make_tensor((2, 4), device=device, dtype=torch.float32)
+        backward_calls: list[torch.Tensor | None] = []
+        handles = [
+            layer.weight.register_hook(lambda grad: backward_calls.append(grad))
+            for layer in (model.left, model.right)
+        ]
+        counters.clear()
+        try:
+            with fresh_cache():
+                code, cache = torch.compiler.precompile(
+                    _precompile_dynamo_undefined_tangent_step,
+                    example_inputs=[(model, x, True), (model, x, False)],
+                    tracer="dynamo",
+                    backend="inductor",
+                    training=True,
+                )
+        finally:
+            for handle in handles:
+                handle.remove()
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+        self.assertEqual(len(backward_calls), 4)
+        self.assertEqual(sum(grad is None for grad in backward_calls), 2)
+        self.assertIn("1: (_inner_call_bw_0", code)
+        self.assertIn("2: (_inner_call_bw_1", code)
+        self.assertIn("_AOT_DEFAULT_BACKWARD_VARIANT_s0 = None", code)
+        self.assertEqual(code.count("Inner Inductor output code: BACKWARD variant"), 2)
+
+        for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
+            for use_first in (True, False):
+                run = copy.deepcopy(model)
+                ref = copy.deepcopy(model)
+                loaded(run, x, use_first)
+                _precompile_dynamo_undefined_tangent_step(ref, x, use_first)
+                for actual, expected in zip(run.parameters(), ref.parameters()):
+                    self.assertEqual(actual.grad, expected.grad)
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_dynamo_training_custom_backward_observes_none_tangent(self, device):
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import fresh_cache
+        from torch.library import _scoped_library
+
+        with _scoped_library("precompile_optional_tangents", "FRAGMENT") as lib:
+            lib.define("split(Tensor x, Tensor y) -> (Tensor, Tensor)")
+            lib.impl(
+                "split",
+                lambda x, y: (x * 2, y * 3),
+                "CompositeExplicitAutograd",
+            )
+            lib.impl(
+                "split",
+                lambda x, y: (torch.empty_like(x), torch.empty_like(y)),
+                "Meta",
+            )
+
+            def setup_context(ctx, inputs, output):
+                ctx.set_materialize_grads(False)
+                ctx.save_for_backward(*inputs)
+
+            def backward(ctx, grad_x, grad_y):
+                x, y = ctx.saved_tensors
+                if grad_x is None:
+                    return y * 5, grad_y * y
+                if grad_y is None:
+                    return grad_x * x, x * 7
+                return grad_x * x, grad_y * y
+
+            torch.library.register_autograd(
+                "precompile_optional_tangents::split",
+                backward,
+                setup_context=setup_context,
+                lib=lib,
+            )
+            examples = []
+            for size, use_first in ((2, True), (3, False), (5, True)):
+                x = make_tensor(
+                    (size,), device=device, dtype=torch.float32, requires_grad=True
+                )
+                y = make_tensor(
+                    (size,), device=device, dtype=torch.float32, requires_grad=True
+                )
+                examples.append((x, y, use_first))
+            counters.clear()
+            with fresh_cache():
+                code, cache = torch.compiler.precompile(
+                    _precompile_dynamo_optional_tangent_step,
+                    example_inputs=examples,
+                    tracer="dynamo",
+                    backend="inductor",
+                    training=True,
+                )
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+            self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
+            self.assertIn("1: (_inner_call_bw_0", code)
+            self.assertIn("2: (_inner_call_bw_1", code)
+            caches = (cache, _strip_artifact(cache))
+            for artifact_cache in caches:
+                with fresh_cache():
+                    loaded = torch.compiler.precompile.load(code, artifact_cache)
+                    for use_first in (True, False):
+                        x = make_tensor(
+                            (7,),
+                            device=device,
+                            dtype=torch.float32,
+                            requires_grad=True,
+                        )
+                        y = make_tensor(
+                            (7,),
+                            device=device,
+                            dtype=torch.float32,
+                            requires_grad=True,
+                        )
+                        actual_x = x.detach().clone().requires_grad_()
+                        actual_y = y.detach().clone().requires_grad_()
+                        expected_x = x.detach().clone().requires_grad_()
+                        expected_y = y.detach().clone().requires_grad_()
+                        loaded(actual_x, actual_y, use_first)
+                        _precompile_dynamo_optional_tangent_step(
+                            expected_x, expected_y, use_first
+                        )
+                        self.assertEqual(actual_x.grad, expected_x.grad)
+                        self.assertEqual(actual_y.grad, expected_y.grad)
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_dynamo_training_async_collective_tensor_undefined_tangent(self, device):
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import fresh_cache
+
+        examples = []
+        for size in (2, 3, 5):
+            x = make_tensor(
+                (size,), device=device, dtype=torch.float32, requires_grad=True
+            )
+            y = make_tensor(
+                (size,), device=device, dtype=torch.float32, requires_grad=True
+            )
+            examples.append((x, y))
+        counters.clear()
+        with fresh_cache():
+            code, cache = torch.compiler.precompile(
+                _precompile_dynamo_async_collective_tangent_step,
+                example_inputs=examples,
+                tracer="dynamo",
+                backend="inductor",
+                training=True,
+            )
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+        self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
+        self.assertIn("2: (_inner_call_bw_0", code)
+        self.assertNotIn("tangents_2", code)
+        for artifact_cache in (cache, _strip_artifact(cache)):
+            with fresh_cache():
+                loaded = torch.compiler.precompile.load(code, artifact_cache)
+                x = make_tensor(
+                    (7,), device=device, dtype=torch.float32, requires_grad=True
+                )
+                y = make_tensor(
+                    (7,), device=device, dtype=torch.float32, requires_grad=True
+                )
+                loaded(x, y)
+                self.assertEqual(x.grad, x.cos())
+                self.assertIsNone(y.grad)
+
+        if device == "cpu":
+            with tempfile.NamedTemporaryFile(
+                "w", suffix=".py", delete=False
+            ) as artifact:
+                artifact.write(code)
+                artifact_path = artifact.name
+            try:
+                subprocess.check_call(
+                    [
+                        sys.executable,
+                        "-c",
+                        textwrap.dedent(
+                            """
+                            import runpy
+                            import sys
+                            import torch
+
+                            namespace = runpy.run_path(sys.argv[1])
+                            x = torch.randn(7, requires_grad=True)
+                            y = torch.randn(7, requires_grad=True)
+                            namespace["forward"](x, y)
+                            torch.testing.assert_close(x.grad, x.cos())
+                            if y.grad is not None:
+                                raise AssertionError(f"expected no y.grad, got {y.grad}")
+                            """
+                        ),
+                        artifact_path,
+                    ]
+                )
+            finally:
+                os.unlink(artifact_path)
 
     @onlyCUDA
     def test_make_fx_autocast_tracks_graph_devices(self, device):

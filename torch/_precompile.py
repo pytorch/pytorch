@@ -33,7 +33,11 @@ also stored as opaque inline data.
 With ``tracer="dynamo", training=True``, captured graphs remain differentiable on both
 backends. Inductor artifacts contain AOTAutograd's forward and backward as readable
 source. The served output retains its ``grad_fn`` and a later ``backward()`` executes
-the captured backward, including across captured recompilations and graph breaks.
+the captured backward, including across captured recompilations and graph breaks. Each
+example's real backward records which differentiable outputs have undefined tangents;
+the artifact contains one backward specialization per observed pattern and rejects an
+unseen pattern instead of passing ``None`` to an Inductor tensor input. If the examples
+only run forwards, only the all-tangents-present backward is covered.
 
 ``precompile`` returns an executable ``python_code`` string plus a companion
 integrity-tagged ``cache``. Make-fx artifacts are self-contained. Dynamo artifacts may
@@ -1384,14 +1388,35 @@ class _DynamoPythonBackend:
         cache: bytes | None,
         is_dynamic: bool,
         call: Callable[[list[object]], object],
+        compile_state: Any | None = None,
     ) -> None:
         self.python_code = python_code
         self.cache = cache
         self.is_dynamic = is_dynamic
         self._call = call
+        self._compile_state = compile_state
+        if compile_state is not None:
+            globals_dict = getattr(call, "__globals__", None)
+            if not isinstance(globals_dict, dict):
+                raise AssertionError("training backend call must have Python globals")
+            compile_state.install_capture(globals_dict)
 
     def __call__(self, *args: object) -> object:
         return self._call(list(args))
+
+    def finalize_training(self) -> None:
+        if self._compile_state is None:
+            return
+        globals_dict = getattr(self._call, "__globals__", {})
+        masks = globals_dict.get("_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS", ())
+        try:
+            self.python_code, self.cache = self._compile_state.finalize(tuple(masks))
+        finally:
+            globals_dict["_AOT_BACKWARD_VARIANT_COMPILER"] = None
+            variants = globals_dict.get("_AOT_BACKWARD_VARIANTS")
+            if isinstance(variants, dict):
+                variants.clear()
+            self._compile_state = None
 
 
 def _build_dynamo_eager_graph_source(gm: torch.fx.GraphModule) -> str:
@@ -1525,6 +1550,7 @@ def _dynamo_backend_compiler(
     ) -> _DynamoPythonBackend:
         from torch._functorch import aot_autograd
         from torch._functorch._aot_autograd.to_standalone_python import (
+            _compile_to_python_with_state,
             _graph_has_dynamic_shapes,
         )
 
@@ -1535,6 +1561,7 @@ def _dynamo_backend_compiler(
             namespace: dict[str, object] = {"__name__": "_dynamo_eager_graph"}
             exec(compile(python_code, "<dynamo-eager-graph>", "exec"), namespace)
             call = cast("Callable[[list[object]], object]", namespace["call"])
+            compile_state = None
         else:
             # Dynamo's runtime examples may have concrete tensor sizes while the graph
             # metadata carries the symbolic sizes and sources selected for this variant.
@@ -1543,14 +1570,14 @@ def _dynamo_backend_compiler(
                 for node in gm.graph.nodes
                 if node.op == "placeholder"
             ]
-            python_code, cache = aot_autograd.compile_to_python(
+            python_code, cache, compile_state = _compile_to_python_with_state(
                 gm,
                 graph_inputs,
                 options={"size_asserts": True},
                 grad_enabled=training,
             )
             call = aot_autograd.load_from_python(python_code, cache)
-        return _DynamoPythonBackend(python_code, cache, is_dynamic, call)
+        return _DynamoPythonBackend(python_code, cache, is_dynamic, call, compile_state)
 
     return compile_graph
 
@@ -2741,7 +2768,10 @@ def _precompile_dynamo(
                 trace_autograd_ops=training,
             )
         )
-        functorch_options = {"bundled_autograd_cache": True}
+        functorch_options = {
+            "bundled_autograd_cache": True,
+            "bypass_autograd_cache_key": True,
+        }
         if training:
             functorch_options["force_non_lazy_backward_lowering"] = True
         capture_stack.enter_context(functorch_config.patch(**functorch_options))
@@ -2955,6 +2985,7 @@ def _precompile_dynamo(
                     "precompile tracer='dynamo' encountered a graph that could not be "
                     "represented as standalone Python source."
                 )
+            compiled_backend.finalize_training()
             compiled_backends.append(compiled_backend)
 
         code_states: list[_DynamoCodeState] = []
@@ -3707,7 +3738,12 @@ class _PrecompileApi:
         Inductor graphs carry readable AOTAutograd forward and backward source bridged
         by an emitted ``torch.autograd.Function``; eager graphs replay their captured
         differentiable operations. The input tensors that require gradients must do so
-        in every example and at runtime.
+        in every example and at runtime. Each example's actual backward also records its
+        output-tangent presence pattern. Inductor compiles and serializes one backward
+        variant per observed pattern, preserving undefined gradients without presenting
+        ``None`` as a kernel tensor input. A runtime pattern not covered by the examples
+        raises :class:`PrecompileError` rather than compiling at serve time. If the
+        examples only run forwards, only the all-tangents-present backward is covered.
 
         With ``tracer="dynamo"``, shape variation across ``example_inputs`` uses
         Dynamo's ordinary automatic dynamic-shape policy: for example, a static first

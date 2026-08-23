@@ -132,8 +132,13 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       ``torch.autograd.Function``; eager segments retain differentiable ATen operations.
       Outputs retain their ``grad_fn``, so a later ``backward()`` runs the captured
       backward. Training works across captured recompilations and graph breaks. Only
-      first-order backward is supported; tensor-subclass and ``BackwardState`` training
-      graphs are rejected.
+      first-order backward is supported; training graphs carrying ``BackwardState`` are
+      rejected. Each example's actual backward determines an integer bitmask whose set
+      bits identify undefined output tangents and compiles that pattern during the
+      example call. Inductor serializes every observed backward variant and rejects an
+      unseen pattern at runtime; ``None`` is never passed to a compiled Tensor input. If
+      the examples only run forwards, the ordinary all-tangents-present backward is the
+      sole covered pattern.
 
    With ``tracer="make_fx"``, if ``fn`` runs a backward, the artifact re-runs the whole
    forward and backward and scatters the resulting parameter gradients onto the runtime
