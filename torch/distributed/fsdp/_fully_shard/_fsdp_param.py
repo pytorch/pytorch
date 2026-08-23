@@ -210,10 +210,6 @@ class FSDPParam:
     _unsharded_inner_tensors: list[torch.Tensor]
     _release_all_gather_outputs_after_post_all_gather: bool
     _orig_param_uid: int
-    # User-set Tensor.grad_dtype when it differs from param.dtype. None means
-    # the default (grad_dtype == param.dtype), which must not be copied onto
-    # the unsharded compute param or reduce-scatter would see orig_dtype grads.
-    _explicit_grad_dtype: torch.dtype | None
 
     def __init__(
         self,
@@ -278,12 +274,6 @@ class FSDPParam:
             raise NotImplementedError(
                 f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
             )
-        # Snapshot before any rewrite of `param` (e.g. spmd_types -> DTensor).
-        explicit_grad_dtype = (
-            param.grad_dtype
-            if param.requires_grad and param.grad_dtype != param.dtype
-            else None
-        )
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
         elif fsdp_placement.dim < 0:
@@ -370,12 +360,6 @@ class FSDPParam:
             self.to_sharded_dtensor(sharded_param),
             requires_grad=param.requires_grad,
         )
-        # Propagate user-set grad_dtype. grad_dtype returns param.dtype by
-        # default, so this does not detect an explicit setting of
-        # grad_dtype == param.dtype; that case matches the default.
-        self._explicit_grad_dtype = explicit_grad_dtype
-        if explicit_grad_dtype is not None:
-            self.sharded_param.grad_dtype = explicit_grad_dtype
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
@@ -701,7 +685,7 @@ class FSDPParam:
                 if isinstance(self.mesh_info, HSDPMeshInfo):
                     spec_placements.append(Replicate())
                 # Reuse the placement already computed for this DP shard dim
-                # so that we don't loss _StridedShard.
+                # so that we don't lose _StridedShard.
                 spec_placements.append(spmd_placements[i])
                 skip = len(dp_dim_names.shard_names) - 1
             elif name in replicate_names_set and isinstance(
@@ -946,7 +930,6 @@ class FSDPParam:
         self._unsharded_param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
         )
-        self._maybe_set_explicit_grad_dtype(self._unsharded_param)
         self._release_all_gather_outputs_if_needed()
 
     def _release_all_gather_outputs_if_needed(self) -> None:
@@ -1016,7 +999,6 @@ class FSDPParam:
             self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor),
             requires_grad=self.sharded_param.requires_grad,
         )
-        self._maybe_set_explicit_grad_dtype(self._sharded_post_forward_param)
         self._setattr_on_modules(self._sharded_post_forward_param)
         self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
@@ -1033,10 +1015,6 @@ class FSDPParam:
             self._sharded_post_forward_param = None
             self._sharded_post_forward_param_data = None  # free
         self.sharded_state = ShardedState.UNSHARDED
-
-    def _maybe_set_explicit_grad_dtype(self, param: nn.Parameter) -> None:
-        if self._explicit_grad_dtype is not None:
-            param.grad_dtype = self._explicit_grad_dtype
 
     def _setattr_on_modules(self, param: nn.Parameter) -> None:
         unsafe_setattr_param(
@@ -1081,15 +1059,21 @@ class FSDPParam:
 
     def to_accumulated_grad_if_needed(self) -> None:
         # Access `_unsharded_param` to bypass the sharded state check since we
-        # prefer to reshard before upcasting the gradient to save memory
+        # prefer to reshard before upcasting the gradient to save memory.
+        # It is created by `init_unsharded_param` and dropped by
+        # `free_unsharded_param`, so a parameter that has not been all-gathered
+        # does not have it. Such a parameter has no unsharded gradient to upcast,
+        # which is the case this method already returns early for.
+        unsharded_param = getattr(self, "_unsharded_param", None)
         if (
             self.reduce_dtype is None
-            or self._unsharded_param.grad is None
-            or self._unsharded_param.grad.dtype == self.reduce_dtype
+            or unsharded_param is None
+            or unsharded_param.grad is None
+            or unsharded_param.grad.dtype == self.reduce_dtype
         ):
             return
-        unsharded_grad = self._unsharded_param.grad
-        self._unsharded_param.grad = None
+        unsharded_grad = unsharded_param.grad
+        unsharded_param.grad = None
         self.unsharded_accumulated_grad = unsharded_grad.to(self.reduce_dtype)
 
     def accumulate_unsharded_grad_if_needed(self) -> None:
@@ -1305,9 +1289,6 @@ class FSDPParam:
                     f"instead of {self.sharded_param}"
                 )
             self.sharded_param = new_param
-        # _apply may keep the Parameter object but replace storage, dropping
-        # Tensor.grad_dtype. Re-stamp after every reset.
-        self._maybe_set_explicit_grad_dtype(self.sharded_param)
 
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
