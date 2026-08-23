@@ -9,7 +9,6 @@
 #include <c10/util/MathConstants.h>
 #include <cfloat>
 #include <cmath>
-#include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
@@ -148,8 +147,9 @@ jiterator_also_stringify_as(jiterator_code(
 
 #define CENTRAL_RANGE 0.7
 
-template <std::floating_point T>
-inline T calc_erfinv(T y) {
+template <typename T>
+inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
+calc_erfinv(T y) {
 /* Function to calculate inverse error function.  Rational approximation
 is used to generate an initial approximation, which is then improved to
 full accuracy by two steps of Newton's method.  Code is a direct
@@ -1242,8 +1242,9 @@ template <>
   return v;
 }
 
-template <std::integral T>
-inline T calc_gcd(T a, T b) {
+template <typename T>
+inline typename std::enable_if_t<std::is_integral_v<T>, T>
+calc_gcd(T a, T b) {
   a = abs_impl(a);
   b = abs_impl(b);
   while (a != 0) {
@@ -1290,8 +1291,9 @@ C10_HOST_DEVICE c10::complex<T> exp2_impl(c10::complex<T> x) {
  * If the coefficients are for the inverted interval, in which (a, b) is mapped to (1/b, 1/a), the transformation
  * required is x -> 2(2ab/x - b - a)/(b-a).  If b is infinity, this becomes x -> 4a/x - 1.
  */
-template <std::floating_point T>
-inline T chbevl(const T x, const T array[], size_t len) {
+template <typename T>
+inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
+chbevl(const T x, const T array[], size_t len) {
   T b0, b1, b2 = static_cast<T>(0.0);
 
   b0 = array[0];
@@ -1468,8 +1470,9 @@ chebyshev_coefficients_i1e_B() {
   return std::make_tuple(coeff, 7);
 }
 
-template <std::floating_point T>
-inline T calc_i0(T _x) {
+template <typename T>
+inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
+calc_i0(T _x) {
   T x = std::abs(_x);
 
   if (x <= T{8.0}) {
@@ -1494,8 +1497,9 @@ inline c10::Half calc_i0(c10::Half a) { return calc_i0(static_cast<float>(a)); }
  * One approximates the function over [0, 8], and the other over (8, infinity). This function takes the absolute value
  * of all inputs to convert them into the domain of the approximation.
  */
-template <std::floating_point T>
-inline T calc_i1(T _x) {
+template <typename T>
+inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
+calc_i1(T _x) {
   T x = std::abs(_x);
 
   if (x <= T{8.0}) {
@@ -1523,8 +1527,9 @@ inline c10::Half calc_i1(c10::Half a) { return calc_i1(static_cast<float>(a)); }
  * One approximates the function over [0, 8], and the other over (8, infinity). This function takes the absolute value
  * of all inputs to convert them into the domain of the approximation.
  */
-template <std::floating_point T>
-inline T calc_i1e(T _x) {
+template <typename T>
+inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
+calc_i1e(T _x) {
   T x = std::abs(_x);
 
   if (x <= T{8.0}) {
@@ -1738,8 +1743,9 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
    compared to fitting the whole [0,1] interval with a single polynomial. */
 
 
-template <std::floating_point T>
-C10_HOST_DEVICE inline T erfcx_y100(T y100)
+template <typename T>
+C10_HOST_DEVICE  inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
+erfcx_y100(T y100)
 {
   switch (static_cast<int>(y100)) {
 case 0: {
@@ -2148,8 +2154,9 @@ return 0.97771701335885035464e0 + (0.22000938572830479551e-1 + (0.27951610702682
   return 1.0;
 }
 
-template <std::floating_point T>
-C10_HOST_DEVICE inline T calc_erfcx(T x)
+template <typename T>
+C10_HOST_DEVICE inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
+calc_erfcx(T x)
 {
   if (at::_isnan(x)) {
     return x;
