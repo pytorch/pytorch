@@ -81,8 +81,8 @@ class SubgraphSlicer {
     // We need to run the slicer multiple times in order to get all merge
     // opportunities. This is because moveBeforeTopologicalValid may reorder
     // nodes to be AFTER the current iteration point. In order to properly
-    // consider those nodes for merging, we need run the pass until no changes
-    // have been made.
+    // consider those nodes for merging, we need to run the pass until no
+    // changes have been made.
     //
     // Example:
     //   c = f(a, b)

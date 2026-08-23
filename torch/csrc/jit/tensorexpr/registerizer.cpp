@@ -232,7 +232,7 @@ void RegisterizerAnalysis::visit(const ForPtr& v) {
 
       bool closed = false;
       // If this access depends on a locally scoped variable, it cannot be
-      // hosted out of the loop.
+      // hoisted out of the loop.
       for (const auto& v : currentScope_->localVars()) {
         if (candidate->dependsOnVar(v)) {
           closeAccessIntoScope(candidate, currentScope_);
@@ -308,7 +308,7 @@ void RegisterizerAnalysis::visit(const CondPtr& v) {
 
 // IfThenElses are just like Conds except they are not Stmts, which means no
 // registerization can occur internally. However, the first reference to an
-// access can occur within one if its visible outside the condition.
+// access can occur within one if it's visible outside the condition.
 void RegisterizerAnalysis::visit(const IfThenElsePtr& v) {
   ExprPtr condition = v->condition();
   ExprPtr true_value = v->true_value();

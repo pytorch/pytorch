@@ -71,7 +71,7 @@ void ExecutionPlanner::generateDeallocationPlan(ExecutionPlan& plan) {
 
   // Traverse from the last node to the first node
   // For each Value, find out which is the last node that uses it
-  // the Value can freed after executing the node
+  // the Value can be freed after executing the node
   size_t nodeIdx = nodes.size() - 1;
   for (auto it = std::rbegin(nodes); it != std::rend(nodes); it++) {
     const auto& inputs = it->inputs();

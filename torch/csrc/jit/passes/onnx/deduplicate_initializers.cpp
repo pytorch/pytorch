@@ -152,7 +152,7 @@ void DeduplicateInitializers(
     bool is_train) {
   auto valsToParamsMap = buildValueToParamsMap(g->block(), paramsDict);
   // ONNX spec does not support parameters with shared memory.
-  // This pass de-duplicate those parameters. Training is not affected.
+  // This pass de-duplicates those parameters. Training is not affected.
   DeduplicateInitializers(g, valsToParamsMap, DeduplicateInitializersByDataPtr);
   if (!is_train) {
     // More aggressive parameters de-duplication based on tensor values.
