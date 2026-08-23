@@ -158,6 +158,10 @@ class FakeProcessGroup : public Backend {
         // on equal operands, so each leaves the local value unchanged.
         return;
       case ReduceOp::PRODUCT:
+        // Overflows silently for integer dtypes once the world is more than a
+        // few ranks wide, and saturates to inf for floats. That matches what a
+        // real backend would produce for the same inputs, so it is left alone
+        // rather than clamped.
         tensor.pow_(size_);
         return;
       case ReduceOp::BXOR:
@@ -227,14 +231,14 @@ class FakeProcessGroup : public Backend {
   static at::Tensor splitSegment(
       const at::Tensor& flat,
       const std::vector<int64_t>& splitSizes,
-      int index,
-      int worldSize) {
+      int64_t index,
+      int64_t worldSize) {
     if (splitSizes.empty()) {
       const auto chunk = flat.numel() / worldSize;
       return flat.narrow(0, chunk * index, chunk);
     }
     int64_t offset = 0;
-    for (int i = 0; i < index; ++i) {
+    for (int64_t i = 0; i < index; ++i) {
       offset += splitSizes[i];
     }
     return flat.narrow(0, offset, splitSizes[index]);
@@ -506,24 +510,24 @@ class FakeProcessGroup : public Backend {
     // much of the local input as fits and zero the remainder.
     auto flat_input = inputBuffer.as_strided(
         {inputBuffer.numel()}, {1}, inputBuffer.storage_offset());
-    auto flat_output =
-        outputBuffer
-            .as_strided(
-                {outputBuffer.numel()}, {1}, outputBuffer.storage_offset())
-            .zero_();
+    auto flat_output = outputBuffer.as_strided(
+        {outputBuffer.numel()}, {1}, outputBuffer.storage_offset());
     if (uniformRanks()) {
       // Every peer holds what we hold, so the segment peer j sends to us is
       // the segment we would send to a peer in our own position: our input
       // split at index rank_. Fill each output slot from it, which keeps the
       // split structure self-consistent and lets callers reshape the result.
+      // The splits cover the whole buffer, so every element is written here
+      // and the approximation's pre-zeroing below would be wasted work.
       auto mine = splitSegment(flat_input, inputSplitSizes, rank_, size_);
-      for (int j = 0; j < size_; ++j) {
+      for (int64_t j = 0; j < size_; ++j) {
         auto slot = splitSegment(flat_output, outputSplitSizes, j, size_);
         fillByTiling(slot, mine);
       }
       return c10::make_intrusive<FakeWork>(
           std::vector<at::Tensor>{outputBuffer});
     }
+    flat_output.zero_();
     auto copy_size = std::min(flat_input.numel(), flat_output.numel());
     if (copy_size > 0) {
       flat_output.narrow(0, 0, copy_size)
@@ -544,28 +548,31 @@ class FakeProcessGroup : public Backend {
         invalidArgument, outputTensors.size(), inputTensors.size(), size_);
     // See note in _allgather_base above.
     at::AutoDispatchBelowAutograd guard;
-    for (size_t i = 0; i < outputTensors.size(); ++i) {
-      if (uniformRanks()) {
-        // Every peer sends us what it would send to our position, which is our
-        // own entry at index rank_. Shapes need not match, so tile.
-        // flatView walks storage linearly, so a non-contiguous tensor would
-        // read or write the wrong elements. all_to_all_single rejects those
-        // outright; do the same here rather than corrupt them silently.
+    if (uniformRanks()) {
+      // Every peer sends us what it would send to our position, which is our
+      // own entry at index rank_, so it is the same source for every slot.
+      // flatView walks storage linearly, so a non-contiguous tensor would read
+      // or write the wrong elements. all_to_all_single rejects those outright;
+      // do the same here rather than corrupt them silently.
+      TORCH_CHECK(
+          inputTensors[rank_].is_contiguous(),
+          "FakeProcessGroup::alltoall: input tensor must be contiguous "
+          "under simulate_uniform_ranks");
+      auto mine = flatView(inputTensors[rank_]);
+      for (auto& output : outputTensors) {
         TORCH_CHECK(
-            outputTensors[i].is_contiguous(),
+            output.is_contiguous(),
             "FakeProcessGroup::alltoall: output tensor must be contiguous "
             "under simulate_uniform_ranks");
-        TORCH_CHECK(
-            inputTensors[rank_].is_contiguous(),
-            "FakeProcessGroup::alltoall: input tensor must be contiguous "
-            "under simulate_uniform_ranks");
-        fillByTiling(flatView(outputTensors[i]), flatView(inputTensors[rank_]));
-      } else {
-        outputTensors[i].copy_(inputTensors[i]);
+        // Shapes need not match, so tile.
+        fillByTiling(flatView(output), mine);
       }
+      return c10::make_intrusive<FakeWork>(outputTensors);
     }
-    return uniformRanks() ? c10::make_intrusive<FakeWork>(outputTensors)
-                          : c10::make_intrusive<FakeWork>();
+    for (size_t i = 0; i < outputTensors.size(); ++i) {
+      outputTensors[i].copy_(inputTensors[i]);
+    }
+    return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> send(
