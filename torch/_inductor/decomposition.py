@@ -325,10 +325,35 @@ def _native_group_norm(
     if (
         input.device.type != "cpu"
         or input.dtype != torch.float32
-        or (weight is None and bias is None)
         or memory_format != torch.contiguous_format
         or config.cpu_backend != "cpp"
     ):
+        return decomp_native_group_norm(
+            input,
+            weight,
+            bias,
+            batch_size,
+            num_channels,
+            flattened_inner_size,
+            num_groups,
+            eps,
+        )
+
+    reduction_numel = flattened_inner_size * (num_channels // num_groups)
+    # Keep this predicate aligned with use_two_step_variance in lowering.py.
+    uses_two_step_variance = config.mtia.disable_welford_reduction or (
+        statically_known_true(
+            reduction_numel <= config.cpp.use_two_step_variance_threshold
+        )
+        and not statically_known_true(batch_size * num_groups == 1)
+    )
+    # Native GroupNorm uses rowwise moments, while Inductor's small CPU
+    # reductions use a two-step vector sum. Their mean can round differently,
+    # and no affine FMA policy can recover the native result.
+    if uses_two_step_variance:
+        return NotImplemented
+
+    if weight is None and bias is None:
         return decomp_native_group_norm(
             input,
             weight,

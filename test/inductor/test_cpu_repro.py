@@ -5510,14 +5510,13 @@ class CPUReproTests(TestCase):
             ("weight_and_bias", torch.ones(5), torch.zeros(5)),
             ("weight_only", torch.ones(5), None),
             ("bias_only", None, torch.zeros(5)),
+            ("no_affine", None, None),
         ]
 
-        x = torch.full((4, 5, 6, 6), 0.9999949932098389)
-        _, output_uses_fma = (
-            cpu_vec_isa.get_cpu_contiguous_group_norm_fma_policy()
-        )
-        for name, weight, bias in test_cases:
-            with self.subTest(name=name):
+        shapes = [(4, 5, 6, 6), (4, 5, 1, 17), (2, 5, 1, 1024)]
+        for shape, (name, weight, bias) in itertools.product(shapes, test_cases):
+            with self.subTest(shape=shape, name=name):
+                x = torch.full(shape, 0.9999949932098389)
                 expected = fn(x, weight, bias)
                 torch._dynamo.reset()
                 actual, code = run_and_get_cpp_code(
@@ -5525,21 +5524,30 @@ class CPUReproTests(TestCase):
                 )
 
                 self.assertEqual(expected, actual, rtol=0, atol=1e-4)
-                if name == "weight_only" and output_uses_fma:
-                    FileCheck().check_regex(r"(fmadd|std::fma)\(").run(code)
+                FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
 
-        # Exercise cancellation in the folded bias expression itself. The
-        # fused and unfused choices at both affine sites are bitwise distinct.
+        # Above the two-step variance threshold, exercise cancellation in the
+        # folded bias expression while retaining the decomposed fast path.
         def group_norm(x, weight, bias):
             return F.group_norm(x, 5, weight, bias)
 
-        x = torch.full((4, 5, 6, 6), 4.375030517578125)
+        x = torch.full((1, 5, 1, 1025), 4.375030517578125)
         weight = torch.full((5,), -3.735017776489258)
         bias = torch.full((5,), -1.5276412963867188)
+        fma_policy = cpu_vec_isa.get_cpu_contiguous_group_norm_fma_policy()
+        bias_uses_fma, output_uses_fma = fma_policy
         expected = group_norm(x, weight, bias)
         torch._dynamo.reset()
-        actual = torch.compile(group_norm, backend="inductor")(x, weight, bias)
-        self.assertEqual(expected, actual, rtol=0, atol=0)
+        actual, code = run_and_get_cpp_code(
+            torch.compile(group_norm, backend="inductor"), x, weight, bias
+        )
+        self.assertEqual(expected, actual, rtol=0, atol=1e-4)
+        if bias_uses_fma is None or output_uses_fma is None:
+            FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
+        else:
+            FileCheck().check_not("torch.ops.aten.native_group_norm.default").run(code)
+            if bias_uses_fma or output_uses_fma:
+                FileCheck().check_regex(r"(fmadd|std::fma)\(").run(code)
 
     def test_cpu_group_norm_fma_probe_ignores_default_device(self):
         policy = cpu_vec_isa.get_cpu_contiguous_group_norm_fma_policy
@@ -5553,6 +5561,7 @@ class CPUReproTests(TestCase):
         finally:
             policy.cache_clear()
 
+    @config.patch("cpp.use_two_step_variance_threshold", 0)
     def test_cpu_group_norm_unknown_fma_policy_falls_back(self):
         def fn(x, weight, bias):
             return F.group_norm(x, 5, weight, bias)
@@ -5573,9 +5582,14 @@ class CPUReproTests(TestCase):
                 torch.compile(fn, backend="inductor"), x, weight, bias
             )
         self.assertEqual(expected, actual, rtol=0, atol=0)
-        FileCheck().check("native_group_norm").run(code)
+        FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
 
-    @config.patch("cpp.enable_floating_point_contract_flag", "fast")
+    @config.patch(
+        {
+            "cpp.enable_floating_point_contract_flag": "fast",
+            "cpp.use_two_step_variance_threshold": 0,
+        }
+    )
     def test_cpu_group_norm_unfused_policy_with_fast_math_falls_back(self):
         def fn(x, weight, bias):
             return F.group_norm(x, 5, weight, bias)
@@ -5596,7 +5610,7 @@ class CPUReproTests(TestCase):
                 torch.compile(fn, backend="inductor"), x, weight, bias
             )
         self.assertEqual(expected, actual, rtol=0, atol=0)
-        FileCheck().check("native_group_norm").run(code)
+        FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
 
     @unittest.skipIf(
         os.getenv("ATEN_CPU_CAPABILITY") == "default",

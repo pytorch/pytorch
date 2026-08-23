@@ -41,7 +41,7 @@ def _classify_float32_fma(
 
 
 def _probe_contiguous_group_norm_fma() -> tuple[bool | None, bool | None]:
-    shape = (4, 5, 6, 6)
+    shape = (4, 5, 1, 1025)
     num_groups = 5
     batch_size, num_channels = shape[:2]
     flattened_inner_size = math.prod(shape[2:])
