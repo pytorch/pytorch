@@ -42,9 +42,15 @@ __all__ = [
 ]
 
 _traceback_tls = threading.local()
-# Python ``threading.local`` state is not carried into autograd engine workers.
-# Preservation contexts bridge their state through this native TLS slot, which
-# AOTAutograd hooks fork per GraphTask and the engine restores after each NodeTask.
+# Note [FX traceback state in autograd]
+# Python ``threading.local`` state is not carried into autograd engine workers,
+# so preservation contexts publish their live state through this native TLS
+# slot before autograd captures its GraphTask state. ThreadLocalPythonObjects
+# copies share their Python object, so each NodeTask (or final-callback scope)
+# must fork that object before exposing mutable state. ThreadLocalStateGuard
+# discards the fork on exit and reinstalls the GraphTask snapshot for the next
+# NodeTask. The AOT posthook's gradient-accumulation stack intentionally remains
+# live through InputBuffer.add; metadata does not accumulate across NodeTasks.
 _AUTOGRAD_ENGINE_STATE_KEY = "fx_traceback_autograd_engine_state"
 
 
@@ -55,7 +61,7 @@ def _copy_current_meta(meta: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-class _CapturedTracebackState:
+class _TracebackState:
     def __init__(
         self,
         current_meta: dict[str, Any],
@@ -70,8 +76,8 @@ class _CapturedTracebackState:
         self.should_preserve_node_seq_nr = should_preserve_node_seq_nr
         self.graph_task_id = graph_task_id
 
-    def copy(self) -> "_CapturedTracebackState":
-        return _CapturedTracebackState(
+    def copy(self) -> "_TracebackState":
+        return _TracebackState(
             _copy_current_meta(self.current_meta),
             self.current_replay_node,
             self.should_preserve_node_meta,
@@ -80,51 +86,62 @@ class _CapturedTracebackState:
         )
 
 
-def _get_autograd_engine_state() -> _CapturedTracebackState | None:
+def _get_python_state() -> _TracebackState:
+    if not hasattr(_traceback_tls, "state"):
+        _traceback_tls.state = _TracebackState({}, None, False, False)
+    return cast(_TracebackState, _traceback_tls.state)
+
+
+def _get_autograd_engine_state() -> _TracebackState | None:
     if torch._C._is_key_in_tls(_AUTOGRAD_ENGINE_STATE_KEY):
         return cast(
-            _CapturedTracebackState,
+            _TracebackState,
             torch._C._get_obj_in_tls(_AUTOGRAD_ENGINE_STATE_KEY),
         )
     return None
 
 
+def _get_current_state(*, mutable: bool = False) -> _TracebackState:
+    graph_task_id = torch._C._current_graph_task_id()
+    if graph_task_id == -1:
+        return _get_python_state()
+
+    state = _get_autograd_engine_state()
+    if state is None:
+        return _get_python_state()
+
+    if mutable and state.graph_task_id != graph_task_id:
+        # See Note [FX traceback state in autograd]. Do this lazily so hooks
+        # registered before AOTAutograd's traceback prehook cannot mutate the
+        # shared GraphTask snapshot.
+        state = state.copy()
+        state.graph_task_id = graph_task_id
+        torch._C._stash_obj_in_tls(_AUTOGRAD_ENGINE_STATE_KEY, state)
+    return state
+
+
 class _ThreadLocalValue(Generic[_T]):
-    def __init__(self, name: str, default_factory: Callable[[], _T]) -> None:
+    def __init__(self, name: str) -> None:
         self._name = name
-        self._default_factory = default_factory
 
     def get(self) -> _T:
-        if (state := _get_autograd_engine_state()) is not None:
-            return cast(_T, getattr(state, self._name))
-        if not hasattr(_traceback_tls, self._name):
-            setattr(_traceback_tls, self._name, self._default_factory())
-        return cast(_T, getattr(_traceback_tls, self._name))
+        return cast(_T, getattr(_get_current_state(), self._name))
 
     def set(self, value: _T) -> None:
-        if (state := _get_autograd_engine_state()) is not None:
-            setattr(state, self._name, value)
-        else:
-            setattr(_traceback_tls, self._name, value)
+        setattr(_get_current_state(mutable=True), self._name, value)
 
     def __bool__(self) -> bool:
         return bool(self.get())
 
-    def __repr__(self) -> str:
-        return repr(self.get())
 
-    def __eq__(self, other: object) -> bool:
-        return self.get() == other
-
-
-_current_meta: _ThreadLocalValue[dict[str, Any]] = _ThreadLocalValue(
-    "current_meta", dict
-)
+_current_meta: _ThreadLocalValue[dict[str, Any]] = _ThreadLocalValue("current_meta")
 
 
 class _ThreadLocalCurrentMeta(MutableMapping[str, Any]):
     def _dict(self) -> dict[str, Any]:
-        return _current_meta.get()
+        # MutableMapping methods can expose or mutate nested values, so obtain
+        # a NodeTask-private state before returning the backing dictionary.
+        return _get_current_state(mutable=True).current_meta
 
     def __getitem__(self, key: str) -> Any:
         return self._dict()[key]
@@ -148,13 +165,9 @@ class _ThreadLocalCurrentMeta(MutableMapping[str, Any]):
         return repr(self._dict())
 
 
-def _set_current_meta(meta: dict[str, Any]) -> None:
-    _current_meta.set(meta)
-
-
 current_meta: _ThreadLocalCurrentMeta = _ThreadLocalCurrentMeta()
 current_replay_node: _ThreadLocalValue[Node | None] = _ThreadLocalValue(
-    "current_replay_node", lambda: None
+    "current_replay_node"
 )
 # Thread-local holder for the optional name of the subgraph being compiled by a
 # nested/regional inductor compile (e.g. a regional inductor scooped-out region
@@ -164,47 +177,37 @@ current_replay_node: _ThreadLocalValue[Node | None] = _ThreadLocalValue(
 _regional_inductor_subgraph_name_tls = threading.local()
 # Preserve the node meta fields in torch.fx.proxy._COPY_META_FIELDS
 should_preserve_node_meta: _ThreadLocalValue[bool] = _ThreadLocalValue(
-    "should_preserve_node_meta", lambda: False
+    "should_preserve_node_meta"
 )
 # Preserve the "seq_nr" node meta field
-_should_preserve_node_meta: _ThreadLocalValue[bool] = _ThreadLocalValue(
-    "should_preserve_node_seq_nr", lambda: False
+_should_preserve_node_seq_nr: _ThreadLocalValue[bool] = _ThreadLocalValue(
+    "should_preserve_node_seq_nr"
 )
-
-
-def _capture_thread_local_state() -> _CapturedTracebackState:
-    return _CapturedTracebackState(
-        current_meta=_copy_current_meta(_current_meta.get()),
-        current_replay_node=current_replay_node.get(),
-        should_preserve_node_meta=should_preserve_node_meta.get(),
-        should_preserve_node_seq_nr=_should_preserve_node_meta.get(),
-    )
 
 
 @contextmanager
 def _propagate_thread_local_state_for_autograd() -> Iterator[None]:
-    if _get_autograd_engine_state() is not None:
-        yield
-        return
-
-    torch._C._stash_obj_in_tls(
-        _AUTOGRAD_ENGINE_STATE_KEY, _capture_thread_local_state()
-    )
+    previous_state = _get_autograd_engine_state()
+    if previous_state is None:
+        # Publish the caller's live object rather than a snapshot: metadata may
+        # be updated after entering preserve_node_meta but before backward
+        # constructs its GraphTask. NodeTasks copy it before mutable access.
+        torch._C._stash_obj_in_tls(_AUTOGRAD_ENGINE_STATE_KEY, _get_python_state())
     try:
         yield
     finally:
-        torch._C._remove_obj_from_tls(_AUTOGRAD_ENGINE_STATE_KEY)
+        if previous_state is None:
+            torch._C._remove_obj_from_tls(_AUTOGRAD_ENGINE_STATE_KEY)
+        else:
+            # Nested preservation may run reentrant autograd, which replaces
+            # the slot temporarily. Restore the exact object owned by the
+            # surrounding context.
+            torch._C._stash_obj_in_tls(_AUTOGRAD_ENGINE_STATE_KEY, previous_state)
 
 
 def _install_thread_local_state_for_autograd() -> None:
-    graph_task_id = torch._C._current_graph_task_id()
-    current_state = _get_autograd_engine_state()
-    if current_state is None or current_state.graph_task_id != graph_task_id:
-        # Reentrant backwards inherit the outer task's live metadata stack.
-        # Duplicate hook pairs within one task reuse it instead of resetting it.
-        new_state = (current_state or _capture_thread_local_state()).copy()
-        new_state.graph_task_id = graph_task_id
-        torch._C._stash_obj_in_tls(_AUTOGRAD_ENGINE_STATE_KEY, new_state)
+    # Force the NodeTask-private copy before the traceback prehook mutates it.
+    _get_current_state(mutable=True)
 
 
 GRADIENT_ACC_SPECIAL_STACK = (
@@ -423,14 +426,14 @@ class NodeSource:
 def preserve_node_meta(enable: bool = True) -> Iterator[None]:
     with _propagate_thread_local_state_for_autograd():
         saved_should_preserve_node_meta = should_preserve_node_meta.get()
-        # Shallow copy is OK since fields of current_meta are not mutated
+        # Context managers that mutate nested metadata restore it themselves.
         saved_current_meta = current_meta.copy()
         try:
             should_preserve_node_meta.set(enable)
             yield
         finally:
             should_preserve_node_meta.set(saved_should_preserve_node_meta)
-            _set_current_meta(saved_current_meta)
+            _current_meta.set(saved_current_meta)
 
 
 @contextmanager
@@ -439,13 +442,13 @@ def _preserve_node_seq_nr(preserve_seq_nr: bool = True) -> Iterator[None]:
     Temporarily enables or disables the preservation of node.meta["seq_nr"] in the
     tracing context.
     """
-    saved = _should_preserve_node_meta.get()
+    saved = _should_preserve_node_seq_nr.get()
 
     try:
-        _should_preserve_node_meta.set(preserve_seq_nr)
+        _should_preserve_node_seq_nr.set(preserve_seq_nr)
         yield
     finally:
-        _should_preserve_node_meta.set(saved)
+        _should_preserve_node_seq_nr.set(saved)
 
 
 @compatibility(is_backward_compatible=False)
@@ -468,7 +471,7 @@ def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
     custom annotations in node.metadata["custom"] field.
 
     This context manager allows you to insert arbitrary metadata into the PT2
-    tracing system by updating the global `current_meta["custom"]` dictionary.
+    tracing system by updating the thread-local `current_meta["custom"]` dictionary.
     The annotations are automatically reverted after the context exits.
 
     Gradient accumulation nodes will not be annotated.
@@ -649,7 +652,7 @@ def has_preserved_node_meta() -> bool:
 
 
 def _is_preserving_node_seq_nr() -> bool:
-    return _should_preserve_node_meta.get()
+    return _should_preserve_node_seq_nr.get()
 
 
 @compatibility(is_backward_compatible=False)
@@ -667,17 +670,18 @@ def set_current_meta(node: Node, pass_name: str = "") -> Iterator[None]:
             new_meta["from_node"] = [
                 NodeSource(node, pass_name, NodeSourceAction.CREATE)
             ]
-            _set_current_meta(new_meta)
+            _current_meta.set(new_meta)
             yield
         finally:
-            _set_current_meta(saved_meta)
+            _current_meta.set(saved_meta)
     else:
         yield
 
 
 @compatibility(is_backward_compatible=False)
 def get_current_meta() -> dict[str, Any]:
-    return _current_meta.get()
+    # Callers receive the mutable dictionary, not a read-only view.
+    return _get_current_state(mutable=True).current_meta
 
 
 @compatibility(is_backward_compatible=False)
