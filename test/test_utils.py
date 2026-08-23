@@ -57,7 +57,11 @@ from torch.utils.data import DataLoader
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests  # noqa: PLW0127
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 # mypy: disable-error-code="name-defined"
@@ -72,6 +76,8 @@ class RandomDatasetMock(torch.utils.data.Dataset):
 
 
 class TestCheckpoint(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # This runs checkpoint_sequential on each of the nets in
     # module_lists_to_compare, and compares them against the uncheckpointed model.
     # To compare, it checks outputs as well as input gradients and parameter gradients
@@ -397,6 +403,15 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2, use_reentrant=True)
             out.sum().backward()
 
+    def test_infer_device_state_recursive_meta(self):
+        inp = {"foo": torch.rand(10, device="meta")}
+        device_type = _infer_device_type(inp)
+        self.assertEqual("meta", device_type)
+
+
+class TestCheckpointAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipIf(not torch.accelerator.is_available(), "No accelerator")
     def test_checkpointing_without_reentrant_early_free(self):
         _acc = torch.accelerator.current_accelerator()
@@ -466,13 +481,10 @@ class TestCheckpoint(TestCase):
         self.assertEqual(non_retain_stats, checkpoint_non_retain_stats)
         self.assertEqual(non_retain_stats, checkpoint_retain_stats)
 
-    def test_infer_device_state_recursive_meta(self):
-        inp = {"foo": torch.rand(10, device="meta")}
-        device_type = _infer_device_type(inp)
-        self.assertEqual("meta", device_type)
-
 
 class TestCheckpointDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyAccelerator
     def test_checkpoint_rng_accelerator(self, device):
         for _ in range(5):
@@ -592,6 +604,8 @@ instantiate_device_type_tests(
 
 
 class TestDataLoaderUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     MAX_TIMEOUT_IN_SECOND = 300
 
     @unittest.skipIf(TEST_WITH_ASAN, "https://github.com/pytorch/pytorch/issues/84937")
@@ -669,17 +683,23 @@ from torch.utils.collect_env import get_pretty_env_info
 
 @unittest.skipIf(IS_FBCODE, "runs pip which is not available internally")
 class TestCollectEnv(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_smoke(self):
         info_output = get_pretty_env_info()
         self.assertTrue(info_output.count("\n") >= 17)
 
 
 class TestHipify(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
 
 
 class TestHipifyTrie(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         from torch.utils.hipify import hipify_python
@@ -752,6 +772,8 @@ class TestHipifyTrie(TestCase):
 
 
 class TestAssert(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_assert_true(self):
         # verify assertions work as expected
         # bool argument
@@ -781,6 +803,8 @@ class TestAssert(TestCase):
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
 class TestStandaloneCPPJIT(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_load_standalone(self):
         build_dir = tempfile.mkdtemp()
         try:
@@ -836,6 +860,8 @@ class TestStandaloneCPPJIT(TestCase):
 
 
 class TestRenderUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self):
         self.assertExpectedInline(
             torch._utils.render_call(torch.sum, [torch.randn(100)], {"dim": 0}),
@@ -848,6 +874,8 @@ class TestRenderUtils(TestCase):
 
 
 class TestDeviceUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self):
         with torch.device("meta") as dev:
             x = torch.empty(3, 3)
@@ -890,6 +918,10 @@ class TestDeviceUtils(TestCase):
         self.assertEqual(torch.get_default_device().type, "meta")
         torch.set_default_device(None)
 
+
+class TestDeviceUtilsAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyAccelerator
     @deviceCountAtLeast(2)
     def test_get_default_device_more(self, devices):
@@ -927,6 +959,10 @@ class TestDeviceUtils(TestCase):
         finally:
             torch.set_default_device(None)
 
+
+class TestDeviceModeOps(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @onlyCPU
     @ops(op_db)
     def test_device_mode_ops(self, device, dtype, op):
@@ -957,10 +993,13 @@ class TestDeviceUtils(TestCase):
             self.assertTrue(tree_all_only(torch.Tensor, is_meta_device, r))
 
 
-instantiate_device_type_tests(TestDeviceUtils, globals())
+instantiate_device_type_tests(TestDeviceUtilsAccelerator, globals())
+instantiate_device_type_tests(TestDeviceModeOps, globals(), only_for=("cpu",))
 
 
 class TestCppExtensionUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_cpp_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("c++"))
 
@@ -969,6 +1008,8 @@ class TestCppExtensionUtils(TestCase):
 
 
 class TestTraceback(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self):
         source = """\
 def f(x):
@@ -1019,6 +1060,8 @@ def f(x):
 
 
 class TestTryImport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_import_imported(self):
         self.assertIn("os", sys.modules)
         os_module = try_import("os")
@@ -1037,6 +1080,8 @@ class TestTryImport(TestCase):
 
 
 class TestUtilsInternal(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_max_clock_rate_falls_back_to_pynvml_when_nvidia_smi_missing(self):
         def nvsmi(_query):
             raise FileNotFoundError("nvidia-smi")
@@ -1093,6 +1138,8 @@ def _deprecated_api(x, y=15):
 
 
 class TestDeprecate(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_deprecated(self):
         with self.assertWarnsRegex(Warning, "is DEPRECATED"):
             # pyrefly: ignore [unknown-name]
@@ -1105,6 +1152,8 @@ class TestDeprecate(TestCase):
 
 
 class TestDeviceLazyInit(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipIf(IS_WINDOWS, "pthread_atfork not available on Windows")
     def test_fork_poison_on_lazy_init(self, device):
         torch.empty(1, device=device)
@@ -1136,6 +1185,8 @@ instantiate_device_type_tests(
 
 
 class TestEnv(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_getenv_matches_os(self):
         for name in ("PATH", "PATH_DOES_NOT_EXIST_TORCH_TEST"):
             self.assertEqual(torch._utils.getenv(name), os.environ.get(name))
