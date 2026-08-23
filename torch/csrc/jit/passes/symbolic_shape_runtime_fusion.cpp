@@ -425,7 +425,7 @@ void insertDynamicShapesGuard(
     guarded_node->addInput(pair.second);
     std::stringstream ss;
     ss << "SS_" << -pair.first;
-    subgraph->addInput(ss.str())->setType(IntType::get());
+    subgraph->addInput(std::move(ss).str())->setType(IntType::get());
   }
   guarded_node->is_(
       attr::symbolic_shape_inputs, std::move(symbolic_shape_inputs));
@@ -524,7 +524,7 @@ static RegisterOperators SRCopyOuts({
 
 // On each invocation of this guard, we need to check all of the static
 // information (dtype/device/requires grad/contiguity/static dims),
-// and also the that the symbolic shape dimensions are observed.
+// and also that the symbolic shape dimensions are observed.
 // For any symbolic dimension we need to set its value on its first
 // use and for all subsequent uses check that the values are equal
 static RegisterOperators reg_guard({

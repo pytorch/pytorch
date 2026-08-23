@@ -359,7 +359,7 @@ struct FDE {
             std::stringstream ss;
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
             ss << "unknown op code " << (void*)(uint64_t)lowbits;
-            throw UnwindError(ss.str());
+            throw UnwindError(std::move(ss).str());
           }
         }
       }
