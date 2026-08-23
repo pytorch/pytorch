@@ -46,8 +46,10 @@ from torch.testing._internal.common_dtype import (
     integral_types,
 )
 from torch.testing._internal.common_methods_invocations import (
-    binary_ufuncs, op_db, foreach_unary_op_db, foreach_binary_op_db,
-    foreach_pointwise_op_db, foreach_reduce_op_db, foreach_other_op_db)
+    binary_ufuncs,
+    foreach_op_db,
+    op_db,
+)
 from torch.testing._internal.opinfo.core import S, SampleInput
 from torchgen.yaml_utils import YamlLoader
 from torchgen.model import OperatorName
@@ -80,15 +82,6 @@ u8 = torch.uint8
 u16 = torch.uint16
 u32 = torch.uint32
 u64 = torch.uint64
-
-foreach_op_db = (
-    foreach_unary_op_db +
-    foreach_binary_op_db +
-    foreach_pointwise_op_db +
-    foreach_reduce_op_db +
-    foreach_other_op_db
-)
-
 
 class TestMetaConverter(TestCase):
     def assertSameVersionCounter(self, m1, m2):
@@ -1760,6 +1753,18 @@ class TestMeta(TestCase):
                 # test functional call
                 self._norm_backwards_test_helper(torch.ops.aten.native_group_norm_backward,
                                                  args, output_mask, expected_shapes)
+
+    def test_group_norm_channels_last(self):
+        input = torch.empty((2, 32, 8, 8), device="meta").contiguous(
+            memory_format=torch.channels_last
+        )
+        output, mean, rstd = torch.native_group_norm(input, None, None, 2, 32, 64, 4, 1e-5)
+        self.assertTrue(output.is_contiguous(memory_format=torch.channels_last))
+
+        grad_input, _, _ = torch.ops.aten.native_group_norm_backward(
+            torch.empty_like(output), input, mean, rstd, None, 2, 32, 64, 4, (True, False, False)
+        )
+        self.assertTrue(grad_input.is_contiguous(memory_format=torch.channels_last))
 
     @onlyCPU
     @parametrize("output_mask", list(itertools.product([True], [True, False], [True, False])))

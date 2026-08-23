@@ -87,33 +87,6 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
   }
 }
 
-// #issue 104398441 sortWithTensor and argsortWithTensor has support of
-// Int32, Half and Float32 types. These utilities are to help cast to these
-// types.
-MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const TensorBase& input) {
-  MPSDataType dataType = getMPSDataType(input.scalar_type());
-  bool condition = (dataType != MPSDataTypeInt32) && (dataType != MPSDataTypeFloat32) &&
-      (dataType != MPSDataTypeFloat16) && (dataType != MPSDataTypeInt64);
-  if (condition) {
-    dataType = (dataType & MPSDataTypeFloatBit) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
-    return [mpsGraph castTensor:inputTensor toType:dataType name:@"castInputTensor"];
-  }
-  return inputTensor;
-}
-
-// #issue 104398441 sortWithTensor and argsortWithTensor has support of
-// Int32, Half and Float32 types. These utilities are to help cast from these
-// types.
-MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const TensorBase& input) {
-  MPSDataType dataType = getMPSDataType(input.scalar_type());
-  bool condition = (dataType != MPSDataTypeInt32) && (dataType != MPSDataTypeFloat32) &&
-      (dataType != MPSDataTypeFloat16) && (dataType != MPSDataTypeInt64);
-  if (condition) {
-    inputTensor = [mpsGraph castTensor:inputTensor toType:dataType name:@"castInputTensor"];
-  }
-  return inputTensor;
-}
-
 MPSDataType getMPSScalarType(ScalarType scalar_type) {
   switch (scalar_type) {
     // This is an intentional fallthrough supporting Double for Scalar
@@ -263,20 +236,8 @@ NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, OptionalIntArrayRef 
   return getTensorAxes(sizes);
 }
 
-std::string getMPSShapeString(MPSShape* shape) {
-  std::string str;
-  for (NSNumber* elem in shape) {
-    str += std::to_string(elem.unsignedLongValue) + ",";
-  }
-  return str;
-}
-
 std::string getArrayRefString(const IntArrayRef s) {
   return fmt::to_string(fmt::join(s, ","));
-}
-
-std::string to_hex_key(float f) {
-  return fmt::format("{:a}", f);
 }
 
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, bool exclude_shape) {
