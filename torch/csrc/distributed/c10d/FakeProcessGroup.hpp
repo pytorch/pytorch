@@ -13,6 +13,14 @@ namespace c10d {
 class FakeWork : public Work {
  public:
   int seq_id = -1;
+
+  // `result` is the tensors the collective produced. Real backends resolve
+  // their future to those tensors; callers using async_op=True read them via
+  // get_future().value(). Defaulted so existing no-arg construction is
+  // unchanged and keeps returning a valueless future.
+  explicit FakeWork(std::vector<at::Tensor> result = {})
+      : result_(std::move(result)) {}
+
   bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
     return true;
   }
@@ -26,10 +34,19 @@ class FakeWork : public Work {
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
-    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
-    fut->markCompleted();
+    if (result_.empty()) {
+      auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
+      fut->markCompleted();
+      return fut;
+    }
+    auto fut = c10::make_intrusive<c10::ivalue::Future>(
+        c10::ListType::create(c10::TensorType::get()));
+    fut->markCompleted(result_);
     return fut;
   }
+
+ private:
+  std::vector<at::Tensor> result_;
 };
 
 class FakeProcessGroup : public Backend {
@@ -43,6 +60,8 @@ class FakeProcessGroup : public Backend {
 
     int fake_option = 0;
     bool error_on_collective = false;
+    // See NOTE [FakeProcessGroup uniform-rank simulation]
+    bool simulate_uniform_ranks = false;
   };
 
   // Static factory method for official APIs
@@ -106,17 +125,140 @@ class FakeProcessGroup : public Backend {
         groupRank, static_cast<int>(ranks.size()), std::move(fakeOpts));
   }
 
+  // NOTE [FakeProcessGroup uniform-rank simulation]
+  // With Options::simulate_uniform_ranks the group models a world in which
+  // every rank holds data identical to this one. That single assumption makes
+  // every collective well defined from local inputs alone, which the default
+  // approximations are not: they ignore the reduce op entirely and fill
+  // all-to-all outputs without regard to the split structure, so a caller that
+  // reshapes collective output (TorchRec's KeyedJaggedTensor does) gets a
+  // wrongly sized tensor.
+  //
+  // The modeling cost is that ranks cannot diverge, so this cannot surface
+  // rank-divergence bugs. It is off by default; existing behavior is untouched.
+  bool uniformRanks() const {
+    return options_ != nullptr && options_->simulate_uniform_ranks;
+  }
+
+  // Combine `size_` identical contributions in place. Every reduce op has a
+  // closed form once the contributions are known to be equal, so the contract
+  // is total: no op falls back to a silently wrong approximation.
+  void applyUniformReduction(const at::Tensor& tensor, const ReduceOp& reduceOp)
+      const {
+    switch (reduceOp.op_) {
+      case ReduceOp::SUM:
+        tensor.mul_(size_);
+        return;
+      case ReduceOp::AVG:
+      case ReduceOp::MIN:
+      case ReduceOp::MAX:
+      case ReduceOp::BAND:
+      case ReduceOp::BOR:
+        // Averaging, taking an extremum, and bitwise AND/OR are all idempotent
+        // on equal operands, so each leaves the local value unchanged.
+        return;
+      case ReduceOp::PRODUCT:
+        tensor.pow_(size_);
+        return;
+      case ReduceOp::BXOR:
+        // x ^ x == 0, so an even number of equal contributions cancels out
+        // entirely and an odd number leaves one behind.
+        if (size_ % 2 == 0) {
+          tensor.zero_();
+        }
+        return;
+      case ReduceOp::PREMUL_SUM: {
+        // Summing `factor * x` over `size_` equal ranks scales the local
+        // value by `size_ * factor`.
+        auto supplement =
+            c10::dynamic_intrusive_pointer_cast<PreMulSumSupplement>(
+                reduceOp.supplement_);
+        TORCH_CHECK(
+            supplement != nullptr,
+            "FakeProcessGroup: PREMUL_SUM was given without its scaling "
+            "factor. Build it with torch.distributed._make_nccl_premul_sum.");
+        if (supplement->tensor_factor.defined()) {
+          tensor.mul_(supplement->tensor_factor);
+        } else {
+          tensor.mul_(supplement->double_factor);
+        }
+        tensor.mul_(size_);
+        return;
+      }
+      default:
+        TORCH_CHECK(
+            false,
+            "FakeProcessGroup: unrecognized reduce op ",
+            static_cast<int>(reduceOp.op_),
+            " under simulate_uniform_ranks.");
+    }
+  }
+
+  // Fill `dst` by repeating `src`. Real backends write the whole slot;
+  // truncating would leave the tail uninitialized, and a caller that reshapes
+  // the output would then read garbage.
+  static void fillByTiling(const at::Tensor& dst, const at::Tensor& src) {
+    const auto dstNumel = dst.numel();
+    const auto srcNumel = src.numel();
+    if (dstNumel == 0) {
+      return;
+    }
+    if (srcNumel == 0) {
+      // This peer contributes nothing, so the slot receives nothing. Zero it
+      // rather than leaving whatever the caller's buffer happened to hold.
+      dst.zero_();
+      return;
+    }
+    int64_t written = 0;
+    while (written < dstNumel) {
+      const auto n = std::min(srcNumel, dstNumel - written);
+      dst.narrow(0, written, n).copy_(src.narrow(0, 0, n));
+      written += n;
+    }
+  }
+
+  // A flat 1-D view over `t`'s storage, for element-wise segment copies.
+  static at::Tensor flatView(const at::Tensor& t) {
+    return t.as_strided({t.numel()}, {1}, t.storage_offset());
+  }
+
+  // The contiguous segment of `flat` belonging to peer `index`, honoring the
+  // c10d convention that an empty split list means an equal division.
+  static at::Tensor splitSegment(
+      const at::Tensor& flat,
+      const std::vector<int64_t>& splitSizes,
+      int index,
+      int worldSize) {
+    if (splitSizes.empty()) {
+      const auto chunk = flat.numel() / worldSize;
+      return flat.narrow(0, chunk * index, chunk);
+    }
+    int64_t offset = 0;
+    for (int i = 0; i < index; ++i) {
+      offset += splitSizes[i];
+    }
+    return flat.narrow(0, offset, splitSizes[index]);
+  }
+
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) override {
     checkCollectiveError();
+    // Identity under either contract: every rank already holds the value.
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> allreduce(
-      std::vector<at::Tensor>& /* tensors */,
-      const AllreduceOptions& /* opts */ = AllreduceOptions()) override {
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) override {
     checkCollectiveError();
+    if (uniformRanks()) {
+      at::AutoDispatchBelowAutograd guard;
+      for (auto& tensor : tensors) {
+        applyUniformReduction(tensor, opts.reduceOp);
+      }
+      return c10::make_intrusive<FakeWork>(tensors);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -128,17 +270,31 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> allreduce_coalesced(
-      std::vector<at::Tensor>& /* tensors */,
-      const AllreduceCoalescedOptions& /* opts */ =
+      std::vector<at::Tensor>& tensors,
+      const AllreduceCoalescedOptions& opts =
           AllreduceCoalescedOptions()) override {
     checkCollectiveError();
+    if (uniformRanks()) {
+      at::AutoDispatchBelowAutograd guard;
+      for (auto& tensor : tensors) {
+        applyUniformReduction(tensor, opts.reduceOp);
+      }
+      return c10::make_intrusive<FakeWork>(tensors);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> reduce(
-      std::vector<at::Tensor>& /* tensors */,
-      const ReduceOptions& /* opts */ = ReduceOptions()) override {
+      std::vector<at::Tensor>& tensors,
+      const ReduceOptions& opts = ReduceOptions()) override {
     checkCollectiveError();
+    if (uniformRanks()) {
+      at::AutoDispatchBelowAutograd guard;
+      for (auto& tensor : tensors) {
+        applyUniformReduction(tensor, opts.reduceOp);
+      }
+      return c10::make_intrusive<FakeWork>(tensors);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -285,8 +441,7 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> reduce_scatter_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
-      const ReduceScatterOptions& /* opts */ =
-          ReduceScatterOptions()) override {
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
     checkCollectiveError();
     TORCH_CHECK(
         inputBuffer.numel() == outputBuffer.numel() * size_,
@@ -295,14 +450,16 @@ class FakeProcessGroup : public Backend {
     at::AutoDispatchBelowAutograd guard;
     auto chunks = inputBuffer.chunk(size_);
     outputBuffer.copy_(chunks[rank_]);
+    if (uniformRanks()) {
+      applyUniformReduction(outputBuffer, opts.reduceOp);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> reduce_scatter_single_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
-      const ReduceScatterOptions& /* opts */ =
-          ReduceScatterOptions()) override {
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
     checkCollectiveError();
     auto invalidArgument = [](const std::string& msg) {
       TORCH_CHECK(
@@ -318,6 +475,9 @@ class FakeProcessGroup : public Backend {
           "input tensor must be the same size as output size times world size");
       auto chunks = inputs[i].chunk(size_);
       outputs[i].copy_(chunks[rank_]);
+      if (uniformRanks()) {
+        applyUniformReduction(outputs[i], opts.reduceOp);
+      }
     }
     return c10::make_intrusive<FakeWork>();
   }
@@ -348,6 +508,19 @@ class FakeProcessGroup : public Backend {
             .as_strided(
                 {outputBuffer.numel()}, {1}, outputBuffer.storage_offset())
             .zero_();
+    if (uniformRanks()) {
+      // Every peer holds what we hold, so the segment peer j sends to us is
+      // the segment we would send to a peer in our own position: our input
+      // split at index rank_. Fill each output slot from it, which keeps the
+      // split structure self-consistent and lets callers reshape the result.
+      auto mine = splitSegment(flat_input, inputSplitSizes, rank_, size_);
+      for (int j = 0; j < size_; ++j) {
+        auto slot = splitSegment(flat_output, outputSplitSizes, j, size_);
+        fillByTiling(slot, mine);
+      }
+      return c10::make_intrusive<FakeWork>(
+          std::vector<at::Tensor>{outputBuffer});
+    }
     auto copy_size = std::min(flat_input.numel(), flat_output.numel());
     if (copy_size > 0) {
       flat_output.narrow(0, 0, copy_size)
@@ -369,9 +542,16 @@ class FakeProcessGroup : public Backend {
     // See note in _allgather_base above.
     at::AutoDispatchBelowAutograd guard;
     for (size_t i = 0; i < outputTensors.size(); ++i) {
-      outputTensors[i].copy_(inputTensors[i]);
+      if (uniformRanks()) {
+        // Every peer sends us what it would send to our position, which is our
+        // own entry at index rank_. Shapes need not match, so tile.
+        fillByTiling(flatView(outputTensors[i]), flatView(inputTensors[rank_]));
+      } else {
+        outputTensors[i].copy_(inputTensors[i]);
+      }
     }
-    return c10::make_intrusive<FakeWork>();
+    return uniformRanks() ? c10::make_intrusive<FakeWork>(outputTensors)
+                          : c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> send(

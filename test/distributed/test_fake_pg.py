@@ -1026,6 +1026,178 @@ class TestFakePG(TestCase):
         self.assertEqual(pg_name, expected)
 
 
+class TestFakePGUniformRanks(TestCase):
+    """Tests for Options.simulate_uniform_ranks.
+
+    See NOTE [FakeProcessGroup uniform-rank simulation]. The contract is that
+    the group behaves as if every rank held data identical to this one, which
+    makes every collective well defined from local inputs alone.
+    """
+
+    def tearDown(self):
+        super().tearDown()
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+    def _init(self, rank, world_size):
+        opts = FakeProcessGroup.Options()
+        opts.simulate_uniform_ranks = True
+        backend = FakeProcessGroup._create_internal(
+            rank, world_size=world_size, options=opts
+        )
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=rank, world_size=world_size, store=store
+        )
+        return backend
+
+    def test_option_defaults_to_off(self):
+        """Existing behavior must be untouched unless the flag is set."""
+        self.assertFalse(FakeProcessGroup.Options().simulate_uniform_ranks)
+
+    def test_allreduce_sum_scales_by_world_size(self):
+        """Summing world_size identical tensors multiplies by world_size."""
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.ones(3)
+
+        pg.allreduce([tensor]).wait()
+
+        self.assertEqual(tensor, torch.full((3,), 4.0))
+
+    def test_allreduce_avg_is_identity(self):
+        """Averaging identical values leaves them unchanged."""
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.full((3,), 7.0)
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = dist.ReduceOp.AVG
+
+        pg.allreduce([tensor], opts).wait()
+
+        self.assertEqual(tensor, torch.full((3,), 7.0))
+
+    def test_allreduce_product_raises_to_the_world_size(self):
+        """Multiplying world_size identical tensors is exponentiation."""
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.full((3,), 2.0)
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = dist.ReduceOp.PRODUCT
+
+        pg.allreduce([tensor], opts).wait()
+
+        self.assertEqual(tensor, torch.full((3,), 16.0))
+
+    def test_allreduce_premul_sum_applies_factor_then_scales(self):
+        """PREMUL_SUM sums factor * x over every rank."""
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.full((3,), 3.0)
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = dist.ReduceOp.PREMUL_SUM(0.5)
+
+        pg.allreduce([tensor], opts).wait()
+
+        self.assertEqual(tensor, torch.full((3,), 6.0))
+
+    def test_allreduce_bitwise_and_or_are_identity(self):
+        """AND and OR are idempotent, so equal operands reduce to themselves."""
+        for op in (dist.ReduceOp.BAND, dist.ReduceOp.BOR):
+            with self.subTest(op=op):
+                pg = self._init(rank=0, world_size=4)
+                tensor = torch.tensor([0b1100, 0b1010], dtype=torch.int32)
+                opts = dist.AllreduceOptions()
+                opts.reduceOp = op
+
+                pg.allreduce([tensor], opts).wait()
+
+                self.assertEqual(
+                    tensor, torch.tensor([0b1100, 0b1010], dtype=torch.int32)
+                )
+                dist.destroy_process_group()
+
+    def test_allreduce_bitwise_xor_cancels_in_pairs(self):
+        """XOR over equal operands depends only on the parity of world_size."""
+        for world_size, expected in ((4, [0, 0]), (3, [0b1100, 0b1010])):
+            with self.subTest(world_size=world_size):
+                pg = self._init(rank=0, world_size=world_size)
+                tensor = torch.tensor([0b1100, 0b1010], dtype=torch.int32)
+                opts = dist.AllreduceOptions()
+                opts.reduceOp = dist.ReduceOp.BXOR
+
+                pg.allreduce([tensor], opts).wait()
+
+                self.assertEqual(tensor, torch.tensor(expected, dtype=torch.int32))
+                dist.destroy_process_group()
+
+    def test_reduce_scatter_sum_scales_the_local_chunk(self):
+        """Each rank keeps its own chunk, scaled by the number of ranks."""
+        pg = self._init(rank=2, world_size=4)
+        output = torch.empty(1)
+
+        pg.reduce_scatter_single(output, torch.tensor([1.0, 2.0, 3.0, 4.0])).wait()
+
+        # chunk[2] is 3.0, summed across 4 identical ranks.
+        self.assertEqual(output.item(), 12.0)
+
+    def test_all_gather_replicates_local_input(self):
+        """Unchanged by the flag: every slot already held the local value."""
+        pg = self._init(rank=1, world_size=3)
+        output = torch.empty(6)
+
+        pg.all_gather_single(output, torch.tensor([5.0, 6.0])).wait()
+
+        for chunk in output.chunk(3):
+            self.assertEqual(chunk, torch.tensor([5.0, 6.0]))
+
+    def test_all_to_all_single_preserves_split_structure(self):
+        """The regression that motivated the flag.
+
+        A caller that reshapes all-to-all output by [world_size, per_rank]
+        needs every slot filled with a full-size segment. The default
+        approximation copies a prefix and zeroes the rest, which yields the
+        wrong element count once splits are uneven.
+        """
+        world_size = 4
+        pg = self._init(rank=1, world_size=world_size)
+        # Each rank sends 2 elements to every peer, so it receives 2 from each.
+        send = torch.tensor([10.0, 11.0, 20.0, 21.0, 30.0, 31.0, 40.0, 41.0])
+        recv = torch.empty(8)
+
+        pg.all_to_all_single(recv, send, [2] * world_size, [2] * world_size).wait()
+
+        # Every peer sends us the segment it would send to rank 1, and under
+        # the uniform contract that is our own split at index 1.
+        for slot in recv.chunk(world_size):
+            self.assertEqual(slot, torch.tensor([20.0, 21.0]))
+
+    def test_all_to_all_single_reshapes_like_torchrec(self):
+        """Output must survive a [world_size, per_rank] view."""
+        world_size = 16
+        per_rank = 8
+        pg = self._init(rank=0, world_size=world_size)
+        send = torch.arange(world_size * per_rank, dtype=torch.float)
+        recv = torch.empty(world_size * per_rank)
+
+        pg.all_to_all_single(
+            recv, send, [per_rank] * world_size, [per_rank] * world_size
+        ).wait()
+
+        # This view is what KeyedJaggedTensor.dist_init performs; under the
+        # default approximation the element count does not line up.
+        self.assertEqual(recv.view(world_size, per_rank).shape, (world_size, per_rank))
+
+    def test_alltoall_list_form_uses_our_own_entry(self):
+        """Every peer sends what it would send to our position."""
+        pg = self._init(rank=2, world_size=3)
+        inputs = [torch.full((2,), float(i)) for i in range(3)]
+        outputs = [torch.empty(2) for _ in range(3)]
+
+        pg.alltoall(outputs, inputs).wait()
+
+        for output in outputs:
+            self.assertEqual(output, torch.full((2,), 2.0))
+
+
+instantiate_parametrized_tests(TestFakePGUniformRanks)
+
 instantiate_parametrized_tests(TestFakePG)
 
 if __name__ == "__main__":
