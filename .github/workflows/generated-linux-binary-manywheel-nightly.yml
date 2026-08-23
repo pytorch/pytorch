@@ -2140,7 +2140,7 @@ jobs:
 
   libtorch-extract:
     name: ${{ matrix.build_name }}-extract
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     needs: [manywheel-build]
     runs-on: "mt-l-x86iavx512-16-128"
     container:
@@ -2261,7 +2261,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-extract
+    needs: [libtorch-extract, manywheel-cpu-test, manywheel-cuda-cu126-test, manywheel-cuda-cu130-test, manywheel-cuda-cu132-test, manywheel-cuda-cu134-test, manywheel-test-rocm]
     uses: ./.github/workflows/_binary-upload.yml
     strategy:
       fail-fast: false

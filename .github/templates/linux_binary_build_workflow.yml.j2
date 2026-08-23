@@ -600,7 +600,7 @@ jobs:
 
   libtorch-extract:
     name: ${{ matrix.build_name }}-extract
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: !{{ owner_if }}
     needs: [manywheel-build]
     runs-on: "mt-l-x86iavx512-16-128"
     container:
@@ -666,6 +666,15 @@ jobs:
           path: "${{ github.workspace }}/libtorch_output/"
 
 {%- if branches == "nightly" %}
+{#- Every libtorch tarball is cut out of a wheel, so its upload must also wait
+    on that wheel's test job: a red wheel test has to withhold the tarball taken
+    from the same build. -#}
+{%- set source_wheels = libtorch_extraction_configs | map(attribute='source_wheel_build_name') | list %}
+{%- set wheel_test_jobs = standard_test_jobs + [{'name': 'manywheel-test-rocm', 'configs': rocm_configs}, {'name': 'manywheel-test-xpu', 'configs': xpu_configs}] %}
+{%- set libtorch_upload_needs = ['libtorch-extract'] %}
+{%- for t in wheel_test_jobs if t['configs'] | selectattr('build_name', 'in', source_wheels) | list %}
+  {%- set _ = libtorch_upload_needs.append(t['name']) %}
+{%- endfor %}
 
   libtorch-upload:
     name: ${{ matrix.build_name }}-upload
@@ -673,7 +682,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-extract
+    needs: [!{{ libtorch_upload_needs | join(', ') }}]
     uses: ./.github/workflows/_binary-upload.yml
     strategy:
       fail-fast: false
