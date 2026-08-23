@@ -12,17 +12,26 @@ import unittest
 from collections.abc import Callable
 from unittest.mock import patch
 
+import sympy
+
 import torch
 from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import CompileCounterWithBackend, rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config, cpu_vec_isa, metrics, test_operators
-from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
+from torch._inductor.codegen.cpp import (
+    CppKernelProxy,
+    CppOverrides,
+    CppVecKernel,
+    CppVecOverrides,
+    KernelGroup,
+    LoopLevel,
+    LoopNest,
+)
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
-from torch._inductor.lowering import _cpu_addcmul_uses_fma
 from torch._inductor.utils import fresh_cache, timed
 from torch._prims_common import is_float_dtype
 from torch.autograd.functional import vjp
@@ -1458,6 +1467,102 @@ class CPUReproTests(TestCase):
             # Use same criterion as test_inplace_squeeze_needed
             # for parallel reduction.
             self.common(mod, (x, weight), atol=5e-1, rtol=5e-1)
+
+    @requires_vectorization
+    def test_max_parallel_depth_sub_vector_width_loop(self):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/190757
+        # A vectorized loop smaller than the vector width runs 1 iteration, not
+        # 0. Counting it as 0 zeroed the outer-work estimate and relocated
+        # parallelism onto the inner reduction, nesting an OpenMP parallel
+        # region inside a serial loop.
+        kernel_group = KernelGroup()
+        proxy = CppKernelProxy(kernel_group)
+        # Populate `kernels` with a vec kernel so the relocation guard's
+        # `has_scalar_kernel(self)` is intentionally False (the repro's softmax
+        # kernel is vectorized), rather than relying on `kernels` being empty.
+        proxy.kernels = [
+            CppVecKernel(kernel_group.args, 1, tiling_factor=16, tiling_idx=0)
+        ]
+        outer = LoopLevel(sympy.Symbol("x0"), sympy.Integer(4)).tile(16)
+        reduction = LoopLevel(sympy.Symbol("x1"), sympy.Integer(64))
+        reduction.is_reduction = True
+        nest = LoopNest([outer, reduction], proxy)
+        depth = nest.max_parallel_depth()
+        self.assertEqual(depth.start_depth, 0)
+        self.assertEqual(depth.parallel_depth, 1)
+
+    @requires_vectorization
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @config.patch(freezing=True)
+    def test_masked_softmax_freezing_no_parallel_reduction(self):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/190757
+        # End-to-end check of the symptom: under freezing, the shifted-window
+        # masked-softmax reduction was left with a size-4 (num heads) vectorized
+        # outer loop, whose trip count underflowed to 0 and relocated
+        # parallelism onto the inner reduction -- nesting an OpenMP parallel
+        # region inside a serial loop (30-50x slowdown). Assert that parallelism
+        # never lands on a reduction loop.
+        C, WS, SHIFT, NH = 96, 8, 4, 4
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = torch.nn.Conv2d(1, C, 4, 4)
+                self.gate = torch.nn.Conv2d(C, C, 1)
+                self.ln = torch.nn.LayerNorm(C)
+                self.qkv = torch.nn.Linear(C, 3 * C)
+                self.out = torch.nn.Linear(C, C)
+
+            def forward(self, x):
+                x = F.interpolate(
+                    x, (1024, 64), mode="bicubic", align_corners=True
+                ).reshape(1, 1, 256, 256)
+                g = self.proj(x)
+                x = g * torch.sigmoid(self.gate(g))
+                b, c, h, w = x.shape
+                x = self.ln(x.flatten(2).transpose(1, 2)).view(b, h, w, c)
+                x = torch.roll(x, (-SHIFT, -SHIFT), (1, 2))
+                win = (
+                    x.view(b, h // WS, WS, w // WS, WS, c)
+                    .permute(0, 1, 3, 2, 4, 5)
+                    .reshape(-1, WS * WS, c)
+                )
+                n = win.shape[0]
+                r = (torch.arange(h) >= h - WS).long() + (
+                    torch.arange(h) >= h - SHIFT
+                ).long()
+                reg = (
+                    (r[:, None] * 3 + r[None, :])
+                    .view(h // WS, WS, w // WS, WS)
+                    .permute(0, 2, 1, 3)
+                    .reshape(-1, WS * WS)
+                )
+                mask = (
+                    (reg.unsqueeze(1) - reg.unsqueeze(2))
+                    .to(x.dtype)
+                    .masked_fill_(reg.unsqueeze(1) != reg.unsqueeze(2), -100.0)
+                )
+                q, k, v = (
+                    self.qkv(win)
+                    .view(n, WS * WS, 3, NH, c // NH)
+                    .permute(2, 0, 3, 1, 4)
+                )
+                s = q @ k.transpose(-1, -2) / math.sqrt(c // NH)
+                s = (
+                    s.view(1, n, NH, WS * WS, WS * WS) + mask.unsqueeze(1).unsqueeze(0)
+                ).view(-1, NH, WS * WS, WS * WS)
+                o = (s.softmax(-1) @ v).transpose(1, 2).reshape(n, WS * WS, c)
+                return self.out(o)
+
+        mod = Model().eval()
+        x = torch.randn(1, 1, 1001, 64)
+        with torch.no_grad():
+            metrics.reset()
+            expected = mod(x)
+            compiled_m = torch.compile(mod)
+            actual = compiled_m(x)
+            self.assertEqual(expected, actual, atol=1e-3, rtol=1e-3)
+            self.assertEqual(metrics.parallel_reduction_count, 0)
 
     def test_cat_mul(self):
         # https://github.com/pytorch/pytorch/issues/93365
@@ -5401,59 +5506,97 @@ class CPUReproTests(TestCase):
             y = F.group_norm(x, 5, weight, bias)
             return torch.log(torch.clamp(y, min=1e-6))
 
-        x = torch.full((4, 5, 6, 6), 0.9999949932098389)
         test_cases = [
             ("weight_and_bias", torch.ones(5), torch.zeros(5)),
             ("weight_only", torch.ones(5), None),
             ("bias_only", None, torch.zeros(5)),
         ]
 
+        x = torch.full((4, 5, 6, 6), 0.9999949932098389)
+        _, output_uses_fma = (
+            cpu_vec_isa.get_cpu_contiguous_group_norm_fma_policy()
+        )
         for name, weight, bias in test_cases:
             with self.subTest(name=name):
                 expected = fn(x, weight, bias)
                 torch._dynamo.reset()
-                actual = torch.compile(fn, backend="inductor")(x, weight, bias)
+                actual, code = run_and_get_cpp_code(
+                    torch.compile(fn, backend="inductor"), x, weight, bias
+                )
 
-                self.assertLess((expected - actual).abs().max().item(), 1e-4)
+                self.assertEqual(expected, actual, rtol=0, atol=1e-4)
+                if name == "weight_only" and output_uses_fma:
+                    FileCheck().check_regex(r"(fmadd|std::fma)\(").run(code)
 
-        # Exercise cancellation in the folded bias expression itself. Separate
-        # multiply/add rounds this case 0.001953125 away from eager's FMA result.
+        # Exercise cancellation in the folded bias expression itself. The
+        # fused and unfused choices at both affine sites are bitwise distinct.
         def group_norm(x, weight, bias):
             return F.group_norm(x, 5, weight, bias)
 
-        x = torch.full((4, 5, 6, 6), 10.0)
-        weight = torch.full((5,), 10.0)
-        bias = torch.full((5,), 31622.779296875)
+        x = torch.full((4, 5, 6, 6), 4.375030517578125)
+        weight = torch.full((5,), -3.735017776489258)
+        bias = torch.full((5,), -1.5276412963867188)
         expected = group_norm(x, weight, bias)
         torch._dynamo.reset()
         actual = torch.compile(group_norm, backend="inductor")(x, weight, bias)
-        self.assertEqual(expected, actual)
+        self.assertEqual(expected, actual, rtol=0, atol=0)
 
-    def test_cpu_addcmul_fma_probe_ignores_default_device(self):
-        _cpu_addcmul_uses_fma.cache_clear()
+    def test_cpu_group_norm_fma_probe_ignores_default_device(self):
+        policy = cpu_vec_isa.get_cpu_contiguous_group_norm_fma_policy
+        policy.cache_clear()
         try:
-            expected = _cpu_addcmul_uses_fma()
-            _cpu_addcmul_uses_fma.cache_clear()
+            expected = policy()
+            policy.cache_clear()
             with torch.device("meta"):
-                actual = _cpu_addcmul_uses_fma()
+                actual = policy()
             self.assertEqual(expected, actual)
         finally:
-            _cpu_addcmul_uses_fma.cache_clear()
+            policy.cache_clear()
 
-    def test_cpu_addcmul_fma_matches_eager_dtypes_and_tail(self):
-        def fn(x, tensor1, tensor2):
-            return torch.addcmul(x, tensor1, tensor2, value=1)
+    def test_cpu_group_norm_unknown_fma_policy_falls_back(self):
+        def fn(x, weight, bias):
+            return F.group_norm(x, 5, weight, bias)
 
-        for dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
-            with self.subTest(dtype=dtype):
-                torch.manual_seed(0)
-                x = torch.randn(257, dtype=dtype)
-                tensor1 = torch.randn(257, dtype=dtype)
-                tensor2 = torch.randn(257, dtype=dtype)
-                expected = fn(x, tensor1, tensor2)
-                torch._dynamo.reset()
-                actual = torch.compile(fn, backend="inductor")(x, tensor1, tensor2)
-                self.assertEqual(expected, actual)
+        x = torch.full((4, 5, 6, 6), 0.9999949932098389)
+        weight = torch.ones(5)
+        bias = torch.zeros(5)
+        expected = fn(x, weight, bias)
+        with (
+            fresh_cache(),
+            patch(
+                "torch._inductor.decomposition.get_cpu_contiguous_group_norm_fma_policy",
+                return_value=(None, None),
+            ),
+        ):
+            torch._dynamo.reset()
+            actual, code = run_and_get_cpp_code(
+                torch.compile(fn, backend="inductor"), x, weight, bias
+            )
+        self.assertEqual(expected, actual, rtol=0, atol=0)
+        FileCheck().check("native_group_norm").run(code)
+
+    @config.patch("cpp.enable_floating_point_contract_flag", "fast")
+    def test_cpu_group_norm_unfused_policy_with_fast_math_falls_back(self):
+        def fn(x, weight, bias):
+            return F.group_norm(x, 5, weight, bias)
+
+        x = torch.full((4, 5, 6, 6), 0.9999949932098389)
+        weight = torch.ones(5)
+        bias = torch.zeros(5)
+        expected = fn(x, weight, bias)
+        with (
+            fresh_cache(),
+            patch(
+                "torch._inductor.decomposition.get_cpu_contiguous_group_norm_fma_policy",
+                return_value=(False, False),
+            ),
+        ):
+            torch._dynamo.reset()
+            actual, code = run_and_get_cpp_code(
+                torch.compile(fn, backend="inductor"), x, weight, bias
+            )
+        self.assertEqual(expected, actual, rtol=0, atol=0)
+        FileCheck().check("native_group_norm").run(code)
 
     @unittest.skipIf(
         os.getenv("ATEN_CPU_CAPABILITY") == "default",

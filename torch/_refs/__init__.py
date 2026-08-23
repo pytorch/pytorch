@@ -28,6 +28,7 @@ from torch._prims_common import (
     FloatLike,
     FloatWithoutSymFloat,
     IntLike,
+    IntWithoutSymInt,
     is_contiguous_for_memory_format_or_false,
     is_contiguous_or_false,
     is_weakly_lesser_type,
@@ -2035,6 +2036,29 @@ def clamp(
         msg = "clamp called but both min and max are none!"
         raise ValueError(msg)
 
+    if utils.is_integer_dtype(a.dtype):
+        # A lower bound below the dtype's range (or an upper bound above it) is a
+        # no-op and is dropped. The opposite case would force every element to an
+        # unrepresentable value, so it is rejected.
+        limits = torch.iinfo(a.dtype)
+        if isinstance(min, IntWithoutSymInt):
+            if min > limits.max:
+                raise RuntimeError(
+                    f"Clamp min value {min} is outside the representable range of {a.dtype}"
+                )
+            if min < limits.min:
+                min = None
+        if isinstance(max, IntWithoutSymInt):
+            if max < limits.min:
+                raise RuntimeError(
+                    f"Clamp max value {max} is outside the representable range of {a.dtype}"
+                )
+            if max > limits.max:
+                max = None
+        if min is None and max is None:
+            # Both bounds were dropped as no-ops; return a fresh tensor.
+            return torch.clone(a)
+
     if min is not None:
         a_isnan = torch.isnan(a)
         condition = torch.bitwise_or(torch.ge(a, min), a_isnan)  # type: ignore[arg-type]
@@ -2539,6 +2563,13 @@ def amin(
     *,
     out: Tensor | None = None,
 ) -> TensorLikeType:
+    if out is not None:
+        torch._check(
+            a.dtype == out.dtype,
+            lambda: f"Expected the dtype for input and out to match, but got "
+            f"{a.dtype} for input's dtype and {out.dtype} for out's dtype.",
+        )
+
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
@@ -2563,6 +2594,13 @@ def amax(
     *,
     out: Tensor | None = None,
 ) -> TensorLikeType:
+    if out is not None:
+        torch._check(
+            a.dtype == out.dtype,
+            lambda: f"Expected the dtype for input and out to match, but got "
+            f"{a.dtype} for input's dtype and {out.dtype} for out's dtype.",
+        )
+
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
@@ -3379,8 +3417,7 @@ def _unsqueeze_multiple(x: TensorLikeType, dimensions: list[int]) -> TensorLikeT
     return x
 
 
-@register_decomposition(aten.native_group_norm.default)
-def native_group_norm(
+def _native_group_norm(
     input: Tensor,
     weight: Tensor | None,
     bias: Tensor | None,
@@ -3389,6 +3426,10 @@ def native_group_norm(
     flattened_inner_size: int,
     num_groups: int,
     eps: float,
+    *,
+    bias_fma: Callable[[Tensor, Tensor, Tensor], Tensor] | None = None,
+    output_fma: Callable[[Tensor, Tensor, Tensor], Tensor] | None = None,
+    use_cpu_affine_formula: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor]:
     torch._check(
         num_channels > 0,
@@ -3460,7 +3501,9 @@ def native_group_norm(
         input_reshaped, dim=reduction_dims, unbiased=False, keepdim=True
     )
     rstd = torch.rsqrt(biased_var + eps)
-    if input.device.type == "cpu" and (weight is not None or bias is not None):
+    if input.device.type == "cpu" and (
+        weight is not None or (use_cpu_affine_formula and bias is not None)
+    ):
         if weight is not None:
             weight_reshaped = torch.reshape(
                 weight, [1, num_groups, num_channels // num_groups, 1]
@@ -3472,7 +3515,11 @@ def native_group_norm(
             bias_reshaped = torch.reshape(
                 bias, [1, num_groups, num_channels // num_groups, 1]
             )
-            b = torch.addcmul(bias_reshaped, -mean, w)
+            b = (
+                -mean * w + bias_reshaped
+                if bias_fma is None
+                else bias_fma(-w, mean, bias_reshaped)
+            )
         else:
             b = -mean * w
         w = w.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
@@ -3480,7 +3527,11 @@ def native_group_norm(
         broadcast_dims = list(range(2, input.ndim))
         unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
         unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
-        out = torch.addcmul(unsqueeze_b, input_acc, unsqueeze_w)
+        out = (
+            input_acc * unsqueeze_w + unsqueeze_b
+            if output_fma is None
+            else output_fma(unsqueeze_w, input_acc, unsqueeze_b)
+        )
     else:
         out = (input_reshaped - mean) * rstd
         out = out.view(input.shape)
@@ -3501,6 +3552,29 @@ def native_group_norm(
     mean = torch.squeeze(mean, reduction_dims)
     rstd = torch.squeeze(rstd, reduction_dims)
     return (out, mean, rstd)
+
+
+@register_decomposition(aten.native_group_norm.default)
+def native_group_norm(
+    input: Tensor,
+    weight: Tensor | None,
+    bias: Tensor | None,
+    batch_size: int,
+    num_channels: int,
+    flattened_inner_size: int,
+    num_groups: int,
+    eps: float,
+) -> tuple[Tensor, Tensor, Tensor]:
+    return _native_group_norm(
+        input,
+        weight,
+        bias,
+        batch_size,
+        num_channels,
+        flattened_inner_size,
+        num_groups,
+        eps,
+    )
 
 
 _SCALAR_TYPE_NAME_OVERRIDES = {
