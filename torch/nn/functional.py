@@ -3347,12 +3347,10 @@ def gaussian_nll_loss(
         if var < 0:
             raise ValueError("var has negative entry/entries")
         var = var * torch.ones_like(input)
-    else:
-        from torch.fx.experimental.symbolic_shapes import guard_or_false
-
-        # pyrefly: ignore [bad-argument-type]
-        if guard_or_false(torch.any(var < 0).item()):
-            raise ValueError("var has negative entry/entries")
+    elif torch.compiler.is_compiling():
+        torch._assert_async(~torch.any(var < 0), "var has negative entry/entries")
+    elif torch.any(var < 0):
+        raise ValueError("var has negative entry/entries")
 
     # Check var size
     # If var.size == input.size, the case is heteroscedastic and no further checks are needed.
