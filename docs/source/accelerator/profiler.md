@@ -10,11 +10,17 @@ There are two primary integration paths for accelerators:
     - Can attach backend-specific hooks via `ProfilerStubs` to record device events and compute elapsed times.
     - Works without Kineto; suitable for PrivateUse1 backends that want a minimal, self-contained path.
 
-2. Kineto-based timeline:
-    - Bridges to Kineto, which aggregates device timelines via vendor libraries (e.g., CUPTI for CUDA).
-    - Provides rich activity traces and advanced export/visualization, but requires a Kineto-capable backend.
+2. Kineto `IActivityProfiler` plugin:
+    - Registers a full activity profiler with Kineto via `REGISTER_PRIVATEUSE1_PROFILER`.
+    - Wires Kineto sessions and correlation-ID plumbing; vendors extend this to emit kernel events, flow links, and Chrome/Perfetto trace compatibility.
+    - Requires Kineto at backend build time (`kineto_LIBRARY` from `find_package(Torch)`, guarded by `USE_KINETO`).
 
-This document focuses on path (1): how a `PrivateUse1` accelerator exposes the minimal hooks to plug into the legacy autograd profiler so ATen ops and `record_function` ranges are correctly attributed to device activity.
+| Path | Python API | Profiler State | What it provides |
+| ---- | ---------- | -------------- | ---------------- |
+| Legacy (1) | `torch.autograd.profiler.profile(use_device="openreg")` (default `use_kineto=False`) | `KINETO_PRIVATEUSE1_FALLBACK` | Operator-level timing via `ProfilerStubs` device events |
+| Kineto plugin (2) | `profile(activities=[ProfilerActivity.CPU, ProfilerActivity.PrivateUse1])` | `KINETO_PRIVATEUSE1` | Kineto session + correlation-ID plumbing; vendors add kernel events and flow links |
+
+Both paths can coexist when the backend extension is built with Kineto available (`kineto_LIBRARY` from `find_package(Torch)`). The legacy stubs path always works; the Kineto plugin path requires `USE_KINETO` at backend build time. PyTorch core already exposes `REGISTER_PRIVATEUSE1_PROFILER`; vendors implement and register their `IActivityProfiler` in the backend extension.
 
 ## Design
 
@@ -39,7 +45,7 @@ This layering keeps PyTorch device-agnostic: Python brokers the session, `Profil
 
 Here we use OpenReg (Open Registration) to illustrate the minimal set of hooks a `PrivateUse1` accelerator needs to expose so the profiler can attribute ATen ops, `record_function` ranges, and user code to device activity. OpenReg keeps upstream code untouched by translating profiler requests into its runtime calls, mirroring what a production accelerator would implement inside an out-of-tree extension.
 
-OpenReg currently relies on the legacy profiler (`torch.autograd.profiler.profile`) interface rather than the modern one (`torch.profiler.profile`) because the latter enforces `use_kineto=True`.
+OpenReg supports both paths: the legacy autograd profiler (`use_kineto=False`, the default) for operator-level timing via stubs, and the modern `torch.profiler.profile` API (`use_kineto=True`) for the Kineto plugin path described below.
 
 ### Profiler stubs (C++)
 
@@ -81,6 +87,55 @@ prof.export_chrome_trace("openreg_trace.json")
 4. The OpenReg stubs allocate `orEvent` objects, attach them to the current stream, and stash CPU timestamps.
 5. When events end, the profiler calls `elapsed()` to compute durations.
 
+## Implementation (Kineto Plugin)
+
+```{note}
+This section covers the Kineto `IActivityProfiler` plugin path for kernel-level tracing. It requires `USE_KINETO` at build time. All Kineto-dependent code must be guarded with `#ifdef USE_KINETO`.
+```
+
+The plugin path has two layers: a **device library** component (the CUPTI analog) and the **PyTorch integration** layer. OpenReg keeps these clearly separated.
+
+### Device library: correlation tracking
+
+The device library provides `openreg::profiler::OpenRegTracer` (`third_party/openreg/csrc/tracer.h/.cpp`) — a singleton with a thread-local correlation-ID stack and an atomic enable/disable flag that the profiler session uses to control the recording window.
+
+Kineto pushes/pops correlation IDs through the session. The session calls C-style activity APIs in `openreg.h` (mirroring CUPTI):
+
+* `orActivityEnableTracing()` / `orActivityDisableTracing()` — control the recording window
+* `orActivityPushExternalCorrelationId()` / `orActivityPopExternalCorrelationId()` — maintain the correlation stack
+
+A real vendor's equivalent would be their device tracing SDK (e.g., CUPTI for CUDA).
+
+### PyTorch integration: IActivityProfiler and IActivityProfilerSession
+
+Implement the two Kineto interfaces from `third_party/kineto/libkineto/include/IActivityProfiler.h`. In OpenReg, these live in `torch_openreg/csrc/profiler/` — the backend extension integration layer.
+
+* **`IActivityProfiler`** — stateless factory. Two `configure()` overloads both create and return a session:
+  - `configure(activity_types, config)` — synchronous overload; required by the interface. The OpenReg stub implements this as the core session-creation path.
+  - `configure(ts_ms, duration_ms, activity_types, config)` — Kineto's child-profiler path calls this overload for all traces (including on-demand), passing `profileStartTime()` epoch ms and `profileDuration()` ms. The OpenReg stub ignores scheduling and delegates to the first overload; vendors use `ts_ms`/`duration_ms` to defer device-SDK activation.
+* **`IActivityProfilerSession`** — per-trace session. `start()`/`stop()` manage the profiling window and toggle activity tracing via `orActivityEnableTracing()`/`orActivityDisableTracing()`; `getTraceBuffer()` returns the buffer to Kineto.
+  - **Reference stub**: `processTrace()` only sets the trace span (`traceBuffer_.span = TraceSpan(startTs_, endTs_, "openreg")`); it emits no kernel records.
+  - **Vendor extension**: replace `processTrace()` to flush records from your device tracing SDK, emit `GenericTraceActivity` entries with timestamps (µs), correlation IDs, and flow links (`flow.id = correlationId`, `flow.type = kLinkAsyncCpuGpu`, `flow.start = 0`).
+
+### Registration and build
+
+Register with one line: `REGISTER_PRIVATEUSE1_PROFILER(OpenRegActivityProfiler)`. The macro (defined in `torch/csrc/profiler/standalone/privateuse1_profiler.h`) creates a static registration object that forwards a factory to Kineto at profiler init time.
+
+Kineto is on by default in PyTorch; no special build flags are needed unless explicitly disabled it with `USE_KINETO=0`. In backend extension, `find_package(Torch)` sets `kineto_LIBRARY`; link against `kineto` and `torch_cpu_library`, and guard Kineto code with `#ifdef USE_KINETO`. Without Kineto, the plugin compiles as a no-op and only the legacy stubs path is available.
+
+### Usage
+
+```python
+import torch
+from torch.profiler import profile, ProfilerActivity
+
+with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.PrivateUse1]) as prof:
+    x = torch.randn(512, 512, device="openreg")
+    y = torch.randn(512, 512, device="openreg")
+    z = x @ y
+
+prof.export_chrome_trace("kernel_trace.json")
+```
 
 [PyTorch Profiler README]: https://github.com/pytorch/pytorch/blob/main/torch/csrc/profiler/README.md "PyTorch Profiler README"
 [openreg-stubs]: https://github.com/pytorch/pytorch/blob/main/test/cpp_extensions/open_registration_extension/torch_openreg/csrc/profiler/stubs/openreg.cpp "OpenReg profiler stubs"

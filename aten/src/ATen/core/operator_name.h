@@ -41,9 +41,10 @@ struct OperatorName final {
       const auto old_name_size = name.size();
       name.resize(ns_len + 2 + old_name_size);
       // Shift current value of name to the end of the new space.
-      name.replace(
-          name.size() - old_name_size, old_name_size, name, 0, old_name_size);
-      name.replace(0, ns_len, ns, ns_len);
+      auto name_data = name.data();
+      std::char_traits<char>::move(
+          name_data + ns_len + 2, name_data, old_name_size);
+      std::char_traits<char>::copy(name_data, ns, ns_len);
       name[ns_len] = ':';
       name[ns_len + 1] = ':';
       return true;
