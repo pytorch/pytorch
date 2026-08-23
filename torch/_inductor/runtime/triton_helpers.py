@@ -277,6 +277,39 @@ def fmaximum(a, b):
 
 
 @triton.jit
+def nextafter(x, y):
+    if not is_floating(x):
+        return libdevice.nextafter(x, y)
+    if x.dtype.primitive_bitwidth != 16 and x.dtype.primitive_bitwidth != 32:
+        return libdevice.nextafter(x, y)
+
+    # libdevice.nextafterf honors CUDA FTZ and skips fp32 subnormals. For
+    # fp16/bf16, stepping must happen before values are promoted to fp32.
+    idtype: tl.constexpr = tl.core.get_int_dtype(
+        x.dtype.primitive_bitwidth, signed=False
+    )
+    ix = x.to(idtype, bitcast=True)
+    iy = y.to(idtype, bitcast=True)
+    sign_mask: tl.constexpr = 1 << (x.dtype.primitive_bitwidth - 1)
+
+    x_is_zero = (ix & (sign_mask - 1)) == 0
+    y_is_zero = (iy & (sign_mask - 1)) == 0
+
+    # Compare bit patterns so the helper does not depend on floating point
+    # denormal handling and preserves IEEE ordering exactly.
+    same_sign = (ix & sign_mask) == (iy & sign_mask)
+    step_up = same_sign & (iy > ix)
+    stepped = ix + tl.where(step_up, 1, -1).to(idtype)
+    zero_step = (iy & sign_mask) | 1
+
+    result = (
+        tl.where(x_is_zero, zero_step, stepped).to(idtype).to(x.dtype, bitcast=True)
+    )
+    result = tl.where((ix == iy) | (x_is_zero & y_is_zero), y, result)
+    return tl.where((x != x) | (y != y), x + y, result)
+
+
+@triton.jit
 def min2(a, dim):
     return tl.reduce(a, dim, minimum)
 

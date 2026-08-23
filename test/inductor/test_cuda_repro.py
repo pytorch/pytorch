@@ -3300,6 +3300,113 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
                 self.assertEqual(eager_div, compiled_div)
 
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_nextafter_low_precision_non_contiguous(self, dtype):
+        if dtype is torch.bfloat16 and not SM80OrLater:
+            self.skipTest("bfloat16 requires SM >= 80")
+
+        def fn(x, y):
+            return torch.nextafter(x, y)
+
+        x_base = torch.tensor(
+            [
+                [-0.0, 0.0, 1.0, -1.0],
+                [float("inf"), -float("inf"), 2.0, -2.0],
+                [0.0, -0.0, 1.0, -1.0],
+            ],
+            dtype=dtype,
+            device=device_type,
+        )
+        y_base = torch.tensor(
+            [
+                [0.0, -1.0, 0.0, 0.0],
+                [0.0, 0.0, float("inf"), -float("inf")],
+                [1.0, -1.0, float("nan"), float("nan")],
+            ],
+            dtype=dtype,
+            device=device_type,
+        )
+        x = x_base.t()
+        y = y_base.t()
+
+        self.assertFalse(x.is_contiguous())
+        self.assertFalse(y.is_contiguous())
+
+        expected = fn(x, y)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+
+        self.assertEqual(torch.isnan(actual), torch.isnan(expected))
+        non_nan = ~torch.isnan(expected)
+        self.assertEqual(
+            actual[non_nan].view(torch.int16),
+            expected[non_nan].view(torch.int16),
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_nextafter_float32_subnormals(self):
+        def fn(x, y):
+            return torch.nextafter(x, y)
+
+        bit_pairs = torch.tensor(
+            [
+                (0x00000000, 0xBF800000),  # +0 toward -1
+                (0x80000000, 0x3F800000),  # -0 toward +1
+                (0x00000000, 0x80000000),  # +0 toward -0
+                (0x80000000, 0x00000000),  # -0 toward +0
+                (0x00000001, 0x00000002),  # adjacent positive subnormals
+                (0x00000002, 0x00000001),
+                (0x00000001, 0x00000003),  # non-adjacent positive subnormals
+                (0x00000003, 0x00000001),
+                (0x00000001, 0x00000000),  # positive subnormal toward zero
+                (0x007FFFFF, 0x3F800000),  # positive max subnormal toward +1
+                (0x00800000, 0x00000000),  # positive min normal toward zero
+                (0x80000001, 0x80000002),  # adjacent negative subnormals
+                (0x80000002, 0x80000001),
+                (0x80000001, 0x80000003),  # non-adjacent negative subnormals
+                (0x80000003, 0x80000001),
+                (0x80000001, 0x80000000),  # negative subnormal toward zero
+                (0x00000001, 0x80000001),  # positive to negative subnormal
+                (0x80000001, 0x00000001),  # negative to positive subnormal
+                (0x00000003, 0x00000003),  # equal nonzero values
+                (0x807FFFFF, 0xBF800000),  # negative max subnormal toward -1
+                (0x80800000, 0x80000000),  # negative min normal toward zero
+                (0x7F7FFFFF, 0x7F800000),  # positive max finite toward +inf
+                (0x7F800000, 0x00000000),  # +inf toward zero
+                (0xFF7FFFFF, 0xFF800000),  # negative max finite toward -inf
+                (0xFF800000, 0x80000000),  # -inf toward zero
+                (0x7FC00001, 0x3F800000),  # NaN input
+                (0x3F800000, 0x7FC00001),  # NaN target
+            ],
+            dtype=torch.uint32,
+            device=device_type,
+        )
+        x = bit_pairs[:, 0].view(torch.float32)
+        y = bit_pairs[:, 1].view(torch.float32)
+
+        expected = fn(x, y)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+
+        self.assertEqual(torch.isnan(actual), torch.isnan(expected))
+        non_nan = ~torch.isnan(expected)
+        self.assertEqual(
+            actual[non_nan].view(torch.int32),
+            expected[non_nan].view(torch.int32),
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @parametrize("dtype", [torch.int16, torch.uint16])
+    def test_nextafter_integer_unsupported(self, dtype):
+        def fn(x, y):
+            return torch.nextafter(x, y)
+
+        x = torch.tensor([1, 2, 3], dtype=dtype, device=device_type)
+        y = torch.tensor([2, 1, 4], dtype=dtype, device=device_type)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        with self.assertRaisesRegex(NotImplementedError, "nextafter_cuda"):
+            compiled(x, y)
+
     @skipIfXpu(msg="triton dependency - torch-xpu-ops: 2554")
     @config.patch({"eager_numerics.division_rounding": False})
     @xfailIfROCm
