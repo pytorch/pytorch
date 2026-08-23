@@ -4658,6 +4658,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       .def_readwrite(
           "error_on_collective",
           &::c10d::FakeProcessGroup::Options::error_on_collective)
+      .def_readwrite(
+          "simulate_uniform_ranks",
+          &::c10d::FakeProcessGroup::Options::simulate_uniform_ranks)
       .def(
           "__copy__",
           [](const ::c10d::FakeProcessGroup::Options& self) {
