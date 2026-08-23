@@ -12,9 +12,6 @@
 #include <torch/csrc/inductor/cpp_wrapper/device_internal/cuda.h>
 #endif
 
-static PyObject* (*_THPVariable_Wrap)(const at::TensorBase&) = nullptr;
-static int32_t (*_THPUtils_unpackInt)(PyObject*) = nullptr;
-
 // Cached module and function references
 static PyObject* triton_lazy_compile_module = nullptr;
 static PyObject* start_kernel_compile = nullptr;
@@ -42,25 +39,6 @@ static inline void loadLazyCompileFuncs() {
     AOTI_TORCH_CHECK(
         run_triton_kernel_with_autotune,
         "Failed to get run_triton_kernel_with_autotune");
-
-    RAIIPyObject guards_mod = PyImport_ImportModule("torch._C._dynamo.guards");
-    AOTI_TORCH_CHECK(guards_mod, "Failed to import torch._C._dynamo.guards");
-
-    RAIIPyObject wrap_addr =
-        PyObject_GetAttrString(guards_mod, "_torchinductor_thp_variable_wrap");
-    AOTI_TORCH_CHECK(
-        wrap_addr, "Failed to get _torchinductor_thp_variable_wrap");
-    _THPVariable_Wrap = reinterpret_cast<decltype(_THPVariable_Wrap)>(
-        PyLong_AsVoidPtr(wrap_addr));
-    AOTI_TORCH_CHECK(_THPVariable_Wrap, "THPVariable_Wrap not resolved");
-
-    RAIIPyObject unpack_addr = PyObject_GetAttrString(
-        guards_mod, "_torchinductor_thputils_unpack_int");
-    AOTI_TORCH_CHECK(
-        unpack_addr, "Failed to get _torchinductor_thputils_unpack_int");
-    _THPUtils_unpackInt = reinterpret_cast<decltype(_THPUtils_unpackInt)>(
-        PyLong_AsVoidPtr(unpack_addr));
-    AOTI_TORCH_CHECK(_THPUtils_unpackInt, "THPUtils_unpackInt not resolved");
   }
 }
 
@@ -73,7 +51,7 @@ static inline std::string getStringAttr(PyObject* obj, const char* attr) {
 static inline int getIntAttr(PyObject* obj, const char* attr) {
   RAIIPyObject val = PyObject_GetAttrString(obj, attr);
   AOTI_TORCH_CHECK(val, "Failed to get attribute");
-  return _THPUtils_unpackInt(val);
+  return torch_python_thputils_unpack_int(val);
 }
 
 static inline int getOptionalIntAttr(
@@ -82,7 +60,8 @@ static inline int getOptionalIntAttr(
     int sentinel = -1) {
   RAIIPyObject val = PyObject_GetAttrString(obj, attr);
   AOTI_TORCH_CHECK(val, "Failed to get attribute");
-  return (!Py_IsNone(val.get())) ? _THPUtils_unpackInt(val) : sentinel;
+  return (!Py_IsNone(val.get())) ? torch_python_thputils_unpack_int(val)
+                                 : sentinel;
 }
 
 static inline std::vector<int> getIntListAttr(PyObject* obj, const char* attr) {
@@ -92,7 +71,7 @@ static inline std::vector<int> getIntListAttr(PyObject* obj, const char* attr) {
   std::vector<int> result;
   result.reserve(size);
   for (Py_ssize_t i = 0; i < size; i++) {
-    result.push_back(_THPUtils_unpackInt(PyList_GetItem(val, i)));
+    result.push_back(torch_python_thputils_unpack_int(PyList_GetItem(val, i)));
   }
   return result;
 }
@@ -122,13 +101,13 @@ static inline PyObject* convertArgToPython(const T& arg) {
   if constexpr (std::is_same_v<DecayedT, AtenTensorHandle>) {
     at::Tensor* tensor_ptr =
         torch::aot_inductor::tensor_handle_to_tensor_pointer(arg);
-    return _THPVariable_Wrap(*tensor_ptr);
+    return torch_python_thp_variable_wrap(*tensor_ptr);
   } else if constexpr (std::is_same_v<
                            DecayedT,
                            torch::aot_inductor::RAIIAtenTensorHandle>) {
     at::Tensor* tensor_ptr =
         torch::aot_inductor::tensor_handle_to_tensor_pointer(arg.get());
-    return _THPVariable_Wrap(*tensor_ptr);
+    return torch_python_thp_variable_wrap(*tensor_ptr);
   } else if constexpr (std::is_same_v<DecayedT, bool>) {
     PyObject* py_arg = arg ? Py_True : Py_False;
     return Py_NewRef(py_arg);

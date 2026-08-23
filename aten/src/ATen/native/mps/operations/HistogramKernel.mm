@@ -50,7 +50,6 @@ void histogramdd_kernel_impl(Tensor& hist_output,
   TORCH_INTERNAL_ASSERT(int64_t(bin_edges.size()) == D);
   for (const auto dim : c10::irange(D)) {
     bin_edges_numel += bin_edges[dim].numel();
-    TORCH_INTERNAL_ASSERT(bin_edges[dim].is_contiguous());
     TORCH_INTERNAL_ASSERT(hist_output.size(dim) + 1 == bin_edges[dim].numel());
   }
 
@@ -123,7 +122,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       id<MTLComputePipelineState> histogramPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(histogramPSO, "histogram", allTensorsList);
+      getMPSProfiler().beginProfileKernel(histogramPSO, "histogram", allTensorsList, mpsStream);
 
       [computeEncoder setComputePipelineState:histogramPSO];
       mtl_setArgs(computeEncoder, input, weight, thread_histograms, stridedIndicesBuffer, D);
@@ -138,7 +137,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
       mtl_dispatch1DJob(computeEncoder, histogramPSO, numThreads);
 
-      getMPSProfiler().endProfileKernel(histogramPSO);
+      getMPSProfiler().endProfileKernel(histogramPSO, mpsStream);
     }
   });
   at::sum_out(hist_output, thread_histograms, /*dim=*/{0});
@@ -161,16 +160,11 @@ static void histogramdd_out_mps_template(const Tensor& self,
   const auto reshaped_weight =
       weight.has_value() ? std::optional<Tensor>(weight.value().reshape({M})) : std::optional<Tensor>();
 
-  std::vector<Tensor> bin_edges_contig(bin_edges.size());
-  for (const auto dim : c10::irange(bin_edges_contig.size())) {
-    bin_edges_contig[dim] = bin_edges[dim].contiguous();
-  }
-
   AT_DISPATCH_V2(self.scalar_type(),
                  "histogram_mps",
                  AT_WRAP([&]() {
                    mps::histogramdd_kernel_impl<scalar_t, bin_algorithm>(
-                       hist, bin_edges_contig, reshaped_input, reshaped_weight);
+                       hist, bin_edges, reshaped_input, reshaped_weight);
                  }),
                  AT_EXPAND(AT_ALL_TYPES),
                  kBFloat16,
