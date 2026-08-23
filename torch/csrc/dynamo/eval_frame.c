@@ -570,6 +570,8 @@ static PyTypeObject THPPyInterpreterFrameType = {
 
 #endif // !(IS_PYTHON_3_15_PLUS)
 
+#if !IS_PYTHON_3_13_PLUS
+
 void clear_old_frame_if_python_312_plus(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame) {
@@ -580,6 +582,8 @@ void clear_old_frame_if_python_312_plus(
 
 #endif
 }
+
+#endif // !IS_PYTHON_3_13_PLUS
 
 static PyObject* increment_working_threads(
     PyThreadState* tstate,

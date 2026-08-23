@@ -292,7 +292,7 @@ kernel void conv_weight_to_dhwio(
        input_channel) *
           params.output_channels +
       output_channel;
-  for (int kernel_width_index = 0; kernel_width_index < params.kernel_width;
+  for (uint kernel_width_index = 0; kernel_width_index < params.kernel_width;
        ++kernel_width_index) {
     destination_row
         [kernel_width_index * params.input_channels_per_group *
