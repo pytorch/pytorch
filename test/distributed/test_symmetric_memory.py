@@ -36,7 +36,7 @@ from torch.distributed._symmetric_memory._nccl import (
     register_external_nccl_comm,
 )
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
-from torch.nn.functional import ScalingType, SwizzleType
+from torch.nn.functional import scaled_mm, ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
@@ -1363,6 +1363,98 @@ class AsyncTPTest(MultiProcContinuousTest):
         dist.reduce_scatter_tensor(ref, (A_hp @ B_hp.t()).contiguous())
         for out in outputs:
             torch.testing.assert_close(out, ref, rtol=2e-2, atol=5e-2)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    @parametrize("k_shard", [128, 64])
+    def test_mxfp8_colwise_all_gather_scales(self, k_shard: int) -> None:
+        """Gathering colwise-quantized activations, which wgrad needs.
+
+        This path is a standalone all-gather rather than a fused op: wgrad wants
+        dY.T @ X with X colwise-quantized, so the caller gathers X itself. The
+        test pins which layouts survive that gather.
+
+        Colwise means blocking along M, so the operand is X.T [K, M] with scales
+        [K, M / 32] and the gather runs along K. The alignment constraint therefore
+        lands on K / world_size, which is much smaller than the M / world_size the
+        forward's rowwise gather has to satisfy -- k_shard=64 is the case that
+        breaks, and it is reachable at real shapes (K=512 at TP=8).
+
+        Two things hold regardless of alignment: the qdata concatenates, and so do
+        the *unswizzled* scales. Only concatenating already-swizzled scales needs
+        the 128 alignment, because `to_blocked` pads each shard's tail to a
+        128-row tile. Gathering unswizzled and swizzling once afterwards is the
+        general recipe.
+        """
+        self._init_process()
+        world = self.world_size
+        M, N = 256, 64
+        K = k_shard * world
+
+        torch.manual_seed(42)
+        X_full = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+        X_shard = X_full.chunk(world, dim=1)[self.rank].contiguous()
+
+        def colwise(x):
+            # blocks along M, i.e. quantize the transpose: [K, M] and [K, M // 32]
+            scale, q = to_mxfp(x.t().contiguous(), format="mxfp8")
+            return q, scale
+
+        q_shard, s_shard = colwise(X_shard)
+        q_ref, s_ref = colwise(X_full)
+
+        # 1. qdata gathers by plain concatenation at any alignment
+        q_gathered = torch.empty_like(q_ref)
+        dist.all_gather_into_tensor(
+            q_gathered.view(torch.uint8), q_shard.view(torch.uint8)
+        )
+        self.assertEqual(q_gathered.view(torch.uint8), q_ref.view(torch.uint8))
+
+        # 2. so do the unswizzled scales; swizzling the gathered result then
+        #    matches swizzling the reference, whatever k_shard is
+        s_gathered = torch.empty_like(s_ref)
+        dist.all_gather_into_tensor(
+            s_gathered.view(torch.uint8), s_shard.contiguous().view(torch.uint8)
+        )
+        self.assertEqual(s_gathered.view(torch.uint8), s_ref.view(torch.uint8))
+        self.assertEqual(
+            to_blocked(s_gathered).view(torch.uint8),
+            to_blocked(s_ref).view(torch.uint8),
+        )
+
+        # 3. concatenating already-swizzled scales only works when 128-aligned
+        cat_swizzled = torch.cat([to_blocked(s_shard)] * world)
+        ref_swizzled = to_blocked(s_ref)
+        if k_shard % 128 == 0:
+            self.assertEqual(cat_swizzled.numel(), ref_swizzled.numel())
+        else:
+            # each shard pads its own tail, so the buffer is the wrong size --
+            # the failure is structural, not a silent numerical error
+            self.assertNotEqual(cat_swizzled.numel(), ref_swizzled.numel())
+
+        # 4. the gathered scales are consumable by scaled_mm
+        dY = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
+        dY_scale, dY_q = to_mxfp(dY.t().contiguous(), format="mxfp8")
+        wgrad = scaled_mm(
+            q_gathered,
+            dY_q.t(),
+            to_blocked(s_gathered),
+            ScalingType.BlockWise1x32,
+            to_blocked(dY_scale),
+            ScalingType.BlockWise1x32,
+            swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+            output_dtype=torch.bfloat16,
+        )
+        self.assertEqual(wgrad.shape, torch.Size([K, N]))
+        ref = (
+            from_blocked_format(q_ref, s_ref, blocksize=32)
+            @ from_blocked_format(dY_q, dY_scale, blocksize=32).t()
+        )
+        torch.testing.assert_close(wgrad, ref, rtol=2e-2, atol=5e-2)
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
