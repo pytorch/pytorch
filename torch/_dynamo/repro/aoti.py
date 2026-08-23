@@ -31,6 +31,7 @@ from typing import Any, IO
 import torch
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
+    AccuracyError,
     BuckTargetWriter,
     extra_imports,
     generate_config_string,
@@ -43,6 +44,8 @@ from torch._dynamo.debug_utils import (
 )
 from torch.export import ExportedProgram
 from torch.hub import tqdm
+
+from . import _minifier_sanity_guard
 
 
 log = logging.getLogger(__name__)
@@ -127,7 +130,7 @@ def get_module_string(gm: torch.fx.GraphModule) -> str:
         s = first + "\n" + s
         return s
 
-    module_string = NNModuleToString.convert(gm)
+    module_string = NNModuleToString.convert(gm, allow_unsafe_repr=True)
     return _convert_to_comment(module_string)
 
 
@@ -459,23 +462,28 @@ def repro_minify(
                 return False
             return True
 
-    minifier(
-        mod,
-        flat_example_inputs,
-        module_fails=functools.partial(module_fails, check_str=options.check_str),
-        dump_state=functools.partial(
-            dump_compiler_graph_state,
-            compiler_name=compiler_name,
-            config_patches=config_patches,
-            accuracy=options.accuracy,
-            strict=strict,
-        ),
-        save_dir=options.save_dir,
-        offload_to_disk=options.offload_to_disk,
-        skip_offload=options.skip_saving_eager_intermediates,
-        skip_sanity=options.skip_sanity,
-        max_granularity=options.max_granularity,
+    original_failure = (
+        AccuracyError("Bad accuracy detected") if options.accuracy else None
     )
+    with _minifier_sanity_guard() as sanity:
+        minifier(
+            mod,
+            flat_example_inputs,
+            module_fails=functools.partial(module_fails, check_str=options.check_str),
+            dump_state=functools.partial(
+                dump_compiler_graph_state,
+                compiler_name=compiler_name,
+                config_patches=config_patches,
+                accuracy=options.accuracy,
+                strict=strict,
+            ),
+            save_dir=options.save_dir,
+            offload_to_disk=options.offload_to_disk,
+            skip_offload=options.skip_saving_eager_intermediates,
+            skip_sanity=options.skip_sanity,
+            max_granularity=options.max_granularity,
+        )
+    sanity.raise_if_failed(original_failure)
 
 
 def run_repro(

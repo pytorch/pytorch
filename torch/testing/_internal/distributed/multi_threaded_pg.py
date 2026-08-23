@@ -31,7 +31,7 @@ Lots of missing collectives.
 Collectives validation.
 Make timeout robust by making collectives respect the test deadline.
 Make tests robust by making collectives interruptible.
-We need some synchronization around cleanup to ensure that timedout ranks don't cause spurious failures.
+We need some synchronization around cleanup to ensure that timed out ranks don't cause spurious failures.
 
 """
 
@@ -83,7 +83,7 @@ _reduce_ops = {
 # actually update any view metadata if you do differentiation.  This
 # ordinarily "doesn't matter" because distributed collectives aren't
 # differentiable anyway, but it's possible to tickle this in testing if
-# someone tries to touch the grad_fn of a Tensor.  There a few ways to
+# someone tries to touch the grad_fn of a Tensor.  There are a few ways to
 # fix this, but the easiest way was to use the .detach() trick to hide
 # the mutations from autograd.
 
@@ -152,13 +152,24 @@ class AllToAllBase:
         return sizes
 
 
+def _premul_sum_reduce(tensors, factor):
+    if isinstance(factor, torch.Tensor):
+        factor = factor.to(tensors[0].device)
+    return torch.sum(torch.stack([t * factor for t in tensors]), dim=0)
+
+
 class AllReduce:
     def __init__(self, op):
-        if op.op not in _reduce_ops:
+        if op.op == ReduceOp.PREMUL_SUM:
+            self.op = op.op
+            self.premul_factor = op.factor
+        elif op.op in _reduce_ops:
+            self.op = op.op
+            self.premul_factor = None
+        else:
             raise NotImplementedError(
                 f"AllReduce op {op.op} not supported on multithreaded pg for now."
             )
-        self.op = op.op
 
     @torch.no_grad()
     def work(self, data):
@@ -172,7 +183,10 @@ class AllReduce:
             ]
 
             # now mimic reduce across all ranks
-            res = _reduce_ops[self.op](tensors)
+            if self.premul_factor is not None:
+                res = _premul_sum_reduce(tensors, self.premul_factor)
+            else:
+                res = _reduce_ops[self.op](tensors)
 
             # copy all the reduced value to each rank
             for src_rank in range(len(data)):
@@ -545,7 +559,9 @@ def _create_threaded_pg(prefix_store, rank, world_size, timeout):
     return pg
 
 
-dist.Backend.register_backend("threaded", _create_threaded_pg, devices=["cpu", "cuda"])
+dist.Backend.register_backend(
+    "threaded", _create_threaded_pg, devices=["cpu", "cuda", "xpu"]
+)
 
 
 @dataclass
