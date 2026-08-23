@@ -8,8 +8,7 @@ namespace torch::utils {
 
 void initializeDtypes() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
-  if (!torch_module)
-    throw python_error();
+  TORCH_CHECK_PYTHON(torch_module);
 
 #define DEFINE_SCALAR_TYPE(_1, n) at::ScalarType::n,
 
@@ -24,15 +23,13 @@ void initializeDtypes() {
     std::string legacy_name(legacy_view);
     THPObjectPtr dtype(THPDtype_New(scalarType, primary_name));
     torch::registerDtypeObject((THPDtype*)dtype.get(), scalarType);
-    if (PyModule_AddObjectRef(
-            torch_module.get(), primary_name.c_str(), dtype.get()) != 0) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(
+        PyModule_AddObjectRef(
+            torch_module.get(), primary_name.c_str(), dtype.get()) == 0);
     if (!legacy_name.empty()) {
-      if (PyModule_AddObjectRef(
-              torch_module.get(), legacy_name.c_str(), dtype.get()) != 0) {
-        throw python_error();
-      }
+      TORCH_CHECK_PYTHON(
+          PyModule_AddObjectRef(
+              torch_module.get(), legacy_name.c_str(), dtype.get()) == 0);
     }
   }
 }

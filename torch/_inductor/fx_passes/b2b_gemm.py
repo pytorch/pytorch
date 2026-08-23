@@ -785,6 +785,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
         function = functools.partial(tuned_b2b_gemm, is_left_assoc, subgraph)
         function.__name__ = tuned_b2b_gemm.__name__  # type: ignore[attr-defined]
         function._inductor_lowering_function = True  # type: ignore[attr-defined]
+        function._inductor_lowering_output_metadata_ignores_input_storage = True  # type: ignore[attr-defined]
         replacement: torch.fx.Node = graph.call_function(
             function,
             (A, B, C),

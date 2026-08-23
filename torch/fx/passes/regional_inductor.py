@@ -99,6 +99,7 @@ def _compile_submod(gm: torch.fx.GraphModule, prefix: str) -> torch.fx.GraphModu
                     fake_inputs,
                     dynamic_shapes="from_tracing_context",
                     aot=True,
+                    donate_graph_module=True,
                 )
             if not isinstance(compiled_fn, AOTCompiledArtifact):
                 raise AssertionError(

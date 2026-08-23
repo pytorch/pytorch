@@ -108,7 +108,7 @@ from torch._inductor.utils import (
     XPU_KERNEL_FORMAT,
 )
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_reference_type
+from torch._library.opaque_object import is_opaque_symbolic_type
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -207,7 +207,7 @@ log = logging.getLogger(__name__)
 AOTAUTOGRAD_CACHE_PREFIX = "a"
 
 
-def _device_constructor_sort_key(target: Any) -> str:
+def _device_constructor_sort_key(target: object) -> str:
     return ".".join(
         x
         for x in (
@@ -247,6 +247,51 @@ def get_kernel_bin_format(device: str) -> str:
         return XPU_KERNEL_FORMAT
     else:
         return ""
+
+
+def _cuda_fatbin_command(
+    asm_file: str,
+    cubin_file: str,
+    raw_cubin_file: str | None,
+    nvcc: str | None,
+    fatbinary: str | None,
+    current_arch: str | None = None,
+) -> list[str]:
+    if not current_arch:
+        current_arch = cuda_compile_utils._nvcc_arch_as_compile_option_or_raise()
+    gencode_options = cuda_compile_utils._cuda_multi_arch_gencode_options(current_arch)
+    if (
+        fatbinary is not None
+        and raw_cubin_file is not None
+        and os.path.exists(raw_cubin_file)
+        and not cuda_compile_utils._cuda_gencode_options_have_non_current_sass(
+            gencode_options, current_arch
+        )
+    ):
+        # Avoid re-running ptxas; the CUDA toolkit can lag the PTX version
+        # emitted by Triton. This path is only valid when no extra SASS images
+        # beyond the current GPU generation were requested.
+        return [
+            fatbinary,
+            f"--create={cubin_file}",
+            "-64",
+            f"--image3=kind=elf,sm={current_arch},file={raw_cubin_file}",
+            f"--image3=kind=ptx,sm={current_arch},file={asm_file}",
+        ]
+
+    if nvcc is None:
+        raise RuntimeError("nvcc is required to build fatbin")
+
+    cmd = [
+        *shlex.split(nvcc),
+        "-fatbin",
+        asm_file,
+        "-o",
+        cubin_file,
+    ]
+    for gencode_option in gencode_options:
+        cmd.extend(["-gencode", gencode_option])
+    return cmd
 
 
 def get_device_information(device_type: str) -> dict[str, str]:
@@ -688,7 +733,7 @@ class FxGraphCachePickler(pickle.Pickler):
         self.fast = True
 
     # pyrefly: ignore [bad-override]
-    def reducer_override(self, obj: Any) -> Any:
+    def reducer_override(self, obj: object) -> Any:
         """Fallback reducer for objects not registered in dispatch_table.
 
         This handles extension types (e.g. pybind11 enums) that don't support
@@ -724,7 +769,9 @@ class FxGraphCachePickler(pickle.Pickler):
         return result
 
     @staticmethod
-    def _reduce_unpicklable(obj: Any) -> Any:
+    def _reduce_unpicklable(
+        obj: object,
+    ) -> tuple[Callable[[str], NoReturn], tuple[str]]:
         key = _get_stable_obj_key(obj)
         if key is None:
             raise BypassFxGraphCache(
@@ -801,7 +848,7 @@ class FxGraphCachePickler(pickle.Pickler):
         # hashing.  Guards ensure correctness on cache reload.
         return (_ident, (str(s),))
 
-    def _reduce_unsupported(self, s: Any) -> NoReturn:
+    def _reduce_unsupported(self, s: object) -> NoReturn:
         """
         Custom reducer to handle any objects that we don't support and therefore
         raise to bypass caching.
@@ -836,19 +883,19 @@ class FxGraphCachePickler(pickle.Pickler):
             # I have not worked out the details for everything else
             # but I'm sure we could
             if (
-                opaque_object.is_opaque_type(cls)
+                opaque_object.is_custom_class(cls)
                 and opaque_object.should_hoist(cls)
                 and not opaque_object.has_members(cls)
             ):
                 return (_ident, (t.script_class_name,))
-            if opaque_object.is_opaque_type(cls):
+            if opaque_object.is_custom_class(cls):
                 # Opaque types (e.g., DeviceMesh) may have cyclic references
                 # that fast-mode pickling cannot handle.  Disable fast mode
                 # before the subtree is pickled so the memo table tracks cycles.
                 self.fast = False
         return (_ident, (t.wrapped_obj, t.script_class_name, t.real_obj))
 
-    def dumps(self, obj: Any) -> bytes:
+    def dumps(self, obj: object) -> bytes:
         """
         Pickle an object and return a byte string.
         """
@@ -868,14 +915,14 @@ class FxGraphCachePickler(pickle.Pickler):
             self._stream.seek(0)
             self._stream.truncate(0)
 
-    def get_hash(self, obj: Any) -> str:
+    def get_hash(self, obj: object) -> str:
         """
         Serialize an object and return a hash of the bytes.
         """
         serialized_data = self.dumps(obj)
         return COMPACT_CACHE_KEY_STRATEGY.key(serialized_data)
 
-    def get_key(self, obj: Any) -> str:
+    def get_key(self, obj: object) -> str:
         """
         Serialize an object and return an FX graph cache key.
         """
@@ -889,7 +936,7 @@ class FxGraphCachePickler(pickle.Pickler):
         to a different value than another.
         """
 
-        def get_str(obj: Any) -> str:
+        def get_str(obj: object) -> str:
             if isinstance(obj, torch.Tensor):
                 return str(extract_tensor_metadata_for_cache_key(obj))
             elif isinstance(obj, bytes):
@@ -949,6 +996,7 @@ def torch_key() -> bytes:
                 # a hash representing the state of the source code.
                 extra_files = (
                     "codegen/aoti_runtime/interface.cpp",
+                    "codegen/aoti_runtime/streams.h",
                     "script.ld",
                 )
                 inductor_root = os.path.dirname(__file__)
@@ -1006,6 +1054,7 @@ class CacheabilityValidator:
 
     def validate(self) -> None:
         self._check_custom_passes()
+        self._check_nested_region_inductor_config_patches()
         self._check_frozen_params()
         self._check_runtime_constant_folding()
         self._check_compiler_bisector()
@@ -1100,6 +1149,28 @@ class CacheabilityValidator:
             if callable(p) and not isinstance(p, CustomGraphPass):
                 self.bypass("Unsupported _fuse_ddp_communication_pass")
 
+    def _check_nested_region_inductor_config_patches(self) -> None:
+        # Nested region config patches are hashed by pickling their raw value
+        # (see _collect_nested_region_inductor_config_patches_for_hash). Unlike
+        # top-level custom passes there is no uuid() fallback, so any callable or
+        # custom-pass value is conservatively treated as uncacheable, including a
+        # CustomGraphPass that provides a stable uuid().
+        for _, config_patches in _collect_nested_region_inductor_config_patches(
+            self.gm
+        ):
+            for key, value in config_patches.items():
+                # A value may be a list of callables (e.g.
+                # _fuse_ddp_communication_passes), so look inside sequences too.
+                values = value if isinstance(value, (list, tuple)) else (value,)
+                if any(callable(v) for v in values):
+                    self.bypass(
+                        f"Uncacheable nested region config '{key}': callable value"
+                    )
+                if key in _NESTED_REGION_UNCACHEABLE_CONFIG_KEYS and value:
+                    self.bypass(
+                        f"Uncacheable nested region config '{key}': custom pass"
+                    )
+
     def _check_frozen_params(self) -> None:
         # Freezing can embed constants that wouldn't be static across runs.
         if has_frozen_params(self.gm) and not torch._utils_internal.justknobs_check(
@@ -1130,7 +1201,7 @@ class CacheabilityValidator:
 
     def _check_cache_key_object(
         self,
-        obj: Any,
+        obj: object,
         seen: set[int] | None = None,  # noqa: set_linter
     ) -> None:
         if seen is None:
@@ -1158,11 +1229,11 @@ class CacheabilityValidator:
 _warned_pre_grad_pass_missing_uuid: OrderedSet[str] = OrderedSet()
 
 
-def _custom_pass_has_uuid(custom_pass: Any) -> bool:
+def _custom_pass_has_uuid(custom_pass: object) -> bool:
     return isinstance(custom_pass, CustomGraphPass) and custom_pass.uuid() is not None
 
 
-def _custom_pass_name(custom_pass: Any) -> str:
+def _custom_pass_name(custom_pass: object) -> str:
     return getattr(custom_pass, "__qualname__", None) or type(custom_pass).__qualname__
 
 
@@ -1222,6 +1293,56 @@ class HashableOpaqueValue:
     ordinal: int
 
 
+_NESTED_REGION_UNCACHEABLE_CONFIG_KEYS = OrderedSet(
+    [
+        "custom_partitioner_fn",
+        "joint_custom_post_pass",
+        "joint_custom_pre_pass",
+        "post_grad_custom_post_pass",
+        "post_grad_custom_pre_pass",
+        "pre_grad_custom_pass",
+        "_post_fusion_custom_pass",
+        "_pre_fusion_custom_pass",
+    ]
+)
+
+
+def _collect_nested_region_inductor_config_patches(
+    gm: torch.fx.GraphModule,
+) -> tuple[tuple[str, dict[str, Any]], ...]:
+    patches: list[tuple[str, dict[str, Any]]] = []
+
+    def add_patches(name: str, nested_config: Any) -> None:
+        config_patches = getattr(nested_config, "inductor_config_patches", None)
+        if config_patches:
+            patches.append((name, config_patches))
+
+    for name, module in gm.named_modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+        add_patches(name, getattr(module, "meta", {}).get("nested_region_config"))
+        for node in module.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        ):
+            add_patches(
+                f"{name}.{node.name}",
+                node.meta.get("custom", {}).get("nested_region_config"),
+            )
+    return tuple(patches)
+
+
+def _collect_nested_region_inductor_config_patches_for_hash(
+    gm: torch.fx.GraphModule,
+) -> tuple[tuple[str, tuple[tuple[str, Any], ...]], ...]:
+    return tuple(
+        (
+            name,
+            tuple((key, config_patches[key]) for key in sorted(config_patches)),
+        )
+        for name, config_patches in _collect_nested_region_inductor_config_patches(gm)
+    )
+
+
 class FxGraphHashDetails:
     """
     Object to capture all the details for a compiled FX graph relevant to computing
@@ -1253,7 +1374,7 @@ class FxGraphHashDetails:
     )
 
     @classmethod
-    def _contains_tensor(cls, value: Any) -> bool:
+    def _contains_tensor(cls, value: object) -> bool:
         if isinstance(value, torch.Tensor):
             return True
         if isinstance(value, (list, tuple, OrderedSet, frozenset)):
@@ -1266,7 +1387,7 @@ class FxGraphHashDetails:
         return False
 
     @classmethod
-    def _contains_cpu_tensor(cls, value: Any) -> bool:
+    def _contains_cpu_tensor(cls, value: object) -> bool:
         if isinstance(value, torch.Tensor):
             return value.device.type == "cpu"
         if isinstance(value, (list, tuple, OrderedSet, frozenset)):
@@ -1279,7 +1400,7 @@ class FxGraphHashDetails:
         return False
 
     @staticmethod
-    def _device_type(value: Any) -> str | None:
+    def _device_type(value: object) -> str | None:
         if isinstance(value, torch.device):
             return value.type
         if isinstance(value, str):
@@ -1291,7 +1412,7 @@ class FxGraphHashDetails:
 
     @classmethod
     def _is_factory_target(
-        cls, target: Any, targets: tuple[Any, ...], packets: tuple[Any, ...]
+        cls, target: object, targets: tuple[object, ...], packets: tuple[object, ...]
     ) -> bool:
         if target in targets or target in packets:
             return True
@@ -1373,7 +1494,7 @@ class FxGraphHashDetails:
         processed_inputs: list[InputType | HashableOpaqueValue] = []
         seen_opaques: dict[int, HashableOpaqueValue] = {}
         for inp in example_inputs:
-            if is_opaque_reference_type(type(inp)):
+            if is_opaque_symbolic_type(type(inp)):
                 if id(inp) not in seen_opaques:
                     seen_opaques[id(inp)] = HashableOpaqueValue(len(seen_opaques))
                 processed_inputs.append(seen_opaques[id(inp)])
@@ -1381,6 +1502,11 @@ class FxGraphHashDetails:
                 processed_inputs.append(inp)
         self.example_inputs = processed_inputs
         self.cache_key_tag = cconfig.cache_key_tag
+        self.nested_inductor_config_patches = (
+            _collect_nested_region_inductor_config_patches_for_hash(gm)
+            if gm is not None
+            else ()
+        )
 
         # Order kwargs so hashing is stable to changes in kwarg order. Although
         # it's technically a _CompileFxKwargs we don't actually need it typed as
@@ -1474,7 +1600,10 @@ class FxGraphHashDetails:
         # in the CompiledFxGraph, so it must be part of the cache key.
         # Note: the "trace" prefix is excluded from _cache_config_ignore_prefix,
         # so we add this explicitly.
-        self.provenance_tracking_level = config.trace.provenance_tracking_level
+        self.provenance_tracking_level = config.effective_provenance_tracking_level()
+        self.provenance_tracking_to_timeline = (
+            config.trace.provenance_tracking_to_timeline
+        )
 
         # Factory ops with dtype=None are lowered using the ambient default dtype,
         # so cached code compiled under one default dtype is not valid under another.
@@ -1486,6 +1615,15 @@ class FxGraphHashDetails:
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
         )
+
+        # compile-on-one-rank changes wrapper and kernel codegen (runtime device
+        # resolution, DeviceProperties(index=None)) even for graphs that contain no
+        # coor::current_device node, so an entry compiled with it off must not be served
+        # to a compile with it on -- that would hand back the device-baked artifact CooR
+        # exists to avoid.
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+        self.compile_on_one_rank = _coor_enabled()
 
         # Include cudagraph annotation in cache key only when it changes
         # behavior. When both fwd and bwd are overridden to the same value,
@@ -1543,7 +1681,7 @@ class FxGraphHashDetails:
             config._fuse_ddp_communication_passes
         )
 
-        # Register indcutor backends and custom passes and get their UUIDs.
+        # Register inductor backends and custom passes and get their UUIDs.
         init_backend_registration()
         self.custom_backend_passes = tuple(
             map(self._get_custom_pass_detail, custom_backend_passes.values())
@@ -1855,7 +1993,6 @@ class InductorCacheArtifact(CacheArtifact):
     @override
     def populate_cache(self) -> None:
         FxGraphCache._write_to_local_cache(self.key, self.content)
-        FxGraphCache._emit_triton_bundle(self.content)
 
     @override
     @staticmethod
@@ -2117,29 +2254,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
-            # Older cache entries were serialized before guard source locations
-            # were stored, so keep accepting entries with only guards_expr.
-            guards_expr_with_source = getattr(graph, "guards_expr_with_source", None)
-            guards_expr_with_source_arg_count = getattr(
-                graph, "guards_expr_with_source_arg_count", None
-            )
-            # AOTAutograd can load an FX graph using a custom guard checker and
-            # an argument list that differs from the one Inductor used to save
-            # these per-guard expressions. In that case, preserve the custom
-            # evaluate_guards fallback below.
-            can_replay_guards_with_source = (
-                guards_expr_with_source is not None
-                and guards_expr_with_source_arg_count == len(symints)
-                and not config.unsafe_skip_cache_dynamic_shape_guards
-            )
-            if can_replay_guards_with_source:
-                check = shape_env.evaluate_guards_expression_with_source_info(
-                    guards_expr_with_source, symints
-                )
-            else:
-                check = bool(evaluate_guards(graph.guards_expr, symints))
+            check = bool(evaluate_guards(graph.guards_expr, symints))
             if check is not True:
-                raise AssertionError(f"Post-load guard evaluation failed for key {key}")
+                raise AssertionError(f"expected check to be True, got {check}")
             log.debug(
                 "fx graph cache key %s post-load guards: %s", key, shape_env.guards
             )
@@ -2157,15 +2274,6 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # iterating over all entries in the parent subdir.
         path = os.path.join(subdir, sha256_hash(content))
         write_atomic(path, content, make_dirs=True)
-
-    @staticmethod
-    def _emit_triton_bundle(content: bytes) -> None:
-        if not TritonBundler.is_enabled():
-            return
-
-        graph = pickle.loads(content)
-        if bundle := graph._triton_bundle:
-            TritonBundler.read_and_emit(bundle)
 
     @staticmethod
     def _save_graph(
@@ -2193,14 +2301,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             raise AssertionError("ShapeEnv is not set for cache serialization")
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         guards = shape_env.get_pruned_guards(symints)
-        (
-            compiled_graph.guards_expr,
-            compiled_graph.guards_expr_with_source,
-        ) = shape_env.produce_guards_expression_with_source_info(
+        compiled_graph.guards_expr = shape_env.produce_guards_expression(
             placeholders=symints, guards=guards
-        )
-        compiled_graph.guards_expr_with_source_arg_count = (
-            len(symints) if compiled_graph.guards_expr_with_source is not None else None
         )
         try:
             backend = torch.utils._triton.triton_backend()
@@ -3223,7 +3325,7 @@ end
 
             cubins_o = []
             asm_files = []
-            fatbin_cmds: list[tuple[str, str, str | None]] = []
+            fatbin_cmds: list[tuple[str, str, str | None, str | None]] = []
             if not _IS_WINDOWS:
                 cubins_to_embed: list[tuple[str, str]] = []
                 ld, objcopy = get_ld_and_objcopy(use_relative_path)
@@ -3244,7 +3346,12 @@ end
                     ):
                         if torch.version.hip is None:
                             fatbin_cmds.append(
-                                (asm_file, cubin_file, value.get("runtime_bin_path"))
+                                (
+                                    asm_file,
+                                    cubin_file,
+                                    value.get("runtime_bin_path"),
+                                    value.get("cuda_arch"),
+                                )
                             )
 
                         else:
@@ -3285,7 +3392,6 @@ end
                 if fatbin_cmds:
                     from concurrent.futures import ThreadPoolExecutor
 
-                    current_arch = cuda_compile_utils._nvcc_arch_as_compile_option()
                     nvcc = cuda_compile_utils._cuda_compiler()
                     fatbinary = shutil.which("fatbinary")
                     if nvcc is not None and (nvcc_dir := os.path.dirname(nvcc)):
@@ -3294,37 +3400,12 @@ end
                             fatbinary = candidate
 
                     def _compile_fatbin(
-                        asm_cubin_and_raw: tuple[str, str, str | None],
+                        asm_cubin_and_raw: tuple[str, str, str | None, str | None],
                     ) -> None:
-                        asm_f, cubin_f, raw_cubin_f = asm_cubin_and_raw
-                        if (
-                            fatbinary is not None
-                            and raw_cubin_f is not None
-                            and os.path.exists(raw_cubin_f)
-                        ):
-                            # Avoid re-running ptxas; the CUDA toolkit can lag
-                            # the PTX version emitted by Triton.
-                            cmd = [
-                                fatbinary,
-                                f"--create={cubin_f}",
-                                "-64",
-                                f"--image3=kind=elf,sm={current_arch},file={raw_cubin_f}",
-                                f"--image3=kind=ptx,sm={current_arch},file={asm_f}",
-                            ]
-                        else:
-                            if nvcc is None:
-                                raise RuntimeError("nvcc is required to build fatbin")
-                            cmd = [
-                                *shlex.split(nvcc),
-                                "-fatbin",
-                                asm_f,
-                                "-o",
-                                cubin_f,
-                                "-gencode",
-                                f"arch=compute_{current_arch},code=compute_{current_arch}",
-                                "-gencode",
-                                f"arch=compute_{current_arch},code=sm_{current_arch}",
-                            ]
+                        asm_f, cubin_f, raw_cubin_f, cuda_arch = asm_cubin_and_raw
+                        cmd = _cuda_fatbin_command(
+                            asm_f, cubin_f, raw_cubin_f, nvcc, fatbinary, cuda_arch
+                        )
                         try:
                             subprocess.run(
                                 cmd, capture_output=True, text=True, check=True
@@ -3525,7 +3606,7 @@ end
                 if config.aot_inductor.package:
                     generated_files.append(output_so)
 
-        if config.trace.provenance_tracking_level != 0:
+        if config.effective_provenance_tracking_level() != 0:
             kernel_info = torch._inductor.debug.create_kernel_information_json()
             kernel_info_json = os.path.join(
                 wrapper_path_operator.parent, "kernel_information.json"
@@ -3984,24 +4065,24 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         // We manually link it below to workaround issues with fbcode build.
         static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
 
-        template <typename T> static inline T parse_arg(PyObject* args, size_t n) {{
+        template <typename T> static inline T parse_arg(PyObject* const* args, size_t n) {{
             static_assert(std::is_pointer_v<T>, "arg type must be pointer or long");
-            return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
+            return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(args[n]));
         }}
-        template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {{
-            auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
+        template <> inline int64_t parse_arg<int64_t>(PyObject* const* args, size_t n) {{
+            auto result = PyLong_AsSsize_t(args[n]);
             if(result == -1 && PyErr_Occurred()) [[unlikely]]
                 throw std::runtime_error("expected int arg");
             return result;
         }}
-        template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* args, size_t n) {{
-            auto result = PyLong_AsVoidPtr(PyTuple_GET_ITEM(args, n));
+        template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* const* args, size_t n) {{
+            auto result = PyLong_AsVoidPtr(args[n]);
             if(result == reinterpret_cast<void*>(-1) && PyErr_Occurred()) [[unlikely]]
                 throw std::runtime_error("expected int arg");
             return reinterpret_cast<uintptr_t>(result);
         }}
-        template <> inline float parse_arg<float>(PyObject* args, size_t n) {{
-            auto result = PyFloat_AsDouble(PyTuple_GET_ITEM(args, n));
+        template <> inline float parse_arg<float>(PyObject* const* args, size_t n) {{
+            auto result = PyFloat_AsDouble(args[n]);
             if(result == -1.0 && PyErr_Occurred()) [[unlikely]]
                 throw std::runtime_error("expected float arg");
             return static_cast<float>(result);
@@ -4009,11 +4090,9 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
         {extra_parse_arg}
 
-        static PyObject* {entry_func}_py(PyObject* self, PyObject* args) {{
+        static PyObject* {entry_func}_py(PyObject* self, PyObject* const* args, Py_ssize_t nargs) {{
             try {{
-                if(!PyTuple_CheckExact(args)) [[unlikely]]
-                    throw std::runtime_error("tuple args required");
-                if(PyTuple_GET_SIZE(args) != {arg_len}) [[unlikely]]
+                if(nargs != {arg_len}) [[unlikely]]
                     throw std::runtime_error("requires {arg_len} args");
                 {call_entry_func}
             }} catch(std::exception const& e) {{
@@ -4026,7 +4105,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         }}
 
         static PyMethodDef py_methods[] = {{
-            {{"{entry_func}", {entry_func}_py, METH_VARARGS, ""}},
+            {{
+                "{entry_func}",
+                reinterpret_cast<PyCFunction>(reinterpret_cast<void (*)()>({entry_func}_py)),
+                METH_FASTCALL,
+                ""
+            }},
             {{NULL, NULL, 0, NULL}}}};
 
         static struct PyModuleDef py_module =
@@ -4165,6 +4249,17 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     def cache_clear() -> None:
         CppWrapperCodeCache.cache.clear()
 
+    @classmethod
+    def load_pybinding(cls, *args: Any, **kwargs: Any) -> Any:
+        # The cpp_wrapper host glue is compiled synchronously here (in the JIT
+        # torch.compile path this runs while importing the generated wrapper
+        # module, and in AOTI it runs during the autotune pass). Time it under a
+        # dedicated key so the host C++ cold-compile cost is attributed to
+        # cpp_wrapper instead of being hidden inside the generic
+        # PyCodeCache.load_by_key_path timer.
+        with dynamo_timed("cpp_wrapper_compile", log_pt2_compile_event=True):
+            return super().load_pybinding(*args, **kwargs)
+
     cpp_compile_command_flags = {
         "include_pytorch": True,
         "shared": True,
@@ -4180,8 +4275,19 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             size_t result_len = PyList_GET_SIZE(pyvec);
             result.reserve(result_len);
             for (size_t i = 0; i < result_len; i++) {{
+                PyObject* item = PyList_GET_ITEM(pyvec, i);
+                if (item == Py_None) {{
+                    result.push_back(nullptr);
+                    continue;
+                }}
                 // AtenTensorHandle is essentially a pointer
-                void* elem = PyCapsule_GetPointer(PyList_GET_ITEM(pyvec, i), NULL);
+                void* elem = PyCapsule_GetPointer(item, NULL);
+                if (elem == nullptr && PyErr_Occurred()) {{
+                    PyErr_Clear();
+                    throw std::runtime_error(
+                        "expected input handle to be a PyCapsule or None"
+                    );
+                }}
                 result.push_back(reinterpret_cast<AtenTensorHandle>(elem));
             }}
             return result;
@@ -4200,8 +4306,9 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             return result;
         }}
 
-        template <> inline std::vector<AtenTensorHandle> parse_arg<std::vector<AtenTensorHandle>>(PyObject* args, size_t n) {{
-            return unpack_tensor_handle_list(PyTuple_GET_ITEM(args, n));
+        template <>
+        inline std::vector<AtenTensorHandle> parse_arg<std::vector<AtenTensorHandle>>(PyObject* const* args, size_t n) {{
+            return unpack_tensor_handle_list(args[n]);
         }}
 
         PyObject* inductor_entry_cpp(std::vector<AtenTensorHandle>&& input_handles) {{
@@ -4924,6 +5031,7 @@ class CUTLASSCodeCache:
 
     _SOURCE_CODE_SUFFIX: str = ""
     _BACKEND: str = ""
+    _COMPILE_ERROR: type[exc.CppCompileError] = exc.CUDACompileError
 
     @classmethod
     def cache_clear(cls) -> None:
@@ -5002,16 +5110,6 @@ class CUTLASSCodeCache:
         return key, input_path
 
     @classmethod
-    def get_output_path(cls, source_code: str, dst_file_ext: str) -> str:
-        """
-        Returns the deterministic output path for `compile(source_code, dst_file_ext)`
-        without performing the compile. Useful when a caller needs to reference the
-        compiled artifact path before an async compile has finished.
-        """
-        _, input_path = cls.write(source_code, dst_file_ext)
-        return input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
-
-    @classmethod
     def compile(
         cls, source_code: str, dst_file_ext: str, extra_args: list[str] | None = None
     ) -> tuple[str, str, str]:
@@ -5066,7 +5164,7 @@ class CUTLASSCodeCache:
                     cls.cache[key_with_ext] = cls.CacheEntry(
                         input_path, output_path, error_json
                     )
-                    raise exc.CUDACompileError(cmd_parts, error_output)
+                    raise cls._COMPILE_ERROR(cmd_parts, error_output)
                 if not os.path.exists(output_path):
                     cmd = cls._compile_command(
                         src_files, output_path, dst_file_ext, extra_args
@@ -5099,7 +5197,7 @@ class CUTLASSCodeCache:
                             output_path,
                             binary_remote_cache,
                         )
-                        raise exc.CUDACompileError(cmd_parts, error.output) from error
+                        raise cls._COMPILE_ERROR(cmd_parts, error.output) from error
                     except Exception as error:
                         if "COMPILE FAILED WITH" in str(error):
                             cls._record_compile_error(
@@ -5110,7 +5208,7 @@ class CUTLASSCodeCache:
                                 output_path,
                                 binary_remote_cache,
                             )
-                            raise exc.CUDACompileError(cmd_parts, str(error)) from error
+                            raise cls._COMPILE_ERROR(cmd_parts, str(error)) from error
                         raise error
                     end_time = time()
                     log_duration_msg = f"{cls._BACKEND} {operation_name} took {end_time - start_time} seconds. Command: {cmd}"
@@ -5138,7 +5236,7 @@ class CUTLASSCodeCache:
         if cache_entry.error_json is not None:
             # Restore cached Exception and raise it as if we had compiled
             cmd_parts, error_output = json.loads(cache_entry.error_json)
-            raise exc.CUDACompileError(cmd_parts, error_output.encode("utf-8"))
+            raise cls._COMPILE_ERROR(cmd_parts, error_output.encode("utf-8"))
         return (cls.cache[key_with_ext].output_path, key, input_path)
 
     @classmethod
@@ -5232,7 +5330,13 @@ from torch._inductor.codegen.xpu import compile_utils as xpu_compile_utils
 class XPUCodeCache(CUTLASSCodeCache):
     _SOURCE_CODE_SUFFIX = "cpp"
     _BACKEND = "XPU"
+    _COMPILE_ERROR: type[exc.CppCompileError] = exc.XPUCompileError
     dll_cache: dict[str, DLLWrapper] = {}
+
+    @classmethod
+    def cache_clear(cls) -> None:
+        super().cache_clear()
+        cls.dll_cache.clear()
 
     @classmethod
     def _use_re_build(cls) -> bool:
@@ -5284,6 +5388,12 @@ class XPUCodeCache(CUTLASSCodeCache):
 
 @clear_on_fresh_cache
 class ROCmCodeCache:
+    """
+    A cache for managing the compilation and loading source code specifically for ROCm.
+    This class handles writing source code to files, compiling them into shared objects, and caching
+    the results to avoid redundant compilations.
+    """
+
     @dataclasses.dataclass
     class CacheEntry:
         input_path: str
