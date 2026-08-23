@@ -5164,6 +5164,79 @@ def forward(self, tangents_1):
 
         self._assert_no_extra_refs(refcount_box)
 
+    def test_detach_output_aliasing_intermediate_base(self):
+        # mark_non_differentiable is keyed on TensorImpl, and a backend is free
+        # to lower aten.detach to a no-op -- inductor does -- so y.detach() and
+        # y's intermediate base can be the same object. Marking the detach
+        # output then marks the base, which is a slot the backward requires a
+        # tangent for, and autograd hands it None because
+        # _materialize_non_diff_grads is False. Depending on whether that
+        # backward has any compute this either silently drops the gradient or
+        # dies inside the compiled backward.
+        def f(x):
+            y = torch.sin(x)
+            return y[0:4], y[4:8], y.detach(), x * 3
+
+        def run(fn, x):
+            outs = fn(x)
+            (outs[0].sum() + outs[1].sum() + outs[3].sum()).backward()
+            return (
+                [o.requires_grad for o in outs],
+                [o.grad_fn is not None for o in outs],
+                x.grad,
+            )
+
+        x_ref = torch.arange(8, dtype=torch.float32).requires_grad_(True)
+        rg_ref, gf_ref, grad_ref = run(f, x_ref)
+        self.assertIsNotNone(grad_ref)
+
+        for backend in ("aot_eager", "inductor"):
+            torch._dynamo.reset()
+            x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
+            rg, gf, grad = run(torch.compile(f, backend=backend), x)
+            self.assertEqual(rg, rg_ref, f"requires_grad diverged on {backend}")
+            self.assertEqual(gf, gf_ref, f"grad_fn diverged on {backend}")
+            self.assertEqual(grad, grad_ref, f"gradient diverged on {backend}")
+
+        # The detach output must stay a leaf: sparing the base must not be
+        # done by declining to mark the output that aliases it.
+        torch._dynamo.reset()
+        x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
+        detached = torch.compile(f, backend="inductor")(x)[2]
+        self.assertFalse(detached.requires_grad)
+        self.assertIsNone(detached.grad_fn)
+
+    def test_detach_output_aliasing_sibling_output(self):
+        # No intermediate base here: h * 1 folds to h and detach() no-ops, so
+        # two OUTPUT slots hold one object and marking the second marks the
+        # first, dropping the only gradient in the model.
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                h = torch.relu(self.l(x))
+                return h * 1.0, h.detach()
+
+        torch.manual_seed(0)
+        ref = Net()
+        x_ref = torch.randn(3, requires_grad=True)
+        out_ref = ref(x_ref)
+        out_ref[0].sum().backward()
+
+        torch._dynamo.reset()
+        torch.manual_seed(0)
+        mod = Net()
+        x = torch.randn(3, requires_grad=True)
+        outs = torch.compile(mod, backend="inductor")(x)
+        self.assertEqual(
+            [(o.requires_grad, o.grad_fn is not None) for o in outs],
+            [(o.requires_grad, o.grad_fn is not None) for o in out_ref],
+        )
+        outs[0].sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
