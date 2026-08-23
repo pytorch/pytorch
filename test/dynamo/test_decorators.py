@@ -354,17 +354,20 @@ class DecoratorTests(PytreeRegisteringTestCase):
             torch._dynamo.graph_break()
             if maybe_y is None and payload["bias"] is None:
                 return x + 1
+            if payload["bias"] is None:
+                return x + maybe_y
             return x + maybe_y + payload["bias"]
 
-        def fn(x):
-            return trace_me(x, None, {"bias": None}) * 2
+        def fn(x, maybe_y):
+            return trace_me(x, maybe_y, {"bias": None}) * 2
 
         x = torch.randn(3)
-        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, fullgraph=True, backend=cnts)
 
-        ref = fn(x)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
+        for maybe_y in (None, torch.randn(3)):
+            self.assertEqual(fn(x, maybe_y), opt_fn(x, maybe_y))
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_nonstrict_trace_none_outputs(self):
         @torch._dynamo.nonstrict_trace
