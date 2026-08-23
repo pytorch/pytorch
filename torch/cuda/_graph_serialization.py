@@ -62,6 +62,12 @@ if TYPE_CHECKING:
 
 ARCHIVE_VERSION = 1
 
+# Where the last load() spent its time, phase name -> seconds. Diagnostic only:
+# the phases have very different scaling (reserving address space is per segment,
+# building nodes is per node, loading cubins is per unique module), so a single
+# total hides which one a slow load is actually in.
+_LAST_LOAD_PROFILE: dict[str, float] = {}
+
 MANIFEST_PATH = "manifest.json"
 CUBIN_DIR = "cubins"
 SEGMENT_DIR = "segments"
@@ -846,7 +852,24 @@ def load(
     -- and it has to be host memory, because materialising a checkpoint straight to
     the device would allocate over the addresses being reclaimed.
     """
+    import time
+
     import torch
+
+    profile = _LAST_LOAD_PROFILE
+    profile.clear()
+
+    class _Phase:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def __enter__(self) -> None:
+            self.start = time.perf_counter()
+
+        def __exit__(self, *exc: Any) -> None:
+            profile[self.name] = profile.get(self.name, 0.0) + (
+                time.perf_counter() - self.start
+            )
 
     driver = _driver()
     # PyTorchFileReader addresses records relative to the archive root, stripping
@@ -856,28 +879,33 @@ def load(
     def record(name: str) -> bytes:
         return bytes(reader.get_record(name))
 
-    manifest = json.loads(record(MANIFEST_PATH))
+    with _Phase("read_manifest"):
+        manifest = json.loads(record(MANIFEST_PATH))
     if manifest["version"] != ARCHIVE_VERSION:
         raise UnserializableGraph(
             f"archive version {manifest['version']} is not {ARCHIVE_VERSION}"
         )
 
     # Contents first, while nothing has touched the device yet.
-    contents = load_fn() if load_fn is not None else {}
+    with _Phase("load_fn"):
+        contents = load_fn() if load_fn is not None else {}
 
     device = manifest["device"]
-    pool = torch.cuda.MemPool()
-    torch.cuda.memory._restore_expandable_segments(
-        [{**segment, "is_expandable": True} for segment in manifest["segments"]],
-        pool.id,
-        device,
-    )
+    with _Phase("restore_segments"):
+        pool = torch.cuda.MemPool()
+        torch.cuda.memory._restore_expandable_segments(
+            [{**segment, "is_expandable": True} for segment in manifest["segments"]],
+            pool.id,
+            device,
+        )
 
     # Put each allocation back exactly as it was: a block that was allocated has to
     # be allocated again, or a later allocation could be handed an address the graph
     # writes to.
     holders: list[Any] = []
     blocks: list[tuple[int, int, Any]] = []
+    phase_blocks = _Phase("reproduce_blocks")
+    phase_blocks.__enter__()
     with torch.cuda.use_mem_pool(pool):
         for segment in manifest["segments"]:
             for block in segment["blocks"]:
@@ -889,6 +917,7 @@ def load(
                 )
                 holders.append(holder)
                 blocks.append((block["address"], block["size"], holder))
+    phase_blocks.__exit__()
 
     # Sorted once and bisected per tensor: scanning every block for each named
     # tensor is quadratic, and a graph with thousands of parameters has thousands
@@ -921,16 +950,23 @@ def load(
         )
 
     tensors: dict[str, Any] = {}
-    for index, rec in enumerate(manifest["tensors"]):
-        name = rec.get("name", str(index))
-        tensors[name] = view_for(rec)
-        if name in contents:
-            tensors[name].copy_(contents[name])
+    with _Phase("bind_views"):
+        for index, rec in enumerate(manifest["tensors"]):
+            tensors[rec.get("name", str(index))] = view_for(rec)
+    # Copying contents in is checkpoint-restore cost, paid whichever way the graph
+    # was obtained, so it is timed apart from the work load itself does.
+    with _Phase("copy_contents"):
+        for name, tensor in tensors.items():
+            if name in contents:
+                tensor.copy_(contents[name])
+        torch.cuda.synchronize()
 
     # Kernels come back by name out of the archived cubins.
     libraries: list[Any] = []
     functions: dict[str, int] = {}
     wanted = set(manifest["kernels"])
+    phase_kernels = _Phase("load_kernels")
+    phase_kernels.__enter__()
     for module_id in sorted(set(manifest["kernels"].values())):
         image = record(f"{CUBIN_DIR}/{module_id}.cubin")
         err, library = driver.cuLibraryLoadData(image, [], [], 0, [], [], 0)
@@ -942,6 +978,7 @@ def load(
             if found == driver.CUresult.CUDA_SUCCESS:
                 functions[name] = int(_chk(driver.cuKernelGetFunction(kernel)))
                 wanted.discard(name)
+    phase_kernels.__exit__()
     if wanted:
         raise UnserializableGraph(f"cubins do not contain kernels {sorted(wanted)}")
 
@@ -954,6 +991,8 @@ def load(
         for _ in range(manifest.get("num_events", 0))
     ]
 
+    phase_nodes = _Phase("build_nodes")
+    phase_nodes.__enter__()
     graph = _chk(driver.cuGraphCreate(0))
     func_attr = driver.CUfunction_attribute
     launch_attr = driver.CUlaunchAttributeID
@@ -1046,7 +1085,9 @@ def load(
         made[index] = handle
 
     _add_edges(driver, graph, made, manifest["edges"], manifest["edge_data"])
-    exec_graph = _chk(driver.cuGraphInstantiate(graph, 0))
+    phase_nodes.__exit__()
+    with _Phase("instantiate"):
+        exec_graph = _chk(driver.cuGraphInstantiate(graph, 0))
     del keep
     return (
         RestoredCUDAGraph(
