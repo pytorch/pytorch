@@ -662,7 +662,7 @@ class IRNode:
     def wrap_for_lowering(self) -> IRNode:
         return TensorBox.create(self)
 
-    def _post_init_setattr(self, attr: str, value: Any) -> None:
+    def _post_init_setattr(self, attr: str, value: object) -> None:
         # Intended for use in __post_init__ for enforcing an invariant on a dataclass
         # If you must, can also be used for setting provenance info
         # We would like to try and minimize these usages though
@@ -3842,7 +3842,7 @@ class SqueezeView(BaseView):
 
         return new_size, reindex
 
-    def __init__(self, data: Any) -> None:
+    def __init__(self, data: object) -> None:
         raise AssertionError("use SqueezeView.create()")
 
 
@@ -5210,7 +5210,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
         return self.real_layout().storage_size()
 
     def get_buffer(self) -> Buffer:
-        def unwrap_views(target: Any) -> Any:
+        def unwrap_views(target: object) -> object:
             if isinstance(target, MutationLayoutSHOULDREMOVE):
                 return unwrap_views(target.target)
             if isinstance(target, BaseView):
@@ -7226,7 +7226,7 @@ class ExternKernel(InputsKernel):
     def get_read_writes(self) -> dependencies.ReadWrites:
         read_writes = super().get_read_writes()
 
-        def add_ir_read(value: Any) -> None:
+        def add_ir_read(value: object) -> None:
             if isinstance(value, IRNode):
                 name = value.maybe_get_name()
                 if name is not None:
