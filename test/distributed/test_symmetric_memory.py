@@ -18,6 +18,7 @@ from torch._C._distributed_c10d import _SymmetricMemory
 from torch._inductor.utils import (
     fresh_cache,
     fresh_inductor_cache,
+    infer_scale_swizzle,
     run_and_get_triton_code,
 )
 from torch._prims_common import make_contiguous_strides_for
@@ -35,6 +36,7 @@ from torch.distributed._symmetric_memory._nccl import (
     register_external_nccl_comm,
 )
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
+from torch.nn.functional import ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
@@ -49,6 +51,11 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm_ver_atleast_multiprocess,
     skip_if_rocm_ver_lessthan_multiprocess,
 )
+from torch.testing._internal.common_quantized import (
+    from_blocked_format,
+    to_blocked,
+    to_mxfp,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -62,6 +69,12 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 test_contexts = [nullcontext, _test_mode]
+
+
+def _mxfp8_quantize(t: torch.Tensor):
+    """-> (bf16 reconstruction, fp8e4m3 data, e8m0 scales in swizzled 32x4x4 layout)"""
+    scale, q = to_mxfp(t, format="mxfp8")
+    return from_blocked_format(q, scale, blocksize=32), q, to_blocked(scale)
 
 
 @contextmanager
@@ -1195,6 +1208,161 @@ class AsyncTPTest(MultiProcContinuousTest):
                 f"Expected strides to match: {outputs[0].stride()} vs {outputs[1].stride()}"
             )
         self.assertEqual(outputs[0], outputs[1])
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_all_gather_scaled_matmul_mxfp8(self) -> None:
+        """MXFP8 all-gather + matmul against the fallback and a bf16 reference.
+
+        The scales are e8m0 block scales in the swizzled 32x4x4 layout. They are
+        gathered alongside the data as opaque bytes, which is only sound because
+        `to_blocked` orders tiles row-block-major and each shard is 128-row
+        aligned -- so concatenating per-rank swizzled scales equals swizzling the
+        gathered scales. `infer_scale_swizzle` below asserts the gathered buffer
+        is still recognized as a swizzled block scale at the full size.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+        rank, world = self.rank, self.world_size
+
+        M, K, N = 256 * world, 128, 64
+        torch.manual_seed(42)
+        A_full = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+        B = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
+        A_shard_hp = A_full.chunk(world, dim=0)[rank].contiguous()
+
+        A_hp, A_q, A_sb = _mxfp8_quantize(A_shard_hp)
+        B_hp, B_q, B_sb = _mxfp8_quantize(B)
+
+        args = (
+            A_q,
+            [B_q.t()],
+            A_sb,
+            [B_sb],
+            0,
+            group.group_name,
+            [None],
+            [None],
+            [torch.bfloat16],
+            [False],
+        )
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(torch.ops.symm_mem.fused_all_gather_scaled_matmul(*args))
+        ag_target, mm_target = outputs[0]
+        ag_baseline, mm_baseline = outputs[1]
+        self.assertEqual(ag_target, ag_baseline)
+        self.assertEqual(mm_target[0], mm_baseline[0])
+
+        # the gathered scales must still describe a swizzled block scale
+        scale_type, swizzle = infer_scale_swizzle(
+            torch.empty(M, K, device="cuda", dtype=A_q.dtype),
+            torch.cat([A_sb] * world),
+        )
+        self.assertEqual(scale_type, ScalingType.BlockWise1x32)
+        self.assertEqual(swizzle, SwizzleType.SWIZZLE_32_4_4)
+
+        # numerics against the dequantized operands
+        A_hp_gathered = torch.empty(M, K, device="cuda", dtype=torch.bfloat16)
+        dist.all_gather_into_tensor(A_hp_gathered, A_hp)
+        torch.testing.assert_close(
+            mm_target[0], A_hp_gathered @ B_hp.t(), rtol=1e-2, atol=1e-2
+        )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_all_gather_scaled_matmul_mxfp8_unaligned_shard(self) -> None:
+        """A shard whose gathered dim is not 128-aligned must be rejected.
+
+        Concatenating swizzled scales from such shards interleaves each shard's
+        padding, so the result is not the gathered scale -- and is the wrong size
+        besides. Fail loudly rather than compute garbage.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+
+        A = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+        B = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+        _, A_q, A_sb = _mxfp8_quantize(A)
+        _, B_q, B_sb = _mxfp8_quantize(B)
+
+        with self.assertRaisesRegex(ValueError, "multiple of 128"):
+            torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+                A_q,
+                [B_q.t()],
+                A_sb,
+                [B_sb],
+                0,
+                group.group_name,
+                [None],
+                [None],
+                [torch.bfloat16],
+                [False],
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_scaled_matmul_reduce_scatter_mxfp8(self) -> None:
+        """MXFP8 matmul + reduce-scatter against the fallback and a bf16 reference.
+
+        Unlike the all-gather case no scales cross the wire here -- only the bf16
+        partials do -- so the swizzled scale is merely sliced per chunk, which
+        still needs each chunk to be 128-row aligned.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+        rank, world = self.rank, self.world_size
+
+        M, K, N = 256 * world, 128, 64
+        torch.manual_seed(42 + rank)
+        # scaled down so the reduction stays in a range where bf16 resolves it;
+        # the point of the test is the plumbing, not accumulation headroom
+        A = torch.randn(M, K, device="cuda", dtype=torch.bfloat16) / 8
+        B = torch.randn(N, K, device="cuda", dtype=torch.bfloat16) / 8
+        A_hp, A_q, A_sb = _mxfp8_quantize(A)
+        B_hp, B_q, B_sb = _mxfp8_quantize(B)
+
+        args = (
+            A_q,
+            B_q.t(),
+            A_sb,
+            B_sb,
+            "sum",
+            0,
+            0,
+            group.group_name,
+            [M, N],
+            None,
+            None,
+            torch.bfloat16,
+            False,
+        )
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(
+                    torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(*args)
+                )
+
+        # Each implementation is checked against the dequantized reference rather
+        # than against the other: the op accumulates the rank partials in fp32 and
+        # rounds once (reduce_partials), while the fallback reduces through NCCL in
+        # bf16. They therefore differ by a rounding step that grows with the number
+        # of partials, and the op is the more accurate of the two.
+        ref = torch.empty(M // world, N, device="cuda", dtype=torch.bfloat16)
+        dist.reduce_scatter_tensor(ref, (A_hp @ B_hp.t()).contiguous())
+        for out in outputs:
+            torch.testing.assert_close(out, ref, rtol=2e-2, atol=5e-2)
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
