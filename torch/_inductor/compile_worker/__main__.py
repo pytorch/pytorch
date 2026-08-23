@@ -6,7 +6,7 @@ import importlib
 import logging
 import os
 import sys
-from typing import TypeVar
+from typing import IO, TypeVar
 
 from torch._inductor.async_compile import pre_fork_setup
 from torch._inductor.codecache import torch_key
@@ -48,6 +48,10 @@ def _lookup_and_create_type(base: type[_T], qname: str) -> _T:
     return ty()
 
 
+def _open_parent_read_pipe(fd: int) -> IO[bytes]:
+    return os.fdopen(fd, "rb", buffering=0)
+
+
 def main():
     try:
         parser = argparse.ArgumentParser()
@@ -63,7 +67,7 @@ def main():
         args = parser.parse_args()
         if os.getppid() != args.parent:
             sys.exit(0)
-        read_fd = os.fdopen(args.read_fd, "rb")
+        read_fd = _open_parent_read_pipe(args.read_fd)
         write_fd = os.fdopen(args.write_fd, "wb")
 
         pre_fork_setup()
