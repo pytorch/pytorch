@@ -110,6 +110,42 @@ class CNNEnsemble(nn.Module):
         return self.classifier(x.view(x.size(0), -1))
 
 
+# Attention model for testing exact per-kernel annotation attribution.
+# SharedMaskAttn shares a causal mask across layers; without the
+# collect_compute_fx_nodes fix, the mask kernel claims qkv ops it only reads.
+
+
+class _AttnLayer(nn.Module):
+    def __init__(self, dim: int, n_heads: int) -> None:
+        super().__init__()
+        self.qkv = nn.Linear(dim, 3 * dim)
+        self.proj = nn.Linear(dim, dim)
+        self.n_heads = n_heads
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        B, S, D = x.shape
+        qkv = self.qkv(x).view(B, S, 3, self.n_heads, D // self.n_heads)
+        qkv = qkv.permute(2, 0, 3, 1, 4)
+        o = torch.nn.functional.scaled_dot_product_attention(
+            qkv[0], qkv[1], qkv[2], attn_mask=mask
+        )
+        o = o.permute(0, 2, 1, 3).reshape(B, S, D)
+        return self.proj(o)
+
+
+class SharedMaskAttn(nn.Module):
+    def __init__(self, n_layers: int = 2, dim: int = 32, n_heads: int = 2) -> None:
+        super().__init__()
+        self.layers = nn.ModuleList([_AttnLayer(dim, n_heads) for _ in range(n_layers)])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        seq = x.shape[1]
+        mask = torch.tril(torch.ones(seq, seq, dtype=torch.bool, device=x.device))
+        for layer in self.layers:
+            x = x + layer(x, mask)
+        return x
+
+
 # --- Profiler graph-node-id extraction (test 4) ---
 # Candidate metadata keys under which CUPTI/kineto may surface the cuda graph
 # node id on a kernel event.  The first GPU run confirms the real key (the test
@@ -475,6 +511,27 @@ class TestCudagraphFqnAnnotations(TestCase):
             any("L.model.layers." in s for s in fqns),
             f"joined table lacks per-layer FQNs; saw {sorted(set(fqns))[:8]}",
         )
+
+    def test_shared_mask_attn_annotation_discovery(self):
+        """Discovery: print actual annotation strings for the AIB log.
+        Used to determine expected values for test_kernel_annotations_match_expected.
+        Run with cudagraph_fqn_compute_tracking=True to see the new path's output."""
+        model = SharedMaskAttn(n_layers=2, dim=32, n_heads=2).cuda()
+        x = torch.randn(1, 16, 32, device="cuda")
+        patches = {
+            "triton.cudagraphs": True,
+            "triton.cudagraph_kernel_annotations": True,
+            "triton.cudagraph_fqn_compute_tracking": True,
+        }
+        with config.patch(patches), torch.no_grad():
+            compiled = torch.compile(model, fullgraph=True)
+            for _ in range(3):
+                compiled(x)
+                torch.cuda.synchronize()
+        all_strs = sorted(_all_fqn_strings(dict(get_kernel_annotations())))
+        for s in all_strs:
+            print(f"  annotation: {s!r}")
+        self.assertTrue(all_strs, "expected non-empty annotations")
 
 
 class TestGraphViewHelpers(TestCase):
