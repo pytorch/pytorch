@@ -2564,6 +2564,37 @@ class GraphModule(torch.nn.Module):
         out.backward()
         self.assertEqual(modules.idx, 0)
 
+    def test_non_nullified_module_container_index_side_effect_in_backward(self):
+        class Modules(torch.nn.ModuleList):
+            def __init__(self):
+                super().__init__([torch.nn.Identity(), torch.nn.Identity()])
+                self.idx = 0
+
+        modules = Modules()
+
+        class Bad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                result = modules[modules.idx](grad)
+                modules.idx = 1 - modules.idx
+                return result
+
+        def fn(x):
+            return Bad.apply(x).sum()
+
+        x = torch.randn(8, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "HOP: Non-nullified side effect",
+        ):
+            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            out.backward()
+        self.assertEqual(modules.idx, 0)
+
     def test_read_after_mutate_in_backward(self):
         # Code inside the backward reads the flipped value, confirming
         # the traced mutation is visible during tracing.

@@ -3,12 +3,14 @@
 
 import collections
 import copy
+import gc
 import itertools
 import os
 import tempfile
 import traceback
 import types
 import unittest
+import weakref
 from copy import deepcopy
 from functools import partial, update_wrapper
 from typing import NamedTuple
@@ -27,7 +29,11 @@ from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfHpu
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    skipIfHpu,
+)
 
 
 try:
@@ -1865,10 +1871,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             direct_cnt = torch._dynamo.testing.CompileCounter()
             opt_layers = torch.compile(copy.deepcopy(mod.layers), backend=direct_cnt)
             for _ in range(20):
-                self.assertTrue(torch.allclose(mod.layers(x), opt_layers(x)))
+                self.assertEqual(mod.layers(x), opt_layers(x))
 
             for _ in range(20):
-                self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
+                self.assertEqual(mod(x), opt_mod(x))
 
         self.assertEqual(direct_cnt.frame_count, 0)
         self.assertEqual(direct_cnt.op_count, 0)
@@ -1906,11 +1912,17 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_mod = torch.compile(opt_mod, backend=cnt)
         x = torch.randn(2, 4)
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
 
         with torch._dynamo.config.patch(error_on_recompile=True):
-            for _ in range(20):
-                self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
+            self.assertEqual(mod(x), opt_mod(x))
+            frames_after_first = torch._dynamo.utils.counters["frames"]["total"]
+            for _ in range(19):
+                self.assertEqual(mod(x), opt_mod(x))
+        frames_after_repeats = torch._dynamo.utils.counters["frames"]["total"]
 
+        self.assertGreater(frames_after_first, frames_before)
+        self.assertEqual(frames_after_repeats, frames_after_first)
         self.assertEqual(cnt.frame_count, 0)
         self.assertEqual(cnt.op_count, 0)
 
@@ -1933,11 +1945,17 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_mod = torch.compile(opt_mod, backend=cnt)
         x = torch.randn(2, 4)
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
 
         with torch._dynamo.config.patch(error_on_recompile=True):
-            for _ in range(20):
-                self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
+            self.assertEqual(mod(x), opt_mod(x))
+            frames_after_first = torch._dynamo.utils.counters["frames"]["total"]
+            for _ in range(19):
+                self.assertEqual(mod(x), opt_mod(x))
+        frames_after_repeats = torch._dynamo.utils.counters["frames"]["total"]
 
+        self.assertGreater(frames_after_first, frames_before)
+        self.assertEqual(frames_after_repeats, frames_after_first)
         self.assertEqual(cnt.frame_count, 0)
         self.assertEqual(cnt.op_count, 0)
 
@@ -1958,12 +1976,13 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = mod(x)
 
         opt_mod = torch.compile(copy.deepcopy(mod), backend="eager", fullgraph=True)
-        self.assertTrue(torch.allclose(ref, opt_mod(x)))
+        self.assertEqual(ref, opt_mod(x))
 
         exported, _ = torch._dynamo.export(copy.deepcopy(mod))(x)
-        self.assertTrue(torch.allclose(ref, exported(x)))
+        self.assertEqual(ref, exported(x))
 
-    def test_module_list_idempotent_attr_store(self):
+    @parametrize("index", [0, True])
+    def test_module_list_idempotent_attr_store(self, index):
         class Mod(torch.nn.Module):
             def __init__(self, index) -> None:
                 super().__init__()
@@ -1979,18 +1998,16 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 return y
 
         x = torch.randn(2, 4)
-        for index in (0, True):
-            with self.subTest(index=index):
-                mod = Mod(index)
-                ref = mod(x)
+        mod = Mod(index)
+        ref = mod(x)
 
-                cnt = torch._dynamo.testing.CompileCounter()
-                opt_mod = torch.compile(copy.deepcopy(mod), backend=cnt, fullgraph=True)
-                self.assertTrue(torch.allclose(ref, opt_mod(x)))
-                self.assertEqual(cnt.frame_count, 1)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(copy.deepcopy(mod), backend=cnt, fullgraph=True)
+        self.assertEqual(ref, opt_mod(x))
+        self.assertEqual(cnt.frame_count, 1)
 
-                exported, _ = torch._dynamo.export(copy.deepcopy(mod))(x)
-                self.assertTrue(torch.allclose(ref, exported(x)))
+        exported, _ = torch._dynamo.export(copy.deepcopy(mod))(x)
+        self.assertEqual(ref, exported(x))
 
     def test_module_list_idempotent_attr_store_does_not_call_user_eq(self):
         class Index(int):
@@ -2013,6 +2030,57 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             "indexed by mutable nn.Module attribute",
         ):
             torch.compile(Mod(), backend="eager", fullgraph=True)(torch.randn(2, 4))
+
+    def test_module_list_failed_index_is_not_mutable_selector_candidate(self):
+        class Mod(torch.nn.ModuleList):
+            def __init__(self) -> None:
+                super().__init__([torch.nn.Identity()])
+                self.idx = 2
+
+            def forward(self, x):
+                try:
+                    y = self[self.idx](x)
+                except IndexError:
+                    y = x + 1
+                self.idx = 0
+                return y
+
+        mod = Mod()
+        opt_mod = copy.deepcopy(mod)
+        x = torch.randn(2)
+        self.assertEqual(
+            mod(x),
+            torch.compile(opt_mod, backend="eager", fullgraph=True)(x),
+        )
+        self.assertEqual(opt_mod.idx, 0)
+
+    def test_module_dict_mutating_string_attr_index_graph_breaks(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.ModuleDict(
+                    {
+                        "identity": torch.nn.Identity(),
+                        "relu": torch.nn.ReLU(),
+                    }
+                )
+                self.key = "identity"
+
+            def forward(self, x):
+                y = self.layers[self.key](x)
+                self.key = "relu" if self.key == "identity" else "identity"
+                return y
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(Mod(), backend=cnt)
+        x = -torch.ones(2)
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for expected in (x, torch.zeros_like(x), x, torch.zeros_like(x)):
+                self.assertEqual(opt_mod(x), expected)
+
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.op_count, 0)
 
     def test_module_list_dynamic_index_shared_forward(self):
         class Selector(torch.nn.ModuleList):
@@ -2049,7 +2117,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
         with torch._dynamo.config.patch(error_on_recompile=True):
             for _ in range(20):
-                self.assertTrue(torch.allclose(mod(x), opt_mod(x)))
+                self.assertEqual(mod(x), opt_mod(x))
 
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
@@ -2062,6 +2130,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 self.mutate = mutate
 
         class Controller:
+            # Exercise the exact-identity weak cache without relying on
+            # user-defined hashing or equality.
             __hash__ = None
 
             def __init__(self, mutate) -> None:
@@ -2080,27 +2150,41 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         frames_before = torch._dynamo.utils.counters["frames"]["total"]
         x = torch.randn(2, 4)
         with torch._dynamo.config.patch(error_on_recompile=True):
-            for _ in range(3):
-                self.assertTrue(torch.allclose(dynamic.run(x), opt_dynamic(x)))
-        self.assertEqual(
-            torch._dynamo.utils.counters["frames"]["total"] - frames_before, 1
-        )
+            self.assertEqual(dynamic.run(x), opt_dynamic(x))
+            frames_after_first = torch._dynamo.utils.counters["frames"]["total"]
+            for _ in range(2):
+                self.assertEqual(dynamic.run(x), opt_dynamic(x))
+        frames_after_repeats = torch._dynamo.utils.counters["frames"]["total"]
+        self.assertGreater(frames_after_first, frames_before)
+        self.assertEqual(frames_after_repeats, frames_after_first)
         self.assertEqual(dynamic_cnt.frame_count, 0)
+
+        torch._dynamo.reset_code(Controller.run.__code__)
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
+        self.assertEqual(dynamic.run(x), opt_dynamic(x))
+        frames_after_reset_code = torch._dynamo.utils.counters["frames"]["total"]
+        self.assertGreater(frames_after_reset_code, frames_before)
+        self.assertEqual(dynamic.run(x), opt_dynamic(x))
+        self.assertEqual(
+            torch._dynamo.utils.counters["frames"]["total"],
+            frames_after_reset_code,
+        )
 
         fixed = Controller(False)
         opt_fixed_arg = copy.deepcopy(fixed)
         fixed_cnt = torch._dynamo.testing.CompileCounter()
         opt_fixed = torch.compile(opt_fixed_arg.run, backend=fixed_cnt, fullgraph=True)
-        self.assertTrue(torch.allclose(fixed.run(x), opt_fixed(x)))
+        self.assertEqual(fixed.run(x), opt_fixed(x))
         self.assertEqual(fixed_cnt.frame_count, 1)
 
         torch._dynamo.reset()
         frames_before = torch._dynamo.utils.counters["frames"]["total"]
-        for _ in range(2):
-            self.assertTrue(torch.allclose(dynamic.run(x), opt_dynamic(x)))
-        self.assertEqual(
-            torch._dynamo.utils.counters["frames"]["total"] - frames_before, 1
-        )
+        self.assertEqual(dynamic.run(x), opt_dynamic(x))
+        frames_after_first = torch._dynamo.utils.counters["frames"]["total"]
+        self.assertEqual(dynamic.run(x), opt_dynamic(x))
+        frames_after_repeat = torch._dynamo.utils.counters["frames"]["total"]
+        self.assertGreater(frames_after_first, frames_before)
+        self.assertEqual(frames_after_repeat, frames_after_first)
 
     def test_module_list_dynamic_index_global_skip_cache(self):
         global _global_dynamic_index_module
@@ -2111,15 +2195,145 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 4)
         frames_before = torch._dynamo.utils.counters["frames"]["total"]
         try:
-            for _ in range(4):
-                self.assertTrue(torch.allclose(x, opt_fn(x)))
+            self.assertEqual(x, opt_fn(x))
+            frames_after_first = torch._dynamo.utils.counters["frames"]["total"]
+            for _ in range(3):
+                self.assertEqual(x, opt_fn(x))
+            frames_after_repeats = torch._dynamo.utils.counters["frames"]["total"]
         finally:
             _global_dynamic_index_module = None
 
-        self.assertEqual(
-            torch._dynamo.utils.counters["frames"]["total"] - frames_before, 1
-        )
+        self.assertGreater(frames_after_first, frames_before)
+        self.assertEqual(frames_after_repeats, frames_after_first)
         self.assertEqual(cnt.frame_count, 0)
+
+    def test_module_list_dynamic_index_reassigned_arg_skip_cache(self):
+        class Selector(torch.nn.ModuleList):
+            def __init__(self) -> None:
+                super().__init__([torch.nn.Identity(), torch.nn.Identity()])
+                self.idx = 0
+
+        class Controller:
+            def __init__(self) -> None:
+                self.layers = Selector()
+
+        class Dummy:
+            tag = 1
+
+        def fn(dummy, controller, x):
+            z = dummy.tag
+            dummy = controller
+            y = dummy.layers[dummy.layers.idx](x)
+            dummy.layers.idx = 1 - dummy.layers.idx
+            return y + z
+
+        controller = Controller()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(2)
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            self.assertEqual(opt_fn(Dummy(), controller, x), x + 1)
+            frames_after_first = torch._dynamo.utils.counters["frames"]["total"]
+            for _ in range(3):
+                self.assertEqual(opt_fn(Dummy(), controller, x), x + 1)
+        frames_after_repeats = torch._dynamo.utils.counters["frames"]["total"]
+
+        self.assertGreater(frames_after_first, frames_before)
+        self.assertEqual(frames_after_repeats, frames_after_first)
+        self.assertEqual(cnt.frame_count, 0)
+
+    def test_module_list_dynamic_index_reassigned_ancestor_locator(self):
+        class Selector(torch.nn.ModuleList):
+            def __init__(self) -> None:
+                super().__init__([torch.nn.Identity(), torch.nn.Identity()])
+                self.idx = 0
+
+        class Holder:
+            def __init__(self) -> None:
+                self.layers = Selector()
+
+        def select(module, x):
+            return module[module.idx](x)
+
+        def fn(holder, x):
+            y = select(holder.layers, x)
+            holder = holder.layers
+            holder.idx = 1 - holder.idx
+            return y
+
+        holder = Holder()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(2)
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            self.assertEqual(opt_fn(holder, x), x)
+            frames_after_first = torch._dynamo.utils.counters["frames"]["total"]
+            for _ in range(3):
+                self.assertEqual(opt_fn(holder, x), x)
+        frames_after_repeats = torch._dynamo.utils.counters["frames"]["total"]
+
+        self.assertGreater(frames_after_first, frames_before)
+        self.assertEqual(frames_after_repeats, frames_after_first)
+        self.assertEqual(cnt.frame_count, 0)
+
+    def test_module_list_dynamic_index_unweakrefable_root_skip_cache(self):
+        class Selector(torch.nn.ModuleList):
+            def __init__(self) -> None:
+                super().__init__([torch.nn.Identity(), torch.nn.Identity()])
+                self.idx = 0
+
+        def fn(holder, x):
+            try:
+                module = holder[0]
+            except IndexError:
+                return x + 1
+            y = module[module.idx](x)
+            module.idx = 1 - module.idx
+            return y
+
+        holder = [Selector()]
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(2)
+        frames_before = torch._dynamo.utils.counters["frames"]["total"]
+
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            self.assertEqual(opt_fn(holder, x), x)
+            frames_after_first = torch._dynamo.utils.counters["frames"]["total"]
+            for _ in range(3):
+                self.assertEqual(opt_fn(holder, x), x)
+        frames_after_repeats = torch._dynamo.utils.counters["frames"]["total"]
+
+        self.assertGreater(frames_after_first, frames_before)
+        self.assertEqual(frames_after_repeats, frames_after_first)
+        self.assertEqual(cnt.frame_count, 0)
+
+        holder.clear()
+        self.assertEqual(opt_fn(holder, x), x + 1)
+
+    def test_module_list_dynamic_index_skip_cache_does_not_retain_instance(self):
+        class Selector(torch.nn.ModuleList):
+            def __init__(self) -> None:
+                super().__init__([torch.nn.Identity(), torch.nn.Identity()])
+                self.idx = 0
+
+        def fn(module, x):
+            y = module[module.idx](x)
+            module.idx = 1 - module.idx
+            return y
+
+        module = Selector()
+        module_ref = weakref.ref(module)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(module, torch.randn(2)).shape, (2,))
+
+        del module
+        gc.collect()
+        self.assertIsNone(module_ref())
 
     def test_module_list_dynamic_index_closure_skip_cache(self):
         module = _GlobalDynamicIndexModuleList()
@@ -2133,12 +2347,14 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend=cnt)
         x = torch.randn(2, 4)
         frames_before = torch._dynamo.utils.counters["frames"]["total"]
-        for _ in range(4):
-            self.assertTrue(torch.allclose(x, opt_fn(x)))
+        self.assertEqual(x, opt_fn(x))
+        frames_after_first = torch._dynamo.utils.counters["frames"]["total"]
+        for _ in range(3):
+            self.assertEqual(x, opt_fn(x))
+        frames_after_repeats = torch._dynamo.utils.counters["frames"]["total"]
 
-        self.assertEqual(
-            torch._dynamo.utils.counters["frames"]["total"] - frames_before, 1
-        )
+        self.assertGreater(frames_after_first, frames_before)
+        self.assertEqual(frames_after_repeats, frames_after_first)
         self.assertEqual(cnt.frame_count, 0)
 
     def test_module_list_dynamic_index_ancestor_subscript(self):
@@ -4258,6 +4474,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager, compiled)
 
 
+instantiate_parametrized_tests(NNModuleTests)
 instantiate_device_type_tests(
     NNModuleTestsDevice, globals(), except_for="cpu", allow_xpu=True
 )

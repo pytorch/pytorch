@@ -73,9 +73,12 @@ from .utils import counters
 
 
 if TYPE_CHECKING:
+    import weakref
+
     from torch._dynamo.variables import VariableTracker
     from torch._guards import CompileId
 
+    from .nn_module_container_index import CacheLocator
     from .output_graph import DynamoTracerOutput
     from .symbolic_convert import InstructionTranslatorBase
     from .types import DynamoFrameType, FrameExecStrategy
@@ -97,7 +100,8 @@ _EXCEPTION_STATE_ATTRS_TO_DROP = frozenset(
     (
         "_torch_dynamo_tracer_output",
         "first_useful_frame",
-        "frame_exec_strategy_cache_key",
+        "frame_exec_strategy_cache_key_ref",
+        "frame_exec_strategy_cache_locator",
         "frame_exec_strategy",
     )
 )
@@ -153,12 +157,10 @@ class TorchDynamoException(RuntimeError):
             exception types for control flow.
         frame_exec_strategy_apply_to_code: Whether the custom strategy should be
             cached on the code object or only apply to the current frame invocation.
-        frame_exec_strategy_cache_key: Optional object identity used by the frame
-            converter to cache a non-code-global strategy.
-        frame_exec_strategy_cache_name: Name of the root-frame local or global
-            containing ``frame_exec_strategy_cache_key`` on future invocations.
-        frame_exec_strategy_cache_is_global: Whether the cache name is resolved
-            from frame globals instead of frame locals.
+        frame_exec_strategy_cache_key_ref: Optional weak reference to the object
+            identity used to cache a non-code-global strategy.
+        frame_exec_strategy_cache_locator: Side-effect-free locator used to
+            resolve the cached object on future invocations.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -166,9 +168,10 @@ class TorchDynamoException(RuntimeError):
         self._torch_dynamo_tracer_output: DynamoTracerOutput | None = None
         self.frame_exec_strategy: FrameExecStrategy | None = None
         self.frame_exec_strategy_apply_to_code = True
-        self.frame_exec_strategy_cache_key: object | None = None
-        self.frame_exec_strategy_cache_name: str | None = None
-        self.frame_exec_strategy_cache_is_global = False
+        self.frame_exec_strategy_cache_key_ref: weakref.ReferenceType[object] | None = (
+            None
+        )
+        self.frame_exec_strategy_cache_locator: CacheLocator | None = None
 
     def __reduce__(self) -> tuple[Any, ...]:
         return (
@@ -647,6 +650,7 @@ def unimplemented_with_warning(
     context: str,
     explanation: str,
     hints: list[str],
+    log_warning: bool = True,
 ) -> NoReturn:
     # This function calls unimplemented internally and eventually graph breaks
     # or falls to eager. unimplemented itself does not print any user warnings,
@@ -654,7 +658,8 @@ def unimplemented_with_warning(
     # encountered in the torch.compile stack which is worth showing as warning
     # to the user. For example, if AOT Autograd backend fails with a fake tensor
     # exception, its ok to fallback to eager but not silently. Here, we can use
-    # this function to log the message and the stack trace.
+    # this function to log the message and the stack trace. Callers can disable
+    # the user warning while keeping structured/debug graph-break logging.
     graph_break_msg = format_error_msg_verbose(e, code)
     torch._logging.trace_structured(
         "artifact",
@@ -673,7 +678,7 @@ def unimplemented_with_warning(
         explanation=explanation,
         hints=hints,
         from_exc=e,
-        log_warning=True,
+        log_warning=log_warning,
     )
 
 

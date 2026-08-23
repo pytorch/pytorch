@@ -124,6 +124,7 @@ from .graph_id_filter import (
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
+from .nn_module_container_index import NNModuleContainerIndexTracker
 from .side_effects import AttributeMutationExisting, SideEffects, ValueMutationExisting
 from .source import (
     _get_source_debug_name,
@@ -143,7 +144,6 @@ from .source import (
     TensorProperty,
     TensorPropertySource,
 )
-from .types import NNModuleContainerIndexFrame
 from .utils import (
     _extract_tensor_dict,
     _get_cudagraph_override,
@@ -279,18 +279,6 @@ class MutationInfo:
     has_mutation: bool
     msg: str
     mutated_input_indices: tuple[int, ...] = ()
-
-
-@dataclass
-class NNModuleContainerIndexCandidate:
-    """One leaf index site plus its retained leaf-to-root translator ancestry.
-
-    Retaining translator objects gives each inlined invocation a stable identity
-    for the duration of the attempt; ``id(tx)`` can be reused between siblings.
-    """
-
-    leaf_tx: "InstructionTranslatorBase"
-    frames: dict["InstructionTranslatorBase", NNModuleContainerIndexFrame]
 
 
 def collect_reachable_grad_fns(
@@ -850,12 +838,7 @@ class OutputGraph(OutputGraphCommon):
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: dict[str, Source] | None = {}
         self.side_effects = SideEffects(self)
-        # Container-index sites grouped by the nn.Module attribute source used
-        # as the key. If the source is later mutated, a restart promotes these
-        # sites to graph-break locations in the shared speculation log.
-        self.nn_module_container_index_sites: dict[
-            Source, list[NNModuleContainerIndexCandidate]
-        ] = {}
+        self.nn_module_container_index_tracker = NNModuleContainerIndexTracker()
         # Generators created while tracing this frame. Tracked here (not on
         # SideEffects) because SideEffects is cloned/swapped during HOP
         # speculation and graph-break restore; the OutputGraph is the single
@@ -1538,16 +1521,6 @@ class OutputGraph(OutputGraphCommon):
 
     def push_tx(self, tx: "InstructionTranslatorBase") -> None:
         self._current_tx.append(tx)
-
-    def record_nn_module_container_index_site(
-        self,
-        source: Source,
-        leaf_tx: "InstructionTranslatorBase",
-        frames: dict["InstructionTranslatorBase", NNModuleContainerIndexFrame],
-    ) -> None:
-        self.nn_module_container_index_sites.setdefault(source, []).append(
-            NNModuleContainerIndexCandidate(leaf_tx, frames)
-        )
 
     def pop_tx(self) -> "InstructionTranslatorBase":
         return self._current_tx.pop()
@@ -3305,8 +3278,12 @@ class OutputGraph(OutputGraphCommon):
                 context=f"Backend: {name}\nException:{str(e)}\nTraceback:\n{self.root_tx.format_frame_summary()}",
                 explanation=f"Backend compiler `{name}` failed with {str(e)}. Adding a graph break.",
                 hints=[
-                    "Report an issue to the backend compiler repo.",
+                    "Set `fullgraph=False` to allow this backend fallback to run eagerly.",
                 ],
+                # These exceptions are allowed backend fallbacks, not hard
+                # backend failures. Keep graph-break debug artifacts without
+                # warning users for every fallback graph.
+                log_warning=False,
             )
         except SkipFrame:
             # The backend compiler has requested that we skip the frame, instead of
@@ -4433,6 +4410,9 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy: fx.Proxy) -> LazyProxy | fx.Proxy:
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
+        # (A stale cross-tracer cached proxy used to reach this via
+        # wrap_symfloat; see the fix in
+        # https://github.com/pytorch/pytorch/issues/193194.)
         if self.parent is None:
             raise AssertionError(
                 "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"

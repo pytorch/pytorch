@@ -31,7 +31,7 @@ import textwrap
 import traceback
 import weakref
 from collections.abc import Callable, Generator, MutableMapping
-from types import CellType, CodeType
+from types import CellType
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -50,14 +50,8 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .codegen import PyCodegen
-from .exc import (
-    collapse_resume_frames,
-    get_stack_above_dynamo,
-    NNModuleContainerIndexRestartAnalysis,
-    unimplemented,
-)
+from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
 from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
-from .types import NNModuleContainerIndexTarget
 from .utils import (
     is_frozen_dataclass,
     is_namedtuple_cls,
@@ -550,72 +544,13 @@ class SideEffects:
                 output_graph = self.output_graph_weakref()
                 if output_graph is None:
                     raise AssertionError("output_graph weakref is dead")
-                index_candidates = output_graph.nn_module_container_index_sites.get(
-                    mutated_source
+                output_graph.nn_module_container_index_tracker.raise_if_selector_is_mutated(
+                    item=item,
+                    name=name,
+                    value=value,
+                    mutated_source=mutated_source,
+                    output_graph=output_graph,
                 )
-                if index_candidates:
-                    selector_value_changed = True
-                    if value.is_python_constant():
-                        try:
-                            previous_value = item.tp_getattro_impl(
-                                output_graph.current_tx, name
-                            )
-                        except NotImplementedError:
-                            pass
-                        else:
-                            if previous_value.is_python_constant():
-                                previous = previous_value.as_python_constant()
-                                current = value.as_python_constant()
-                                if (
-                                    type(previous) is type(current)
-                                    and type(current) in (bool, int, str)
-                                    and previous == current
-                                ):
-                                    selector_value_changed = False
-
-                    if not selector_value_changed:
-                        index_candidates = None
-
-                if index_candidates:
-                    mutation_txs = []
-                    current_tx = output_graph.current_tx
-                    while True:
-                        mutation_txs.append(current_tx)
-                        if current_tx.parent is None:
-                            break
-                        current_tx = current_tx.parent
-
-                    index_sites: dict[
-                        tuple[CodeType, int], NNModuleContainerIndexTarget
-                    ] = {}
-                    for candidate in index_candidates:
-                        for mutation_tx in mutation_txs:
-                            if mutation_tx in candidate.frames:
-                                target_frame = candidate.frames[mutation_tx]
-                                root_tx = candidate.leaf_tx
-                                while root_tx.parent is not None:
-                                    root_tx = root_tx.parent
-                                root_frame = candidate.frames[root_tx]
-                                index_sites[target_frame.site] = (
-                                    NNModuleContainerIndexTarget(
-                                        source=mutated_source,
-                                        source_aware=mutation_tx is candidate.leaf_tx,
-                                        locator=target_frame.locator,
-                                        cache_locator=root_frame.cache_locator,
-                                    )
-                                )
-                                break
-
-                    if index_sites:
-                        speculation_log = output_graph.current_tx.speculation_log
-                        speculation_log.mutated_nn_module_container_index_sites.update(
-                            index_sites
-                        )
-                        raise NNModuleContainerIndexRestartAnalysis(
-                            restart_reason=(
-                                "nn.Module container index source was mutated"
-                            )
-                        )
         if item not in self.store_attr_mutations:
             self.store_attr_mutations[item] = {}
         if item not in self.attr_mutation_kinds:
@@ -1784,9 +1719,22 @@ def _codegen_cell_mutation(ctx: SideEffectReplayContext) -> None:
     # Emit more readable and performant bytecode.
     # TODO generalize this for cells created during inlining.
     if var in ctx.side_effects.store_attr_mutations:
-        contents_var = ctx.side_effects.load_cell(var)
-        cg(contents_var)
-        ctx.suffixes.append([cg.create_store_deref(var.local_name)])
+        contents_var = ctx.side_effects.load_attr(var, "cell_contents", deleted_ok=True)
+        if isinstance(contents_var, variables.DeletedVariable):
+            # DELETE_DEREF on an already-empty cell raises NameError, and the
+            # real cell may be empty at replay time (e.g. a fresh MAKE_CELL
+            # cell whose store happened only in the traced region), so store a
+            # dummy value first to make the delete unconditional.
+            ctx.suffixes.append(
+                [
+                    create_instruction("LOAD_CONST", argval=None),
+                    cg.create_store_deref(var.local_name),
+                    create_instruction("DELETE_DEREF", argval=var.local_name),
+                ]
+            )
+        else:
+            cg(contents_var)
+            ctx.suffixes.append([cg.create_store_deref(var.local_name)])
         ctx.log(var)
 
 
@@ -2013,7 +1961,20 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             ctx.suffixes.append([create_instruction("STORE_GLOBAL", argval=name)])
             side_effect_occurred = True
         elif isinstance(value, variables.DeletedVariable):
-            if (
+            if isinstance(var, variables.CellVariable):
+                # Cells created during inlining (no local_name) are rebuilt via
+                # make_cell(), which leaves None in the cell; existing cells
+                # keep their pre-graph contents. Replay the DELETE_DEREF by
+                # emptying the cell so later reads raise NameError.
+                cg.add_push_null(
+                    lambda: cg.load_import_from(utils.__name__, "clear_cell")
+                )
+                cg(var.source)  # type: ignore[attr-defined]
+                ctx.suffixes.append(
+                    [*create_call_function(1, False), create_instruction("POP_TOP")]
+                )
+                side_effect_occurred = True
+            elif (
                 isinstance(var, variables.UserDefinedObjectVariable)
                 and mutation_kind is AttrMutationKind.INSTANCE_DICT
             ):
@@ -2091,13 +2052,18 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
 
 @register_side_effect_replay_handler(
     name="list_iterator_mutation",
-    matcher=lambda ctx: isinstance(ctx.var, variables.ListIteratorVariable),
+    # Lazy: builder imports side_effects while variables/ is still initializing.
+    matcher=lambda ctx: isinstance(
+        ctx.var, (variables.ListIteratorVariable, variables.TupleIteratorVariable)
+    ),
     priority=30,
 )
 def _codegen_list_iterator_mutation(ctx: SideEffectReplayContext) -> None:
     cg = ctx.codegen
     var = ctx.var
-    if not isinstance(var, variables.ListIteratorVariable):
+    if not isinstance(
+        var, (variables.ListIteratorVariable, variables.TupleIteratorVariable)
+    ):
         raise AssertionError(type(var))
     for _ in range(var.index):
         cg.add_push_null(lambda: cg.load_import_from(utils.__name__, "iter_next"))

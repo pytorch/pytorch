@@ -24,39 +24,11 @@ from torch._C._dynamo.eval_frame import (
     _FrameExecStrategy as FrameExecStrategy,
     _PyInterpreterFrame as DynamoFrameType,
 )
-from torch._guards import CompileId, Guard, Source
+from torch._guards import CompileId, Guard
 
 
 # We use a dict to store additional data per frame.
 FrameState = dict[Any, Any]
-
-
-@dataclasses.dataclass(frozen=True)
-class NNModuleContainerIndexFrameLocator:
-    """How a translator frame reaches the module owning an index attribute."""
-
-    name: str
-    source: Source
-    is_global: bool
-
-
-@dataclasses.dataclass(frozen=True)
-class NNModuleContainerIndexFrame:
-    """Metadata for one translator frame containing an index candidate."""
-
-    site: tuple[types.CodeType, int]
-    locator: NNModuleContainerIndexFrameLocator | None
-    cache_locator: NNModuleContainerIndexFrameLocator | None
-
-
-@dataclasses.dataclass(frozen=True)
-class NNModuleContainerIndexTarget:
-    """A retry target and the root-frame object used for negative caching."""
-
-    source: Source
-    source_aware: bool
-    locator: NNModuleContainerIndexFrameLocator | None
-    cache_locator: NNModuleContainerIndexFrameLocator | None
 
 
 class GuardFail(NamedTuple):

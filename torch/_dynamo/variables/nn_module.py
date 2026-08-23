@@ -32,7 +32,7 @@ from contextlib import contextmanager, nullcontext
 from typing import Any, TYPE_CHECKING
 
 import torch.nn
-from torch._guards import ChainedSource, Source
+from torch._guards import Source
 
 from .. import graph_break_hints, trace_rules, variables
 from ..exc import (
@@ -46,25 +46,19 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..mutation_guard import GenerationTracker
+from ..nn_module_container_index import (
+    BUILTIN_NN_MODULE_CONTAINER_GETITEMS,
+    is_unspecialized_nn_module_attr_source,
+    raise_mutated_nn_module_container_index,
+)
 from ..source import (
     AttrSource,
-    CellContentsSource,
     ConstDictKeySource,
     DictGetItemSource,
     FSDPNNModuleSource,
     GetItemSource,
-    GlobalSource,
-    LocalCellSource,
-    LocalSource,
     NNModuleSource,
     UnspecializedNNModuleSource,
-)
-from ..types import (
-    FrameAction,
-    FrameExecStrategy,
-    NNModuleContainerIndexFrame,
-    NNModuleContainerIndexFrameLocator,
-    NNModuleContainerIndexTarget,
 )
 from ..utils import (
     enumerate_items_with_dict_position,
@@ -525,9 +519,6 @@ class NNModuleVariable(VariableTracker):
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
 
-        if name == "__class__" and not object_member:
-            return VariableTracker.build(tx, base.__class__, source=source)
-
         if object_member:
             out = VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
 
@@ -706,15 +697,8 @@ class NNModuleVariable(VariableTracker):
 
         module = tx.output.get_submodule(self.module_key)
 
-        builtin_supported = (
-            torch.nn.ModuleDict.__getitem__,
-            torch.nn.ModuleList.__getitem__,
-            torch.nn.ParameterDict.__getitem__,
-            torch.nn.ParameterList.__getitem__,
-            torch.nn.Sequential.__getitem__,
-        )
         # pyrefly: ignore[missing-attribute]
-        if type(module).__getitem__ not in builtin_supported:
+        if type(module).__getitem__ not in BUILTIN_NN_MODULE_CONTAINER_GETITEMS:
             if not (
                 key.is_python_constant()
                 and isinstance(key.as_python_constant(), (str, int))
@@ -1290,168 +1274,24 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         return super().unpack_var_sequence(tx)
 
-    @staticmethod
-    def _key_source_is_unspecialized_nn_module_attr(key: VariableTracker) -> bool:
-        source = key.source
-        if source is None or not isinstance(source, AttrSource):
-            return False
-        if isinstance(source, CellContentsSource):
-            return False
-        try:
-            return source.guard_source.is_unspecialized_nn_module()
-        except NotImplementedError:
-            return False
-
-    @staticmethod
-    def _raise_mutated_nn_module_container_index(
-        source: Source,
-        cache_key: object | None,
-        cache_locator: NNModuleContainerIndexFrameLocator | None,
-    ) -> None:
-        try:
-            unimplemented(
-                gb_type=(
-                    "Unspecialized nn.Module container indexed by mutable "
-                    "nn.Module attribute"
-                ),
-                context=f"source: {source}",
-                explanation="Dynamo observed an nn.Module state attribute select "
-                "an item from an unspecialized nn.Module container and then mutate "
-                "later in the same compiled region. Specializing the key would "
-                "select a different child module or parameter as the state changes.",
-                hints=[
-                    "Use a constant key for nn.Module container indexing.",
-                ],
-                skip_frame=True,
-            )
-        except Unsupported as exc:
-            # If the selected container access lives in a helper called by the
-            # skipped frame, keep that helper eager too. Otherwise it can be
-            # intercepted independently and repeat the same guarded churn.
-            exc.frame_exec_strategy = FrameExecStrategy(
-                FrameAction.SKIP, FrameAction.SKIP
-            )
-            exc.frame_exec_strategy_apply_to_code = False
-            exc.frame_exec_strategy_cache_key = cache_key
-            if cache_locator is not None:
-                exc.frame_exec_strategy_cache_name = cache_locator.name
-                exc.frame_exec_strategy_cache_is_global = cache_locator.is_global
-            raise
-
-    @staticmethod
-    def _find_frame_locator_for_source(
-        tx: "InstructionTranslatorBase",
-        source: Source,
-        *,
-        frame_entry_only: bool,
-    ) -> NNModuleContainerIndexFrameLocator | None:
-        source_ancestors = []
-        current = source
-        while isinstance(current, ChainedSource):
-            current = current.base
-            source_ancestors.append(current)
-
-        entry_locals = [
-            (name, variable.source)
-            for name, variable in tx.symbolic_locals.items()
-            if variable.source is not None
-            and (not frame_entry_only or name in tx.f_locals)
-        ]
-        for ancestor in source_ancestors:
-            for name, local_source in entry_locals:
-                if local_source == ancestor or (
-                    isinstance(local_source, LocalCellSource)
-                    and isinstance(ancestor, LocalSource)
-                    and ancestor.is_derefed_cell_contents
-                    and local_source.local_name == ancestor.local_name
-                ):
-                    return NNModuleContainerIndexFrameLocator(
-                        name=name,
-                        source=local_source,
-                        is_global=False,
-                    )
-            if (
-                isinstance(ancestor, GlobalSource)
-                and ancestor.global_name in tx.f_globals
-            ):
-                return NNModuleContainerIndexFrameLocator(
-                    name=ancestor.global_name,
-                    source=ancestor,
-                    is_global=True,
-                )
-        return None
-
-    @staticmethod
-    def _frame_locator_matches(
-        tx: "InstructionTranslatorBase",
-        locator: NNModuleContainerIndexFrameLocator,
-    ) -> bool:
-        if locator.is_global:
-            return locator.name in tx.f_globals
-        local_variable = tx.symbolic_locals.get(locator.name)
-        return local_variable is not None and local_variable.source == locator.source
-
-    @staticmethod
-    def _frame_exec_strategy_cache_key(
-        tx: "InstructionTranslatorBase", target: NNModuleContainerIndexTarget
-    ) -> tuple[object | None, NNModuleContainerIndexFrameLocator | None]:
-        root_tx = tx
-        while root_tx.parent is not None:
-            root_tx = root_tx.parent
-
-        locator = target.cache_locator
-        if locator is None or not UnspecializedNNModuleVariable._frame_locator_matches(
-            root_tx, locator
-        ):
-            return None, None
-        namespace = root_tx.f_globals if locator.is_global else root_tx.f_locals
-        cache_key = namespace.get(locator.name)
-        if cache_key is None:
-            return None, None
-        return cache_key, locator
-
     def mp_subscript_impl(
         self,
         tx: "InstructionTranslatorBase",
         key: VariableTracker,
     ) -> VariableTracker:
-        builtin_supported = (
-            torch.nn.ModuleDict.__getitem__,
-            torch.nn.ModuleList.__getitem__,
-            torch.nn.ParameterDict.__getitem__,
-            torch.nn.ParameterList.__getitem__,
-            torch.nn.Sequential.__getitem__,
-        )
         getitem = getattr(type(self.value), "__getitem__", None)
         key_source = key.source
         if (
             key_source is not None
-            and getitem in builtin_supported
-            and self._key_source_is_unspecialized_nn_module_attr(key)
+            and getitem in BUILTIN_NN_MODULE_CONTAINER_GETITEMS
+            and is_unspecialized_nn_module_attr_source(key_source)
         ):
-            index_frames = {}
-            current_tx = tx
-            while True:
-                instruction_offset = current_tx.current_instruction.offset
-                if instruction_offset is None:
-                    raise AssertionError("current instruction must have an offset")
-                locator = self._find_frame_locator_for_source(
-                    current_tx, key_source, frame_entry_only=False
-                )
-                cache_locator = self._find_frame_locator_for_source(
-                    current_tx, key_source, frame_entry_only=True
-                )
-                index_frames[current_tx] = NNModuleContainerIndexFrame(
-                    (current_tx.f_code, instruction_offset),
-                    locator,
-                    cache_locator,
-                )
-                if current_tx.parent is None:
-                    break
-                current_tx = current_tx.parent
+            instruction_offset = tx.current_instruction.offset
+            if instruction_offset is None:
+                raise AssertionError("current instruction must have an offset")
             graph_break_target = (
                 tx.speculation_log.mutated_nn_module_container_index_sites.get(
-                    index_frames[tx].site
+                    (tx.f_code, instruction_offset)
                 )
             )
             if (
@@ -1459,17 +1299,13 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 and graph_break_target.source == key_source
                 and graph_break_target.source_aware
             ):
-                cache_key, cache_locator = self._frame_exec_strategy_cache_key(
-                    tx, graph_break_target
-                )
-                self._raise_mutated_nn_module_container_index(
-                    key_source,
-                    cache_key,
-                    cache_locator,
-                )
-            tx.output.record_nn_module_container_index_site(
-                key_source, tx, index_frames
+                raise_mutated_nn_module_container_index(tx, graph_break_target)
+            result = super().mp_subscript_impl(tx, key)
+            tx.output.nn_module_container_index_tracker.record(
+                key_source,
+                tx,
             )
+            return result
 
         return super().mp_subscript_impl(tx, key)
 

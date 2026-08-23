@@ -114,6 +114,11 @@ from .exc import (
 )
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
+from .nn_module_container_index import (
+    frame_locator_matches,
+    IndexTarget,
+    raise_mutated_nn_module_container_index,
+)
 from .output_graph import (
     CodeOptions,
     GraphCompileReason,
@@ -186,6 +191,7 @@ from .variables.lists import (
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .variables.misc import (
@@ -227,7 +233,6 @@ if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import FakeTensorMode
 
     from .package import CompilePackage
-    from .types import NNModuleContainerIndexTarget
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
@@ -343,7 +348,7 @@ class SpeculationLog:
     # Bytecode sites where an nn.Module attribute was used to index an
     # unspecialized nn.Module container and mutated on an earlier attempt.
     mutated_nn_module_container_index_sites: dict[
-        tuple[types.CodeType, int], NNModuleContainerIndexTarget
+        tuple[types.CodeType, int], IndexTarget
     ] = dataclasses.field(default_factory=dict)
 
     def restart(self) -> None:
@@ -1752,27 +1757,20 @@ class InstructionTranslatorBase(
         self.update_block_stack(inst)
 
         try:
+            graph_break_targets = (
+                self.speculation_log.mutated_nn_module_container_index_sites
+            )
             graph_break_target = (
-                self.speculation_log.mutated_nn_module_container_index_sites.get(
-                    (self.f_code, inst.offset)
-                )
-                if inst.offset is not None
+                graph_break_targets.get((self.f_code, inst.offset))
+                if graph_break_targets and inst.offset is not None
                 else None
             )
             if graph_break_target is not None and not graph_break_target.source_aware:
                 locator = graph_break_target.locator
-                if locator is None or (
-                    UnspecializedNNModuleVariable._frame_locator_matches(self, locator)
-                ):
-                    cache_key, cache_locator = (
-                        UnspecializedNNModuleVariable._frame_exec_strategy_cache_key(
-                            self, graph_break_target
-                        )
-                    )
-                    UnspecializedNNModuleVariable._raise_mutated_nn_module_container_index(
-                        graph_break_target.source,
-                        cache_key,
-                        cache_locator,
+                if locator is None or frame_locator_matches(self, locator):
+                    raise_mutated_nn_module_container_index(
+                        self,
+                        graph_break_target,
                     )
             self.dispatch_table[inst.opcode](self, inst)
             return not self.output.should_exit
@@ -3429,6 +3427,14 @@ class InstructionTranslatorBase(
             [obj, VariableTracker.build(self, inst.argval)],
             {},
         )
+
+    def DELETE_DEREF(self, inst: Instruction) -> None:
+        if inst.argval not in self.cell_and_freevars():
+            raise AssertionError(
+                "expected inst.argval in self.cell_and_freevars() to be true"
+            )
+        cell = self._cellvar(inst.argval)
+        self.output.side_effects.store_cell(cell, variables.DeletedVariable())
 
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
         # Only check side_effects — a pure dict lookup with no observable
@@ -6577,8 +6583,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        # tuple iterators subclass ListIteratorVariable; deque is a sibling
-        if not isinstance(tos, (ListIteratorVariable, DequeIteratorVariable)):
+        iter_vts = (ListIteratorVariable, TupleIteratorVariable, DequeIteratorVariable)
+        if not isinstance(tos, iter_vts):
             self.pop()
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
