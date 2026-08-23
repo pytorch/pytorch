@@ -92,7 +92,7 @@ def mark_non_differentiable(ctx, output, output_differentiability):
                 raise RuntimeError(
                     f"With output_differentiability={output_differentiability}. "
                     f"At idx {idx}, we received an object of type {type(out)} that "
-                    f"is not a Tensor, so it cannot have be marked as differentiable in "
+                    f"is not a Tensor, so it cannot have been marked as differentiable in "
                     f"output_differentiability."
                 )
         if non_differentiable_tensors:

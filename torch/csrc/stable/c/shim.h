@@ -2,6 +2,7 @@
 #define STABLE_TORCH_SHIM
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
 
 #include <torch/csrc/stable/version.h>
 
@@ -259,7 +260,80 @@ torch_new_stable_ivalue(StableIValue** ret_value);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_delete_stable_ivalue(StableIValue* value);
 
+/// Retrieves the underlying Stream's backend-specific non-owning stream handle
+/// (e.g. `cudaStream_t` for CUDA). Returns a void* that can be `static_cast`ed
+/// accordingly.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_stream_native_handle(StreamHandle stream, void** ret_native_handle);
+
+// Returns a new owning AtenGeneratorHandle that shares the underlying RNG state
+// with `self` (the copy bumps the GeneratorImpl refcount). The callee owns the
+// result and must free it with torch_delete_generator.
+AOTI_TORCH_EXPORT AOTITorchError torch_new_generator_handle(
+    AtenGeneratorHandle self,
+    AtenGeneratorHandle* ret_new_generator);
+
+// Frees an owning AtenGeneratorHandle previously returned by
+// torch_new_generator_handle (or otherwise handed off with ownership).
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_generator(AtenGeneratorHandle generator);
+
+// Returns the generator's device as (device_type, device_index). device_type
+// uses the same encoding as the aoti_torch_device_type_*() getters.
+AOTI_TORCH_EXPORT AOTITorchError torch_generator_get_device(
+    AtenGeneratorHandle generator,
+    int32_t* ret_device_type,
+    int32_t* ret_device_index);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+
+/**
+ * The beginning of all shims added in 2.14.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+
+// Returns whether the tensor has an associated storage. Returns false for
+// undefined tensors and for tensors without storage (e.g. sparse tensors).
+AOTI_TORCH_EXPORT AOTITorchError
+torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage);
+
+#ifdef USE_MPS
+
+// Binds size bytes at ptr so float, bool and small array args can be used
+// (for tensor and int64_t types see aoti_torch/c/shim_mps.h).
+// setBytes supports transient data up to 4 KB. Pass larger data as a tensor:
+// https://developer.apple.com/documentation/metal/mtlcomputecommandencoder/1443159-setbytes
+AOTI_TORCH_EXPORT AOTITorchError torch_mps_set_arg_bytes(
+    AOTIMetalKernelFunctionHandle func,
+    unsigned idx,
+    const void* ptr,
+    uint64_t size);
+
+#endif // USE_MPS
+
+// --- Python interop shims -------------------------------------------------
+// Unlike the rest of the stable ABI, these convert between a Python
+// torch.Tensor (a PyObject*, passed as an opaque void* so this header stays
+// free of Python.h) and an AtenTensorHandle. The conversion is implemented in
+// libtorch_python via a vtable it registers with libtorch, so an extension
+// still links only libtorch; if libtorch_python is not loaded at runtime the
+// call errors. The GIL must be held.
+
+// Wrap a Python torch.Tensor as a new AtenTensorHandle that shares the
+// underlying TensorImpl with the input.
+AOTI_TORCH_EXPORT AOTITorchError torch_tensor_from_pyobject(
+    void* py_obj,
+    AtenTensorHandle* ret); // returns new reference
+
+// Wrap an AtenTensorHandle as a Python torch.Tensor. If py_type is non-null, it
+// is used as the result's exact PyTypeObject* (e.g. torch.nn.Parameter); null
+// means the default torch.Tensor type.
+AOTI_TORCH_EXPORT AOTITorchError torch_tensor_to_pyobject(
+    AtenTensorHandle ath,
+    void* py_type,
+    void** ret); // returns new reference
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
 
 #ifdef __cplusplus
 } // extern "C"

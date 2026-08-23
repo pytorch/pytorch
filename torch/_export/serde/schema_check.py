@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import dataclasses
 import hashlib
 import inspect
@@ -16,7 +15,7 @@ class SchemaUpdateError(Exception):
     pass
 
 
-def _check(x, msg):
+def _check(x: object, msg: str) -> None:
     if not x:
         raise SchemaUpdateError(msg)
 
@@ -36,9 +35,9 @@ _THRIFT_TYPE_MAP = {
 }
 
 
-def _staged_schema():
+def _staged_schema() -> tuple[dict[str, Any], str, str]:
     yaml_ret: dict[str, Any] = {}
-    defs = {}
+    defs: dict[str, Any] = {}
     cpp_enum_defs: dict[str, str] = {}
     cpp_class_defs: dict[str, str] = {}
     cpp_type_decls: list[str] = []
@@ -46,8 +45,10 @@ def _staged_schema():
     thrift_enum_defs: list[str] = []
     thrift_type_defs: dict[str, str] = {}
 
-    def _handle_aggregate(ty) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-        def dump_type(t, level: int) -> tuple[str, str, str]:
+    def _handle_aggregate(
+        ty: type[Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        def dump_type(t: Any, level: int) -> tuple[str, str, str]:
             if getattr(t, "__name__", None) in cpp_enum_defs:
                 return t.__name__, "int64_t", t.__name__
             elif t in _CPP_TYPE_MAP:
@@ -115,7 +116,7 @@ def _staged_schema():
             else:
                 raise AssertionError(f"Type {t} is not supported in export schema.")
 
-        def dump_cpp_value(v) -> str:
+        def dump_cpp_value(v: object) -> str:
             if v is None:
                 return "std::nullopt"
             elif v is True:
@@ -135,7 +136,9 @@ def _staged_schema():
                     f"Default value {v} is not supported yet in export schema."
                 )
 
-        def dump_field(f) -> tuple[dict[str, Any], str, str | None, str, int]:
+        def dump_field(
+            f: dataclasses.Field[Any],
+        ) -> tuple[dict[str, Any], str, str | None, str, int]:
             t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
             cpp_default: str | None = None
@@ -143,6 +146,7 @@ def _staged_schema():
                 raise AssertionError(
                     f"Field {f.name} must be annotated with an integer id."
                 )
+            # pyrefly: ignore[missing-attribute]  # TODO f.type is an Annotated alias at runtime, not str
             thrift_id = f.type.__metadata__[0]
             if type(thrift_id) is not int:
                 raise AssertionError(
@@ -198,7 +202,7 @@ def _staged_schema():
             thrift_ids.add(thrift_id)
         return yaml_ret, cpp_ret, thrift_ret
 
-    def _handle_int_enum(name, ty):
+    def _handle_int_enum(name: str, ty: type[IntEnum]) -> None:
         yaml_ret[name] = {"kind": "enum", "fields": {x.name: x.value for x in ty}}
         cpp_enum_defs[name] = f"""
 enum class {name} {{
@@ -226,7 +230,7 @@ enum {name} {{
 """
         )
 
-    def _handle_struct(name, ty):
+    def _handle_struct(name: str, ty: type[Any]) -> None:
         fields, cpp_fields, thrift_fields = _handle_aggregate(ty)
         yaml_ret[name] = {"kind": "struct", "fields": fields}
         field_decls = "\n".join(
@@ -234,7 +238,7 @@ enum {name} {{
             for name, f in cpp_fields.items()
         )
 
-        def accessor(name, ty):
+        def accessor(name: str, ty: str) -> str:
             type_name = fields[name]["type"]
             if type_name in cpp_enum_defs:
                 return f"""
@@ -296,11 +300,11 @@ struct {name} {{
 {chr(10).join(f"  {f['thrift_id']}: {f['thrift_type']} {n};" for n, f in thrift_fields.items())}
 }}"""
 
-    def _handle_union(name, ty):
+    def _handle_union(name: str, ty: type[Any]) -> None:
         fields, cpp_fields, thrift_fields = _handle_aggregate(ty)
         yaml_ret[name] = {"kind": "union", "fields": fields}
 
-        def accessor(name, ty, idx):
+        def accessor(name: str, ty: str, idx: int) -> str:
             return f"""
   const {ty}& get_{name}() const {{
     return std::get<{idx + 1}>(variant_);
@@ -572,7 +576,9 @@ namespace cpp2 torch._export.schema
     return yaml_ret, cpp_header, thrift_schema
 
 
-def _diff_schema(dst, src):
+def _diff_schema(
+    dst: dict[str, Any], src: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
     additions = {key: src[key] for key in src.keys() - dst.keys()}
     subtractions = {key: dst[key] for key in dst.keys() - src.keys()}
 
@@ -642,7 +648,7 @@ def _diff_schema(dst, src):
     return additions, subtractions
 
 
-def _hash_content(s: str):
+def _hash_content(s: str) -> str:
     return hashlib.sha256(s.strip().encode("utf-8")).hexdigest()
 
 
@@ -780,9 +786,10 @@ class _Commit:
     thrift_schema_path: str
 
 
-def update_schema():
+def update_schema() -> _Commit:
     import importlib.resources
 
+    dst: dict[str, Any]
     # pyrefly: ignore [bad-argument-type]
     if importlib.resources.is_resource(__package__, "schema.yaml"):
         # pyrefly: ignore [bad-argument-type]
@@ -863,8 +870,8 @@ def update_schema():
     )
 
 
-def check(commit: _Commit, force_unsafe: bool = False):
-    next_version = None
+def check(commit: _Commit, force_unsafe: bool = False) -> tuple[list[int] | None, str]:
+    next_version: list[int] | None = None
     reason = ""
     # Step 1: Detect major schema updates.
     if len(commit.additions) > 0:
