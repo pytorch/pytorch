@@ -581,7 +581,7 @@ def broadcast_symbolic_shapes(a, b):
 
 
 _ADD_SUB_SCALAR_ROUNDING_DEVICES = frozenset(("cpu", "mps"))
-_FMOD_REMAINDER_SCALAR_ROUNDING_DEVICES = frozenset(("cpu", "cuda", "xpu"))
+_FMOD_REMAINDER_SCALAR_ROUNDING_DEVICES = frozenset(("cpu", "cuda", "mtia", "xpu"))
 
 
 def promote_constants(
