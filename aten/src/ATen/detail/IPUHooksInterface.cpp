@@ -5,7 +5,7 @@ namespace detail {
 
 const IPUHooksInterface& getIPUHooks() {
   auto create_impl = [] {
-    auto hooks = IPUHooksRegistry()->Create("IPUHooks", IPUHooksArgs{});
+    auto hooks = IPUHooksRegistry()->Create("IPUHooks");
     if (hooks) {
       return hooks;
     }
@@ -17,6 +17,6 @@ const IPUHooksInterface& getIPUHooks() {
 
 } // namespace detail
 
-C10_DEFINE_REGISTRY(IPUHooksRegistry, IPUHooksInterface, IPUHooksArgs)
+C10_DEFINE_REGISTRY(IPUHooksRegistry, IPUHooksInterface)
 
 } // namespace at

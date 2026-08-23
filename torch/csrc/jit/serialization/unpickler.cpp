@@ -4,6 +4,8 @@
 #ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
+#include <c10/util/FbcodeMaps.h>
+#include <c10/util/safe_numerics.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
@@ -39,7 +41,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
     IValue value;
   };
   std::vector<Work> to_process = {{type_tag, root}};
-  std::unordered_set<const void*> scanned;
+  c10::FastSet<const void*> scanned;
   while (!to_process.empty()) {
     Work w = std::move(to_process.back());
     to_process.pop_back();
@@ -48,11 +50,10 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
     // it would not terminate).
     if (w.value.isPtrType()) {
       const void* key = w.value.internalToPointer();
-      auto it = scanned.find(key);
-      if (it != scanned.end()) {
+      // insert() reports prior presence, so the key is hashed once.
+      if (!scanned.insert(key).second) {
         continue;
       }
-      scanned.emplace_hint(it, key);
     }
     auto kind = w.type->kind();
     if (auto dyn = w.type->castRaw<c10::DynamicType>()) {
@@ -569,7 +570,14 @@ PickleOpCode Unpickler::readInstruction() {
         storage = storage_context_->getStorage(key);
       } else {
         int64_t numel = args.at(4).toInt();
+        size_t nbytes = 0;
         auto dtype = scalarTypeToTypeMeta(type);
+
+        TORCH_CHECK(numel >= 0, "Numel can not be negative");
+        TORCH_CHECK(
+            !c10::mul_overflows(
+                static_cast<size_t>(numel), dtype.itemsize(), &nbytes),
+            "Tensor storage size overflowed");
 
         at::DataPtr storage_ptr;
         if (numel > 0) {
@@ -581,7 +589,7 @@ PickleOpCode Unpickler::readInstruction() {
 
         storage = at::Storage(
             c10::Storage::use_byte_size_t(),
-            numel * dtype.itemsize(),
+            nbytes,
             std::move(storage_ptr),
             /*allocator=*/nullptr,
             /*resizable=*/false); // NB: we didn't set any allocator for the

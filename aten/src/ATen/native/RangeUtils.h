@@ -40,13 +40,18 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
   // the corner-case we do want to take into account is int64_t, which has higher precision than double
   double size_d;
   if constexpr (std::is_same_v<scalar_t, int64_t>) {
-    using accscalar_t = at::acc_type<scalar_t, false>;
-    auto xstart = start.to<accscalar_t>();
-    auto xend = end.to<accscalar_t>();
-    auto xstep = step.to<accscalar_t>();
-    TORCH_CHECK_VALUE(xstep != 0, "step must be nonzero");
-    int64_t sgn = (xstep > 0) - (xstep < 0);
-    size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
+    if (start.isIntegral(false) && end.isIntegral(false) && step.isIntegral(false)) {
+      using accscalar_t = at::acc_type<scalar_t, false>;
+      auto xstart = start.to<accscalar_t>();
+      auto xend = end.to<accscalar_t>();
+      auto xstep = step.to<accscalar_t>();
+      TORCH_CHECK_VALUE(xstep != 0, "step must be nonzero");
+      int64_t sgn = (xstep > 0) - (xstep < 0);
+      size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
+    } else {
+      size_d = std::ceil((end.to<double>() - start.to<double>())
+                          / step.to<double>());
+    }
   } else {
     size_d = std::ceil((end.to<double>() - start.to<double>())
                         / step.to<double>());

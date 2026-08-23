@@ -72,11 +72,12 @@ def _make_disk_key(
     config_key: tuple[Any, ...],
     runtime_key: tuple[Any, ...],
     device_index: int = 0,
+    device_capability: tuple[int, int] | None = None,
 ) -> str:
     import torch
 
-    arch = None
-    if torch.cuda.is_available():
+    arch = device_capability
+    if arch is None and torch.cuda.is_available():
         arch = torch.cuda.get_device_capability(device_index)
     cuda_version = getattr(torch.version, "cuda", None)
 
@@ -90,13 +91,16 @@ def disk_cache_get(
     config_key: tuple[Any, ...],
     runtime_key: tuple[Any, ...],
     device_index: int = 0,
+    device_capability: tuple[int, int] | None = None,
 ) -> Any | None:
     """Look up a compiled CuTe DSL function, checking memory then disk."""
     mem_key = (runtime_key, device_index)
     if mem_key in mem_cache:
         return mem_cache[mem_key]
 
-    h = _make_disk_key(module_path, config_key, runtime_key, device_index)
+    h = _make_disk_key(
+        module_path, config_key, runtime_key, device_index, device_capability
+    )
     obj_path = _cache_dir() / f"{h}.o"
     if obj_path.exists():
         try:
@@ -123,12 +127,15 @@ def disk_cache_set(
     runtime_key: tuple[Any, ...],
     compiled_fn: Any,
     device_index: int = 0,
+    device_capability: tuple[int, int] | None = None,
 ) -> None:
     """Store a compiled CuTe DSL function to memory and disk."""
     mem_key = (runtime_key, device_index)
     mem_cache[mem_key] = compiled_fn
 
-    h = _make_disk_key(module_path, config_key, runtime_key, device_index)
+    h = _make_disk_key(
+        module_path, config_key, runtime_key, device_index, device_capability
+    )
     d = _cache_dir()
     d.mkdir(parents=True, exist_ok=True)
     obj_path = d / f"{h}.o"

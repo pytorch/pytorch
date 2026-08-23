@@ -40,7 +40,7 @@ class TORCH_API Dtype {
   Dtype(Dtype type, int64_t lanes)
       : scalar_type_(type.scalar_type_), lanes_(lanes) {
     if (type.lanes() != 1) {
-      throw malformed_input("dtype lanes dont match");
+      throw malformed_input("dtype lanes don't match");
     }
   }
   int64_t lanes() const {
@@ -129,7 +129,7 @@ inline Dtype BinaryOpDtype(
   }
 
   if (op1_dtype.lanes() != op2_dtype.lanes()) {
-    throw malformed_input("lanes dont match");
+    throw malformed_input("lanes don't match");
   }
   int64_t lanes = op1_dtype.lanes();
 

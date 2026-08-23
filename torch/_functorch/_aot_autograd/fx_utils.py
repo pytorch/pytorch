@@ -107,7 +107,7 @@ def get_all_output_and_tangent_nodes(
     all differentiable outputs and matches them with their corresponding tangent
     inputs used in forward-mode autodiff.
 
-    NB: *all* forward tensor output sare turned, including non-differentiable outputs,
+    NB: *all* forward tensor outputs are returned, including non-differentiable outputs,
     so you can use this function to perform operations on all outputs.
 
     Args:

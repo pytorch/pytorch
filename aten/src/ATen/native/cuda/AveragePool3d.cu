@@ -220,7 +220,7 @@ __global__ void avg_pool3d_cuda_update_grad_input_atomic(
   int dT, int dH, int dW,
   int padT, int padH, int padW,
   bool count_include_pad,
-  int offsetZ, int divisor_override, const int gradInput_numel)
+  int offsetZ, int divisor_override, const int64_t gradInput_numel)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -263,7 +263,7 @@ __global__ void avg_pool3d_cuda_update_grad_input_atomic(
       {
         for (int iCol = wstart; iCol < wend; ++iCol)
         {
-          const int index = slice * gradInput.stride(0) + iFrame * gradInput.stride(1) + iRow * gradInput.stride(2) + iCol * gradInput.stride(3);
+          const int64_t index = slice * gradInput.stride(0) + iFrame * gradInput.stride(1) + iRow * gradInput.stride(2) + iCol * gradInput.stride(3);
           fastAtomicAdd(gradInput.data(), index, gradInput_numel, val, true);
         }
       }

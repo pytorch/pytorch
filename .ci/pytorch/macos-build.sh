@@ -50,9 +50,8 @@ else
   # that building with USE_DISTRIBUTED=0 works at all. See https://github.com/pytorch/pytorch/issues/86448
   USE_DISTRIBUTED=0 USE_OPENMP=1 WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python -m build --wheel --no-isolation
 fi
-if which sccache > /dev/null; then
-  print_sccache_stats
-fi
+# print_sccache_stats self-guards (and warns) when sccache is absent.
+print_sccache_stats
 
 python tools/stats/export_test_times.py
 
