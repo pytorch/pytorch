@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     serialTest,
     skipIfRocmArch,
-    skipIfRocmVersionAtLeast,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
 )
@@ -199,14 +198,6 @@ if HAS_CPU:
                 self.assertEqual(actual[1], expected[1])
 
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
-
-    if hasattr(DynamicShapesCpuTests, "test_tmp_not_defined_issue3_dynamic_shapes_cpu"):
-        # The vec-ISA probe child cannot resolve ROCm SDK libraries in CI.
-        DynamicShapesCpuTests.test_tmp_not_defined_issue3_dynamic_shapes_cpu = (
-            skipIfRocmVersionAtLeast([7, 14])(
-                DynamicShapesCpuTests.test_tmp_not_defined_issue3_dynamic_shapes_cpu
-            )
-        )
 
 
 if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
