@@ -228,20 +228,49 @@ class FakeProcessGroup : public Backend {
 
   // The contiguous segment of `flat` belonging to peer `index`, honoring the
   // c10d convention that an empty split list means an equal division.
+  // Segment `index` of a flattened buffer. c10d split sizes count rows along
+  // dim 0, not elements, so each one scales by `rowSize` exactly as
+  // computeLengthsAndOffsets does for the real backends. Getting this wrong
+  // silently under-writes the output for anything that is not 1-D.
   static at::Tensor splitSegment(
       const at::Tensor& flat,
       const std::vector<int64_t>& splitSizes,
       int64_t index,
-      int64_t worldSize) {
+      int64_t worldSize,
+      int64_t rowSize) {
     if (splitSizes.empty()) {
+      // checkSplitSizes has already verified size(0) divides the world, so
+      // numel does too and this covers the buffer exactly.
       const auto chunk = flat.numel() / worldSize;
       return flat.narrow(0, chunk * index, chunk);
     }
+    TORCH_CHECK(
+        static_cast<int64_t>(splitSizes.size()) >= worldSize,
+        "FakeProcessGroup: split list has ",
+        splitSizes.size(),
+        " entries for a world of ",
+        worldSize);
     int64_t offset = 0;
     for (int64_t i = 0; i < index; ++i) {
-      offset += splitSizes[i];
+      offset += splitSizes[i] * rowSize;
     }
-    return flat.narrow(0, offset, splitSizes[index]);
+    const auto length = splitSizes[index] * rowSize;
+    TORCH_CHECK(
+        offset + length <= flat.numel(),
+        "FakeProcessGroup: split segment [",
+        offset,
+        ", ",
+        offset + length,
+        ") exceeds the ",
+        flat.numel(),
+        "-element buffer");
+    return flat.narrow(0, offset, length);
+  }
+
+  // Elements per row along dim 0, matching computeLengthsAndOffsets.
+  static int64_t rowSizeOf(const at::Tensor& t) {
+    const auto dim0 = t.dim() > 0 ? t.size(0) : 0;
+    return dim0 ? t.numel() / dim0 : 1;
   }
 
   c10::intrusive_ptr<Work> broadcast(
@@ -270,6 +299,13 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& /* tensors */,
       const AllreduceOptions& /* opts */ = AllreduceOptions()) override {
     checkCollectiveError();
+    // Sparse tensors do not support the in-place ops applyUniformReduction
+    // uses, so this stays a no-op. Fail loudly rather than silently returning
+    // an unreduced result while the sibling collectives honour the contract.
+    TORCH_CHECK(
+        !uniformRanks(),
+        "FakeProcessGroup: allreduce_sparse is not supported under "
+        "simulate_uniform_ranks.");
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -424,8 +460,7 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ReduceScatterOptions& /* opts */ =
-          ReduceScatterOptions()) override {
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
     checkCollectiveError();
     auto invalidArgument = [](const std::string& msg) {
       TORCH_CHECK(false, "FakeProcessGroup::reduce_scatter: ", msg);
@@ -438,8 +473,12 @@ class FakeProcessGroup : public Backend {
       assertInputTensorListSizeEqualsWorldSize(
           invalidArgument, inputTensors[i].size(), size_);
       outputTensors[i].copy_(inputTensors[i][rank_]);
+      if (uniformRanks()) {
+        applyUniformReduction(outputTensors[i], opts.reduceOp);
+      }
     }
-    return c10::make_intrusive<FakeWork>();
+    return uniformRanks() ? c10::make_intrusive<FakeWork>(outputTensors)
+                          : c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> reduce_scatter_single(
@@ -517,11 +556,16 @@ class FakeProcessGroup : public Backend {
       // the segment we would send to a peer in our own position: our input
       // split at index rank_. Fill each output slot from it, which keeps the
       // split structure self-consistent and lets callers reshape the result.
-      // The splits cover the whole buffer, so every element is written here
-      // and the approximation's pre-zeroing below would be wasted work.
-      auto mine = splitSegment(flat_input, inputSplitSizes, rank_, size_);
+      // Zero first: the slots should tile over the whole buffer, but a caller
+      // that reshapes the output must never read uninitialized memory if they
+      // do not, so this is a cheap backstop rather than an assumption.
+      flat_output.zero_();
+      auto mine = splitSegment(
+          flat_input, inputSplitSizes, rank_, size_, rowSizeOf(inputBuffer));
+      const auto outputRowSize = rowSizeOf(outputBuffer);
       for (int64_t j = 0; j < size_; ++j) {
-        auto slot = splitSegment(flat_output, outputSplitSizes, j, size_);
+        auto slot = splitSegment(
+            flat_output, outputSplitSizes, j, size_, outputRowSize);
         fillByTiling(slot, mine);
       }
       return c10::make_intrusive<FakeWork>(

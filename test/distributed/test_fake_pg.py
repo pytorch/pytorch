@@ -1175,6 +1175,24 @@ class TestFakePGUniformRanks(TestCase):
         for slot in recv.chunk(world_size):
             self.assertEqual(slot, torch.tensor([20.0, 21.0]))
 
+    def test_all_to_all_single_fills_a_2d_buffer(self):
+        """Split sizes count rows along dim 0, not elements.
+
+        A 2-D buffer with explicit splits has to be written in full: narrowing
+        the flat view by the raw split value would write one element per slot
+        instead of one row, leaving the rest of the buffer untouched.
+        """
+        pg = self._init(rank=1, world_size=4)
+        output = torch.empty(4, 8)
+        input_tensor = torch.arange(32.0).reshape(4, 8)
+
+        pg.all_to_all_single(output, input_tensor, [1] * 4, [1] * 4).wait()
+
+        # Row 1 is what this rank would send to a peer in its own position, so
+        # under the uniform contract every slot receives it.
+        expected = input_tensor[1].expand(4, 8)
+        self.assertEqual(output, expected)
+
     def test_all_to_all_single_reshapes_like_torchrec(self):
         """Output must survive a [world_size, per_rank] view."""
         world_size = 16

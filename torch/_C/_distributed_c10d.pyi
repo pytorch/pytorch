@@ -832,8 +832,10 @@ class FakeProcessGroup(Backend):
         world_size: int,
         options: FakeProcessGroup.Options = ...,
     ) -> FakeProcessGroup: ...
+    # getOptions() returns null when the group was built without options, and
+    # callers (test_device_mesh) branch on that, so this must stay optional.
     @property
-    def options(self) -> FakeProcessGroup.Options: ...
+    def options(self) -> FakeProcessGroup.Options | None: ...
 
 class FakeWork(Work):
     seq_id: int
