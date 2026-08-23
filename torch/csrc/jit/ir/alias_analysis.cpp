@@ -426,7 +426,7 @@ std::string AliasDb::getElementName(const Element* e) const {
       ss << '%' << v->debugName() << ", ";
     }
     ss << ')';
-    return ss.str();
+    return std::move(ss).str();
   }
 }
 
@@ -481,7 +481,7 @@ std::string AliasDb::toString() const {
     ss << '\n';
   }
   ss << '\n';
-  return ss.str();
+  return std::move(ss).str();
 }
 
 bool AliasDb::dumpToGraphvizFile(const char* filename) const {
@@ -518,7 +518,7 @@ std::string AliasDb::toGraphviz() const {
         ss << "\\%" << v->debugName() << ", ";
       }
       ss << ")\"";
-      return ss.str();
+      return std::move(ss).str();
     }
   };
 
@@ -550,7 +550,7 @@ std::string AliasDb::toGraphviz() const {
   }
 
   dot << "}\n";
-  return dot.str();
+  return std::move(dot).str();
 }
 
 void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
@@ -584,7 +584,7 @@ bool AliasDb::tryRegisteredAnalysis(Node* node) {
 
 // The basic strategy is:
 //   1. Retrieve alias information for every input.
-//   2. Use the node's schema's alias annotations to propgagate alias/write
+//   2. Use the node's schema's alias annotations to propagate alias/write
 //      information to the outputs. For unschematized nodes, a special analyzer
 //      will have to be handwritten.
 void AliasDb::analyzeImpl(Node* node) {
@@ -626,7 +626,7 @@ void AliasDb::analyzeImpl(Node* node) {
           node->kind().toDisplayString(),
           " but it isn't a special case.  ",
           "Argument types: ",
-          oss.str());
+          std::move(oss).str());
     }
   }
 
@@ -737,7 +737,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return;
     case prim::CallFunction:
     case prim::CallMethod: {
-      // TODO: this can be improved with summarizes of what the function does
+      // TODO: this can be improved with summaries of what the function does
       // for now we assume the worst
       if (!descend_function_calls_) {
         return analyzeConservative(node);
@@ -769,7 +769,7 @@ void AliasDb::analyzeImpl(Node* node) {
     }
     case prim::Enter:
     case prim::Exit:
-      // TODO: this can be improved with summarizes of what the function does
+      // TODO: this can be improved with summaries of what the function does
       // for now we assume the worst
       // NB: update safeToChangeAliasingRelationship if changed
       return analyzeConservative(node);
@@ -852,7 +852,7 @@ void AliasDb::analyzeImpl(Node* node) {
         "Composite types for alias analysis not yet supported");
     TORCH_INTERNAL_ASSERT(
         !formal->isWildcardBefore(),
-        "Doesn't make sense for a input value to begin as a wildcard");
+        "Doesn't make sense for an input value to begin as a wildcard");
     // This is a special case where we have alias info before [] but not after,
     // such as `Tensor(a!)[]`
     if (formal->containedTypes().size() == 1 && formal->beforeSets().empty()) {
@@ -863,7 +863,7 @@ void AliasDb::analyzeImpl(Node* node) {
     const auto& formalAlias = formal->beforeSet();
 
     // skip if we've already bound this alias
-    if (formalToActual.count(formalAlias) != 0) {
+    if (formalToActual.contains(formalAlias)) {
       continue;
     }
 
@@ -923,7 +923,7 @@ void AliasDb::analyzeImpl(Node* node) {
 
     bool inputs_has_alias = false;
     for (const auto& formalAlias : formal->beforeSets()) {
-      if (formalToActual.count(formalAlias)) {
+      if (formalToActual.contains(formalAlias)) {
         inputs_has_alias = true;
         auto toAlias = formalToActual.at(formalAlias);
         makePointerTo(actual, toAlias);
@@ -1017,7 +1017,7 @@ void AliasDb::analyzeSubgraph(
   analyze(subgraphBlock);
 
   // Note: the subgraph outputs and node outputs are NOT NECESSARILY the
-  // same length. Autodifferentiation maybe capture additional outputs in the
+  // same length. Autodifferentiation may capture additional outputs in the
   // subgraph block.
   TORCH_INTERNAL_ASSERT(
       subgraphBlock->outputs().size() >= node->outputs().size());
@@ -1658,21 +1658,21 @@ class AliasDb::WorkingSet {
   bool producesFor(Node* n) const {
     // This equivalent to asking: does the total use-set of all the nodes in the
     // working set include `n`?
-    if (mover_ && moverUsers_.count(n)) {
+    if (mover_ && moverUsers_.contains(n)) {
       return true;
     }
-    return users_.count(n) != 0;
+    return users_.contains(n);
   }
 
   // Does the working set consume any values produced by `n`?
   bool consumesFrom(Node* n) const {
     const auto users = getUsersSameBlock(n);
 
-    if (mover_ && users.count(mover_)) {
+    if (mover_ && users.contains(mover_)) {
       return true;
     }
     return std::any_of(users.begin(), users.end(), [&](Node* user) {
-      return node_to_index_.find(user) != node_to_index_.end();
+      return node_to_index_.contains(user);
     });
   }
 
@@ -2013,7 +2013,7 @@ void Lint(const AliasDb* db) {
          << "It was defined in " << *v->node();
     }
   }
-  TORCH_INTERNAL_ASSERT(!failed, ss.str());
+  TORCH_INTERNAL_ASSERT(!failed, std::move(ss).str());
 
   // Two checks that we want to add but can't until the mutation API is more
   // fully developed.

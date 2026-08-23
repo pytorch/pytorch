@@ -31,6 +31,9 @@
 #endif
 #elif defined(__aarch64__) && !defined(__CUDACC__) && !defined(__HIPCC__)
 #define C10_ARMTSC
+#elif defined(__riscv) && (__riscv_xlen == 64) && !defined(__CUDACC__) && \
+    !defined(__HIPCC__)
+#define C10_RISCVTSC
 #endif
 
 namespace c10 {
@@ -80,6 +83,16 @@ inline uint64_t getArmApproximateTime() {
 }
 #endif
 
+#if defined(C10_RISCVTSC)
+inline uint64_t getRiscvApproximateTime() {
+  uint64_t val;
+  // rdtime reads the constant-frequency `time` CSR (user-readable on Linux,
+  // as cntvct_el0 is on aarch64).
+  __asm__ __volatile__("rdtime %0" : "=r"(val));
+  return val;
+}
+#endif
+
 // We often do not need to capture true wall times. If a fast mechanism such
 // as TSC is available we can use that instead and convert back to epoch time
 // during post processing. This greatly reduce the clock's contribution to
@@ -93,6 +106,8 @@ inline auto getApproximateTime() {
   return static_cast<uint64_t>(__rdtsc());
 #elif defined(C10_ARMTSC)
   return getArmApproximateTime();
+#elif defined(C10_RISCVTSC)
+  return getRiscvApproximateTime();
 #else
   return getTime();
 #endif

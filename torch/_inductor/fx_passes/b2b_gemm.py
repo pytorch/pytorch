@@ -500,16 +500,23 @@ def build_subgraph_buffer(
                     return None
                 output_node = output
                 output_buffer = env[output_node]
-                assert isinstance(output_buffer, TensorBox), (
-                    "The output node for B2B-GEMM's subgraph must be a TensorBox, but got: ",
-                    type(output_buffer),
-                )
-                assert isinstance(output_buffer.data, StorageBox), (
-                    "The output node for B2B-GEMM's subgraph must be a StorageBox, but got: ",
-                    type(output_buffer),
-                )
+                if not isinstance(output_buffer, TensorBox):
+                    raise AssertionError(
+                        (
+                            "The output node for B2B-GEMM's subgraph must be a TensorBox, but got: ",
+                            type(output_buffer),
+                        )
+                    )
+                if not isinstance(output_buffer.data, StorageBox):
+                    raise AssertionError(
+                        (
+                            "The output node for B2B-GEMM's subgraph must be a StorageBox, but got: ",
+                            type(output_buffer),
+                        )
+                    )
                 device = output_buffer.data.get_device()
-                assert device is not None
+                if device is None:
+                    raise AssertionError("expected output buffer to have a device")
                 subgraph_buffer = ComputedBuffer(
                     name=None,
                     layout=FlexibleLayout(
@@ -778,6 +785,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
         function = functools.partial(tuned_b2b_gemm, is_left_assoc, subgraph)
         function.__name__ = tuned_b2b_gemm.__name__  # type: ignore[attr-defined]
         function._inductor_lowering_function = True  # type: ignore[attr-defined]
+        function._inductor_lowering_output_metadata_ignores_input_storage = True  # type: ignore[attr-defined]
         replacement: torch.fx.Node = graph.call_function(
             function,
             (A, B, C),
