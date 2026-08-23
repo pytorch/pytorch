@@ -359,28 +359,32 @@ inline at::vec::VecMask<float, 1> min_masked_reduce(
 // ties (minimum(-0., +0.) == -0. and maximum(-0., +0.) == +0.). The plain
 // comparisons inside at::vec::minimum/maximum treat the two zeros as equal,
 // which can drop the sign bit of the result.
+//
+// For floating point types, a == b with differing bit patterns happens only
+// for +/- zero, and when the bit patterns are identical the bitwise fixup is
+// a no-op, so a plain equality mask suffices here. NaN lanes compare unequal
+// and stay untouched, preserving propagation. at::vec::is_floating_point_v is
+// used instead of the std trait because it also covers at::Half/at::BFloat16.
 template <typename V>
-inline V minimum_preserve_signbit_vec(const V& a, const V& b) {
+inline V min_preserve_signbit_vec(const V& a, const V& b) {
   auto result = at::vec::minimum(a, b);
   using T = typename V::value_type;
-  if constexpr (std::is_floating_point_v<T>) {
+  if constexpr (at::vec::is_floating_point_v<T>) {
     // For +/- zero ties the result sign must be negative, which is exactly
     // the bitwise OR of the two values.
-    auto both_zero = (a == V(static_cast<T>(0))) & (b == V(static_cast<T>(0)));
-    result = V::blendv(result, a | b, both_zero);
+    result = V::blendv(result, a | b, a == b);
   }
   return result;
 }
 
 template <typename V>
-inline V maximum_preserve_signbit_vec(const V& a, const V& b) {
+inline V max_preserve_signbit_vec(const V& a, const V& b) {
   auto result = at::vec::maximum(a, b);
   using T = typename V::value_type;
-  if constexpr (std::is_floating_point_v<T>) {
+  if constexpr (at::vec::is_floating_point_v<T>) {
     // For +/- zero ties the result sign must be positive, which is exactly
     // the bitwise AND of the two values.
-    auto both_zero = (a == V(static_cast<T>(0))) & (b == V(static_cast<T>(0)));
-    result = V::blendv(result, a & b, both_zero);
+    result = V::blendv(result, a & b, a == b);
   }
   return result;
 }
@@ -1009,7 +1013,7 @@ inline scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
 }
 
 template <typename scalar_t>
-inline scalar_t maximum_preserve_signbit(scalar_t a, scalar_t b) {
+inline scalar_t max_preserve_signbit(scalar_t a, scalar_t b) {
   if (at::_isnan(a)) {
     return a;
   }
@@ -1017,8 +1021,9 @@ inline scalar_t maximum_preserve_signbit(scalar_t a, scalar_t b) {
     return a > b ? a : b;
   } else {
     // IEEE 754: maximum(-0., +0.) is +0., but plain `>` treats the two
-    // zeros as equal and may drop the sign bit of the result.
-    if (a == static_cast<scalar_t>(0) && b == static_cast<scalar_t>(0)) {
+    // zeros as equal and may drop the sign bit of the result. For equal
+    // operands with identical bits either operand is the answer.
+    if (a == b) {
       return std::signbit(static_cast<double>(a)) ? b : a;
     }
     return a > b ? a : b;
@@ -1026,7 +1031,7 @@ inline scalar_t maximum_preserve_signbit(scalar_t a, scalar_t b) {
 }
 
 template <typename scalar_t>
-inline scalar_t minimum_preserve_signbit(scalar_t a, scalar_t b) {
+inline scalar_t min_preserve_signbit(scalar_t a, scalar_t b) {
   if (at::_isnan(a)) {
     return a;
   }
@@ -1034,7 +1039,7 @@ inline scalar_t minimum_preserve_signbit(scalar_t a, scalar_t b) {
     return a < b ? a : b;
   } else {
     // IEEE 754: minimum(-0., +0.) is -0.
-    if (a == static_cast<scalar_t>(0) && b == static_cast<scalar_t>(0)) {
+    if (a == b) {
       return std::signbit(static_cast<double>(a)) ? a : b;
     }
     return a < b ? a : b;
