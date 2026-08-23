@@ -534,7 +534,6 @@
   approved_by:
   - lolpack
   - maggiemoss
-  - ndmitchell
   - kinto0
   mandatory_checks_name:
   - EasyCLA
@@ -568,7 +567,6 @@
   patterns:
   - '*'
   approved_by:
-  - 8Keep
   - aditvenk
   - AmesingFlank
   - amirafzali
@@ -587,12 +585,12 @@
   - digantdesai
   - dolpm
   - drisspg
-  - echen4096
   - egienvalue
   - fegin
   - frgossen
   - fxdawnn
   - georgehong
+  - han3101
   - haoyuz
   - htyu
   - huydhn
@@ -603,7 +601,6 @@
   - jathu
   - jbschlosser
   - jeanschmidt
-  - jijunyan
   - kapilsh
   - karthickai
   - kqfu
@@ -611,7 +608,6 @@
   - liangel-02
   - Microve
   - mlazos
-  - NicolasHug
   - njriasan
   - oulgen
   - pianpwk
@@ -620,11 +616,9 @@
   - scotts
   - seemethere
   - sevenEng
-  - shawnxu26
   - SherlockNoMad
   - slayton58
   - soulitzer
-  - tianyu-l
   - tushar00jain
   - warrendeng
   - wconstab
@@ -633,8 +627,17 @@
   - xmfan
   - ydwu4
   - yushangdi
-  - ZainRizvi
   - zpcore
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: Greenlight Review Bot
+  patterns:
+  - '*'
+  approved_by:
+  - pytorchgreenlight
   mandatory_checks_name:
   - EasyCLA
   - Lint
