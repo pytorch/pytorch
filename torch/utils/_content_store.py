@@ -173,7 +173,7 @@ class ContentStoreWriter:
             t.dtype,
             h,
             t.storage_offset(),
-            tuple(t.shape),
+            t.shape,
             t.stride(),
             torch._utils.get_tensor_metadata(t),
         )

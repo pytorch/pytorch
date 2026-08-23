@@ -247,7 +247,7 @@ std::vector<int64_t> makeShapesSymbolic(
 
     auto new_sizes = c10::fmap(shape_vec, [&](const at::ShapeSymbol& shape) {
       auto value = shape.value();
-      if (shape_to_sym_shape.count(value)) {
+      if (shape_to_sym_shape.contains(value)) {
         return shape_to_sym_shape.at(value);
       }
       return value;
@@ -431,14 +431,14 @@ static bool trimGraphOnce(const std::shared_ptr<Graph>& graph) {
   bool changed = false;
   for (size_t idx = 0; idx < ret->inputs().size(); idx++) {
     auto v = ret->inputs()[idx];
-    if (graph_inputs.count(v)) {
+    if (graph_inputs.contains(v)) {
       continue;
     }
     // Delete the graph output IDX and add all inputs of the node producing that
     // value to the graph outputs
     graph->eraseOutput(idx);
     for (auto v_ins : v->node()->inputs()) {
-      if (outputs.count(v_ins)) {
+      if (outputs.contains(v_ins)) {
         continue;
       }
       if (v_ins->node()->kind() == prim::Constant) {
