@@ -47,6 +47,13 @@ class GuardFilterEntry:
     derived_guard_types: tuple[str, ...]
     is_global: bool
     orig_guard: Guard
+    # Capture-only provenance used by precompile's environment contract.
+    source_root_id: int | None = None
+    source_root_is_import: bool = False
+    source_has_unsupported_value: bool = False
+    # Snapshot this when the inspection builder creates the entry. Rebuilding
+    # guards appends to Guard.code_list, so reading it later duplicates text.
+    code: tuple[str, ...] = ()
 
 
 class GuardFn(Protocol):
