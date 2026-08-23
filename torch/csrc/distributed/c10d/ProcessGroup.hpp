@@ -37,13 +37,16 @@ C10_EXPORT void register_work(
 
 C10_EXPORT at::Tensor wait_tensor(const at::Tensor& tensor);
 
+C10_EXPORT std::vector<at::Tensor> wait_tensors(at::TensorList tensors);
+
 // We only call `unregister_work()` in one case:
 // 1. If the work object is created from a non-functional collective call within
 //    the `with allow_inflight_collective_as_graph_input_ctx()` context manager.
 //
 // Q: What about the functional collective case?
 // A: The unregistration of work object for functional collective is done in
-//    the required user-side explicit call to `wait_tensor()`.
+//    the required user-side explicit call to `wait_tensor()` or
+//    `wait_tensors()`.
 C10_EXPORT void unregister_work(const c10::intrusive_ptr<c10d::Work>& work);
 
 C10_EXPORT size_t get_work_registry_size();

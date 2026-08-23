@@ -141,15 +141,10 @@
 # /aten/src/ATen/SparseTensorImpl.h
 #
 # [core_aten_optimizers]
-# /aten/src/ATen/native/ForeachOpsKernels.cpp
-# /aten/src/ATen/native/ForeachUtils.h
-# /aten/src/ATen/native/FusedAdagrad.cpp
-# /aten/src/ATen/native/FusedAdagrad.h
-# /aten/src/ATen/native/FusedAdam.cpp
-# /aten/src/ATen/native/FusedAdam.h
-# /aten/src/ATen/native/FusedSGD.cpp
-# /aten/src/ATen/native/FusedSGD.h
+/aten/src/ATen/native/Foreach* @janeyx99
+/aten/src/ATen/native/Fused* @janeyx99
 # /test/test_functional_optim.py
+/torch/foreach/ @janeyx99
 /torch/optim/ @albanD @janeyx99
 #
 # [core_aten_runtime]
@@ -219,7 +214,7 @@
 # /aten/src/ATen/LegacyVmapTransforms.cpp
 # /aten/src/ATen/LegacyVmapTransforms.h
 # /aten/src/ATen/LinalgBackend.h
-/aten/src/ATen/MapAllocator* @mikaylagawarecki
+# /aten/src/ATen/MapAllocator*
 # /aten/src/ATen/MapAllocator.cpp
 # /aten/src/ATen/MapAllocator.h
 # /aten/src/ATen/MatrixRef.h
@@ -361,7 +356,7 @@
 # /torch/csrc/README.md
 # /torch/csrc/Size.cpp
 # /torch/csrc/Size.h
-/torch/csrc/Storage* @mikaylagawarecki
+# /torch/csrc/Storage*
 # /torch/csrc/Storage.cpp
 # /torch/csrc/Storage.h
 # /torch/csrc/StorageMethods.cpp
@@ -395,11 +390,8 @@
 # /torch/csrc/python_headers.h
 # /torch/csrc/serialization.cpp
 # /torch/csrc/serialization.h
-# /torch/csrc/shim_common.cpp
-# /torch/csrc/shim_conversion_utils.h
-# /torch/csrc/shim_exception_state.cpp
-# /torch/csrc/shim_exception_state.h
-/torch/csrc/stable/ @janeyx99 @mikaylagawarecki
+/torch/csrc/shim* @janeyx99
+/torch/csrc/stable/ @janeyx99
 # /torch/csrc/stub.c
 # /torch/csrc/tensor/
 # /torch/csrc/utils.cpp
@@ -502,7 +494,7 @@
 # /test/test_as_strided.py
 # /test/test_autocast.py
 # /test/test_autoload.py
-/test/test_binary_ufuncs.py @mruberry
+# /test/test_binary_ufuncs.py
 # /test/test_bmm_outer_product.py
 # /test/test_bundled_images.py
 # /test/test_bundled_inputs.py
@@ -523,7 +515,7 @@
 # /test/test_fake_tensor.py
 # /test/test_file_check.py
 # /test/test_flop_counter.py
-# /test/test_foreach.py
+/test/test_foreach.py @janeyx99
 # /test/test_function_schema.py
 # /test/test_functionalization.py
 # /test/test_futures.py
@@ -556,9 +548,9 @@
 # /test/test_numba_integration.py
 # /test/test_opaque_obj_v2.py
 # /test/test_openmp.py
-/test/test_ops.py @mruberry
-/test/test_ops_fwd_gradients.py @mruberry @soulitzer
-/test/test_ops_gradients.py @mruberry @soulitzer
+# /test/test_ops.py
+/test/test_ops_fwd_gradients.py @soulitzer
+/test/test_ops_gradients.py @soulitzer
 # /test/test_ops_jit.py
 # /test/test_ops_unbacked.py
 # /test/test_out_dtype_op.py
@@ -570,7 +562,7 @@
 # /test/test_pruning_op.py
 # /test/test_python_dispatch.py
 # /test/test_pytree.py
-/test/test_reductions.py @mruberry
+# /test/test_reductions.py
 # /test/test_rename_privateuse1_to_existing_device.py
 # /test/test_scatter_gather_ops.py
 # /test/test_schema_check.py
@@ -592,8 +584,8 @@
 # /test/test_torchfuzz_repros.py
 # /test/test_tsan.py
 # /test/test_type_info.py
-/test/test_type_promotion.py @mruberry
-/test/test_unary_ufuncs.py @mruberry
+# /test/test_type_promotion.py
+# /test/test_unary_ufuncs.py
 # /test/test_view_ops.py
 # /test/test_weak.py
 /test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
@@ -735,7 +727,7 @@
 # /torch/script.h
 # /torch/signal/
 # /torch/special/
-/torch/storage.py @mikaylagawarecki
+# /torch/storage.py
 # /torch/torch_version.py
 # /torch/types.py
 # /torch/utils/
@@ -747,7 +739,7 @@
 /torch/_vendor/quack/ @slayton58 @drisspg
 #
 # [python_nn_api]
-/torch/nn/ @albanD @jbschlosser @mikaylagawarecki
+/torch/nn/ @albanD @jbschlosser
 /torch/nn/utils/parametriz*.py @lezcano
 /torch/nn/attention/flex_attention.py @drisspg
 #
@@ -761,22 +753,22 @@
 # /torch/utils/tensorboard/
 #
 # [python_api_tests]
-# /test/autograd/
+/test/autograd/ @soulitzer
 # /test/cpython/
 # /test/distributions/
 # /test/nn/
-# /test/optim/
-# /test/test_autograd.py
-# /test/test_autograd_fallback.py
+/test/optim/ @janeyx99
+/test/test_autograd.py @soulitzer
+/test/test_autograd_fallback.py @soulitzer
 # /test/test_modules.py
 # /test/test_nn.py
 # /test/test_nnapi.py
 # /test/test_numpy_interop.py
-# /test/test_optim.py
+/test/test_optim.py @janeyx99
 # /test/test_transformers.py
 # /test/test_type_hints.py
 # /test/test_typing.py
-# /test/test_varlen_attention.py
+/test/test_varlen_attention.py @liangel-02
 # /test/torch_np/
 # /test/typing/
 # /test/xpu/test_transformers.py
@@ -808,7 +800,7 @@
 # /test/test_tensorexpr_pybind.py
 # /torch/csrc/jit/
 # /torch/jit/
-/torch/csrc/jit/python/init.cpp @mikaylagawarecki
+# /torch/csrc/jit/python/init.cpp
 #
 # [cpp_api_custom_ops]
 # /aten/src/ATen/native/native_functions.yaml
@@ -914,7 +906,7 @@
 /.ci/docker/common/install_miopen.sh @jeffdaily
 /.ci/docker/common/install_amdsmi.sh @jeffdaily
 /.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
-/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony
 /.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 #
 # [infra_github_automation]
@@ -1064,8 +1056,8 @@
 # /torch/testing/
 # /torch/utils/benchmark/
 /torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
-/torch/testing/_internal/common_methods_invocations.py @mruberry
-/torch/testing/_internal/common_device_type.py @mruberry
+# /torch/testing/_internal/common_methods_invocations.py
+# /torch/testing/_internal/common_device_type.py
 /torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @bohnstingl
 /test/run_test.py @pytorch/pytorch-dev-infra
 #
@@ -1096,12 +1088,12 @@
 #
 # [serialization_package]
 # /benchmarks/serialization/
-/caffe2/serialize/ @mikaylagawarecki
+# /caffe2/serialize/
 # /test/package/
 # /test/test_package.py
 # /test/test_serialization.py
 # /torch/package/
-/torch/serialization.py @mikaylagawarecki
+# /torch/serialization.py
 #
 # [compiler_export_fx]
 # /test/export/

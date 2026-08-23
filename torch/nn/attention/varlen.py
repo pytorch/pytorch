@@ -10,13 +10,19 @@ from functools import lru_cache
 from typing import Any, NamedTuple
 
 import torch
+from torch._C import _SDPBackend as SDPBackend
 
+from . import _is_sdp_priority_order_active
 from ._utils import _empty_with_matching_layout
 
 
 log = logging.getLogger(__name__)
 
 __all__ = ["varlen_attn", "varlen_attn_out", "AuxRequest"]
+
+# Custom op schemas do not support enum arguments, so pass SDPBackend values as ints.
+_FLASH_ATTENTION_BACKEND = SDPBackend.FLASH_ATTENTION.value
+_CUDNN_ATTENTION_BACKEND = SDPBackend.CUDNN_ATTENTION.value
 
 
 def _normalize_window_size(window_size: list[int] | None) -> list[int]:
@@ -26,6 +32,21 @@ def _normalize_window_size(window_size: list[int] | None) -> list[int]:
     if len(window_size) != 2:
         raise ValueError(f"window_size must have length 2, got {len(window_size)}")
     return window_size
+
+
+def _validate_scale(scale: float | None) -> None:
+    """Require scales supported by the fused varlen backends."""
+    # This form also rejects NaN, unlike scale <= 0.
+    if scale is not None and not scale > 0:
+        raise ValueError(f"scale must be greater than 0, got {scale}")
+
+
+@torch.compiler.assume_constant_result
+def _get_sdp_priority_order() -> list[int]:
+    """Capture varlen backend priority at trace time."""
+    if _is_sdp_priority_order_active():
+        return torch._C._get_sdp_priority_order()
+    return [_CUDNN_ATTENTION_BACKEND, _FLASH_ATTENTION_BACKEND]
 
 
 @lru_cache(maxsize=8)
@@ -43,7 +64,7 @@ def _should_use_cudnn(device_index: int) -> bool:
     return False
 
 
-def _can_use_cudnn(
+def _cudnn_rejection_reasons(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -55,25 +76,86 @@ def _can_use_cudnn(
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
-) -> bool:
-    if not query.is_cuda or not _should_use_cudnn(query.device.index):
-        return False
+) -> list[str]:
+    """Return the constraints preventing cuDNN varlen attention."""
+    reasons = []
+    if not query.is_cuda:
+        reasons.append("query must be on CUDA")
+    elif not _should_use_cudnn(query.device.index):
+        reasons.append("cuDNN >= 9.18 on SM90 or SM100 is required")
     if max_q <= 128:
-        return False
+        reasons.append("max_q must be greater than 128")
     if query.dtype not in (torch.float16, torch.bfloat16):
-        return False
+        reasons.append("query dtype must be float16 or bfloat16")
     if query.shape[-1] % 8 != 0 or value.shape[-1] % 8 != 0:
-        return False
+        reasons.append("query and value head dimensions must be divisible by 8")
     if window_size == [-1, 0]:
-        if cu_seq_q is not cu_seq_k or seqused_k is not None or block_table is not None:
-            return False
+        if cu_seq_q is not cu_seq_k:
+            reasons.append(
+                "causal attention requires the same cu_seq tensor for Q and K"
+            )
+        if seqused_k is not None or block_table is not None:
+            reasons.append("causal attention does not support a KV cache")
     elif window_size != [-1, -1]:
-        return False
+        reasons.append("window_size must be (-1, -1) or causal (-1, 0)")
     if enable_gqa or query.size(-2) != key.size(-2):
-        return False
-    if num_splits is not None or (block_table is not None and seqused_k is None):
-        return False
-    return True
+        reasons.append("GQA is not supported")
+    if num_splits is not None:
+        reasons.append("num_splits is not supported")
+    if block_table is not None and seqused_k is None:
+        reasons.append("block_table requires seqused_k")
+    return reasons
+
+
+def _select_backend(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor | None,
+    max_q: int,
+    window_size: list[int],
+    enable_gqa: bool = False,
+    seqused_k: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
+    num_splits: int | None = None,
+) -> int:
+    """Select the first eligible varlen backend in the SDPA priority order."""
+    cudnn_enabled = torch._C._get_cudnn_sdp_enabled()
+    flash_enabled = torch._C._get_flash_sdp_enabled()
+    cudnn_reasons = (
+        _cudnn_rejection_reasons(
+            query,
+            key,
+            value,
+            cu_seq_q,
+            cu_seq_k,
+            max_q,
+            window_size,
+            enable_gqa,
+            seqused_k,
+            block_table,
+            num_splits,
+        )
+        if cudnn_enabled
+        else []
+    )
+    cudnn_eligible = cudnn_enabled and not cudnn_reasons
+    for backend in _get_sdp_priority_order():
+        if backend == _CUDNN_ATTENTION_BACKEND and cudnn_eligible:
+            return backend
+        if backend == _FLASH_ATTENTION_BACKEND and flash_enabled:
+            return backend
+    if cudnn_enabled:
+        constraints = "\n  - ".join(cudnn_reasons)
+        raise RuntimeError(
+            "SDPBackend.CUDNN_ATTENTION was requested for varlen_attn, but its "
+            f"constraints are not satisfied:\n  - {constraints}"
+        )
+    raise RuntimeError(
+        "No viable backend for varlen_attn. Enable SDPBackend.FLASH_ATTENTION "
+        "or SDPBackend.CUDNN_ATTENTION with sdpa_kernel()."
+    )
 
 
 class AuxRequest(NamedTuple):
@@ -102,7 +184,7 @@ def _varlen_attn(
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
-    use_cudnn: bool = False,
+    backend: int = _FLASH_ATTENTION_BACKEND,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -111,7 +193,7 @@ def _varlen_attn(
     """
     window_size = _normalize_window_size(window_size)
 
-    if use_cudnn:
+    if backend == _CUDNN_ATTENTION_BACKEND:
         log.info("Using cuDNN backend for varlen_attn")
         result = torch.ops.aten._cudnn_attention_forward(
             query=query,
@@ -132,7 +214,7 @@ def _varlen_attn(
         )
         # cuDNN returns: (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
         output, softmax_lse, rng_state = result[0], result[1], result[6]
-    else:
+    elif backend == _FLASH_ATTENTION_BACKEND:
         log.info("Using Flash Attention backend for varlen_attn")
         output, softmax_lse, rng_state, _, _ = torch.ops.aten._flash_attention_forward(
             query,
@@ -152,6 +234,8 @@ def _varlen_attn(
             block_table=block_table,
             num_splits=num_splits,
         )
+    else:
+        raise AssertionError(f"Unsupported varlen attention backend: {backend}")
 
     rng_state_ = torch.zeros(
         (2,), dtype=torch.uint64, device=query.device
@@ -175,7 +259,7 @@ def _varlen_attn_fake(
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
-    use_cudnn: bool = False,
+    backend: int = _FLASH_ATTENTION_BACKEND,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -221,6 +305,8 @@ def varlen_attn(
 
     This function is similar to scaled_dot_product_attention but optimized for
     variable-length sequences using cumulative sequence position tensors.
+    Backend enablement follows :func:`torch.nn.attention.sdpa_kernel`. By default,
+    eligible cuDNN is preferred over Flash; ``set_priority=True`` overrides this order.
 
     Args:
         query (Tensor): Query tensor; shape :math:`(T_q, H_q, D)`
@@ -233,7 +319,7 @@ def varlen_attn(
         max_q (int): Maximum query sequence length in the batch.
         max_k (int): Maximum key/value sequence length in the batch.
         return_aux (Optional[AuxRequest]): If not None and ``return_aux.lse`` is True, also returns the logsumexp tensor.
-        scale (float, optional): Scaling factor for attention scores
+        scale (float, optional): Positive scaling factor for attention scores.
         window_size (tuple[int, int], optional): Window size for sliding window attention as (left, right).
             Use (-1, -1) for full attention (default), (-1, 0) for causal attention,
             or (W, 0) for causal attention with sliding window of size W.
@@ -331,9 +417,10 @@ def varlen_attn(
             f"but got Hq={num_heads_q} and Hkv={num_heads_k}."
         )
 
+    _validate_scale(scale)
     window_size_list = list(window_size)
     is_causal = window_size_list == [-1, 0]
-    use_cudnn = _can_use_cudnn(
+    backend = _select_backend(
         query,
         key,
         value,
@@ -361,7 +448,7 @@ def varlen_attn(
         seqused_k,
         block_table,
         num_splits,
-        use_cudnn,
+        backend,
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -484,6 +571,13 @@ def varlen_attn_out(
             f"but got Hq={num_heads_q} and Hkv={num_heads_k}."
         )
 
+    _validate_scale(scale)
+    if not torch._C._get_flash_sdp_enabled():
+        raise RuntimeError(
+            "varlen_attn_out only supports SDPBackend.FLASH_ATTENTION; enable it "
+            "with sdpa_kernel()."
+        )
+
     is_causal = window_size == (-1, 0)
     lse = torch.ops.torch_attn._varlen_attn_out(
         out,
@@ -523,7 +617,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         seqused_k,
         block_table,
         num_splits,
-        use_cudnn,
+        backend,
     ) = inputs
     out, lse, rng_state = output
 
@@ -532,7 +626,8 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     if block_table is not None:
         raise RuntimeError("block_table is an inference-only parameter.")
 
-    ctx.use_cudnn = use_cudnn
+    ctx.backend = backend
+    ctx.mark_non_differentiable(lse, rng_state)
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
 
     ctx.max_q = max_q
@@ -558,13 +653,13 @@ def _varlen_attn_backward(
     rng_state: torch.Tensor,
     scale: float | None = None,
     window_size: list[int] | None = None,
-    use_cudnn: bool = False,
+    backend: int = _FLASH_ATTENTION_BACKEND,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     window_size = _normalize_window_size(window_size)
 
     unused = torch.empty(0, device=query.device)
 
-    if use_cudnn:
+    if backend == _CUDNN_ATTENTION_BACKEND:
         log.info("Using cuDNN backend for varlen_attn")
         dq, dk, dv = torch.ops.aten._cudnn_attention_backward(
             grad_out=grad_out,
@@ -584,7 +679,7 @@ def _varlen_attn_backward(
             is_causal=is_causal,
             scale=scale,
         )
-    else:
+    elif backend == _FLASH_ATTENTION_BACKEND:
         log.info("Using Flash Attention backend for varlen_attn")
         dq, dk, dv = torch.ops.aten._flash_attention_backward(
             grad_out,
@@ -605,6 +700,8 @@ def _varlen_attn_backward(
             window_size_left=window_size[0],
             window_size_right=window_size[1],
         )
+    else:
+        raise AssertionError(f"Unsupported varlen attention backend: {backend}")
     return dq, dk, dv
 
 
@@ -624,7 +721,7 @@ def _varlen_attn_backward_fake(
     rng_state: torch.Tensor,
     scale: float | None = None,
     window_size: list[int] | None = None,
-    use_cudnn: bool = False,
+    backend: int = _FLASH_ATTENTION_BACKEND,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -664,10 +761,10 @@ def _backward(
         rng_state,
         scale,
         window_size,
-        ctx.use_cudnn,
+        ctx.backend,
     )
     # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, \
-    # enable_gqa, seqused_k, block_table, num_splits, use_cudnn
+    # enable_gqa, seqused_k, block_table, num_splits, backend
     num_params = 12
     return (dq, dk, dv, *((None,) * num_params))
 

@@ -12,10 +12,12 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
     skipXPUIf,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, HardwareClassification
 from torch.nn.attention import SDPBackend
 
 class TestMHADeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @torch.no_grad()
     def _test_transform_bias_rescale_qkv_impl(
         self, device, dtype, use_nt, use_padding=False
