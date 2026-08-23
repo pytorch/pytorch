@@ -5,8 +5,8 @@ import itertools
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch._library.opaque_object import is_opaque_reference_type
-from torch._opaque_base import OpaqueBase
+from torch._custom_class_base import CustomClassBase
+from torch._library.opaque_object import is_opaque_symbolic_type
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .schemas import OpaqueMeta
@@ -33,7 +33,7 @@ class SubclassCreationMeta:
 
 class UnwrapTensorSubclass(torch.nn.Module):
     def forward(self, *tensors) -> torch.Tensor:  # type: ignore[no-untyped-def]
-        todo: list[torch.Tensor | OpaqueBase] = list(tensors)
+        todo: list[torch.Tensor | CustomClassBase] = list(tensors)
 
         def _unwrap_tensor_subclasses(subclass_meta, tensors, offset):  # type: ignore[no-untyped-def]
             if subclass_meta is None:
@@ -58,10 +58,12 @@ class UnwrapTensorSubclass(torch.nn.Module):
 
         return _unwrap_tensor_subclasses(self.subclass_meta, todo, 0)[0]
 
-    def right_inverse(self, tensor: torch.Tensor) -> list[torch.Tensor | OpaqueBase]:
+    def right_inverse(
+        self, tensor: torch.Tensor
+    ) -> list[torch.Tensor | CustomClassBase]:
         if type(tensor) is torch.Tensor:
             raise AssertionError("tensor must be a subclass, not torch.Tensor")
-        plain_tensors: list[torch.Tensor | OpaqueBase] = []
+        plain_tensors: list[torch.Tensor | CustomClassBase] = []
 
         def _create_subclass_meta(tensor, idx, plain_tensor_container):  # type: ignore[no-untyped-def]
             if type(tensor) is torch.Tensor:
@@ -73,8 +75,8 @@ class UnwrapTensorSubclass(torch.nn.Module):
             for attr in inner_tensors_attrnames:
                 val = getattr(tensor, attr)
                 match val:
-                    case OpaqueBase():
-                        if not is_opaque_reference_type(type(val)):
+                    case CustomClassBase():
+                        if not is_opaque_symbolic_type(type(val)):
                             raise ValueError(
                                 f"{type(val).__name__!r} found in tensor attrs of "
                                 f"{type(tensor).__name__}.__tensor_flatten__(). "
@@ -91,7 +93,7 @@ class UnwrapTensorSubclass(torch.nn.Module):
                         attr_to_meta[attr] = subclass_meta
                     case _:
                         raise AssertionError(
-                            f"expected Tensor or OpaqueBase, got {type(val)}"
+                            f"expected Tensor or CustomClassBase, got {type(val)}"
                         )
             return (
                 SubclassCreationMeta(
