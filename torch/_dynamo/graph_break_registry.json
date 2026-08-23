@@ -4750,6 +4750,17 @@
       ]
     }
   ],
+  "GB2112": [
+    {
+      "Gb_type": "Unspecialized nn.Module container indexed by mutable nn.Module attribute",
+      "Context": "source: {source}",
+      "Explanation": "Dynamo observed an nn.Module state attribute select an item from an unspecialized nn.Module container and then mutate later in the same compiled region. Specializing the key would select a different child module or parameter as the state changes.",
+      "Hints": [
+        "Use a constant key for nn.Module container indexing.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0290": [
     {
       "Gb_type": "attempted to trace numpy.* function as a method",

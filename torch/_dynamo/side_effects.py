@@ -536,8 +536,21 @@ class SideEffects:
             and value.is_python_constant()
         ):
             deferred = self.snapshot_attr_mutation(item, name, value)
+        if mutated_source is None and item.source is not None:
+            mutated_source = AttrSource(item.source, name)
         if not deferred:
             self.check_allowed_side_effect(item)
+            if mutated_source is not None:
+                output_graph = self.output_graph_weakref()
+                if output_graph is None:
+                    raise AssertionError("output_graph weakref is dead")
+                output_graph.nn_module_container_index_tracker.raise_if_selector_is_mutated(
+                    item=item,
+                    name=name,
+                    value=value,
+                    mutated_source=mutated_source,
+                    output_graph=output_graph,
+                )
         if item not in self.store_attr_mutations:
             self.store_attr_mutations[item] = {}
         if item not in self.attr_mutation_kinds:
@@ -548,10 +561,6 @@ class SideEffects:
         self._capture_user_stack(item)
         if mutated_source is not None:
             self.mutated_sources.add(mutated_source)
-        else:
-            item_source = getattr(item, "source", None)
-            if item_source is not None:
-                self.mutated_sources.add(AttrSource(item_source, name))
 
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker

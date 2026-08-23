@@ -114,6 +114,11 @@ from .exc import (
 )
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
+from .nn_module_container_index import (
+    frame_locator_matches,
+    IndexTarget,
+    raise_mutated_nn_module_container_index,
+)
 from .output_graph import (
     CodeOptions,
     GraphCompileReason,
@@ -340,6 +345,11 @@ class SpeculationLog:
     # instead of tracing it. Set when we detect that such an intermediate
     # leaks as a graph output with requires_grad=True.
     graph_break_on_requires_grad_: bool = False
+    # Bytecode sites where an nn.Module attribute was used to index an
+    # unspecialized nn.Module container and mutated on an earlier attempt.
+    mutated_nn_module_container_index_sites: dict[
+        tuple[types.CodeType, int], IndexTarget
+    ] = dataclasses.field(default_factory=dict)
 
     def restart(self) -> None:
         self.index = 0
@@ -1747,6 +1757,21 @@ class InstructionTranslatorBase(
         self.update_block_stack(inst)
 
         try:
+            graph_break_targets = (
+                self.speculation_log.mutated_nn_module_container_index_sites
+            )
+            graph_break_target = (
+                graph_break_targets.get((self.f_code, inst.offset))
+                if graph_break_targets and inst.offset is not None
+                else None
+            )
+            if graph_break_target is not None and not graph_break_target.source_aware:
+                locator = graph_break_target.locator
+                if locator is None or frame_locator_matches(self, locator):
+                    raise_mutated_nn_module_container_index(
+                        self,
+                        graph_break_target,
+                    )
             self.dispatch_table[inst.opcode](self, inst)
             return not self.output.should_exit
         except TensorifyScalarRestartAnalysis:

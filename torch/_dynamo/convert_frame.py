@@ -160,6 +160,7 @@ from .utils import (
     CompileTimeInstructionCounter,
     counters,
     dynamo_timed,
+    ExactWeakKeyDictionary,
     format_bytecode,
     gen_record_file_name,
     get_hook_for_recompile_user_context,
@@ -193,6 +194,7 @@ if typing.TYPE_CHECKING:
     from torch.utils.weak import WeakIdKeyDictionary
 
     from .backends.registry import CompilerFn
+    from .nn_module_container_index import CacheLocator
     from .package import CompilePackage
     from .repro.after_dynamo import WrapBackendDebug
     from .types import BytecodeHook, CacheEntry, DynamoFrameType
@@ -488,6 +490,30 @@ def exception_handler(
 
 FRAME_COUNTER = 0
 FRAME_COMPILE_COUNTER: typing.Counter[int | FrameStateSizeEntry] = collections.Counter()
+_FRAME_EXEC_STRATEGY_CACHE_EPOCH = 0
+
+
+@dataclass(frozen=True)
+class _CachedFrameExecStrategy:
+    cur_action: FrameAction
+    recursive_action: FrameAction
+    reason: str
+
+
+@dataclass
+class _FrameExecStrategyCacheState:
+    entries: ExactWeakKeyDictionary = dataclasses.field(
+        default_factory=ExactWeakKeyDictionary
+    )
+    epoch: int = dataclasses.field(
+        default_factory=lambda: _FRAME_EXEC_STRATEGY_CACHE_EPOCH
+    )
+
+
+def reset_frame_exec_strategy_cache() -> None:
+    global _FRAME_EXEC_STRATEGY_CACHE_EPOCH
+    with compile_lock:
+        _FRAME_EXEC_STRATEGY_CACHE_EPOCH += 1
 
 
 def maybe_cprofile(func: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -964,6 +990,7 @@ def trace_frame(
             raise
         finally:
             tracer.output.call_cleanup_hooks()
+            tracer.output.nn_module_container_index_tracker.clear()
             tracer.f_locals = {}
 
     try:
@@ -2340,6 +2367,7 @@ class ConvertFrame:
         hooks: Hooks,
         package: CompilePackage | None = None,
         recompile_limit: int | None = None,
+        frame_exec_strategy_cache_state: _FrameExecStrategyCacheState | None = None,
     ) -> None:
         self._torchdynamo_orig_backend = compiler_fn
         self._inner_convert = convert_frame_assert(
@@ -2350,14 +2378,22 @@ class ConvertFrame:
         )
         self._hooks = hooks
         self._recompile_limit = recompile_limit
+        # A custom suppressed failure can be instance-specific: applying its
+        # SKIP/SKIP strategy to the code object would poison fixed instances
+        # sharing the same ``forward``. Key the negative cache by the root
+        # frame local/global name and exact object identity instead.
+        self._frame_exec_strategy_cache_state = (
+            frame_exec_strategy_cache_state or _FrameExecStrategyCacheState()
+        )
 
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
         # Used by DDPOptimizer to swap in its own backend.
-        return lambda backend: convert_frame(
+        return lambda backend: ConvertFrame(
             backend,
             self._hooks,
             recompile_limit=self._recompile_limit,
+            frame_exec_strategy_cache_state=self._frame_exec_strategy_cache_state,
         )
 
     def __call__(
@@ -2368,6 +2404,36 @@ class ConvertFrame:
         frame_state: dict[str, int | FrameStateSizeEntry],
         skip: int = 0,
     ) -> ConvertFrameReturn:
+        # CatchErrorsWrapper holds this same RLock across supported calls into
+        # ConvertFrame, and reset_code_caches() uses it while advancing the
+        # epoch. The local lock also keeps this private cache safe if
+        # ConvertFrame is invoked directly by internal tooling.
+        with compile_lock:
+            cache_state = self._frame_exec_strategy_cache_state
+            if cache_state.epoch != _FRAME_EXEC_STRATEGY_CACHE_EPOCH:
+                cache_state.entries = ExactWeakKeyDictionary()
+                cache_state.epoch = _FRAME_EXEC_STRATEGY_CACHE_EPOCH
+            cache_epoch = cache_state.epoch
+            cached_locators = cache_state.entries.get(frame.f_code)
+            if cached_locators is not None:
+                for cache_locator, cached_keys in cached_locators.items():
+                    cache_key = cache_locator.resolve(frame.f_locals, frame.f_globals)
+                    if cache_key is None:
+                        continue
+                    cached_strategy = cached_keys.get(cache_key)
+                    if cached_strategy is not None:
+                        counters["frame_exec_strategy_cache"]["hit"] += 1
+                        return ConvertFrameReturn(
+                            frame_exec_strategy=FrameExecStrategy(
+                                cached_strategy.cur_action,
+                                cached_strategy.recursive_action,
+                            ),
+                            apply_to_code=False,
+                            skip_reason=(
+                                "cached instance-specific skip: "
+                                f"{cached_strategy.reason}"
+                            ),
+                        )
         input_codes.add(frame.f_code)
         counters["frames"]["total"] += 1
         try:
@@ -2474,8 +2540,36 @@ class ConvertFrame:
                 isinstance(e, exc.TorchDynamoException)
                 and e.frame_exec_strategy is not None
             ):
+                cache_key_ref = e.frame_exec_strategy_cache_key_ref
+                cache_key = cache_key_ref() if cache_key_ref is not None else None
+                cache_locator = e.frame_exec_strategy_cache_locator
+                if (
+                    not e.frame_exec_strategy_apply_to_code
+                    and cache_key is not None
+                    and cache_locator is not None
+                ):
+                    with compile_lock:
+                        if cache_epoch == _FRAME_EXEC_STRATEGY_CACHE_EPOCH:
+                            cache_state = self._frame_exec_strategy_cache_state
+                            cached_locators = cache_state.entries.get(frame.f_code)
+                            if cached_locators is None:
+                                new_cached_locators: dict[
+                                    CacheLocator, ExactWeakKeyDictionary
+                                ] = {}
+                                cached_locators = new_cached_locators
+                                cache_state.entries[frame.f_code] = cached_locators
+                            cached_keys = cached_locators.setdefault(
+                                cache_locator, ExactWeakKeyDictionary()
+                            )
+                            cached_keys[cache_key] = _CachedFrameExecStrategy(
+                                e.frame_exec_strategy.cur_action,
+                                e.frame_exec_strategy.recursive_action,
+                                getattr(e, "gb_type", None) or type(e).__name__,
+                            )
+                            counters["frame_exec_strategy_cache"]["store"] += 1
                 return ConvertFrameReturn(
                     frame_exec_strategy=e.frame_exec_strategy,
+                    apply_to_code=e.frame_exec_strategy_apply_to_code,
                     skip_reason="compilation failed with a custom frame execution strategy",
                 )
 

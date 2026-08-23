@@ -46,6 +46,11 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..mutation_guard import GenerationTracker
+from ..nn_module_container_index import (
+    BUILTIN_NN_MODULE_CONTAINER_GETITEMS,
+    is_unspecialized_nn_module_attr_source,
+    raise_mutated_nn_module_container_index,
+)
 from ..source import (
     AttrSource,
     ConstDictKeySource,
@@ -692,15 +697,8 @@ class NNModuleVariable(VariableTracker):
 
         module = tx.output.get_submodule(self.module_key)
 
-        builtin_supported = (
-            torch.nn.ModuleDict.__getitem__,
-            torch.nn.ModuleList.__getitem__,
-            torch.nn.ParameterDict.__getitem__,
-            torch.nn.ParameterList.__getitem__,
-            torch.nn.Sequential.__getitem__,
-        )
         # pyrefly: ignore[missing-attribute]
-        if type(module).__getitem__ not in builtin_supported:
+        if type(module).__getitem__ not in BUILTIN_NN_MODULE_CONTAINER_GETITEMS:
             if not (
                 key.is_python_constant()
                 and isinstance(key.as_python_constant(), (str, int))
@@ -1275,6 +1273,41 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             ).unpack_var_sequence(tx)
 
         return super().unpack_var_sequence(tx)
+
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        getitem = getattr(type(self.value), "__getitem__", None)
+        key_source = key.source
+        if (
+            key_source is not None
+            and getitem in BUILTIN_NN_MODULE_CONTAINER_GETITEMS
+            and is_unspecialized_nn_module_attr_source(key_source)
+        ):
+            instruction_offset = tx.current_instruction.offset
+            if instruction_offset is None:
+                raise AssertionError("current instruction must have an offset")
+            graph_break_target = (
+                tx.speculation_log.mutated_nn_module_container_index_sites.get(
+                    (tx.f_code, instruction_offset)
+                )
+            )
+            if (
+                graph_break_target is not None
+                and graph_break_target.source == key_source
+                and graph_break_target.source_aware
+            ):
+                raise_mutated_nn_module_container_index(tx, graph_break_target)
+            result = super().mp_subscript_impl(tx, key)
+            tx.output.nn_module_container_index_tracker.record(
+                key_source,
+                tx,
+            )
+            return result
+
+        return super().mp_subscript_impl(tx, key)
 
     def call_function(
         self,
