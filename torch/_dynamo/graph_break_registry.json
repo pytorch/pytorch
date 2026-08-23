@@ -3206,6 +3206,16 @@
       ]
     }
   ],
+  "GB6602": [
+    {
+      "Gb_type": "setattr() on Tensor.data with different shape",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo does not trace shape-changing `.data` mutations on differentiable tensors. AOTAutograd assumes graph input metadata is stable while building the backward graph.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB8843": [
     {
       "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
@@ -5776,6 +5786,16 @@
       "Gb_type": "missing_mp_ass_subscript",
       "Context": "mp_ass_subscript_impl not defined for {self.python_type_name()}",
       "Explanation": "Dynamo does not yet support item assignment on '{self.python_type_name()}'.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9182": [
+    {
+      "Gb_type": "setattr() on Parameter.data with different shape",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo does not trace shape-changing `.data` mutations on differentiable parameters. AOTAutograd assumes graph input metadata is stable while building the backward graph.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

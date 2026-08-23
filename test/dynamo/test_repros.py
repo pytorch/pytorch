@@ -4722,8 +4722,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
 
-        compiled_fn = torch.compile(func, backend=cnt, fullgraph=True)
         requires_grad = func is not func1
+        compiled_fn = torch.compile(func, backend=cnt, fullgraph=not requires_grad)
         for _ in range(5):
             # Inputs
             eager_a = torch.ones([6], requires_grad=requires_grad)
@@ -4749,8 +4749,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(eager_a.grad, compiled_a.grad)
 
         # Prove guarding works - we run the compiled_fn 5 times
-        # frame_count should stay at 1.
-        self.assertEqual(cnt.frame_count, 1)
+        # frame_count should remain stable after the first run.
+        self.assertEqual(cnt.frame_count, 2 if func is func3 else 1)
+        if requires_grad:
+            graph_break_reasons = "\n".join(
+                torch._dynamo.utils.counters["graph_break"].keys()
+            )
+            self.assertIn(
+                "setattr() on Tensor.data with different shape", graph_break_reasons
+            )
 
     def test_tensor_set_data_mismatched_dtype(self):
         def func(x, y):
@@ -6626,6 +6633,211 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         res = opt_mod(x)
 
         self.assertEqual(ref, res)
+
+    @parametrize(
+        "tensor_kind",
+        ["tensor", "parameter", "parameter_subclass", "tensor_subclass"],
+    )
+    @parametrize("dynamic", [False, True])
+    def test_tensor_data_different_shape_graph_breaks(self, tensor_kind, dynamic):
+        class ParameterSubclass(torch.nn.Parameter):
+            pass
+
+        class TensorSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data):
+                return torch.Tensor._make_subclass(cls, data, data.requires_grad)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                if tensor_kind == "tensor":
+                    self.tensor = torch.randn(3, requires_grad=True)
+                elif tensor_kind == "parameter_subclass":
+                    self.tensor = ParameterSubclass(torch.randn(3))
+                elif tensor_kind == "tensor_subclass":
+                    self.tensor = torch.nn.Parameter(TensorSubclass(torch.randn(3)))
+                else:
+                    self.tensor = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, x):
+                self.tensor.data = x
+                return (self.tensor * x).sum()
+
+        x = torch.randn(5)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Tensor.data with different shape",
+        ):
+            torch.compile(
+                Model(), backend="aot_eager", dynamic=dynamic, fullgraph=True
+            )(x)
+
+        model = Model()
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        actual = torch.compile(model, backend=counter, dynamic=dynamic)(x)
+
+        self.assertEqual(actual, (x * x).sum())
+        actual.backward()
+        self.assertEqual(model.tensor.grad, x)
+        self.assertGreater(counter.op_count, 0)
+
+    def test_parameter_data_unproven_same_shape_graph_breaks(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, x):
+                self.param.data = x
+                return self.param.sin()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Tensor.data with different shape",
+        ):
+            torch.compile(Model(), backend="aot_eager", dynamic=True, fullgraph=True)(
+                torch.randn(3)
+            )
+
+    @torch._dynamo.config.patch(force_parameter_static_shapes=False)
+    def test_parameter_data_same_shape_dynamic_fullgraph(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self):
+                self.param.data = self.param.data.clone()
+                return self.param.sin().sum()
+
+        model = Model()
+        torch._dynamo.mark_dynamic(model.param, 0)
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(model, backend=counter, dynamic=True, fullgraph=True)
+
+        expected = model.param.sin().sum()
+        self.assertEqual(compiled(), expected)
+        self.assertEqual(counter.frame_count, 1)
+
+        model.param.data = torch.randn(5)
+        expected = model.param.sin().sum()
+        self.assertEqual(compiled(), expected)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertGreater(counter.op_count, 0)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_parameter_data_unbacked_shape_graph_breaks(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, x, length):
+                self.param.data = x[: length.item()]
+                return self.param.sum()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Tensor.data with different shape",
+        ):
+            torch.compile(Model(), backend="aot_eager", fullgraph=True)(
+                torch.randn(5), torch.tensor(4)
+            )
+
+    def test_parameter_data_different_shape_local_no_grad_graph_breaks(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, x):
+                with torch.no_grad():
+                    self.param.data = x
+                return (self.param * x).sum()
+
+        x = torch.randn(5)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Tensor.data with different shape",
+        ):
+            torch.compile(Model(), backend="aot_eager", fullgraph=True)(x)
+
+        model = Model()
+        actual = torch.compile(model, backend="aot_eager")(x)
+        self.assertEqual(actual, (x * x).sum())
+        actual.backward()
+        self.assertEqual(model.param.grad, x)
+
+    def test_deepspeed_zero3_partitioned_parameter_hooks(self):
+        class FakeZeRO:
+            def install(self, module):
+                for child in module.modules():
+                    child.register_forward_pre_hook(self._pre_forward_module_hook)
+                    child.register_forward_hook(self._post_forward_module_hook)
+
+            def _pre_forward_module_hook(self, module, args):
+                self.pre_sub_module_forward_function(module)
+
+            def _post_forward_module_hook(self, module, args, output):
+                self.post_sub_module_forward_function(module)
+
+            def pre_sub_module_forward_function(self, sub_module):
+                for param in sub_module.parameters(recurse=False):
+                    if param.ds_status == "NOT_AVAILABLE":
+                        param.data = param.ds_tensor.narrow(0, 0, param.ds_numel).view(
+                            param.ds_shape
+                        )
+                        param.ds_status = "AVAILABLE"
+
+            def post_sub_module_forward_function(self, sub_module):
+                for param in sub_module.parameters(recurse=False):
+                    if param.ds_status == "AVAILABLE":
+                        param.ds_tensor = param.detach().clone().flatten()
+                        param.data = torch.empty(0, dtype=param.dtype)
+                        param.ds_status = "NOT_AVAILABLE"
+
+        class MLP(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gate_proj = torch.nn.Linear(4, 8)
+                self.up_proj = torch.nn.Linear(4, 8)
+                self.down_proj = torch.nn.Linear(8, 4)
+
+            def forward(self, x):
+                return self.down_proj(
+                    torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x)
+                )
+
+        def partition_parameters(module):
+            for param in module.parameters():
+                param.ds_shape = param.shape
+                param.ds_numel = param.numel()
+                param.ds_tensor = param.detach().clone().flatten()
+                param.ds_status = "NOT_AVAILABLE"
+                param.data = torch.empty(0, dtype=param.dtype)
+
+        model = MLP()
+        ref_model = copy.deepcopy(model)
+        partition_parameters(model)
+        FakeZeRO().install(model)
+
+        x = torch.randn(2, 4)
+        expected = ref_model(x)
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        actual = torch.compile(model, backend=counter)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertGreater(counter.op_count, 0)
+        graph_break_reasons = "\n".join(
+            torch._dynamo.utils.counters["graph_break"].keys()
+        )
+        self.assertIn(
+            "setattr() on Tensor.data with different shape", graph_break_reasons
+        )
+        for param in model.parameters():
+            self.assertEqual(param.shape, torch.Size([0]))
 
     def test_os_fspath(self):
         @torch.compile(backend="eager", fullgraph=True)
