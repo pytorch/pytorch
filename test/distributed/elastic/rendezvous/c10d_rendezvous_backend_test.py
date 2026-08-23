@@ -274,9 +274,7 @@ class CreateBackendTest(TestCase):
         ):
             create_backend(self._params_filestore)
 
-    @mock.patch(
-        "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"
-    )
+    @mock.patch("torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore")
     def test_create_backend_raises_error_if_file_path_is_invalid(
         self, filestore_mock
     ) -> None:
@@ -288,3 +286,24 @@ class CreateBackendTest(TestCase):
             r"details.$",
         ):
             create_backend(self._params_filestore)
+
+    @mock.patch("torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore")
+    @mock.patch("tempfile.mkstemp")
+    @mock.patch("os.close")
+    def test_create_file_store_closes_mkstemp_fd(
+        self, mock_os_close, mock_mkstemp, mock_filestore
+    ) -> None:
+        """mkstemp() returns an fd that must be closed; FileStore opens the path itself."""
+        mock_mkstemp.return_value = (42, "/tmp/test_rdzv_path")
+        mock_filestore.side_effect = RuntimeError("store init fails")
+
+        self._params_filestore.endpoint = ""
+        with self.assertRaisesRegex(
+            RendezvousConnectionError,
+            r"^The connection to the C10d store has failed. See inner exception for "
+            r"details.$",
+        ):
+            create_backend(self._params_filestore)
+
+        mock_mkstemp.assert_called_once()
+        mock_os_close.assert_called_once_with(42)
