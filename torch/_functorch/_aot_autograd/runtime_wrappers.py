@@ -4142,9 +4142,9 @@ class _AutogradBackwardCompiler:
                         bw_module,
                         placeholder_list,
                     )
-                if specialized is None and not any(
-                    isinstance(meta, SubclassCreationMeta)
-                    for meta in self.fw_metadata.subclass_tangent_meta
+                if (
+                    specialized is None
+                    and self.aot_config.precompile_backend_id is not None
                 ):
                     raise RuntimeError(
                         "AOTAutograd could not compile the observed undefined-output "
@@ -4160,6 +4160,11 @@ class _AutogradBackwardCompiler:
                     all_args,
                 )
             if specialized is None:
+                if self.aot_config.precompile_backend_id is not None:
+                    raise RuntimeError(
+                        "AOTAutograd could not compile the observed undefined-output "
+                        "tangent pattern."
+                    )
                 _materialize_missing_tangent_args(
                     all_args,
                     bw_module,
