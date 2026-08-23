@@ -11,17 +11,16 @@ using namespace metal;
 
 constant uint TILE_DIM = 16;
 
-template <typename T>
-inline c10::metal::opmath_t<T> matmul_inner(
-    constant T* mat1Data,
-    constant T* mat2Data,
+template <typename T1, typename T2, typename TA>
+inline TA matmul_inner(
+    constant T1* mat1Data,
+    constant T2* mat2Data,
     constant array<ulong2, 3>& strides,
     constant uint3& sizes,
-    threadgroup c10::metal::opmath_t<T> A_tile[TILE_DIM][TILE_DIM],
-    threadgroup c10::metal::opmath_t<T> B_tile[TILE_DIM][TILE_DIM],
+    threadgroup TA A_tile[TILE_DIM][TILE_DIM],
+    threadgroup TA B_tile[TILE_DIM][TILE_DIM],
     uint2 tid,
     uint2 thread_id) {
-  using TA = c10::metal::opmath_t<T>;
   TA sum = 0;
 
   uint numTiles = (sizes.y + TILE_DIM - 1) / TILE_DIM;
@@ -120,6 +119,25 @@ kernel void matmul(
   if (thread_id.y < sizes.x && thread_id.x < sizes.z) {
     outputData[thread_id.y * strides[2].x + thread_id.x * strides[2].y] =
         static_cast<T>(sum);
+  }
+}
+
+template <typename T>
+kernel void int_mm(
+    constant T* mat1Data [[buffer(0)]],
+    constant char* mat2Data [[buffer(1)]],
+    device int* outputData [[buffer(2)]],
+    constant array<ulong2, 3>& strides [[buffer(3)]],
+    constant uint3& sizes [[buffer(4)]],
+    uint2 tid [[thread_position_in_threadgroup]],
+    uint2 thread_id [[thread_position_in_grid]]) {
+  threadgroup int A_tile[TILE_DIM][TILE_DIM];
+  threadgroup int B_tile[TILE_DIM][TILE_DIM];
+
+  auto sum = matmul_inner(
+      mat1Data, mat2Data, strides, sizes, A_tile, B_tile, tid, thread_id);
+  if (thread_id.y < sizes.x && thread_id.x < sizes.z) {
+    outputData[thread_id.y * strides[2].x + thread_id.x * strides[2].y] = sum;
   }
 }
 
@@ -2026,6 +2044,76 @@ kernel void gemmSimdLU(
     __has_include(<MetalPerformancePrimitives/MetalPerformancePrimitives.h>)
 #include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
 
+template <int BM, int BN, int NSG>
+kernel void int_mm_mpp(
+    device int8_t* mat1Data [[buffer(0)]],
+    device int8_t* mat2Data [[buffer(1)]],
+    device int* outputData [[buffer(2)]],
+    constant array<ulong2, 3>& strides [[buffer(3)]],
+    constant uint3& sizes [[buffer(4)]],
+    uint3 tgid [[threadgroup_position_in_grid]]) {
+  const int m = int(sizes.x);
+  const int k = int(sizes.y);
+  const int n = int(sizes.z);
+  const int row = int(tgid.y) * BM;
+  const int col = int(tgid.x) * BN;
+
+  constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
+      BM,
+      BN,
+      static_cast<int>(dynamic_extent),
+      false,
+      false,
+      false,
+      mpp::tensor_ops::matmul2d_descriptor::mode::multiply);
+  mpp::tensor_ops::matmul2d<desc, execution_simdgroups<NSG>> op;
+
+  tensor<device int8_t, dextents<int32_t, 2>, tensor_inline> mat1(
+      mat1Data,
+      dextents<int32_t, 2>(k, m),
+      array<int32_t, 2>{int(strides[0].y), int(strides[0].x)});
+  tensor<device int8_t, dextents<int32_t, 2>, tensor_inline> mat2(
+      mat2Data,
+      dextents<int32_t, 2>(n, k),
+      array<int32_t, 2>{int(strides[1].y), int(strides[1].x)});
+  tensor<device int, dextents<int32_t, 2>, tensor_inline> output(
+      outputData,
+      dextents<int32_t, 2>(n, m),
+      array<int32_t, 2>{int(strides[2].y), int(strides[2].x)});
+
+  const bool inside = row + BM <= m && col + BN <= n;
+  if (inside) {
+    auto a = mat1.template slice<dynamic_extent, BM>(0, row);
+    auto b = mat2.template slice<BN, dynamic_extent>(col, 0);
+    auto c = output.template slice<BN, BM>(col, row);
+    auto result = op.template get_destination_cooperative_tensor<
+        decltype(a),
+        decltype(b),
+        int>();
+    op.run(a, b, result);
+    result.store(c);
+  } else {
+    auto a = mat1.slice(0, row);
+    auto b = mat2.slice(col, 0);
+    auto c = output.slice(col, row);
+    auto result = op.template get_destination_cooperative_tensor<
+        decltype(a),
+        decltype(b),
+        int>();
+    op.run(a, b, result);
+    result.store(c);
+  }
+}
+
+template [[host_name("int_mm_mpp_64_64_4")]]
+kernel void int_mm_mpp<64, 64, 4>(
+    device int8_t* mat1Data [[buffer(0)]],
+    device int8_t* mat2Data [[buffer(1)]],
+    device int* outputData [[buffer(2)]],
+    constant array<ulong2, 3>& strides [[buffer(3)]],
+    constant uint3& sizes [[buffer(4)]],
+    uint3 tgid [[threadgroup_position_in_grid]]);
+
 // Same Schur update C -= A*B (sgemm) as gemmSimdLU, but via MetalPerformance-
 // Primitives matmul2d (macOS 26.2+, gated by lu_has_matmul2d()).
 template <int BM, int BN, int NSG>
@@ -2714,6 +2802,19 @@ INSTANTIATE_MM_OPS(int);
 INSTANTIATE_MM_OPS(short);
 INSTANTIATE_MM_OPS(char);
 INSTANTIATE_MM_OPS(uchar);
+
+#define INSTANTIATE_INT_MM_OP(DTYPE)                                  \
+  template [[host_name("int_mm_" #DTYPE)]] kernel void int_mm<DTYPE>( \
+      constant DTYPE * mat1Data [[buffer(0)]],                        \
+      constant char* mat2Data [[buffer(1)]],                          \
+      device int* outputData [[buffer(2)]],                           \
+      constant array<ulong2, 3>& strides [[buffer(3)]],               \
+      constant uint3& sizes [[buffer(4)]],                            \
+      uint2 tid [[thread_position_in_threadgroup]],                   \
+      uint2 thread_id [[thread_position_in_grid]])
+
+INSTANTIATE_INT_MM_OP(char);
+INSTANTIATE_INT_MM_OP(uchar);
 
 #define REGISTER_ORGQR(T)                            \
   template [[host_name("orgqr_" #T)]]                \
