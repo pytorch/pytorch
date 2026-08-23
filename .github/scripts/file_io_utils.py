@@ -78,7 +78,16 @@ def upload_file_to_s3(file_name: Path, bucket: str, key: str) -> None:
 def download_s3_objects_with_prefix(
     bucket_name: str, prefix: str, download_folder: Path
 ) -> list[Path]:
-    s3 = boto3.resource("s3")
+    # The artifacts bucket is public-read. If no credentials are available (e.g.
+    # fork PRs that can't assume an OIDC role), fall back to anonymous/unsigned
+    # requests so the (best-effort) download still works.
+    if boto3.Session().get_credentials() is None:
+        from botocore import UNSIGNED
+        from botocore.config import Config
+
+        s3 = boto3.resource("s3", config=Config(signature_version=UNSIGNED))
+    else:
+        s3 = boto3.resource("s3")
     bucket = s3.Bucket(bucket_name)
 
     downloads = []
