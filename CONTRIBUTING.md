@@ -40,6 +40,7 @@ aspects of contributing to PyTorch.
 - [Managing multiple build trees](#managing-multiple-build-trees)
 - [C++ development tips](#c-development-tips)
   - [Build only what you need](#build-only-what-you-need)
+  - [Profile build time](#profile-build-time)
   - [Code completion and IDE support](#code-completion-and-ide-support)
   - [Make no-op build fast](#make-no-op-build-fast)
     - [Use Ninja](#use-ninja)
@@ -134,10 +135,12 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
       python -m pip install --group dev
       python -m pip install --no-build-isolation -v -e .
       ```
-  4. The main step within `python -m pip install -e . -v --no-build-isolation` is running `make` from the `build` directory. If you want to
-    experiment with some environment variables, you can pass them into the command:
+  4. The main step within `python -m pip install -e . -v --no-build-isolation` is the CMake build in the
+    `build` directory (`ninja` by default). If you want to experiment with some environment variables, you
+    can pass them into the command (see
+    [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake) for the environment variables the build forwards):
       ```bash
-      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* CMAKE_FRESH=1 python -m pip install --no-build-isolation -v -e .
+      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python -m pip install --no-build-isolation -v -e .
       ```
   5. Try installing PyTorch without build isolation by adding `--no-build-isolation` to the `pip install` command.
   This will use the current environment's packages instead of creating a new isolated environment for the build.
@@ -798,6 +801,9 @@ On the initial build, you can also speed things up by disabling the features you
 - `USE_CPU_VECTORIZATION=0` will disable building vectorized CPU kernel variants (AVX2, AVX512, VSX, ZVECTOR, SVE). Only the scalar DEFAULT kernels are built. Fine for correctness/dispatch work; not for CPU benchmarking.
 - `USE_COLORIZE_OUTPUT=1` will colorize compiler output for easier reading.
 
+The full list of build environment variables, what each one does, and how it reaches CMake is
+documented at the top of [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).
+
 For example, a good default for the most minimal build is to add to your bashrc is:
 ```bash
 alias BUILD_CONFIG='CMAKE_GENERATOR=Ninja USE_DISTRIBUTED=0 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_XNNPACK=0 BUILD_LAZY_TS_BACKEND=0 USE_PYTORCH_QNNPACK=0 USE_CPU_VECTORIZATION=0 USE_COLORIZE_OUTPUT=1'
@@ -819,6 +825,18 @@ For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
 options passed for the first time will persist; please run `ccmake build/`, run
 `cmake-gui build/`, or directly edit `build/CMakeCache.txt` to adapt build
 options.
+
+### Profile build time
+
+With CMake 4.3 or newer, you can collect timing information for compile, link,
+and custom build commands by enabling CMake instrumentation:
+
+```bash
+USE_CMAKE_INSTRUMENTATION=1 pip install --no-build-isolation -v -e .
+```
+
+The build prints a timing summary and the path to a trace that can be loaded in
+[Perfetto](https://ui.perfetto.dev/) for further analysis.
 
 ### Code completion and IDE support
 
@@ -1075,9 +1093,14 @@ Set `TORCH_SHOW_CPP_STACKTRACES=1` to get the C++ stacktrace when an error occur
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
 
-1. `CUDA_DEVICE_DEBUG=1` will enable CUDA device function debug symbols (`-g -G`).
+1. `CUDA_DEVICE_DEBUG` will enable CUDA device function debug symbols (`-g -G`).
     This will be particularly helpful in debugging device code. However, it will
     slow down the build process for about 50% (compared to only `DEBUG=1`), so use wisely.
+    Unlike `DEBUG`, it is read as a CMake variable rather than forwarded from the environment, so
+    pass it at install time (it has no effect on MSVC builds):
+      ```bash
+      python -m pip install -e . -v --no-build-isolation -C cmake.define.CUDA_DEVICE_DEBUG=1
+      ```
 2. `cuda-gdb` and `compute-sanitizer` are your best CUDA debugging friends. Unlike`gdb`,
    `cuda-gdb` can display actual values in a CUDA tensor (rather than all zeros).
 3. CUDA supports a lot of C++17/20 features, which include `std::numeric_limits`, `std::nextafter`,

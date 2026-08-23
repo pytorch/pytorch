@@ -7,6 +7,10 @@
 
 namespace torch::inductor::static_launcher {
 
+// Match Triton's generated launchers: fp16 packs directly from the Python
+// double, while bf16 narrows to fp32 and keeps its high 16 bits. Keep the bf16
+// conversion open-coded to avoid pulling the full BFloat16 header into both
+// launchers.
 inline uint16_t unpackTritonFp16(PyObject* obj) {
   uint16_t bits = 0;
   if (PyFloat_Pack2(

@@ -416,6 +416,9 @@ class TestStaticTritonLauncher(TestCase):
         launcher.run(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
         self.assertEqual(new_arg0, arg0)
 
+        with self.assertRaisesRegex(OverflowError, "too large to pack"):
+            launcher.run(1, 1, 1, stream, new_arg0, 65520.0, 0.0, 0.0)
+
     @skipIfRocm
     @unittest.skipIf(
         not HAS_XPU_AND_TRITON and not SM80OrLater,
@@ -444,6 +447,13 @@ class TestStaticTritonLauncher(TestCase):
         stream = device_interface.get_raw_stream(device_interface.current_device())
         launcher.run(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
         self.assertEqual(new_arg0, arg0)
+
+        new_arg0.zero_()
+        launcher.run(1, 1, 1, stream, new_arg0, 1e300, 0.0, 0.0)
+        self.assertEqual(
+            new_arg0,
+            torch.tensor([float("inf")], dtype=torch.float64, device=GPU_TYPE),
+        )
 
     def test_basic_1arg(self):
         @triton.jit
@@ -572,7 +582,8 @@ class TestStaticTritonLauncher(TestCase):
         arg1 = 5
         args = (arg0, arg1)
         compiled_kernel = simple_kernel[(1,)](*args)
-        # Allocate 50 KB of memory
+        # Allocate 50 KB without adding a local-accessor kernel parameter. On
+        # XPU this exercises the static shared-memory argument-count path.
         compiled_kernel.shared = 50000
         launcher = self._make_launcher(compiled_kernel)
         self.assertEqual(arg0, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE))
@@ -583,6 +594,31 @@ class TestStaticTritonLauncher(TestCase):
         launcher.slow_launch_kernel = True
         launcher.run(1, 1, 1, stream, new_arg0, arg1)
         self.assertEqual(new_arg0, arg0)
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_kernel_arg_count_mismatch(self):
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        launcher = self._make_launcher(compiled_kernel)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+
+        with self.assertRaisesRegex(RuntimeError, "Kernel argument count mismatch"):
+            launcher.C_impl._launch_kernel(
+                launcher.function,
+                1,
+                1,
+                1,
+                launcher.num_warps,
+                launcher.shared,
+                f"{launcher.arg_tys}i",
+                (arg0, 0),
+                stream,
+            )
 
     @skipIfXpu(msg="Only testing CUDA OOM behavior")
     def test_too_high_shared_mem(self):

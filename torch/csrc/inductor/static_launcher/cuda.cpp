@@ -6,7 +6,6 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/static_launcher/common.h>
 #include <torch/csrc/inductor/static_launcher/cuda.h>
-#include <array>
 #include <cstdint>
 
 #include <torch/csrc/utils/python_numbers.h>
@@ -658,14 +657,12 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
 
 PyObject* unload_kernel(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject* mod_obj = nullptr;
-  if (!PyArg_ParseTuple(args, "O", &mod_obj)) {
+  uint64_t mod_ptr = 0;
+  if (!PyArg_ParseTuple(args, "K", &mod_ptr)) {
     return nullptr;
   }
-  CUmodule mod = static_cast<CUmodule>(PyLong_AsVoidPtr(mod_obj));
-  if (PyErr_Occurred()) {
-    return nullptr;
-  }
+  CUmodule mod =
+      reinterpret_cast<CUmodule>(mod_ptr); // NOLINT(performance-no-int-to-ptr)
   if (mod) {
 #if defined(USE_ROCM)
     AT_CUDA_DRIVER_CHECK(hipModuleUnload(mod));
@@ -790,9 +787,6 @@ inline CUdeviceptr getPointerFast(PyObject* obj) {
 // Skips:     cuCtxGetCurrent, cuPointerGetAttribute, PyArg_ParseTuple for
 //            kernel metadata.
 // ---------------------------------------------------------------------------
-// Instances are allocated and zero-initialized by PyTypeObject::tp_alloc;
-// their C++ default constructor is intentionally not invoked.
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct FastCudaLauncherObject {
   PyObject_HEAD
   vectorcallfunc vectorcall;
@@ -801,7 +795,8 @@ struct FastCudaLauncherObject {
   uint32_t sharedMemBytes;
   int numKernelArgs; // args passed from Python
   int numTotalArgs; // numKernelArgs + nScratch
-  std::array<char, MAX_ARGS + 1> argTypes; // null-terminated
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  char argTypes[MAX_ARGS + 1]; // null-terminated
   // Thread safety: argStorage/kernelArgs are shared across calls but safe
   // because the GIL is held throughout fast_launcher_vectorcall (no
   // Py_BEGIN_ALLOW_THREADS).  cuLaunchKernel copies arg values from the
@@ -810,8 +805,10 @@ struct FastCudaLauncherObject {
   // TODO(T000000): Not safe under free-threaded Python (PEP 703, nogil).
   // If two threads call the same instance concurrently without the GIL,
   // they will corrupt argStorage/kernelArgs.  Revisit when nogil is stable.
-  std::array<uint64_t, MAX_ARGS> argStorage;
-  std::array<void*, MAX_ARGS> kernelArgs;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  uint64_t argStorage[MAX_ARGS];
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  void* kernelArgs[MAX_ARGS];
 };
 
 static PyObject* fast_launcher_vectorcall(
@@ -857,7 +854,7 @@ static PyObject* FastCudaLauncher_new(
 
   self->numKernelArgs = nKernel;
   self->numTotalArgs = nTotal;
-  std::memcpy(self->argTypes.data(), argTypes, nKernel);
+  std::memcpy(self->argTypes, argTypes, nKernel);
   // Scratch slots are pointer type ('O')
   for (int i = nKernel; i < nTotal; ++i) {
     self->argTypes[i] = 'O';
@@ -865,7 +862,7 @@ static PyObject* FastCudaLauncher_new(
   self->argTypes[nTotal] = '\0';
 
   // Pre-compute kernelArgs pointers and zero all storage.
-  self->argStorage.fill(0);
+  std::memset(self->argStorage, 0, sizeof(self->argStorage));
   for (int i = 0; i < nTotal; ++i) {
     self->kernelArgs[i] = &self->argStorage[i];
   }
@@ -1002,7 +999,7 @@ static PyObject* fast_launcher_vectorcall(
       static_cast<uint32_t>(gridZ),
       self->numWarps,
       self->sharedMemBytes,
-      self->kernelArgs.data(),
+      self->kernelArgs,
       reinterpret_cast<cudaStream_t>(stream)); // NOLINT
 
   Py_RETURN_NONE;
