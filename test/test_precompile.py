@@ -3531,6 +3531,40 @@ class TestPrecompile(TestCase):
             loaded(model, uncovered)
             self.assertGreater(loaded.serve_time_compiles(), 0)
 
+    def test_serve_time_compile_warning_identifies_the_graph(self):
+        # The module class is the same for every graph a model produces, so a
+        # capture that recompiled nine graphs said "GraphModule" nine times and
+        # cost a round of wrong attribution. Each warning has to be traceable to
+        # one graph -- including telling apart the continuations in a resume
+        # chain, which is where a graph break per submodule call lands you.
+        model = _PrecompileBreakingModule().eval()
+        captured, uncovered = torch.randn(3, 8), torch.randn(5, 8)
+        torch._dynamo.reset()
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_attr_entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, captured)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            loaded(model, captured)
+            with self.assertLogs("torch._dynamo.precompile_package", "WARNING") as cm:
+                loaded(model, uncovered)
+
+        warnings = [m for m in cm.output if "serving compiled a NEW graph" in m]
+        self.assertTrue(warnings)
+        for message in warnings:
+            self.assertIn("compile id ", message)
+            self.assertIn("backend id ", message)
+            self.assertIn("first traced at ", message)
+        # Distinct per graph, which is the whole point.
+        self.assertEqual(len(set(warnings)), len(warnings))
+
     def test_capture_records_a_graph_the_cache_will_not_key(self):
         # AOTAutogradCache refuses to KEY a graph calling anything outside its
         # allowlist, and a refusal means it never saves -- so the bundled
