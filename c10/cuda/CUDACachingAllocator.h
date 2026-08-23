@@ -81,6 +81,8 @@ struct SnapshotInfo {
   std::vector<std::vector<CachingDeviceAllocator::TraceEntry>> device_traces;
   std::vector<CachingDeviceAllocator::AnnotationEntry> external_annotations;
   AllocatorConfigInfo config_metadata;
+  std::vector<CachingDeviceAllocator::HostSegmentInfo> host_segments;
+  std::vector<CachingDeviceAllocator::TraceEntry> host_traces;
 };
 
 // returns the pointers freed in the pool
@@ -232,9 +234,36 @@ class CUDAAllocator : public DeviceAllocator {
       const std::vector<std::pair<std::string, std::string>>& /*md*/) {}
   virtual void pushCompileContext(std::string& md) {}
   virtual void popCompileContext() {}
-  virtual void setUserMetadata(const std::string& metadata) {}
+  // Whether this backend records the string set via setUserMetadata onto
+  // memory-history trace entries. When false, setUserMetadata is a no-op and
+  // getUserMetadata always returns "".
+  virtual bool supportsUserMetadata() {
+    return false;
+  }
+  virtual void setUserMetadata(const std::string& /*metadata*/) {
+    TORCH_WARN_ONCE(
+        name(),
+        " does not support user metadata; the value set via "
+        "torch.cuda.memory._set_memory_metadata is ignored and will not "
+        "appear in memory snapshots. Query "
+        "torch._C._cuda_memoryMetadataSupported() to check support.");
+  }
   virtual std::string getUserMetadata() {
     return "";
+  }
+  // Post-facto annotation: records an "annotate" trace entry for a live
+  // allocation identified by its base data pointer. Unlike setUserMetadata,
+  // this does not affect metadata recorded at allocation time; annotations
+  // accumulate as separate trace events keyed by address.
+  virtual void annotateMemory(
+      const void* /*ptr*/,
+      const std::string& /*metadata*/) {
+    TORCH_WARN_ONCE(
+        name(),
+        " does not support memory annotations; the value passed to "
+        "torch.cuda.memory._annotate_memory is ignored and will not "
+        "appear in memory snapshots. Query "
+        "torch._C._cuda_memoryMetadataSupported() to check support.");
   }
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
   virtual void attachOomRejectionObserver(OomRejectionObserver observer) = 0;
@@ -523,6 +552,10 @@ inline void enablePeerAccess(
   get()->enablePeerAccess(dev, dev_to_access);
 }
 
+inline bool supportsUserMetadata() {
+  return get()->supportsUserMetadata();
+}
+
 inline void setUserMetadata(const std::string& metadata) {
   get()->setUserMetadata(metadata);
 }
@@ -530,6 +563,47 @@ inline void setUserMetadata(const std::string& metadata) {
 inline std::string getUserMetadata() {
   return get()->getUserMetadata();
 }
+
+inline void annotateMemory(const void* ptr, const std::string& metadata) {
+  get()->annotateMemory(ptr, metadata);
+}
+
+// Tag (or, with an empty class, untag) a CUDA stream with an opaque reserve
+// class. Expandable segments created for a tagged stream size their virtual
+// address reservation from the per-class reserve in PYTORCH_CUDA_ALLOC_CONF
+// (see expandable_segments_reserve_by_class / expandable_segments_reserve). The
+// class string is opaque to core: downstream callers own the vocabulary. An
+// untagged stream (or the empty class) uses the full historical reserve.
+//
+// Contract: the tag is keyed by the raw cudaStream_t handle and persists until
+// overwritten or cleared. Streams from getStreamFromPool come from a shared,
+// round-robin pool, so tagging such a stream applies the class to every user of
+// that handle and to the (shared) expandable segments created on it. Tag only
+// streams whose (device, stream) identity you control for the intended
+// lifetime, and clear the tag (empty class) if the handle may later be reused
+// for an unrelated purpose.
+C10_CUDA_API void setExpandableSegmentReserveClassForStream(
+    cudaStream_t stream,
+    const std::string& reserve_class);
+C10_CUDA_API std::string getExpandableSegmentReserveClassForStream(
+    cudaStream_t stream);
+
+// Registers a code-side default reserve, expressed as a fraction of total
+// device memory, for a reserve class. Lets serving layers opt their stream
+// classes into a downsized reserve by default without depending on
+// CUDAAllocatorConfig. Explicit operator config (via PYTORCH_CUDA_ALLOC_CONF)
+// wins; see the precedence note on
+// CUDAAllocatorConfig::set_default_reserve_for_class.
+C10_CUDA_API void setDefaultExpandableSegmentReserveFractionForClass(
+    const std::string& reserve_class,
+    double fraction);
+
+// Process-wide expandable-segment virtual-address gauges, for observability
+// (ODS) and out-of-VM diagnostics: total VA bytes reserved by all live
+// ExpandableSegments, and the number of live segments. Cheap relaxed-atomic
+// reads; safe to call at any time.
+C10_CUDA_API size_t getExpandableSegmentsReservedBytes();
+C10_CUDA_API size_t getExpandableSegmentsCount();
 
 } // namespace c10::cuda::CUDACachingAllocator
 
