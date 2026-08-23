@@ -30,7 +30,7 @@ class TensorMetadata(NamedTuple):
     qparams: dict[str, Any]
 
 
-# When include_contiguity is True, we will set contiguity when its always true for the tensor.
+# When include_contiguity is True, we will set contiguity when it's always true for the tensor.
 # Some tensors can represent both contiguous and non-contiguous tensors. e.g: (u0, u1) with (u2, u3).
 # In such situation contiguity is not set. We could also make it a tri-state i.e: (def_contiguous,
 # def_not_contiguous and unknown).

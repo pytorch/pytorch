@@ -49,7 +49,7 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
   ss << vec_size;
 // DeviceIndex, e.g. int8_t, is not treated as a number by the stream, cast to int as a workaround
   ss << static_cast<int>(dev_idx);
-  const std::string cache_key = ss.str();
+  const std::string cache_key = std::move(ss).str();
 
   static std::mutex _jiterator_mutex;
   static std::unordered_map<std::string, at::cuda::jit::NvrtcFunction> fns;
@@ -150,7 +150,7 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
   ss << static_cast<int>(at::cuda::jit::BinaryFuncVariant::NoScalar);
   ss << extra_args_types;
   ss << dev_idx;
-  const std::string cache_key = ss.str();
+  const std::string cache_key = std::move(ss).str();
 
   static std::mutex _jiterator_mutex;
   static std::unordered_map<std::string, at::cuda::jit::NvrtcFunction> fns;

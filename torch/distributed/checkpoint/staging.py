@@ -154,11 +154,6 @@ class DefaultStager(AsyncStager):
         staged_dict = future.result()
         stager.close()
 
-        # Context manager pattern (recommended)
-        stager = DefaultStager(config)
-        with stager:
-        result = stager.stage(state_dict)
-
     Performance Considerations:
         - Async staging provides best performance when model computation
           can overlap with staging operations
@@ -245,10 +240,6 @@ class DefaultStager(AsyncStager):
             self._staging_stream.synchronize() if self._staging_stream else torch.accelerator.synchronize()
         else:
             state_dict = self._state_dict_stager.stage(state_dict, non_blocking=False)
-
-        # release reference cycle to prevent memory leaks in async_save
-        # created by _deepcopy_dispatch that capture self
-        self._state_dict_stager.close()
 
         return state_dict
 

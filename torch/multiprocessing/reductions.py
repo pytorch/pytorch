@@ -6,7 +6,6 @@ from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
 
 import torch
-from torch._namedtensor_internals import check_serializing_named_tensor
 
 
 try:
@@ -228,7 +227,6 @@ def reduce_tensor(tensor):
             "before serializing (e.g., putting it on the queue)."
         )
 
-    check_serializing_named_tensor(tensor)
     torch.utils.hooks.warn_if_has_hooks(tensor)
 
     # Note [CUDA IPC and the caching allocator]
@@ -258,11 +256,11 @@ def reduce_tensor(tensor):
     # only be opened by one context per device per other process.
     # If we open and close a memory handle multiples times in a process, CUDA is allowed
     # to give it a different address; similarly, once we close the memory, we're not
-    # allowed to access it(and the storage/tensor built on top of it), even if it is
+    # allowed to access it (and the storage/tensor built on top of it), even if it is
     # still live in the original process. As we cannot make a cudaMalloc allocation
     # to a single storage in one go, this requires us to cache the device pointer for
-    # each cudaIpcMemHandle on C++ side to reconstruct types of storages, while keep
-    # the old ones alives.
+    # each cudaIpcMemHandle on C++ side to reconstruct types of storages, while keeping
+    # the old ones alive.
     # See [https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html]
     #
     # This is fine, because all we need to do is to save our position in the allocation,
