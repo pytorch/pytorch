@@ -143,10 +143,7 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override {
     checkCollectiveError();
-    // Real backends write the reduced value only into the root's tensor and
-    // leave every other rank's unspecified. Mirror that, so a caller that
-    // wrongly reads a non-root result fails here as it would in production.
-    if (uniformRanks() && rank_ == opts.rootRank) {
+    if (uniformRanks()) {
       at::AutoDispatchBelowAutograd guard;
       for (auto& tensor : tensors) {
         applyUniformReduction(tensor, opts.reduceOp);
@@ -189,7 +186,11 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override {
     checkCollectiveError();
-    if (uniformRanks()) {
+    // Real backends write the reduced value only into the root's tensor and
+    // leave every other rank's unspecified. Mirror that, so a caller that
+    // wrongly reads a non-root result sees the same thing it would in
+    // production instead of a value only this backend would produce.
+    if (uniformRanks() && rank_ == opts.rootRank) {
       at::AutoDispatchBelowAutograd guard;
       for (auto& tensor : tensors) {
         applyUniformReduction(tensor, opts.reduceOp);
