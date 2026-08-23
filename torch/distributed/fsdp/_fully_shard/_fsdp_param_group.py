@@ -561,6 +561,8 @@ class FSDPParamGroup:
                 self._training_state = TrainingState.FORWARD
                 self.unshard(self.unshard_async_op)
                 self.wait_for_unshard()
+            for fsdp_param in self.fsdp_params:
+                fsdp_param._restore_spmd_types(fsdp_param.unsharded_param)
             if entering_forward_pass:
                 args, kwargs = self._register_post_backward_hook(args, kwargs)
             return args, kwargs
@@ -1023,11 +1025,16 @@ class FSDPParamGroup:
             if existing is not None:
                 new_groups[ranks] = existing
             else:
-                new_groups[ranks] = dist.new_group(
+                new_group = dist.new_group(
                     list(ranks),
                     use_local_synchronization=True,
                     group_desc="fsdp_reduce_scatter",
                 )
+                if new_group == dist.GroupMember.NON_GROUP_MEMBER:
+                    raise AssertionError(
+                        f"Current rank was not included in process group {ranks}"
+                    )
+                new_groups[ranks] = new_group
         mesh_info.reduce_scatter_process_group = new_groups[ranks]
 
     @property
@@ -1160,3 +1167,9 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
         # Drop the non-tensor param_group tangent. The output pre-backward hook
         # queues final post-backward after all primal/tangent paths finish.
         return grad_inputs
+
+
+if dist._is_spmd_types_available():
+    import spmd_types
+
+    spmd_types.register_local_autograd_function(RegisterPostBackwardFunction)

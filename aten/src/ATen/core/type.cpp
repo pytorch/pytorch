@@ -8,32 +8,11 @@
 #include <c10/util/env.h>
 #include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <array>
 #include <iostream>
 #include <utility>
-
-namespace std {
-template<>
-struct hash<std::tuple<std::string, c10::TypePtr, c10::TypePtr>> {
-  size_t operator()(std::tuple<std::string, c10::TypePtr, c10::TypePtr> const& t) const {
-    // This hashing is all hidden behind a static initializer so it
-    // doesn't have to be optimal
-    auto hash = std::hash<std::string>()(std::get<0>(t));
-    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
-    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<2>(t)));
-    return hash;
-  }
-};
-template<>
-struct hash<std::tuple<std::string, c10::TypePtr>> {
-  size_t operator()(std::tuple<std::string, c10::TypePtr> const& t) const {
-    auto hash = std::hash<std::string>()(std::get<0>(t));
-    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
-    return hash;
-  }
-};
-} // namespace std
 
 namespace c10 {
 
@@ -287,7 +266,8 @@ TypePtr OptionalType::get(TypePtr inner) {
 }
 
 TypePtr ListType::get(const std::string& identifier, TypePtr inner) {
-  static ska::flat_hash_map<std::tuple<std::string, TypePtr>, TypePtr> containerTypePtrs;
+  using Key = std::tuple<std::string, TypePtr>;
+  static ska::flat_hash_map<Key, TypePtr, c10::hash<Key>> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
   // a static initializer; it should only be called once per type.
@@ -301,7 +281,8 @@ TypePtr ListType::get(const std::string& identifier, TypePtr inner) {
 }
 
 TypePtr DictType::get(const std::string& identifier, TypePtr key, TypePtr value) {
-  static ska::flat_hash_map<std::tuple<std::string, TypePtr, TypePtr>, TypePtr> containerTypePtrs;
+  using Key = std::tuple<std::string, TypePtr, TypePtr>;
+  static ska::flat_hash_map<Key, TypePtr, c10::hash<Key>> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
   // a static initializer; it should only be called once per type.

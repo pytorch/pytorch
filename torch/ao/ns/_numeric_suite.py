@@ -412,7 +412,7 @@ def compare_model_stub(
     float shadow module. This dict can be used to compare and compute the module
     level quantization error.
 
-    This function first call prepare_model_with_stubs() to swap the quantized
+    This function first calls prepare_model_with_stubs() to swap the quantized
     module that we want to compare with the Shadow module, which takes quantized
     module, corresponding float module and logger as input, and creates a forward
     path inside to make the float module to shadow quantized module sharing the

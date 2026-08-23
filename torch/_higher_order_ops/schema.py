@@ -5,7 +5,7 @@ from typing import Any
 import torch
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch.fx.node import Target
 
 
@@ -72,7 +72,7 @@ class CTypeGen:
             return torch._C.SymBoolType.get()
         elif isinstance(obj, torch.SymFloat):
             return torch._C.FloatType.get()
-        elif isinstance(obj, (FakeScriptObject, pytree.TreeSpec)) or is_opaque_type(
+        elif isinstance(obj, (FakeScriptObject, pytree.TreeSpec)) or is_custom_class(
             type(obj)
         ):
             return torch._C.PyObjectType.get()  # pyrefly: ignore[missing-attribute]
@@ -115,7 +115,7 @@ class HopSchemaGenerator:
         is_mutated: bool = False,
         kw_only: bool = False,
     ) -> None:
-        if callable(example_value) and not is_opaque_type(type(example_value)):
+        if callable(example_value) and not is_custom_class(type(example_value)):
             if not isinstance(
                 example_value, (torch.fx.GraphModule, torch._ops.OperatorBase)
             ):

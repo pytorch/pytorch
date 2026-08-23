@@ -426,7 +426,7 @@ std::string AliasDb::getElementName(const Element* e) const {
       ss << '%' << v->debugName() << ", ";
     }
     ss << ')';
-    return ss.str();
+    return std::move(ss).str();
   }
 }
 
@@ -518,7 +518,7 @@ std::string AliasDb::toGraphviz() const {
         ss << "\\%" << v->debugName() << ", ";
       }
       ss << ")\"";
-      return ss.str();
+      return std::move(ss).str();
     }
   };
 
@@ -626,7 +626,7 @@ void AliasDb::analyzeImpl(Node* node) {
           node->kind().toDisplayString(),
           " but it isn't a special case.  ",
           "Argument types: ",
-          oss.str());
+          std::move(oss).str());
     }
   }
 
@@ -809,7 +809,7 @@ void AliasDb::analyzeImpl(Node* node) {
 
   if (analysis == AliasAnalysisKind::CONSERVATIVE) {
     // TODO A previous implementation of alias analysis always accessed
-    // node->schema , which cause the schema caches in the Node class to be
+    // node->schema , which caused the schema caches in the Node class to be
     // filled for the full graph. Unfortunately, our JIT passes started relying
     // on that, so we need to keep doing this. Details: in
     // caffe2/torch/onnx/utils.py, _jit_pass_onnx is called on an invalid JIT
@@ -863,7 +863,7 @@ void AliasDb::analyzeImpl(Node* node) {
     const auto& formalAlias = formal->beforeSet();
 
     // skip if we've already bound this alias
-    if (formalToActual.count(formalAlias) != 0) {
+    if (formalToActual.contains(formalAlias)) {
       continue;
     }
 
@@ -923,7 +923,7 @@ void AliasDb::analyzeImpl(Node* node) {
 
     bool inputs_has_alias = false;
     for (const auto& formalAlias : formal->beforeSets()) {
-      if (formalToActual.count(formalAlias)) {
+      if (formalToActual.contains(formalAlias)) {
         inputs_has_alias = true;
         auto toAlias = formalToActual.at(formalAlias);
         makePointerTo(actual, toAlias);
@@ -1658,21 +1658,21 @@ class AliasDb::WorkingSet {
   bool producesFor(Node* n) const {
     // This equivalent to asking: does the total use-set of all the nodes in the
     // working set include `n`?
-    if (mover_ && moverUsers_.count(n)) {
+    if (mover_ && moverUsers_.contains(n)) {
       return true;
     }
-    return users_.count(n) != 0;
+    return users_.contains(n);
   }
 
   // Does the working set consume any values produced by `n`?
   bool consumesFrom(Node* n) const {
     const auto users = getUsersSameBlock(n);
 
-    if (mover_ && users.count(mover_)) {
+    if (mover_ && users.contains(mover_)) {
       return true;
     }
     return std::any_of(users.begin(), users.end(), [&](Node* user) {
-      return node_to_index_.find(user) != node_to_index_.end();
+      return node_to_index_.contains(user);
     });
   }
 

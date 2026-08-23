@@ -94,7 +94,7 @@ class ChunkingApplier:
 
     def _categorize_subgraph_nodes(self) -> None:
         """
-        For each chunked node, decide if it's a input/body/output node of the
+        For each chunked node, decide if it's an input/body/output node of the
         chunking subgraph.
         """
         for node in self.parent_graph.nodes:
