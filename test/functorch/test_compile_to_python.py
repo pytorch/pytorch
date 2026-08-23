@@ -8,6 +8,7 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch._functorch._aot_autograd.codegen import GeneratedSource
 from torch._functorch._aot_autograd.to_standalone_python import (
+    _compile_to_python_with_state,
     _compose_standalone_module,
     _find_effectful_op,
     _known_helper_table,
@@ -234,6 +235,107 @@ class TestAOTCompileToPython(TestCase):
         out.sum().backward()
         for name, param in m.named_parameters():
             self.assertEqual(param.grad, expected[name])
+
+    def test_training_preserves_undefined_output_tangents(self):
+        def flat_fn(flat):
+            return [flat[0].sin(), flat[1].sin()]
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=True)
+        with torch.enable_grad():
+            gm = make_fx(flat_fn)([x, y])
+            src, _cache = compile_to_python(gm, [x, y], grad_enabled=True)
+
+        run_x = x.detach().clone().requires_grad_()
+        run_y = y.detach().clone().requires_grad_()
+        out = _exec(src)([run_x, run_y])
+        out[0].sum().backward()
+
+        self.assertEqual(run_x.grad, x.cos())
+        self.assertIsNone(run_y.grad)
+
+    def test_training_serializes_observed_tangent_mask(self):
+        def flat_fn(flat):
+            return [flat[0].sin(), flat[1].sin()]
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=True)
+        with torch.enable_grad():
+            gm = make_fx(flat_fn)([x, y])
+            capture_source, cache, state = _compile_to_python_with_state(
+                gm, [x, y], grad_enabled=True
+            )
+        if state is None:
+            raise AssertionError("expected a training compile state")
+
+        capture_call = load_from_python(capture_source, cache)
+        state.install_capture(capture_call.__globals__)
+        capture_x = x.detach().clone().requires_grad_()
+        capture_y = y.detach().clone().requires_grad_()
+        capture_call([capture_x, capture_y])[0].sum().backward()
+        masks = capture_call.__globals__["_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS"]
+        self.assertEqual(masks, {0b10})
+        self.assertIn(0b10, state._observed_variants)
+
+        source, final_cache = state.finalize(tuple(masks))
+        self.assertIn("2: (_inner_call_bw_0", source)
+        self.assertIn("_AOT_DEFAULT_BACKWARD_VARIANT = None", source)
+        loaded = load_from_python(source, final_cache)
+        run_x = x.detach().clone().requires_grad_()
+        run_y = y.detach().clone().requires_grad_()
+        loaded([run_x, run_y])[0].sum().backward()
+        self.assertEqual(run_x.grad, x.cos())
+        self.assertIsNone(run_y.grad)
+
+        unseen_x = x.detach().clone().requires_grad_()
+        unseen_y = y.detach().clone().requires_grad_()
+        with self.assertRaisesRegex(
+            torch.compiler.PrecompileError, "not covered by example_inputs"
+        ):
+            loaded([unseen_x, unseen_y])[1].sum().backward()
+
+    def test_training_synthetic_base_and_undefined_tangent(self):
+        def flat_fn(flat):
+            first, alias, unused = flat
+            first.mul_(2)
+            return [first + alias, unused.sin()]
+
+        def make_inputs():
+            leaf = torch.arange(1.0, 5.0, requires_grad=True)
+            base = leaf + 0
+            unused = torch.randn(4, requires_grad=True)
+            return leaf, [base[:], base, unused]
+
+        _, example = make_inputs()
+        gm = make_fx(flat_fn)(example)
+        _, compile_inputs = make_inputs()
+        capture_source, cache, state = _compile_to_python_with_state(
+            gm, compile_inputs, grad_enabled=True
+        )
+        if state is None:
+            raise AssertionError("expected a training compile state")
+
+        capture_call = load_from_python(capture_source, cache)
+        state.install_capture(capture_call.__globals__)
+        _, capture_inputs = make_inputs()
+        capture_call(capture_inputs)[0].sum().backward()
+        masks = capture_call.__globals__["_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS"]
+        self.assertEqual(masks, {0b101})
+
+        source, final_cache = state.finalize(tuple(masks))
+        self.assertIn("_synthetic_base_wrapper", source)
+        actual_leaf, actual_inputs = make_inputs()
+        expected_leaf, expected_inputs = make_inputs()
+        actual = load_from_python(source, final_cache)(actual_inputs)
+        expected = flat_fn(expected_inputs)
+        actual[0].sum().backward()
+        expected[0].sum().backward()
+
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(actual_inputs[1], expected_inputs[1])
+        self.assertEqual(actual_leaf.grad, expected_leaf.grad)
+        self.assertIsNone(actual_inputs[2].grad)
+        self.assertIsNone(expected_inputs[2].grad)
 
     def test_training_forward_and_backward_do_not_share_names(self):
         # The two inductor modules are spliced into ONE namespace and both define
