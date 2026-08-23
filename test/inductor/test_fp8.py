@@ -30,6 +30,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_quantized import ceil_div, to_blocked
 from torch.testing._internal.common_utils import (
+    IS_ARM64,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     skipIfRocm,
@@ -2164,8 +2165,16 @@ class TestCvtE8M0RceilFallback(TestCase):
         """Compiled output matches eager for finite values, subnormals, and zero.
 
         fp16/bf16 are upcast to fp32 inside the fallback (exactly), so all three
-        dtypes must agree with the eager reference.
+        dtypes must agree with the eager reference.  fp16/bf16 on CPU are only
+        exercised off aarch64: the generated C++ for the Half->float upcast hits
+        a GCC 13 internal compiler error (convert_mode_scalar) on aarch64.  The
+        upcast IR route is covered on cuda/xpu regardless.
         """
+        if IS_ARM64 and device == "cpu" and dtype != torch.float32:
+            self.skipTest(
+                "fp16/bf16 CPU fallback triggers a GCC 13 ICE on aarch64 "
+                "(convert_mode_scalar); covered on cuda/xpu"
+            )
 
         inp = torch.tensor(
             [
