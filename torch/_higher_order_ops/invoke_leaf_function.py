@@ -7,8 +7,9 @@ from typing import Any, NamedTuple
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet
+from torch._custom_class_base import CustomClassBase
 from torch._higher_order_ops.utils import register_fake
-from torch._library.opaque_object import OpaqueBase, register_opaque_type
+from torch._library.opaque_object import register_custom_class
 from torch._ops import HigherOrderOperator
 from torch.autograd.graph import get_gradient_edge
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
@@ -48,7 +49,7 @@ def reset_makefx_module_storage() -> None:
     _makefx_module_storage.clear()
 
 
-class _LeafCallable(OpaqueBase):
+class _LeafCallable(CustomClassBase):
     def __init__(self, fn: Callable) -> None:
         self._fn = fn
 
@@ -56,7 +57,7 @@ class _LeafCallable(OpaqueBase):
         return self._fn(*args, **kwargs)
 
 
-register_opaque_type(_LeafCallable, typ="reference")
+register_custom_class(_LeafCallable, typ="symbolic")
 
 
 def set_leaf_function_module_retriever(retriever: Callable[[int], Any]) -> None:
@@ -209,7 +210,7 @@ def check_escaped_gradients(
     requires_grad_indices: set[int],
 ) -> None:
     """
-    Check if autograd graph depends on tensors that not passed as explicit inputs.
+    Check if autograd graph depends on tensors that are not passed as explicit inputs.
 
     Controlled by torch._dynamo.config.leaf_function_check_escaped_gradients.
     """
@@ -708,7 +709,8 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
         hook_real = getattr(real_fn_callable, "_leaf_hook_real_fn", None)
         hook_fake = getattr(real_fn_callable, "_leaf_hook_fake_fn", None)
         if hook_real is not None:
-            assert hook_fake is not None  # noqa: S101
+            if hook_fake is None:
+                raise AssertionError("expected hook_fake to be not None")
             hook_captured_out_spec: list[pytree.TreeSpec | None] = [None]
             wrapped_hook_real, wrapped_hook_fake = make_leaf_function_wrappers(
                 hook_real, hook_fake, hook_captured_out_spec
