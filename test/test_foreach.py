@@ -97,26 +97,25 @@ class ForeachFuncWrapper:
             (12, 6),
             (12, 8),
         ]
-        if device_type in ("cpu", "meta"):
-            profiler_activity = None
-        elif device_type == torch._C._get_privateuse1_backend_name():
-            profiler_activity = torch.profiler.ProfilerActivity.PrivateUse1
-        else:
-            profiler_activity = getattr(
-                torch.profiler.ProfilerActivity, device_type.upper(), None
-            )
+        # Only CUDA/ROCm expose a reliable fastpath profiler key
+        # (multi_tensor_apply_kernel, or the _foreach_mta_launch marker on
+        # ROCm), so the check below is CUDA-only; other accelerators skip it.
         if (
-            profiler_activity is not None
+            device_type == "cuda"
             and not skip_profiler_check
             and torch.autograd.kineto_available()
-            and profiler_activity in torch.profiler.supported_activities()
+            and torch.profiler.ProfilerActivity.CUDA
+            in torch.profiler.supported_activities()
         ):
             with torch.profiler.profile(
-                activities=[torch.profiler.ProfilerActivity.CPU, profiler_activity]
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ]
             ) as p:
                 actual = self.func(*inputs, **kwargs)
                 # synchronize within the profiler context to make sure events happen before exiting
-                torch.accelerator.synchronize(device_type)
+                torch.get_device_module(device_type).synchronize()
             keys = tuple([e.key for e in p.key_averages()])
             mta_kernel_called = any("multi_tensor_apply_kernel" in k for k in keys)
             # Explicitly track MTA launch on ROCm via RECORD_FUNCTION in
@@ -444,7 +443,7 @@ class TestForeach(TestCase):
                         custom_values_err="Expected packed scalar Tensor to be of dimension 1. Got 0 instead.",
                         **kwargs,
                     )
-                    if self.device_type != "cpu":
+                    if self.device_type not in ("cpu", "meta"):
                         self._pointwise_test(
                             op_,
                             ref_,
@@ -2179,7 +2178,7 @@ def _foreach_mm_check(test_case, shapes, dtype, device):
     A = [torch.randn(M, K, dtype=dtype, device=device) for M, _, K in shapes]
     B = [torch.randn(K, N, dtype=dtype, device=device) for _, N, K in shapes]
     ref = [torch.mm(a, b) for a, b in zip(A, B)]
-    out = torch._foreach_mm(A, B)
+    out = torch.foreach.mm(A, B)
     test_case.assertEqual(len(out), len(ref))
     # Grouped GEMM backends may use different accumulation order than
     # torch.mm, so fp32 needs relaxed tolerances.
@@ -2192,20 +2191,6 @@ def _foreach_mm_check(test_case, shapes, dtype, device):
 
 class TestForeachMM(TestCase):
     hw_classification = HardwareClassification.GENERIC
-
-    def _check(self, shapes, dtype, device):
-        A = [torch.randn(M, K, dtype=dtype, device=device) for M, _, K in shapes]
-        B = [torch.randn(K, N, dtype=dtype, device=device) for _, N, K in shapes]
-        ref = [torch.mm(a, b) for a, b in zip(A, B)]
-        out = torch.foreach.mm(A, B)
-        self.assertEqual(len(out), len(ref))
-        # Grouped GEMM backends may use different accumulation order than
-        # torch.mm, so fp32 needs relaxed tolerances.
-        kwargs = {"atol": 2e-4, "rtol": 2e-4} if dtype == torch.float32 else {}
-        for i, (r, o) in enumerate(zip(ref, out)):
-            self.assertEqual(
-                o, r, msg=lambda msg: f"{msg}\nmismatch at group {i}", **kwargs
-            )
 
     @parametrize(
         "label,shapes",
@@ -2422,7 +2407,7 @@ class TestForeachMMCudaOnly(TestCase):
 
 instantiate_device_type_tests(TestForeach, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestForeachMM)
-instantiate_device_type_tests(TestForeachMMDevice, globals())
+instantiate_device_type_tests(TestForeachMMDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestForeachMMCudaOnly, globals(), only_for="cuda")
 
 instantiate_parametrized_tests(TestForeachPublicAPI)
