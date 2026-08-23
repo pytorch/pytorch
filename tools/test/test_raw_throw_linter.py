@@ -222,6 +222,14 @@ class TestBuckets(unittest.TestCase):
         self.assertEqual(names(source, JIT_PATH), [])
         self.assertEqual(names(source, "aten/src/ATen/Foo.cpp"), ["raw-throw"])
 
+    def test_unwind_error_is_scoped_to_the_profiler(self) -> None:
+        for expression in ("UnwindError(x)", "unwind::UnwindError(x)"):
+            with self.subTest(expression=expression):
+                source = f"throw {expression};\n"
+                profiler = "torch/csrc/profiler/unwind/unwind.cpp"
+                self.assertEqual(names(source, profiler), [])
+                self.assertEqual(names(source, "aten/src/ATen/Foo.cpp"), ["raw-throw"])
+
     def test_a_qualified_allowed_name_need_not_be_scoped(self) -> None:
         source = "throw py::key_error(x);\n"
         self.assertEqual(names(source, "aten/src/ATen/Foo.cpp"), [])
