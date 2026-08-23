@@ -2815,10 +2815,16 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    if device_id is not None and (device_id.index is None or device_id.type == "cpu"):
+    if device_id is not None and device_id.index is None:
         raise ValueError(
             "init_process_group device_id parameter must be an accelerator with an index"
         )
+    if device_id is not None and device_id.type == "cpu":
+        supported_devices = Backend.backend_capability.get(backend, [])
+        if "cpu" not in supported_devices:
+            raise ValueError(
+                f"init_process_group device_id parameter must be an accelerator with an index"
+            )
 
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
     _check_valid_timeout(timeout)

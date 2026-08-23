@@ -2150,6 +2150,114 @@ class BackendRegistrationTest(TestCase):
             dist.Backend._plugins = old_plugins
 
 
+class NewProcessGroupHelperDeviceIdTest(TestCase):
+    """Regression tests for device_id validation in _new_process_group_helper."""
+
+    TIMEOUT = timedelta(seconds=30)
+
+    def test_cpu_device_id_allowed_for_gloo_backend(self):
+        """GLOO supports CPU; cpu:0 device_id must not raise during validation."""
+        # Drive the function past device_id validation by providing a
+        # fresh, unique group name. The call will fail later when trying
+        # to create a real backend, but that confirms the device_id check passed.
+        import torch.distributed.distributed_c10d as c10d_module
+
+        saved_pg_names = c10d_module._pg_names.copy()
+        c10d_module._pg_names.clear()
+        try:
+            with self.assertRaisesRegex(
+                RuntimeError, "No module named 'torch._C'"
+            ):
+                # Any error after device_id validation confirms it passed.
+                c10d._new_process_group_helper(
+                    group_size=1,
+                    group_rank=0,
+                    global_ranks_in_group=[],
+                    backend="gloo",
+                    store=dist.HashStore(),
+                    group_name=c10d.GroupName("test-cpu-gloo-" + str(id(self))),
+                    timeout=self.TIMEOUT,
+                    device_id=torch.device("cpu:0"),
+                )
+        finally:
+            c10d_module._pg_names.clear()
+            c10d_module._pg_names.update(saved_pg_names)
+
+    def test_cpu_device_id_rejected_for_nccl_backend(self):
+        """NCCL does not support CPU; cpu:0 device_id must raise."""
+        import torch.distributed.distributed_c10d as c10d_module
+
+        saved_pg_names = c10d_module._pg_names.copy()
+        c10d_module._pg_names.clear()
+        try:
+            with self.assertRaisesRegex(
+                ValueError,
+                "init_process_group device_id parameter must be an accelerator with an index",
+            ):
+                c10d._new_process_group_helper(
+                    group_size=1,
+                    group_rank=0,
+                    global_ranks_in_group=[],
+                    backend="nccl",
+                    store=dist.HashStore(),
+                    group_name=c10d.GroupName("test-cpu-nccl-" + str(id(self))),
+                    timeout=self.TIMEOUT,
+                    device_id=torch.device("cpu:0"),
+                )
+        finally:
+            c10d_module._pg_names.clear()
+            c10d_module._pg_names.update(saved_pg_names)
+
+    def test_unindexed_accelerator_device_rejected(self):
+        """Accelerator device without index must still raise regardless of backend."""
+        import torch.distributed.distributed_c10d as c10d_module
+
+        saved_pg_names = c10d_module._pg_names.copy()
+        c10d_module._pg_names.clear()
+        try:
+            with self.assertRaisesRegex(
+                ValueError,
+                "init_process_group device_id parameter must be an accelerator with an index",
+            ):
+                c10d._new_process_group_helper(
+                    group_size=1,
+                    group_rank=0,
+                    global_ranks_in_group=[],
+                    backend="nccl",
+                    store=dist.HashStore(),
+                    group_name=c10d.GroupName("test-no-index-" + str(id(self))),
+                    timeout=self.TIMEOUT,
+                    device_id=torch.device("cuda"),
+                )
+        finally:
+            c10d_module._pg_names.clear()
+            c10d_module._pg_names.update(saved_pg_names)
+
+    def test_cpu_device_id_allowed_for_ucc_backend(self):
+        """UCC supports CPU; cpu:0 device_id must not raise during validation."""
+        import torch.distributed.distributed_c10d as c10d_module
+
+        saved_pg_names = c10d_module._pg_names.copy()
+        c10d_module._pg_names.clear()
+        try:
+            with self.assertRaisesRegex(
+                RuntimeError, "No module named 'torch._C'"
+            ):
+                c10d._new_process_group_helper(
+                    group_size=1,
+                    group_rank=0,
+                    global_ranks_in_group=[],
+                    backend="ucc",
+                    store=dist.HashStore(),
+                    group_name=c10d.GroupName("test-cpu-ucc-" + str(id(self))),
+                    timeout=self.TIMEOUT,
+                    device_id=torch.device("cpu:0"),
+                )
+        finally:
+            c10d_module._pg_names.clear()
+            c10d_module._pg_names.update(saved_pg_names)
+
+
 class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
