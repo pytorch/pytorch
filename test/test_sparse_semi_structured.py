@@ -35,6 +35,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import all_types_and_complex
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -185,6 +186,8 @@ def rand_sparse_semi_structured_all_patterns(r, c, dtype, device):
 
 
 class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) == 0:
             self.skipTest("semi-structured sparsity has no available backend!")
@@ -340,6 +343,8 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
 
 
 class TestSparseSemiStructured(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) == 0:
@@ -698,6 +703,8 @@ def create_random_mask(shape) -> torch.Tensor:
 
 
 class TestSparseSemiStructuredTraining(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         if not _IS_SM8X:
@@ -1094,6 +1101,8 @@ class TestSparseSemiStructuredTraining(TestCase):
 
 
 class TestSparseSemiStructuredCUTLASS(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     """
     This contains CUTLASS specific tests for
          - torch._sparse_semi_structured_linear
@@ -1360,6 +1369,8 @@ def to_float8(x, dtype=e4m3_type):
 
 
 class TestSparseSemiStructuredCUSPARSELT(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     """
     This contains cuSPARSELt specific tests for
         torch._cslt_compress
