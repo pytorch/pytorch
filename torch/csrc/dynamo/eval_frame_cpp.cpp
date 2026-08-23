@@ -34,15 +34,20 @@ struct DebugContextGuard {
     ctx.attr("__enter__")();
   }
 
-  ~DebugContextGuard() {
+  // NOLINTNEXTLINE(bugprone-exception-escape)
+  ~DebugContextGuard() noexcept {
     // Save any pending Python exception (e.g. KeyboardInterrupt from the
     // debugger's 'q' command) so calling __exit__ doesn't clobber it.
-    PyObject *exc_type, *exc_value, *exc_tb;
+    PyObject* exc_type = nullptr;
+    PyObject* exc_value = nullptr;
+    PyObject* exc_tb = nullptr;
     PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
     try {
       ctx.attr("__exit__")(py::none(), py::none(), py::none());
     } catch (py::error_already_set& e) {
       e.restore();
+      PyErr_Clear();
+    } catch (...) {
       PyErr_Clear();
     }
     if (exc_type != nullptr) {
@@ -52,11 +57,13 @@ struct DebugContextGuard {
 
   DebugContextGuard(const DebugContextGuard&) = delete;
   DebugContextGuard& operator=(const DebugContextGuard&) = delete;
+  DebugContextGuard(DebugContextGuard&&) = delete;
+  DebugContextGuard& operator=(DebugContextGuard&&) = delete;
 };
 
 } // namespace
 
-void set_bytecode_debugger_callback(py::object callback) {
+void set_bytecode_debugger_callback(const py::object& callback) {
   if (callback.is_none()) {
     Py_XSETREF(bytecode_debugger_callback_obj, nullptr);
   } else {
@@ -514,8 +521,22 @@ PyObject* dynamo__custom_eval_frame(
   FrameExecStrategy strategy =
       extra_state_get_region_exec_strategy(extra, isolate_recompiles_id);
 
-  recursive_callback =
-      _callback_from_action(recursive_callback, strategy.recursive_action);
+  // py::hasattr on a miss raises and clears an AttributeError, so keep it off
+  // the ordinary run-only path: torch._dynamo.run() and the eager_on_recompile
+  // stance both arrive here with callback == Py_False on every frame, and only
+  // a real callback object can carry the marker.
+  bool force_callback_on_cache_miss = false;
+  if ((strategy.cur_action == FrameAction::RUN_ONLY ||
+       strategy.recursive_action == FrameAction::RUN_ONLY) &&
+      !callback.is_none() && callback.ptr() != Py_False) {
+    force_callback_on_cache_miss =
+        py::hasattr(callback, "_torchdynamo_force_callback_on_cache_miss");
+  }
+  if (!force_callback_on_cache_miss ||
+      strategy.recursive_action != FrameAction::RUN_ONLY) {
+    recursive_callback =
+        _callback_from_action(recursive_callback, strategy.recursive_action);
+  }
 
   if (strategy.cur_action == FrameAction::SKIP) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
@@ -558,7 +579,8 @@ PyObject* dynamo__custom_eval_frame(
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
-  bool run_only = strategy.cur_action == FrameAction::RUN_ONLY ||
+  bool run_only = (strategy.cur_action == FrameAction::RUN_ONLY &&
+                   !force_callback_on_cache_miss) ||
       callback.is(py::bool_(false));
   if (run_only) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
@@ -570,14 +592,24 @@ PyObject* dynamo__custom_eval_frame(
     return eval_result;
   }
 
+  // The lookups above hand back a BORROWED pointer and then drop the cache
+  // lock. Everything below can release the GIL -- has_relevant_entries takes
+  // CacheLock, and the guard-collective hook runs Python -- so a concurrent
+  // unload can destroy the entry that owns this code object before
+  // eval_custom() runs it. A precompile entry is often that code object's only
+  // owner, so the result is a freed pointer handed to the interpreter. Own it
+  // for the rest of the frame.
+  py::object cached_code_owner =
+      py::reinterpret_borrow<py::object>(maybe_cached_code);
+
   // NB: We only do guard collectives when there are compiled code entries
   // for the current region (or the default region); this reduces
   // overtriggering and we don't need to do guard collectives the very first
-  // time we've seen a frame in this region.
-  bool has_relevant_entries =
-      extra->cache_entry_map.count(isolate_recompiles_id) > 0 ||
-      extra->cache_entry_map.count(-1) > 0;
-  if (guard_complete_hook != nullptr && has_relevant_entries) {
+  // time we've seen a frame in this region. Only the hook consumes this and
+  // computing it takes the cache lock, so it is not worth paying for -- nor
+  // worth opening a GIL-release window for -- on every intercepted frame.
+  if (guard_complete_hook != nullptr &&
+      extra->has_relevant_entries(isolate_recompiles_id)) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
     py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
@@ -616,7 +648,8 @@ PyObject* dynamo__custom_eval_frame(
     locals = std::make_unique<FrameLocalsMapping>(frame);
   }
   CacheEntry* cache_entry = extract_cache_entry(extra, isolate_recompiles_id);
-  FrameState* frame_state = extract_frame_state(extra);
+  py::object frame_state = py::reinterpret_steal<py::object>(
+      extract_frame_state(extra, isolate_recompiles_id));
   py::object callback_result;
   FrameExecStrategy new_strategy;
   bool apply_to_code = false;
@@ -631,7 +664,7 @@ PyObject* dynamo__custom_eval_frame(
     }
     PreserveGlobalState preserve_global_state;
     callback_result = dynamo_call_callback(
-        callback, frame, locals.get(), cache_entry, frame_state);
+        callback, frame, locals.get(), cache_entry, frame_state.ptr());
     new_strategy =
         callback_result.attr("frame_exec_strategy").cast<FrameExecStrategy>();
     apply_to_code = callback_result.attr("apply_to_code").cast<bool>();
