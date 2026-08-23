@@ -120,7 +120,7 @@ def _misc_patterns_init(input_device: torch.device | None = None):
                 and inp_val.dtype == torch.float32
             )
 
-        is_sm100_plus = is_nvidia_sm100_or_later()
+        is_sm100_plus = is_nvidia_sm100_or_later(device)
 
         if is_sm100_plus:
             from .. import inductor_prims
@@ -143,7 +143,7 @@ def _misc_patterns_init(input_device: torch.device | None = None):
                 e8m0_rceil_pattern,
                 # pyrefly: ignore [bad-argument-type]
                 e8m0_rceil_replacement,
-                [torch.randn(32, device="cuda", dtype=torch.float32)],
+                [torch.randn(32, device=device, dtype=torch.float32)],
                 # pyrefly: ignore [bad-argument-type]
                 fwd_only,
                 # pyrefly: ignore [bad-argument-type]
@@ -155,8 +155,14 @@ def _misc_patterns_init(input_device: torch.device | None = None):
         # Pattern 2: log2 + ceil approach (used by torchao MX formats)
         # Matches: (clamp(ceil(log2(x)), -127, 127) + 127).to(uint8)
         #
-        # Registered on ALL CUDA hardware. On NVIDIA SM100+ uses the PTX instruction;
-        # on earlier hardware uses exact IEEE 754 bit-manipulation.
+        # Registered on ALL CUDA and XPU hardware. On NVIDIA SM100+ uses the PTX
+        # instruction; on earlier hardware uses exact IEEE 754 bit-manipulation.
+        #
+        # NOTE: the replacement assumes x > 0. log2(x) for x <= 0 is nan/-inf
+        # whose uint8 cast is implementation-defined, while the bit-manipulation
+        # form returns the exponent of |x|, so the two disagree for negative and
+        # zero inputs. The pattern's example input is .abs() + 1e-10; it should
+        # only fire on positive-input graphs.
         #
         # The bit-manipulation replacement is preferred over the software
         # log2+ceil because Triton's fused kernels can produce inputs that

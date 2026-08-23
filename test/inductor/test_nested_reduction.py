@@ -2868,9 +2868,15 @@ class _InternalsBase:
             )
         else:
             # Non-SM100 devices (XPU, older CUDA, ROCm, CPU) use the software
-            # fallback: assert the PTX instruction is absent and the mantissa
-            # mask (0x7FFFFF = 8388607) is emitted.
-            extra_checks = FileCheck().check_not("cvt.rp.satfinite").check("8388607")
+            # fallback: assert the mantissa mask (0x7FFFFF = 8388607) is emitted
+            # and the PTX instruction is absent. check_count(x, 0, exactly=True)
+            # expands to a single CHECK_NOT over the rest of the kernel, unlike
+            # check_not(...).check(...), which only asserts absence in the prefix
+            # up to the "8388607" match (a cvt.rp.satfinite emitted afterwards
+            # would go undetected).
+            extra_checks = FileCheck().check("8388607").check_count(
+                "cvt.rp.satfinite", 0, exactly=True
+            )
         self.assert_single_kernel_form(
             _capture_rmsnorm_mxfp8_scale_swizzle_sources,
             128,

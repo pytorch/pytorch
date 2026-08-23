@@ -9690,7 +9690,7 @@ def cvt_e8m0_rceil_lowering(inp):
     if (
         device is not None
         and device.type == "cuda"
-        and is_nvidia_sm100_or_later(device.index)
+        and is_nvidia_sm100_or_later(device)
     ):
         fn = functools.partial(
             ops.inline_asm_elementwise,

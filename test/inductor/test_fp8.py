@@ -2159,8 +2159,13 @@ class TestCvtE8M0RceilFallback(TestCase):
         "SM100+ uses the PTX instruction, not the software fallback",
     )
     @onlyOn(["cpu", "cuda", "xpu"])
-    def test_correctness(self, device):
-        """Compiled output matches eager for finite values, subnormals, and zero."""
+    @parametrize("dtype", (torch.float32, torch.bfloat16, torch.float16))
+    def test_correctness(self, device, dtype):
+        """Compiled output matches eager for finite values, subnormals, and zero.
+
+        fp16/bf16 are upcast to fp32 inside the fallback (exactly), so all three
+        dtypes must agree with the eager reference.
+        """
 
         inp = torch.tensor(
             [
@@ -2183,7 +2188,7 @@ class TestCvtE8M0RceilFallback(TestCase):
                 -0.0,  # zero
             ],
             device=device,
-            dtype=torch.float32,
+            dtype=dtype,
         )
         self.assertEqual(
             torch.compile(_cvt_e8m0_rceil, fullgraph=True)(inp), _cvt_e8m0_rceil(inp)
@@ -2209,21 +2214,23 @@ class TestCvtE8M0RceilFallback(TestCase):
         self.assertEqual(torch.compile(_cvt_e8m0_rceil, fullgraph=True)(inp), expected)
 
 
-@unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
-@unittest.skipIf(
-    utils.is_nvidia_sm100_or_later(),
-    "Pre-NVIDIA-SM100 path: uses bit-manipulation fallback",
-)
 class TestE8M0Log2PatternBitManip(TestCase):
-    """Tests for the e8m0_rceil_log2 pattern on pre-SM100 hardware.
+    """Tests for the e8m0_rceil_log2 pattern on non-SM100 hardware.
 
     On hardware without the SM100 PTX instruction, Inductor replaces the
     software log2+ceil sequence with an equivalent IEEE 754 bit-manipulation
     that reads the biased exponent directly.  This avoids 1 ULP errors in
-    software log2 near exact powers of 2 (gh-178045).
+    software log2 near exact powers of 2 (gh-178045).  Runs on CUDA (pre-SM100)
+    and XPU; the pattern is registered for both via misc_patterns.
     """
 
-    def test_pattern_fires_and_is_correct(self):
+    @onlyOn(["cuda", "xpu"])
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
+    @skipCUDAIf(
+        utils.is_nvidia_sm100_or_later(),
+        "SM100+ uses the PTX instruction, not the bit-manipulation fallback",
+    )
+    def test_pattern_fires_and_is_correct(self, device):
         """The log2+ceil pattern should be matched and produce correct uint8."""
         _misc_patterns_init()
         E8M0_BIAS = 127
@@ -2236,13 +2243,19 @@ class TestE8M0Log2PatternBitManip(TestCase):
             return biased.to(torch.uint8)
 
         inp = torch.tensor(
-            [1.0, 2.0, 4.0, 3.0, 1.5, 0.5, 0.25], device="cuda", dtype=torch.float32
+            [1.0, 2.0, 4.0, 3.0, 1.5, 0.5, 0.25], device=device, dtype=torch.float32
         )
         eager_result = fn(inp)
         compiled_result = torch.compile(fn)(inp)
         self.assertEqual(compiled_result, eager_result)
 
-    def test_correct_for_values_one_ulp_above_power_of_two(self):
+    @onlyOn(["cuda", "xpu"])
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
+    @skipCUDAIf(
+        utils.is_nvidia_sm100_or_later(),
+        "SM100+ uses the PTX instruction, not the bit-manipulation fallback",
+    )
+    def test_correct_for_values_one_ulp_above_power_of_two(self, device):
         """Values 1 ULP above a power of 2 must produce the correct (higher) exponent.
 
         Software log2 for x = 2^e + 1 ULP may round to exactly e when e is
@@ -2264,15 +2277,21 @@ class TestE8M0Log2PatternBitManip(TestCase):
             torch.nextafter(torch.tensor(p), torch.tensor(float("inf"))).item()
             for p in powers
         ]
-        inp = torch.tensor(one_ulp_above, device="cuda", dtype=torch.float32)
+        inp = torch.tensor(one_ulp_above, device=device, dtype=torch.float32)
 
         expected = torch.tensor(
-            [E8M0_BIAS + e + 1 for e in range(8)], dtype=torch.uint8, device="cuda"
+            [E8M0_BIAS + e + 1 for e in range(8)], dtype=torch.uint8, device=device
         )
         compiled_result = torch.compile(fn)(inp)
         self.assertEqual(compiled_result, expected)
 
-    def test_regression_gh178045_encoding_correctness(self):
+    @onlyOn(["cuda", "xpu"])
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
+    @skipCUDAIf(
+        utils.is_nvidia_sm100_or_later(),
+        "SM100+ uses the PTX instruction, not the bit-manipulation fallback",
+    )
+    def test_regression_gh178045_encoding_correctness(self, device):
         """Regression for gh-178045: encoding must be correct for inputs near power-of-2.
 
         When a compiled kernel (e.g. fused GELU) produces a float value that is
@@ -2306,11 +2325,11 @@ class TestE8M0Log2PatternBitManip(TestCase):
             torch.nextafter(torch.tensor(p), torch.tensor(float("inf"))).item()
             for p in powers
         ]
-        inp = torch.tensor(one_ulp_above, device="cuda", dtype=torch.float32)
+        inp = torch.tensor(one_ulp_above, device=device, dtype=torch.float32)
 
         # The correct e8m0 encoding for "1 ULP above 2^e" is E8M0_BIAS + (e+1)
         expected = torch.tensor(
-            [E8M0_BIAS + e + 1 for e in range(7)], dtype=torch.uint8, device="cuda"
+            [E8M0_BIAS + e + 1 for e in range(7)], dtype=torch.uint8, device=device
         )
 
         torch._dynamo.reset()
@@ -2330,6 +2349,12 @@ instantiate_device_type_tests(
     TestCvtE8M0RceilFallback,
     globals(),
     only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestE8M0Log2PatternBitManip,
+    globals(),
+    only_for=("cuda", "xpu"),
     allow_xpu=True,
 )
 
