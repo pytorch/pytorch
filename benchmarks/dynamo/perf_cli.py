@@ -1510,7 +1510,8 @@ def cmd_prepare_repro(args):
     if "timm_models" in suites:
         print("# ── Timm ──")
         print(
-            f"pip install git+https://github.com/huggingface/pytorch-image-models@{timm_pin}"
+            "pip install --no-deps "
+            f"git+https://github.com/huggingface/pytorch-image-models@{timm_pin}"
         )
         print()
 
