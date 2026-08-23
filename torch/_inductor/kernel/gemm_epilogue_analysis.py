@@ -8,7 +8,6 @@ from typing import Any
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR,
-    local_reduce_compressed_shape,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR,
     LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR,
@@ -772,29 +771,6 @@ class GemmLocalReduceAnalysis:
         ):
             return None
         return matches[0]
-
-    def compressed_aux_plan(
-        self,
-        output: Any,
-        aux: torch.fx.Node,
-        aux_index: int,
-    ) -> GemmOutputLocalReducePlan | None:
-        """Plan a matched local reduction returned in compressed output shape."""
-        match = self.matches.get(aux)
-        output_meta = (
-            output.meta.get("val") if isinstance(output, torch.fx.Node) else None
-        )
-        aux_meta = aux.meta.get("val")
-        if match is None or aux_meta is None or output_meta is None:
-            return None
-        expected_aux_shape = local_reduce_compressed_shape(
-            output_meta.shape, match.geometry.group, match.geometry.axis
-        )
-        if not statically_known_shape_equal(expected_aux_shape, aux_meta.shape):
-            return None
-        return match.to_plan(
-            store=GemmLocalReduceStore(aux, aux_index), feeds_main=False
-        )
 
     def feed_main_output_plan(
         self,

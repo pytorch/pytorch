@@ -150,6 +150,8 @@ class TORCH_API ProcessGroupWrapper : public Backend {
   bool supportsSplitting() const override;
   bool supportsCoalescing() const override;
   bool supportsTimeEstimation() const override;
+  void startTimeEstimate() override;
+  float endTimeEstimate() override;
   bool supportsShrinking() const override;
   c10::intrusive_ptr<Backend> shrink(
       const std::vector<int64_t>& ranks_to_exclude,
