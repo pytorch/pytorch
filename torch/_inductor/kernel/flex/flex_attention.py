@@ -653,16 +653,18 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
             for user in node.users:
                 if user.op != "output":
                     raise NotImplementedError(
-                        "Using multiple indexing operations on the same tensor that requires gradients "
-                        "in a score_mod function is not currently supported. "
-                        "This typically happens when indexing the same tensor multiple times, like:\n\n"
-                        "    def score_mod(score, b, h, q_idx, kv_idx):\n"
-                        "        return score + bias[q_idx] + bias[kv_idx]  # bias used twice!\n\n"
-                        "A valid workaround is to clone() the tensors that will be indexed multiple times. For example:\n\n"
+                        "Using multiple indexing operations on the same tensor that "
+                        "requires gradients in a score_mod is not supported by the "
+                        "compiled FlexAttention backward. For independent uses, clone "
+                        "the tensor outside score_mod before indexing it again. For "
+                        "example:\n\n"
                         "    bias1 = bias.clone()\n"
                         "    def score_mod(score, b, h, q_idx, kv_idx):\n"
                         "        return score + bias[q_idx] + bias1[kv_idx]\n\n"
-                        "Note that this solution will use additional memory."
+                        "For chained indexing, "
+                        "apply all indices together and move intervening operations "
+                        "afterward, for example rewrite (table[idx] * 2)[0] as "
+                        "table[idx, 0] * 2."
                     )
     return
 

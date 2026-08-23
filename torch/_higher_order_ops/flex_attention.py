@@ -643,6 +643,161 @@ redirect_to_mode(flex_attention, _CachedTorchDispatchMode)
 
 
 # ---------------------------- Autograd Implementation ----------------------------
+def _get_zeros_and_scatter_args(
+    node: torch.fx.Node, zeros_and_scatter: Any
+) -> tuple[Any, Any, Any] | None:
+    schema_args = zeros_and_scatter._schema.arguments
+    if len(node.args) > len(schema_args):
+        return None
+
+    values = []
+    for position, schema_arg in enumerate(schema_args):
+        if position < len(node.args):
+            values.append(node.args[position])
+        elif schema_arg.name in node.kwargs:
+            values.append(node.kwargs[schema_arg.name])
+        else:
+            return None
+    return values[0], values[1], values[2]
+
+
+def _fuse_nested_index_backward(joint_graph: GraphModule) -> None:
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+
+    zeros_and_scatter = torch.ops.flex_lib.zeros_and_scatter.default
+
+    def _same_shape(left: object, right: object) -> bool:
+        if not isinstance(left, (list, tuple)) or not isinstance(right, (list, tuple)):
+            return False
+
+        def _shape_values(shape: list[Any] | tuple[Any, ...]) -> tuple[Any, ...] | None:
+            values = []
+            for dim in shape:
+                if isinstance(dim, torch.fx.Node):
+                    dim = dim.meta.get("val")
+                if not isinstance(dim, (int, torch.SymInt)):
+                    return None
+                values.append(dim)
+            return tuple(values)
+
+        left_values = _shape_values(left)
+        right_values = _shape_values(right)
+        if left_values is None or right_values is None:
+            return False
+        return statically_known_true(sym_eq(left_values, right_values))
+
+    graph = joint_graph.graph
+    changed = False
+    for node in list(graph.nodes):
+        if node.op != "call_function" or node.target is not zeros_and_scatter:
+            continue
+
+        node_args = _get_zeros_and_scatter_args(node, zeros_and_scatter)
+        if node_args is None:
+            raise AssertionError("Malformed zeros_and_scatter node")
+        shape, indices, value = node_args
+        if (
+            not isinstance(value, torch.fx.Node)
+            or value.op != "call_function"
+            or value.target is not zeros_and_scatter
+        ):
+            continue
+
+        value_args = _get_zeros_and_scatter_args(value, zeros_and_scatter)
+        if value_args is None:
+            raise AssertionError("Malformed zeros_and_scatter node")
+        inner_shape, inner_indices, inner_value = value_args
+        if not isinstance(shape, (list, tuple)) or not isinstance(
+            indices, (list, tuple)
+        ):
+            continue
+        if not isinstance(inner_indices, (list, tuple)):
+            continue
+
+        # Backward for x[i][j] produces scatter(scatter(grad, j), i).
+        # When j indexes exactly the dimensions left over by i, fuse the
+        # scatters into backward for x[i, j]. This keeps vmap from reducing the
+        # intermediate scatter before the outer index can use it. The shape
+        # check also rejects non-scalar outer advanced indices: their index shape
+        # would be present in inner_shape, but not in shape[len(indices) :].
+        if not _same_shape(shape[len(indices) :], inner_shape):
+            continue
+
+        with graph.inserting_before(node):
+            fused = graph.call_function(
+                zeros_and_scatter,
+                args=(shape, list(indices) + list(inner_indices), inner_value),
+            )
+            fused.meta.update(node.meta)
+        node.replace_all_uses_with(fused)
+        graph.erase_node(node)
+        if len(value.users) == 0:
+            graph.erase_node(value)
+        changed = True
+
+    if changed:
+        graph.lint()
+        joint_graph.recompile()
+
+
+def _validate_index_backward_graph(joint_graph: GraphModule) -> None:
+    zeros_and_scatter = torch.ops.flex_lib.zeros_and_scatter.default
+    graph = joint_graph.graph
+
+    live_nodes = {graph.output_node()}
+    pending = list(graph.output_node().all_input_nodes)
+    while pending:
+        current = pending.pop()
+        if current in live_nodes:
+            continue
+        live_nodes.add(current)
+        pending.extend(current.all_input_nodes)
+
+    # Dead FX calls still execute in a GraphModule. Remove dead index gradients
+    # before vmap so an unused unsupported chain cannot fail at runtime.
+    if (
+        any(
+            node.op == "call_function"
+            and node.target is zeros_and_scatter
+            and node not in live_nodes
+            for node in graph.nodes
+        )
+        and graph.eliminate_dead_code()
+    ):
+        joint_graph.recompile()
+
+    index_gradient_derived: set[torch.fx.Node] = set()
+    for node in graph.nodes:
+        if node.op != "call_function" or node.target is not zeros_and_scatter:
+            if any(
+                input_node in index_gradient_derived
+                for input_node in node.all_input_nodes
+            ):
+                index_gradient_derived.add(node)
+            continue
+
+        node_args = _get_zeros_and_scatter_args(node, zeros_and_scatter)
+        if node_args is None:
+            raise AssertionError("Malformed zeros_and_scatter node")
+        value = node_args[2]
+        value_nodes: list[torch.fx.Node] = []
+
+        def _record_value_node(input_node: torch.fx.Node) -> torch.fx.Node:
+            value_nodes.append(input_node)
+            return input_node
+
+        torch.fx.map_arg(value, _record_value_node)
+        if any(input_node in index_gradient_derived for input_node in value_nodes):
+            raise NotImplementedError(
+                "Applying operations between chained indexing expressions on a "
+                "captured tensor that requires gradients is not supported in a "
+                "score_mod. Apply all indices in one indexing expression and move "
+                "the intervening operations afterward. For example, rewrite "
+                "(table[idx] * 2)[0] as table[idx, 0] * 2."
+            )
+        index_gradient_derived.add(node)
+
+
 def create_fw_bw_graph(
     score_mod: Callable,
     index_values: tuple[Tensor, Tensor, Tensor, Tensor, Tensor],
@@ -759,6 +914,7 @@ def create_fw_bw_graph(
         joint_graph = make_fx(joint_f)(
             *unwrapped_score_mod_indexes, example_grad, *unwrapped_other_buffers
         )
+        _fuse_nested_index_backward(joint_graph)
         # pyrefly: ignore [bad-return]
         return score_mod, joint_graph
 
@@ -1012,6 +1168,10 @@ def sdpa_dense_backward(
         _, joint_graph = create_fw_bw_graph(
             fw_graph, example_vals, score_mod_other_buffers
         )
+    if isinstance(joint_graph, GraphModule):
+        # An index gradient cannot be used as the value of another index gradient:
+        # its vmap rule has already reduced away the batch dimensions.
+        _validate_index_backward_graph(joint_graph)
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
     Bq, Hq, seq_len_q, qk_head_dim = query.shape

@@ -2070,6 +2070,126 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    @common_utils.parametrize(
+        "trailing_shape,trailing_indices,backend",
+        [
+            ((1,), (0,), "aot_eager"),
+            ((4,), (2,), "aot_eager"),
+            ((2, 3), (1, 2), "inductor"),
+        ],
+        name_fn=lambda trailing_shape, trailing_indices, backend: (
+            f"shape_{'x'.join(map(str, trailing_shape))}_"
+            f"index_{'x'.join(map(str, trailing_indices))}_{backend}"
+        ),
+    )
+    @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
+    def test_captured_score_mod_nested_index_backward(
+        self, device, trailing_shape, trailing_indices, backend
+    ):
+        max_len = 4
+        dtype = torch.float32
+        embedding_table = nn.Parameter(
+            torch.randn(2 * max_len, *trailing_shape, device=device, dtype=dtype)
+        )
+        embedding_table_ref = nn.Parameter(embedding_table.detach().clone())
+        query = torch.randn(1, 1, 3, 32, device=device, dtype=dtype)
+        key = torch.randn(1, 1, 3, 32, device=device, dtype=dtype)
+        value = torch.randn(1, 1, 3, 32, device=device, dtype=dtype)
+
+        def rpe(score, _b, _h, q_idx, kv_idx):
+            delta = q_idx - kv_idx
+            delta = torch.clamp(delta, -max_len, max_len - 1)
+            delta += max_len
+            lookup = embedding_table[delta.int()]
+            for index in trailing_indices:
+                lookup = lookup[index]
+            return score + lookup
+
+        def rpe_ref(score, _b, _h, q_idx, kv_idx):
+            delta = q_idx - kv_idx
+            delta = torch.clamp(delta, -max_len, max_len - 1)
+            delta += max_len
+            return score + embedding_table_ref[(delta.int(), *trailing_indices)]
+
+        compiled_flex_attention = torch.compile(
+            flex_attention, backend=backend, fullgraph=True
+        )
+        out = compiled_flex_attention(query, key, value, score_mod=rpe)
+        out_ref = compiled_flex_attention(query, key, value, score_mod=rpe_ref)
+
+        self.assertEqual(out, out_ref)
+        out.sum().backward()
+        out_ref.sum().backward()
+        self.assertEqual(embedding_table.grad, embedding_table_ref.grad)
+
+    @supported_platform
+    @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
+    def test_captured_score_mod_nested_index_backward_dynamic(self, device):
+        embedding_table = nn.Parameter(
+            torch.randn(5, 4, device=device, dtype=torch.float32)
+        )
+        embedding_table_ref = nn.Parameter(embedding_table.detach().clone())
+        query = torch.randn(1, 1, 2, 32, device=device, dtype=torch.float32)
+        key = torch.randn(1, 1, 2, 32, device=device, dtype=torch.float32)
+        value = torch.randn(1, 1, 2, 32, device=device, dtype=torch.float32)
+
+        def attention(query, key, value, table):
+            def rpe(score, _b, _h, q_idx, kv_idx):
+                return score + table[q_idx - kv_idx + 2][2]
+
+            return flex_attention(query, key, value, score_mod=rpe)
+
+        def attention_ref(query, key, value, table):
+            def rpe_ref(score, _b, _h, q_idx, kv_idx):
+                return score + table[q_idx - kv_idx + 2, 2]
+
+            return flex_attention(query, key, value, score_mod=rpe_ref)
+
+        compiled_attention = torch.compile(
+            attention, backend="aot_eager", fullgraph=True, dynamic=True
+        )
+        reference_attention = torch.compile(
+            attention_ref, backend="aot_eager", fullgraph=True
+        )
+        out = compiled_attention(query, key, value, embedding_table)
+        out_ref = reference_attention(query, key, value, embedding_table_ref)
+
+        self.assertEqual(out, out_ref)
+        out.sum().backward()
+        out_ref.sum().backward()
+        self.assertEqual(embedding_table.grad, embedding_table_ref.grad)
+
+    @supported_platform
+    @skip_on_cpu
+    @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
+    def test_captured_score_mod_nonterminal_index_backward_error(self, device):
+        max_len = 4
+        embedding_table = nn.Parameter(
+            torch.randn(2 * max_len, 4, device=device, dtype=torch.float32)
+        )
+        query = torch.randn(1, 1, 3, 32, device=device, dtype=torch.float32)
+        key = torch.randn(1, 1, 3, 32, device=device, dtype=torch.float32)
+        value = torch.randn(1, 1, 3, 32, device=device, dtype=torch.float32)
+
+        def rpe(score, _b, _h, q_idx, kv_idx):
+            delta = q_idx - kv_idx
+            delta = torch.clamp(delta, -max_len, max_len - 1)
+            delta += max_len
+            return score + (embedding_table[delta.int()] * 2)[2]
+
+        compiled_flex_attention = torch.compile(
+            flex_attention, backend="aot_eager", fullgraph=True
+        )
+        out = compiled_flex_attention(query, key, value, score_mod=rpe)
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "operations between chained indexing expressions.*"
+            "Apply all indices in one indexing expression",
+        ):
+            out.sum().backward()
+
+    @supported_platform
+    @skip_on_cpu
     @skip_on_xpu
     @skip_on_mps
     @skip_on_rocm
@@ -9767,22 +9887,23 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention, mode=mode)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
-            score_mod=bias_func,
+        backwards_grad = torch.randn_like(out_eager, device="cpu").to(device)
+        torch.autograd.grad(
+            (out_eager,),
+            (query, key, value, bias),
+            backwards_grad,
         )
-        # Error in backwards
+
+        # Eager supports accumulating these two complete captured-buffer gradients,
+        # but the compiled FlexAttention backward cannot lower the intermediate add.
         with self.assertRaisesRegex(
             torch._inductor.exc.InductorError,
-            "Using multiple indexing operations on the same tensor that requires gradients",
+            "Using multiple indexing operations.*clone the tensor outside score_mod",
         ):
-            self._check_outputs_and_grads(
-                out_eager,
-                out_compiled,
-                out_gold,
+            torch.autograd.grad(
+                (out_compiled,),
                 (query, key, value, bias),
+                backwards_grad,
             )
 
     @skip_on_cpu
