@@ -68,7 +68,7 @@ _isinf
 Philox4_32
 randn
 
-# torch/headeronly/Metaprogramming.h
+# torch/headeronly/util/Metaprogramming.h
 infer_function_traits_t
 make_function_traits_t
 tuple_elements
@@ -76,7 +76,7 @@ tuple_map
 tuple_slice
 tuple_take
 
-# torch/headeronly/TypeList.h
+# torch/headeronly/util/TypeList.h
 # false_t => tested through from_tuple_t and various other APIs
 all
 concat_t
@@ -98,7 +98,7 @@ to_tuple_t
 true_for_any_type
 typelist
 
-# torch/headeronly/TypeTraits.h
+# torch/headeronly/util/TypeTraits.h
 is_equality_comparable
 is_function_type
 is_hashable
