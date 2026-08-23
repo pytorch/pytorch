@@ -1894,8 +1894,7 @@ class LAMBDA_GUARD : public LeafGuard {
     if (py::isinstance<py::function>(guard_check_fn)) {
       _guard_check_fn = py::cast<py::function>(std::move(guard_check_fn));
     } else {
-      throw py::type_error(
-          "LAMBDA_GUARD expects (callable, str)"); // @allow-raw-throw
+      TORCH_CHECK_TYPE(false, "LAMBDA_GUARD expects (callable, str)");
     }
   }
 
@@ -2364,10 +2363,9 @@ class GLOBAL_STATE : public LeafGuard {
       : LeafGuard(root, std::move(verbose_code_parts), std::move(user_stack)),
         owner_(std::move(initial_state)),
         _guard((GlobalStateGuard*)owner_.ptr()) {
-    if (!PyObject_TypeCheck(owner_.ptr(), &GlobalStateGuardType)) {
-      throw py::type_error(
-          "GLOBAL_STATE expects a GlobalStateGuard"); // @allow-raw-throw
-    }
+    TORCH_CHECK_TYPE(
+        PyObject_TypeCheck(owner_.ptr(), &GlobalStateGuardType),
+        "GLOBAL_STATE expects a GlobalStateGuard");
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -2747,17 +2745,13 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
     _nargs_int = PyLong_AsSize_t(nargs_int.ptr());
     _nargs_float = PyLong_AsSize_t(nargs_float.ptr());
     _nargs = _nargs_int + _nargs_float;
-    if (PyErr_Occurred()) {
-      // @allow-raw-throw
-      throw py::value_error(
-          "SYMBOLIC_SHAPE_GUARD expected a non-negative number of arguments.");
-    }
+    TORCH_CHECK_VALUE(
+        !PyErr_Occurred(),
+        "SYMBOLIC_SHAPE_GUARD expected a non-negative number of arguments.");
     uintptr_t addr = PyLong_AsUnsignedLongLong(py_addr.ptr());
-    if (PyErr_Occurred()) {
-      // @allow-raw-throw
-      throw py::value_error(
-          "SYMBOLIC_SHAPE_GUARD expected an address to a C function.");
-    }
+    TORCH_CHECK_VALUE(
+        !PyErr_Occurred(),
+        "SYMBOLIC_SHAPE_GUARD expected an address to a C function.");
     _guard_check_fn = reinterpret_cast<int8_t (*)(int64_t*, double*)>(addr);
     _args_int = std::vector<int64_t>(_nargs_int);
     _args_float = std::vector<double>(_nargs_float);
@@ -3126,9 +3120,7 @@ class DICT_VERSION : public LeafGuard {
             root_guard_manager,
             std::move(verbose_code_parts),
             std::move(user_stack)) {
-    if (!PyDict_Check(value.ptr())) {
-      throw py::type_error("DICT_VERSION expects a dict"); // @allow-raw-throw
-    }
+    TORCH_CHECK_TYPE(PyDict_Check(value.ptr()), "DICT_VERSION expects a dict");
     _tag = get_dict_version_unchecked(value.ptr());
   }
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -4989,7 +4981,7 @@ std::unique_ptr<GuardManager> make_guard_manager(
       return std::make_unique<DictGuardManager>(
           root, std::move(source), example_value);
     } else {
-      throw py::type_error("Invalid guard manager enum"); // @allow-raw-throw
+      TORCH_CHECK_TYPE(false, "Invalid guard manager enum");
     }
   }
   return std::make_unique<GuardManager>(root, std::move(source), example_value);

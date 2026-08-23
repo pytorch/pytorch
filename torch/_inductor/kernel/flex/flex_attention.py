@@ -369,7 +369,7 @@ def flex_attention(
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
     if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
         raise AssertionError(
-            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+            f"Bq and Bkv must be broadcastable. Got Bq={Bq} and Bkv={Bkv}"
         )
     if not V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_q, 0)):
         raise AssertionError("Query length must be greater than 0")
@@ -653,13 +653,18 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
             for user in node.users:
                 if user.op != "output":
                     raise NotImplementedError(
-                        "Using a gradient produced by indexing a captured tensor as an "
-                        "intermediate value in a score_mod is not supported. This can "
-                        "happen when indexing the same tensor multiple times or applying "
-                        "operations between chained indexing expressions. Move intervening "
-                        "operations after a single indexing expression, for example rewrite "
-                        "(table[idx] * 2)[0] as table[idx, 0] * 2, or clone a captured "
-                        "tensor that must be indexed independently."
+                        "Using multiple indexing operations on the same tensor that "
+                        "requires gradients in a score_mod is not supported by the "
+                        "compiled FlexAttention backward. For independent uses, clone "
+                        "the tensor outside score_mod before indexing it again. For "
+                        "example:\n\n"
+                        "    bias1 = bias.clone()\n"
+                        "    def score_mod(score, b, h, q_idx, kv_idx):\n"
+                        "        return score + bias[q_idx] + bias1[kv_idx]\n\n"
+                        "For chained indexing, "
+                        "apply all indices together and move intervening operations "
+                        "afterward, for example rewrite (table[idx] * 2)[0] as "
+                        "table[idx, 0] * 2."
                     )
     return
 
@@ -810,7 +815,7 @@ def flex_attention_backward(*args, **kwargs):
 
     if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
         raise AssertionError(
-            f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+            f"Bq and Bkv must be broadcastable. Got Bq={Bq} and Bkv={Bkv}"
         )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)

@@ -6157,8 +6157,7 @@
 - func: flip(Tensor self, int[] dims) -> Tensor
   variants: function, method
   dispatch:
-    CPU, QuantizedCPU, CUDA, QuantizedCUDA, XPU: flip
-    MPS: flip_mps
+    CPU, QuantizedCPU, CUDA, QuantizedCUDA, XPU, MPS: flip
   autogen: flip.out
   tags: core
 
@@ -14551,7 +14550,7 @@
   variants: function
   structured_delegate: linalg_vector_norm.out
   dispatch:
-    SparseCPU, SparseCUDA, SparseMPS: linalg_vector_norm_sparse
+    SparseCPU, SparseCUDA, SparseMPS, SparseXPU: linalg_vector_norm_sparse
   tags: reduction
 
 - func: linalg_vector_norm.out(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
