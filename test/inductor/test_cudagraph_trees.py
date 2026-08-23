@@ -150,6 +150,17 @@ class TestCase(InductorTestCase):
         torch._dynamo.reset()
 
 
+class CUDAGraphAPIOnlyTests(TestCase):
+    def test_mark_warmup_incomplete_without_cudagraphs(self):
+        cudagraph_trees = torch._inductor.cudagraph_trees
+        containers = cudagraph_trees.get_obj(
+            cudagraph_trees.local, "tree_manager_containers"
+        )
+        existing_devices = tuple(containers)
+        torch.compiler.cudagraph_mark_warmup_incomplete()
+        self.assertEqual(tuple(containers), existing_devices)
+
+
 if HAS_CUDA_AND_TRITON:
 
     def get_all_cudagraph_segments():
@@ -2131,7 +2142,7 @@ if HAS_CUDA_AND_TRITON:
         @blas_library_context("cublas")
         @unittest.mock.patch.dict(os.environ, {"TORCH_DISABLE_ADDR2LINE": "0"})
         def test_workspace_allocation_error(self):
-            torch.cuda._clear_cublas_workspaces()
+            torch._C._cuda_clearCublasWorkspaces()
 
             prev = torch._inductor.cudagraph_trees.clear_cublas_manager
 
@@ -2171,7 +2182,7 @@ if HAS_CUDA_AND_TRITON:
                 self.assertTrue(thrown)
 
             finally:
-                torch.cuda._clear_cublas_workspaces()
+                torch._C._cuda_clearCublasWorkspaces()
                 torch._inductor.cudagraph_trees.clear_cublas_manager = prev
                 torch._inductor.cudagraph_trees.get_container(
                     self.device_idx
@@ -3149,6 +3160,61 @@ if HAS_CUDA_AND_TRITON:
             foo_cg([3, x])  # record
             foo_cg([3, x])  # replay
             self.assertEqual(COUNTER, 4)
+
+        def test_mark_warmup_incomplete(self):
+            mark_warmup_incomplete = torch.compiler.cudagraph_mark_warmup_incomplete
+            mark_warmup_incomplete()
+            self.assertIsNone(self.get_manager())
+
+            def stable(inps):
+                x = inps[0]
+                inps.clear()
+                return (x + 1,)
+
+            x = torch.randn(2, device="cuda")
+            stable_cg = self.cudagraphify_impl(stable, [x], ())
+            stable_out = stable_cg([x])
+            manager = self.get_manager()
+            stable_functions = manager.warmed_up_functions.copy()
+            self.assertEqual(len(stable_functions), 1)
+            del stable_out
+
+            calls = 0
+
+            def f(inps):
+                nonlocal calls
+                calls += 1
+                x = inps[0]
+                inps.clear()
+                if calls < 3 or calls == 4:
+                    mark_warmup_incomplete()
+                return (x + 1,)
+
+            foo_cg = self.cudagraphify_impl(f, [x], ())
+
+            for _ in range(2):
+                out = foo_cg([x])
+                self.assertEqual(manager.warmed_up_functions, stable_functions)
+                del out
+
+            out = foo_cg([x])
+            warmed_functions = manager.warmed_up_functions.copy()
+            self.assertEqual(len(warmed_functions), 2)
+            mark_warmup_incomplete()
+            self.assertEqual(manager.warmed_up_functions, warmed_functions)
+            del out
+
+            out = foo_cg([x])
+            self.assertEqual(manager.path_state, ExecutionState.RECORDING)
+            self.assertEqual(manager.warmed_up_functions, warmed_functions)
+            del out
+
+            out = foo_cg([x])
+            self.assertEqual(manager.path_state, ExecutionState.EXECUTION)
+            self.assertEqual(calls, 4)
+            mark_warmup_incomplete()
+            self.assertEqual(manager.warmed_up_functions, warmed_functions)
+            del out
 
         def test_forward_generation(self):
             def foo(x):

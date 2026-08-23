@@ -6,6 +6,7 @@ import json
 import math
 import operator
 import os
+import pickle
 import random
 import re
 import sys
@@ -168,7 +169,11 @@ PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.UCC,
 ]
 
-# Allowlist of distributed backends where profiling is supported with use_cuda=True
+# Allowlist of distributed backends where profiling collectives with a CUDA
+# device is supported. This filters nothing today. The one branch that consults
+# it is reachable only from the three CUDA all_reduce tests, and all three skip
+# unless the backend is Gloo or NCCL, so the MPI and UCC entries below are
+# unreachable and the membership test always passes.
 CUDA_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.GLOO,
     dist.Backend.MPI,
@@ -604,7 +609,7 @@ class TestDistBackend(MultiProcessTestCase):
         if torch.cuda.is_available() and torch.cuda.device_count() < int(
             self.world_size
         ):
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
         try:
             pg_timeout_seconds = CUSTOM_PG_TIMEOUT.get(test_name, default_pg_timeout)
             timeout = timedelta(seconds=pg_timeout_seconds)
@@ -2605,7 +2610,7 @@ class DistributedTest:
                 op_calls.append(secondary_op_call)
 
             autograd_profiler_ctx = torch.autograd.profiler.profile(
-                use_cuda=profile_cuda, record_shapes=True
+                use_device="cuda" if profile_cuda else None, record_shapes=True
             )
 
             # TODO: move this test to use torch.profiler once kineto issues are
@@ -2677,7 +2682,8 @@ class DistributedTest:
                     async_op=async_op,
                     tensor_shapes=tensor_shapes,
                 )
-                # Currently, only Gloo backend has profiling tested with CUDA enabled.
+                # Gloo and NCCL are the only backends that reach here; every other
+                # backend skips the enclosing tests.
                 # Only run cuda profiling test for one rank to speed up since
                 # running with different src_rank does not affect the correctness.
                 if (
@@ -6838,7 +6844,10 @@ class DistributedTest:
 
             b = Bar()
             gather_objects = [b for _ in range(dist.get_world_size())]
-            with self.assertRaises(AttributeError):
+            # Pickling a local class fails; the exception type depends on the
+            # Python version: AttributeError on <=3.13, PicklingError on >=3.14
+            # (CPython gh-139806). pickle.PickleError covers PicklingError.
+            with self.assertRaises((AttributeError, pickle.PickleError)):
                 dist.all_gather_object(
                     [None for _ in range(dist.get_world_size())],
                     gather_objects[self.rank],
