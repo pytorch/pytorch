@@ -83,6 +83,68 @@ class GemmVariant(Enum):
         return False
 
 
+def _nvgemm_cudagraph_unroll(
+    variant: GemmVariant,
+    input_dtype: torch.dtype,
+    output_shape: torch.Size | tuple[int, ...],
+) -> int:
+    """Return one common CUDA-graph unroll for an NVGEMM problem.
+
+    Candidate-dependent unrolls would make the fixed replay overhead differ
+    across choices, so this policy depends only on the GEMM problem.  The
+    scoped value is intentionally limited to the decode-range NVFP4 cases
+    measured in LLM inference; BF16 and larger GEMMs retain the generic
+    setting.
+    """
+    unroll = config.autotune_cudagraph_unroll
+    if (
+        variant == GemmVariant.SCALED_GEMM
+        and input_dtype == torch.float4_e2m1fn_x2
+        and len(output_shape) == 2
+        and output_shape[0] <= 256
+    ):
+        unroll = max(unroll, config.nvgemm_autotune_cudagraph_unroll)
+    return unroll
+
+
+def _nvgemm_cold_cache_pool_size(
+    variant: GemmVariant,
+    input_tensors: tuple[torch.Tensor, ...],
+    output_shape: torch.Size | tuple[int, ...],
+    unroll: int,
+) -> int:
+    """Choose a divisor of ``unroll`` whose B operands exceed twice L2.
+
+    Scope the policy to medium-M, moderate-width projections.  Smaller decode
+    batches already select good kernels with the cheaper hot-cache benchmark,
+    while very wide gate/up projections did not change winners in the model
+    validation and needlessly increased tuning time.
+    """
+    if (
+        not config.nvgemm_autotune_cold_cache
+        or variant != GemmVariant.SCALED_GEMM
+        or input_tensors[0].dtype != torch.float4_e2m1fn_x2
+        or len(output_shape) != 2
+        or output_shape[0] <= 64
+        or output_shape[0] > 256
+        or output_shape[1] > 16384
+        or unroll < 2
+        or len(input_tensors) < 4
+    ):
+        return 1
+
+    weight_bytes = input_tensors[1].nbytes + input_tensors[3].nbytes
+    if weight_bytes <= 0:
+        return 1
+    target_bytes = (
+        2 * torch.cuda.get_device_properties(input_tensors[0].device).L2_cache_size
+    )
+    for pool_size in range(2, unroll + 1):
+        if unroll % pool_size == 0 and pool_size * weight_bytes >= target_bytes:
+            return pool_size
+    return unroll
+
+
 class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     """Benchmark request for NVIDIA Universal GEMM kernels."""
 
@@ -141,9 +203,42 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             out = self.output_tensor_meta.to_tensor()
 
         fn = self.make_run_fn(*input_tensors, out=out)
+        run_fns = [fn]
         try:
-            if self.benchmark_with_cudagraphs:
-                res = benchmarker.benchmark_gpu_with_cuda_graph(fn)
+            use_cudagraphs = self.benchmark_with_cudagraphs or (
+                config.autotune_cudagraph_benchmarking and config.max_autotune
+            )
+            if use_cudagraphs:
+                unroll = _nvgemm_cudagraph_unroll(
+                    self.variant, input_tensors[0].dtype, out.shape
+                )
+                pool_size = _nvgemm_cold_cache_pool_size(
+                    self.variant, input_tensors, out.shape, unroll
+                )
+                if pool_size > 1:
+                    # Transformer decode walks distinct weights layer by layer.
+                    # Rotate only B and its block scale so a captured benchmark
+                    # does not repeatedly read one unrealistically L2-hot weight.
+                    for _ in range(pool_size - 1):
+                        rotated = list(input_tensors)
+                        rotated[1] = input_tensors[1].clone(
+                            memory_format=torch.preserve_format
+                        )
+                        rotated[3] = input_tensors[3].clone(
+                            memory_format=torch.preserve_format
+                        )
+                        run_fns.append(self.make_run_fn(*rotated, out=out))
+                    next_fn = 0
+
+                    def run_rotating_weights():
+                        nonlocal next_fn
+                        run_fns[next_fn]()
+                        next_fn = (next_fn + 1) % pool_size
+
+                    fn = run_rotating_weights
+                res = benchmarker.benchmark_gpu_with_cuda_graph(
+                    fn, cudagraph_unroll=unroll
+                )
             else:
                 res = self.do_bench(fn, *input_tensors, out=out)
         finally:
@@ -959,7 +1054,8 @@ def add_nv_universal_gemm_choices(
     # small-tile configs that make swap_ab win.
     mat_a, mat_b = inputs.mat1mat2()
     swap_inputs = MMKernelInputs(
-        [PermuteView.create(mat_b, [1, 0]), PermuteView.create(mat_a, [1, 0])]
+        [PermuteView.create(mat_b, [1, 0]), PermuteView.create(mat_a, [1, 0])],
+        out_dtype=layout.dtype,
     )
     _add_nv_gemm_choices_impl(
         choices=choices,
