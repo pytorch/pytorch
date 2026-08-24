@@ -361,21 +361,21 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             if self.local_reduce_feeds_main and self.local_reduce_axis == 0
             else 3
         )
-        self.local_reduce_smem_shape = (
-            (self.cta_tile_shape_mnk[1], self.local_reduce_smem_cols)
-            if self.has_cross_warp_local_reduce
-            else 1
-        )
-        self.local_reduce_smem_stride = (
-            (self.local_reduce_smem_cols, 1)
-            if self.has_cross_warp_local_reduce
-            else None
-        )
-        local_reduce_smem_layout = cute.make_layout(
-            self.local_reduce_smem_shape,
-            stride=self.local_reduce_smem_stride,
-        )
-        self.local_reduce_elements = cute.cosize(local_reduce_smem_layout)
+        if cutlass.const_expr(self.has_cross_warp_local_reduce):
+            self.local_reduce_smem_shape = (
+                self.cta_tile_shape_mnk[1],
+                self.local_reduce_smem_cols,
+            )
+            self.local_reduce_smem_stride = (self.local_reduce_smem_cols, 1)
+            local_reduce_smem_layout = cute.make_layout(
+                self.local_reduce_smem_shape,
+                stride=self.local_reduce_smem_stride,
+            )
+            self.local_reduce_elements = cute.cosize(local_reduce_smem_layout)
+        else:
+            self.local_reduce_smem_shape = None
+            self.local_reduce_smem_stride = None
+            self.local_reduce_elements = 0
         self.num_acc_stage, self.num_ab_stage, self.num_c_stage = self._compute_stages(
             tiled_mma,
             self.mma_tiler,
@@ -881,11 +881,14 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         #
         smem = utils.SmemAllocator()
         storage = smem.allocate(self.shared_storage)
-        local_reduce_smem_layout = cute.make_layout(
-            self.local_reduce_smem_shape,
-            stride=self.local_reduce_smem_stride,
-        )
-        sLocalReduce = storage.sLocalReduce.get_tensor(local_reduce_smem_layout)
+        if cutlass.const_expr(self.has_cross_warp_local_reduce):
+            local_reduce_smem_layout = cute.make_layout(
+                self.local_reduce_smem_shape,
+                stride=self.local_reduce_smem_stride,
+            )
+            sLocalReduce = storage.sLocalReduce.get_tensor(local_reduce_smem_layout)
+        else:
+            sLocalReduce = None
 
         # Initialize mainloop ab_pipeline (barrier) and states
         ab_pipeline_producer_group = pipeline.CooperativeGroup(pipeline.Agent.Thread)
