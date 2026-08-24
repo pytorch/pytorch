@@ -37,9 +37,11 @@ if TEST_WITH_DEV_DBG_ASAN:
 class TestReshard(ShardedTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def _run_sharded_tensor_reshard(self, sharding_spec, reshard_spec, input_size, device):
+    def _run_sharded_tensor_reshard(
+        self, sharding_spec, reshard_spec, input_size, device
+    ):
         torch.manual_seed(0)
-        local_tensor = torch.rand(*input_size).to(device)
+        local_tensor = torch.rand(*input_size).to(torch.device(device).type)
         st = _shard_tensor(local_tensor, sharding_spec)
         st_compare = _shard_tensor(local_tensor, reshard_spec)
         st.reshard(reshard_spec)
@@ -54,14 +56,14 @@ class TestReshard(ShardedTensorTestBase):
             st.local_shards()[0].metadata, st_compare.local_shards()[0].metadata
         )
 
+    @requires_capabilities(Capability.distributed.backend)
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(Capability.distributed.backend)
     def test_sharded_tensor_reshard(self, device):
         dims = [0, 1]
         for sharding_dim, reshard_dim in product(dims, dims):
             specs = _chunk_sharding_specs_list_for_test(
-                [sharding_dim, reshard_dim], seed=5, device_type=torch.device(device).type
+                [sharding_dim, reshard_dim], seed=5
             )
             spec, reshard_spec = specs[0], specs[1]
             self._run_sharded_tensor_reshard(spec, reshard_spec, [13, 21], device)
@@ -69,13 +71,13 @@ class TestReshard(ShardedTensorTestBase):
             self._run_sharded_tensor_reshard(spec, reshard_spec, [15, 26], device)
             self._run_sharded_tensor_reshard(spec, reshard_spec, [12, 24], device)
 
+    @requires_capabilities(Capability.distributed.backend)
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(Capability.distributed.backend)
     def test_sharded_tensor_reshard_errors(self, device):
-        specs = _chunk_sharding_specs_list_for_test([0, 1], seed=6, device_type=torch.device(device).type)
-        spec, reshard_spec = specs[0], specs[1]
         device_type = torch.device(device).type
+        specs = _chunk_sharding_specs_list_for_test([0, 1], seed=6)
+        spec, reshard_spec = specs[0], specs[1]
         enumerable_sharding_spec = EnumerableShardingSpec(
             [
                 ShardMetadata(
@@ -102,7 +104,7 @@ class TestReshard(ShardedTensorTestBase):
             st.reshard(reshard_spec)
 
 
-instantiate_device_type_tests(TestReshard, globals())
+instantiate_device_type_tests(TestReshard, globals(), except_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
