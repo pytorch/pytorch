@@ -27,6 +27,7 @@
 #include <torch/csrc/utils/python_raii.h>
 
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -185,9 +186,7 @@ class PythonKernelHolder : public c10::OperatorKernel {
                   **args_kwargs.second)
         : with_keyset_ ? func(keyset, *args_kwargs.first, **args_kwargs.second)
                         : func(*args_kwargs.first, **args_kwargs.second);
-    if (!obj) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(obj);
     pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
   }
 };
@@ -594,17 +593,14 @@ static PyObject* make_pyobject_dispatch_func(
     PyObject* cpp_dispatch_fn,
     PyObject* cpp_redispatch_fn,
     vectorcallfunc vectorcall) {
-  auto* owned_handle = new c10::OperatorHandle(handle);
+  auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
   auto* result = PyObject_New(PyObjectDispatchFunc, &PyObjectDispatchFuncType);
-  if (result == nullptr) {
-    delete owned_handle;
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_dispatch_fn);
   Py_INCREF(cpp_redispatch_fn);
   result->cpp_dispatch_fn = cpp_dispatch_fn;
   result->cpp_redispatch_fn = cpp_redispatch_fn;
-  result->handle = owned_handle;
+  result->handle = owned_handle.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
   return reinterpret_cast<PyObject*>(result);
@@ -614,16 +610,13 @@ static PyObject* make_pyobject_redispatch_func(
     const c10::OperatorHandle& handle,
     PyObject* cpp_redispatch_fn,
     vectorcallfunc vectorcall) {
-  auto* owned_handle = new c10::OperatorHandle(handle);
+  auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
   auto* result =
       PyObject_New(PyObjectRedispatchFunc, &PyObjectRedispatchFuncType);
-  if (result == nullptr) {
-    delete owned_handle;
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_redispatch_fn);
   result->cpp_redispatch_fn = cpp_redispatch_fn;
-  result->handle = owned_handle;
+  result->handle = owned_handle.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
   return reinterpret_cast<PyObject*>(result);
@@ -694,9 +687,7 @@ void initDispatchBindings(PyObject* module) {
   PyObjectDispatchFuncType.tp_call = PyVectorcall_Call;
   PyObjectDispatchFuncType.tp_vectorcall_offset =
       offsetof(PyObjectDispatchFunc, vectorcall);
-  if (PyType_Ready(&PyObjectDispatchFuncType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&PyObjectDispatchFuncType) >= 0);
 
   PyObjectRedispatchFuncType.tp_name = "torch._C._PyObjectRedispatchFunc";
   PyObjectRedispatchFuncType.tp_basicsize = sizeof(PyObjectRedispatchFunc);
@@ -707,9 +698,7 @@ void initDispatchBindings(PyObject* module) {
   PyObjectRedispatchFuncType.tp_call = PyVectorcall_Call;
   PyObjectRedispatchFuncType.tp_vectorcall_offset =
       offsetof(PyObjectRedispatchFunc, vectorcall);
-  if (PyType_Ready(&PyObjectRedispatchFuncType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&PyObjectRedispatchFuncType) >= 0);
 
   py::class_<c10::OperatorHandle>(m, "_DispatchOperatorHandle")
       .def("schema", &c10::OperatorHandle::schema)
@@ -1572,9 +1561,7 @@ void python_op_registration_trampoline_impl(
                                          **args_kwargs.second)
       : with_keyset ? callable(keyset, *args_kwargs.first, **args_kwargs.second)
                     : callable(*args_kwargs.first, **args_kwargs.second);
-  if (!obj) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(obj);
   pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
 }
 
