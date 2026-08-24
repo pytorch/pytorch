@@ -4957,6 +4957,22 @@ class TestFunctionalize(TestCase):
 
         self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
 
+    def test_multioutput_view_preserves_autograd_metadata(self, device):
+        def f(x):
+            base = x.clone()
+            out = base.unbind(0)[0]
+            base.add_(1)
+            return out
+
+        out = torch.func.functionalize(f)(
+            torch.ones(2, 3, device=device, requires_grad=True)
+        )
+        self.assertIn("UnbindBackward", str(out.grad_fn))
+        with self.assertRaisesRegex(
+            RuntimeError, "output of a function that returns multiple views"
+        ):
+            out.mul_(2)
+
     def test_inplace_view(self, device):
         def f(x: torch.Tensor) -> torch.Tensor:
             tmp = torch.ones(4, device=device)

@@ -119,7 +119,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // Performs step (1) of the sync. This is its own public API because it's
   // needed by view_inplace ops like transpose_. See Note [Functionalization
   // Pass - Inplace View Ops]
-  void regenerate_from_base();
+  // Single-output replay may change autograd view metadata, so callers that
+  // expose value() must use the default exact replay.
+  void regenerate_from_base(bool single_output_replay = false);
   // Performs step (2) of the sync. This is its own public API because it's
   // needed by functorch. functorch wants to make sure that all input tensors to
   // a functionalized program have been properly synced so it can properly

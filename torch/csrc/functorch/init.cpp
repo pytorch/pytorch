@@ -186,15 +186,16 @@ static Tensor _unwrap_functional_tensor(
   auto functional =
       at::functionalization::impl::unsafeGetFunctionalWrapper(self);
 
-  // when regenerating the (potentially mutated) input tensors, the
-  // functionalization pass regenerates them through a series of view_copy() op
-  // calls. Functorch wants to turn those back into view ops though. Ensure that
-  // the input is up to date by committing any pending updates to the alias.
+  // Multi-output views returned to the user must replay the original operation
+  // to preserve autograd's mutation restrictions, even if an internal sync
+  // already regenerated the value using a select or slice.
   at::functionalization::impl::FunctionalizationReapplyViewsGuard guard(
       add_back_views);
-  bool any_updates = functional->apply_updates();
-  if (any_updates) {
+  functional->apply_updates();
+  if (add_back_views && functional->is_multi_output_view()) {
     functional->regenerate_from_base();
+  } else if (!functional->is_up_to_date()) {
+    functional->regenerate_from_base(/*single_output_replay=*/true);
   }
   return functional->value();
 }
