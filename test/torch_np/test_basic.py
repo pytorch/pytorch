@@ -12,7 +12,10 @@ import torch._numpy as w
 import torch._numpy._ufuncs as _ufuncs
 import torch._numpy._util as _util
 from torch._numpy.testing import assert_allclose, assert_equal
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -705,19 +708,32 @@ class TestMisc(TestCase):
                 f"Expected out[0][0] to be torch.Tensor, got {type(out[0][0])}"
             )
 
-    @skip(not TEST_CUDA, reason="requires cuda")
-    def test_f16_on_cuda(self):
-        # make sure operations with float16 tensors give same results on CUDA and on CPU
+
+class TestMiscDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_f16_on_gpu(self, device):
+        # make sure operations with float16 tensors give same results on gpu and on CPU
         t = torch.arange(5, dtype=torch.float16)
-        assert_allclose(w.vdot(t.cuda(), t.cuda()), w.vdot(t, t))
-        assert_allclose(w.inner(t.cuda(), t.cuda()), w.inner(t, t))
-        assert_allclose(w.matmul(t.cuda(), t.cuda()), w.matmul(t, t))
-        assert_allclose(w.einsum("i,i", t.cuda(), t.cuda()), w.einsum("i,i", t, t))
+        assert_allclose(w.vdot(t.to(device), t.to(device)), w.vdot(t, t))
+        assert_allclose(w.inner(t.to(device), t.to(device)), w.inner(t, t))
+        assert_allclose(w.matmul(t.to(device), t.to(device)), w.matmul(t, t))
+        assert_allclose(
+            w.einsum("i,i", t.to(device), t.to(device)), w.einsum("i,i", t, t)
+        )
 
-        assert_allclose(w.mean(t.cuda()), w.mean(t))
+        assert_allclose(w.mean(t.to(device)), w.mean(t))
 
-        assert_allclose(w.cov(t.cuda(), t.cuda()), w.cov(t, t).tensor.cuda())
-        assert_allclose(w.corrcoef(t.cuda()), w.corrcoef(t).tensor.cuda())
+        assert_allclose(
+            w.cov(t.to(device), t.to(device)), w.cov(t, t).tensor.to(device)
+        )
+        assert_allclose(w.corrcoef(t.to(device)), w.corrcoef(t).tensor.to(device))
+
+
+instantiate_device_type_tests(
+    TestMiscDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
