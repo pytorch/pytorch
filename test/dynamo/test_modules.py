@@ -3901,6 +3901,40 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(model, backend="eager", fullgraph=True)(x)
         self.assertEqual(eager, compiled)
 
+    def test_batchnorm_momentum_none_fullgraph(self):
+        # Issue #194504: BatchNorm with momentum=None (cumulative moving average)
+        # under fullgraph=True torch.compile
+        for bn_cls in [torch.nn.BatchNorm1d, torch.nn.BatchNorm2d, torch.nn.BatchNorm3d]:
+            m_eager = bn_cls(4, momentum=None).train()
+            m_compiled = bn_cls(4, momentum=None).train()
+            m_compiled.load_state_dict(m_eager.state_dict())
+
+            compiled_fn = torch.compile(m_compiled, backend="aot_eager", fullgraph=True)
+
+            if bn_cls is torch.nn.BatchNorm1d:
+                x1 = torch.randn(3, 4)
+                x2 = torch.randn(5, 4)
+            elif bn_cls is torch.nn.BatchNorm2d:
+                x1 = torch.randn(3, 4, 8, 8)
+                x2 = torch.randn(5, 4, 8, 8)
+            else:
+                x1 = torch.randn(3, 4, 4, 8, 8)
+                x2 = torch.randn(5, 4, 4, 8, 8)
+
+            out_eager1 = m_eager(x1)
+            out_compiled1 = compiled_fn(x1)
+            self.assertEqual(out_eager1, out_compiled1)
+            self.assertEqual(m_eager.running_mean, m_compiled.running_mean)
+            self.assertEqual(m_eager.running_var, m_compiled.running_var)
+            self.assertEqual(m_eager.num_batches_tracked, m_compiled.num_batches_tracked)
+
+            out_eager2 = m_eager(x2)
+            out_compiled2 = compiled_fn(x2)
+            self.assertEqual(out_eager2, out_compiled2)
+            self.assertEqual(m_eager.running_mean, m_compiled.running_mean)
+            self.assertEqual(m_eager.running_var, m_compiled.running_var)
+            self.assertEqual(m_eager.num_batches_tracked, m_compiled.num_batches_tracked)
+
 
 instantiate_device_type_tests(
     NNModuleTestsDevice, globals(), except_for="cpu", allow_xpu=True
