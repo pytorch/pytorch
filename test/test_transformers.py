@@ -3408,6 +3408,300 @@ class TestSDPACudaOnly(NNTestCase):
             self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=4e-4)
 
     @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Memory efficient attention is not supported on this system",
+    )
+    @parametrize("q_len,k_len,head_dim", [(80, 48, 64), (192, 64, 160)])
+    def test_mem_efficient_bottom_right_fully_masked_rows(
+        self, device, q_len, k_len, head_dim
+    ):
+        if head_dim > 64 and not MEM_EFF_CAPABILITY_MATCHES_SM80:
+            self.skipTest("large head dimensions require SM80 or later")
+        torch.manual_seed(42)
+        query = torch.randn(
+            1,
+            2,
+            q_len,
+            head_dim,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            1,
+            2,
+            k_len,
+            head_dim,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        value = torch.randn_like(key, requires_grad=True)
+        grad_out = torch.randn_like(query)
+        mask = torch.ones(q_len, k_len, dtype=torch.bool, device=device).tril(
+            diagonal=k_len - q_len
+        )
+
+        with sdpa_kernel(SDPBackend.MATH):
+            expected = scaled_dot_product_attention(
+                query, key, value, attn_mask=mask
+            )
+        expected_grads = torch.autograd.grad(
+            expected, (query, key, value), grad_out, retain_graph=True
+        )
+
+        with (
+            sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+            use_deterministic_algorithims(True, warn_only=False),
+        ):
+            actual = scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=causal_lower_right(q_len, k_len),
+            )
+            actual_grads = torch.autograd.grad(
+                actual, (query, key, value), grad_out
+            )
+
+        self.assertEqual(actual, expected, atol=3e-3, rtol=2e-3)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad, atol=3e-3, rtol=2e-3)
+
+        fully_masked = q_len - k_len
+        self.assertEqual(
+            actual[:, :, :fully_masked],
+            torch.zeros_like(actual[:, :, :fully_masked]),
+        )
+        self.assertEqual(
+            actual_grads[0][:, :, :fully_masked],
+            torch.zeros_like(actual_grads[0][:, :, :fully_masked]),
+        )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Memory efficient attention is not supported on this system",
+    )
+    @parametrize(
+        "causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT]
+    )
+    @parametrize("head_dim", [32, 160])
+    def test_mem_efficient_causal_window(self, device, causal_variant, head_dim):
+        if head_dim > 64 and not MEM_EFF_CAPABILITY_MATCHES_SM80:
+            self.skipTest("large head dimensions require SM80 or later")
+        torch.manual_seed(42)
+        q_len, k_len, window_size = 96, 64, 17
+        make_tensor = partial(
+            torch.randn, device=device, dtype=torch.float32, requires_grad=True
+        )
+        query = make_tensor(1, 2, q_len, head_dim)
+        key = make_tensor(1, 2, k_len, head_dim)
+        value = make_tensor(1, 2, k_len, 24)
+        grad_out = torch.randn(1, 2, q_len, 24, device=device)
+        q_index = torch.arange(q_len, device=device)[:, None]
+        k_index = torch.arange(k_len, device=device)[None, :]
+        diagonal = k_len - q_len if causal_variant == CausalVariant.LOWER_RIGHT else 0
+        mask = (k_index <= q_index + diagonal) & (
+            k_index > q_index + diagonal - window_size
+        )
+
+        with sdpa_kernel(SDPBackend.MATH):
+            expected = scaled_dot_product_attention(
+                query, key, value, attn_mask=mask
+            )
+        expected_grads = torch.autograd.grad(
+            expected, (query, key, value), grad_out, retain_graph=True
+        )
+
+        with use_deterministic_algorithims(True, warn_only=False):
+            actual = torch.ops.aten._efficient_attention_forward.default(
+                query.transpose(1, 2),
+                key.transpose(1, 2),
+                value.transpose(1, 2),
+                None,
+                None,
+                None,
+                None,
+                None,
+                0.0,
+                int(causal_variant),
+                True,
+                window_size=window_size,
+            )[0].transpose(1, 2)
+            actual_grads = torch.autograd.grad(
+                actual, (query, key, value), grad_out
+            )
+
+        self.assertEqual(actual, expected, atol=5e-4, rtol=5e-4)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=5e-4)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Memory efficient attention is not supported on this system",
+    )
+    @parametrize("shared_storage_dqdkdv", [False, True])
+    def test_mem_efficient_bottom_right_varlen_fully_masked_rows(
+        self, device, shared_storage_dqdkdv
+    ):
+        torch.manual_seed(42)
+        # Equal totals enable shared gradient storage; the first sequence skips
+        # a full query block and the second exercises a partial block.
+        q_lengths = (192, 80, 64)
+        k_lengths = (64, 48, 224)
+        query = torch.randn(
+            1,
+            sum(q_lengths),
+            2,
+            64,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            1,
+            sum(k_lengths),
+            2,
+            64,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        value = torch.randn_like(key, requires_grad=True)
+        cu_seqlens_q = torch.tensor(
+            [0, *itertools.accumulate(q_lengths)], device=device, dtype=torch.int32
+        )
+        cu_seqlens_k = torch.tensor(
+            [0, *itertools.accumulate(k_lengths)], device=device, dtype=torch.int32
+        )
+
+        expected_sequences = []
+        q_start = k_start = 0
+        for q_len, k_len in zip(q_lengths, k_lengths):
+            q_end, k_end = q_start + q_len, k_start + k_len
+            mask = torch.ones(q_len, k_len, dtype=torch.bool, device=device).tril(
+                diagonal=k_len - q_len
+            )
+            with sdpa_kernel(SDPBackend.MATH):
+                expected_sequences.append(
+                    scaled_dot_product_attention(
+                        query[:, q_start:q_end].transpose(1, 2),
+                        key[:, k_start:k_end].transpose(1, 2),
+                        value[:, k_start:k_end].transpose(1, 2),
+                        attn_mask=mask,
+                    ).transpose(1, 2)
+                )
+            q_start, k_start = q_end, k_end
+        expected = torch.cat(expected_sequences, dim=1)
+        grad_out = torch.randn_like(expected)
+        expected_grads = torch.autograd.grad(
+            expected, (query, key, value), grad_out, retain_graph=True
+        )
+
+        # Deterministic mode fills empty allocations with NaNs, exposing rows
+        # skipped by the forward or backward kernel.
+        with use_deterministic_algorithims(True, warn_only=False):
+            actual, logsumexp, seed, offset, max_q, max_k = (
+                torch.ops.aten._efficient_attention_forward.default(
+                    query,
+                    key,
+                    value,
+                    None,
+                    cu_seqlens_q,
+                    cu_seqlens_k,
+                    max(q_lengths),
+                    max(k_lengths),
+                    0.0,
+                    int(CausalVariant.LOWER_RIGHT),
+                    True,
+                )
+            )
+            if shared_storage_dqdkdv:
+                actual_grads = torch.ops.aten._efficient_attention_backward.default(
+                    grad_out,
+                    query,
+                    key,
+                    value,
+                    None,
+                    actual,
+                    cu_seqlens_q,
+                    cu_seqlens_k,
+                    max_q,
+                    max_k,
+                    logsumexp,
+                    0.0,
+                    seed,
+                    offset,
+                    int(CausalVariant.LOWER_RIGHT),
+                    False,
+                    shared_storage_dqdkdv=True,
+                )[:3]
+            else:
+                actual_grads = torch.autograd.grad(
+                    actual, (query, key, value), grad_out
+                )
+
+        self.assertEqual(actual, expected, atol=3e-3, rtol=2e-3)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad, atol=3e-3, rtol=2e-3)
+
+        fully_masked = q_lengths[0] - k_lengths[0]
+        self.assertEqual(
+            actual[:, :fully_masked],
+            torch.zeros_like(actual[:, :fully_masked]),
+        )
+        self.assertEqual(
+            actual_grads[0][:, :fully_masked],
+            torch.zeros_like(actual_grads[0][:, :fully_masked]),
+        )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Memory efficient attention is not supported on this system",
+    )
+    def test_mem_efficient_shared_storage_requires_matching_value_dim(self, device):
+        q_lengths = (192, 64)
+        k_lengths = (64, 192)
+        query = torch.randn(1, sum(q_lengths), 2, 64, device=device)
+        key = torch.randn_like(query)
+        value = torch.randn(1, sum(k_lengths), 2, 40, device=device)
+        cu_seqlens_q = torch.tensor(
+            [0, *itertools.accumulate(q_lengths)], device=device, dtype=torch.int32
+        )
+        cu_seqlens_k = torch.tensor(
+            [0, *itertools.accumulate(k_lengths)], device=device, dtype=torch.int32
+        )
+        output = torch.empty(1, sum(q_lengths), 2, 40, device=device)
+        logsumexp = torch.empty(len(q_lengths), 2, max(q_lengths), device=device)
+        seed = torch.empty((), dtype=torch.int64, device=device)
+        offset = torch.empty((), dtype=torch.int64, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "same embed dim"):
+            torch.ops.aten._efficient_attention_backward.default(
+                torch.empty_like(output),
+                query,
+                key,
+                value,
+                None,
+                output,
+                cu_seqlens_q,
+                cu_seqlens_k,
+                max(q_lengths),
+                max(k_lengths),
+                logsumexp,
+                0.0,
+                seed,
+                offset,
+                int(CausalVariant.LOWER_RIGHT),
+                False,
+                shared_storage_dqdkdv=True,
+            )
+
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     def test_mem_efficient_attention_zero_heads(self, device):
         """Zero-head low-level attention should return empty outputs and gradients."""
@@ -4572,13 +4866,15 @@ class TestSDPACudaOnly(NNTestCase):
         device_capability = None
         if "cuda" in str(device):
             device_capability = torch.cuda.get_device_capability()
-        prefer_cudnn = "TORCH_CUDNN_SDPA_PREFERRED" not in os.environ or bool(os.environ["TORCH_CUDNN_SDPA_PREFERRED"])
+        prefer_cudnn = os.getenv("TORCH_CUDNN_SDPA_DEPRIORITIZED") != "1"
         # cuDNN prioritization requires cuDNN > 9.15.0 (91500) per sdp_utils.cpp:83
         cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
-        is_hopper_or_newer = device_capability and (device_capability[0] == 9 or device_capability[0] == 10)
-        prefer_cudnn = prefer_cudnn and is_hopper_or_newer and cudnn_version > 91500
+        is_cudnn_preferred_arch = device_capability and (
+            device_capability in [(8, 6), (8, 9)] or device_capability[0] in [9, 10]
+        )
+        prefer_cudnn = prefer_cudnn and is_cudnn_preferred_arch and cudnn_version > 91500
 
-        # cuDNN is enabled by default on SM 9.0/10.0 with cuDNN > 9.15.0 (per #169849)
+        # cuDNN is enabled by default on SM 8.6/8.9/9.0/10.0 with cuDNN > 9.15.0 (per #169849)
         # For older cuDNN versions or other architectures, Flash Attention is preferred
         if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and prefer_cudnn:
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
