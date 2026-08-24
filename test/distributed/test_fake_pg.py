@@ -1242,19 +1242,22 @@ class TestFakePGUniformRanks(TestCase):
         self.assertEqual(wide, torch.tensor([1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 1.0]))
         self.assertEqual(narrow, torch.tensor([1.0, 2.0]))
 
-    def test_all_to_all_single_rejects_inconsistent_splits(self):
-        """Uniformity forces every peer to send us what we send it.
+    def test_all_to_all_single_fills_asymmetric_slots(self):
+        """The output shape the caller declared is the one it gets.
 
-        Splits that disagree mean the caller's world is not uniform after all.
-        Padding or tiling the gap would hand back plausible-looking numbers
-        that no real backend would produce, so it has to raise instead.
+        Strict uniformity would force every output split to equal the input
+        split at our own index, and rejecting anything else was tried: it
+        breaks callers that declare asymmetric splits or a receive-only rank.
+        Each slot is tiled or truncated to the width it asked for instead.
         """
-        pg = self._init(rank=0, world_size=2)
+        pg = self._init(rank=1, world_size=2)
+        # Input split 1 is our segment, so every slot is filled from [1, 2, 3].
         send = torch.arange(4.0)
-        recv = torch.empty(4)
+        recv = torch.empty(8)
 
-        with self.assertRaisesRegex(RuntimeError, "every rank sends the same amount"):
-            pg.all_to_all_single(recv, send, [1, 3], [2, 2]).wait()
+        pg.all_to_all_single(recv, send, [2, 6], [1, 3]).wait()
+
+        self.assertEqual(recv, torch.tensor([1.0, 2.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0]))
 
     def test_reduce_writes_only_the_root(self):
         """Real backends leave every non-root tensor unspecified."""

@@ -424,31 +424,25 @@ class FakeProcessGroup : public Backend {
       // the segment we would send to a peer in our own position: our input
       // split at index rank_. Fill each output slot from it, which keeps the
       // split structure self-consistent and lets callers reshape the result.
-      // checkSplitSizes has already proven the slots tile the buffer exactly,
-      // so every element below is written and none is written twice.
+      //
+      // A slot need not be the size of that segment. Strict uniformity would
+      // force the two to match, and rejecting the mismatch was tried: it
+      // breaks callers that declare asymmetric splits or a receive-only rank,
+      // which the ads_fake_process_group tests cover and which the shapes here
+      // are meant to serve. The output shape the caller asked for is what it
+      // gets, so tile or truncate to fill it.
+      //
+      // Zero first: the slots should tile over the whole buffer, but a caller
+      // that reshapes the output must never read uninitialized memory if they
+      // do not, so this is a cheap backstop rather than an assumption.
+      flat_output.zero_();
       auto mine = splitSegment(
           flat_input, inputSplitSizes, rank_, size_, rowSizeOf(inputBuffer));
       const auto outputRowSize = rowSizeOf(outputBuffer);
       for (int64_t j = 0; j < size_; ++j) {
         auto slot = splitSegment(
             flat_output, outputSplitSizes, j, size_, outputRowSize);
-        // Uniformity forces every peer to send us exactly what we send it, so
-        // a slot that is not the size of `mine` means the caller's splits were
-        // not the same on every rank. Any output we invented for the gap would
-        // look plausible and be wrong, so refuse instead of padding or tiling.
-        TORCH_CHECK(
-            slot.numel() == mine.numel(),
-            "FakeProcessGroup::all_to_all_single: under "
-            "simulate_uniform_ranks every rank sends the same amount, so "
-            "output split ",
-            j,
-            " must hold ",
-            mine.numel(),
-            " elements, but the given splits size it at ",
-            slot.numel(),
-            ". The input and output split lists are inconsistent with a "
-            "uniform world.");
-        slot.copy_(mine);
+        fillByTiling(slot, mine);
       }
       return c10::make_intrusive<FakeWork>(
           std::vector<at::Tensor>{outputBuffer});
@@ -655,11 +649,11 @@ class FakeProcessGroup : public Backend {
     }
   }
 
-  // Fill `dst` by repeating `src`. The list form of alltoall lets each peer's
-  // slot have its own shape, so unlike all_to_all_single there is no size
-  // equality to lean on here. Real backends write the whole slot; truncating
-  // would leave the tail uninitialized and a caller that reshapes the output
-  // would then read garbage.
+  // Fill `dst` by repeating `src`, or cut it short when `dst` is the smaller.
+  // Both callers let a slot have a shape of its own, so there is no size
+  // equality to lean on. Real backends write the whole slot; truncating would
+  // leave the tail uninitialized and a caller that reshapes the output would
+  // then read garbage.
   static void fillByTiling(const at::Tensor& dst, const at::Tensor& src) {
     const auto dstNumel = dst.numel();
     const auto srcNumel = src.numel();
