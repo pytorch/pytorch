@@ -454,7 +454,9 @@ class TestTorchbindAccelerator(TestCase):
         self.assertTrue(torch.allclose(orig_res, new_res))
 
 
-instantiate_device_type_tests(TestTorchbindAccelerator, globals(), allow_xpu=True, except_for="cpu")
+instantiate_device_type_tests(
+    TestTorchbindAccelerator, globals(), allow_xpu=True, except_for="cpu"
+)
 
 
 if __name__ == "__main__":
