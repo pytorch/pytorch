@@ -11,10 +11,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, serialTest
-from torch.testing._internal.inductor_utils import (
-    HAS_TRITON,
-    requires_gpu_with_enough_memory,
-)
+from torch.testing._internal.inductor_utils import requires_gpu_with_enough_memory
 
 
 # Make the helper files in test/ importable
@@ -56,7 +53,6 @@ class InplacePaddingTest(TestCase):
         self._config_ctx.__exit__(None, None, None)
         super().tearDown()
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_skip_pad_due_to_fusion(self, device):
         """
         If the padding can be fused with downstream op, there would
@@ -73,7 +69,6 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_skip_pad_input(self, device):
         """
         Don't apply the padding to graph input since Inductor does not
@@ -92,7 +87,6 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_pad_non_zero(self, device):
         def f(x):
             x = x + 1
@@ -124,7 +118,6 @@ class InplacePaddingTest(TestCase):
         self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
         self.assertEqual(num_inplace_padding(), 1)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @inductor_config.patch(cpp_wrapper=True)
     @inductor_config.patch("triton.autotune_at_compile_time", True)
     def test_pad_non_zero_cpp_wrapper(self, device):
@@ -172,7 +165,6 @@ class InplacePaddingTest(TestCase):
         self.assertEqual(num_inplace_padding(), 1)
         self.assertTrue(compile_time_autotune_called)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_pad_too_large(self, device):
         def f(x, y):
             x = aten.constant_pad_nd(x, (0, 8, 0, 0), 12345.0)
@@ -185,7 +177,6 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @inductor_config.patch(can_inplace_pad_graph_input=True)
     def test_mutating_padding_input(self, device):
         """
@@ -207,7 +198,6 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 1)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_mutating_padding_output(self, device):
         """
         Inplace padding does not take effect since the `aten.add_` op
@@ -228,7 +218,6 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @requires_gpu_with_enough_memory(2e10)
     @inductor_config.patch(force_shape_pad=True)
     @serialTest()
@@ -277,7 +266,6 @@ class InplacePaddingTest(TestCase):
 
     # Enable Max-Autotune to repro this test failure:
     #   https://github.com/pytorch/pytorch/pull/140249#issuecomment-2556079406
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @requires_gpu_with_enough_memory(2e10)
     @inductor_config.patch(max_autotune=True)
     @serialTest()
