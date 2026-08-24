@@ -505,6 +505,14 @@ class ViewAndMutationMeta:
     # This list is generated after calling make_runtime_safe().
     traced_tangent_metas: list[Any] | None = None
 
+    # Same length/order as traced_tangents, also captured by make_runtime_safe()
+    # before the fake traced_tangents are dropped. Diagnostic only: the backward
+    # prologue reports the dtype of the forward output behind a tangent slot when
+    # that slot arrives as None, which is the one fact that separates "autograd
+    # refused to differentiate this dtype" from "something marked this output
+    # non-differentiable".
+    traced_tangent_dtypes: list[torch.dtype | None] | None = None
+
     num_symints_saved_for_bw: int | None = None
 
     # See Note [Activations with no version counter checks in eager]
@@ -757,6 +765,10 @@ class ViewAndMutationMeta:
                 return None
 
         self.traced_tangent_metas = [extract_metadata(t) for t in self.traced_tangents]
+        self.traced_tangent_dtypes = [
+            t.dtype if isinstance(t, torch.Tensor) else None
+            for t in self.traced_tangents
+        ]
         # Clear traced tangents at runtime
         self.traced_tangents = []
         for inp_meta in self.subclass_inp_meta:
