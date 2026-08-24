@@ -49,12 +49,12 @@ from torch._inductor.kernel.gemm_epilogue_utils import (
 from torch.utils._ordered_set import OrderedSet
 
 
-def _is_inferred_reshape_dim(value: Any) -> bool:
+def _is_inferred_reshape_dim(value: object) -> bool:
     """Return whether a reshape dimension is the literal inferred-size marker."""
     return isinstance(value, int) and value == -1
 
 
-def _kept_dim_matches_source(kept_size: Any, source_size: Any) -> bool:
+def _kept_dim_matches_source(kept_size: object, source_size: object) -> bool:
     return _is_inferred_reshape_dim(kept_size) or statically_known_equal(
         kept_size, source_size
     )
@@ -145,14 +145,14 @@ def _grouped_layout_matches_source_shape(
 
 
 def grouped_tensor_layout(
-    shape: Any, source_shape: Any | None = None
+    shape: object, source_shape: object | None = None
 ) -> GemmReductionGeometry | None:
     """Recognize grouped M/N geometry, specializing backed group dimensions."""
     shape = normalize_shape(shape)
     if not isinstance(shape, tuple):
         return None
     if len(shape) == 1 and isinstance(shape[0], (list, tuple, torch.Size)):
-        shape = normalize_shape(shape[0])
+        shape = tuple(shape[0])
     if source_shape is not None:
         source_shape = normalize_shape(source_shape)
         if isinstance(source_shape, tuple) and len(source_shape) == 2:
