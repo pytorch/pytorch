@@ -1335,6 +1335,16 @@ print(t.is_pinned())
             with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
                 print(torch.backends.cuda.matmul.allow_tf32)
 
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_tf32_context_manager_state_synchronization(self):
+        for ctx in (tf32_on(self), tf32_off(), tf32_enabled()):
+            with ctx:
+                pass
+            self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+            self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "none")
+            self.assertEqual(torch.get_float32_matmul_precision(), "highest")
+
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
