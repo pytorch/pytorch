@@ -120,6 +120,30 @@ def _nvgemm_config(**overrides):
 class TestNVUniversalGemm(TestCase):
     """Test cases for NVIDIA Universal GEMM functionality."""
 
+    def test_compile_preserves_wrapped_cute_compile_protocol(self):
+        import cutlass.cute as cute
+
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _compile_nvgemm_kernel,
+        )
+
+        original_compile = cute.compile
+
+        def monitored_compile(*args, **kwargs):
+            return original_compile(*args, **kwargs)
+
+        monitored_compile.__wrapped__ = original_compile
+
+        class FakeKernel:
+            def compile(inner_self, args):
+                self.assertIs(cute.compile, original_compile)
+                return args
+
+        with mock.patch.object(cute, "compile", monitored_compile):
+            marker = object()
+            self.assertIs(_compile_nvgemm_kernel(FakeKernel(), marker), marker)
+            self.assertIs(cute.compile, monitored_compile)
+
     def test_direct_epilogue_cache_signature_distinguishes_wrapped_tensors(self):
         from cutlass.operators.utils.tensor import TensorWrapper
 
