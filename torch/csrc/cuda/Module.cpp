@@ -1644,14 +1644,11 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
-  if (!m)
-    throw python_error();
+  TORCH_CHECK_PYTHON(m);
 
   auto set_module_attr = [&](const char* name, PyObject* v) {
     // PyObject_SetAttrString doesn't steal reference. So no need to incref.
-    if (PyObject_SetAttrString(m, name, v) < 0) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(PyObject_SetAttrString(m, name, v) >= 0);
   };
 
   auto num_gpus = c10::cuda::device_count();
@@ -1767,8 +1764,8 @@ static PyObject* THCPModule_cudnnClearDropoutState_wrap(
     PyObject* noargs) {
   HANDLE_TH_ERRORS
 #if defined(USE_ROCM)
-  // On ROCm, RNNs dispatch to MIOpen, which caches its dropout state buffer in
-  // thread-local storage separate from the cuDNN path.
+  // On ROCm, RNNs dispatch to MIOpen, which caches per-device dropout state
+  // buffers separate from the cuDNN path.
   at::native::_miopen_clear_dropout_state();
 #endif
   at::native::_cudnn_clear_dropout_state();
@@ -2008,26 +2005,20 @@ PyObject* THCPModule_cuda_tunableop_get_results(
     result_size += kernelmap.size();
   }
   THPObjectPtr outer_tuple(PyTuple_New(static_cast<Py_ssize_t>(result_size)));
-  if (!outer_tuple)
-    throw python_error();
+  TORCH_CHECK_PYTHON(outer_tuple);
   size_t result_index = 0;
   for (const auto& [op_sig, kernelmap] : results) {
     for (const auto& [param_sig, result] : kernelmap) {
       THPObjectPtr inner_tuple(PyTuple_New(4));
-      if (!inner_tuple)
-        throw python_error();
+      TORCH_CHECK_PYTHON(inner_tuple);
       PyObject* obj_op_sig = THPUtils_packString(op_sig);
-      if (!obj_op_sig)
-        throw python_error();
+      TORCH_CHECK_PYTHON(obj_op_sig);
       PyObject* obj_param_sig = THPUtils_packString(param_sig);
-      if (!obj_param_sig)
-        throw python_error();
+      TORCH_CHECK_PYTHON(obj_param_sig);
       PyObject* obj_result_key = THPUtils_packString(result.GetKey());
-      if (!obj_result_key)
-        throw python_error();
+      TORCH_CHECK_PYTHON(obj_result_key);
       PyObject* obj_result_time = PyFloat_FromDouble(result.GetTime());
-      if (!obj_result_time)
-        throw python_error();
+      TORCH_CHECK_PYTHON(obj_result_time);
       PyTuple_SET_ITEM(inner_tuple.get(), 0, obj_op_sig);
       PyTuple_SET_ITEM(inner_tuple.get(), 1, obj_param_sig);
       PyTuple_SET_ITEM(inner_tuple.get(), 2, obj_result_key);
@@ -2049,19 +2040,15 @@ PyObject* THCPModule_cuda_tunableop_get_validators(
                         .GetAllValidators();
   THPObjectPtr outer_tuple(
       PyTuple_New(static_cast<Py_ssize_t>(validators.size())));
-  if (!outer_tuple)
-    throw python_error();
+  TORCH_CHECK_PYTHON(outer_tuple);
   size_t validator_index = 0;
   for (const auto& [key, val] : validators) {
     THPObjectPtr inner_tuple(PyTuple_New(2));
-    if (!inner_tuple)
-      throw python_error();
+    TORCH_CHECK_PYTHON(inner_tuple);
     PyObject* obj_key = THPUtils_packString(key);
-    if (!obj_key)
-      throw python_error();
+    TORCH_CHECK_PYTHON(obj_key);
     PyObject* obj_val = THPUtils_packString(val);
-    if (!obj_val)
-      throw python_error();
+    TORCH_CHECK_PYTHON(obj_val);
     PyTuple_SET_ITEM(inner_tuple.get(), 0, obj_key);
     PyTuple_SET_ITEM(inner_tuple.get(), 1, obj_val);
     PyTuple_SET_ITEM(

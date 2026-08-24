@@ -39,6 +39,7 @@
 #include <torch/csrc/distributed/c10d/nccl/NCCLXStub.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLLazy.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #endif
@@ -190,6 +191,63 @@ std::vector<std::vector<uint8_t>> toVec8(const std::vector<std::string>& data) {
   }
   return out;
 }
+
+using SymmetricMemoryPtr =
+    c10::intrusive_ptr<::c10d::symmetric_memory::SymmetricMemory>;
+
+// Host-side CFT (Compute Fabric Transport) logical-endpoint coordinates for a
+// symmetric memory buffer, as the `(le_id, le_offset)` pair that the
+// device-side `ncclCft` put/get/red family takes. Returned as plain ints so
+// they can be handed straight to a custom kernel; `le_offset` is a byte
+// offset, so advancing into the buffer is just `le_offset + n`.
+//
+// Spelled as two complementary `#if` blocks rather than `#if`/`#else`: an
+// `#else` anywhere in this file sends clang-format down the alternate branch,
+// where it then reformats unrelated code thousands of lines below.
+#if defined(USE_C10D_NCCL) && defined(NCCL_HAS_SYMMEM_SUPPORT)
+::c10d::symmetric_memory::NCCLSymmetricMemory* asNcclSymmetricMemory(
+    const SymmetricMemoryPtr& symm_mem) {
+  auto* mem = dynamic_cast<::c10d::symmetric_memory::NCCLSymmetricMemory*>(
+      symm_mem.get());
+  TORCH_CHECK(
+      mem != nullptr,
+      "CFT handles are only available on the NCCL symmetric memory backend");
+  return mem;
+}
+
+// Both queries raise on their own when the build predates the host-side CFT
+// API, so there is nothing extra to check here.
+std::tuple<int64_t, int64_t> getPeerCftHandle(
+    const SymmetricMemoryPtr& symm_mem,
+    int64_t peer) {
+  auto* mem = asNcclSymmetricMemory(symm_mem);
+  const auto handle = mem->get_peer_cft_handle(static_cast<int>(peer));
+  return {handle.le_id, static_cast<int64_t>(handle.le_offset)};
+}
+
+std::tuple<int64_t, int64_t> getMultimemCftHandle(
+    const SymmetricMemoryPtr& symm_mem) {
+  auto* mem = asNcclSymmetricMemory(symm_mem);
+  const auto handle = mem->get_multimem_cft_handle();
+  return {handle.le_id, static_cast<int64_t>(handle.le_offset)};
+}
+#endif
+
+#if !defined(USE_C10D_NCCL) || !defined(NCCL_HAS_SYMMEM_SUPPORT)
+constexpr const char* kNoNcclSymmMem =
+    "CFT handles require a build with NCCL symmetric memory support";
+
+std::tuple<int64_t, int64_t> getPeerCftHandle(
+    const SymmetricMemoryPtr& /* symm_mem */,
+    int64_t /* peer */) {
+  TORCH_CHECK(false, kNoNcclSymmMem);
+}
+
+std::tuple<int64_t, int64_t> getMultimemCftHandle(
+    const SymmetricMemoryPtr& /* symm_mem */) {
+  TORCH_CHECK(false, kNoNcclSymmMem);
+}
+#endif
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
@@ -484,14 +542,10 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
-  if (!c10d_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(c10d_module);
 
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
-  if (!torch_C_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(torch_C_module);
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
   auto m =
@@ -1048,6 +1102,14 @@ Example:
       },
       py::arg("group_name"));
 
+  // Check the native registry without throwing on unknown group names
+  module.def(
+      "_is_process_group_registered",
+      [](const std::string& group_name) {
+        return ::c10d::is_process_group_registered(group_name);
+      },
+      py::arg("group_name"));
+
   module.def(
       "_register_work",
       [](const at::Tensor& tensor,
@@ -1435,6 +1497,12 @@ Example:
           py::arg("peer"),
           py::arg("sizes"),
           py::arg("dtype"))
+      // A CFT handle is only valid for the group this SymmetricMemory was
+      // rendezvoused with -- each group owns a separate set of logical
+      // endpoints over the same allocation. Requires the group's communicator
+      // to have been created with `host_cft_mode` enabled.
+      .def("get_peer_cft_handle", getPeerCftHandle, py::arg("peer"))
+      .def("get_multimem_cft_handle", getMultimemCftHandle)
       // Util functions that are often used together with symmetric memory but
       // not necessarily directly on symmetric memory.
       .def_static(
@@ -3952,6 +4020,14 @@ for details.
           [](ncclConfig_t& self, const char* tmp) {
             self.commName = strdup(tmp);
           })
+#endif
+#ifdef NCCL_HAS_HOST_CFT_MODE
+      // ncclHostCftMode_t: 1 = enable, 2 = disable, 3 = fallback (try to
+      // create the CFT logical endpoints, disable host-side CFT on error).
+      // Opt-in: NCCL leaves host-side CFT off unless this is set, since the
+      // endpoints are a limited per-device resource. Must be identical on
+      // every rank of a communicator.
+      .def_readwrite("host_cft_mode", &ncclConfig_t::hostCftMode)
 #endif
       .def(
           "unsafe_get_ptr",
