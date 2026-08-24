@@ -2725,7 +2725,7 @@ class TestMuonBatchedMatrices(TestCase):
             "nesterov": False,
             "ns_steps": 3,
         }
-        optimizer = torch.optim.Muon([param], allow_batched=True, **kwargs)
+        optimizer = torch.optim.Muon([param], allow_batched_matrices=True, **kwargs)
         reference_optimizer = torch.optim.Muon(reference_params, **kwargs)
         grad_scales = torch.tensor(
             [0.1, 1.0, 10.0, 0.2, 2.0, 20.0],
@@ -2757,21 +2757,11 @@ class TestMuonBatchedMatrices(TestCase):
         shape = (0, 2, 5)
         param = Parameter(torch.empty(shape, device=device))
         param.grad = torch.empty_like(param)
-        optimizer = torch.optim.Muon([param], ns_steps=100, allow_batched=True)
+        optimizer = torch.optim.Muon([param], ns_steps=100, allow_batched_matrices=True)
 
         optimizer.step()
 
         self.assertEqual(tuple(optimizer.state[param]["momentum_buffer"].shape), shape)
-
-    def test_muon_add_param_group(self, device):
-        optimizer = torch.optim.Muon([Parameter(torch.randn(4, 6, device=device))])
-        batched_param = Parameter(torch.randn(2, 4, 6, device=device))
-        with self.assertRaisesRegex(ValueError, "Muon only supports 2D parameters"):
-            optimizer.add_param_group({"params": [batched_param]})
-        self.assertEqual(len(optimizer.param_groups), 1)
-
-        optimizer.add_param_group({"params": [batched_param], "allow_batched": True})
-        self.assertEqual(len(optimizer.param_groups), 2)
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)

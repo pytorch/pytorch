@@ -930,7 +930,7 @@ def optim_inputs_func_muon(device, dtype=None):
         ),
         OptimizerInput(
             params=None,
-            kwargs={"allow_batched": True},
+            kwargs={"allow_batched_matrices": True},
             desc="allow batched matrices",
         ),
     ]
@@ -960,8 +960,8 @@ def optim_error_inputs_func_muon(device, dtype):
         ErrorOptimizerInput(
             OptimizerInput(
                 params=[non_matrix_param],
-                kwargs={"allow_batched": True},
-                desc="allow_batched still requires matrices",
+                kwargs={"allow_batched_matrices": True},
+                desc="allow_batched_matrices still requires matrices",
             ),
             error_type=ValueError,
             error_regex="requires parameters with at least two dimensions",
