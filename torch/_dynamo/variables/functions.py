@@ -4257,21 +4257,6 @@ def _check_descriptor_obj_type(
         )
 
 
-def descr_setcheck(
-    tx: "InstructionTranslatorBase",
-    descr: DescriptorTypes,
-    obj: VariableTracker,
-) -> None:
-    obj_type = obj.python_type()
-    if not issubclass(obj_type, descr.__objclass__):
-        raise_type_error(
-            tx,
-            f"descriptor '{descr.__name__}' for "
-            f"'{descr.__objclass__.__name__}' objects "
-            f"doesn't apply to a '{obj_type.__name__}' object",
-        )
-
-
 class DescriptorVariable(VariableTracker):
     """Base class for CPython descriptor VTs.
 
@@ -4411,6 +4396,9 @@ class MethodWrapperVariable(VariableTracker):
     # python constant, which would break e.g. a list holding non-constant items.
     # Every entry in CPython's wrapper_getsets has a NULL setter.
     tp_getset = {
+        "__name__": GetSet(
+            lambda s, tx: ConstantVariable.create(s.descriptor.__name__), None
+        ),
         "__qualname__": GetSet(
             lambda s, tx: ConstantVariable.create(s.descriptor.__qualname__), None
         ),
@@ -4674,6 +4662,11 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
     def get_real_python_backed_value(self) -> types.ClassMethodDescriptorType:
         return self.descriptor
 
+    tp_members = {
+        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__), None),
+        "__name__": Member(getset_build(lambda s: s.descriptor.__name__), None),
+    }
+
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -4686,7 +4679,7 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         return BoundBuiltinMethodVariable(self.descriptor, owner, source=self.source)
 
 
-class StaticMethodVariable(DescriptorVariable):
+class StaticMethodVariable(VariableTracker):
     """staticmethod descriptor wrapping a callable.
 
     CPython's staticmethod (PyStaticMethod_Type) is a non-data descriptor
@@ -4731,7 +4724,7 @@ class StaticMethodVariable(DescriptorVariable):
         return VariableTracker.build(tx, self.descriptor.__func__, func_source)
 
 
-class ClassMethodVariable(DescriptorVariable):
+class ClassMethodVariable(VariableTracker):
     """classmethod descriptor wrapping a callable.
 
     CPython's classmethod (PyClassMethod_Type) is a non-data descriptor
@@ -4835,6 +4828,13 @@ class MemberDescriptorVariable(DescriptorVariable):
         from .object_protocol import _UnhandledDescriptorError
 
         attr_name = self.descriptor.__name__
+        # Prefer the VT's declarative table when it models this attribute, so a
+        # VT with no concrete Python object behind it still resolves.
+        entry = obj.lookup_tp_getset_member(attr_name)
+        if entry is not None and entry.getter is not None:
+            result = entry.getter(obj, tx)
+            if result is not None:
+                return result
         obj_value = obj.get_real_python_backed_value()
         if obj_value is NO_SUCH_SUBOBJ:
             raise _UnhandledDescriptorError(
@@ -4860,14 +4860,24 @@ class MemberDescriptorVariable(DescriptorVariable):
         obj: VariableTracker,
         value: VariableTracker | None,
     ) -> VariableTracker:
-        # Mirrors member_set (PyMember_SetOne): store into the C struct field.
-        # STORE_ATTR itself applies the descriptor, so replay via store_attr on
-        # the target (mirrors the __slots__ path in UserDefinedObjectVariable).
-        # value is None for __delete__.
+        # Mirrors member_set: descr_setcheck, then PyMember_SetOne writes the
+        # C struct field. value is None for __delete__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L180-L196
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
+        name = self.descriptor.__name__
+        entry = obj.lookup_tp_getset_member(name)
+        if entry is not None:
+            if entry.setter is None:
+                # PyMember_SetOne rejects a READONLY PyMemberDef.
+                raise_attribute_error(tx, "readonly attribute")
+            entry.setter(obj, tx, value)
+            return ConstantVariable.create(None)
+        # No model for this member. STORE_ATTR itself applies the descriptor, so
+        # replay via store_attr on the target (mirrors the __slots__ path in
+        # UserDefinedObjectVariable).
         stored = variables.DeletedVariable() if value is None else value
-        tx.output.side_effects.store_attr(obj, self.descriptor.__name__, stored)
-        return variables.ConstantVariable.create(None)
+        tx.output.side_effects.store_attr(obj, name, stored)
+        return ConstantVariable.create(None)
 
 
 class GetSetDescriptorVariable(DescriptorVariable):
@@ -4930,7 +4940,7 @@ class GetSetDescriptorVariable(DescriptorVariable):
         obj: VariableTracker,
         value: VariableTracker | None,
     ) -> VariableTracker:
-        descr_setcheck(tx, self.descriptor, obj)
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
         name = self.descriptor.__name__
         entry = obj.lookup_tp_getset_member(name)
         if entry is None:
@@ -5010,7 +5020,7 @@ class GetSetDescriptorVariable(DescriptorVariable):
         return VariableTracker.build(tx, resolved, result_source)
 
 
-class PropertyVariable(DescriptorVariable):
+class PropertyVariable(VariableTracker):
     """Python property descriptor.
 
     The property type is a data descriptor with tp_descr_get =
@@ -5022,23 +5032,6 @@ class PropertyVariable(DescriptorVariable):
     _nonvar_fields = {
         "descriptor",
         *VariableTracker._nonvar_fields,
-    }
-
-    tp_members = {
-        "fget": Member(getset_build(lambda s: s.descriptor.fget), None),
-        "fset": Member(getset_build(lambda s: s.descriptor.fset), None),
-        "fdel": Member(getset_build(lambda s: s.descriptor.fdel), None),
-        "__doc__": Member(
-            getset_load_or_build(lambda s: s.descriptor.__doc__, "__doc__"),
-            getset_set("__doc__"),
-        ),
-    }
-
-    tp_getset = {
-        "__name__": GetSet(
-            getset_load_or_build(lambda s: s.descriptor.__name__, "__name__"),
-            getset_set("__name__"),
-        ),
     }
 
     def __init__(
@@ -5058,36 +5051,6 @@ class PropertyVariable(DescriptorVariable):
 
     def as_python_constant(self) -> property:
         return self.descriptor
-
-    def tp_descr_set_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
-        value: VariableTracker | None,
-    ) -> VariableTracker:
-        fn = self.descriptor.fset if value is not None else self.descriptor.fdel
-
-        if fn is None:
-            raise_attribute_error(
-                tx,
-                f"property '{self.descriptor.__name__}' of "  # type: ignore[missing-attribute]
-                f"'{obj.python_type_name()}' object "
-                f"has no {'setter' if value is not None else 'deleter'}",
-            )
-
-        if value is None:
-            fdel_source = self.source and AttrSource(self.source, "fdel")
-            fdel_vt = VariableTracker.build(
-                tx, self.descriptor.fdel, source=fdel_source
-            )
-            fdel_vt.call_function(tx, [obj], {})
-        else:
-            fset_source = self.source and AttrSource(self.source, "fset")
-            fset_vt = VariableTracker.build(
-                tx, self.descriptor.fset, source=fset_source
-            )
-            fset_vt.call_function(tx, [obj, value], {})
-        return ConstantVariable.create(None)
 
     def tp_descr_get_impl(
         self,
