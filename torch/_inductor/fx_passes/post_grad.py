@@ -895,7 +895,10 @@ def reorder_for_locality(graph: torch.fx.Graph):
             # which cause hangs. Once we have SPMD mode, we can safely reorder them.
             # However, increasing the locality between a collective and its wait node
             # is generally worse for performance.
-            return node.target != torch.ops._c10d_functional.wait_tensor.default
+            return node.target not in (
+                torch.ops._c10d_functional.wait_tensor.default,
+                torch.ops._c10d_functional.wait_tensors.default,
+            )
     else:
 
         def check():
@@ -909,9 +912,16 @@ def reorder_for_locality(graph: torch.fx.Graph):
         )
 
     def visit(other_node):
+        is_wait_tensors_getitem = (
+            other_node.target is operator.getitem
+            and torch.distributed.is_available()
+            and isinstance(other_node.args[0], torch.fx.Node)
+            and other_node.args[0].target
+            is torch.ops._c10d_functional.wait_tensors.default
+        )
         if (
             other_node.op == "call_function"
-            and other_node.target != operator.getitem
+            and (other_node.target is not operator.getitem or is_wait_tensors_getitem)
             and all((n in seen_nodes) for n in other_node.users)
             and get_mutation_region_id(graph, node)
             == get_mutation_region_id(graph, other_node)
