@@ -276,8 +276,9 @@ C10_HOST_DEVICE To convert(From f) {
   return static_cast_with_inter_type<To, From>::apply(f);
 }
 
-// Shared error-formatting helper for checked_convert/unsafe_wrapping_convert.
-[[noreturn]] inline void report_overflow(const char* name) {
+// Define separately (C10_NOINLINE) to avoid being inlined and prevent
+// code-size bloat.
+[[noreturn]] C10_NOINLINE inline void report_overflow(const char* name) {
   STD_TORCH_CHECK(
       false,
       "value cannot be converted to type ",
