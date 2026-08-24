@@ -4391,9 +4391,11 @@ class TestSparseCompressedTritonKernels(TestCase):
                          dict(GROUP_SIZE_ROW=4, SPLIT_N=4, num_stages=1, num_warps=4))
 
 
-class TestSparseTritonMetaDeviceName(TestCase):
-    """_get_device_name keys the Triton tuning tables, so it has to name whatever
-    accelerator is in use rather than only CUDA and XPU."""
+class TestSparseTritonMetaDeviceNameFallbacks(TestCase):
+    """The two cases real hardware cannot produce: a device module with no
+    get_device_name, and no accelerator at all. Both must key as unnamed."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _patched(self, device_type, module):
         return unittest.mock.patch.multiple(
@@ -4428,10 +4430,38 @@ class TestSparseTritonMetaDeviceName(TestCase):
             self.assertEqual(_get_device_name(), "")
 
 
+class TestSparseTritonMetaDeviceName(TestCase):
+    """_get_device_name supplies the device component of the Triton tuning cache
+    key, so an accelerator that keys as unnamed silently loses its tuned
+    parameters. Instantiated per device so every backend checks its own name."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_device_name_is_the_accelerator_name(self, device):
+        from torch.sparse._triton_ops_meta import _get_device_name
+
+        device_type = torch.device(device).type
+        accelerator = torch.accelerator.current_accelerator(check_available=True)
+        if accelerator is None or accelerator.type != device_type:
+            self.skipTest(f"{device_type} is not the accelerator in use")
+
+        get_device_name = getattr(
+            torch.get_device_module(device_type), "get_device_name", None
+        )
+        if get_device_name is None:
+            self.assertEqual(_get_device_name(), "")
+        else:
+            self.assertEqual(_get_device_name(), get_device_name())
+            self.assertNotEqual(_get_device_name(), "")
+
+
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())
 instantiate_device_type_tests(TestSparseCompressed, globals())
 instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())
+instantiate_device_type_tests(
+    TestSparseTritonMetaDeviceName, globals(), allow_mps=True, allow_xpu=True
+)
 
 if __name__ == '__main__':
     run_tests()
