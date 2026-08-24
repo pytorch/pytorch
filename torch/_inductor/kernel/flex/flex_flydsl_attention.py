@@ -93,17 +93,17 @@ def _get_supported_bhsd_stride(node, *, allow_strided: bool) -> tuple[int, ...] 
     return None
 
 
-def _fits_u32_buffer(node) -> bool:
+def _fits_u32_head_slice(node) -> bool:
     try:
         sizes = [V.graph.sizevars.guard_int(value) for value in node.get_size()]
         strides = [V.graph.sizevars.guard_int(value) for value in node.get_stride()]
         element_size = torch._utils._element_size(node.get_dtype())
     except (AttributeError, TypeError, ValueError):
         return False
-    if len(sizes) != len(strides) or any(stride < 0 for stride in strides):
+    if len(sizes) != 4 or len(strides) != 4 or any(stride < 0 for stride in strides):
         return False
     storage_elements = 1 + sum(
-        (size - 1) * stride for size, stride in zip(sizes, strides)
+        (size - 1) * stride for size, stride in zip(sizes[-2:], strides[-2:])
     )
     return storage_elements * element_size < _MAX_BUFFER_BYTES
 
@@ -165,8 +165,8 @@ def _check_flydsl_common_compatibility(
         if not allow_strided_bhsd:
             layout = "contiguous 4D BHSD tensors"
         return f"requires {layout}"
-    if not all(_fits_u32_buffer(node) for node in tensors if node is not None):
-        return "requires every tensor buffer to be smaller than 4 GiB"
+    if not all(_fits_u32_head_slice(node) for node in tensors if node is not None):
+        return "requires every per-head tensor slice to be smaller than 4 GiB"
     return ""
 
 
@@ -274,6 +274,7 @@ def _get_flydsl_flex_attention_forward_config(
         if mask_program is None:
             return None, f"unsupported mask_mod: {mask_reason}"
 
+    decode = sq in (1, 4, 8)
     common_reason = _check_flydsl_common_compatibility(
         query=query,
         key=key,
@@ -282,14 +283,14 @@ def _get_flydsl_flex_attention_forward_config(
         score_mod_other_buffers=score_mod_other_buffers,
         mask_mod_other_buffers=mask_mod_other_buffers,
         allow_mask_mod_buffers=mask_program is not None,
-        allow_strided_bhsd=True,
+        allow_strided_bhsd=not decode,
     )
     if common_reason:
         return None, common_reason
 
-    q_stride = _get_supported_bhsd_stride(query, allow_strided=True)
-    k_stride = _get_supported_bhsd_stride(key, allow_strided=True)
-    v_stride = _get_supported_bhsd_stride(value, allow_strided=True)
+    q_stride = _get_supported_bhsd_stride(query, allow_strided=not decode)
+    k_stride = _get_supported_bhsd_stride(key, allow_strided=not decode)
+    v_stride = _get_supported_bhsd_stride(value, allow_strided=not decode)
     if q_stride is None or k_stride is None or v_stride is None:
         return None, "requires supported Q/K/V BHSD strides"
 
@@ -326,9 +327,14 @@ def _get_flydsl_flex_attention_forward_config(
             return None, "requires matching full BlockMask count/index dimensions"
         max_full_blocks = full_index_shape[-1]
 
-    candidate_blocks = 2 * (max_full_blocks + index_shape[-1])
-    supports_prefill = (
-        sq % 128 == 0 and candidate_blocks <= 512 and mask_shape[2] == sq // 128
+    gqa_group_size = hq // hkv
+    packed_decode_rows = gqa_group_size * sq
+    supports_prefill = sq % 128 == 0 and mask_shape[2] == sq // 128
+    supports_decode = (
+        decode
+        and mask_shape[1] in (1, hkv)
+        and mask_shape[2] == 1
+        and 0 < packed_decode_rows <= 256
     )
     if sk % 128 != 0:
         return None, "requires Sk divisible by 128"
@@ -336,11 +342,12 @@ def _get_flydsl_flex_attention_forward_config(
         return None, "requires sparse Q/KV block sizes of 128"
     if not has_full_blocks or max_full_blocks <= 0 or index_shape[-1] <= 0:
         return None, "requires non-empty partial and full BlockMask storage"
-    if not supports_prefill:
+    if not (supports_prefill or supports_decode):
         return (
             None,
-            "requires prefill Sq divisible by 128 with matching BlockMask rows "
-            "and at most 512 stored candidate blocks per CTA",
+            "requires prefill Sq divisible by 128 with matching BlockMask rows, "
+            "or decode Sq=1/4/8 with a shared/per-KV-head BlockMask and "
+            "(Hq/Hkv)*Sq <= 256",
         )
 
     return (

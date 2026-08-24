@@ -21,10 +21,16 @@ _SCHED_EXP = 0x400
 
 
 def make_global_view(tensor, offset, shape, stride):
-    iterator = fx.get_iter(fx.rocdl.make_buffer_tensor(tensor))
-    if offset is not None:
-        iterator = fx.add_offset(iterator, offset)
-    return fx.make_view(iterator, fx.make_layout(shape, stride))
+    layout = fx.make_layout(shape, stride)
+    iterator = fx.get_iter(tensor)
+    if offset is None:
+        return fx.rocdl.make_buffer_tensor(fx.make_view(iterator, layout))
+
+    # AMD buffer-resource offsets are 32-bit. Rebase the raw 64-bit pointer
+    # before constructing the descriptor so only this CTA-local view must fit
+    # in the descriptor's addressable range.
+    iterator = fx.add_offset(iterator, fx.Int64(offset))
+    return fx.rocdl.make_buffer_tensor(fx.make_view(iterator, layout))
 
 
 def make_shared_view(pointer, shape, stride):
@@ -146,11 +152,16 @@ def read_first_lane(value, dtype):
     return dtype(fx.rocdl.readfirstlane(dtype.ir_type, value.ir_value()))
 
 
-def schedule_fwd_qk_pipeline(*, reduction_steps: int):
-    """Interleave three LDS reads with each pair of QK MFMAs."""
+def schedule_fwd_qk_pipeline(*, reduction_steps: int, vmem_count: int = 0):
+    """Interleave Q/K LDS reads and optional next-tile VMEM with QK MFMAs."""
     dsrd_preload = min(6, 3 * reduction_steps)
     fx.rocdl.sched_dsrd(dsrd_preload)
+    scheduled_vmem = 0
     for step in fx.range_constexpr(reduction_steps):
+        target_vmem = ((step + 1) * vmem_count) // reduction_steps
+        if const_expr(target_vmem > scheduled_vmem):
+            fx.rocdl.sched_vmem(target_vmem - scheduled_vmem)
+            scheduled_vmem = target_vmem
         fx.rocdl.sched_mfma(2)
         if const_expr(step + 2 < reduction_steps):
             fx.rocdl.sched_dsrd(3)
