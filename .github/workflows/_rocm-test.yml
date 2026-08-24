@@ -270,18 +270,20 @@ jobs:
         run: |
           set -x
 
-          if [[ $TEST_CONFIG == 'multigpu' ]]; then
-            TEST_COMMAND=.ci/pytorch/multigpu-test.sh
-          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
-            TEST_COMMAND=.ci/caffe2/test.sh
-          else
-            TEST_COMMAND=.ci/pytorch/test.sh
-          fi
-          PREFLIGHT=""
-          if [[ "${TEST_CONFIG}" == *distributed* ]]; then
-            PREFLIGHT="timeout 180 python .ci/pytorch/rocm_preflight.py && "
-          fi
-          pip install dist/*.whl && ${PREFLIGHT}${TEST_COMMAND}"
+          # if [[ $TEST_CONFIG == 'multigpu' ]]; then
+          #   TEST_COMMAND=.ci/pytorch/multigpu-test.sh
+          # elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+          #   TEST_COMMAND=.ci/caffe2/test.sh
+          # else
+          #   TEST_COMMAND=.ci/pytorch/test.sh
+          # fi
+          # PREFLIGHT=""
+          # if [[ "${TEST_CONFIG}" == *distributed* ]]; then
+          #   PREFLIGHT="timeout 180 python .ci/pytorch/rocm_preflight.py && "
+          # fi
+          pwd  
+          TEST_COMMAND=.ci/pytorch/test.sh
+          pip install dist/*.whl && .ci/pytorch/test.sh
 
       # - name: Restore workspace owner
       #   if: always()
