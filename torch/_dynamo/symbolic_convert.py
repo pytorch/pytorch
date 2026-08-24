@@ -43,6 +43,7 @@ import threading
 import time
 import traceback
 import types
+import unittest
 import weakref
 from collections import defaultdict, deque
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
@@ -181,9 +182,11 @@ from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
+    DequeIteratorVariable,
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .variables.misc import (
@@ -2924,7 +2927,20 @@ class InstructionTranslatorBase(
                 raise e.with_traceback(raised_exception.__traceback__) from None
 
             curr_exc = self.exn_vt_stack.get_raised_exception()
-            dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
+            exc_python_type = curr_exc.python_type()
+            if (self.one_graph or self.error_on_graph_break) and issubclass(
+                exc_python_type, unittest.SkipTest
+            ):
+                try:
+                    skip_args: list[Any] = [
+                        a.as_python_constant() for a in curr_exc.args
+                    ]
+                except NotImplementedError:
+                    skip_args = []
+                skip_exc = exc_python_type(*skip_args)
+                raise skip_exc from None
+
+            dynamo_exc = exc.get_dynamo_observed_exception(exc_python_type)
             if not isinstance(raised_exception, dynamo_exc):
                 raise AssertionError(
                     "expected isinstance(raised_exception, dynamo_exc) to be true"
@@ -3386,6 +3402,14 @@ class InstructionTranslatorBase(
             [obj, VariableTracker.build(self, inst.argval)],
             {},
         )
+
+    def DELETE_DEREF(self, inst: Instruction) -> None:
+        if inst.argval not in self.cell_and_freevars():
+            raise AssertionError(
+                "expected inst.argval in self.cell_and_freevars() to be true"
+            )
+        cell = self._cellvar(inst.argval)
+        self.output.side_effects.store_cell(cell, variables.DeletedVariable())
 
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
         # Only check side_effects — a pure dict lookup with no observable
@@ -4407,6 +4431,10 @@ class InstructionTranslatorBase(
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_VALUE(self, inst: Instruction) -> None:
         flags = inst.arg
         if flags is None:
@@ -5056,14 +5084,26 @@ class InstructionTranslatorBase(
 
         self.push(fn)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when converting an f-string value",
+    )
     def CONVERT_VALUE(self, inst: Instruction) -> None:
         if inst.arg is None:
             raise AssertionError("expected inst.arg is not None to be true")
         self.push(self._convert_value(self.pop(), inst.arg))
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_SIMPLE(self, inst: Instruction) -> None:
         self._format_value(VariableTracker.build(self, ""), 0)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when formatting an f-string value",
+    )
     def FORMAT_WITH_SPEC(self, inst: Instruction) -> None:
         self._format_value(self.pop(), 0)
 
@@ -5182,7 +5222,7 @@ class InstructionTranslatorBase(
         nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
         return nn_modules_pattern.match(filename) is not None
 
-    def store_global_weakref_by_id(self, prefix: str, value: Any) -> str:
+    def store_global_weakref_by_id(self, prefix: str, value: object) -> str:
         global_name = self.output.install_global_by_id(prefix, weakref.ref(value))
         install_guard(
             GlobalWeakRefSource(global_name).make_guard(GuardBuilder.WEAKREF_ALIVE)
@@ -6534,7 +6574,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        if not isinstance(tos, ListIteratorVariable):
+        iter_vts = (ListIteratorVariable, TupleIteratorVariable, DequeIteratorVariable)
+        if not isinstance(tos, iter_vts):
             self.pop()
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
