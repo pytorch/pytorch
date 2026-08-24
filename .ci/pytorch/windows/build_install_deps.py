@@ -105,38 +105,37 @@ def install_libuv(workdir: Path, python_prefix: Path) -> Path:
     return libuv_root
 
 
-def constrain_cython_for_cp315() -> None:
-    """Hold Cython below 3.3.0 for the cp315 Windows builds.
+def preinstall_cp315_build_deps() -> list[str]:
+    """Pin Cython for the cp315 sdist builds and return the pip flags to use.
 
-    Cython 3.3.0 (released 2026-08-22) crashes with STATUS_ACCESS_VIOLATION
-    (0xC0000005) when merely asked for its version under the GIL-enabled
-    CPython 3.15 build on Windows, so any package pip has to build from an
-    sdist dies in its PEP 517 hook. meson-backed projects report this as the
-    misleading "Unknown compiler(s): [['cython'], ['cython3']]"; setuptools
-    ones just exit 3221225477 with no output.
+    Cython 3.3.0 (released 2026-08-22 05:16 UTC) crashes with
+    STATUS_ACCESS_VIOLATION (0xC0000005, decimal 3221225477) under the
+    GIL-enabled CPython 3.15 build on Windows, so every package pip has to
+    build from an sdist dies in its PEP 517 hook. meson projects surface it as
+    the misleading "Unknown compiler(s): [['cython'], ['cython3']]"; setuptools
+    ones just exit 3221225477 with no output at all.
 
-    The Windows nightly went red on 2026-08-22, the first run after that
-    release, having passed on 2026-08-21 with Cython 3.2.9. The freethreaded
-    cp315t builds are unaffected, so this is specific to the GIL-enabled 3.15
-    build; the condition still covers both, because 3.15t gains nothing from
-    3.3.0 and one version check is easier to delete later.
+    The Windows nightly passed on 2026-08-21 and has failed every run since
+    2026-08-22, the first after that release, with no PyTorch-side change and
+    no setuptools/wheel/packaging release in the window. cp315t is unaffected,
+    so the crash is specific to the GIL-enabled build.
 
-    PIP_CONSTRAINT is used rather than installing Cython here because pip
-    propagates it into the isolated build environments where the crashing
-    Cython actually gets installed. Remove once Cython ships a fix.
+    PIP_CONSTRAINT does not work here: pip does not apply it to the isolated
+    build environments, which is where the crashing Cython is installed. That
+    was verified directly with pip 26.2.1 -- building pyyaml from its sdist
+    installs Cython 3.3.0 into the build env whether or not PIP_CONSTRAINT
+    pins it lower. So instead pin Cython in the outer environment and turn
+    build isolation off, which makes sdist builds use the pinned copy.
+
+    Remove once Cython ships a fix.
     """
     if sys.version_info[:2] != (3, 15):
-        return
-    if os.environ.get("PIP_CONSTRAINT"):
-        print(
-            "PIP_CONSTRAINT already set, not overriding; "
-            "cp315 builds may pick up the crashing Cython 3.3.0"
-        )
-        return
-    constraints = WIN_CI_DIR / "cp315-constraints.txt"
-    constraints.write_text("cython<3.3.0\n")
-    os.environ["PIP_CONSTRAINT"] = str(constraints)
-    print(f"Constrained Cython for cp315 source builds: {constraints}")
+        return []
+    # setuptools/wheel must be present too: without isolation pip will not
+    # provide them to the sdist builds.
+    pip_install("-q", "cython<3.3.0", "setuptools", "wheel")
+    print("Pinned cython<3.3.0 for cp315 sdist builds; disabling build isolation")
+    return ["--no-build-isolation"]
 
 
 def main() -> None:
@@ -144,9 +143,9 @@ def main() -> None:
     parser.add_argument("--env-out", type=Path)
     args = parser.parse_args()
 
-    constrain_cython_for_cp315()
-    pip_install("-q", f"numpy=={numpy_pin()}")
-    pip_install("-q", *PIP_PACKAGES)
+    build_flags = preinstall_cp315_build_deps()
+    pip_install("-q", *build_flags, f"numpy=={numpy_pin()}")
+    pip_install("-q", *build_flags, *PIP_PACKAGES)
 
     if not os.environ.get("SKIP_SETUP_CLEAN"):
         subprocess.run(
