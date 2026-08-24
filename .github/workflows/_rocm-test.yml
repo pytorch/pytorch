@@ -94,8 +94,53 @@ jobs:
         with:
           no-sudo: true
 
-      - name: Setup ROCm
-        uses: $/.github/actions/setup-rocm
+      # - name: Setup ROCm
+      #   uses: $/.github/actions/setup-rocm
+
+
+      - name: Setup useful environment variables
+        shell: bash
+        run: |
+          RUNNER_ARTIFACT_DIR="${RUNNER_TEMP}/artifacts"
+          rm -rf "${RUNNER_ARTIFACT_DIR}"
+          mkdir -p "${RUNNER_ARTIFACT_DIR}"
+          echo "RUNNER_ARTIFACT_DIR=${RUNNER_ARTIFACT_DIR}" >> "${GITHUB_ENV}"
+
+          RUNNER_TEST_RESULTS_DIR="${RUNNER_TEMP}/test-results"
+          rm -rf "${RUNNER_TEST_RESULTS_DIR}"
+          mkdir -p "${RUNNER_TEST_RESULTS_DIR}"
+          echo "RUNNER_TEST_RESULTS_DIR=${RUNNER_TEST_RESULTS_DIR}" >> "${GITHUB_ENV}"
+
+          RUNNER_DOCS_DIR="${RUNNER_TEMP}/docs"
+          rm -rf "${RUNNER_DOCS_DIR}"
+          mkdir -p "${RUNNER_DOCS_DIR}"
+          echo "RUNNER_DOCS_DIR=${RUNNER_DOCS_DIR}" >> "${GITHUB_ENV}"
+
+      - name: Preserve github env variables for use in docker
+        shell: bash
+        run: |
+          env | grep '^GITHUB' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+
+      - name: Login to ECR
+        uses: pytorch/pytorch/.github/actions/ecr-login@main
+
+      - name: Preserve github env variables for use in docker
+        shell: bash
+        run: |
+          env | grep '^GITHUB' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+          env | grep '^RUNNER' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+
+      - name: Configure AWS credentials
+        id: aws-creds
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+          # The max duration enforced by the server side
+          role-duration-seconds: 18000
 
       - name: Runner check GPU count (distributed jobs)
         if: ${{ contains(matrix.config, 'distributed') }}
