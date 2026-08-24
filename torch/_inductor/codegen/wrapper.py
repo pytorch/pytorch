@@ -5,6 +5,7 @@ import collections
 import contextlib
 import dataclasses
 import dis
+import enum
 import functools
 import inspect
 import logging
@@ -337,6 +338,27 @@ def user_defined_kernel_grid_fn_code(
                 writeline(statement, f"if {guards}: return {example_grid}")
 
     return fn_name, output.getvalue()
+
+
+def _constexpr_constant(value: Any) -> Any:
+    """A ``tl.constexpr`` value in a form the generated kernel can be parsed with.
+
+    ``triton_meta`` is emitted with ``repr()``, so a value whose repr is not an
+    expression makes the generated file unimportable and loses the kernel --
+    ``'ROUNDING_MODE': <RoundingMode.even: 2>`` is a ``SyntaxError``, and every
+    frame above it silently falls back to eager.
+
+    Only ``IntEnum`` is rewritten, and only to its int. That is safe because the
+    value reaches ``ASTSource`` as a Triton specialisation input: an ``IntEnum``
+    compares and hashes equal to that int, so the kernel Triton builds and the
+    key it is cached under are unchanged. A plain ``Enum`` is NOT equal to its
+    value, so rewriting one would change what a kernel comparing against it
+    computes; those still fail here, and want a reconstructible expression plus
+    an import in the generated file rather than a substitution.
+    """
+    if isinstance(value, enum.IntEnum):
+        return int(value)
+    return value
 
 
 def user_defined_triton_kernel_transitive_closure_source_code(
@@ -3419,7 +3441,7 @@ class PythonWrapperCodegen(CodeGen):
                 if arg.name in kwargs:
                     # the arg may not appear in kwargs if it is an autotuned arg.
                     # in this case, it will be added in triton_heuristics after autotuning.
-                    constants[arg.name] = kwargs[arg.name]
+                    constants[arg.name] = _constexpr_constant(kwargs[arg.name])
 
             else:
                 # the only case where arg name isn't in kwargs, should be
