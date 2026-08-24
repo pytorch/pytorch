@@ -47,11 +47,14 @@ CPP_TEST_GLOBS = [
 
 REPO_ROOT = Path(__file__).parents[3]
 
-# A comment naming the header(s) the symbols below it come from, e.g.
+# Where a C++ #include is resolved from. Headers under aten/src include each
+# other as <ATen/...>, so aten/src is an include root too.
+INCLUDE_ROOTS = (REPO_ROOT, REPO_ROOT / "aten/src")
+
+# A comment naming the header the symbols below it come from, e.g.
 #   "# torch/headeronly/util/Half.h"
-#   "# c10/util/complex.h, torch/headeronly/util/complex.h"
 # Other comments in the file are prose and do not change the attribution.
-HEADER_COMMENT = re.compile(r"^#\s*([\w/.]+\.h(?:\s*,\s*[\w/.]+\.h)*)\s*$")
+HEADER_COMMENT = re.compile(r"^#\s*([\w/.]+\.h)\s*$")
 IDENTIFIER = re.compile(r"^[A-Za-z_]\w*$")
 INCLUDE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE)
 
@@ -59,7 +62,7 @@ INCLUDE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE)
 class Symbol(NamedTuple):
     name: str
     lineno: int
-    headers: list[str]
+    header: str | None
 
 
 @functools.cache
@@ -68,27 +71,28 @@ def _read(path: Path) -> str:
 
 
 @functools.cache
-def resolve_header(include: str) -> Path | None:
-    """Map an include path to a file on disk. ATen lives under aten/src."""
-    for candidate in (REPO_ROOT / include, REPO_ROOT / "aten/src" / include):
+def resolve_include(include: str) -> Path | None:
+    """Map an #include to a file on disk. Paths are relative to an include root."""
+    for root in INCLUDE_ROOTS:
+        candidate = root / include
         if candidate.is_file():
             return candidate
     return None
 
 
 def include_closure(header: Path) -> set[Path]:
-    """Every in-tree header reachable from `header`.
+    """Return a set of every in-tree header reachable from `header`.
 
     What matters is whether including the filed header gets you the symbol,
-    not whether the token sits in that exact file. ATen/cpu/vec/vec.h is a
-    small umbrella over the arch-specific vec headers, and Dispatch_v2.h pulls
-    its macros in from Dispatch.h.
+    not whether the token sits in that exact file. e.g., ATen/cpu/vec/vec.h is
+    a small umbrella over the arch-specific vec headers, and Dispatch_v2.h
+    pulls its macros in from Dispatch.h.
     """
     seen = {header}
     queue = [header]
     while queue:
         for include in INCLUDE.findall(_read(queue.pop())):
-            nxt = resolve_header(include)
+            nxt = resolve_include(include)
             if nxt is not None and nxt not in seen:
                 seen.add(nxt)
                 queue.append(nxt)
@@ -121,10 +125,10 @@ def find_matched_symbols(
 
 
 def parse_symbols(filename: str) -> list[Symbol]:
-    """Read header_only_apis.txt, attributing each symbol to the header(s)
-    named by the most recent header comment above it."""
+    """Read header_only_apis.txt, attributing each symbol to the header named
+    by the most recent header comment above it."""
     entries: list[Symbol] = []
-    headers: list[str] = []
+    header: str | None = None
     with open(filename) as f:
         for idx, line in enumerate(f):
             symbol = line.strip()
@@ -133,22 +137,19 @@ def parse_symbols(filename: str) -> list[Symbol]:
             if symbol[0] == "#":
                 match = HEADER_COMMENT.match(symbol)
                 if match:
-                    headers = [h.strip() for h in match.group(1).split(",")]
+                    header = match.group(1)
                 continue
-            entries.append(Symbol(symbol, idx + 1, headers))
+            entries.append(Symbol(symbol, idx + 1, header))
     return entries
 
 
-def is_reachable(symbol: Symbol, pattern: re.Pattern[str]) -> bool:
-    """Whether the symbol turns up in any header it is filed under, or in
-    anything those headers include."""
-    for filed_under in symbol.headers:
-        header = resolve_header(filed_under)
-        if header is None:
-            continue
-        if any(pattern.search(_read(f)) for f in include_closure(header)):
-            return True
-    return False
+def is_reachable(filed_under: str, pattern: re.Pattern[str]) -> bool:
+    """Whether the symbol turns up in the header it is filed under, or in
+    anything that header includes."""
+    header = REPO_ROOT / filed_under
+    if not header.is_file():
+        return False
+    return any(pattern.search(_read(f)) for f in include_closure(header))
 
 
 def check_symbols_exist(filename: str, entries: list[Symbol]) -> list[LintMessage]:
@@ -163,21 +164,20 @@ def check_symbols_exist(filename: str, entries: list[Symbol]) -> list[LintMessag
             # operators are spelled "operator<<" in the header
             pattern = re.compile(rf"operator\s*{re.escape(symbol.name)}")
 
-        if not symbol.headers:
+        if symbol.header is None:
             description = (
                 f"{symbol.name} is not filed under any header. Add a comment "
                 "naming its header (e.g. '# torch/headeronly/util/Half.h') "
                 "above it so its continued existence can be verified."
             )
-        elif is_reachable(symbol, pattern):
+        elif is_reachable(symbol.header, pattern):
             continue
         else:
             description = (
                 f"{symbol.name} is listed as a header-only API but was not "
-                f"found in {' or '.join(symbol.headers)} (or anything they "
-                "include). If it was renamed or removed, update this file to "
-                "match -- a stale entry advertises an API that no longer "
-                "exists. If it moved, correct the header comment above it."
+                f"found in {symbol.header} (or anything it includes). If it "
+                "was renamed or removed, update header_only_apis.txt to match."
+                " If it moved, correct the header comment above it."
             )
 
         lint_messages.append(
