@@ -283,6 +283,28 @@ def _elem_dtype(param: GemmGfx950Param):
     return fx.Float16 if const_expr(param.dtype_id == GEMM_DTYPE_FP16) else fx.BFloat16
 
 
+def _make_gemm_gfx950_tiled_mma(param: GemmGfx950Param):
+    mma_atom = fx.make_mma_atom(
+        fx.rocdl.MFMA(param.mma_m, param.mma_n, param.mma_k, _elem_dtype(param))
+    )
+    k_per_mfma_group = param.mma_k // 4
+    return fx.make_tiled_mma(
+        mma_atom,
+        fx.make_layout(
+            (param.m_waves, param.n_waves, 1),
+            (param.n_waves, 1, 0),
+        ),
+        fx.make_tile(
+            None,
+            None,
+            fx.make_layout(
+                (k_per_mfma_group, 4),
+                (1, k_per_mfma_group),
+            ),
+        ),
+    )
+
+
 @flyc.kernel
 def gemm_gfx950_kernel(
     out: fx.Tensor,
@@ -973,26 +995,7 @@ def gemm_gfx950(
     k = fx.Int32(fx.get_scalar(a.shape[1]))
     a_row_stride = fx.Int32(fx.get_scalar(a.stride[0]))
     b_row_stride = fx.Int32(fx.get_scalar(b.stride[0]))
-    elem_dtype = _elem_dtype(param)
-    mma_atom = fx.make_mma_atom(
-        fx.rocdl.MFMA(param.mma_m, param.mma_n, param.mma_k, elem_dtype)
-    )
-    k_per_mfma_group = param.mma_k // 4
-    tiled_mma = fx.make_tiled_mma(
-        mma_atom,
-        fx.make_layout(
-            (param.m_waves, param.n_waves, 1),
-            (param.n_waves, 1, 0),
-        ),
-        fx.make_tile(
-            None,
-            None,
-            fx.make_layout(
-                (k_per_mfma_group, 4),
-                (1, k_per_mfma_group),
-            ),
-        ),
-    )
+    tiled_mma = _make_gemm_gfx950_tiled_mma(param)
     num_pid_m = (m - 1) // param.block_m + 1
     num_pid_n = (n - 1) // param.block_n + 1
     kernel_impl = (
