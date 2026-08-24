@@ -928,6 +928,11 @@ def optim_inputs_func_muon(device, dtype=None):
             kwargs={"adjust_lr_fn": "spectral_unclamped"},
             desc="spectral_unclamped lr adjustment",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={"allow_batched": True},
+            desc="allow batched matrices",
+        ),
     ]
 
 
@@ -935,6 +940,8 @@ def optim_error_inputs_func_muon(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
     complex_param = torch.rand(2, 3, device=device, dtype=torch.complex64)
     complex_param.grad = torch.rand_like(complex_param)
+    non_2d_param = torch.rand(2, 3, 4, device=device, dtype=dtype)
+    non_2d_param.grad = torch.rand_like(non_2d_param)
     non_matrix_param = torch.rand(3, device=device, dtype=dtype)
     non_matrix_param.grad = torch.rand_like(non_matrix_param)
     param = torch.rand(2, 3, device=device, dtype=dtype)
@@ -942,12 +949,22 @@ def optim_error_inputs_func_muon(device, dtype):
     error_inputs += [
         ErrorOptimizerInput(
             OptimizerInput(
-                params=[non_matrix_param],
+                params=[non_2d_param],
                 kwargs=dict(),
-                desc="requires matrix parameters",
+                desc="only support 2D parameters",
             ),
             error_type=ValueError,
-            error_regex="Muon requires parameters with at least two dimensions",
+            error_regex="Muon only supports 2D parameters",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[non_matrix_param],
+                kwargs={"allow_batched": True},
+                desc="allow_batched still requires matrices",
+            ),
+            error_type=ValueError,
+            error_regex="requires parameters with at least two dimensions",
             error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
         ),
         ErrorOptimizerInput(

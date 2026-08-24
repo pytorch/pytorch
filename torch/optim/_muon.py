@@ -28,6 +28,11 @@ DEFAULT_C = 2.0315
 DEFAULT_NS_STEPS = 5
 
 
+def _ndim_supported(ndim: int, allow_batched: bool) -> bool:
+    """Muon is a matrix optimizer; batches of matrices are opt-in."""
+    return ndim == 2 or (allow_batched and ndim > 2)
+
+
 def _zeropower_via_newtonschulz(
     grad: Tensor, ns_coefficients: tuple[float, float, float], ns_steps: int, eps: float
 ) -> Tensor:
@@ -112,6 +117,7 @@ class Muon(Optimizer):
         eps: float = EPS,
         ns_steps: int = DEFAULT_NS_STEPS,
         adjust_lr_fn: str | None = None,
+        allow_batched: bool = False,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -139,19 +145,27 @@ class Muon(Optimizer):
             "eps": eps,
             "ns_steps": ns_steps,
             "adjust_lr_fn": adjust_lr_fn,
+            "allow_batched": allow_batched,
         }
         super().__init__(params, defaults)
 
     def add_param_group(self, param_group: dict) -> None:
         super().add_param_group(param_group)
         group = self.param_groups[-1]
+        allow_batched = group["allow_batched"]
         for p in group["params"]:
-            if p.ndim < 2:
-                self.param_groups.pop()
+            if _ndim_supported(p.ndim, allow_batched):
+                continue
+            self.param_groups.pop()
+            if allow_batched:
                 raise ValueError(
-                    "Muon requires parameters with at least two dimensions, "
-                    f"but found a parameter with size: {p.size()}"
+                    "Muon with allow_batched=True requires parameters with at least "
+                    f"two dimensions, but found a parameter with size: {p.size()}"
                 )
+            raise ValueError(
+                f"Muon only supports 2D parameters whereas we found a parameter with size: {p.size()}. "
+                "Batches of matrices, shaped [..., M, N], are supported with allow_batched=True."
+            )
 
     def _init_group(
         self,
@@ -218,6 +232,7 @@ class Muon(Optimizer):
                 eps=group["eps"],
                 ns_steps=group["ns_steps"],
                 adjust_lr_fn=group["adjust_lr_fn"],
+                allow_batched=group["allow_batched"],
                 has_complex=has_complex,
             )
         return loss
@@ -285,10 +300,9 @@ Muon.__doc__ = (
     """
     + rf"""
     Args:
-        {_params_doc}. Muon treats the last two dimensions as matrix dimensions
-            and any leading dimensions as a batch of independent matrices. Other
-            parameters, such as bias, should be optimized by a standard method
-            such as AdamW.
+        {_params_doc}. Note that Muon is an optimizer for 2D parameters of neural network hidden layers. Other
+            parameters, such as bias, and embedding, should be optimized by a standard method such as AdamW.
+            Parameters with more than two dimensions are only accepted when ``allow_batched=True``.
         lr (float, Tensor, optional): learning rate (default: 1e-3).
         weight_decay (float, optional): weight decay (L2 penalty). (default: 0.1)
         momentum (float, optional): momentum factor (default: 0.95)
@@ -300,15 +314,22 @@ Muon.__doc__ = (
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
         adjust_lr_fn (str, optional): function to adjust learning rate. One of "original", "match_rms_adamw", and "spectral_unclamped".
             If not specified, we will default to use "original". (default: None)
+        allow_batched (bool, optional): opt in to parameters shaped :math:`[..., M, N]`. The last two dimensions
+            are the matrix dimensions and any leading dimensions are treated as a batch of independent matrices,
+            each orthogonalized on its own. This is useful for per-head or per-expert Muon, where a fused
+            parameter stores many logical matrices. When ``False``, only 2D parameters are accepted, so that a
+            future >2D Muon formulation is free to interpret the leading dimensions differently. (default: False)
+
     Example:
         >>> # xdoctest: +SKIP
-        >>> # Muon supports matrices and batches of matrices. Use a standard
-        >>> # optimizer such as AdamW for biases and other rank-1 parameters.
+        >>> # Muon only supports 2D params; use a standard optimizer
+        >>> # such as AdamW for biases, embeddings, and other non-2D
+        >>> # parameters.
         >>> muon_params = [
-        ...     p for p in model.parameters() if p.ndim >= 2
+        ...     p for p in model.parameters() if p.ndim == 2
         ... ]
         >>> other_params = [
-        ...     p for p in model.parameters() if p.ndim < 2
+        ...     p for p in model.parameters() if p.ndim != 2
         ... ]
         >>> optim_muon = torch.optim.Muon(
         ...     muon_params, lr=0.02, momentum=0.95
@@ -321,6 +342,14 @@ Muon.__doc__ = (
         >>> loss_fn(model(input), target).backward()
         >>> optim_muon.step()
         >>> optim_adamw.step()
+
+        >>> # xdoctest: +SKIP
+        >>> # Opt in to a batch of matrices, e.g. per-expert Muon over a
+        >>> # grouped expert weight of shape [num_experts, hidden_dim, dim].
+        >>> # Newton-Schulz runs independently on each expert matrix.
+        >>> optim_muon = torch.optim.Muon(
+        ...     [grouped_expert_weight], lr=0.02, allow_batched=True
+        ... )
 
     .. _Muon\: An optimizer for hidden layers in neural networks:
         https://kellerjordan.github.io/posts/muon/
@@ -346,6 +375,7 @@ def _single_tensor_muon(
     ns_steps: int,
     eps: float,
     adjust_lr_fn: str | None,
+    allow_batched: bool = False,
     has_complex: bool,
 ) -> None:
     lr = _to_scalar(lr)
@@ -354,8 +384,9 @@ def _single_tensor_muon(
 
     for i, param in enumerate(params):
         grad = grads[i]
-        if grad.ndim < 2:
-            raise ValueError("Param gradient must be a matrix or matrix batch")
+        if not _ndim_supported(grad.ndim, allow_batched):
+            expected = "a matrix or matrix batch" if allow_batched else "a 2D matrix"
+            raise ValueError(f"Param gradient must be {expected}")
 
         buf = muon_momentum_bufs[i]
         buf.lerp_(grad, 1 - momentum)
@@ -385,6 +416,7 @@ def muon(
     ns_steps: int,
     eps: float,
     adjust_lr_fn: str | None,
+    allow_batched: bool = False,
     has_complex: bool,
 ) -> None:
     r"""Functional API that performs Muon algorithm computation.
@@ -408,5 +440,6 @@ def muon(
         ns_steps=ns_steps,
         eps=eps,
         adjust_lr_fn=adjust_lr_fn,
+        allow_batched=allow_batched,
         has_complex=has_complex,
     )
