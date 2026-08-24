@@ -2046,7 +2046,6 @@ class TestCvtE8M0Rceil(TestCase):
     hw_classification = HardwareClassification.CUDA
     """Tests for cvt_e8m0_rceil prim with PTX lowering on NVIDIA Blackwell."""
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_correctness(self, device):
         """Test correctness for various dtypes."""
 
@@ -2064,7 +2063,6 @@ class TestCvtE8M0Rceil(TestCase):
             compiled_result = torch.compile(fn)(inp)
             self.assertEqual(compiled_result, eager_result)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_pattern_match(self, device):
         """Test that the log2+ceil pattern gets matched and replaced."""
         _misc_patterns_init()
@@ -2086,7 +2084,6 @@ class TestCvtE8M0Rceil(TestCase):
         compiled_result = torch.compile(fn_with_log2_pattern)(inp)
         self.assertEqual(compiled_result, eager_result)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_ptx_code_generation(self, device):
         """Test that PTX instruction appears in generated code."""
 
@@ -2100,7 +2097,6 @@ class TestCvtE8M0Rceil(TestCase):
         code_str = "\n".join(code)
         self.assertIn("cvt.rp.satfinite.ue8m0x2.f32", code_str)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_log2_pattern_near_power_of_two(self, device):
         """Values within 1 ULP above a power of 2 must ceil to the next integer.
 
@@ -2149,7 +2145,6 @@ class TestE8M0Log2PatternBitManip(TestCase):
     software log2 near exact powers of 2 (gh-178045).
     """
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_pattern_fires_and_is_correct(self, device):
         """The log2+ceil pattern should be matched and produce correct uint8."""
         _misc_patterns_init()
@@ -2169,7 +2164,6 @@ class TestE8M0Log2PatternBitManip(TestCase):
         compiled_result = torch.compile(fn)(inp)
         self.assertEqual(compiled_result, eager_result)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_correct_for_values_one_ulp_above_power_of_two(self, device):
         """Values 1 ULP above a power of 2 must produce the correct (higher) exponent.
 
@@ -2200,7 +2194,6 @@ class TestE8M0Log2PatternBitManip(TestCase):
         compiled_result = torch.compile(fn)(inp)
         self.assertEqual(compiled_result, expected)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_regression_gh178045_encoding_correctness(self, device):
         """Regression for gh-178045: encoding must be correct for inputs near power-of-2.
 
