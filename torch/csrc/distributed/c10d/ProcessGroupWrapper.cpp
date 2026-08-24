@@ -8,6 +8,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <fmt/ostream.h>
+#include <fmt/ranges.h>
 #include <chrono>
 #include <optional>
 #include <stdexcept>
@@ -363,12 +364,12 @@ std::ostream& operator<<(
 
     fmt::print(
         output,
-        "CollectiveFingerPrint(SequenceNumber={}, OpType={}, TensorShape=[{}], TensorDtypes={}, TensorDeviceTypes={}",
+        "CollectiveFingerPrint(SequenceNumber={}, OpType={}, TensorShape=[{}], TensorDtypes=[{}], TensorDeviceTypes=[{}]",
         collective_fingerprint.sequence_number_,
         op_type_str,
-        c10::Join(", ", size_strs),
-        fmt::streamed(dtype_strs),
-        fmt::streamed(device_type_strs));
+        fmt::join(size_strs, ", "),
+        fmt::join(dtype_strs, ", "),
+        fmt::join(device_type_strs, ", "));
   } else {
     fmt::print(
         output,
@@ -378,7 +379,7 @@ std::ostream& operator<<(
   }
   if (collective_fingerprint.python_gc_counts_.has_value()) {
     const auto& gc = *collective_fingerprint.python_gc_counts_;
-    fmt::print(output, ", PythonGcCounts=[{}, {}, {}]", gc[0], gc[1], gc[2]);
+    fmt::print(output, ", PythonGcCounts=[{}]", fmt::join(gc, ", "));
   }
   if (collective_fingerprint.steady_clock_time_ms_.has_value()) {
     fmt::print(
