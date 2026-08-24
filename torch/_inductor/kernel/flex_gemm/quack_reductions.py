@@ -30,7 +30,6 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
 from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
-    local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
 )
 from torch._inductor.kernel.gemm_epilogue import (
@@ -87,7 +86,9 @@ class GroupedTensorSSALayout(GemmReductionGeometry):
 
     @property
     def needs_physical_callbacks(self) -> bool:
-        return local_reduce_needs_physical_callbacks(self.tensorssa_axis, self.group)
+        return GemmReductionGeometry(
+            self.group, self.tensorssa_axis
+        ).needs_physical_callbacks
 
     @property
     def needs_physical_combine(self) -> bool:
