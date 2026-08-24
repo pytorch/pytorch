@@ -2547,8 +2547,97 @@ class OutputGraph(OutputGraphCommon):
         # codegen cells before we apply side effects
         self.codegen_cells(tx, cg)
 
+        if config.replay_side_effects and self.side_effects.contextvar_mutations:
+            self._cache_contextvar_get_sources(cg, stack_values)
+        if config.replay_side_effects:
+            self.side_effects.codegen_contextvar_mutations(cg)
         cg.restore_stack(stack_values, value_from_source=not tx.export)
         self.side_effects.codegen_update_mutated(cg, log_side_effects)
+
+    def _cache_contextvar_get_sources(
+        self, cg: PyCodegen, stack_values: list[VariableTracker]
+    ) -> None:
+        from .source import ContextVarExplicitValueSource, ContextVarGetSource
+        from .variables.hashable import HashableTracker
+
+        contextvar_get_sources: OrderedSet[Source] = OrderedSet()
+        cache_roots = [
+            stack_values,
+            self.side_effects._get_modified_vars(),
+            list(self.side_effects.contextvar_states.items()),
+            [
+                (mutation.contextvar, mutation.value, mutation.token)
+                for mutation in self.side_effects.contextvar_mutations
+            ],
+        ]
+
+        def source_depends_on_contextvar_get(source: Source) -> bool:
+            pending = [source]
+            seen: set[int] = set()
+            while pending:
+                cur = pending.pop()
+                if id(cur) in seen:
+                    continue
+                seen.add(id(cur))
+                if isinstance(
+                    cur, (ContextVarGetSource, ContextVarExplicitValueSource)
+                ):
+                    return True
+                base = getattr(cur, "base", None)
+                if isinstance(base, Source):
+                    pending.append(base)
+            return False
+
+        def collect_contextvar_get_sources(var: VariableTracker) -> None:
+            source = getattr(var, "source", None)
+            if isinstance(source, Source) and source_depends_on_contextvar_get(source):
+                contextvar_get_sources.add(source)
+
+        visit_cache: dict[int, Any] = {}
+        worklist: list[Any] = [cache_roots]
+        while worklist:
+            cur = worklist.pop()
+            idx = id(cur)
+            if idx in visit_cache:
+                continue
+            visit_cache[idx] = cur
+
+            children: list[Any]
+            if isinstance(cur, VariableTracker):
+                cur = cur.unwrap()
+                collect_contextvar_get_sources(cur)
+                nonvars = cur._nonvar_fields
+                children = [
+                    subvalue
+                    for key, subvalue in cur.__dict__.items()
+                    if key not in nonvars
+                ]
+                if cur in self.side_effects.store_attr_mutations:
+                    children.extend(
+                        self.side_effects.store_attr_mutations[cur].values()
+                    )
+            elif isinstance(cur, HashableTracker):
+                children = [cur.vt]
+            elif isinstance(cur, (list, tuple)):
+                children = list(cur)
+            elif isinstance(cur, (dict, collections.OrderedDict)):
+                children = []
+                for key, value in cur.items():
+                    children.append(key)
+                    children.append(value)
+            else:
+                continue
+
+            worklist.extend(reversed(children))
+
+        for source in contextvar_get_sources:
+            if source in cg.tempvars:
+                cg(source)
+                cg.pop_top()
+            else:
+                cg(source)
+                cg.add_cache(source)
+            cg.clear_tos()
 
     def cleanup_graph(self) -> None:
         """
@@ -2560,6 +2649,7 @@ class OutputGraph(OutputGraphCommon):
         """
         if not self.should_exit:
             raise AssertionError("should_exit must be True before cleanup_graph")
+
         nodes = list(self.graph.nodes)
         for node in nodes:
             node.meta.pop("creation_timestamp", None)
