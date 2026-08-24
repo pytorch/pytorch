@@ -4,8 +4,8 @@ import flydsl.compiler as flyc
 import flydsl.expr as fx
 from flydsl.expr import const_expr
 
-from .flex_attn_utils import make_global_view
-from .flex_bwd_utils import (
+from .flex_attn_utils import (
+    make_global_view,
     make_mask_buffers,
     make_mask_evaluator,
     make_mfma32_ops,
