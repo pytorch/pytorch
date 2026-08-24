@@ -397,7 +397,9 @@ class TensorVariable(VariableTracker):
         proxy = tx.output.create_proxy(
             "call_function", op_fn, (self.as_proxy(), other.as_proxy()), {}
         )
-        return wrap_fx_proxy_cls(type(self), tx, proxy)
+        # Getting here means no __torch_function__ intercepted the comparison, so the
+        # result is a plain tensor even when self models a subclass.
+        return wrap_fx_proxy_cls(TensorVariable, tx, proxy)
 
     @staticmethod
     def specialize(value: torch.Tensor) -> TensorSpecializedProps:

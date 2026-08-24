@@ -1319,6 +1319,45 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         self.assertIsInstance(res_act, MySubclass)
         self.assertEqual(res_exp, res_act)
 
+        # The wrong class is also observable inside the graph, where it silently
+        # takes the other branch instead of raising.
+        def observe_intermediate(x):
+            y = torch.empty_like(x)
+            y.copy_(x)
+            return isinstance(y, MySubclass)
+
+        def observe_input(x):
+            x.add_(1)
+            return isinstance(x, MySubclass)
+
+        self.assertTrue(compile_full_eager(observe_intermediate)(x))
+        self.assertTrue(compile_full_eager(observe_input)(x.clone()))
+
+    def test_comparison_with_torch_function_disabled(self):
+        # A subclass that disables __torch_function__ does not intercept the
+        # comparison, so the result is a plain tensor and must be modelled as one.
+        class DisabledTF(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+        class MyParam(torch.nn.Parameter):
+            pass
+
+        def fn(x):
+            return x > 0
+
+        def fn_inplace(x):
+            x.add_(1)
+            return x > 0
+
+        base = torch.randn(2, 2)
+        for cls in (DisabledTF, MyParam):
+            for f in (fn, fn_inplace):
+                res_exp = f(base.clone().as_subclass(cls))
+                res_act = compile_full_eager(f)(base.clone().as_subclass(cls))
+                self.assertIs(type(res_exp), torch.Tensor)
+                self.assertIs(type(res_act), torch.Tensor)
+                self.assertEqual(res_exp, res_act)
+
     # ACT (AsyncCollectiveTensor) can be constructed directly, so the guard
     # relaxation for ACT inputs is exercised here on CPU without a process group.
     # The end-to-end path with a real collective + inductor is covered by
