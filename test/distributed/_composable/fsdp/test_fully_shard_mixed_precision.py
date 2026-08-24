@@ -561,6 +561,54 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         for param in model.parameters():
             self.assertEqual(param.grad_dtype, torch.float32)
 
+    @skip_if_lt_x_gpu(4)
+    def test_hsdp_partial_reduce_dtype(self):
+        """With a deferred all-reduce the microbatch partial sums are held
+        across backward calls. At reduce_dtype they round once per microbatch,
+        so an explicit wider grad_dtype widens the buffer."""
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, self.world_size // 2),
+            mesh_dim_names=("dp_replicate", "dp_shard"),
+        )
+        torch.manual_seed(42)
+        model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
+        model.to(device=device_type, dtype=torch.bfloat16)
+        # Leave the first parameter of each group at the default so the group is
+        # non-uniform: the shared buffer must widen to what any parameter needs,
+        # not to whatever the first one happens to be.
+        for mlp in model:
+            for idx, param in enumerate(mlp.parameters()):
+                if idx > 0:
+                    param.grad_dtype = torch.float32
+        mp_policy = MixedPrecisionPolicy(reduce_dtype=torch.bfloat16)
+        for mlp in model:
+            fully_shard(mlp, mesh=mesh, mp_policy=mp_policy)
+        fully_shard(model, mesh=mesh, mp_policy=mp_policy)
+
+        torch.manual_seed(42 + self.rank + 1)
+        num_microbatches = 3
+        microbatch_inps = torch.randn(
+            2 * num_microbatches, 16, device=device_type, dtype=torch.bfloat16
+        ).chunk(num_microbatches)
+        partial_dtypes = set()
+        for microbatch_idx in range(num_microbatches):
+            model.set_requires_all_reduce(microbatch_idx == num_microbatches - 1)
+            model(microbatch_inps[microbatch_idx]).sum().backward()
+            for module in model.modules():
+                state = _get_module_fsdp_state(module)
+                if state is None or state._fsdp_param_group is None:
+                    continue
+                partial = state._fsdp_param_group._partial_reduce_output
+                if partial is not None:
+                    partial_dtypes.add(partial.dtype)
+
+        self.assertEqual(partial_dtypes, {torch.float32})
+        for mlp in model:
+            for idx, param in enumerate(mlp.parameters()):
+                expected = torch.bfloat16 if idx == 0 else torch.float32
+                self.assertEqual(param.grad.dtype, expected)
+
     @skip_if_lt_x_gpu(2)
     def test_structured_input_output(self):
         """
