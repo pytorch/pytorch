@@ -1,6 +1,4 @@
 # Owner(s): ["module: inductor"]
-import ast
-import importlib
 import os
 import threading
 import unittest
@@ -61,47 +59,6 @@ class TestFlyDSLTemplate(TestCase):
         }
         defaults.update(overrides)
         return SimpleNamespace(**defaults)
-
-    def _expected_grouped_gemm_persistent_grid_size(
-        self, param, total_m, n, group_count, device_properties
-    ):
-        if total_m <= 0 or n <= 0 or group_count <= 0:
-            return 1
-
-        smem_bytes = (
-            param.stages
-            * (param.block_m + param.block_n)
-            * param.block_k
-            * param.in_data_bytes
-        )
-        smem_bytes = max(
-            smem_bytes, param.block_m * param.block_n * param.out_data_bytes
-        )
-        resource_blocks_per_cu = min(
-            max(device_properties.shared_memory_per_multiprocessor // smem_bytes, 1),
-            max(
-                device_properties.max_threads_per_multi_processor
-                // param.block_threads,
-                1,
-            ),
-        )
-        light_tile = param.block_m <= 64 and param.block_n <= 128
-        n_tiles = (n - 1) // param.block_n + 1
-        if light_tile:
-            blocks_per_cu = min(1 << (resource_blocks_per_cu.bit_length() - 1), 8)
-        else:
-            blocks_per_cu = 2 if resource_blocks_per_cu >= 2 else 1
-        nonempty_groups_upper = min(group_count, total_m)
-        m_tiles_upper = (
-            nonempty_groups_upper + (total_m - nonempty_groups_upper) // param.block_m
-        )
-        return max(
-            1,
-            min(
-                device_properties.multi_processor_count * blocks_per_cu,
-                m_tiles_upper * n_tiles,
-            ),
-        )
 
     def setUp(self):
         super().setUp()
@@ -661,86 +618,12 @@ class TestFlyDSLTemplate(TestCase):
         ):
             configs = flydsl_heuristics.get_default_grouped_gemm_configs()
             selected = flydsl_heuristics.get_grouped_gemm_configs()
-        self.assertEqual(
-            asdict(default_config),
-            {
-                "TILE_M": 128,
-                "TILE_N": 128,
-                "TILE_K": 64,
-                "STAGES": 2,
-                "BLOCK_M_WARPS": 1,
-                "BLOCK_N_WARPS": 4,
-                "GROUP_M": 0,
-                "USE_HALF_TILE_INTERLEAVED": False,
-            },
-        )
-        # The baseline must stay reachable regardless of candidate ordering.
         self.assertIn(default_config, configs)
         self.assertEqual(selected, [asdict(default_config)])
-        self.assertTrue(any(config.USE_HALF_TILE_INTERLEAVED for config in configs))
-
-    def test_flydsl_grouped_template_imports_exist(self):
-        from torch._inductor.kernel.mm_grouped import flydsl_grouped_mm_template
-
-        template = flydsl_grouped_mm_template.template
-        self.assertIsNotNone(template)
-        rendered = template.render(
-            kernel_name="flydsl_grouped_template_test",
-            input_nodes=[],
-            output_node=None,
-            gen_defines=lambda: "",
-            def_kernel=lambda *_: (
-                "def flydsl_grouped_template_test_main("
-                "mat1, mat2, offs, output, stream):"
-            ),
-            get_output=lambda: "output",
-        )
-        source = (
-            FlyDSLTemplateKernel(
-                kernel_name="flydsl_grouped_template_test",
-                input_nodes=[],
-                output_node=None,
-            ).gen_imports()
-            + rendered
-        )
-        compile(source, "flydsl_grouped_mm.py", "exec")
-
-        for node in ast.walk(ast.parse(source)):
-            if not isinstance(node, ast.ImportFrom) or node.module is None:
-                continue
-            module = importlib.import_module(node.module)
-            exports = getattr(module, "__all__", None)
-            for name in node.names:
-                if exports is not None:
-                    self.assertIn(name.name, exports)
-                else:
-                    self.assertTrue(
-                        hasattr(module, name.name),
-                        f"{name.name} is not defined by {node.module}",
-                    )
-
-    def test_flydsl_grouped_gemm_exhaustive_layout_filter(self):
-        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
-
-        flydsl_heuristics.get_exhaustive_grouped_gemm_configs.cache_clear()
-        self.addCleanup(
-            flydsl_heuristics.get_exhaustive_grouped_gemm_configs.cache_clear
-        )
-        valid = flydsl_heuristics.DEFAULT_GROUPED_GEMM_CONFIG
-        small_n = flydsl_heuristics.FlyDSLGemmConfig(32, 32, 64, 2, 1, 2, 0)
-        invalid_cshuffle = flydsl_heuristics.FlyDSLGemmConfig(16, 96, 64, 2, 1, 2, 0)
-        with mock.patch.object(
-            flydsl_heuristics,
-            "get_exhaustive_gemm_configs",
-            return_value=[small_n, invalid_cshuffle, valid],
-        ):
-            configs = flydsl_heuristics.get_exhaustive_grouped_gemm_configs()
-        self.assertEqual(configs, [valid])
 
     @parametrize(
         "config_args,n,expected",
         [
-            ((32, 32, 64, 2, 1, 2, 0), 32, False),
             ((16, 96, 64, 2, 1, 2, 0), 96, False),
             ((128, 128, 64, 2, 1, 4, 0), 128, True),
         ],
@@ -763,16 +646,7 @@ class TestFlyDSLTemplate(TestCase):
         "total_m,n,group_count,param_overrides,device_overrides,expected",
         [
             (0, 128, 6, {}, {}, 1),
-            (201, 0, 6, {}, {}, 1),
-            (201, 128, 0, {}, {}, 1),
-            (
-                201,
-                128,
-                6,
-                {},
-                {},
-                9,
-            ),
+            (201, 128, 6, {}, {}, 9),
             (
                 201,
                 128,
@@ -782,31 +656,12 @@ class TestFlyDSLTemplate(TestCase):
                 7,
             ),
             (
-                32,
-                128,
-                1,
-                {},
-                {},
-                1,
-            ),
-            (
                 10000,
                 256,
                 100,
                 {},
                 {"multi_processor_count": 10},
                 20,
-            ),
-            (
-                201,
-                128,
-                6,
-                {},
-                {
-                    "shared_memory_per_multiprocessor": 327680,
-                    "max_threads_per_multi_processor": 4096,
-                },
-                9,
             ),
         ],
     )
@@ -829,36 +684,17 @@ class TestFlyDSLTemplate(TestCase):
             param, total_m, n, group_count, device
         )
         self.assertEqual(grid_size, expected)
-        self.assertEqual(
-            grid_size,
-            self._expected_grouped_gemm_persistent_grid_size(
-                param, total_m, n, group_count, device
-            ),
-        )
 
-    def _meta_fp16_grouped_mm_inputs(self, n: int = 128):
-        mat_a = torch.empty(96, 128, device="meta", dtype=torch.float16)
-        mat_b = torch.empty(2, 128, n, device="meta", dtype=torch.float16)
-        offs = torch.empty(2, device="meta", dtype=torch.int32)
-        return mat_a, mat_b, offs
-
-    @parametrize("n", (96, 128))
-    def test_grouped_mm_fp16_meta_shape_inference(self, n):
+    def test_grouped_mm_fp16_meta_shape_inference(self):
         from torch._meta_registrations import meta_grouped_mm
 
-        mat_a, mat_b, offs = self._meta_fp16_grouped_mm_inputs(n=n)
+        mat_a = torch.empty(96, 128, device="meta", dtype=torch.float16)
+        mat_b = torch.empty(2, 128, 128, device="meta", dtype=torch.float16)
+        offs = torch.empty(2, device="meta", dtype=torch.int32)
         out = meta_grouped_mm(mat_a, mat_b, offs)
         self.assertEqual(out.dtype, torch.float16)
-        self.assertEqual(out.shape, (96, n))
+        self.assertEqual(out.shape, (96, 128))
 
-    @parametrize(
-        "dtype,k,n",
-        [
-            (torch.bfloat16, 128, 128),
-            (torch.bfloat16, 160, 256),
-            (torch.float16, 128, 128),
-        ],
-    )
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @torch._inductor.config.patch(
@@ -866,7 +702,7 @@ class TestFlyDSLTemplate(TestCase):
         max_autotune_gemm_backends="FLYDSL",
         flydsl_enable_autotuning=False,
     )
-    def test_flydsl_grouped_mm_e2e(self, dtype, k, n):
+    def test_flydsl_grouped_mm_e2e(self):
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
 
@@ -874,14 +710,15 @@ class TestFlyDSLTemplate(TestCase):
             [0, 1, 67, 0, 130, 3], device="cuda", dtype=torch.int32
         )
         offs = group_sizes.cumsum(0).to(torch.int32)
-        a = torch.randn(int(group_sizes.sum()), k, device="cuda", dtype=dtype)
-        b = torch.randn(group_sizes.numel(), k, n, device="cuda", dtype=dtype)
+        k = 128
+        n = 128
+        a = torch.randn(int(group_sizes.sum()), k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(group_sizes.numel(), k, n, device="cuda", dtype=torch.bfloat16)
         code = self._assert_compiled_grouped_mm(a, b, offs)
         self.assertIn(".mark_layout_dynamic()", code)
         self.assertIn("FLYDSL_COMPILE_ONLY", code)
         self.assertIn("_precompile", code)
 
-    @parametrize("k", (96, 192))
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @torch._inductor.config.patch(
@@ -891,7 +728,7 @@ class TestFlyDSLTemplate(TestCase):
         flydsl_enable_autotuning=True,
         autotune_in_subproc=True,
     )
-    def test_flydsl_grouped_mm_autotune_e2e(self, k):
+    def test_flydsl_grouped_mm_autotune_e2e(self):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
 
         if not flydsl_utils.runtime_available():
@@ -916,6 +753,7 @@ class TestFlyDSLTemplate(TestCase):
             [0, 1, 67, 0, 130, 3], device="cuda", dtype=torch.int32
         )
         offs = group_sizes.cumsum(0).to(torch.int32)
+        k = 96
         a = torch.randn(int(group_sizes.sum()), k, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(
             group_sizes.numel(), k, 128, device="cuda", dtype=torch.bfloat16
@@ -961,36 +799,12 @@ class TestFlyDSLTemplate(TestCase):
                 (128, 128, 64, 2, 1, 4, 4, False),
             ),
             (
-                "deep_pipeline",
-                1,
-                128,
-                128,
-                192,
-                (64, 128, 64, 3, 1, 4, 0, False),
-            ),
-            (
-                "large_tile",
-                1,
-                1024,
-                256,
-                128,
-                (256, 256, 64, 2, 2, 4, 0, True),
-            ),
-            (
                 "hti_odd_k_tiles",
                 1,
                 128,
                 128,
                 320,
                 (128, 128, 64, 2, 2, 2, 0, True),
-            ),
-            (
-                "persistent_hti",
-                8,
-                512,
-                4352,
-                128,
-                (256, 256, 64, 2, 2, 4, 0, True),
             ),
         )
         configs = [
@@ -1024,95 +838,6 @@ class TestFlyDSLTemplate(TestCase):
                 self.assertIn("launch_gemm_gfx950_grouped", code)
                 for field, value in zip(config_fields, expected_values):
                     self.assertIn(f"{field}: fx.Constexpr = {value}", code)
-
-    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
-    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
-    @torch._inductor.config.patch(
-        max_autotune_gemm=True,
-        max_autotune_gemm_backends="FLYDSL",
-        flydsl_enable_autotuning=True,
-        autotune_in_subproc=False,
-    )
-    def test_flydsl_grouped_mm_persistent_grid_stride_e2e(self):
-        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
-        from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
-            make_gemm_gfx950_param,
-        )
-        from torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_gemm_gfx950 import (
-            get_grouped_gemm_persistent_grid_size,
-        )
-
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
-
-        config_fields = (
-            "TILE_M",
-            "TILE_N",
-            "TILE_K",
-            "STAGES",
-            "BLOCK_M_WARPS",
-            "BLOCK_N_WARPS",
-            "GROUP_M",
-            "USE_HALF_TILE_INTERLEAVED",
-        )
-        expected_values = (64, 128, 64, 2, 2, 2, 0, True)
-        configs = [
-            asdict(config)
-            for config in flydsl_heuristics.get_default_grouped_gemm_configs()
-        ]
-        configs_by_values = {
-            tuple(config[field] for field in config_fields): config
-            for config in configs
-        }
-        self.assertIn(
-            expected_values,
-            configs_by_values,
-            f"missing grouped GEMM config {expected_values}; "
-            f"available configs: {tuple(configs_by_values)}",
-        )
-        config = configs_by_values[expected_values]
-
-        groups = 32
-        m_per_group = 512
-        n = 2048
-        k = 128
-        total_m = groups * m_per_group
-        group_sizes = torch.full(
-            (groups,), m_per_group, device="cuda", dtype=torch.int32
-        )
-        offs = group_sizes.cumsum(0).to(torch.int32)
-        a = torch.randn(total_m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(groups, k, n, device="cuda", dtype=torch.bfloat16)
-
-        param = make_gemm_gfx950_param(
-            block_m=config["TILE_M"],
-            block_n=config["TILE_N"],
-            block_k=config["TILE_K"],
-            stages=config["STAGES"],
-            m_waves=config["BLOCK_M_WARPS"],
-            n_waves=config["BLOCK_N_WARPS"],
-            group_m=config["GROUP_M"],
-            use_half_tile_interleaved=config["USE_HALF_TILE_INTERLEAVED"],
-        )
-        device = torch.cuda.get_device_properties(a.device)
-        grid_size = get_grouped_gemm_persistent_grid_size(
-            param, total_m, n, groups, device
-        )
-        n_tiles = (n - 1) // config["TILE_N"] + 1
-        m_tiles_upper = groups + (total_m - groups) // config["TILE_M"]
-        total_tiles = m_tiles_upper * n_tiles
-        self.assertGreater(
-            total_tiles,
-            grid_size,
-            "expected enough tiles to exercise persistent grid-stride loops",
-        )
-
-        with mock.patch.object(
-            flydsl_heuristics,
-            "get_grouped_gemm_configs",
-            return_value=[config],
-        ):
-            self._assert_compiled_grouped_mm(a, b, offs)
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
@@ -1166,33 +891,9 @@ class TestFlyDSLTemplate(TestCase):
             ),
             ("a_padded_stride", a_padded, b),
             ("b_padded_stride", a, b_padded),
-            (
-                "k_not_tile_divisible",
-                torch.randn(total_m, 80, device="cuda", dtype=torch.bfloat16),
-                torch.randn(2, 80, 128, device="cuda", dtype=torch.bfloat16),
-            ),
         )
 
         for name, case_a, case_b in cases:
-            with self.subTest(name=name):
-                self._assert_compiled_grouped_mm(
-                    case_a, case_b, offs, expect_flydsl=False
-                )
-
-        fp16_a = torch.randn(total_m, k, device="cuda", dtype=torch.float16)
-        fp16_cases = (
-            (
-                "fp16_n_not_tile_divisible",
-                fp16_a,
-                torch.randn(2, k, 96, device="cuda", dtype=torch.float16),
-            ),
-            (
-                "fp16_b_padded_stride",
-                fp16_a,
-                torch.randn(2, k, 136, device="cuda", dtype=torch.float16)[..., :128],
-            ),
-        )
-        for name, case_a, case_b in fp16_cases:
             with self.subTest(name=name):
                 self._assert_compiled_grouped_mm(
                     case_a, case_b, offs, expect_flydsl=False

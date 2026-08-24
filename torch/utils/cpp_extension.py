@@ -475,9 +475,14 @@ JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 PLAT_TO_VCVARS = {
     'win32' : 'x86',
     'win-amd64' : 'x86_amd64',
+    'win-arm64' : 'arm64',
 }
 
 min_supported_cpython = "0x030A0000"  # Python 3.10 hexcode
+
+def _windows_cuda_lib_dir() -> str:
+    return os.path.join('lib', 'arm64' if sysconfig.get_platform().lower() == 'win-arm64' else 'x64')
+
 
 def get_cxx_compiler():
     if IS_WINDOWS:
@@ -1798,7 +1803,7 @@ def library_paths(device_type: str = "cpu", torch_include_dirs: bool = True, cro
             paths.append(os.path.join(WINDOWS_CUDA_HOME, lib_dir))
         else:
             if IS_WINDOWS:
-                lib_dir = os.path.join('lib', 'x64')
+                lib_dir = _windows_cuda_lib_dir()
             else:
                 lib_dir = 'lib64'
                 if (not os.path.exists(_join_cuda_home(lib_dir)) and
@@ -2620,10 +2625,11 @@ def _prepare_ldflags(extra_ldflags, with_cuda, with_sycl, verbose, is_standalone
         if verbose:
             logger.info('Detected CUDA files, patching ldflags')
         if IS_WINDOWS and not IS_HIP_EXTENSION:
-            extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib", "x64")}')
+            cuda_lib_dir = _windows_cuda_lib_dir()
+            extra_ldflags.append(f'/LIBPATH:{_join_cuda_home(cuda_lib_dir)}')
             extra_ldflags.append('cudart.lib')
             if CUDNN_HOME is not None:
-                extra_ldflags.append(f'/LIBPATH:{os.path.join(CUDNN_HOME, "lib", "x64")}')
+                extra_ldflags.append(f'/LIBPATH:{os.path.join(CUDNN_HOME, _windows_cuda_lib_dir())}')
         elif not IS_HIP_EXTENSION:
             extra_lib_dir = "lib64"
             if (not os.path.exists(_join_cuda_home(extra_lib_dir)) and

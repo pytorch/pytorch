@@ -161,6 +161,7 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     HAS_MULTIGPU,
     HAS_TPU,
     IS_BIG_GPU,
+    requires_block_ptr,
     requires_gpu,
     RUN_CPU,
     RUN_GPU,
@@ -5889,7 +5890,10 @@ for dtype in (torch.int32, torch.int64):
     @parametrize("dim", (subtest(2), subtest(3)))
     @parametrize(
         "use_block_ptr",
-        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+        [
+            subtest(False),
+            subtest(True, decorators=[skip_if_not_triton, requires_block_ptr]),
+        ],
     )
     def test_low_memory_max_pool(self, dilation: int, dim: int, use_block_ptr: bool):
         prims = torch.ops.prims
@@ -6625,7 +6629,10 @@ for dtype in (torch.int32, torch.int64):
 
     @parametrize(
         "use_block_ptr",
-        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+        [
+            subtest(False),
+            subtest(True, decorators=[skip_if_not_triton, requires_block_ptr]),
+        ],
     )
     def test_conv3d_channels_last(self, use_block_ptr: bool):
         if self.device == GPU_TYPE:
@@ -13509,6 +13516,37 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(code.count("triton_helpers.rand_eager_kernel"), 1)
         self.assertEqual(code.count("tl.rand("), 0)
 
+    @xfail_if_mps  # Only works for Triton on CUDA
+    @config.patch(align_random_eager=True)
+    def test_align_random_eager_randn(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("Only valid for CUDA!")
+
+        @torch.compile
+        def fn():
+            return torch.randn([4096], device=self.device)
+
+        torch.manual_seed(1234)
+        result, (code,) = run_and_get_code(fn)
+        self.assertEqual(result.shape, (4096,))
+        self.assertEqual(code.count("triton_helpers.rand_eager_kernel"), 0)
+
+        x = torch.empty(4096, device=self.device)
+
+        @torch.compile
+        def fn_like(t):
+            return torch.randn_like(t)
+
+        torch.manual_seed(5678)
+        result_like = fn_like(x)
+        self.assertEqual(result_like.shape, x.shape)
+
+        for t in (result, result_like):
+            self.assertGreater((t < 0).sum().item(), 0)
+            self.assertGreater((t > 1).sum().item(), 0)
+            self.assertTrue(-0.2 < t.mean().item() < 0.2)
+            self.assertTrue(0.7 < t.std().item() < 1.3)
+
     @xfail_if_mps  # Only works for triton
     def test_randint_kernel_count(self):
         if self.device != GPU_TYPE:
@@ -13761,7 +13799,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @parametrize(
         "use_block_ptr",
         [
-            subtest(True, decorators=[skip_if_not_triton]),
+            subtest(False),
+            subtest(True, decorators=[skip_if_not_triton, requires_block_ptr]),
         ],
     )
     def test_tmp_not_defined_issue1(self, use_block_ptr):
@@ -14832,7 +14871,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @requires_gpu()
     @parametrize("prefer_nd_tiling", (False, True))
-    @parametrize("use_block_ptr", (False, True))
+    @parametrize(
+        "use_block_ptr",
+        (subtest(False), subtest(True, decorators=[requires_block_ptr])),
+    )
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
@@ -16964,6 +17006,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (x,), reference_in_float=False)
         assertGeneratedKernelCountEqual(self, 1)
 
+    def test_dtypeview_clone_copy_arg_count(self):
+        # https://github.com/pytorch/pytorch/issues/193705
+        # remove_redundant_views used to erase a graph placeholder whose only
+        # uses were folded away by a view(dtype)+clone+copy_ chain, shrinking
+        # the compiled function's arity while the runtime call site kept
+        # passing the original number of arguments.
+        def fn(x, y):
+            return (
+                x.view(torch.uint16)
+                .clone()
+                .copy_(y.view(torch.uint16))
+                .view(torch.float32)
+                .sum()
+            )
+
+        x = torch.randn(8, 8, device=self.device)
+        y = torch.randn(8, 8, device=self.device)
+        self.common(fn, (x, y), reference_in_float=False)
+
     @expectedFailureCodegenDynamic
     def test_reinterpret_dtypeview(self):
         @torch.compile
@@ -17319,7 +17380,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @largeTensorTest("1GB", inductor=True)
     @parametrize(
         "use_block_ptr",
-        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+        [
+            subtest(False),
+            subtest(True, decorators=[skip_if_not_triton, requires_block_ptr]),
+        ],
     )
     def test_large_grid(self, use_block_ptr):
         # https://github.com/pytorch/pytorch/issues/123210
@@ -17897,6 +17961,75 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         FileCheck().check("torch.ops.aten.sum").check(".item()").run(code[0])
         # `.item()` took the DynamicScalar lowering, not a generic fallback kernel
         self.assertNotIn("_local_scalar_dense", code[0])
+
+    def test_lite_mode_sym_size(self):
+        # aten.sym_size.int (`x.size(dim)` under a dynamic shape) returns a SymInt,
+        # which cannot be serialized as a generic fallback kernel.
+        # skip_fallback_due_to_dynamic_shape routes it to its symbolic (no-kernel)
+        # handling instead, so lite mode does not hit the "Unsupported return type
+        # torch.SymIntType" wall (which handle_single_output raises for a SymInt
+        # fallback-kernel output).
+        def f(x):
+            n = x.size(0)
+            return x + n
+
+        x = torch.randn(64, device=self.device)
+        torch._dynamo.mark_dynamic(x, 0)
+        opt_f = torch.compile(f, mode="lite")
+
+        # Compiles and matches eager. Without the skip_fallback_due_to_dynamic_shape
+        # entry for sym_size.int, this raises "Unsupported return type torch.SymIntType"
+        # under the cpp wrapper (AOTI) serialization path.
+        result, code = run_and_get_code(opt_f, x)
+        self.assertEqual(result, f(x))
+
+        # The surrounding elementwise op still falls back (lite mode is active); the
+        # sym_size.int node did not become a generic fallback kernel. Lite mode sets
+        # use_dce=False, so a fallback kernel would survive into the generated code
+        # even with nothing consuming its buffer.
+        self.assertNotIn("sym_size", code[0])
+        if config.cpp_wrapper:
+            # `aten.add.Tensor` is in torchgen's inductor_fallback_ops, so its
+            # fallback is emitted through the device c-shim
+            # (aoti_torch_cpu_add_Tensor / aoti_torch_cuda_add_Tensor) rather
+            # than the generic aoti_torch_call_dispatcher path.
+            FileCheck().check_regex(r"aoti_torch_\w+_add_Tensor\(").run(code[0])
+        else:
+            FileCheck().check("torch.ops.aten.add").run(code[0])
+
+    def test_lite_mode_sym_stride(self):
+        # aten.sym_stride.int (`x.stride(dim)` under a dynamic shape) returns a SymInt,
+        # like sym_size.int, and cannot be serialized as a generic fallback kernel.
+        # skip_fallback_due_to_dynamic_shape routes it to its symbolic (no-kernel)
+        # handling so lite mode does not hit the "Unsupported return type
+        # torch.SymIntType" wall. Use a 2D tensor with a dynamic inner dim so stride(0)
+        # is symbolic (for a 1D/contiguous tensor stride(0) is the constant 1).
+        def f(x):
+            s = x.stride(0)
+            return x + s
+
+        x = torch.randn(4, 8, device=self.device)
+        torch._dynamo.mark_dynamic(x, 1)
+        opt_f = torch.compile(f, mode="lite")
+
+        # Compiles and matches eager. Without the skip_fallback_due_to_dynamic_shape
+        # entry for sym_stride.int, this raises "Unsupported return type torch.SymIntType"
+        # under the cpp wrapper (AOTI) serialization path.
+        result, code = run_and_get_code(opt_f, x)
+        self.assertEqual(result, f(x))
+
+        # The surrounding elementwise op still falls back (lite mode is active); the
+        # sym_stride.int node did not become a generic fallback kernel. Lite mode sets
+        # use_dce=False, so a fallback kernel would survive into the generated code
+        # even with nothing consuming its buffer.
+        self.assertNotIn("sym_stride", code[0])
+        if config.cpp_wrapper:
+            # Same as test_lite_mode_sym_size: `aten.add.Tensor` is in torchgen's
+            # inductor_fallback_ops, so its fallback goes through the device
+            # c-shim, not the generic aoti_torch_call_dispatcher path.
+            FileCheck().check_regex(r"aoti_torch_\w+_add_Tensor\(").run(code[0])
+        else:
+            FileCheck().check("torch.ops.aten.add").run(code[0])
 
     @lowering.force_fallback(aten.sort.default)
     def test_size_asserts_for_multi_output_fallback(self):
@@ -20625,7 +20758,6 @@ if RUN_GPU:
 
         # only uncoalesced without this :)
         @config.patch("triton.coalesce_tiling_analysis", False)
-        @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
             @torch.compile
             def f(a, b):
@@ -20661,7 +20793,6 @@ if RUN_GPU:
             {
                 "triton.persistent_reductions": True,
                 "triton.multi_kernel": False,
-                "triton.use_block_ptr": False,
             }
         )
         def test_evict_first_for_persistent_reduction_last_use(self):
@@ -20700,7 +20831,6 @@ if RUN_GPU:
             {
                 "triton.persistent_reductions": True,
                 "triton.multi_kernel": False,
-                "triton.use_block_ptr": False,
             }
         )
         def test_evict_last_for_reused_persistent_reduction_load(self):
@@ -20773,6 +20903,7 @@ if RUN_GPU:
             finally:
                 simd_kernel_features.SIMDKernelFeatures.buffer_read_counts = orig
 
+        @requires_block_ptr
         @config.patch("triton.use_block_ptr", True)
         @config.patch("triton.coalesce_tiling_analysis", False)
         def test_evict_last_non_coalesced_loads_block_ptr(self):
