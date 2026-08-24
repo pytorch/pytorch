@@ -152,14 +152,16 @@ def _infer_device_type(*args):
             "Tensor arguments, excluding CPU tensors, are detected on at least two types of devices. "
             "Device state will only be saved for devices of a single device type, and the remaining "
             "devices will be ignored. Consequently, if any checkpointed functions involve randomness, "
-            "this may result in incorrect gradients. (Note that if CUDA devices are among the devices "
-            "detected, it will be prioritized; otherwise, the first device encountered will be selected.)"
+            "this may result in incorrect gradients. (Note that if the current accelerator's device type "
+            "is among the devices detected, it will be prioritized; otherwise, the first device encountered "
+            "will be selected.)"
             f"\nDevice types: {sorted(device_types_set)} first device type: {device_types[0]}", stacklevel=2
         )
     if len(device_types) == 0:
         return DefaultDeviceType.get_device_type()
-    elif "cuda" in device_types_set:
-        return "cuda"
+    acc_type = torch._C._get_accelerator(False).type
+    if acc_type in device_types_set:
+        return acc_type
     else:
         return device_types[0]
 
