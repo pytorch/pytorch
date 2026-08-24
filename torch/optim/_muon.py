@@ -29,7 +29,14 @@ DEFAULT_NS_STEPS = 5
 
 
 def _ndim_supported(ndim: int, allow_batched: bool) -> bool:
-    """Muon is a matrix optimizer; batches of matrices are opt-in."""
+    """Muon is a matrix optimizer; batches of matrices are opt-in.
+
+    Any rank above 2 is accepted rather than exactly 3, because Newton-Schulz
+    flattens every leading dimension into a single batch, so the batch rank does
+    not change the math. Transformers produce both: a grouped MoE expert weight
+    is 3D, [num_experts, hidden_dim, dim], and that same weight stacked across
+    layers is 4D, [n_layers, num_experts, hidden_dim, dim].
+    """
     return ndim == 2 or (allow_batched and ndim > 2)
 
 
@@ -57,7 +64,10 @@ def _zeropower_via_newtonschulz(
     if len(ns_coefficients) != 3:
         raise ValueError("Coefficients must be a tuple of exactly 3 values")
     a, b, c = ns_coefficients
-    # NS normalizes in place, so never alias the momentum buffer.
+    # Fixes a latent bug: grad.bfloat16() returns grad itself when grad is
+    # already bf16, and the div_ below is in place. With nesterov=False the
+    # caller passes the momentum buffer directly, so the optimizer state was
+    # normalized on every step. copy=True never aliases, whatever the dtype.
     ortho_grad = grad.to(dtype=torch.bfloat16, copy=True)
     transposed = grad.size(-2) > grad.size(-1)
     if transposed:
