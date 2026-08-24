@@ -498,6 +498,31 @@ class DefaultBackendTypeTest(TestCase):
                 dist.ProcessGroup.BackendType.GLOO,
             )
 
+    def test_gloo_allows_cpu_device_id(self):
+        """Gloo backend should accept cpu:0 as a valid device_id."""
+        with self.assertRaises(ValueError):
+            c10d._new_process_group_helper(
+                group_size=1,
+                group_rank=0,
+                global_ranks_in_group=[],
+                backend="nccl",
+                store=dist.HashStore(),
+                group_name=c10d.GroupName("test_nccl_cpu"),
+                timeout=c10d.not_none(timedelta(seconds=30)),
+                device_id=torch.device("cpu:0"),
+            )
+        # Gloo should NOT raise for cpu:0
+        c10d._new_process_group_helper(
+            group_size=1,
+            group_rank=0,
+            global_ranks_in_group=[],
+            backend="gloo",
+            store=dist.HashStore(),
+            group_name=c10d.GroupName("test_gloo_cpu"),
+            timeout=c10d.not_none(timedelta(seconds=30)),
+            device_id=torch.device("cpu:0"),
+        )
+
 
 instantiate_parametrized_tests(DefaultBackendTypeTest)
 
