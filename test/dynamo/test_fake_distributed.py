@@ -17,15 +17,11 @@ from torch.testing._internal.common_utils import (
 
 if dist.is_available():
     from torch.distributed._functional_collectives import (
-        _remapped_batch_p2p_ops,
         all_gather_single,
         all_to_all_single_autograd,
-        traceable_collective_remaps,
         wait_tensor,
     )
     from torch.distributed.device_mesh import init_device_mesh
-
-    traceable_collective_remaps[dist.batch_isend_irecv] = _remapped_batch_p2p_ops
 
 
 def normalize_graph(gm):
