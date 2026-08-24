@@ -2,6 +2,7 @@
 
 
 import copy
+import unittest
 
 import torch
 import torch._dynamo.compiled_autograd as compiled_autograd
@@ -20,14 +21,11 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
+from torch.utils._triton import has_triton
 
 
 device_type = torch.device(get_devtype())
@@ -47,10 +45,10 @@ class Mod(torch.nn.Module):
         return self.encoder(x)
 
 
+@unittest.skipIf(not has_triton(), "Triton is not available")
 class TestFullyShardCompileCompute(FSDPTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
     @skip_if_lt_x_gpu(2)
     def test_disable_compiling_hooks(self, device):
         """Verify that dynamo never traces into FSDP hooks in forward or backward."""
@@ -79,7 +77,6 @@ class TestFullyShardCompileCompute(FSDPTest):
         torch._dynamo.trace_rules.check = orig_trace_rules_check
         self.assertEqual(trace_rules_check_count, 0)
 
-    @requires_capabilities(Capability.lib.triton)
     @skip_if_lt_x_gpu(2)
     def test_compiled_autograd_fsdp2_backward(self, device):
         """
@@ -128,7 +125,6 @@ class TestFullyShardCompileCompute(FSDPTest):
         #   graph break 2: post_backward (from RegisterPostBackwardFunction)
         self.assertEqual(backend_count, 2)
 
-    @requires_capabilities(Capability.lib.triton)
     @skip_if_lt_x_gpu(2)
     def test_compile_optimizer_uneven_shard(self, device):
         # Regression test for https://github.com/pytorch/pytorch/issues/176667
@@ -162,7 +158,6 @@ class TestFullyShardCompileCompute(FSDPTest):
         model(x).sum().backward()
         torch.compile(opt.step)()
 
-    @requires_capabilities(Capability.lib.triton)
     @skip_if_lt_x_gpu(4)
     def test_tp_mixed_precision_dtensor_spec_dtype(self, device):
         torch._dynamo.reset()
@@ -226,10 +221,10 @@ class TestFullyShardCompileCompute(FSDPTest):
             dist.barrier()
 
 
+@unittest.skipIf(not has_triton(), "Triton is not available")
 class TestFullyShardCompile(FSDPTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
     def test_dynamo_trace_use_training_state(self, device):
         torch._dynamo.reset()
         # Construct a dummy FSDPParamGroup, since we just want to test the `use_training_state` ctx manager.
@@ -267,7 +262,6 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(cnt.op_count, 1)
         self.assertEqual(len(cnt.graphs), 1)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_trace_fsdp_copy_(self, device):
         @torch.library.custom_op("mylib::add_one_out", mutates_args={"out"})
         def add_one_out(x: torch.Tensor, out: torch.Tensor) -> None:
@@ -286,7 +280,6 @@ class TestFullyShardCompile(FSDPTest):
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_dynamo_recompiles_on_fsdp_layers(self, device):
         m = Mod()
         for name, child in m.encoder.named_children():
