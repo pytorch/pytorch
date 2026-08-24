@@ -13,7 +13,6 @@ import gc
 import importlib
 import inspect
 import itertools
-import logging
 import os
 import random
 import sys
@@ -64,16 +63,12 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 from torch.profiler import profile, ProfilerActivity
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_BF16,
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_FP8,
-    SM70OrLater,
-)
 from torch.testing._internal.common_device_type import (
+    Capability,
     E4M3_MAX_POS,
     e4m3_type,
     instantiate_device_type_tests,
+    requires_capabilities,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -87,6 +82,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.testing._internal.logging_utils import LoggingTestCase
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -6297,10 +6293,7 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         )
         self.assertEqual(actual_str, expected_str)
 
-    @unittest.skipIf(
-        not SM70OrLater,
-        "Triton only supports devices of CUDA capability >= 7.0",
-    )
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_add_complex_conj(self):
         def f(x):
             return x + x.conj()
@@ -9669,10 +9662,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             torch.set_default_device(None)
 
     @skipIfHpu
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "flash attention not supported",
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     def test_flash_attn_backward_mixed_strides(self, device):
         # in this repro, "grad_out" and "value" are transposed tensors,
         # but "key" and "value" are contiguous
@@ -9788,7 +9778,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             out = f_compiled(x, s0, s1, s2)
             self.assertEqual(out_ref, out)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "requires gpu with fp8 support")
+    @requires_capabilities(Capability.dtype.fp8)
     def test_partitioner_saves_weights_for_bw(self, device):
         def mul_tiled(a, *bs):
             for b in bs:
@@ -9928,7 +9918,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(mode.ops_counter[torch.ops.aten._to_copy.default], 5)
 
     def test_zero_dim_param_mixed_device_grad(self, device):
-        # cpu 0-dim params with cuda grads
+        # cpu 0-dim params with accelerator grads
         # https://github.com/pytorch/pytorch/issues/160084
         class RegressionModel(torch.nn.Module):
             def __init__(self, a=0, b=0):
@@ -9966,10 +9956,9 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             ref_grad = torch.autograd.grad(ref.sum(), x)
             self.assertEqual(grad, ref_grad)
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "flash attention not supported",
-    )
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm not supported")
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @requires_capabilities(Capability.attention.flash_attention)
     def test_flex_attention_guard_on_constant_func_defaults(self, device):
         """
         Dynamo must guard on mask_mod.__defaults__ so that when a
@@ -9977,10 +9966,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mask_mod has the same __code__ but different __defaults__,
         Dynamo recompiles instead of reusing the stale first graph.
         """
-        from torch.utils._triton import has_triton
-
-        if not has_triton():
-            self.skipTest("requires triton")
 
         @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def flex_chunk(q, k, v, block_mask, scale):
@@ -10223,7 +10208,7 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
         # retained the real CUDA scalar through FakeTensor.constant.
         self.assertIsNotNone(opt_f)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16, "requires CUDA bf16 support")
+    @requires_capabilities(Capability.dtype.bf16)
     def test_layer_norm_mixed_dtype_aot_eager_decomp_partition_errors(self, device):
         # https://github.com/pytorch/pytorch/issues/151478
         x = torch.tensor(
@@ -10358,7 +10343,10 @@ instantiate_device_type_tests(
     LRUCacheWarningTests, globals(), except_for="cpu", allow_xpu=True, allow_mps=True
 )
 instantiate_device_type_tests(
-    ReproTestsDevice, globals(), except_for="cpu", allow_xpu=True, allow_mps=True
+    ReproTestsDevice,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
 )
 instantiate_device_type_tests(CUDAReproTests, globals(), only_for="cuda")
 
