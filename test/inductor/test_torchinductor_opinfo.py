@@ -169,7 +169,7 @@ def print_seen():
                 f"    {format_op(op)}: {fmt_dtypes(failed_dtypes)},{reasons}"
             )
 
-    for device_type in sorted(set(dtype for (dtype, _) in seen_failed.keys())):
+    for device_type in sorted({device_type for device_type, _ in seen_failed}):
         expected_failures[device_type]
         nl = "\n"
         print(
