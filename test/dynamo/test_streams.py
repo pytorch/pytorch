@@ -52,6 +52,27 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     def tearDownClass(cls):
         super().tearDownClass()
 
+    def test_stream_event_variable_python_type_uses_wrapped_value_type(self):
+        from torch._dynamo.variables.streams import EventVariable, StreamVariable
+
+        class FakeStream:
+            device = torch.device("cpu")
+
+        class FakeEvent:
+            pass
+
+        stream = FakeStream()
+        event = FakeEvent()
+
+        self.assertIs(
+            StreamVariable(None, stream).python_type(),  # type: ignore[arg-type]
+            FakeStream,
+        )
+        self.assertIs(
+            EventVariable(None, event, None).python_type(),  # type: ignore[arg-type]
+            FakeEvent,
+        )
+
     @requires_cuda
     def test_stream_weakref(self):
         s = torch.Stream()
