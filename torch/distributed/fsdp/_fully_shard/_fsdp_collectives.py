@@ -550,14 +550,23 @@ def foreach_reduce(
     """
 
     grad_dtypes = {grad.dtype for grad in unsharded_grads}
-    if len(grad_dtypes) != 1:
-        # Check this at runtime since it could be a real runtime error if e.g.
-        # fp8 weights do not produce the correct higher precision gradients
+    explicit_grad_dtypes = {p._explicit_grad_dtype for p in fsdp_params}
+    if len(grad_dtypes) != 1 and len(explicit_grad_dtypes) == 1:
+        # Not explained by grad_dtype, so this is the pre-existing case the
+        # check was written for: e.g. fp8 weights not producing the correct
+        # higher precision gradients. Keep failing loudly.
         _raise_assert_with_print(
             f"FSDP reduce-scatter expects uniform gradient dtype but got {grad_dtypes}"
         )
     grad_dtype = unsharded_grads[0].dtype
     reduce_dtype = reduce_dtype or grad_dtype
+    if len(grad_dtypes) != 1:
+        # A group carrying different grad_dtype produces different gradient
+        # dtypes, and one copy-in cannot take a mixture -- `_chunk_cat` rejects
+        # it. Bring them to the dtype the reduce runs in anyway; each parameter
+        # is cast back to its own grad_dtype after the reduce. Only a group that
+        # actually is non-uniform pays for this.
+        unsharded_grads = [grad.to(reduce_dtype) for grad in unsharded_grads]
     (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
         _get_gradient_divide_factors(
             reduce_scatter_group,
@@ -693,13 +702,17 @@ def foreach_reduce(
         # AR to finish. The reduce-dtype buffer is held across layers by
         # FSDPParamGroup._all_reduce_state (captured above) to prevent
         # this. See PR #140044, regression test PR #180900.
-        # grad_dtype is uniform within the group (enforced at lazy_init), so a
-        # single cast over the shared buffer. Skipping orig_dtype avoids a lossy
-        # round-trip such as fp32 reduce -> bf16 orig -> fp32.
+        # Skipping orig_dtype avoids a lossy round-trip such as
+        # fp32 reduce -> bf16 orig -> fp32.
+        # `None` is a legal uniform value (nothing set), so a separate flag
+        # rather than testing `uniform_grad_dtype is None`, which would send the
+        # common case down the per-parameter path below.
+        group_is_uniform = len(explicit_grad_dtypes) == 1
+        uniform_grad_dtype = (
+            next(iter(explicit_grad_dtypes)) if group_is_uniform else None
+        )
         reduce_output = _to_dtype_if_needed(
-            reduce_output,
-            (fsdp_params[0]._explicit_grad_dtype if fsdp_params else None)
-            or orig_dtype,
+            reduce_output, uniform_grad_dtype or orig_dtype
         )
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
@@ -714,6 +727,14 @@ def foreach_reduce(
                 stride=fsdp_param.contiguous_sharded_stride,
                 storage_offset=flat_grad_offset,
             )
+            if not group_is_uniform:
+                # The shared cast above could not pick one
+                # dtype, so cast each parameter's slice to its own. Inlined
+                # rather than routed through `_to_dtype_if_needed` to keep the
+                # uniform path a plain comparison.
+                explicit_grad_dtype = fsdp_param._explicit_grad_dtype
+                if explicit_grad_dtype is not None:
+                    new_sharded_grad = new_sharded_grad.to(explicit_grad_dtype)
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
             if fsdp_param.offload_to_cpu:
                 # Only overlap the D2H copy (copying to pinned memory) when no
