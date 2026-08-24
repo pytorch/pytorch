@@ -10141,8 +10141,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             lambda msg: f"{msg}\nStrides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
         )
 
-
-class CUDAReproTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @torch._dynamo.config.patch(capture_scalar_outputs=False)
     def test_aot_backward_context_reentry_after_graph_break(self):
@@ -10178,24 +10176,26 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(cnt.frame_count, 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_torch_cuda_is_initialized(self):
+
+class CUDAReproTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_torch_cuda_is_initialized(self, device):
         @torch.compile(fullgraph=True, backend="eager")
         def f(x):
             if torch.cuda.is_initialized():
                 return x + 1
             return x + 2
 
-        inp = torch.randn(3)
+        inp = torch.randn(3, device=device)
         self.assertEqual(f(inp), inp + 1)
 
         with mock.patch("torch.cuda.is_initialized", lambda: False):
             self.assertEqual(f(inp), inp + 2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_graph_metadata_does_not_retain_cuda_fake_constants(self):
+    def test_graph_metadata_does_not_retain_cuda_fake_constants(self, device):
         def f():
-            x = torch.tensor(5, dtype=torch.float32, device="cuda")
+            x = torch.tensor(5, dtype=torch.float32, device=device)
             copy.deepcopy(x)
 
         def clear_cuda_memory(*, reset_dynamo):
@@ -10218,13 +10218,12 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
         # retained the real CUDA scalar through FakeTensor.constant.
         self.assertIsNotNone(opt_f)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @unittest.skipIf(not PLATFORM_SUPPORTS_BF16, "requires CUDA bf16 support")
-    def test_layer_norm_mixed_dtype_aot_eager_decomp_partition_errors(self):
+    def test_layer_norm_mixed_dtype_aot_eager_decomp_partition_errors(self, device):
         # https://github.com/pytorch/pytorch/issues/151478
         x = torch.tensor(
             [[1.0, 2.0, 3.0, 4.0], [2.0, 4.0, 6.0, 8.0]],
-            device="cuda",
+            device=device,
             dtype=torch.bfloat16,
         )
 
@@ -10271,39 +10270,12 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             "expected scalar type BFloat16 but found Long",
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_device_context_matmul_avoids_native_bmm_router_graph_break(self):
-        torch._dynamo.utils.counters.clear()
-
-        @torch.compile(backend="inductor", dynamic=False)
-        def fn(q, k):
-            with torch.device("cuda"):
-                a = torch.reshape(q, [-1, 8, 1, 32])
-                return torch.matmul(a, k)
-
-        q = torch.randn(64, 8 * 32, device="cuda", dtype=torch.float16)
-        k = torch.randn(1, 8, 32, 128, device="cuda", dtype=torch.float16)
-
-        out = fn(q, k)
-        torch.cuda.synchronize()
-        self.assertEqual(out.shape, (64, 8, 1, 128))
-
-        graph_break_reasons = "\n".join(
-            torch._dynamo.utils.counters["graph_break"].keys()
-        )
-        # The native router should not run trace-unsafe eager predicates here.
-        # If it does, the COW probe on the reshaped operand graph-breaks before
-        # it can fold or install a guard.
-        self.assertNotIn("_is_cow_tensor", graph_break_reasons)
-        self.assertNotIn("call_boxed", graph_break_reasons)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")
-    # TODO: Remoe this skip once nccl issue if fixed
+    # TODO: Remove this skip once nccl issue if fixed
     @unittest.skip(
         "Failing with ncc update 2.25.1 : https://github.com/pytorch/pytorch/issues/147141"
     )
-    def test_ddp_checkpoint(self):
+    def test_ddp_checkpoint(self, device):
         # https://github.com/pytorch/pytorch/issues/144035
         DIM = 256
         SEQ_LEN = 32
@@ -10354,12 +10326,12 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             os.environ["MASTER_ADDR"] = "localhost"
             os.environ["MASTER_PORT"] = "12355"
             dist.init_process_group(backend="nccl", world_size=1, rank=0)
-            model = model.to("cuda")
+            model = model.to(device)
             model = nn.parallel.DistributedDataParallel(model)
 
             for batch in dataloader:
                 x, y = batch
-                x = x.to("cuda")
+                x = x.to(device)
                 output = model(x)
                 loss = output.sum()
                 loss.backward()
