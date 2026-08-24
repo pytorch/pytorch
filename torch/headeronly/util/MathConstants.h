@@ -1,15 +1,15 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
-#include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
+#include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Half.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 #endif
 
-namespace c10 {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 // TODO: Replace me with inline constexpr variable when C++17 becomes available
 namespace detail {
 template <typename T>
@@ -97,46 +97,79 @@ C10_HOST_DEVICE inline constexpr Half pi<Half>() {
 } // namespace detail
 
 template <typename T>
-constexpr T e = c10::detail::e<T>();
+constexpr T e = torch::headeronly::detail::e<T>();
 
 template <typename T>
-constexpr T euler = c10::detail::euler<T>();
+constexpr T euler = torch::headeronly::detail::euler<T>();
 
 template <typename T>
-constexpr T frac_1_pi = c10::detail::frac_1_pi<T>();
+constexpr T frac_1_pi = torch::headeronly::detail::frac_1_pi<T>();
 
 template <typename T>
-constexpr T frac_1_sqrt_pi = c10::detail::frac_1_sqrt_pi<T>();
+constexpr T frac_1_sqrt_pi = torch::headeronly::detail::frac_1_sqrt_pi<T>();
 
 template <typename T>
-constexpr T frac_sqrt_2 = c10::detail::frac_sqrt_2<T>();
+constexpr T frac_sqrt_2 = torch::headeronly::detail::frac_sqrt_2<T>();
 
 template <typename T>
-constexpr T frac_sqrt_3 = c10::detail::frac_sqrt_3<T>();
+constexpr T frac_sqrt_3 = torch::headeronly::detail::frac_sqrt_3<T>();
 
 template <typename T>
-constexpr T golden_ratio = c10::detail::golden_ratio<T>();
+constexpr T golden_ratio = torch::headeronly::detail::golden_ratio<T>();
 
 template <typename T>
-constexpr T ln_10 = c10::detail::ln_10<T>();
+constexpr T ln_10 = torch::headeronly::detail::ln_10<T>();
 
 template <typename T>
-constexpr T ln_2 = c10::detail::ln_2<T>();
+constexpr T ln_2 = torch::headeronly::detail::ln_2<T>();
 
 template <typename T>
-constexpr T log_10_e = c10::detail::log_10_e<T>();
+constexpr T log_10_e = torch::headeronly::detail::log_10_e<T>();
 
 template <typename T>
-constexpr T log_2_e = c10::detail::log_2_e<T>();
+constexpr T log_2_e = torch::headeronly::detail::log_2_e<T>();
 
 template <typename T>
-constexpr T pi = c10::detail::pi<T>();
+constexpr T pi = torch::headeronly::detail::pi<T>();
 
 template <typename T>
-constexpr T sqrt_2 = c10::detail::sqrt_2<T>();
+constexpr T sqrt_2 = torch::headeronly::detail::sqrt_2<T>();
 
 template <typename T>
-constexpr T sqrt_3 = c10::detail::sqrt_3<T>();
+constexpr T sqrt_3 = torch::headeronly::detail::sqrt_3<T>();
+HIDDEN_NAMESPACE_END(torch, headeronly)
+
+namespace c10 {
+using torch::headeronly::e;
+using torch::headeronly::euler;
+using torch::headeronly::frac_1_pi;
+using torch::headeronly::frac_1_sqrt_pi;
+using torch::headeronly::frac_sqrt_2;
+using torch::headeronly::frac_sqrt_3;
+using torch::headeronly::golden_ratio;
+using torch::headeronly::ln_10;
+using torch::headeronly::ln_2;
+using torch::headeronly::log_10_e;
+using torch::headeronly::log_2_e;
+using torch::headeronly::pi;
+using torch::headeronly::sqrt_2;
+using torch::headeronly::sqrt_3;
+namespace detail {
+using torch::headeronly::detail::e;
+using torch::headeronly::detail::euler;
+using torch::headeronly::detail::frac_1_pi;
+using torch::headeronly::detail::frac_1_sqrt_pi;
+using torch::headeronly::detail::frac_sqrt_2;
+using torch::headeronly::detail::frac_sqrt_3;
+using torch::headeronly::detail::golden_ratio;
+using torch::headeronly::detail::ln_10;
+using torch::headeronly::detail::ln_2;
+using torch::headeronly::detail::log_10_e;
+using torch::headeronly::detail::log_2_e;
+using torch::headeronly::detail::pi;
+using torch::headeronly::detail::sqrt_2;
+using torch::headeronly::detail::sqrt_3;
+} // namespace detail
 } // namespace c10
 
 C10_CLANG_DIAGNOSTIC_POP()

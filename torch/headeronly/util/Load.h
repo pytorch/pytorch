@@ -1,8 +1,8 @@
 #pragma once
-#include <c10/macros/Macros.h>
+#include <torch/headeronly/macros/Macros.h>
 #include <cstring>
 
-namespace c10 {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 namespace detail {
 
 template <typename T>
@@ -27,12 +27,19 @@ struct LoadImpl<bool> {
 
 template <typename T>
 C10_HOST_DEVICE constexpr T load(const void* src) {
-  return c10::detail::LoadImpl<T>::apply(src);
+  return torch::headeronly::detail::LoadImpl<T>::apply(src);
 }
 
 template <typename scalar_t>
 C10_HOST_DEVICE constexpr scalar_t load(const scalar_t* src) {
-  return c10::detail::LoadImpl<scalar_t>::apply(src);
+  return torch::headeronly::detail::LoadImpl<scalar_t>::apply(src);
 }
 
+HIDDEN_NAMESPACE_END(torch, headeronly)
+
+namespace c10 {
+using torch::headeronly::load;
+namespace detail {
+using torch::headeronly::detail::LoadImpl;
+} // namespace detail
 } // namespace c10

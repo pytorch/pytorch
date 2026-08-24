@@ -2,14 +2,14 @@
 
 #pragma once
 
-#include <c10/util/TypeSafeSignMath.h>
+#include <torch/headeronly/util/TypeSafeSignMath.h>
 
 #include <algorithm>
 #include <cstddef>
 #include <iterator>
 #include <type_traits>
 
-namespace c10 {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
 namespace detail {
 
@@ -120,4 +120,12 @@ constexpr integer_range<Integer, true> irange(Integer end) {
   return {Integer(), end};
 }
 
+HIDDEN_NAMESPACE_END(torch, headeronly)
+
+namespace c10 {
+using torch::headeronly::integer_range;
+using torch::headeronly::irange;
+namespace detail {
+using torch::headeronly::detail::integer_iterator;
+} // namespace detail
 } // namespace c10
