@@ -1230,7 +1230,7 @@ def _identify_graph(gm: torch.fx.GraphModule) -> str:
     -- including, for a continuation, the resume frame Dynamo minted for it,
     which is the only thing that tells one break in a chain from another.
     """
-    parts = []
+    parts: list[str] = []
     compile_id = torch._guards.CompileContext.current_compile_id()
     if compile_id is not None:
         parts.append(f"compile id {compile_id}")
