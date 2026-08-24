@@ -1,9 +1,14 @@
 # Owner(s): ["module: inductor"]
 import os
+import threading
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from types import SimpleNamespace
 from unittest import mock
 
 import torch
+import torch.nn.functional as F
 from torch._inductor.codegen.flydsl import flydsl_utils
 from torch._inductor.codegen.flydsl.flydsl_kernel import FlyDSLTemplateKernel
 from torch._inductor.codegen.flydsl.flydsl_scheduling import (
@@ -12,6 +17,7 @@ from torch._inductor.codegen.flydsl.flydsl_scheduling import (
 )
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
 from torch._inductor.ir import Buffer, FixedLayout
+from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import OrderedSet
@@ -22,8 +28,38 @@ from torch.testing._internal.common_utils import (
 )
 
 
+class _CacheParam:
+    def __init__(self, key="param"):
+        self.key = key
+
+    def __cache_signature__(self):
+        return (self.key,)
+
+
 @instantiate_parametrized_tests
 class TestFlyDSLTemplate(TestCase):
+    def _grouped_gemm_grid_param_stub(self, **overrides):
+        defaults = {
+            "stages": 2,
+            "block_m": 64,
+            "block_n": 128,
+            "block_k": 64,
+            "in_data_bytes": 2,
+            "out_data_bytes": 2,
+            "block_threads": 256,
+        }
+        defaults.update(overrides)
+        return SimpleNamespace(**defaults)
+
+    def _gfx950_device_stub(self, **overrides):
+        defaults = {
+            "multi_processor_count": 304,
+            "shared_memory_per_multiprocessor": 163840,
+            "max_threads_per_multi_processor": 2048,
+        }
+        defaults.update(overrides)
+        return SimpleNamespace(**defaults)
+
     def setUp(self):
         super().setUp()
         flydsl_utils._check_runtime_available.cache_clear()
@@ -294,6 +330,574 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(metadata["precompile_shapes"], {"output": [1]})
         self.assertEqual(metadata["precompile_strides"], {"output": [1]})
         self.assertEqual(metadata["precompile_dtypes"], {"output": "float32"})
+
+    @parametrize(
+        "size,dtype,stride,offset,n",
+        (
+            ([1, 64, 128], torch.float16, [8192, 128, 1], 0, 64),
+            ([64, 128], torch.float32, [128, 1], 0, 64),
+            ([64, 128], torch.float16, [129, 1], 0, 64),
+            ([64, 128], torch.float16, [128, 1], 1, 64),
+            ([64, 128], torch.float16, [128, 1], 0, 63),
+        ),
+    )
+    def test_mm_gate_rejects_invalid_inputs(self, size, dtype, stride, offset, n):
+        from torch._inductor.kernel import mm
+
+        def node(size, stride, offset=0):
+            return SimpleNamespace(
+                get_size=lambda: size,
+                get_stride=lambda: stride,
+                get_dtype=lambda: dtype,
+                get_layout=lambda: SimpleNamespace(offset=offset),
+            )
+
+        mat1 = node(size, stride, offset)
+        mat2 = node([128, n], [1, 128])
+        layout = SimpleNamespace(stride=[n, 1], dtype=dtype, device=torch.device("cpu"))
+        sizevars = SimpleNamespace(
+            statically_known_equals=lambda x, y: x == y,
+            statically_known_multiple_of=lambda x, y: x % y == 0,
+        )
+        with (
+            V.set_graph_handler(SimpleNamespace(sizevars=sizevars)),
+            mock.patch.object(mm, "use_flydsl_gemm_template", return_value=True),
+            mock.patch.object(mm, "is_unaligned", return_value=False),
+        ):
+            result = mm.get_flydsl_mm_template_kwargs(layout, mat1, mat2, True, True)
+            self.assertEqual(result, [])
+
+    def test_grouped_mm_gate_rejects_unaligned_offset(self):
+        from torch._inductor.kernel import mm_grouped
+
+        dtype = torch.bfloat16
+
+        def node(size, stride, offset=0):
+            return SimpleNamespace(
+                get_size=lambda: size,
+                get_stride=lambda: stride,
+                get_dtype=lambda: dtype,
+                get_layout=lambda: SimpleNamespace(offset=offset),
+            )
+
+        mat_a = node([96, 128], [128, 1], offset=1)
+        mat_b = node([2, 128, 128], [128 * 128, 128, 1])
+        layout = SimpleNamespace(
+            stride=[128, 1], dtype=dtype, device=torch.device("cpu")
+        )
+        sizevars = SimpleNamespace(
+            statically_known_equals=lambda x, y: x == y,
+            statically_known_multiple_of=lambda x, y: x % y == 0,
+        )
+        with (
+            V.set_graph_handler(SimpleNamespace(sizevars=sizevars)),
+            mock.patch.object(
+                mm_grouped, "use_flydsl_gemm_template", return_value=True
+            ),
+            mock.patch.object(mm_grouped, "is_unaligned", return_value=False),
+        ):
+            supported = mm_grouped.use_flydsl_grouped_mm_template(
+                mat_a,
+                mat_b,
+                layout,
+                a_is_2d=True,
+                b_is_2d=False,
+                offs=object(),
+                bias=None,
+                is_nonzero=True,
+                scaled=False,
+            )
+        self.assertFalse(supported)
+
+    def test_compiled_cache_keys_on_device_and_param(self):
+        jit_func = SimpleNamespace()
+        compiled = mock.Mock()
+        compiler = mock.Mock(return_value=compiled)
+
+        def invoke(device_index):
+            dispatch = SimpleNamespace(device=SimpleNamespace(index=device_index))
+            return run_cached_flydsl(
+                jit_func,
+                object(),
+                constexpr_param=_CacheParam(),
+                compiler=compiler,
+                dispatch_args=(dispatch,),
+            )
+
+        first = invoke(0)
+        with mock.patch(
+            "torch._inductor.runtime.flydsl_cache._compiled_cache_lock"
+        ) as cache_lock:
+            second = invoke(0)
+        third = invoke(1)
+
+        self.assertIs(first, compiled)
+        self.assertIs(second, compiled)
+        self.assertIs(third, compiled)
+        cache_lock.__enter__.assert_not_called()
+        self.assertEqual(compiler.call_count, 2)
+        compiled.assert_called_once()
+
+    def test_compiled_cache_serializes_same_param(self):
+        jit_func = SimpleNamespace()
+        compile_started = threading.Event()
+        allow_compile = threading.Event()
+        compiled = mock.Mock()
+        compile_calls = 0
+
+        def compiler(*args):
+            nonlocal compile_calls
+            compile_calls += 1
+            compile_started.set()
+            self.assertTrue(allow_compile.wait(5))
+            return compiled
+
+        def invoke(value):
+            return run_cached_flydsl(
+                jit_func,
+                object(),
+                constexpr_param=_CacheParam(),
+                compiler=compiler,
+                dispatch_args=(value,),
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(invoke, "first")
+            self.assertTrue(compile_started.wait(5))
+            second = pool.submit(invoke, "second")
+            allow_compile.set()
+            self.assertIs(first.result(), compiled)
+            self.assertIs(second.result(), compiled)
+
+        self.assertEqual(compile_calls, 1)
+        compiled.assert_called_once_with("second")
+
+    def _assert_compiled_mm(self, a, b, *, expect_flydsl: bool = True):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(lhs, rhs):
+            return torch.mm(lhs, rhs.t())
+
+        torch._dynamo.reset()
+        result, (code,) = run_and_get_code(torch.compile(fn, backend="inductor"), a, b)
+        assertion = self.assertIn if expect_flydsl else self.assertNotIn
+        assertion("async_compile.flydsl", code)
+        self.assertEqual(result, fn(a, b), atol=3e-2, rtol=3e-2)
+        return code
+
+    def _assert_compiled_grouped_mm(self, a, b, offs, *, expect_flydsl: bool = True):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(a, b, offs):
+            return F.grouped_mm(a, b, offs=offs)
+
+        torch._dynamo.reset()
+        result, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor"), a, b, offs
+        )
+        assertion = self.assertIn if expect_flydsl else self.assertNotIn
+        assertion("async_compile.flydsl", code)
+        self.assertEqual(result, fn(a, b, offs), atol=3e-2, rtol=3e-2)
+        return code
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+    )
+    def test_flydsl_gemm_transposed_rhs_e2e(self):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        cases = (
+            (torch.bfloat16, 32, 128, 128),
+            (torch.float16, 32, 128, 128),
+            (torch.bfloat16, 32, 256, 128),
+            (torch.bfloat16, 48, 96, 96),
+        )
+        for dtype, m, n, k in cases:
+            with self.subTest(dtype=dtype, m=m, n=n, k=k):
+                a = torch.randn(m, k, device="cuda", dtype=dtype)
+                b = torch.randn(n, k, device="cuda", dtype=dtype)
+                code = self._assert_compiled_mm(a, b)
+                self.assertIn(".mark_layout_dynamic()", code)
+                self.assertIn("mat2.transpose(0, 1)", code)
+                self.assertIn(".run(", code)
+                self.assertIn("TILE_M: fx.Constexpr", code)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=False,
+    )
+    def test_flydsl_gemm_strides_offsets_and_alignment(self):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        m = n = 64
+        k = 128
+        dtype = torch.bfloat16
+        a = torch.randn(m, k, device="cuda", dtype=dtype)
+        b = torch.randn(n, k, device="cuda", dtype=dtype)
+        a_storage = torch.randn(m + 1, 160, device="cuda", dtype=dtype)
+        b_storage = torch.randn(n + 1, 192, device="cuda", dtype=dtype)
+        supported = (
+            a_storage[1:, 8 : 8 + k],
+            b_storage[1:, 8 : 8 + k],
+        )
+        bad_stride = torch.empty_strided(
+            (m, k), (k + 1, 1), device="cuda", dtype=dtype
+        ).normal_()
+        bad_offset = torch.as_strided(
+            torch.randn(n * k + 1, device="cuda", dtype=dtype),
+            (n, k),
+            (k, 1),
+            storage_offset=1,
+        )
+
+        with torch._inductor.config.patch(
+            max_autotune_gemm_backends="ATEN,FLYDSL",
+            autotune_in_subproc=False,
+        ):
+            self._assert_compiled_mm(bad_stride, b, expect_flydsl=False)
+            self._assert_compiled_mm(a, bad_offset, expect_flydsl=False)
+        self._assert_compiled_mm(*supported)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        max_autotune_gemm_search_space="EXHAUSTIVE",
+        flydsl_enable_autotuning=True,
+        autotune_in_subproc=True,
+    )
+    def test_flydsl_autotune_transposed_rhs_uses_view_tensor(self):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        configs = [
+            asdict(config) for config in flydsl_heuristics.get_default_gemm_configs()
+        ]
+        configs_by_hti = {}
+        for config in configs:
+            configs_by_hti.setdefault(config["USE_HALF_TILE_INTERLEAVED"], config)
+        for use_hti in (False, True):
+            self.assertIn(
+                use_hti,
+                configs_by_hti,
+                f"missing config with USE_HALF_TILE_INTERLEAVED={use_hti}; "
+                f"available configs: {configs}",
+            )
+        configs = [configs_by_hti[False], configs_by_hti[True]]
+
+        with mock.patch.object(
+            flydsl_heuristics, "get_gemm_configs", return_value=configs
+        ):
+            for k in (32, 64, 128):
+                with self.subTest(k=k):
+                    a = torch.randn(64, k, device="cuda", dtype=torch.bfloat16)
+                    b = torch.randn(64, k, device="cuda", dtype=torch.bfloat16)
+                    self._assert_compiled_mm(a, b)
+
+    def test_flydsl_grouped_gemm_config_schema(self):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+
+        flydsl_heuristics.get_default_grouped_gemm_configs.cache_clear()
+        self.addCleanup(flydsl_heuristics.get_default_grouped_gemm_configs.cache_clear)
+        default_config = flydsl_heuristics.DEFAULT_GROUPED_GEMM_CONFIG
+        self.assertIsNotNone(flydsl_heuristics._make_gemm_param(asdict(default_config)))
+        with (
+            mock.patch.object(flydsl_heuristics, "_make_gemm_param"),
+            torch._inductor.config.patch(flydsl_enable_autotuning=False),
+        ):
+            configs = flydsl_heuristics.get_default_grouped_gemm_configs()
+            selected = flydsl_heuristics.get_grouped_gemm_configs()
+        self.assertIn(default_config, configs)
+        self.assertEqual(selected, [asdict(default_config)])
+
+    @parametrize(
+        "config_args,n,expected",
+        [
+            ((16, 96, 64, 2, 1, 2, 0), 96, False),
+            ((128, 128, 64, 2, 1, 4, 0), 128, True),
+        ],
+    )
+    def test_flydsl_grouped_gemm_layout_validation(self, config_args, n, expected):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+
+        gemm_config = asdict(flydsl_heuristics.FlyDSLGemmConfig(*config_args))
+        with mock.patch.object(
+            flydsl_heuristics,
+            "is_gemm_config_valid_for_shape",
+            return_value=True,
+        ):
+            valid = flydsl_heuristics.is_grouped_gemm_config_valid_for_shape(
+                128, n, 128, 0, gemm_config
+            )
+        self.assertEqual(valid, expected)
+
+    @parametrize(
+        "total_m,n,group_count,param_overrides,device_overrides,expected",
+        [
+            (0, 128, 6, {}, {}, 1),
+            (201, 128, 6, {}, {}, 9),
+            (
+                201,
+                128,
+                6,
+                {"block_m": 128, "block_n": 128, "block_threads": 256},
+                {},
+                7,
+            ),
+            (
+                10000,
+                256,
+                100,
+                {},
+                {"multi_processor_count": 10},
+                20,
+            ),
+        ],
+    )
+    def test_flydsl_grouped_gemm_persistent_grid_size(
+        self,
+        total_m,
+        n,
+        group_count,
+        param_overrides,
+        device_overrides,
+        expected,
+    ):
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_gemm_gfx950 import (
+            get_grouped_gemm_persistent_grid_size,
+        )
+
+        param = self._grouped_gemm_grid_param_stub(**param_overrides)
+        device = self._gfx950_device_stub(**device_overrides)
+        grid_size = get_grouped_gemm_persistent_grid_size(
+            param, total_m, n, group_count, device
+        )
+        self.assertEqual(grid_size, expected)
+
+    def test_grouped_mm_fp16_meta_shape_inference(self):
+        from torch._meta_registrations import meta_grouped_mm
+
+        mat_a = torch.empty(96, 128, device="meta", dtype=torch.float16)
+        mat_b = torch.empty(2, 128, 128, device="meta", dtype=torch.float16)
+        offs = torch.empty(2, device="meta", dtype=torch.int32)
+        out = meta_grouped_mm(mat_a, mat_b, offs)
+        self.assertEqual(out.dtype, torch.float16)
+        self.assertEqual(out.shape, (96, 128))
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=False,
+    )
+    def test_flydsl_grouped_mm_e2e(self):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        group_sizes = torch.tensor(
+            [0, 1, 67, 0, 130, 3], device="cuda", dtype=torch.int32
+        )
+        offs = group_sizes.cumsum(0).to(torch.int32)
+        k = 128
+        n = 128
+        a = torch.randn(int(group_sizes.sum()), k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(group_sizes.numel(), k, n, device="cuda", dtype=torch.bfloat16)
+        code = self._assert_compiled_grouped_mm(a, b, offs)
+        self.assertIn(".mark_layout_dynamic()", code)
+        self.assertIn("FLYDSL_COMPILE_ONLY", code)
+        self.assertIn("_precompile", code)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        max_autotune_gemm_search_space="EXHAUSTIVE",
+        flydsl_enable_autotuning=True,
+        autotune_in_subproc=True,
+    )
+    def test_flydsl_grouped_mm_autotune_e2e(self):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        configs = [
+            asdict(config)
+            for config in flydsl_heuristics.get_default_grouped_gemm_configs()
+        ]
+        configs_by_hti = {}
+        for config in configs:
+            configs_by_hti.setdefault(config["USE_HALF_TILE_INTERLEAVED"], config)
+        for use_hti in (False, True):
+            self.assertIn(
+                use_hti,
+                configs_by_hti,
+                f"missing config with USE_HALF_TILE_INTERLEAVED={use_hti}; "
+                f"available configs: {configs}",
+            )
+        configs = [configs_by_hti[False], configs_by_hti[True]]
+        group_sizes = torch.tensor(
+            [0, 1, 67, 0, 130, 3], device="cuda", dtype=torch.int32
+        )
+        offs = group_sizes.cumsum(0).to(torch.int32)
+        k = 96
+        a = torch.randn(int(group_sizes.sum()), k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(
+            group_sizes.numel(), k, 128, device="cuda", dtype=torch.bfloat16
+        )
+        with mock.patch.object(
+            flydsl_heuristics,
+            "get_grouped_gemm_configs",
+            return_value=configs,
+        ):
+            self._assert_compiled_grouped_mm(a, b, offs)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=True,
+        autotune_in_subproc=False,
+    )
+    def test_flydsl_grouped_mm_kernel_paths_e2e(self):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        config_fields = (
+            "TILE_M",
+            "TILE_N",
+            "TILE_K",
+            "STAGES",
+            "BLOCK_M_WARPS",
+            "BLOCK_N_WARPS",
+            "GROUP_M",
+            "USE_HALF_TILE_INTERLEAVED",
+        )
+        cases = (
+            (
+                "block_swizzle",
+                1,
+                4096,
+                1024,
+                128,
+                (128, 128, 64, 2, 1, 4, 4, False),
+            ),
+            (
+                "hti_odd_k_tiles",
+                1,
+                128,
+                128,
+                320,
+                (128, 128, 64, 2, 2, 2, 0, True),
+            ),
+        )
+        configs = [
+            asdict(config)
+            for config in flydsl_heuristics.get_default_grouped_gemm_configs()
+        ]
+        configs_by_values = {
+            tuple(config[field] for field in config_fields): config
+            for config in configs
+        }
+
+        for name, groups, m, n, k, expected_values in cases:
+            with self.subTest(name=name):
+                self.assertIn(
+                    expected_values,
+                    configs_by_values,
+                    f"missing grouped GEMM config {expected_values}; "
+                    f"available configs: {tuple(configs_by_values)}",
+                )
+                config = configs_by_values[expected_values]
+                group_sizes = torch.full((groups,), m, device="cuda", dtype=torch.int32)
+                offs = group_sizes.cumsum(0).to(torch.int32)
+                a = torch.randn(groups * m, k, device="cuda", dtype=torch.bfloat16)
+                b = torch.randn(groups, k, n, device="cuda", dtype=torch.bfloat16)
+                with mock.patch.object(
+                    flydsl_heuristics,
+                    "get_grouped_gemm_configs",
+                    return_value=[config],
+                ):
+                    code = self._assert_compiled_grouped_mm(a, b, offs)
+                self.assertIn("launch_gemm_gfx950_grouped", code)
+                for field, value in zip(config_fields, expected_values):
+                    self.assertIn(f"{field}: fx.Constexpr = {value}", code)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="ATEN,FLYDSL",
+    )
+    def test_flydsl_grouped_mm_fallback_e2e(self):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        group_sizes = torch.tensor([32, 64], device="cuda", dtype=torch.int32)
+        offs = group_sizes.cumsum(0).to(torch.int32)
+        k = 128
+        total_m = int(group_sizes.sum())
+        a = torch.randn(total_m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(2, k, 128, device="cuda", dtype=torch.bfloat16)
+        a_padded = torch.randn(total_m, k + 8, device="cuda", dtype=torch.bfloat16)[
+            :, :k
+        ]
+        b_padded = torch.randn(2, k, 136, device="cuda", dtype=torch.bfloat16)[
+            ..., :128
+        ]
+        a_aligned = torch.as_strided(
+            torch.randn(total_m * k + 8, device="cuda", dtype=torch.bfloat16),
+            (total_m, k),
+            (k, 1),
+            storage_offset=8,
+        )
+        b_aligned = torch.as_strided(
+            torch.randn(2 * k * 128 + 8, device="cuda", dtype=torch.bfloat16),
+            (2, k, 128),
+            (k * 128, 128, 1),
+            storage_offset=8,
+        )
+        with torch._inductor.config.patch(max_autotune_gemm_backends="FLYDSL"):
+            self._assert_compiled_grouped_mm(a_aligned, b_aligned, offs)
+
+        cases = (
+            (
+                "b_transposed",
+                a,
+                torch.randn(2, 256, k, device="cuda", dtype=torch.bfloat16).transpose(
+                    -1, -2
+                ),
+            ),
+            (
+                "n_not_tile_divisible",
+                a,
+                torch.randn(2, k, 96, device="cuda", dtype=torch.bfloat16),
+            ),
+            ("a_padded_stride", a_padded, b),
+            ("b_padded_stride", a, b_padded),
+        )
+
+        for name, case_a, case_b in cases:
+            with self.subTest(name=name):
+                self._assert_compiled_grouped_mm(
+                    case_a, case_b, offs, expect_flydsl=False
+                )
 
 
 if __name__ == "__main__":
