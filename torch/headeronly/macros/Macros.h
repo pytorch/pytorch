@@ -555,28 +555,14 @@ __host__ __device__
   }
 #else
 #if defined(USE_ROCM) && defined(__HIPCC__)
-#include <utility>
 namespace torch::headeronly::detail {
-// Count '%' in s[0..N-2] at compile time (HIP device compile requires a constant
-// array bound; a runtime loop over extra is not acceptable here).
-template <unsigned N, unsigned... I>
-constexpr unsigned rocm_assert_count_percent_impl(
-    const char (&s)[N],
-    std::index_sequence<I...>) {
-  return (static_cast<unsigned>(s[I] == '%') + ... + 0u);
-}
-
-template <unsigned N>
-constexpr unsigned rocm_assert_count_percent(const char (&s)[N]) {
-  return rocm_assert_count_percent_impl(s, std::make_index_sequence<N - 1>{});
-}
-
 // OCKL treats is_last=1 append as printf format; double '%' for literal output.
+// Worst-case escaped size is 2 * N - 1 (each source byte may become two).
 template <unsigned N>
 constexpr auto rocm_assert_escape_format(const char (&s)[N]) {
-  constexpr unsigned extra = rocm_assert_count_percent<N>(s);
   struct {
-    char data[N + extra]; // = N - 1 (content excluding '\0') + extra + 1 ('\0')
+    char data[2 * N - 1];
+    unsigned length;
   } out{};
   unsigned j = 0;
   for (unsigned i = 0; i < N - 1; ++i) {
@@ -586,6 +572,7 @@ constexpr auto rocm_assert_escape_format(const char (&s)[N]) {
     out.data[j++] = s[i];
   }
   out.data[j] = '\0';
+  out.length = j + 1;
   return out;
 }
 
@@ -616,11 +603,11 @@ constexpr auto rocm_assert_concat(
   return rocm_assert_escape_format(msg.data);
 }
 
-template <unsigned N>
 __device__ __attribute__((flatten)) void rocm_assert_one_shot(
-    const char (&msg)[N]) {
+    const char* msg,
+    unsigned length) {
   auto d = __ockl_fprintf_stderr_begin();
-  __ockl_fprintf_append_string_n(d, msg, N, 1);
+  __ockl_fprintf_append_string_n(d, msg, length, 1);
   __builtin_trap();
 }
 
@@ -630,15 +617,17 @@ __host__ __device__ inline void rocm_kernel_assert(
     const char* file,
     unsigned int line,
     const char* func,
-    const char (&msg)[N]) {
+    const char (&msg)[N],
+    unsigned msg_length) {
 #if defined(__HIP_DEVICE_COMPILE__)
   (void)cond;
   (void)file;
   (void)line;
   (void)func;
-  rocm_assert_one_shot(msg);
+  rocm_assert_one_shot(msg, msg_length);
 #else
   (void)msg;
+  (void)msg_length;
   __assert_fail(cond, file, line, func);
 #endif
 }
@@ -656,7 +645,8 @@ __host__ __device__ inline void rocm_kernel_assert(
         __FILE__,                                            \
         static_cast<unsigned int>(__LINE__),                 \
         __func__,                                            \
-        _rocm_assert_msg.data);                              \
+        _rocm_assert_msg.data,                               \
+        _rocm_assert_msg.length);                            \
   }
 #else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
