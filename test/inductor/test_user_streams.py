@@ -36,12 +36,14 @@ from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
     onlyAccelerator,
-    requires_capabilities,
 )
-from torch.testing._internal.common_utils import HardwareClassification, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TEST_WITH_ROCM,
+    xfailIfNoAcceleratorTriton,
+)
 
 
 def _extract_wrapper_body(code):
@@ -312,8 +314,8 @@ with torch.xpu._DeviceGuard(0):
 class TestStreamCodegenRuntime(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_generated_code_uses_get_stream_by_index(self, device):
         """Generated inductor code should use _get_stream_by_index."""
         from torch._inductor.utils import run_and_get_code
@@ -335,8 +337,8 @@ class TestUserStreamCompile(InductorTestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_compile_with_user_stream_context(self, device):
         """Test that user code with stream context compiles and runs correctly."""
         from torch._inductor.utils import run_and_get_code
@@ -372,8 +374,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertGreaterEqual(_count_generated_stream_contexts(code), 1)
         self.assertIn("synchronize_stream", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_raw_stream_name_does_not_clobber_user_stream_on_cuda_1(self, device):
         from torch._inductor.utils import run_and_get_code
 
@@ -413,8 +415,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertIn("raw_stream1 = get_raw_stream(1)", code)
         self.assertNotRegex(code, r"(?m)^\s*stream1 = get_raw_stream\(1\)")
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_compile_preserves_stream_semantics(self, device):
         """Test that compiled code preserves stream execution semantics."""
         from torch._inductor.utils import run_and_get_code
@@ -441,8 +443,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertGreaterEqual(_count_generated_stream_contexts(code), 1)
         self.assertIn("synchronize_stream", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_multiple_stream_contexts(self, device):
         """Test compilation with multiple stream context switches."""
         from torch._inductor.utils import run_and_get_code
@@ -475,8 +477,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertGreaterEqual(_count_generated_stream_contexts(code), 1)
         self.assertIn("synchronize_stream", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_nested_stream_contexts(self, device):
         """Test compilation with nested stream contexts."""
         from torch._inductor.utils import run_and_get_code
@@ -507,8 +509,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertGreaterEqual(_count_generated_stream_contexts(code), 1)
         self.assertIn("synchronize_stream", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_stream_context_with_data_dependency(self, device):
         """Test stream contexts with data flowing between streams."""
         from torch._inductor.utils import run_and_get_code
@@ -539,8 +541,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertGreaterEqual(_count_generated_stream_contexts(code), 1)
         self.assertIn("synchronize_stream", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_event_record_and_wait(self, device):
         """Test compilation with explicit event record and wait."""
         from torch._inductor.utils import run_and_get_code
@@ -574,8 +576,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertIn("record_event", code)
         self.assertIn("wait_event", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_event_record_on_stream(self, device):
         """Test event recording on a specific stream."""
         from torch._inductor.utils import run_and_get_code
@@ -611,8 +613,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertIn("record_event", code)
         self.assertIn("wait_event", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_multiple_events_multiple_streams(self, device):
         """Test multiple events synchronizing multiple streams."""
         from torch._inductor.utils import run_and_get_code
@@ -654,8 +656,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertGreaterEqual(code.count("record_event"), 2)
         self.assertGreaterEqual(code.count("wait_event"), 2)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_event_wait_without_record(self, device):
         """Test that waiting on unrecorded event works (no-op)."""
         from torch._inductor.utils import run_and_get_code
@@ -687,8 +689,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertIn("record_event", code)
         self.assertIn("wait_event", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_stream_wait_event(self, device):
         """Test stream.wait_event() method."""
         from torch._inductor.utils import run_and_get_code
@@ -719,8 +721,8 @@ class TestUserStreamCompile(InductorTestCase):
         # Verify stream.wait_event survives compilation as custom op
         self.assertIn("wait_event", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_bidirectional_stream_sync(self, device):
         """Test bidirectional synchronization between streams."""
         from torch._inductor.utils import run_and_get_code
@@ -763,8 +765,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertGreaterEqual(code.count("record_event"), 2)
         self.assertGreaterEqual(code.count("wait_event"), 2)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_three_streams_pipeline(self, device):
         """Test pipeline pattern with three streams."""
         from torch._inductor.utils import run_and_get_code
@@ -810,8 +812,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertGreaterEqual(code.count("record_event"), 2)
         self.assertGreaterEqual(code.count("wait_event"), 2)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_parallel_streams_join(self, device):
         """Test parallel work on multiple streams joining at the end."""
         from torch._inductor.utils import run_and_get_code
@@ -861,8 +863,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertGreaterEqual(code.count("record_event"), 3)
         self.assertGreaterEqual(code.count("wait_event"), 3)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_fan_out_fan_in(self, device):
         """Test fan-out from one stream to multiple, then fan-in."""
         from torch._inductor.utils import run_and_get_code
@@ -910,8 +912,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertGreaterEqual(code.count("record_event"), 3)
         self.assertGreaterEqual(code.count("wait_event"), 4)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_four_streams_diamond(self, device):
         """Test diamond pattern: one start, two parallel, one end."""
         from torch._inductor.utils import run_and_get_code
@@ -963,8 +965,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertGreaterEqual(code.count("record_event"), 3)
         self.assertGreaterEqual(code.count("wait_event"), 4)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_stream_reuse_across_iterations(self, device):
         """Test that streams can be reused across loop iterations."""
         from torch._inductor.utils import run_and_get_code
@@ -996,8 +998,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertIn("record_event", code)
         self.assertIn("wait_event", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_no_fusion_across_streams(self, device):
         """Test that operations on different streams are not fused together."""
         from torch._inductor.utils import run_and_get_code
@@ -1041,8 +1043,8 @@ class TestUserStreamCompile(InductorTestCase):
         # the default stream (which is a third stream context).
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_no_fusion_across_streams_with_dependency(self, device):
         """Test no fusion when there's a data dependency across streams."""
         from torch._inductor.utils import run_and_get_code
@@ -1076,8 +1078,8 @@ class TestUserStreamCompile(InductorTestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_fusion_within_same_stream(self, device):
         """Test that fusion still works for operations within the same stream."""
         from torch._inductor.utils import run_and_get_code
@@ -1107,8 +1109,8 @@ class TestUserStreamCompile(InductorTestCase):
         # All pointwise ops on same stream should fuse into 1 kernel
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_no_fusion_simple_dependency_across_streams(self, device):
         """Regression: a single pointwise consumed across a stream boundary must not fuse."""
         from torch._inductor.utils import run_and_get_code
@@ -1139,9 +1141,9 @@ class TestUserStreamCompile(InductorTestCase):
         # Must be 2 separate kernels on 2 streams, not fused into 1
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @torch._inductor.config.patch(combo_kernels=True)
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
+    @torch._inductor.config.patch(combo_kernels=True)
     def test_no_combo_kernel_fusion_across_streams(self, device):
         """Combo kernels must not group nodes on different streams."""
         from torch._inductor.utils import run_and_get_code
@@ -1175,9 +1177,9 @@ class TestUserStreamCompile(InductorTestCase):
         # kernels would merge them into 1.
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @torch._inductor.config.patch(combo_kernels=True)
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
+    @torch._inductor.config.patch(combo_kernels=True)
     def test_combo_kernel_fusion_within_same_stream(self, device):
         """Combo kernels should still group independent nodes on the same stream."""
         from torch._inductor.utils import run_and_get_code
@@ -1207,8 +1209,8 @@ class TestUserStreamCompile(InductorTestCase):
         # should be combined, yielding fewer kernels than without.
         self.assertLessEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_cross_stream_stride_copy(self, device):
         """A contiguous copy forced by a non-contiguous slice across streams
         must run on the consumer's stream, not the producer's."""
@@ -1270,8 +1272,8 @@ class TestUserStreamCompile(InductorTestCase):
             lambda msg: f"{msg}\nExpected 1 kernel on s2, got: {stream_kernels}",
         )
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_no_buffer_reuse_across_streams(self, device):
         """Buffer produced on one stream must not be reused in-place on another."""
         from torch._inductor.utils import run_and_get_code
@@ -1300,8 +1302,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertIn("wait_event", wrapper)
         self.assertNotIn("buf0; del buf0", wrapper)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_stream_record_wait_event_not_dropped(self, device):
         """stream.record_event() and stream.wait_event() must survive compilation."""
         from torch._inductor.utils import run_and_get_code
@@ -1327,8 +1329,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertIn("wait_event", code)
         self.assertIn("synchronize_stream", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_stream_synchronize_not_dropped(self, device):
         """stream.synchronize() must survive compilation and appear in wrapper code."""
         from torch._inductor.utils import run_and_get_code
@@ -1348,8 +1350,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertEqual(result, expected)
         self.assertIn("synchronize_stream", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_stream_wait_stream_not_dropped(self, device):
         """stream.wait_stream() must survive compilation and appear in wrapper code."""
         from torch._inductor.utils import run_and_get_code
@@ -1373,8 +1375,8 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertIn("wait_stream", code)
         self.assertIn("synchronize_stream", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_wait_stream_ordering_preserved(self, device):
         """wait_stream must not be reordered before the work it synchronizes."""
         from torch._inductor.utils import run_and_get_code
@@ -1411,8 +1413,8 @@ class TestUserStreamCompile(InductorTestCase):
         # wait_stream(0, 1) must come after wait_stream(1, 0)
         self.assertGreater(wait_0_1_pos, wait_1_0_pos)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_wait_stream_ordering_independent_inputs(self, device):
         """wait_stream must order subsequent waiting-stream work even with independent inputs."""
         from torch._inductor.utils import run_and_get_code
@@ -1463,8 +1465,8 @@ class TestUserStreamCompile(InductorTestCase):
             "wait_stream(0, 1) must come after add kernel (stream 1)",
         )
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_pattern_replacement_preserves_stream(self, device):
         """A post-grad pattern replacement (online softmax) must preserve the
         stream annotation of the intermediate nodes it introduces. Regression
@@ -1512,8 +1514,8 @@ class TestUserStreamCompile(InductorTestCase):
             f"prepare_softmax_online must run on the side stream, got: {softmax_ctx}",
         )
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_codegen_structure_single_stream(self, device):
         """Verify wrapper structure for pointwise ops with one side stream."""
         from torch._inductor.utils import run_and_get_code
@@ -1567,8 +1569,8 @@ class GraphModule(torch.nn.Module):
             .run(wrapper_body)
         )
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_codegen_structure_pipeline(self, device):
         """Verify wrapper structure for two-stage matmul pipeline."""
         from torch._inductor.utils import run_and_get_code
@@ -1636,8 +1638,8 @@ class GraphModule(torch.nn.Module):
             wrapper_body,
         )
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_codegen_structure_three_stream_pipeline(self, device):
         """Verify wrapper structure for three-stage matmul pipeline."""
         from torch._inductor.utils import run_and_get_code
@@ -1739,8 +1741,8 @@ class GraphModule(torch.nn.Module):
             wrapper_body,
         )
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_codegen_structure_parallel_matmuls(self, device):
         """Verify wrapper structure for parallel matmuls with join."""
         from torch._inductor.utils import run_and_get_code
@@ -1829,8 +1831,8 @@ class GraphModule(torch.nn.Module):
             wrapper_body,
         )
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_codegen_per_stream_alignment_copy_multi_stream(self, device):
         """Regression test for per-stream alignment fixups read by many streams.
 
@@ -1887,8 +1889,8 @@ class GraphModule(torch.nn.Module):
         # match the free by pattern rather than a hardcoded name.
         FileCheck().check_regex(r"del arg\d+_1_orig").run(code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_codegen_per_stream_alignment_copy_one_per_stream(self, device):
         """An input read multiple times on one stream gets a single copy there.
 
@@ -2151,8 +2153,8 @@ class TestStreamOrderingStress(InductorTestCase):
     #    Without the event.wait() the consumer would launch immediately
     #    and read stale memory because the producer chain hasn't finished.
     # ------------------------------------------------------------------
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_race_producer_consumer(self, device):
         N = self.N
 
@@ -2179,8 +2181,8 @@ class TestStreamOrderingStress(InductorTestCase):
     # 2. Race: ping-pong where each direction has heavy work.
     #    Both event.wait() calls are load-bearing.
     # ------------------------------------------------------------------
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_race_ping_pong(self, device):
         N = self.N
 
@@ -2215,8 +2217,8 @@ class TestStreamOrderingStress(InductorTestCase):
     # 3. Race: fan-out where the producer is slow.
     #    All three consumers depend on the producer finishing.
     # ------------------------------------------------------------------
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_race_fan_out(self, device):
         N = self.N
 
@@ -2266,8 +2268,8 @@ class TestStreamOrderingStress(InductorTestCase):
     # 4. Race: diamond pattern with heavy work on both branches.
     #    The join must wait for both branches.
     # ------------------------------------------------------------------
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_race_diamond(self, device):
         N = self.N
 
@@ -2311,8 +2313,8 @@ class TestStreamOrderingStress(InductorTestCase):
     # 5. Race: 4-stage pipeline where each stage is heavy.
     #    Every event.wait() is load-bearing.
     # ------------------------------------------------------------------
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_race_pipeline(self, device):
         N = self.N
         matmul_chain = self._heavy_matmul_chain
@@ -2350,8 +2352,8 @@ class TestStreamOrderingStress(InductorTestCase):
     # ------------------------------------------------------------------
     # 6. Race: back-to-back sync, both directions carry heavy work
     # ------------------------------------------------------------------
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_race_back_to_back(self, device):
         N = self.N
 
@@ -2383,8 +2385,8 @@ class TestStreamOrderingStress(InductorTestCase):
     #    Without the triton stream fix the kernel launches on the default
     #    stream and reads stale/in-progress data from the user stream.
     # ------------------------------------------------------------------
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_race_triton_on_user_stream(self, device):
         N = self.N
 
@@ -2414,8 +2416,8 @@ class TestGenericStreamCompile(InductorTestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_generic_stream_basic(self, device):
         """Test compilation with torch.Stream (device-agnostic API)."""
         from torch._inductor.utils import run_and_get_code
@@ -2442,8 +2444,8 @@ class TestGenericStreamCompile(InductorTestCase):
         # Verify stream context is present
         self.assertGreaterEqual(_count_generated_stream_contexts(code), 1)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_generic_stream_with_event(self, device):
         """Test compilation with torch.Stream and torch.Event."""
         from torch._inductor.utils import run_and_get_code
@@ -2480,8 +2482,8 @@ class TestGenericStreamCompile(InductorTestCase):
         # Verify event operations survive compilation as custom ops
         self.assertIn("record_event", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_generic_stream_multiple(self, device):
         """Test compilation with multiple torch.Stream instances."""
         from torch._inductor.utils import run_and_get_code
@@ -2527,8 +2529,8 @@ class TestGenericStreamCompile(InductorTestCase):
         self.assertIn("record_event", code)
         self.assertIn("wait_event", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_generic_event_record_on_stream(self, device):
         """Test torch.Event.record() with explicit stream argument."""
         from torch._inductor.utils import run_and_get_code
@@ -2571,8 +2573,8 @@ class TestStreamIdentity(InductorTestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_single_stream_identity(self, device):
         """Codegen should retrieve the user's stream via _get_stream_by_index."""
         from torch._inductor.utils import run_and_get_code
@@ -2590,8 +2592,8 @@ class TestStreamIdentity(InductorTestCase):
         self.assertIn("_get_stream_by_index", code)
         self.assertNotIn("torch.Stream(device=", code)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_multiple_stream_identity(self, device):
         """Each stream context should retrieve a different user stream object."""
         from torch._inductor.utils import run_and_get_code
@@ -2636,9 +2638,9 @@ class TestPDLWithMultiStream(InductorTestCase):
 
     hw_classification = HardwareClassification.CUDA
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
-    @requires_capabilities(Capability.lib.triton)
     def test_pdl_single_side_stream(self, device):
         """PDL metadata is emitted for a kernel on a side stream."""
         from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
@@ -2669,9 +2671,9 @@ class TestPDLWithMultiStream(InductorTestCase):
             .check("gdc_launch")
         ).run(triton_code)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
-    @requires_capabilities(Capability.lib.triton)
     def test_pdl_correctness_with_multiple_streams(self, device):
         """Enabling PDL with independent side streams produces correct results."""
         from torch._inductor.utils import run_and_get_triton_code
@@ -2717,9 +2719,9 @@ class TestPDLWithMultiStream(InductorTestCase):
             .check("gdc_launch")
         ).run(triton_code)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
-    @requires_capabilities(Capability.lib.triton)
     def test_pdl_cross_stream_events_preserved(self, device):
         """Event record/wait for cross-stream sync must survive with PDL on.
 
@@ -2765,9 +2767,9 @@ class TestPDLWithMultiStream(InductorTestCase):
             .check("gdc_launch")
         ).run(triton_code)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
-    @requires_capabilities(Capability.lib.triton)
     def test_pdl_same_stream_consecutive_kernels(self, device):
         """Two consecutive kernels on the same side stream should both get PDL.
 
@@ -2798,9 +2800,9 @@ class TestPDLWithMultiStream(InductorTestCase):
             .check("gdc_launch")
         ).run(triton_code)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
-    @requires_capabilities(Capability.lib.triton)
     def test_pdl_no_fusion_across_streams(self, device):
         """PDL must not cause cross-stream ops to be fused."""
         from torch._inductor.utils import run_and_get_triton_code
@@ -2854,9 +2856,9 @@ class TestPDLWithMultiStream(InductorTestCase):
             .check("gdc_launch")
         ).run(triton_code)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
-    @requires_capabilities(Capability.lib.triton)
     def test_pdl_stress_multistream_correctness(self, device):
         """Stress test: heavy work across streams with PDL must produce
         correct results over many iterations to surface any races.
@@ -2908,9 +2910,9 @@ class TestPDLWithMultiStream(InductorTestCase):
             torch.cuda.synchronize()
             self.assertEqual(actual, expected)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
-    @requires_capabilities(Capability.lib.triton)
     def test_pdl_mutation_across_streams(self, device):
         """Buffer mutation on one stream, read on another, with PDL enabled.
 
@@ -2982,7 +2984,7 @@ class TestAOTIUserStreams(InductorTestCase):
             result = loaded(*inputs)
         return result, code
 
-    @requires_capabilities(Capability.lib.triton)
+    @xfailIfNoAcceleratorTriton
     def test_record_wait_event_basic(self, device):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -3004,7 +3006,7 @@ class TestAOTIUserStreams(InductorTestCase):
         self.assertIn(self._runtime_name("cudaStreamWaitEvent"), code)
         self.assertIn("AOTIPerThreadStreamCache", code)
 
-    @requires_capabilities(Capability.lib.triton)
+    @xfailIfNoAcceleratorTriton
     def test_two_stream_dependency(self, device):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -3033,7 +3035,7 @@ class TestAOTIUserStreams(InductorTestCase):
         )
         self.assertIn("_aoti_aux_stream_cache.get(2", code)
 
-    @requires_capabilities(Capability.lib.triton)
+    @xfailIfNoAcceleratorTriton
     def test_stream_synchronize_raises(self, device):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -3056,7 +3058,7 @@ class TestStreamCudagraphInteraction(InductorTestCase):
 
     hw_classification = HardwareClassification.CUDA
 
-    @requires_capabilities(Capability.lib.triton)
+    @xfailIfNoAcceleratorTriton
     def test_implicit_current_stream_with_cudagraphs(self, device):
         """Event record/wait with implicit current stream must work under cudagraph capture.
 
@@ -3086,7 +3088,7 @@ class TestStreamCudagraphInteraction(InductorTestCase):
             result = compiled_fn(x, y)
         self.assertEqual(result, expected)
 
-    @requires_capabilities(Capability.lib.triton)
+    @xfailIfNoAcceleratorTriton
     def test_explicit_current_stream_with_cudagraphs(self, device):
         """Passing torch.cuda.current_stream() explicitly must also work under capture.
 
@@ -3117,7 +3119,7 @@ class TestStreamCudagraphInteraction(InductorTestCase):
             result = compiled_fn(x, y)
         self.assertEqual(result, expected)
 
-    @requires_capabilities(Capability.lib.triton)
+    @xfailIfNoAcceleratorTriton
     def test_wait_stream_fork_join_with_cudagraphs(self, device):
         """wait_stream fork-join pattern must work under cudagraph capture.
 
@@ -3144,7 +3146,7 @@ class TestStreamCudagraphInteraction(InductorTestCase):
             result = compiled_fn(x)
         self.assertEqual(result, expected)
 
-    @requires_capabilities(Capability.lib.triton)
+    @xfailIfNoAcceleratorTriton
     def test_wait_stream_independent_inputs_with_cudagraphs(self, device):
         """wait_stream with independent inputs must work under cudagraph capture.
 
@@ -3174,8 +3176,8 @@ class TestStreamCudagraphInteraction(InductorTestCase):
 class TestStreamExternalObjectRestore(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @xfailIfNoAcceleratorTriton
     def test_restore_external_objects_before_backward(self, device):
         """Forward snapshots external object registry, backward restores it."""
         from torch._dynamo.graph_bytecode_inputs import store_user_object_weakrefs
