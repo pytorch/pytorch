@@ -52,10 +52,8 @@ class HashCountingInt(int):
 
 
 class TestJointOps(TestCase):
-    # Tests common to both OrderedSet and frozenset
-
     hw_classification = HardwareClassification.GENERIC
-
+    # Tests common to both OrderedSet and frozenset
     thetype = OrderedSet
     basetype = OrderedSet
 
@@ -435,7 +433,6 @@ class TestJointOps(TestCase):
 
 class TestSet(TestJointOps, TestCase):
     hw_classification = HardwareClassification.GENERIC
-
     thetype = OrderedSet
     basetype = OrderedSet
 
@@ -1002,9 +999,8 @@ def gooditer():
 
 
 class TestExceptionPropagation(TestCase):
-    """SF 628246:  Set constructor should not trap iterator TypeErrors"""
-
     hw_classification = HardwareClassification.GENERIC
+    """SF 628246:  Set constructor should not trap iterator TypeErrors"""
 
     def test_instanceWithException(self):
         self.assertRaises(TypeError, OrderedSet, baditer())
