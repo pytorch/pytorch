@@ -401,7 +401,8 @@ void mutate_view_meta(
 
 TORCH_API Tensor apply_view_meta_sequence(
     const Tensor& base,
-    const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence);
+    const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence,
+    bool single_output_replay = false);
 
 void set_sizes_strides_offset(const Tensor& out, const Tensor& meta_out);
 void set_sizes_strides_offset(
