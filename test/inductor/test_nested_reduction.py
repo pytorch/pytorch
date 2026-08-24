@@ -837,6 +837,49 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x, weight))
         self.check_fusion()
 
+    def _check_sub_parent_indirect_index_mask(self, f, args):
+        ref = f(*args)
+        act, source_codes = run_and_get_code(torch.compile(f, fullgraph=True), *args)
+        self.assertEqual(act, ref, atol=1e-3, rtol=1e-3)
+        self.check_fusion()
+        FileCheck().check("tl.device_assert").check(
+            "half2_r0_index_mask & xmask"
+        ).check("tl.load").check("half2_r0_index_mask & xmask").run(
+            "\n\n".join(source_codes)
+        )
+
+    def test_standalone_sub_parent_preserves_indirect_index_mask(self):
+        B, D = 64, 4608
+
+        def f(x, table):
+            scale = torch.rsqrt(torch.mean(x * x, dim=-1, keepdim=True) + 1e-6)
+            pairs = x.view(B, D // 2, 2)
+            index = (0.01 / (pairs[..., 0].abs() + 1e-11)).long().clamp(min=0)
+            index = torch.where(
+                pairs[..., 0].abs() > 1e-6, torch.zeros_like(index), index
+            )
+            return table[index] * scale + pairs[..., 1] * scale, scale
+
+        x = torch.ones(B, D, device=GPU_TYPE)
+        table = torch.randn(4, device=GPU_TYPE)
+        self._check_sub_parent_indirect_index_mask(f, (x, table))
+
+    @parametrize("G", [2, 16])
+    def test_nested_sub_parent_preserves_indirect_index_mask(self, G):
+        B, D = 64, 4608
+
+        def f(x, table):
+            y = _rmsnorm(x)
+            groups = y.view(B, D // G, G)
+            scale = (groups.abs().amax(dim=-1) / 6.0).clamp(min=1e-12)
+            pairs = groups.view(B, D // G, G // 2, 2)
+            index = (1e-11 / scale).long().unsqueeze(-1).expand_as(pairs[..., 0])
+            return table[index] + pairs[..., 1] / scale.unsqueeze(-1), scale
+
+        x = torch.ones(B, D, device=GPU_TYPE)
+        table = torch.randn(4, device=GPU_TYPE)
+        self._check_sub_parent_indirect_index_mask(f, (x, table))
+
     @parametrize("scale_first", (False, True))
     def test_sub_parent_fusion_is_independent_of_nested_append_order(self, scale_first):
         import torch.nn.functional as F
@@ -2782,6 +2825,7 @@ class _InternalsBase:
             min_rblock=16,
             extra_checks=FileCheck()
             .check("tl.broadcast_to")
+            .check_count(".to(tl.float8e4nv)", 1, exactly=True)
             .check("tl.split(")
             .check(".to(tl.uint8, bitcast=True)")
             .check(").to(tl.float8e4nv, bitcast=True)")

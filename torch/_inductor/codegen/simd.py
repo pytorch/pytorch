@@ -1590,6 +1590,44 @@ class _DerivedIterationFamily:
             raise AssertionError("sub-parent family must have a derived tree")
         return self.flat_index_derived_tree
 
+    def mask_vars_for_shape(
+        self, kernel: TritonKernel, shape: Sequence[int | str] | None
+    ) -> OrderedSet[str]:
+        """Masks from this iteration family that do not widen ``shape``."""
+        if not self.is_active_on(kernel):
+            raise AssertionError("derived iteration family must be active")
+        if shape is None:
+            return OrderedSet()
+        ndim = kernel.triton_tensor_ndim()
+        if len(shape) > ndim:
+            raise AssertionError(f"value rank {len(shape)} exceeds kernel rank {ndim}")
+        # Align lower-rank values to trailing kernel dimensions, matching
+        # Triton broadcasting (for example, [R] is [1, R] in an [X, R] tile).
+        value_shape = (*([1] * (ndim - len(shape))), *shape)
+        mask_vars: OrderedSet[str] = OrderedSet()
+        for tree in self.range_trees:
+            mask_shape = tree.mask_shape(ndim)
+            mask_shape = (*([1] * (ndim - len(mask_shape))), *mask_shape)
+            if all(
+                str(mask_dim) == "1" or str(mask_dim) == str(value_dim)
+                for value_dim, mask_dim in zip(value_shape, mask_shape)
+            ):
+                mask_vars.add(tree.mask_name())
+        kernel.filter_masks(mask_vars)
+        return mask_vars
+
+    def set_value_masks(
+        self, kernel: TritonKernel, values: Iterable[CSEVariable]
+    ) -> None:
+        """Mark values as valid on their materialized derived-domain tiles.
+
+        The planner proves exact divisibility, so the target-family mask is
+        equivalent to projecting the source mask through every lane.
+        """
+        for value in values:
+            value = cast("TritonCSEVariable", value)
+            value.mask_vars = self.mask_vars_for_shape(kernel, value.shape)
+
     @contextlib.contextmanager
     def ensure_active(self, kernel: SIMDKernel[Any]):
         """Activate this family if it isn't already active on ``kernel``."""
@@ -1921,6 +1959,10 @@ class _GroupedReductionLayout:
             name_suffix=f"half{factor}",
             named_constants=self._grouped_axis_named_constants(self.group_tree),
         )
+        # Usually the flattened extent directly proves divisibility by the
+        # factor. Nested codegen may instead retain an opaque but equivalent
+        # extent, so expose its known num_groups * group_size structure. The
+        # planner has already proved that group_size is divisible by factor.
         lane_index_subs = scheduler.NestedReduction.try_get_sub_parent_extent_subs(
             self.group_tree.numel, factor
         )
@@ -1932,7 +1974,7 @@ class _GroupedReductionLayout:
                 self.group_tree.numel, grouped_extent
             ):
                 raise AssertionError(
-                    "sub-parent extent must be divisible by its factor"
+                    "sub-parent extent does not match its grouped layout"
                 )
             lane_index_subs = {self.group_tree.numel: grouped_extent}
         return _DerivedIterationFamily(
@@ -2035,18 +2077,21 @@ class _GroupedReductionLayout:
             return True
         # A value already at child width can be forwarded directly.
         if parent_dim == self.child_block(factor):
+            family.set_value_masks(kernel, (value,))
             family.remapped_values[name] = value
             return True
         # Only a full parent tile can be projected to child width here.
         if parent_dim != self.parent_block:
             if not allow_reduced_broadcast or parent_dim != self.num_groups_str:
                 return False
-            family.remapped_values[name] = self._broadcast_value_to_axis_resolution(
+            broadcast = self._broadcast_value_to_axis_resolution(
                 kernel,
                 value,
                 parent_extent=self.child_block(factor),
                 elems_per_group=str(FloorDiv(self.local_reduction_size_sym, factor)),
             )
+            family.set_value_masks(kernel, (broadcast,))
+            family.remapped_values[name] = broadcast
             return True
         interleaved = scheduler.NestedReduction.SubParentSourceLayout.INTERLEAVED
         if source_layout is not interleaved:
@@ -2066,6 +2111,7 @@ class _GroupedReductionLayout:
             for _ in range(factor)
         )
         kernel.emit_split_via_reshape(value, reshape_shape, tuple(map(str, parts)))
+        family.set_value_masks(kernel, parts)
         # Derived loads select the appropriate register value from this tuple.
         family.remapped_values[name] = parts
         return True
@@ -2291,7 +2337,12 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
 
 
 class _SubParentSourceLoadResolver(WrapperHandler):  # type: ignore[type-arg]
-    """Projects CSE-live parent values into a sub-parent stage."""
+    """Makes live source values available to a sub-parent epilogue.
+
+    For factor F, a parent value [B, D] is split into F lane values
+    [B, D / F]. A group value [B, D / G] is repeated G / F times per group
+    to form [B, D / F].
+    """
 
     def __init__(
         self,
@@ -2321,7 +2372,7 @@ class _SubParentSourceLoadResolver(WrapperHandler):  # type: ignore[type-arg]
             self._values[name] = value
         return value
 
-    def materialize(self, name: str, *, required: bool = False) -> bool:
+    def materialize(self, name: str) -> bool:
         if name in self._sub_parent_family.remapped_values:
             return True
         if (
@@ -2329,13 +2380,14 @@ class _SubParentSourceLoadResolver(WrapperHandler):  # type: ignore[type-arg]
             and name not in self._broadcast_source_names
         ):
             return False
+        must_forward = name in self._kernel.store_buffer_names
         value = self._values.get(name)
         if value is None or not self._kernel.cse.contains_value(value):
             value = cast(
                 "TritonCSEVariable | None", self._kernel.cse.store_cache.get(name)
             )
         if value is None or not self._kernel.cse.contains_value(value):
-            if required:
+            if must_forward:
                 raise AssertionError(
                     f"sub-parent stage could not materialize planned input {name!r}"
                 )
@@ -2349,7 +2401,7 @@ class _SubParentSourceLoadResolver(WrapperHandler):  # type: ignore[type-arg]
             self._source_layouts.get(name),
             allow_reduced_broadcast=name in self._broadcast_source_names,
         )
-        if required and not materialized:
+        if must_forward and not materialized:
             raise AssertionError(
                 f"sub-parent stage has no usable layout for input {name!r}"
             )
@@ -3297,15 +3349,6 @@ class SIMDScheduling(BaseScheduling):
                     or sub_parent_resolver is None
                 ):
                     raise AssertionError("sub-parent stage requires its codegen state")
-                internal_names = OrderedSet.union(
-                    *(sn.get_buffer_names() for sn in node.get_nodes())
-                )
-                source_names = OrderedSet(dict(sub_parent_stage.source_layouts))
-                broadcast_names = OrderedSet(sub_parent_stage.broadcast_source_names)
-                for name in source_names | broadcast_names:
-                    sub_parent_resolver.materialize(
-                        name, required=name in internal_names or name in broadcast_names
-                    )
                 self._codegen_remapped_pointwise(
                     kernel,
                     sub_parent_stage.epilogue_nodes,
