@@ -2033,6 +2033,7 @@ class TensorBase(metaclass=_TensorMeta):
         symint_visitor_fn: Callable[[_int], _int] | None = None,
         tensor_visitor_fn: Callable[[Tensor], Tensor] | None = None,
     ): ...
+    def _use_count(self) -> _int: ...
     ${tensor_method_hints}
 
 _TensorBase = TensorBase
