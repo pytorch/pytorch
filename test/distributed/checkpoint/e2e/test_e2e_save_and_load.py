@@ -73,7 +73,7 @@ class TestDummyModel(torch.nn.Module):
         return x
 
     def get_input(self):
-        return torch.rand(8, 8, device=self.net1.weight.device)
+        return torch.rand(8, 8, device=next(self.parameters()).device)
 
 
 class TestStatefulObj:
