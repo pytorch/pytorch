@@ -1,5 +1,7 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
+#include <torch/csrc/Exceptions.h>
+
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <torch/csrc/autograd/engine.h>
@@ -68,13 +70,6 @@ std::string TURN_OFF_COMPILED_AUTOGRAD_MSG() {
 }
 
 } // namespace
-
-// see https://github.com/pytorch/pytorch/pull/34845
-static void throw_python_error() {
-  python_error err;
-  err.persist();
-  throw std::move(err);
-}
 
 // RuntimeState contains arbitrary callables created during the forward pass.
 // e.g. .retains_grad(). It is created during the compiled_args stage, and is
