@@ -4027,6 +4027,20 @@ class TestFxGraphCacheHashing(TestCase):
             pickler.dumps(fa3_enabled_details),
         )
 
+        old_fa4_enabled = torch._C._get_fa4_sdp_enabled()
+        try:
+            torch._C._set_sdp_use_fa4(False)
+            fa4_disabled_details = FxGraphHashDetails(None, [], {}, [])
+            torch._C._set_sdp_use_fa4(True)
+            fa4_enabled_details = FxGraphHashDetails(None, [], {}, [])
+        finally:
+            torch._C._set_sdp_use_fa4(old_fa4_enabled)
+
+        self.assertNotEqual(
+            pickler.dumps(fa4_disabled_details),
+            pickler.dumps(fa4_enabled_details),
+        )
+
     def test_hash_private_config_changes(self):
         """
         Test that private config settings affect hashes.
