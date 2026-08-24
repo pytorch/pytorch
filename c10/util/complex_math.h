@@ -6,17 +6,11 @@
 namespace c10_complex_math {
 
 // Exponential functions
-
-template <typename T>
-C10_HOST_DEVICE inline c10::complex<T> exp(const c10::complex<T>& x) {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<c10::complex<T>>(
-      thrust::exp(static_cast<thrust::complex<T>>(x)));
-#else
-  return static_cast<c10::complex<T>>(
-      std::exp(static_cast<std::complex<T>>(x)));
-#endif
-}
+//
+// Note: exp(const c10::complex<T>&) now lives in
+// torch/headeronly/util/complex.h's `namespace std` block (it's needed by
+// the header-only ATen/native/Math.h), so it's not redefined here to avoid
+// an ODR conflict; std::exp already resolves to it via that include.
 
 template <typename T>
 C10_HOST_DEVICE inline c10::complex<T> log(const c10::complex<T>& x) {
@@ -402,7 +396,9 @@ using c10_complex_math::atan;
 using c10_complex_math::atanh;
 using c10_complex_math::cos;
 using c10_complex_math::cosh;
-using c10_complex_math::exp;
+// exp(const c10::complex<T>&) now lives in std (see
+// torch/headeronly/util/complex.h); pull it in here too so unqualified
+// `exp(complex_val)` call sites keep working as before.
 using c10_complex_math::expm1;
 using c10_complex_math::log;
 using c10_complex_math::log10;
@@ -414,6 +410,7 @@ using c10_complex_math::sinh;
 using c10_complex_math::sqrt;
 using c10_complex_math::tan;
 using c10_complex_math::tanh;
+using std::exp;
 
 namespace std {
 
@@ -425,7 +422,8 @@ using c10_complex_math::atan;
 using c10_complex_math::atanh;
 using c10_complex_math::cos;
 using c10_complex_math::cosh;
-using c10_complex_math::exp;
+// exp(const c10::complex<T>&) is already defined directly in this
+// namespace by torch/headeronly/util/complex.h.
 using c10_complex_math::expm1;
 using c10_complex_math::log;
 using c10_complex_math::log10;
