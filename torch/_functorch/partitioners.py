@@ -1329,7 +1329,7 @@ def enable_activation_quantization(
                 continue
             node.meta["saved_for_quantization"] = True
             node.meta["dequant_type"] = node.meta["val"].dtype
-            # some of the fwd outputs and bwd inputs are not share the same object
+            # some of the fwd outputs and bwd inputs do not share the same object
             bwd_module_inputs[node.name].meta["saved_for_quantization"] = True
             bwd_module_inputs[node.name].meta["dequant_type"] = node.meta["val"].dtype
             should_perform_fp8_quant = True
@@ -1370,6 +1370,24 @@ def _extract_fwd_bwd_modules(
     )
     placeholders = joint_module.graph.find_nodes(op="placeholder")
     primal_inputs = [*filter(_is_primal, placeholders)]
+    # Stamp is_static_input on primal placeholders for the backward
+    # compiler; see Note: [static_input_idxs semantics] in
+    # torch/_inductor/compile_fx.py. This must happen here, while primals
+    # are still 1:1 with flat forward inputs, because staticness is tracked
+    # positionally (static_lifetime_input_nodes derives from
+    # fw_metadata.static_input_indices) and the backward graph's input
+    # ordering destroys that correspondence. The meta dict is shared by
+    # reference with the extracted fwd/bwd placeholder nodes
+    # (_extract_graph_with_inputs_outputs), so the stamp is visible on
+    # bw_module's placeholders regardless of how saving reorders them.
+    #
+    # TODO: staticness arguably belongs on the AOTInput descriptors
+    # (meta["desc"]); today those cannot express it (the dynamo frontend
+    # emits PlainAOTInput even for lifted params, and mark_static_address
+    # lives on the tensor object), so we use a dedicated meta key.
+    if static_lifetime_input_nodes is not None:
+        for node in primal_inputs:
+            node.meta["is_static_input"] = node in static_lifetime_input_nodes
     tangent_inputs = (
         [] if omit_aot_autograd_runtime else [*filter(_is_tangent, placeholders)]
     )
@@ -1406,7 +1424,11 @@ def _extract_fwd_bwd_modules(
         # then the collective will generally by followed by a wait_tensor() call.
         # we need to peek one node further to see if this wait_tensor is dead as well.
         elif distributed_enabled and all(
-            n.target is torch.ops._c10d_functional.wait_tensor.default
+            n.target
+            in (
+                torch.ops._c10d_functional.wait_tensor.default,
+                torch.ops._c10d_functional.wait_tensors.default,
+            )
             and len(n.users) == 0
             for n in node.users
         ):
@@ -1701,7 +1723,11 @@ def default_partition(
             )
             and (
                 not distributed_enabled
-                or node.target is not torch.ops._c10d_functional.wait_tensor.default
+                or node.target
+                not in (
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    torch.ops._c10d_functional.wait_tensors.default,
+                )
             )
         )
 
@@ -2312,13 +2338,23 @@ def force_save_collectives(joint_module: fx.GraphModule) -> None:
     unless they come from a user-annotated AC region.
     See Note [Recomputing collectives in the partitioner]
     """
+
+    def mark_leaf_tensor_outputs(node: fx.Node) -> None:
+        getitem_users = [user for user in node.users if user.target is operator.getitem]
+        if getitem_users:
+            for user in getitem_users:
+                mark_leaf_tensor_outputs(user)
+            return
+        if not isinstance(node.meta.get("val"), (tuple, list)):
+            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
     for node in joint_module.graph.nodes:
         if (
             isinstance(node.target, torch._ops.OpOverload)
             and node.target.namespace == "_c10d_functional"
             and not must_recompute(node)
         ):
-            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+            mark_leaf_tensor_outputs(node)
 
 
 def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
@@ -3388,12 +3424,10 @@ from torch.utils._mode_utils import no_dispatch
 
 # replace symbols in size and strides with their hints without guarding.
 def _remove_symbols_without_guarding(x: torch.Tensor, fallback: int) -> torch.Tensor:
-    shape = list(x.shape)
-
     def realize_symbol(d: torch.SymInt | int) -> int:
         return optimization_hint(d, fallback=fallback)
 
-    shape = [realize_symbol(s) for s in shape]
+    shape = [realize_symbol(s) for s in x.shape]
     stride = [realize_symbol(s) for s in x.stride()]
     return x.new_empty_strided(shape, stride=stride)
 
