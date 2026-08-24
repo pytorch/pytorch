@@ -2556,4 +2556,5 @@ instantiate_device_type_tests(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    run_tests(needs="filelock")
+    if HAS_TRITON:
+        run_tests(needs="filelock")
