@@ -483,7 +483,10 @@ void register_work(
   RankLocal<WorkRegistry>::get().register_work(tensor, work);
 }
 
-at::Tensor wait_tensor(const at::Tensor& tensor) {
+namespace {
+
+std::vector<c10::intrusive_ptr<c10d::Work>> pop_works(
+    const at::Tensor& tensor) {
   // First try to find work in the current thread's registry (fast path)
   auto works = RankLocal<WorkRegistry>::get().pop_works(tensor);
 
@@ -504,11 +507,35 @@ at::Tensor wait_tensor(const at::Tensor& tensor) {
       works = std::move(result.value());
     }
   }
+  return works;
+}
+
+} // namespace
+
+at::Tensor wait_tensor(const at::Tensor& tensor) {
+  auto works = pop_works(tensor);
 
   for (const auto& work : works) {
     work->wait();
   }
   return tensor;
+}
+
+std::vector<at::Tensor> wait_tensors(at::TensorList tensors) {
+  TORCH_CHECK(!tensors.empty(), "wait_tensors requires at least one tensor");
+  std::vector<c10::intrusive_ptr<c10d::Work>> works;
+  std::unordered_set<c10d::Work*> seen;
+  for (const auto& tensor : tensors) {
+    for (auto& work : pop_works(tensor)) {
+      if (seen.insert(work.get()).second) {
+        works.push_back(std::move(work));
+      }
+    }
+  }
+  for (const auto& work : works) {
+    work->wait();
+  }
+  return tensors.vec();
 }
 
 void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {

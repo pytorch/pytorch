@@ -1089,7 +1089,7 @@ void Unpickler::rebuildTensorFromTypeV2() {
     }
     // This calls the function to rebuild the
     // base tensor.
-    // Eg. `rebuildTensor`, `rebuildSpareTensor`.
+    // Eg. `rebuildTensor`, `rebuildSparseTensor`.
     stack_.emplace_back(base_tensor_args);
     globals_[curr_globals_idx + 1]();
     stack_.emplace_back(pop(stack_));
