@@ -129,8 +129,10 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       break;
     }
     case c10::TypeKind::NumberType: {
-      if (serialized_arg_type == "as_int") {
-        // Only int Scalar is treated as dynamic arg for now
+      if (serialized_arg_type == "as_int" ||
+          serialized_arg_type == "as_sym_int") {
+        // An int (or symbolic int, from a dynamic shape) Scalar is treated as a
+        // dynamic arg, mirroring the SymIntType case above.
         dynamic_args.emplace_back(index, DynamicArgType::IntType, 1);
       } else if (serialized_arg_type == "as_float") {
         stack.at(index) = serialized_arg_val.get<double>();
