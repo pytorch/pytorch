@@ -210,6 +210,11 @@ class FSDPParam:
     _unsharded_inner_tensors: list[torch.Tensor]
     _release_all_gather_outputs_after_post_all_gather: bool
     _orig_param_uid: int
+    # Gradient dtype to force onto the parameters FSDP creates, or None to
+    # leave them at the default where grad_dtype mirrors param.dtype. Taken
+    # from the original parameter at construction, since `fully_shard` replaces
+    # it and a fresh Parameter starts from the default.
+    _explicit_grad_dtype: torch.dtype | None
 
     def __init__(
         self,
@@ -274,6 +279,11 @@ class FSDPParam:
             raise NotImplementedError(
                 f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
             )
+        # Snapshot before any rewrite of `param` (e.g. spmd_types -> DTensor).
+        grad_dtype = param.grad_dtype
+        explicit_grad_dtype = (
+            grad_dtype if param.requires_grad and grad_dtype != param.dtype else None
+        )
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
         elif fsdp_placement.dim < 0:
@@ -360,6 +370,8 @@ class FSDPParam:
             self.to_sharded_dtensor(sharded_param),
             requires_grad=param.requires_grad,
         )
+        self._explicit_grad_dtype = explicit_grad_dtype
+        self._maybe_set_explicit_grad_dtype(self.sharded_param)
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
@@ -930,6 +942,7 @@ class FSDPParam:
         self._unsharded_param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
         )
+        self._maybe_set_explicit_grad_dtype(self._unsharded_param)
         self._release_all_gather_outputs_if_needed()
 
     def _release_all_gather_outputs_if_needed(self) -> None:
@@ -999,6 +1012,7 @@ class FSDPParam:
             self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor),
             requires_grad=self.sharded_param.requires_grad,
         )
+        self._maybe_set_explicit_grad_dtype(self._sharded_post_forward_param)
         self._setattr_on_modules(self._sharded_post_forward_param)
         self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
@@ -1015,6 +1029,23 @@ class FSDPParam:
             self._sharded_post_forward_param = None
             self._sharded_post_forward_param_data = None  # free
         self.sharded_state = ShardedState.UNSHARDED
+
+    def _maybe_set_explicit_grad_dtype(self, param: nn.Parameter) -> None:
+        if self._explicit_grad_dtype is not None:
+            param.grad_dtype = self._explicit_grad_dtype
+
+    def clear_explicit_grad_dtype(self) -> None:
+        """Fall back to the default when the group cannot honor grad_dtype."""
+        if self._explicit_grad_dtype is None:
+            return
+        self._explicit_grad_dtype = None
+        for param in (
+            self.sharded_param,
+            getattr(self, "_sharded_post_forward_param", None),
+            getattr(self, "_unsharded_param", None),
+        ):
+            if param is not None:
+                param.grad_dtype = param.dtype
 
     def _setattr_on_modules(self, param: nn.Parameter) -> None:
         unsafe_setattr_param(
@@ -1057,6 +1088,29 @@ class FSDPParam:
         )
         return _from_local_no_grad(tensor, post_forward_sharding_spec)
 
+    @property
+    def _accumulate_grad_dtype(self) -> torch.dtype | None:
+        """Dtype to sum microbatch gradients in when the reduce is deferred.
+
+        `reduce_dtype` upcasts low-precision compute gradients before summing.
+        An explicit wider `grad_dtype` takes over: casting down to `reduce_dtype`
+        would sum in low precision even though the reduced gradient is cast back
+        up afterwards, silently discarding what `grad_dtype` asked for. A
+        narrower `grad_dtype` must not win, or summing would be less accurate
+        than ignoring `grad_dtype` altogether -- the final cast narrows it
+        anyway. `itemsize` rather than `torch.promote_types`, which raises for
+        float8.
+        """
+        grad_dtype = self._explicit_grad_dtype
+        if grad_dtype is None:
+            return self.reduce_dtype
+        if (
+            self.reduce_dtype is None
+            or grad_dtype.itemsize > self.reduce_dtype.itemsize
+        ):
+            return grad_dtype
+        return self.reduce_dtype
+
     def to_accumulated_grad_if_needed(self) -> None:
         # Access `_unsharded_param` to bypass the sharded state check since we
         # prefer to reshard before upcasting the gradient to save memory.
@@ -1065,16 +1119,17 @@ class FSDPParam:
         # does not have it. Such a parameter has no unsharded gradient to upcast,
         # which is the case this method already returns early for.
         unsharded_param = getattr(self, "_unsharded_param", None)
+        accumulate_dtype = self._accumulate_grad_dtype
         if (
-            self.reduce_dtype is None
+            accumulate_dtype is None
             or unsharded_param is None
             or unsharded_param.grad is None
-            or unsharded_param.grad.dtype == self.reduce_dtype
+            or unsharded_param.grad.dtype == accumulate_dtype
         ):
             return
         unsharded_grad = unsharded_param.grad
         unsharded_param.grad = None
-        self.unsharded_accumulated_grad = unsharded_grad.to(self.reduce_dtype)
+        self.unsharded_accumulated_grad = unsharded_grad.to(accumulate_dtype)
 
     def accumulate_unsharded_grad_if_needed(self) -> None:
         if (
@@ -1289,6 +1344,10 @@ class FSDPParam:
                     f"instead of {self.sharded_param}"
                 )
             self.sharded_param = new_param
+            # grad_dtype lives on the Parameter's autograd metadata and so
+            # survives an in-place `.data` swap, but a replacement Parameter
+            # object starts from the default and has to be re-stamped.
+            self._maybe_set_explicit_grad_dtype(self.sharded_param)
 
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
