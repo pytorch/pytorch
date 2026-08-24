@@ -5906,7 +5906,7 @@ class TestLinalg(TestCase):
             def make_diagonally_dominant(t):
                 # This bounds the growth factor by 2
                 t_diag = t.diagonal(dim1=-2, dim2=-1)
-                col_abs_sum = t.abs().sum(-1)
+                col_abs_sum = t.abs().sum(-2)
                 t_diag.copy_(t_diag.sgn() * col_abs_sum)
                 return t
 
@@ -7054,7 +7054,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                                r"self.size\(1\) needs to be greater than 0 and a multiple of 8, but got 7",
                                lambda: torch._int_mm(*_gen_pair(17, 7, 32)))
         self.assertRaisesRegex(RuntimeError,
-                               r"self.size\(1\) needs to match mat2.size\(0\) but got 8 and 7",
+                               r"mat1 and mat2 shapes cannot be multiplied \(17x8 and 7x32\)",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(7, 32)))
         self.assertRaisesRegex(RuntimeError,
                                r"mat2.size\(1\) needs to be greater than 0 and a multiple of 8, but got 31",

@@ -1053,7 +1053,7 @@ class InputWriter:
             + f")  # {name}"
         )
 
-    def unsupported(self, name: str, arg: Any) -> None:
+    def unsupported(self, name: str, arg: object) -> None:
         # NB: Try hard not to /print/ a tensor, that will be very slow
         self._lines.append(
             f"reader.unsupported({name!r})  # unsupported type for dumping: {type(arg)}"
@@ -1079,7 +1079,7 @@ class InputWriter:
         )
 
     # TODO: this doesn't actually symint atm
-    def symint(self, name: str, val: Any) -> None:
+    def symint(self, name: str, val: object) -> None:
         if isinstance(val, torch.SymInt):
             expr_str = str(val.node.expr)
             hint = val.node.hint
