@@ -1658,6 +1658,64 @@ class TestPatternMatcher(TestCase):
                 torch._inductor.fx_passes.post_grad.should_prefer_unfused_addmm(match)
             )
 
+    def test_gather_bias_addmm_stays_unfused(self):
+        """A gather bias must keep the mm+add shape.
+
+        Folded into addmm the bias becomes a template input passed as prefix_args=1,
+        which def_kernel never registers in prologue_supported_inputs -- so the gather
+        is materialized into its own kernel that neither neighbour can fuse. Left
+        unfused it stays on the output side and epilogue-fuses for free.
+        """
+
+        def build(bias_producer, extra_user: bool, view_consumer: bool = False):
+            graph = torch.fx.Graph()
+            src = graph.placeholder("src")
+            idx = graph.placeholder("idx")
+            mat1 = graph.placeholder("mat1")
+            mat2 = graph.placeholder("mat2")
+            inp = bias_producer(graph, src, idx)
+            mm = graph.call_function(torch.ops.aten.mm.default, (mat1, mat2))
+            out = graph.call_function(torch.ops.aten.add.Tensor, (mm, inp))
+            if view_consumer:
+                graph.call_function(torch.ops.aten.view.default, (out, [10, 4, 5]))
+            else:
+                graph.call_function(torch.ops.aten.relu.default, (out,))
+            if extra_user:
+                # a second consumer means the gather is realized regardless
+                graph.call_function(torch.ops.aten.relu.default, (inp,))
+            with torch._subclasses.FakeTensorMode():
+                dev = torch.device(GPU_TYPE)
+                src.meta["val"] = torch.empty(4, 20, device=dev)
+                idx.meta["val"] = torch.empty(10, device=dev, dtype=torch.int64)
+                inp.meta["val"] = torch.empty(10, 20, device=dev)
+                mat1.meta["val"] = torch.empty(10, 15, device=dev)
+                mat2.meta["val"] = torch.empty(15, 20, device=dev)
+                out.meta["val"] = torch.empty(10, 20, device=dev)
+            return types.SimpleNamespace(
+                args=[mat1, mat2], kwargs={"inp": inp}, output_node=lambda: out
+            )
+
+        def gather(graph, src, idx):
+            return graph.call_function(torch.ops.aten.index.Tensor, (src, [idx]))
+
+        def dense(graph, src, idx):
+            # same shape as the output, no stride-0 dim, not a gather
+            return graph.call_function(torch.ops.aten.relu.default, (src,))
+
+        prefer = torch._inductor.fx_passes.post_grad.should_prefer_unfused_addmm
+
+        # single-use gather bias -> keep mm+add
+        self.assertTrue(prefer(build(gather, extra_user=False)))
+        # the gather fuses upward into the template epilogue, so a non-pointwise
+        # consumer of the add must not force the fold
+        self.assertTrue(prefer(build(gather, extra_user=False, view_consumer=True)))
+        # multi-use gather is realized anyway, so folding costs nothing
+        self.assertFalse(prefer(build(gather, extra_user=True)))
+        # a dense non-gather bias of the same shape still folds, as before
+        self.assertFalse(prefer(build(dense, extra_user=False)))
+        # ... and a non-pointwise consumer still forces the fold for a dense bias
+        self.assertFalse(prefer(build(dense, extra_user=False, view_consumer=True)))
+
     def test_unfuse_expanded_bias_addmm(self):
         args = [
             torch.randn(20, device=GPU_TYPE),

@@ -284,6 +284,12 @@ epilogue_fusion_with_atomic_add = False
 # fuse pointwise into template prologues
 prologue_fusion = prologue_fusion_enabled()
 
+# Keep mm + add unfused when the bias is produced by a gather. Folding into addmm
+# makes the bias a template input (prefix_args=1), which def_kernel never registers
+# in prologue_supported_inputs -- the gather then gets its own kernel that nothing
+# can fuse back in. See _is_gather_like_addmm_input in fx_passes/post_grad.py.
+unfuse_gather_bias_addmm = True
+
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
 

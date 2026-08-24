@@ -7,7 +7,6 @@ import operator
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any, TypeVar
-from typing_extensions import ParamSpec
 
 import torch
 import torch._inductor as inductor
@@ -25,6 +24,7 @@ from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
+from typing_extensions import ParamSpec
 
 from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
@@ -1866,6 +1866,37 @@ def _is_bias_like_addmm_input(inp: torch.fx.Node, output: torch.fx.Node) -> bool
     )
 
 
+_GATHER_LIKE_ADDMM_INPUTS = (
+    aten.index.Tensor,
+    aten.index_select.default,
+    aten.gather.default,
+    aten.embedding.default,
+)
+
+
+def _is_gather_like_addmm_input(inp: torch.fx.Node) -> bool:
+    """Whether an addmm bias is produced by a data-dependent gather.
+
+    Folding mm+add into addmm makes the bias a template *input*, and the addmm
+    heuristic passes it as prefix_args=1. def_kernel only registers named args in
+    prologue_supported_inputs, so the gather ends up materialized into its own
+    kernel that nothing can fuse back in: not into its producer (an indirect read
+    cannot be matched against a producer's write) and not into the template (the
+    prologue gate rejects an input with no load_input hook). Left as mm+add the
+    gather stays on the output side, inlines into the add, and the add
+    epilogue-fuses into the template for free.
+
+    Single-user only: a gather read more than once is realized regardless, so
+    folding costs nothing there.
+    """
+    return (
+        config.unfuse_gather_bias_addmm
+        and inp.op == "call_function"
+        and inp.target in _GATHER_LIKE_ADDMM_INPUTS
+        and len(inp.users) == 1
+    )
+
+
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
@@ -1887,6 +1918,13 @@ def should_prefer_unfused_addmm(match):
             return False
 
     output = match.output_node()
+    if _is_gather_like_addmm_input(inp):
+        # Deliberately skips the downstream-pointwise check below: for a bias-like
+        # input the payoff of staying unfused is that the add fuses into whatever
+        # consumes it, so consumers must be pointwise. For a gather the payoff is
+        # upstream instead -- the add becomes the mm template's epilogue and pulls
+        # the gather in with it -- so what consumes the add does not matter.
+        return True
     if not _is_bias_like_addmm_input(inp, output):
         return False
     return all(is_pointwise_use(use) for use in output.users)
