@@ -646,7 +646,13 @@ def foreach_reduce(
                 if partial_reduce_output is not None:
                     partial_reduce_output += reduce_output
                 else:
-                    partial_reduce_output = reduce_output
+                    # Holding the partial sum at `reduce_dtype` rounds once per
+                    # microbatch, and that error compounds with the microbatch
+                    # count. Widen it the same way the no-collectives no-sync
+                    # path widens its accumulator, so the two cannot diverge.
+                    partial_reduce_output = _to_dtype_if_needed(
+                        reduce_output, _partial_reduce_dtype(fsdp_params)
+                    )
                 return (
                     reduce_scatter_input,
                     reduce_scatter_event,
@@ -801,6 +807,21 @@ def foreach_reduce(
         all_reduce_event,
         None,
     )
+
+
+def _partial_reduce_dtype(fsdp_params: list[FSDPParam]) -> torch.dtype | None:
+    """Widest accumulation dtype any parameter in the group needs.
+
+    The buffer is shared by the whole group and a group may carry different
+    grad_dtype, so `fsdp_params[0]` is not representative. `itemsize` rather
+    than `torch.promote_types`, which raises for float8.
+    """
+    widest: torch.dtype | None = None
+    for fsdp_param in fsdp_params:
+        dtype = fsdp_param._accumulate_grad_dtype
+        if dtype is not None and (widest is None or dtype.itemsize > widest.itemsize):
+            widest = dtype
+    return widest
 
 
 def foreach_reduce_scatter_copy_in(
