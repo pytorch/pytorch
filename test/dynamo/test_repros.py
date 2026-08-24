@@ -83,7 +83,6 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfNoLapack,
     skipIfWindows,
-    skipIfXpu,
     xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
