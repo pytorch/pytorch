@@ -498,6 +498,40 @@ class TestBenchmarker(TestCase):
             ],
         )
 
+    def test_benchmark_gpu_with_cuda_graph_unrolls_and_normalizes(self):
+        class FakeCUDAGraph:
+            def replay(self):
+                calls.append("replay")
+
+        class FakeBenchmarker(Benchmarker):
+            def benchmark_gpu(self, _callable, **kwargs):
+                _callable()
+                return 12.0
+
+        class FakeStream:
+            def wait_stream(self, stream):
+                pass
+
+            def synchronize(self):
+                pass
+
+        calls = []
+        current_stream = FakeStream()
+        with (
+            patch("torch.cuda.synchronize"),
+            patch("torch.cuda.Stream", FakeStream),
+            patch("torch.cuda.current_stream", return_value=current_stream),
+            patch("torch.cuda.stream", return_value=contextlib.nullcontext()),
+            patch("torch.cuda.CUDAGraph", FakeCUDAGraph),
+            patch("torch.cuda.graph", return_value=contextlib.nullcontext()),
+        ):
+            result = FakeBenchmarker().benchmark_gpu_with_cuda_graph(
+                lambda: calls.append("call"), cudagraph_unroll=4
+            )
+
+        self.assertEqual(result, 3.0)
+        self.assertEqual(calls, ["call"] * 6 + ["replay"])
+
     def test_autotune_cudagraph_benchmarking_requires_max_autotune(self):
         from torch._inductor.runtime import benchmarking as _bench
 

@@ -4816,6 +4816,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             swizzle_type_a=c.bmreq.swizzle_type_a,
                             swizzle_type_b=c.bmreq.swizzle_type_b,
                             has_bias_epilogue=c.bmreq.has_bias_epilogue,
+                            has_output_scale=c.bmreq.has_output_scale,
                             swap_ab=c.bmreq.swap_ab,
                             metadata=c.bmreq.kernel.metadata,
                         )

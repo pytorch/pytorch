@@ -11,7 +11,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR,
     LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR,
-    LOCAL_REDUCE_FRAGMENT_WIDTH,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
     LOCAL_REDUCE_MATCH_NODE_ERROR,
@@ -186,19 +185,21 @@ FEED_MAIN_BINARY_FUNCTIONS = frozenset(
 )
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class GemmLocalReduceMatch:
     """Describe a supported grouped local-reduction value found in the FX graph.
 
     Attributes:
         value_node: FX node that produces the matched local-reduction value.
         geometry: Group size and GEMM output axis reduced by the value.
+        reduction_type: Concrete reduction kind, or ``generated`` when generated
+            epilogue code defines a composed reduction.
     """
 
     value_node: torch.fx.Node
     geometry: GemmReductionGeometry
     reduction_node: torch.fx.Node | None = None
-    reduction_type: str | None = None
+    reduction_type: str = "generated"
 
     def __post_init__(self) -> None:
         if not isinstance(self.value_node, torch.fx.Node):
@@ -313,19 +314,16 @@ class GemmOutputPlan:
         if local_reduce is None:
             return None
         match = local_reduce.match
-        reduction_type = match.reduction_type
-        if reduction_type is None:
-            return None
         reduction_output = (
             local_reduce.store.node.name if local_reduce.store is not None else None
         )
         return GemmReductionPlan(
-            reduction_output,
-            match.geometry.group,
-            match.geometry.axis,
-            reduction_type,
-            "identity",
-            self.output.name,
+            reduction_output=reduction_output,
+            group=match.geometry.group,
+            axis=match.geometry.axis,
+            reduction_type=match.reduction_type,
+            source_type="identity",
+            primary_output=self.output.name,
             feeds_main=local_reduce.feeds_main,
             feed_output=self.output.name if local_reduce.feeds_main else None,
         )
@@ -431,7 +429,7 @@ class GemmLocalReduceAnalysis:
         dim: Any,
         dtype: Any = None,
         *,
-        reduction_type: str | None = None,
+        reduction_type: str = "generated",
         raise_invalid_dims: bool = True,
     ) -> bool:
         """Match and record a reduction over a grouped TensorSSA layout."""
@@ -448,8 +446,8 @@ class GemmLocalReduceAnalysis:
                 return False
             raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
         self.matches[node] = GemmLocalReduceMatch(
-            node,
-            layout,
+            value_node=node,
+            geometry=layout,
             reduction_node=node,
             reduction_type=reduction_type,
         )
@@ -498,7 +496,9 @@ class GemmLocalReduceAnalysis:
         )
         if match is None:
             return False
-        self.matches[node] = dataclasses.replace(match, value_node=node)
+        self.matches[node] = dataclasses.replace(
+            match, value_node=node, reduction_type="generated"
+        )
         return True
 
     def match_feed_value(
@@ -523,8 +523,8 @@ class GemmLocalReduceAnalysis:
             ):
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
             return GemmLocalReduceMatch(
-                value,
-                layout,
+                value_node=value,
+                geometry=layout,
                 reduction_node=value,
                 reduction_type=normalized.reduction_type,
             )
@@ -662,7 +662,7 @@ class GemmLocalReduceAnalysis:
         if layout.axis != 0:
             if not self.feed_main_grouped_reduction(value, grouped_source, layout):
                 return None
-            if layout.group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
+            if not layout.needs_physical_callbacks:
                 # Intentional fallthrough: axis-1 feeds within one TensorSSA
                 # fragment lower as plain generated TensorSSA without a feed plan.
                 return None

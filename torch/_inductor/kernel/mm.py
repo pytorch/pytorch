@@ -1217,6 +1217,9 @@ def tuned_scaled_mm(
     check_supported_striding(mat_a, mat_b)
 
     scale_a_real, scale_b_real = realize_inputs(scale_a, scale_b)
+    scale_result_real = (
+        realize_inputs(scale_result) if scale_result is not None else None
+    )
 
     input_nodes: list[Any]
 
@@ -1244,6 +1247,32 @@ def tuned_scaled_mm(
         )
 
     _, is_nonzero = _is_static_problem(layout)
+
+    # The vendored Blackwell block-scaled NVGEMM kernel has a native FP32
+    # output-scale argument.  Prefer that semantic path when scale_result is
+    # present so a graph-level ``_scaled_mm(...) * scalar`` rewrite can avoid a
+    # separate pointwise kernel even when the result fans out (for example QKV).
+    if (
+        scale_result_real is not None
+        and is_nonzero
+        and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b)
+    ):
+        from ..codegen.nv_universal_gemm import add_nv_universal_scaled_gemm_choices
+
+        scaled_choices: list[ChoiceCaller] = []
+        add_nv_universal_scaled_gemm_choices(
+            scaled_choices,
+            layout,
+            input_nodes,
+            kernel_inputs=kernel_inputs,
+            output_scale_node=scale_result_real,
+        )
+        if scaled_choices:
+            scaled_input_nodes = [*input_nodes, scale_result_real]
+            node, _ = autotune_select_algorithm(
+                name, scaled_choices, scaled_input_nodes, layout
+            )
+            return node
 
     if (
         # We don't have triton lowerings for the MX variants yet
@@ -1350,6 +1379,8 @@ def tuned_scaled_mm(
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
     node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    if scale_result_real is not None:
+        node = lowerings[aten.mul](node, scale_result_real)
     return node
 
 

@@ -18,7 +18,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmOutputContraction,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
     LOCAL_REDUCE_FINALIZE_FN_SUFFIX,
-    local_reduce_needs_physical_callbacks,
 )
 from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputStorageLayout
 from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
@@ -74,7 +73,9 @@ class FlexGemmEpilogueLocalReduceConfig:
     @property
     def needs_physical_callbacks(self) -> bool:
         tensorssa_axis = 1 - self.axis if self.swap_ab else self.axis
-        return local_reduce_needs_physical_callbacks(tensorssa_axis, self.group)
+        return FlexGemmLocalReduceGeometry(
+            self.group, tensorssa_axis
+        ).needs_physical_callbacks
 
 
 @dataclasses.dataclass(frozen=True)
