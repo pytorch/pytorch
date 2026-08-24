@@ -51,9 +51,7 @@ from torch.testing._internal.inductor_utils import (
     get_func_call,
     GPU_TYPE,
     HAS_CPU,
-    HAS_CUDA_AND_TRITON,
-    HAS_GPU,
-    HAS_XPU_AND_TRITON,
+    HAS_TRITON,
     requires_block_ptr,
     requires_triton,
     TRITON_HAS_CPU,
@@ -82,11 +80,14 @@ def _dump_launch_params(value: str):
                 os.remove(launch_params_file)
 
 
-if HAS_GPU:
+HAS_GPU_DEVICE = GPU_TYPE != "mps" and getattr(torch, GPU_TYPE).is_available()
+
+
+if HAS_TRITON:
     import triton
     from triton import language as tl
 
-    if HAS_CUDA_AND_TRITON:
+    if torch.cuda.is_available():
         try:
             from triton.language.extra.libdevice import (  # @manual
                 fast_dividef,
@@ -97,7 +98,7 @@ if HAS_GPU:
                 fast_dividef,
                 fast_dividef as my_fast_dividef,
             )
-    elif HAS_XPU_AND_TRITON:
+    elif torch.xpu.is_available():
         from triton.language.extra.intel.libdevice import (  # @manual
             fast_dividef,
             fast_dividef as my_fast_dividef,
@@ -1688,7 +1689,7 @@ def forward(self, x_1, output_1):
 
     @onlyAccelerator
     @unittest.skipIf(
-        not HAS_GPU or not hasattr(triton, "constexpr_function"),
+        not HAS_TRITON or not hasattr(triton, "constexpr_function"),
         "newer triton version required",
     )
     def test_triton_kernel_with_constexpr_function(self, device):
@@ -1722,7 +1723,7 @@ def forward(self, x_1, output_1):
 
     @onlyAccelerator
     @unittest.skipIf(
-        not HAS_GPU or not hasattr(triton, "constexpr_function"),
+        not HAS_TRITON or not hasattr(triton, "constexpr_function"),
         "newer triton version required",
     )
     def test_triton_kernel_with_constexpr_dtype_annotations(self, device):
@@ -3691,7 +3692,10 @@ class KernelTestsLibdeviceIntel(torch._inductor.test_case.TestCase):
 
 
 def make_mutation_test(fn):
-    @requires_gpu
+    @unittest.skipIf(
+        not HAS_GPU_DEVICE and not torch.mps.is_available(), "requires gpu"
+    )
+    @requires_triton()
     def test_fn(self):
         from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
 
@@ -3710,7 +3714,7 @@ def make_mutation_test(fn):
 
 # Triton codegen suffers from scoping issues.
 # Define helpers here
-if HAS_GPU:
+if HAS_TRITON:
 
     @triton.jit
     def helper_id(p):
@@ -3930,7 +3934,10 @@ class MutationTests(torch._inductor.test_case.TestCase):
             expected,
         )
 
-    @requires_gpu
+    @unittest.skipIf(
+        not HAS_GPU_DEVICE and not torch.mps.is_available(), "requires gpu"
+    )
+    @requires_triton()
     def test_triton_kernel_inference_mode(self):
         def f(x, y, out):
             n_elements = x.numel()
@@ -4557,7 +4564,10 @@ class MutationTests(torch._inductor.test_case.TestCase):
         not has_triton_tensor_descriptor_host_tma(),
         "requires TensorDescriptor API in Triton",
     )
-    @requires_gpu
+    @unittest.skipIf(
+        not HAS_GPU_DEVICE and not torch.mps.is_available(), "requires gpu"
+    )
+    @requires_triton()
     def test_descriptor_load_store_read_write_detection(self):
         """
         Regression test: tl.make_tensor_descriptor + desc.load()/desc.store()
@@ -4912,14 +4922,14 @@ class MutationTestsTritonLauncherFallback(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.CPU
 
     @unittest.skipUnless(
-        not HAS_GPU and HAS_CPU and TRITON_HAS_CPU,
+        not HAS_GPU_DEVICE and HAS_CPU and TRITON_HAS_CPU,
         "requires the Triton CPU backend without an accelerator backend",
     )
     def test_custom_tma_descriptor_ops_keep_triton_launcher(self, device):
         _run_custom_tma_descriptor_ops_keep_triton_launcher(self, device)
 
 
-if HAS_GPU:
+if HAS_GPU_DEVICE and HAS_TRITON:
     t = torch.randn(4)
     tt = torch.randn(4, 1)
     tests = [
@@ -6771,7 +6781,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
 
-if HAS_CUDA_AND_TRITON:
+if HAS_TRITON and torch.cuda.is_available():
 
     @triton.jit
     def custom_store(ptr, val, mask):
