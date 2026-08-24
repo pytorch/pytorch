@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.metrics
-from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
+from torch._dynamo.testing import CompileCounterWithBackend, extract_graph, normalize_gm
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.codegen.wrapper import (
     EnterCudaStreamContextLine,
@@ -1747,6 +1747,280 @@ class GraphModule(torch.nn.Module):
 # CHECK: synchronize_stream""",
             wrapper_body,
         )
+
+    def test_codegen_per_stream_alignment_copy_multi_stream(self):
+        """Regression test for per-stream alignment fixups read by many streams.
+
+        When an input is read on more than one stream, its ``x =
+        copy_if_misaligned(x)`` rewrite must be emitted once per consuming
+        stream, so every stream is ordered after its own aligned clone.  A
+        single shared copy is hard to manage due to the synchronization
+        requirements that would impose.
+
+        Here ``x`` is read on both ``s1`` and ``s2`` (``w1`` only on ``s1``,
+        ``w2`` only on ``s2``), so ``x`` must get two copies, one inside each
+        side-stream context, both cloning the same preserved original.
+        """
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x, w1, w2):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+            with torch.cuda.stream(s1):
+                a = x @ w1
+                e1.record(s1)
+            with torch.cuda.stream(s2):
+                b = x @ w2
+                e2.record(s2)
+            e1.wait()
+            e2.wait()
+            c = a + b
+            s1.synchronize()
+            s2.synchronize()
+            return c
+
+        x = torch.randn(32, 32, device="cuda")
+        w1 = torch.randn(32, 32, device="cuda")
+        w2 = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w1, w2)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x, w1, w2)
+        self.assertEqual(result, expected)
+
+        wrapper_body = _extract_wrapper_body(code)
+
+        # x is read on two streams: it is preserved once (`<x>_orig = <x>`)
+        # and cloned from that _orig inside each side-stream context, then
+        # freed after its last reader.
+        FileCheck().check_count("_orig = ", 1, exactly=True).run(wrapper_body)
+        FileCheck().check_count("_orig)", 2, exactly=True).run(wrapper_body)
+        # the clones live inside a side-stream context (not hoisted before the
+        # fork): a `with stream` precedes the first clone of the original.
+        FileCheck().check("with stream").check("_orig)").run(wrapper_body)
+        # the preserved original is freed on the normal codegen_free path;
+        # the multistream input's arg index is not stable across graphs, so
+        # match the free by pattern rather than a hardcoded name.
+        FileCheck().check_regex(r"del arg\d+_1_orig").run(code)
+
+    def test_codegen_per_stream_alignment_copy_one_per_stream(self):
+        """An input read multiple times on one stream gets a single copy there.
+
+        The per-stream alignment copy should be keyed on the consuming stream,
+        not on each use, so an input used several times within one
+        ``torch.cuda.stream`` block is cloned once per block.
+
+        Here ``x`` is read once on ``s1`` and twice on ``s2``, and we verify
+        that there are exactly two ``copy_if_misaligned`` clones of the
+        preserved original (one per stream), not three.
+        """
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x, w1, w2, w3):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+            with torch.cuda.stream(s1):
+                a = x @ w1
+                e1.record(s1)
+            with torch.cuda.stream(s2):
+                b = x @ w2
+                c = x @ w3
+                e2.record(s2)
+            e1.wait()
+            e2.wait()
+            out = a + b + c
+            s1.synchronize()
+            s2.synchronize()
+            return out
+
+        x = torch.randn(32, 32, device="cuda")
+        w1 = torch.randn(32, 32, device="cuda")
+        w2 = torch.randn(32, 32, device="cuda")
+        w3 = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w1, w2, w3)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x, w1, w2, w3)
+        self.assertEqual(result, expected)
+
+        wrapper_body = _extract_wrapper_body(code)
+
+        # x is read 3 times (once on s1, twice on s2) but is cloned once per
+        # consuming stream, not once per use: exactly two clones (`_orig)`) of
+        # the one preserved original (`_orig = `).
+        FileCheck().check_count("_orig = ", 1, exactly=True).run(wrapper_body)
+        FileCheck().check_count("_orig)", 2, exactly=True).run(wrapper_body)
+
+    def test_synchronize_threads_all_prior_sync_data(self):
+        """Both intermediates must be threaded through synchronize_stream."""
+        import operator
+
+        def fn(x, w1, w2):
+            s1 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+            with torch.cuda.stream(s1):
+                a = x @ w1
+                e1.record()
+                b = a @ w2
+                e2.record()
+            s1.synchronize()
+            return a.sum(), b.sum()
+
+        x = torch.randn(32, 32, device="cuda")
+        w1 = torch.randn(32, 32, device="cuda")
+        w2 = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w1, w2)
+        result, _, fw_graphs, _ = extract_graph(fn, x, w1, w2)
+        self.assertEqual(result, expected)
+
+        graph = fw_graphs[0].graph
+        sync_cd = None
+        for node in graph.nodes:
+            if (
+                node.op == "call_function"
+                and "control_deps" in str(node.target)
+                and isinstance(node.args[1], torch.fx.Node)
+                and "synchronize_stream" in node.args[1].name
+            ):
+                sync_cd = node
+        self.assertIsNotNone(sync_cd, "no synchronize_stream control_deps node found")
+        sums = [
+            node
+            for node in graph.nodes
+            if node.op == "call_function" and node.target is torch.ops.aten.sum.default
+        ]
+        self.assertEqual(len(sums), 2)
+        for sum_node in sums:
+            inp = sum_node.args[0]
+            self.assertTrue(
+                inp.op == "call_function"
+                and inp.target is operator.getitem
+                and inp.args[0] is sync_cd,
+                f"sum consumer {inp} does not route through synchronize_stream barrier",
+            )
+
+    def test_synchronize_event_threads_all_prior_sync_data(self):
+        """Both intermediates must be threaded through synchronize_event."""
+        import operator
+
+        def fn(x, w1, w2):
+            s = torch.cuda.Stream()
+            e0 = torch.cuda.Event()
+            e1 = torch.cuda.Event()
+            with torch.cuda.stream(s):
+                a = x @ w1
+                e0.record()
+                b = a @ w2
+                e1.record()
+            e1.synchronize()
+            return a.sum(), b.sum()
+
+        x = torch.randn(32, 32, device="cuda")
+        w1 = torch.randn(32, 32, device="cuda")
+        w2 = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w1, w2)
+        result, _, fw_graphs, _ = extract_graph(fn, x, w1, w2)
+        self.assertEqual(result, expected)
+
+        graph = fw_graphs[0].graph
+        sync_cd = None
+        for node in graph.nodes:
+            if (
+                node.op == "call_function"
+                and "control_deps" in str(node.target)
+                and isinstance(node.args[1], torch.fx.Node)
+                and "synchronize_event" in node.args[1].name
+            ):
+                sync_cd = node
+        self.assertIsNotNone(sync_cd, "no synchronize_event control_deps node found")
+        sums = [
+            node
+            for node in graph.nodes
+            if node.op == "call_function" and node.target is torch.ops.aten.sum.default
+        ]
+        self.assertEqual(len(sums), 2)
+        for sum_node in sums:
+            inp = sum_node.args[0]
+            self.assertTrue(
+                inp.op == "call_function"
+                and inp.target is operator.getitem
+                and inp.args[0] is sync_cd,
+                f"sum consumer {inp} does not route through synchronize_event barrier",
+            )
+
+    def test_barrier_deps_exclude_nodes_defined_after_sync(self):
+        """A get_attr constant first used after the barrier is not a barrier dep.
+
+        The constant is materialized at its first user, which is below the
+        barrier, so listing it as a dep would make the control_deps node
+        reference a value that is not yet defined.
+        """
+
+        def fn(x, w):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                a = x @ w
+            s.synchronize()
+            return a.sum() + torch.tensor([1.0, 2.0, 3.0], device="cuda").sum()
+
+        x = torch.randn(32, 32, device="cuda")
+        w = torch.randn(32, 32, device="cuda")
+        expected = fn(x, w)
+        result, _, fw_graphs, _ = extract_graph(fn, x, w)
+        self.assertEqual(result, expected)
+
+        graph = fw_graphs[0].graph
+        order = {node: i for i, node in enumerate(graph.nodes)}
+        cds = [
+            node
+            for node in graph.nodes
+            if node.op == "call_function" and "control_deps" in str(node.target)
+        ]
+        self.assertGreater(len(cds), 0, "no control_deps node found")
+
+        # Guard against a vacuous pass. The ordering assertions below only
+        # exercise the fix while a tensor constant is still materialized
+        # *below* the barrier -- that is the whole failure condition. If
+        # constant lifting ever hoists the constant above the sync or turns it
+        # into a placeholder, the scenario stops reproducing and this test
+        # would silently stop guarding the regression, so fail loudly instead.
+        # Every control_deps carries its own get_attr for its subgraph, so
+        # those are excluded; only real constants count.
+        subgraph_attrs = {
+            cd.args[1] for cd in cds if isinstance(cd.args[1], torch.fx.Node)
+        }
+        sync_cd = None
+        for cd in cds:
+            attr = cd.args[1]
+            if isinstance(attr, torch.fx.Node) and "synchronize" in attr.name:
+                sync_cd = cd
+        self.assertIsNotNone(sync_cd, "no synchronize control_deps node found")
+
+        constants_after_sync = [
+            node
+            for node in graph.nodes
+            if node.op == "get_attr"
+            and node not in subgraph_attrs
+            and order[node] > order[sync_cd]
+        ]
+        self.assertTrue(
+            constants_after_sync,
+            "scenario no longer reproduces: no tensor constant is materialized "
+            "after the synchronize barrier, so the ordering checks below cannot "
+            "fail. Rework the graph so a constant is first used after the sync.",
+        )
+
+        for cd in cds:
+            for dep in (*cd.args[0], *cd.args[2:]):
+                if isinstance(dep, torch.fx.Node):
+                    self.assertLess(
+                        order[dep],
+                        order[cd],
+                        f"dep {dep} of {cd} is defined after it is used",
+                    )
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
