@@ -2788,6 +2788,10 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(
+        not torch.cuda.get_arch_list(),
+        "torch was built without CUDA kernels (GPU sections stripped)",
+    )
     def test_graph_scalar_assignment(self):
         x = torch.zeros(2, 2, device="cuda")
         g = torch.cuda.CUDAGraph()
