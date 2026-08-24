@@ -345,7 +345,9 @@ def is_grouped_gemm_config_valid_for_shape(
     m_waves = int(gemm_config["BLOCK_M_WARPS"])
     n_waves = int(gemm_config["BLOCK_N_WARPS"])
     use_half_tile_interleaved = bool(gemm_config["USE_HALF_TILE_INTERLEAVED"])
-    has_enough_k = use_half_tile_interleaved or k // tile_k >= stages
+    k_tiles = (k + tile_k - 1) // tile_k
+    # The staged kernel prefetches stages-1 K tiles before the main loop.
+    has_enough_k = use_half_tile_interleaved or k_tiles >= stages - 1
     # Partial N tiles issue unguarded vector B loads past row boundaries.
     return (
         tile_m <= max(128, m)
