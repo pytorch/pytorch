@@ -24,7 +24,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
     onlyNativeDeviceTypes,
     ops,
     skip,
