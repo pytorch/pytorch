@@ -618,11 +618,8 @@ void sync(ITensorListRef t_list) {
   }
 }
 void sync(const c10::List<::std::optional<Tensor>>& t_list) {
-  for (const auto& element : t_list) {
-    const c10::IValue& ivalue = element.get();
-    if (!ivalue.isNone()) {
-      sync(ivalue.toTensor());
-    }
+  for (const auto i : c10::irange(t_list.size())) {
+    sync(t_list[i]);
   }
 }
 
@@ -723,13 +720,11 @@ bool isFunctionalTensor(const std::optional<Tensor>& t) {
 bool isFunctionalTensor(const c10::List<::std::optional<Tensor>>& t_list) {
   if (t_list.empty()) { return false; }
   auto functional_count = 0;
-  for (const auto& element : t_list) {
-    const c10::IValue& ivalue = element.get();
-    if (!ivalue.isNone()) {
-      const Tensor& tensor = ivalue.toTensor();
-      if (tensor.defined() && isFunctionalTensor(tensor)) {
-        ++functional_count;
-      }
+  for (const auto i : c10::irange(t_list.size())) {
+    auto const & e= t_list[i];
+    if (!e.has_value() || !e->defined()) { continue; }
+    if (isFunctionalTensor(e)) {
+      ++functional_count;
     }
   }
   return functional_count > 0;

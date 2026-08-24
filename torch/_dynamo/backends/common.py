@@ -76,6 +76,12 @@ class AotAutograd:
         self.__name__ = "compiler_fn"
         self.kwargs: AotAutogradKwargs = kwargs
 
+    # Read at fire time (not snapshotted) so the hook can be set on fw_compiler
+    # even after aot_autograd() is constructed. Only fw_compiler is consulted.
+    @property
+    def _dynamo_backend_init(self) -> Any | None:
+        return getattr(self.kwargs.get("fw_compiler"), "_dynamo_backend_init", None)
+
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: Sequence[Any], **kwargs: Any
     ) -> Callable[..., Any]:
