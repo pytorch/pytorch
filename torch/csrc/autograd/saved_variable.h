@@ -77,7 +77,7 @@ class TORCH_API SavedVariable {
   // 2. or its tensor_data.
   // If storing the variable itself would create a circular reference,
   // we fall into the second case and its metadata is also saved separately.
-  // In that case, the grad_fn must be passed in to the unpack function when
+  // In that case, the grad_fn must be passed into the unpack function when
   // reconstructing the Variable (except when we are doing an inplace operation
   // on a view, see below). The field saved_original_ below reflects the two
   // cases: its value is true in the first case and false in the second case.
@@ -103,7 +103,7 @@ class TORCH_API SavedVariable {
   // inplace views.
   // This variable is used when the user chooses to create a SavedVariable with
   // is_inplace_on_view = true.
-  // In that case, the grad_fn passed in to the unpack function at unwrapping
+  // In that case, the grad_fn passed into the unpack function at unwrapping
   // time is unused.
   c10::weak_intrusive_ptr<Node> weak_grad_fn_{c10::intrusive_ptr<Node>()};
 
