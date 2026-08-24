@@ -21,8 +21,10 @@ TEST(TestLoad, TestLoadBool) {
   // NOTE: [Loading boolean values] -- loading a byte that isn't 0/1 as a
   // bool should still yield a valid (non-UB) bool value.
   unsigned char invalid_bool_bits = 0xff;
-  bool loaded = load<bool>(&invalid_bool_bits);
-  EXPECT_TRUE(loaded);
+  EXPECT_TRUE(load<bool>(&invalid_bool_bits));
+
+  unsigned char zero = 0;
+  EXPECT_FALSE(load<bool>(&zero));
 }
 
 } // namespace aot_inductor

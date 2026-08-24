@@ -79,7 +79,7 @@ TEST(TestMath, TestIsReducedFloatingPoint) {
   // Exercise the std:: overloads that dispatch on
   // is_reduced_floating_point_v.
   EXPECT_NEAR(static_cast<float>(std::acos(Half(0.5f))), 1.0472f, 1e-3);
-  EXPECT_NEAR(static_cast<float>(std::sqrt(BFloat16(4.0f))), 2.0f, 1e-2);
+  EXPECT_NEAR(static_cast<float>(std::sqrt(BFloat16(4.0f))), 2.0f, 1e-3);
 }
 
 } // namespace aot_inductor
