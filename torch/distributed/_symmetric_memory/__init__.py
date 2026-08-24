@@ -541,7 +541,16 @@ lib.define(
     "Tensor?[] biases, "
     "Tensor?[] result_scales, "
     "ScalarType?[] out_dtypes, "
-    "bool[] use_fast_accum) -> (Tensor, Tensor[])",
+    "bool[] use_fast_accum, "
+    # Explicit block-scaling recipe. Required for MXFP8: a swizzled e8m0 scale
+    # cannot be told apart from a flattened unswizzled one by shape alone, since
+    # the two have identical numel whenever the operand is 128-aligned -- which
+    # this op requires. Omit for tensor-wise / row-wise, where the fp32 scale
+    # shape is unambiguous.
+    "int[]? scale_recipe_a = None, "
+    "int[]? swizzle_a = None, "
+    "int[]? scale_recipe_b = None, "
+    "int[]? swizzle_b = None) -> (Tensor, Tensor[])",
     tags=[torch._C.Tag.needs_fixed_stride_order],
 )
 lib.define(
@@ -555,7 +564,12 @@ lib.define(
     "Tensor? bias = None, "
     "Tensor? result_scale = None, "
     "ScalarType? out_dtype = None, "
-    "bool use_fast_accum = False) -> Tensor",
+    "bool use_fast_accum = False, "
+    # See fused_all_gather_scaled_matmul above.
+    "int[]? scale_recipe_a = None, "
+    "int[]? swizzle_a = None, "
+    "int[]? scale_recipe_b = None, "
+    "int[]? swizzle_b = None) -> Tensor",
     tags=[torch._C.Tag.needs_fixed_stride_order],
 )
 lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor")
@@ -641,32 +655,97 @@ def _mx_swizzled_scale_numel(rows: int, k: int) -> int:
     return row_tiles * col_tiles * _MX_SCALE_ROW_ALIGNMENT * _MX_SCALE_COL_ALIGNMENT
 
 
-def _is_mx_swizzled_scale(shard: torch.Tensor, scale: torch.Tensor) -> bool:
-    return (
-        scale.dtype == torch.float8_e8m0fnu
-        and scale.ndim == 1
-        and scale.numel()
-        == _mx_swizzled_scale_numel(math.prod(shard.shape[:-1]), shard.shape[-1])
-    )
+def _is_mx_scale(scale_recipe: list[int] | None) -> bool:
+    """Whether the caller asked for MXFP8 block scaling, by explicit recipe only.
+
+    Deliberately not inferred from the scale's shape. A swizzled e8m0 scale and a
+    flattened unswizzled one have the *same* numel whenever the operand is
+    128-aligned -- 2048x7168 gives 458752 either way -- and 128-alignment is
+    exactly what these ops require, so the two are indistinguishable in precisely
+    the case that matters. An e8m0 scale with no recipe is rejected below rather
+    than guessed at.
+    """
+    if scale_recipe is None:
+        return False
+    from torch.nn.functional import ScalingType
+
+    return ScalingType.BlockWise1x32.value in scale_recipe
+
+
+def _reject_unlabelled_block_scale(
+    scale: torch.Tensor | None, scale_recipe: list[int] | None
+) -> None:
+    if (
+        scale is not None
+        and scale_recipe is None
+        and scale.dtype == torch.float8_e8m0fnu
+    ):
+        raise ValueError(
+            "Received an e8m0 scale without `scale_recipe`. Block scaling must be "
+            "requested explicitly -- pass scale_recipe=[ScalingType.BlockWise1x32] "
+            "and swizzle=[SwizzleType.SWIZZLE_32_4_4] -- because a swizzled scale "
+            "cannot be distinguished from an unswizzled one by shape alone."
+        )
+
+
+def _resolve_recipe(
+    scale: torch.Tensor | None,
+    scale_recipe: list[int] | None,
+    swizzle: list[int] | None,
+) -> tuple[list[int], list[int]]:
+    """Recipe/swizzle for one operand of `aten::_scaled_mm_v2`.
+
+    An explicit recipe always wins. Otherwise fall back to the tensor-wise /
+    row-wise distinction the v1 op made implicitly, which is unambiguous because
+    those scales are fp32 and differ in numel. Block scaling is never inferred;
+    see `_is_mx_scale`.
+    """
+    from torch.nn.functional import ScalingType, SwizzleType
+
+    _reject_unlabelled_block_scale(scale, scale_recipe)
+    if scale_recipe is not None:
+        return scale_recipe, swizzle or [SwizzleType.NO_SWIZZLE.value]
+    if scale is None or scale.numel() == 1:
+        return [ScalingType.TensorWise.value], [SwizzleType.NO_SWIZZLE.value]
+    return [ScalingType.RowWise.value], [SwizzleType.NO_SWIZZLE.value]
+
+
+def _check_mx_gather_alignment(shard: torch.Tensor, gather_dim: int) -> None:
+    gathered_extent = shard.shape[gather_dim]
+    if gathered_extent % _MX_SCALE_ROW_ALIGNMENT != 0:
+        raise ValueError(
+            "MXFP8 all-gather requires the gathered dim of each shard to be a "
+            f"multiple of {_MX_SCALE_ROW_ALIGNMENT} (got {gathered_extent} for "
+            f"gather_dim={gather_dim}). The swizzled scale layout pads each "
+            "shard's tail to a 128-row tile, so a shorter shard cannot be "
+            "gathered by concatenation."
+        )
 
 
 def _check_and_verify_fp8_all_gather_scale_mode(
-    shard: torch.Tensor, scale: torch.Tensor | None, gather_dim: int, group_size: int
+    shard: torch.Tensor,
+    scale: torch.Tensor | None,
+    gather_dim: int,
+    group_size: int,
+    scale_recipe: list[int] | None = None,
 ) -> _ScaleMode:
     full_shape = list(shard.shape)
     full_shape[gather_dim] *= group_size
 
+    _reject_unlabelled_block_scale(scale, scale_recipe)
+
     if scale is None:
         return _ScaleMode.UNSCALED
-    elif _is_mx_swizzled_scale(shard, scale):
-        gathered_extent = shard.shape[gather_dim]
-        if gathered_extent % _MX_SCALE_ROW_ALIGNMENT != 0:
+    elif _is_mx_scale(scale_recipe):
+        _check_mx_gather_alignment(shard, gather_dim)
+        expected = _mx_swizzled_scale_numel(
+            math.prod(shard.shape[:-1]), shard.shape[-1]
+        )
+        if scale.numel() != expected:
             raise ValueError(
-                "MXFP8 all-gather requires the gathered dim of each shard to be a "
-                f"multiple of {_MX_SCALE_ROW_ALIGNMENT} (got {gathered_extent} for "
-                f"gather_dim={gather_dim}). The swizzled scale layout pads each "
-                "shard's tail to a 128-row tile, so a shorter shard cannot be "
-                "gathered by concatenation."
+                f"MXFP8 scale has {scale.numel()} elements, expected {expected} for "
+                f"a {tuple(shard.shape)} operand in the swizzled 32x4x4 layout. Pass "
+                "the scale as `to_blocked(...)` output."
             )
         return _ScaleMode.MX_BLOCK_WISE_SWIZZLED
     elif scale.shape[:-1] == shard.shape[:-1] and scale.shape[-1] == 1:
@@ -697,6 +776,7 @@ def _fused_all_gather_matmul_impl(
     gather_dim: int,
     group_name: c10d.GroupName,
     return_A: bool,
+    scale_recipe_a: list[int] | None = None,
 ) -> tuple[torch.Tensor | None, list[torch.Tensor]]:
     if A_shard.dim() < 2:
         raise ValueError("A_shard must be a matrix")
@@ -749,7 +829,11 @@ def _fused_all_gather_matmul_impl(
     output_shards = [output.chunk(group.size()) for output in outputs]
 
     scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
-        shard=A_shard, scale=A_scale, gather_dim=gather_dim, group_size=group.size()
+        shard=A_shard,
+        scale=A_scale,
+        gather_dim=gather_dim,
+        group_size=group.size(),
+        scale_recipe=scale_recipe_a,
     )
 
     # Computing block-wise matmul along the first dim of A
@@ -1206,6 +1290,10 @@ def _fused_all_gather_scaled_matmul_fallback(
     result_scales: list[torch.Tensor | None],
     out_dtypes: list[torch.dtype | None],
     use_fast_accum: list[bool],
+    scale_recipe_a: list[int] | None = None,
+    swizzle_a: list[int] | None = None,
+    scale_recipe_b: list[int] | None = None,
+    swizzle_b: list[int] | None = None,
 ) -> tuple[torch.Tensor, list[torch.Tensor]]:
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
 
@@ -1217,7 +1305,11 @@ def _fused_all_gather_scaled_matmul_fallback(
     A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
 
     scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
-        shard=A_shard, scale=A_scale, gather_dim=gather_dim, group_size=group_size
+        shard=A_shard,
+        scale=A_scale,
+        gather_dim=gather_dim,
+        group_size=group_size,
+        scale_recipe=scale_recipe_a,
     )
     if scale_mode == _ScaleMode.MX_BLOCK_WISE_SWIZZLED:
         # Flat swizzled scales gather by concatenation; see _ScaleMode. NCCL has
@@ -1308,6 +1400,10 @@ def _fused_all_gather_scaled_matmul(
     result_scales: list[torch.Tensor | None],
     out_dtypes: list[torch.dtype | None],
     use_fast_accum: list[bool],
+    scale_recipe_a: list[int] | None = None,
+    swizzle_a: list[int] | None = None,
+    scale_recipe_b: list[int] | None = None,
+    swizzle_b: list[int] | None = None,
 ) -> tuple[torch.Tensor, list[torch.Tensor]]:
     """
     Perform the following logic with micro-pipelined computation and
@@ -1356,36 +1452,20 @@ def _fused_all_gather_scaled_matmul(
             result_scales,
             out_dtypes,
             use_fast_accum,
+            scale_recipe_a,
+            swizzle_a,
+            scale_recipe_b,
+            swizzle_b,
         )
 
-    if A_scale is not None and _is_mx_swizzled_scale(A_shard, A_scale):
-        # Imported lazily: torch.nn.functional is not importable at the time this
-        # module is first loaded.
-        from torch.nn.functional import ScalingType, SwizzleType
-
-        # Block scaling needs the v2 op: the original _scaled_mm takes no recipe
-        # or swizzle, so it cannot express one e8m0 scale per 32-element block.
-        mm_out_op = torch.ops.aten._scaled_mm_v2.out
-        recipe = [ScalingType.BlockWise1x32.value]
-        swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
-        kwargs_list = [
-            {
-                "recipe_a": recipe,
-                "swizzle_a": swizzle,
-                "scale_b": [B_scale],
-                "recipe_b": recipe,
-                "swizzle_b": swizzle,
-                "bias": bias,
-                "out_dtype": out_dtype,
-                "use_fast_accum": fast_accum,
-            }
-            for B_scale, bias, out_dtype, fast_accum in zip(
-                B_scales, biases, out_dtypes, use_fast_accum
+    # v2 is preferred: it is a superset of v1 except for `scale_result`, so fall
+    # back to v1 only when a caller actually passes one.
+    if any(rs is not None for rs in result_scales):
+        if _is_mx_scale(scale_recipe_a):
+            raise ValueError(
+                "result_scales are not supported for MXFP8 (aten::_scaled_mm_v2 "
+                "has no scale_result argument)"
             )
-        ]
-        if any(rs is not None for rs in result_scales):
-            raise ValueError("result_scales are not supported for MXFP8 all-gather")
-    else:
         mm_out_op = torch.ops.aten._scaled_mm.out
         kwargs_list = [
             {
@@ -1397,6 +1477,28 @@ def _fused_all_gather_scaled_matmul(
             }
             for B_scale, bias, result_scale, out_dtype, fast_accum in zip(
                 B_scales, biases, result_scales, out_dtypes, use_fast_accum
+            )
+        ]
+    else:
+        recipe_a, sw_a = _resolve_recipe(A_scale, scale_recipe_a, swizzle_a)
+        recipes_b = [
+            _resolve_recipe(B_scale, scale_recipe_b, swizzle_b)
+            for B_scale in B_scales
+        ]
+        mm_out_op = torch.ops.aten._scaled_mm_v2.out
+        kwargs_list = [
+            {
+                "recipe_a": recipe_a,
+                "swizzle_a": sw_a,
+                "scale_b": [B_scale],
+                "recipe_b": recipe_b,
+                "swizzle_b": sw_b,
+                "bias": bias,
+                "out_dtype": out_dtype,
+                "use_fast_accum": fast_accum,
+            }
+            for B_scale, (recipe_b, sw_b), bias, out_dtype, fast_accum in zip(
+                B_scales, recipes_b, biases, out_dtypes, use_fast_accum
             )
         ]
 
@@ -1411,6 +1513,7 @@ def _fused_all_gather_scaled_matmul(
             gather_dim,
             group_name,
             True,
+            scale_recipe_a,
         )
         if A is None:
             raise AssertionError
@@ -1597,6 +1700,10 @@ def _fused_scaled_matmul_reduce_scatter(
     result_scale: torch.Tensor | None = None,
     out_dtype: torch.dtype | None = None,
     use_fast_accum: bool = False,
+    scale_recipe_a: list[int] | None = None,
+    swizzle_a: list[int] | None = None,
+    scale_recipe_b: list[int] | None = None,
+    swizzle_b: list[int] | None = None,
 ) -> torch.Tensor:
     """
     Perform the following logic with micro-pipelined computation and
@@ -1629,36 +1736,39 @@ def _fused_scaled_matmul_reduce_scatter(
             result_scale,
             out_dtype,
             use_fast_accum,
+            scale_recipe_a,
+            swizzle_a,
+            scale_recipe_b,
+            swizzle_b,
         )
-    # A is chunked along the scatter dim, so the mx check uses that 2D view of it.
-    if A_scale is not None and _is_mx_swizzled_scale(
-        A.movedim(scatter_dim_after_maybe_reshape, 0).flatten(0, -2), A_scale
-    ):
-        from torch.nn.functional import ScalingType, SwizzleType
 
-        recipe = [ScalingType.BlockWise1x32.value]
-        swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
-        if result_scale is not None:
+    # v2 everywhere except when a caller passes scale_result, which v2 has no
+    # argument for.
+    if result_scale is not None:
+        if _is_mx_scale(scale_recipe_a):
             raise ValueError(
-                "result_scale is not supported for MXFP8 matmul-reduce-scatter"
+                "result_scale is not supported for MXFP8 (aten::_scaled_mm_v2 has "
+                "no scale_result argument)"
             )
-        mm_out_op = torch.ops.aten._scaled_mm_v2.out
+        mm_out_op = torch.ops.aten._scaled_mm.out
         mm_kwargs: dict[str, Any] = {
-            "recipe_a": recipe,
-            "swizzle_a": swizzle,
-            "scale_b": [B_scale],
-            "recipe_b": recipe,
-            "swizzle_b": swizzle,
+            "scale_b": B_scale,
             "bias": bias,
+            "scale_result": result_scale,
             "out_dtype": out_dtype,
             "use_fast_accum": use_fast_accum,
         }
     else:
-        mm_out_op = torch.ops.aten._scaled_mm.out
+        recipe_a, sw_a = _resolve_recipe(A_scale, scale_recipe_a, swizzle_a)
+        recipe_b, sw_b = _resolve_recipe(B_scale, scale_recipe_b, swizzle_b)
+        mm_out_op = torch.ops.aten._scaled_mm_v2.out
         mm_kwargs = {
-            "scale_b": B_scale,
+            "recipe_a": recipe_a,
+            "swizzle_a": sw_a,
+            "scale_b": [B_scale],
+            "recipe_b": recipe_b,
+            "swizzle_b": sw_b,
             "bias": bias,
-            "scale_result": result_scale,
             "out_dtype": out_dtype,
             "use_fast_accum": use_fast_accum,
         }
@@ -1676,6 +1786,7 @@ def _fused_scaled_matmul_reduce_scatter(
             scatter_dim_after_maybe_reshape=scatter_dim_after_maybe_reshape,
             group_name=group_name,
             output_shape=output_shape,
+            scale_recipe_a=scale_recipe_a,
         )
 
 
@@ -1694,9 +1805,14 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     result_scale: torch.Tensor | None = None,
     out_dtype: torch.dtype | None = None,
     use_fast_accum: bool = False,
+    scale_recipe_a: list[int] | None = None,
+    swizzle_a: list[int] | None = None,
+    scale_recipe_b: list[int] | None = None,
+    swizzle_b: list[int] | None = None,
 ) -> torch.Tensor:
     A_2d = A.flatten(0, -2).contiguous()
-    mx_scaling = _is_mx_swizzled_scale(A_2d, A_scale)
+    _reject_unlabelled_block_scale(A_scale, scale_recipe_a)
+    mx_scaling = _is_mx_scale(scale_recipe_a)
 
     if mx_scaling:
         pass  # the swizzled scale is already shaped for the whole (unchunked) A
@@ -1764,6 +1880,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     scatter_dim_after_maybe_reshape: int,
     group_name: c10d.GroupName,
     output_shape: list[int],
+    scale_recipe_a: list[int] | None = None,
 ) -> torch.Tensor:
     if A.dim() < 2:
         raise ValueError("A_shard must be a matrix")
@@ -1795,9 +1912,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # Now that 'A' is sharded along the first dim, we need to update its scale(s) accordingly.
     # How we do this depends on if we are using tensorwise scaling, rowwise scaling,
     # MXFP8 block-wise scaling, or no scaling.
-    mx_scaling = A_scale is not None and _is_mx_swizzled_scale(
-        A_2D_with_scatter_dim_0, A_scale
-    )
+    mx_scaling = _is_mx_scale(scale_recipe_a)
     tensorwise_scaling = not mx_scaling and A_scale is not None and A_scale.numel() == 1
     rowwise_scaling = not mx_scaling and A_scale is not None and A_scale.numel() > 1
 

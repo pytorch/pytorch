@@ -1248,6 +1248,10 @@ class AsyncTPTest(MultiProcContinuousTest):
             [None],
             [torch.bfloat16],
             [False],
+            [ScalingType.BlockWise1x32.value],
+            [SwizzleType.SWIZZLE_32_4_4.value],
+            [ScalingType.BlockWise1x32.value],
+            [SwizzleType.SWIZZLE_32_4_4.value],
         )
         outputs = []
         for context in test_contexts:
@@ -1293,7 +1297,47 @@ class AsyncTPTest(MultiProcContinuousTest):
         _, A_q, A_sb = _mxfp8_quantize(A)
         _, B_q, B_sb = _mxfp8_quantize(B)
 
+        recipe = [ScalingType.BlockWise1x32.value]
+        swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
         with self.assertRaisesRegex(ValueError, "multiple of 128"):
+            torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+                A_q,
+                [B_q.t()],
+                A_sb,
+                [B_sb],
+                0,
+                group.group_name,
+                [None],
+                [None],
+                [torch.bfloat16],
+                [False],
+                recipe,
+                swizzle,
+                recipe,
+                swizzle,
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_all_gather_scaled_matmul_mxfp8_requires_recipe(self) -> None:
+        """An e8m0 scale must come with an explicit recipe, never be inferred.
+
+        A swizzled scale and an unswizzled one have the same numel at every
+        128-aligned shape, so guessing from the scale alone silently produces
+        wrong numerics.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+
+        A = torch.randn(256, 128, device="cuda", dtype=torch.bfloat16)
+        B = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+        _, A_q, A_sb = _mxfp8_quantize(A)
+        _, B_q, B_sb = _mxfp8_quantize(B)
+
+        with self.assertRaisesRegex(ValueError, "without `scale_recipe`"):
             torch.ops.symm_mem.fused_all_gather_scaled_matmul(
                 A_q,
                 [B_q.t()],
@@ -1346,6 +1390,10 @@ class AsyncTPTest(MultiProcContinuousTest):
             None,
             torch.bfloat16,
             False,
+            [ScalingType.BlockWise1x32.value],
+            [SwizzleType.SWIZZLE_32_4_4.value],
+            [ScalingType.BlockWise1x32.value],
+            [SwizzleType.SWIZZLE_32_4_4.value],
         )
         outputs = []
         for context in test_contexts:
