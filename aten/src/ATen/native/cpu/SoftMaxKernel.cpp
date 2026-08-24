@@ -662,18 +662,16 @@ _vec_softmax(
                 output_data_base + outer_idx * outer_stride + inner_idx;
             // Step 1: Get max Score
             Vec16 max_vec_bf16 = Vec16::loadu(input_data);
-            std::tuple<Vec, Vec> convert_result = vec::convert_to_float<scalar_t>(max_vec_bf16);
-            Vec max_vec_o1 = std::get<0>(convert_result);
-            Vec max_vec_o2 = std::get<1>(convert_result);
-            std::get<0>(convert_result).store(temp_vec_input_data);
-            std::get<1>(convert_result).store(temp_vec_input_data + Vec().size());
+            auto [max_vec_o1, max_vec_o2] = vec::convert_to_float<scalar_t>(max_vec_bf16);
+            max_vec_o1.store(temp_vec_input_data);
+            max_vec_o2.store(temp_vec_input_data + Vec().size());
             for (const auto d : c10::irange(1, dim_size)) {
               Vec16 input_vec_bf16 = Vec16::loadu(input_data + d * dim_stride);
-              convert_result = vec::convert_to_float<scalar_t>(input_vec_bf16);
-              max_vec_o1 = vec::maximum(max_vec_o1, std::get<0>(convert_result));
-              max_vec_o2 = vec::maximum(max_vec_o2, std::get<1>(convert_result));
-              std::get<0>(convert_result).store(temp_vec_input_data + d*vectorized_step);
-              std::get<1>(convert_result).store(temp_vec_input_data + d*vectorized_step + Vec().size());
+              auto [cur_vec_o1, cur_vec_o2] = vec::convert_to_float<scalar_t>(input_vec_bf16);
+              max_vec_o1 = vec::maximum(max_vec_o1, cur_vec_o1);
+              max_vec_o2 = vec::maximum(max_vec_o2, cur_vec_o2);
+              cur_vec_o1.store(temp_vec_input_data + d*vectorized_step);
+              cur_vec_o2.store(temp_vec_input_data + d*vectorized_step + Vec().size());
             }
             // Step2: Calculate sum
             Vec sum_vec_o1 = Vec(0.0);

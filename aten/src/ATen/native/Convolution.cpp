@@ -1085,13 +1085,13 @@ static Tensor convolution_same(
   for (auto i: c10::irange(dim)) {
     auto s = stride.size() == 1 ? stride[0] : stride[i];
     auto d = dilation.size() == 1 ? dilation[0] : dilation[i];
-    auto pad = pooling_same_mode_padding_lr(
+    auto [pad_l, pad_r] = pooling_same_mode_padding_lr(
         input_sizes[i + 2], weight_sizes[i + 2], s, d);
-    if (!TORCH_GUARD_OR_FALSE(pad.first.sym_eq(pad.second))) {
+    if (!TORCH_GUARD_OR_FALSE(pad_l.sym_eq(pad_r))) {
       symmetric_padding = false;
     }
-    padding_l.push_back(std::move(pad.first));
-    padding_r.push_back(std::move(pad.second));
+    padding_l.push_back(std::move(pad_l));
+    padding_r.push_back(std::move(pad_r));
   }
 
   if (symmetric_padding) {
