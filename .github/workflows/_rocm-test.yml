@@ -122,8 +122,8 @@ jobs:
           env | grep '^GITHUB' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
 
-      - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+      # - name: Login to ECR
+      #   uses: pytorch/pytorch/.github/actions/ecr-login@main
 
       - name: Preserve github env variables for use in docker
         shell: bash
