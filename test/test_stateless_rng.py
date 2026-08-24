@@ -131,14 +131,6 @@ class TestStatelessRNGKeySplit(TestCase):
         with self.assertRaisesRegex(RuntimeError, "key must have dtype uint64"):
             random.split(key, 4)
 
-    def test_error_wrong_device(self, device):
-        key = random.key(42)  # CPU key
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "Could not run .* with arguments from the 'CPU' backend",
-        ):
-            random.split(key, 4)
-
     def test_error_invalid_num_splits(self, device):
         key = random.key(42, device=device)
         with self.assertRaisesRegex(RuntimeError, "num_splits must be positive"):
@@ -161,6 +153,20 @@ class TestStatelessRNGKeySplit(TestCase):
         key0 = torch.tensor([42, 0], dtype=torch.uint64, device=device)
         self.assertEqual(splits[1], random.fold_in(key0, 0))
         self.assertEqual(splits[2], random.fold_in(key0, 1))
+
+    @parametrize("batched", [False, True])
+    @onlyAccelerator
+    def test_cross_device_consistency(self, device, batched):
+        key_cpu = random.key(42)
+        key_dev = random.key(42, device=device)
+        if batched:
+            # Batched key exercises the multi-key path.
+            key_cpu = random.split(key_cpu, 4)  # (4, 2)
+            key_dev = random.split(key_dev, 4)
+        self.assertEqual(
+            random.split(key_cpu, 8),
+            random.split(key_dev, 8).cpu(),
+        )
 
 
 class TestStatelessRNGKeyFoldIn(TestCase):
@@ -228,14 +234,6 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         with self.assertRaisesRegex(RuntimeError, "key must have dtype uint64"):
             random.fold_in(key, 0)
 
-    def test_error_wrong_device(self, device):
-        key = random.key(42)  # CPU key
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "Could not run .* with arguments from the 'CPU' backend",
-        ):
-            random.fold_in(key, 0)
-
     def test_error_batched_last_dim_not_2(self, device):
         key = torch.tensor([[42, 0, 1], [43, 0, 1]], dtype=torch.uint64, device=device)
         with self.assertRaisesRegex(
@@ -285,7 +283,11 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         # tensor with more than one value
         with self.assertRaisesRegex(RuntimeError, "data must be a single value"):
             random.fold_in(key, torch.tensor([1, 2], dtype=torch.uint64, device=device))
-        # tensor on a different device than the key
+
+    @onlyAccelerator
+    def test_error_data_wrong_device(self, device):
+        key = random.key(42, device=device)
+        # A CPU data tensor with an accelerator key is a device mismatch.
         with self.assertRaisesRegex(
             RuntimeError, "Expected all tensors to be on the same device"
         ):
@@ -332,6 +334,27 @@ class TestStatelessRNGKeyFoldIn(TestCase):
             g.replay()
             torch.cuda.synchronize()
             self.assertEqual(out, random.fold_in(key, value))
+
+    @parametrize("batched", [False, True])
+    @parametrize("tensor_data", [False, True])
+    @onlyAccelerator
+    def test_cross_device_consistency(self, device, batched, tensor_data):
+        key_cpu = random.key(42)
+        key_dev = random.key(42, device=device)
+        if batched:
+            # Batched key exercises the multi-key path.
+            key_cpu = random.split(key_cpu, 4)  # (4, 2)
+            key_dev = random.split(key_dev, 4)
+        if tensor_data:
+            # Tensor data exercises the .Tensor overload.
+            data_cpu = torch.tensor(7, dtype=torch.uint64)
+            data_dev = torch.tensor(7, dtype=torch.uint64, device=device)
+        else:
+            data_cpu = data_dev = 7
+        self.assertEqual(
+            random.fold_in(key_cpu, data_cpu),
+            random.fold_in(key_dev, data_dev).cpu(),
+        )
 
 
 class TestStatelessRNGDistribution(TestCase):
@@ -572,6 +595,41 @@ class TestStatelessRNGDistribution(TestCase):
         self.assertTrue(result.min().item() >= 2.0)
         self.assertTrue(result.max().item() <= 5.0)
 
+    @dtypes(*all_floating_dtypes)
+    @parametrize("batched", [False, True])
+    @onlyAccelerator
+    def test_cross_device_uniform_consistency(self, device, dtype, batched):
+        if batched:
+            # Batched key exercises the multi-key path.
+            key_cpu = random.split(random.key(42), 4).unsqueeze(-2)  # (4, 1, 2)
+            key_dev = random.split(random.key(42, device=device), 4).unsqueeze(-2)
+            shape = (4, 100)
+        else:
+            key_cpu = random.fold_in(random.key(42), 7)
+            key_dev = random.fold_in(random.key(42, device=device), 7)
+            shape = (1000,)
+        # Uniform generation uses no transcendentals, so results must be bitwise identical.
+        self.assertEqual(
+            self._gen("uniform", key_cpu, shape, dtype=dtype),
+            self._gen("uniform", key_dev, shape, dtype=dtype).cpu(),
+            atol=0,
+            rtol=0,
+        )
+
+    @dtypes(*all_floating_dtypes)
+    @onlyAccelerator
+    def test_cross_device_normal_consistency(self, device, dtype):
+        key_cpu = random.fold_in(random.key(42), 7)
+        key_dev = random.fold_in(random.key(42, device=device), 7)
+        # Normal generation uses Box-Muller (log, sin, cos), and CUDA uses fast-math
+        # intrinsics (__logf, __sincosf) that differ slightly from CPU std::log / std::sin /
+        # std::cos. Results are approximately but not bitwise equal. assertEqual() by default
+        # allows for some tolerance in the comparisons.
+        self.assertEqual(
+            self._gen("normal", key_cpu, (1000,), dtype=dtype),
+            self._gen("normal", key_dev, (1000,), dtype=dtype).cpu(),
+        )
+
 
 class TestStatelessRNGCompile(TestCase):
     def test_split_fullgraph(self, device):
@@ -700,13 +758,19 @@ class TestStatelessRNGCompile(TestCase):
         self.assertEqual(torch.compile(f, dynamic=False)(key, x), f(key, x))
 
 
-instantiate_device_type_tests(TestStatelessRNGKey, globals(), only_for=("cuda",))
-instantiate_device_type_tests(TestStatelessRNGKeySplit, globals(), only_for=("cuda",))
-instantiate_device_type_tests(TestStatelessRNGKeyFoldIn, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestStatelessRNGKey, globals(), only_for=("cpu", "cuda"))
 instantiate_device_type_tests(
-    TestStatelessRNGDistribution, globals(), only_for=("cuda",)
+    TestStatelessRNGKeySplit, globals(), only_for=("cpu", "cuda")
 )
-instantiate_device_type_tests(TestStatelessRNGCompile, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestStatelessRNGKeyFoldIn, globals(), only_for=("cpu", "cuda")
+)
+instantiate_device_type_tests(
+    TestStatelessRNGDistribution, globals(), only_for=("cpu", "cuda")
+)
+instantiate_device_type_tests(
+    TestStatelessRNGCompile, globals(), only_for=("cpu", "cuda")
+)
 
 
 if __name__ == "__main__":

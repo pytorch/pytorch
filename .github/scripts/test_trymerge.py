@@ -24,13 +24,19 @@ from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import (
     _find_non_matching_files,
     _revlist_to_prs,
+    can_skip_internal_checks,
     categorize_checks,
     DRCI_CHECKRUN_NAME,
+    ensure_mergeable_labels,
     find_matching_merge_rule,
     get_classifications,
+    get_docker_build_checks,
     get_drci_classifications,
+    get_topmost_docker_pr,
     gh_get_team_members,
     GitHubPR,
+    is_bot_initiated_codev_merge,
+    is_docker_affecting_files,
     iter_issue_timeline_until_comment,
     JobCheckState,
     main as trymerge_main,
@@ -315,6 +321,154 @@ class TestTryMerge(TestCase):
         "Without negative patterns, behavior matches the positive-only case."
         files = [".ci/test.sh", "torch/foo.py"]
         self.assertEqual(_find_non_matching_files([".ci/**"], files), ["torch/foo.py"])
+
+    @staticmethod
+    def _pr_with_merge_comment(
+        author_login: str,
+        author_url: str | None = None,
+        diff_revision: str | None = "D123456",
+        editor_login: str | None = None,
+    ) -> Any:
+        pr = mock.MagicMock()
+        pr.get_diff_revision.return_value = diff_revision
+        pr.get_comment_by_id.return_value = mock.MagicMock(
+            author_login=author_login,
+            author_url=author_url,
+            editor_login=editor_login,
+        )
+        return pr
+
+    def test_is_bot_initiated_codev_merge_meta_codesync(self, *args: Any) -> None:
+        "meta-codesync, the current export bot, is recognized as a co-dev merge."
+        pr = self._pr_with_merge_comment(
+            "meta-codesync[bot]", "https://github.com/apps/meta-codesync"
+        )
+        self.assertTrue(is_bot_initiated_codev_merge(pr, 123))
+
+    def test_is_bot_initiated_codev_merge_legacy_bots(self, *args: Any) -> None:
+        "The bots meta-codesync superseded are still recognized."
+        tools = self._pr_with_merge_comment(
+            "facebook-github-tools[bot]",
+            "https://github.com/apps/facebook-github-tools",
+        )
+        self.assertTrue(is_bot_initiated_codev_merge(tools, 123))
+        legacy = self._pr_with_merge_comment("facebook-github-bot")
+        self.assertTrue(is_bot_initiated_codev_merge(legacy, 123))
+
+    def test_is_bot_initiated_codev_merge_false_without_diff(self, *args: Any) -> None:
+        "A bot-initiated merge without an internal diff is not a co-dev merge."
+        pr = self._pr_with_merge_comment(
+            "meta-codesync[bot]",
+            "https://github.com/apps/meta-codesync",
+            diff_revision=None,
+        )
+        self.assertFalse(is_bot_initiated_codev_merge(pr, 123))
+
+    def test_is_bot_initiated_codev_merge_false_when_human(self, *args: Any) -> None:
+        "A human-initiated merge is never treated as a co-dev merge."
+        pr = self._pr_with_merge_comment("some-human")
+        self.assertFalse(is_bot_initiated_codev_merge(pr, 123))
+
+    def test_is_bot_initiated_codev_merge_false_when_edited(self, *args: Any) -> None:
+        "An edited merge comment can't be trusted to name its real author."
+        pr = self._pr_with_merge_comment(
+            "meta-codesync[bot]",
+            "https://github.com/apps/meta-codesync",
+            editor_login="some-human",
+        )
+        self.assertFalse(is_bot_initiated_codev_merge(pr, 123))
+
+    def test_codev_bot_list_does_not_widen_internal_checks(self, *args: Any) -> None:
+        "Auto-labeling meta-codesync must not also waive the Phabricator guard."
+        pr = self._pr_with_merge_comment(
+            "meta-codesync[bot]", "https://github.com/apps/meta-codesync"
+        )
+        self.assertTrue(is_bot_initiated_codev_merge(pr, 123))
+        self.assertFalse(can_skip_internal_checks(pr, 123))
+
+    def test_is_bot_initiated_codev_merge_without_author_url(self, *args: Any) -> None:
+        """Recognition must not depend on author_url. Only `comments(last: 5)`
+        selects it; GH_GET_PR_PREV_COMMENTS and the reviews fragment select
+        `login` alone, so a merge comment older than the prefetched window comes
+        back with author_url=None."""
+        node = {
+            "bodyText": "@pytorchbot merge",
+            "createdAt": "2026-08-04T22:14:27Z",
+            # No "url" — exactly what the paginated query returns.
+            "author": {"login": "meta-codesync[bot]"},
+            "authorAssociation": "NONE",
+            "editor": None,
+            "databaseId": 5185216222,
+            "url": "https://github.com/pytorch/pytorch/pull/192125#issuecomment-1",
+        }
+        comment = GitHubPR._comment_from_node(node)
+        self.assertIsNone(comment.author_url)
+
+        pr = mock.MagicMock()
+        pr.get_diff_revision.return_value = "D114427100"
+        pr.get_comment_by_id.return_value = comment
+        self.assertTrue(is_bot_initiated_codev_merge(pr, 5185216222))
+
+    @mock.patch("trymerge.gh_post_pr_comment")
+    @mock.patch("trymerge.gh_add_labels")
+    @mock.patch("trymerge.is_bot_initiated_codev_merge", return_value=True)
+    @mock.patch("trymerge.has_required_labels", return_value=False)
+    def test_ensure_mergeable_labels_autolabels_codev_merge(
+        self,
+        mock_labels: Any,
+        mock_codev: Any,
+        mock_add: Any,
+        mock_comment: Any,
+        *args: Any,
+    ) -> None:
+        "An unlabeled co-dev merge is auto-labeled instead of raising."
+        pr = mock.MagicMock(org="pytorch", project="pytorch", pr_num=123)
+        ensure_mergeable_labels(pr, 456, dry_run=False)
+        mock_add.assert_called_once_with(
+            "pytorch", "pytorch", 123, ["topic: not user facing"], False
+        )
+        mock_comment.assert_called_once()
+
+    @mock.patch("trymerge.gh_post_pr_comment", side_effect=RuntimeError("boom"))
+    @mock.patch("trymerge.gh_add_labels")
+    @mock.patch("trymerge.is_bot_initiated_codev_merge", return_value=True)
+    @mock.patch("trymerge.has_required_labels", return_value=False)
+    def test_ensure_mergeable_labels_does_not_label_without_audit_comment(
+        self,
+        mock_labels: Any,
+        mock_codev: Any,
+        mock_add: Any,
+        mock_comment: Any,
+        *args: Any,
+    ) -> None:
+        """A failed audit comment must not leave the label behind: the label alone
+        satisfies has_required_labels, so the retry would silently skip the notice."""
+        pr = mock.MagicMock(org="pytorch", project="pytorch", pr_num=123)
+        with self.assertRaises(RuntimeError):
+            ensure_mergeable_labels(pr, 456, dry_run=False)
+        mock_add.assert_not_called()
+
+    @mock.patch("trymerge.gh_add_labels")
+    @mock.patch("trymerge.is_bot_initiated_codev_merge", return_value=False)
+    @mock.patch("trymerge.has_required_labels", return_value=False)
+    def test_ensure_mergeable_labels_raises_for_human_merge(
+        self, mock_labels: Any, mock_codev: Any, mock_add: Any, *args: Any
+    ) -> None:
+        "An unlabeled human-initiated merge still fails the label check."
+        pr = mock.MagicMock(org="pytorch", project="pytorch", pr_num=123)
+        with self.assertRaises(RuntimeError):
+            ensure_mergeable_labels(pr, 456, dry_run=False)
+        mock_add.assert_not_called()
+
+    @mock.patch("trymerge.gh_add_labels")
+    @mock.patch("trymerge.has_required_labels", return_value=True)
+    def test_ensure_mergeable_labels_noop_when_labeled(
+        self, mock_labels: Any, mock_add: Any, *args: Any
+    ) -> None:
+        "A PR that already has a required label is left untouched."
+        pr = mock.MagicMock(org="pytorch", project="pytorch", pr_num=123)
+        ensure_mergeable_labels(pr, 456, dry_run=False)
+        mock_add.assert_not_called()
 
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
     def test_match_rules(self, *args: Any) -> None:
@@ -1455,6 +1609,94 @@ class TestTimelineFunctions(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 77700)
         sha = pr.get_commit_sha_at_comment(100)
         self.assertIsNone(sha)
+
+
+class TestDockerCiGates(TestCase):
+    """Unit tests for the docker-image merge gates."""
+
+    def test_is_docker_affecting_files(self) -> None:
+        self.assertTrue(is_docker_affecting_files([".ci/docker/build.sh"]))
+        self.assertTrue(
+            is_docker_affecting_files(["README.md", ".ci/docker/ubuntu/Dockerfile"])
+        )
+        # Exact directory path also counts
+        self.assertTrue(is_docker_affecting_files([".ci/docker"]))
+        # Unrelated files, including a lookalike prefix, don't count
+        self.assertFalse(is_docker_affecting_files(["torch/foo.py", "README.md"]))
+        self.assertFalse(is_docker_affecting_files([".ci/docker-something/x"]))
+        self.assertFalse(is_docker_affecting_files([]))
+
+    def test_get_docker_build_checks(self) -> None:
+        def check(name: str) -> JobCheckState:
+            return JobCheckState(name, "", "SUCCESS", None, None, None, None)
+
+        checks = {
+            name: check(name)
+            for name in (
+                "docker-builds / docker-build (pytorch-linux-jammy)",
+                "docker-builds",
+                "linux-build / build",
+                "docker-builds-nightly / x",
+            )
+        }
+        self.assertEqual(
+            set(get_docker_build_checks(checks)),
+            {
+                "docker-builds / docker-build (pytorch-linux-jammy)",
+                "docker-builds",
+            },
+        )
+
+    def test_get_topmost_docker_pr(self) -> None:
+        lower_docker_pr = mock.MagicMock()
+        lower_docker_pr.is_docker_affecting.return_value = True
+        middle_pr = mock.MagicMock()
+        middle_pr.is_docker_affecting.return_value = False
+        top_docker_pr = mock.MagicMock()
+        top_docker_pr.is_docker_affecting.return_value = True
+
+        self.assertIs(
+            get_topmost_docker_pr([lower_docker_pr, middle_pr]), lower_docker_pr
+        )
+        self.assertIs(
+            get_topmost_docker_pr([lower_docker_pr, middle_pr, top_docker_pr]),
+            top_docker_pr,
+        )
+        self.assertIsNone(get_topmost_docker_pr([middle_pr]))
+
+    @mock.patch("trymerge.check_docker_builds_ready")
+    @mock.patch("trymerge.get_ghstack_prs")
+    @mock.patch("trymerge.find_matching_merge_rule")
+    @mock.patch("trymerge.can_skip_internal_checks", return_value=False)
+    def test_merge_into_gates_lower_ghstack_docker_pr(
+        self,
+        _mock_can_skip_internal_checks: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        mock_get_ghstack_prs: mock.MagicMock,
+        mock_check_docker_builds_ready: mock.MagicMock,
+    ) -> None:
+        lower_pr = mock.MagicMock(spec=GitHubPR)
+        lower_pr.is_closed.return_value = False
+        lower_pr.is_docker_affecting.return_value = True
+        top_pr = mock.MagicMock(spec=GitHubPR)
+        top_pr.is_ghstack_pr.return_value = True
+        top_pr.is_closed.return_value = False
+        top_pr.is_docker_affecting.return_value = False
+        top_pr.is_dependabot_pr.return_value = False
+        top_pr.merge_changes_locally.side_effect = RuntimeError("stop after gates")
+        repo = mock.MagicMock(spec=GitRepo)
+        ghstack_prs = [(lower_pr, "lower_rev"), (top_pr, "top_rev")]
+        mock_get_ghstack_prs.return_value = ghstack_prs
+        mock_find_matching_merge_rule.return_value = (None, [], [], {})
+
+        with self.assertRaisesRegex(RuntimeError, "stop after gates"):
+            GitHubPR.merge_into(top_pr, repo, comment_id=1)
+
+        mock_get_ghstack_prs.assert_called_once_with(repo, top_pr, open_only=False)
+        mock_check_docker_builds_ready.assert_called_once_with(lower_pr)
+        top_pr.merge_changes_locally.assert_called_once_with(
+            repo, False, 1, ghstack_prs=ghstack_prs
+        )
 
 
 if __name__ == "__main__":
