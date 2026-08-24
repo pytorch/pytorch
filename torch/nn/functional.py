@@ -1,5 +1,6 @@
 """Functional interface."""
 
+import copyreg
 import dataclasses
 import importlib
 import math
@@ -36,6 +37,28 @@ from torch.overrides import (
 # Set visibility of the bound enums to this module
 ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
+
+
+# Pickle support for pybind11 enums.
+# pybind11 enums have __qualname__ = "_ScalingType" / "_SwizzleType" but are
+# exported as ScalingType / SwizzleType, so default pickle reduction fails.
+# Reduce by name string through the public alias instead.
+def _rebuild_scaling_type(name: str) -> _Any:
+    return getattr(ScalingType, name)
+
+
+def _rebuild_swizzle_type(name: str) -> _Any:
+    return getattr(SwizzleType, name)
+
+
+copyreg.pickle(
+    type(ScalingType.TensorWise),
+    lambda v: (_rebuild_scaling_type, (v.name,)),
+)
+copyreg.pickle(
+    type(SwizzleType.NO_SWIZZLE),
+    lambda v: (_rebuild_swizzle_type, (v.name,)),
+)
 
 if TYPE_CHECKING:
     from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions

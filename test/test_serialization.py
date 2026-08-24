@@ -4912,6 +4912,22 @@ class TestSerialization(TestCase, SerializationMixin):
             with self.assertRaisesRegex(RuntimeError, "size is inconsistent with indices"):
                 torch.load(bad_buf, weights_only=False)
 
+    def test_pybind11_enum_swizzle_type_save_load(self):
+        from torch.nn.functional import SwizzleType
+
+        buf = io.BytesIO()
+        torch.save(SwizzleType.NO_SWIZZLE, buf)
+        buf.seek(0)
+        self.assertEqual(torch.load(buf, weights_only=True), SwizzleType.NO_SWIZZLE)
+
+    def test_pybind11_enum_scaling_type_save_load(self):
+        from torch.nn.functional import ScalingType
+
+        buf = io.BytesIO()
+        torch.save(ScalingType.TensorWise, buf)
+        buf.seek(0)
+        self.assertEqual(torch.load(buf, weights_only=True), ScalingType.TensorWise)
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)
@@ -5540,6 +5556,7 @@ instantiate_device_type_tests(TestSerializationAccelerator, globals(), allow_xpu
 instantiate_parametrized_tests(TestSubclassSerialization)
 instantiate_parametrized_tests(TestOldSerialization)
 instantiate_parametrized_tests(TestSerialization)
+
 
 if __name__ == '__main__':
     run_tests()

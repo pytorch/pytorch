@@ -223,6 +223,22 @@ def _get_allowed_globals():
     # Handles Tensor Subclasses, Tensor's with attributes.
     # NOTE: It calls into above rebuild functions for regular Tensor types.
     rc["torch._tensor._rebuild_from_type_v2"] = torch._tensor._rebuild_from_type_v2
+
+    # Pybind11 enum rebuild functions (ScalingType / SwizzleType)
+    from torch.nn.functional import (  # pyrefly: ignore[missing-module-attribute]
+        _rebuild_scaling_type,
+        _rebuild_swizzle_type,
+    )
+
+    rc["torch.nn.functional._rebuild_scaling_type"] = _rebuild_scaling_type
+    rc["torch.nn.functional._rebuild_swizzle_type"] = _rebuild_swizzle_type
+    # Backward compat: old checkpoints reference the inductor path
+    rc[
+        "torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils._rebuild_scaling_type"
+    ] = _rebuild_scaling_type
+    rc[
+        "torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils._rebuild_swizzle_type"
+    ] = _rebuild_swizzle_type
     return rc
 
 
