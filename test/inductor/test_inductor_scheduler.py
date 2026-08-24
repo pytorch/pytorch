@@ -35,7 +35,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     HardwareClassification,
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
@@ -1170,8 +1169,6 @@ class TestScoreFusionMemory(TestCase):
         # The _score_fusion_memory_by_buffer_overlap returns 0 for this case
         self.assertEqual(metrics.generated_kernel_count, 2)
 
-
-instantiate_parametrized_tests(TestSchedulerGeneric)
 
 instantiate_device_type_tests(
     TestSchedulerAccelerator, globals(), except_for="cpu", allow_xpu=True
