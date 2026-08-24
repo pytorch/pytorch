@@ -372,7 +372,7 @@ static PyObject* dynamo_eval_custom_code_impl(
   //  variables into frame and initializing cell variables
   //  3. CPython interpreter executes the code object
   //
-  // Dynamo hooks the 3th step: before executing the code object, Dynamo
+  // Dynamo hooks the 3rd step: before executing the code object, Dynamo
   // transforms the code object into a new code object. Then, the old frame is
   // not suitable for executing the new code. Therefore, Dynamo needs to
   // manually create and initialize a new frame to execute the new code. The
