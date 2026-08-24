@@ -22,24 +22,39 @@ from .gemm_gfx950 import (
 )
 
 
-def _grouped_swizzle_tile(param, num_pid_m, num_pid_n, local_tile):
+def _grouped_swizzle_tile(param, num_pid_m, num_pid_n, local_tile, grid, tiles_before):
     bid_m = local_tile % num_pid_m
     bid_n = local_tile // num_pid_m
     if const_expr(param.group_m <= 0):
         return bid_m, bid_n
 
-    block_swizzle = BlockSwizzle(
-        NUM_XCDS=8, NUM_PIDS_THRESHOLD=256, GROUP_M=param.group_m
-    )
-    swizzled_m, swizzled_n = block_swizzle.swizzle(num_pid_m, num_pid_n, local_tile)
+    num_xcds = 8
+    swizzle_threshold = 256
     num_workgroups = num_pid_m * num_pid_n
-    use_block_swizzle = (num_workgroups >= block_swizzle.NUM_PIDS_THRESHOLD) & (
-        (num_workgroups % block_swizzle.NUM_XCDS) == 0
+    # BlockSwizzle maps pid % NUM_XCDS to hardware XCD assignment. In the
+    # persistent grouped loop local_tile = blockIdx.x + j * grid - tiles_before,
+    # so local_tile % NUM_XCDS tracks blockIdx.x only when both grid and
+    # tiles_before are NUM_XCDS-aligned. Otherwise fall back to M-major tile
+    # order so concurrent CTAs share bid_n and reuse the same B tile.
+    use_block_swizzle = (
+        (num_workgroups >= swizzle_threshold)
+        & ((num_workgroups % num_xcds) == 0)
+        & ((grid % num_xcds) == 0)
+        & ((tiles_before % num_xcds) == 0)
     )
     if const_expr(isinstance(use_block_swizzle, bool)):
-        if const_expr(use_block_swizzle):
-            return swizzled_m, swizzled_n
-        return bid_m, bid_n
+        if not use_block_swizzle:
+            return bid_m, bid_n
+        block_swizzle = BlockSwizzle(
+            NUM_XCDS=num_xcds,
+            NUM_PIDS_THRESHOLD=swizzle_threshold,
+            GROUP_M=param.group_m,
+        )
+        return block_swizzle.swizzle(num_pid_m, num_pid_n, local_tile)
+    block_swizzle = BlockSwizzle(
+        NUM_XCDS=num_xcds, NUM_PIDS_THRESHOLD=swizzle_threshold, GROUP_M=param.group_m
+    )
+    swizzled_m, swizzled_n = block_swizzle.swizzle(num_pid_m, num_pid_n, local_tile)
     return (
         use_block_swizzle.select(swizzled_m, bid_m),
         use_block_swizzle.select(swizzled_n, bid_n),
@@ -75,12 +90,8 @@ def get_grouped_gemm_persistent_grid_size(
     n_tiles = (n - 1) // param.block_n + 1
     if light_tile:
         blocks_per_cu = min(1 << (resource_blocks_per_cu.bit_length() - 1), 8)
-        # The host only knows total M. This lower bound prevents empty CTAs
-        # for uniformly small groups, even though ragged inputs have more work.
-        task_floor = ((total_m - 1) // param.block_m + 1) * n_tiles
-        return max(1, min(num_cus * blocks_per_cu, task_floor))
-
-    blocks_per_cu = 2 if resource_blocks_per_cu >= 2 else 1
+    else:
+        blocks_per_cu = 2 if resource_blocks_per_cu >= 2 else 1
     nonempty_groups_upper = min(group_count, total_m)
     m_tiles_upper = (
         nonempty_groups_upper + (total_m - nonempty_groups_upper) // param.block_m
@@ -474,7 +485,7 @@ def _for_each_grouped_tile(offs_buf, group_count, n, param, tile_body):
         for linear_tile in range(work_idx, tiles_after, grid):
             local_tile = linear_tile - tiles_before
             bid_m, bid_n = _grouped_swizzle_tile(
-                param, num_pid_m, num_pid_n, local_tile
+                param, num_pid_m, num_pid_n, local_tile, grid, tiles_before
             )
             tile_body(g, bid_m, bid_n, m_g, row_base)
 

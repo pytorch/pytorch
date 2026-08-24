@@ -40,6 +40,69 @@ class _CacheParam:
 
 @instantiate_parametrized_tests
 class TestFlyDSLTemplate(TestCase):
+    def _grouped_gemm_grid_param_stub(self, **overrides):
+        defaults = {
+            "stages": 2,
+            "block_m": 64,
+            "block_n": 128,
+            "block_k": 64,
+            "in_data_bytes": 2,
+            "out_data_bytes": 2,
+            "block_threads": 256,
+        }
+        defaults.update(overrides)
+        return SimpleNamespace(**defaults)
+
+    def _gfx950_device_stub(self, **overrides):
+        defaults = {
+            "multi_processor_count": 304,
+            "shared_memory_per_multiprocessor": 163840,
+            "max_threads_per_multi_processor": 2048,
+        }
+        defaults.update(overrides)
+        return SimpleNamespace(**defaults)
+
+    def _expected_grouped_gemm_persistent_grid_size(
+        self, param, total_m, n, group_count, device_properties
+    ):
+        if total_m <= 0 or n <= 0 or group_count <= 0:
+            return 1
+
+        smem_bytes = (
+            param.stages
+            * (param.block_m + param.block_n)
+            * param.block_k
+            * param.in_data_bytes
+        )
+        smem_bytes = max(
+            smem_bytes, param.block_m * param.block_n * param.out_data_bytes
+        )
+        resource_blocks_per_cu = min(
+            max(device_properties.shared_memory_per_multiprocessor // smem_bytes, 1),
+            max(
+                device_properties.max_threads_per_multi_processor
+                // param.block_threads,
+                1,
+            ),
+        )
+        light_tile = param.block_m <= 64 and param.block_n <= 128
+        n_tiles = (n - 1) // param.block_n + 1
+        if light_tile:
+            blocks_per_cu = min(1 << (resource_blocks_per_cu.bit_length() - 1), 8)
+        else:
+            blocks_per_cu = 2 if resource_blocks_per_cu >= 2 else 1
+        nonempty_groups_upper = min(group_count, total_m)
+        m_tiles_upper = (
+            nonempty_groups_upper + (total_m - nonempty_groups_upper) // param.block_m
+        )
+        return max(
+            1,
+            min(
+                device_properties.multi_processor_count * blocks_per_cu,
+                m_tiles_upper * n_tiles,
+            ),
+        )
+
     def setUp(self):
         super().setUp()
         flydsl_utils._check_runtime_available.cache_clear()
@@ -376,7 +439,7 @@ class TestFlyDSLTemplate(TestCase):
             ),
             mock.patch.object(mm_grouped, "is_unaligned", return_value=False),
         ):
-            flydsl_configs = mm_grouped.get_flydsl_grouped_mm_template_kwargs(
+            supported = mm_grouped.use_flydsl_grouped_mm_template(
                 mat_a,
                 mat_b,
                 layout,
@@ -385,8 +448,9 @@ class TestFlyDSLTemplate(TestCase):
                 offs=object(),
                 bias=None,
                 is_nonzero=True,
+                scaled=False,
             )
-        self.assertFalse(flydsl_configs)
+        self.assertFalse(supported)
 
     def test_compiled_cache_keys_on_device_and_param(self):
         jit_func = SimpleNamespace()
@@ -696,6 +760,98 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(valid, expected)
 
     @parametrize(
+        "total_m,n,group_count,param_overrides,device_overrides,expected",
+        [
+            (0, 128, 6, {}, {}, 1),
+            (201, 0, 6, {}, {}, 1),
+            (201, 128, 0, {}, {}, 1),
+            (
+                201,
+                128,
+                6,
+                {},
+                {},
+                9,
+            ),
+            (
+                201,
+                128,
+                6,
+                {"block_m": 128, "block_n": 128, "block_threads": 256},
+                {},
+                7,
+            ),
+            (
+                32,
+                128,
+                1,
+                {},
+                {},
+                1,
+            ),
+            (
+                10000,
+                256,
+                100,
+                {},
+                {"multi_processor_count": 10},
+                20,
+            ),
+            (
+                201,
+                128,
+                6,
+                {},
+                {
+                    "shared_memory_per_multiprocessor": 327680,
+                    "max_threads_per_multi_processor": 4096,
+                },
+                9,
+            ),
+        ],
+    )
+    def test_flydsl_grouped_gemm_persistent_grid_size(
+        self,
+        total_m,
+        n,
+        group_count,
+        param_overrides,
+        device_overrides,
+        expected,
+    ):
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_gemm_gfx950 import (
+            get_grouped_gemm_persistent_grid_size,
+        )
+
+        param = self._grouped_gemm_grid_param_stub(**param_overrides)
+        device = self._gfx950_device_stub(**device_overrides)
+        grid_size = get_grouped_gemm_persistent_grid_size(
+            param, total_m, n, group_count, device
+        )
+        self.assertEqual(grid_size, expected)
+        self.assertEqual(
+            grid_size,
+            self._expected_grouped_gemm_persistent_grid_size(
+                param, total_m, n, group_count, device
+            ),
+        )
+
+    def _meta_fp16_grouped_mm_inputs(self, n: int = 128):
+        mat_a = torch.empty(96, 128, device="meta", dtype=torch.float16)
+        mat_b = torch.empty(2, 128, n, device="meta", dtype=torch.float16)
+        offs = torch.empty(2, device="meta", dtype=torch.int32)
+        return mat_a, mat_b, offs
+
+    @parametrize("n", (96, 128))
+    def test_grouped_mm_fp16_meta_shape_inference(self, n):
+        from torch._meta_registrations import meta_grouped_mm
+
+        mat_a, mat_b, offs = self._meta_fp16_grouped_mm_inputs(n=n)
+        out = meta_grouped_mm(mat_a, mat_b, offs)
+        self.assertEqual(out.dtype, torch.float16)
+        self.assertEqual(out.shape, (96, n))
+
+    @parametrize(
         "dtype,k,n",
         [
             (torch.bfloat16, 128, 128),
@@ -873,6 +1029,95 @@ class TestFlyDSLTemplate(TestCase):
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
     @torch._inductor.config.patch(
         max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=True,
+        autotune_in_subproc=False,
+    )
+    def test_flydsl_grouped_mm_persistent_grid_stride_e2e(self):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
+            make_gemm_gfx950_param,
+        )
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_gemm_gfx950 import (
+            get_grouped_gemm_persistent_grid_size,
+        )
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        config_fields = (
+            "TILE_M",
+            "TILE_N",
+            "TILE_K",
+            "STAGES",
+            "BLOCK_M_WARPS",
+            "BLOCK_N_WARPS",
+            "GROUP_M",
+            "USE_HALF_TILE_INTERLEAVED",
+        )
+        expected_values = (64, 128, 64, 2, 2, 2, 0, True)
+        configs = [
+            asdict(config)
+            for config in flydsl_heuristics.get_default_grouped_gemm_configs()
+        ]
+        configs_by_values = {
+            tuple(config[field] for field in config_fields): config
+            for config in configs
+        }
+        self.assertIn(
+            expected_values,
+            configs_by_values,
+            f"missing grouped GEMM config {expected_values}; "
+            f"available configs: {tuple(configs_by_values)}",
+        )
+        config = configs_by_values[expected_values]
+
+        groups = 32
+        m_per_group = 512
+        n = 2048
+        k = 128
+        total_m = groups * m_per_group
+        group_sizes = torch.full(
+            (groups,), m_per_group, device="cuda", dtype=torch.int32
+        )
+        offs = group_sizes.cumsum(0).to(torch.int32)
+        a = torch.randn(total_m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(groups, k, n, device="cuda", dtype=torch.bfloat16)
+
+        param = make_gemm_gfx950_param(
+            block_m=config["TILE_M"],
+            block_n=config["TILE_N"],
+            block_k=config["TILE_K"],
+            stages=config["STAGES"],
+            m_waves=config["BLOCK_M_WARPS"],
+            n_waves=config["BLOCK_N_WARPS"],
+            group_m=config["GROUP_M"],
+            use_half_tile_interleaved=config["USE_HALF_TILE_INTERLEAVED"],
+        )
+        device = torch.cuda.get_device_properties(a.device)
+        grid_size = get_grouped_gemm_persistent_grid_size(
+            param, total_m, n, groups, device
+        )
+        n_tiles = (n - 1) // config["TILE_N"] + 1
+        m_tiles_upper = groups + (total_m - groups) // config["TILE_M"]
+        total_tiles = m_tiles_upper * n_tiles
+        self.assertGreater(
+            total_tiles,
+            grid_size,
+            "expected enough tiles to exercise persistent grid-stride loops",
+        )
+
+        with mock.patch.object(
+            flydsl_heuristics,
+            "get_grouped_gemm_configs",
+            return_value=[config],
+        ):
+            self._assert_compiled_grouped_mm(a, b, offs)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
         max_autotune_gemm_backends="ATEN,FLYDSL",
     )
     def test_flydsl_grouped_mm_fallback_e2e(self):
@@ -929,6 +1174,25 @@ class TestFlyDSLTemplate(TestCase):
         )
 
         for name, case_a, case_b in cases:
+            with self.subTest(name=name):
+                self._assert_compiled_grouped_mm(
+                    case_a, case_b, offs, expect_flydsl=False
+                )
+
+        fp16_a = torch.randn(total_m, k, device="cuda", dtype=torch.float16)
+        fp16_cases = (
+            (
+                "fp16_n_not_tile_divisible",
+                fp16_a,
+                torch.randn(2, k, 96, device="cuda", dtype=torch.float16),
+            ),
+            (
+                "fp16_b_padded_stride",
+                fp16_a,
+                torch.randn(2, k, 136, device="cuda", dtype=torch.float16)[..., :128],
+            ),
+        )
+        for name, case_a, case_b in fp16_cases:
             with self.subTest(name=name):
                 self._assert_compiled_grouped_mm(
                     case_a, case_b, offs, expect_flydsl=False
