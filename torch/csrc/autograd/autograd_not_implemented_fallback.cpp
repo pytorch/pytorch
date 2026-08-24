@@ -520,7 +520,7 @@ struct GenericViewFunc : public ViewFunc {
         aliased_input_idx_val_(aliased_input_idx_val),
         op_(op) {
     // This should report saved Tensors and SymInts.
-    // We already have an assert that ensure there are no Tensors here
+    // We already have an assert that ensures there are no Tensors here
     // by making sure there is only one Tensor input.
     // We also verify there are no SymInt here for now.
     // Both can be lifted if the visit and clone logic get updated.
