@@ -1037,7 +1037,6 @@ class TestSchedulerAccelerator(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 2)
 
 
-@xfailIfNoAcceleratorTriton
 class TestScoreFusionMemory(TestCase):
     """
     Tests for _score_fusion_memory_by_buffer_overlap.
