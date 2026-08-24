@@ -7,7 +7,7 @@ import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import sympy
 
@@ -20,12 +20,13 @@ from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
 from ...runtime.runtime_utils import is_power_of_2
 from ...select_algorithm import (
-    autotune_select_algorithm,
     SymbolicGridFn,
     TritonTemplate,
+    autotune_select_algorithm,
 )
 from ...utils import can_use_tma
 from .common import (
+    SubgraphResults,
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
     build_subgraph_buffer,
@@ -41,7 +42,6 @@ from .common import (
     maybe_realize,
     realize_captures_for_cutedsl,
     set_head_dim_values,
-    SubgraphResults,
 )
 from .flex_cpu import lower_cpu
 from .flex_decoding import _use_flex_decoding, create_flex_decoding_kernel
@@ -58,7 +58,6 @@ from .flex_flydsl_attention import (
     can_use_flydsl_flex_attention_forward,
     maybe_append_flydsl_flex_attention_choice,
 )
-
 
 if TYPE_CHECKING:
     from ...heuristics.template.triton import FlexBwDConfig, FlexConfig

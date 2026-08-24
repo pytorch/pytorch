@@ -7,11 +7,19 @@ import flydsl.expr as fx
 from flydsl.expr import const_expr
 from flydsl.expr.typing import Vector as Vec
 
-from .flex_attn_mask import (
-    evaluate_mask_program,
+from .flex_attn_utils import (
+    fast_exp2,
     is_causal_document_mask_program,
+    load_scalar,
+    make_global_view,
+    make_mask_buffers,
+    make_mask_evaluator,
+    read_first_lane,
+    schedule_fwd_pv_pipeline,
+    schedule_fwd_qk_pipeline,
+    schedule_fwd_softmax_pipeline,
+    store_scalar,
 )
-from .flex_attn_utils import load_scalar, make_global_view, store_scalar
 
 _LOG2E = 1.4426950408889634
 _LN2 = math.log(2.0)
@@ -26,11 +34,55 @@ def _f32(value):
 
 
 def _exp2(value):
-    return fx.math.exp2(_f32(value))
+    return fast_exp2(_f32(value))
 
 
 def _maximum(lhs, rhs):
     return (lhs > rhs).select(lhs, rhs)
+
+
+def _causal_window_size(mask_program, mask_program_output):
+    program = tuple(mask_program)
+    if (
+        len(program) == 5
+        and program[0] == ("ge", 2, 3)
+        and program[1] == ("sub", 2, 3)
+        and len(program[2]) == 2
+        and program[2][0] == "const_i32"
+        and program[3] == ("lt", 5, 6)
+        and program[4] == ("and", 4, 7)
+        and int(mask_program_output) == 8
+    ):
+        window_size = int(program[2][1])
+        return window_size if window_size > 0 else None
+    return None
+
+
+def _select_owner_waves(
+    *,
+    batch_size: int,
+    num_q_heads: int,
+    seq_q: int,
+    seq_kv: int,
+    qk_head_dim: int,
+) -> int:
+    """Choose how many independent 32-row query owners share one CTA."""
+    base_ctas = batch_size * num_q_heads * (seq_q // 128)
+    if qk_head_dim == 128 and (seq_kv <= 1024 or base_ctas < 256):
+        return 2
+    return 4
+
+
+def _select_waves_per_eu(
+    *,
+    owner_waves: int,
+    seq_kv: int,
+    qk_head_dim: int,
+) -> int:
+    """Select the occupancy hint independently from the owner geometry."""
+    if qk_head_dim == 128 and owner_waves == 4 and seq_kv >= 2048:
+        return 2
+    return 1
 
 
 def build_flex_attn_fwd_module(
@@ -63,15 +115,27 @@ def build_flex_attn_fwd_module(
 ):
     """Build the gfx950 prefill kernel.
 
-    A 256-thread CTA owns 128 query rows. Each of its four waves keeps one
-    32-row Q tile and the corresponding 32x128 output tile in registers. K/V
-    are staged once per CTA and consumed by all four waves.
+    Each wave is an independent owner of 32 query rows and its corresponding
+    32x128 output tile. The owner count is selected at compile time; K/V are
+    staged once per CTA and shared by all owners.
     """
 
-    BM = 128
+    OWNER_WAVES = _select_owner_waves(
+        batch_size=batch_size,
+        num_q_heads=num_q_heads,
+        seq_q=seq_q,
+        seq_kv=seq_kv,
+        qk_head_dim=qk_head_dim,
+    )
+    BM = OWNER_WAVES * 32
     BN = 64
-    NW = 4
+    NW = OWNER_WAVES
     NT = NW * 64
+    WAVES_PER_EU = _select_waves_per_eu(
+        owner_waves=OWNER_WAVES,
+        seq_kv=seq_kv,
+        qk_head_dim=qk_head_dim,
+    )
     VPT = 8
     MFMA_MN = 32
 
@@ -82,11 +146,14 @@ def build_flex_attn_fwd_module(
         )
     if num_q_heads % num_kv_heads:
         raise ValueError("FlyDSL forward requires Hq % Hkv == 0")
-    if sparse_q_block_size != BM or sparse_kv_block_size != 128:
+    if sparse_q_block_size != 128 or sparse_kv_block_size != 128:
         raise ValueError("FlyDSL forward requires sparse block size 128")
     if seq_q % BM or seq_kv % sparse_kv_block_size:
-        raise ValueError("FlyDSL forward requires Sq/Sk divisible by 128")
-    if num_q_blocks != seq_q // BM:
+        raise ValueError(
+            "FlyDSL forward requires Sq divisible by its owner tile and "
+            "Sk divisible by 128"
+        )
+    if num_q_blocks != seq_q // sparse_q_block_size:
         raise ValueError("BlockMask Q rows must cover Sq with 128-row blocks")
     if block_mask_batch not in (1, batch_size):
         raise ValueError("BlockMask batch dimension must be 1 or B")
@@ -142,6 +209,7 @@ def build_flex_attn_fwd_module(
         1 + sum((size - 1) * stride for size, stride in zip(shape, strides))
         for shape, strides in zip(MASK_BUFFER_SHAPES, MASK_BUFFER_STRIDES)
     )
+    WINDOW_SIZE = _causal_window_size(MASK_PROGRAM, MASK_PROGRAM_OUTPUT)
     CAUSAL_DOCUMENT_MASK = is_causal_document_mask_program(
         MASK_PROGRAM,
         MASK_PROGRAM_OUTPUT,
@@ -210,23 +278,15 @@ def build_flex_attn_fwd_module(
         )
         gLSE = make_global_view(LSE, None, B * HQ * SQ, 1)
         gMax = make_global_view(MaxScores, None, B * HQ * SQ, 1)
-        mask_buffers = []
-        if const_expr(MASK_BUFFER_COUNT >= 1):
-            mask_buffers.append(
-                make_global_view(MaskBuffer0, None, MASK_BUFFER_SIZES[0], 1)
-            )
-        if const_expr(MASK_BUFFER_COUNT >= 2):
-            mask_buffers.append(
-                make_global_view(MaskBuffer1, None, MASK_BUFFER_SIZES[1], 1)
-            )
-        if const_expr(MASK_BUFFER_COUNT >= 3):
-            mask_buffers.append(
-                make_global_view(MaskBuffer2, None, MASK_BUFFER_SIZES[2], 1)
-            )
-        if const_expr(MASK_BUFFER_COUNT >= 4):
-            mask_buffers.append(
-                make_global_view(MaskBuffer3, None, MASK_BUFFER_SIZES[3], 1)
-            )
+        mask_buffers = make_mask_buffers(
+            make_global_view,
+            MASK_BUFFER_COUNT,
+            MASK_BUFFER_SIZES,
+            MaskBuffer0,
+            MaskBuffer1,
+            MaskBuffer2,
+            MaskBuffer3,
+        )
 
         i32_atom = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Int32)
         f32_atom = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Float32)
@@ -236,8 +296,17 @@ def build_flex_attn_fwd_module(
             return load_scalar(i32_atom, view, index, fx.Int32)
 
         def load_uniform_i32(view, index):
-            value = load_i32(view, index)
-            return fx.gpu.shuffle_idx(value, 0, 64)
+            return read_first_lane(load_i32(view, index), fx.Int32)
+
+        evaluate_mask = make_mask_evaluator(
+            MASK_PROGRAM,
+            MASK_PROGRAM_OUTPUT,
+            MASK_BUFFER_STRIDES,
+            mask_buffers,
+            load_i32,
+            batch,
+            head,
+        )
 
         def store_f32(view, index, value):
             store_scalar(f32_atom, view, index, value, fx.Float32)
@@ -354,11 +423,20 @@ def build_flex_attn_fwd_module(
             mask_head = kv_head
         else:
             mask_head = head
-        mask_q_block = q_chunk
+        mask_q_block = q_base // fx.Int32(sparse_q_block_size)
         mask_row = (
             (mask_batch * fx.Int32(BMH) + mask_head) * fx.Int32(NQB)
             + mask_q_block
         )
+        if const_expr(CAUSAL_DOCUMENT_MASK):
+            document_id = load_i32(
+                mask_buffers[0],
+                query_pos * fx.Int32(MASK_BUFFER_STRIDES[0][0]),
+            )
+            document_start = load_i32(
+                mask_buffers[1],
+                document_id * fx.Int32(MASK_BUFFER_STRIDES[1][0]),
+            )
 
         def stage_k(kv_base):
             for load_step in fx.range_constexpr(K_LOAD_IT):
@@ -540,6 +618,7 @@ def build_flex_attn_fwd_module(
                 key_hi = load_k_pack(k_step, True)
                 scores_lo = mfma(key_lo, query_pack, scores_lo)
                 scores_hi = mfma(key_hi, query_pack, scores_hi)
+            schedule_fwd_qk_pipeline(reduction_steps=K_STEPS)
 
             # Every wave must finish its K reads before the shared allocation is
             # reused for V.
@@ -548,19 +627,6 @@ def build_flex_attn_fwd_module(
 
             raw_lo = Vec(scores_lo)
             raw_hi = Vec(scores_hi)
-            if const_expr(CAUSAL_DOCUMENT_MASK):
-                document_start = fx.Int32(0)
-                if masked:
-                    document_id = load_i32(
-                        mask_buffers[0],
-                        query_pos
-                        * fx.Int32(MASK_BUFFER_STRIDES[0][0]),
-                    )
-                    document_start = load_i32(
-                        mask_buffers[1],
-                        document_id
-                        * fx.Int32(MASK_BUFFER_STRIDES[1][0]),
-                    )
             score_values = []
             keep_values = []
             for half in fx.range_constexpr(2):
@@ -581,25 +647,24 @@ def build_flex_attn_fwd_module(
                             keep = mask_keep if masked else keep
                         else:
                             keep = (~masked) | mask_keep
-                    elif masked and const_expr(
-                        CAUSAL_PARTIAL or bool(MASK_PROGRAM)
-                    ):
-                        if const_expr(bool(MASK_PROGRAM)):
-                            keep = evaluate_mask_program(
-                                mask_program=MASK_PROGRAM,
-                                mask_program_output=MASK_PROGRAM_OUTPUT,
-                                mask_buffer_strides=MASK_BUFFER_STRIDES,
-                                mask_buffers=mask_buffers,
-                                load_i32=load_i32,
-                                batch=batch,
-                                head=head,
-                                q_pos=query_pos,
-                                kv_pos=key_pos,
-                            )
+                    elif const_expr(WINDOW_SIZE is not None):
+                        mask_keep = (query_pos >= key_pos) & (
+                            query_pos - key_pos < fx.Int32(WINDOW_SIZE)
+                        )
+                        if isinstance(masked, bool):
+                            keep = mask_keep if masked else keep
                         else:
-                            keep = key_pos <= (
-                                query_pos + fx.Int32(SK - SQ)
-                            )
+                            keep = (~masked) | mask_keep
+                    elif const_expr(CAUSAL_PARTIAL):
+                        mask_keep = key_pos <= (
+                            query_pos + fx.Int32(SK - SQ)
+                        )
+                        if isinstance(masked, bool):
+                            keep = mask_keep if masked else keep
+                        else:
+                            keep = (~masked) | mask_keep
+                    elif masked and const_expr(bool(MASK_PROGRAM)):
+                        keep = evaluate_mask(query_pos, key_pos)
                     keep_values.append(keep)
                     score_values.append(
                         keep.select(_f32(raw[element]), _f32(_NEG_BIG))
@@ -643,6 +708,7 @@ def build_flex_attn_fwd_module(
                     .to(fx.BFloat16)
                     .ir_value()
                 )
+            schedule_fwd_softmax_pipeline(vmem_count=V_LOAD_IT)
             peer_sum = _f32(
                 fx.gpu.shuffle_xor(local_sum, 32, 64)
             )
@@ -664,6 +730,7 @@ def build_flex_attn_fwd_module(
                         probability_packs[probability_pack],
                         tile_output[d_chunk],
                     )
+            schedule_fwd_pv_pipeline(output_chunks=D_CHUNKS)
 
             # Protect V from the next tile's K staging.
             fx.gpu.barrier()
@@ -870,8 +937,8 @@ def build_flex_attn_fwd_module(
             MaskBuffer3,
             O,
             value_attrs={
-                "rocdl.waves_per_eu": 1,
-                "rocdl.flat_work_group_size": "256,256",
+                "rocdl.waves_per_eu": WAVES_PER_EU,
+                "rocdl.flat_work_group_size": f"{NT},{NT}",
                 "passthrough": [
                     [
                         "denormal-fp-math-f32",

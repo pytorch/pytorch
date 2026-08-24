@@ -12,7 +12,6 @@ from .common import infer_dense_strides, load_flex_template
 from .flex_flash_attention import is_trivial_mask_graph, is_trivial_score_graph
 from .flex_flydsl_mask import lower_flydsl_mask_graph
 
-
 flex_flydsl_forward_template = FlyDSLTemplate(
     name="flex_flydsl_forward",
     source=load_flex_template("flydsl_forward"),
@@ -329,7 +328,7 @@ def _get_flydsl_flex_attention_forward_config(
 
     candidate_blocks = 2 * (max_full_blocks + index_shape[-1])
     supports_prefill = (
-        sq % 256 == 0 and candidate_blocks <= 512 and mask_shape[2] == sq // 128
+        sq % 128 == 0 and candidate_blocks <= 512 and mask_shape[2] == sq // 128
     )
     if sk % 128 != 0:
         return None, "requires Sk divisible by 128"
@@ -340,7 +339,7 @@ def _get_flydsl_flex_attention_forward_config(
     if not supports_prefill:
         return (
             None,
-            "requires prefill Sq divisible by 256 with matching BlockMask rows "
+            "requires prefill Sq divisible by 128 with matching BlockMask rows "
             "and at most 512 stored candidate blocks per CTA",
         )
 

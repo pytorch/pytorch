@@ -57,7 +57,11 @@ def _get_launcher():
 
 
 def _inductor_tensor_arg(tensor):
-    return flyc.from_torch_tensor(tensor).mark_layout_dynamic()
+    # This generated module is already specialized to each tensor's shape and
+    # stride, and the outer Inductor wrapper guards that layout before launch.
+    # Keep only the data pointer dynamic so the compiled FlyDSL dispatcher does
+    # not repack every tensor's shape/stride metadata on each invocation.
+    return flyc.from_torch_tensor(tensor)
 
 
 def _run_compiled(launcher, compile_args, dispatch_args):
@@ -122,32 +126,6 @@ def _run_flydsl_forward(
     output,
     stream,
 ):
-    launcher = _get_launcher()
-    compile_args = (
-        _inductor_tensor_arg(query),
-        _inductor_tensor_arg(key),
-        _inductor_tensor_arg(value),
-        _inductor_tensor_arg(logsumexp),
-        _inductor_tensor_arg(max_scores),
-        _inductor_tensor_arg(kv_num_blocks),
-        _inductor_tensor_arg(kv_indices),
-        _inductor_tensor_arg(full_kv_num_blocks),
-        _inductor_tensor_arg(full_kv_indices),
-{% if MASK_BUFFER_COUNT >= 1 %}
-        _inductor_tensor_arg(mask_buffer_0),
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 2 %}
-        _inductor_tensor_arg(mask_buffer_1),
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 3 %}
-        _inductor_tensor_arg(mask_buffer_2),
-{% endif %}
-{% if MASK_BUFFER_COUNT >= 4 %}
-        _inductor_tensor_arg(mask_buffer_3),
-{% endif %}
-        _inductor_tensor_arg(output),
-        stream,
-    )
     dispatch_args = (
         query,
         key,
@@ -173,6 +151,16 @@ def _run_flydsl_forward(
         output,
         stream,
     )
+    device_index = getattr(query.device, "index", None)
+    compiled = _compiled_dispatchers.get(device_index)
+    if compiled is not None:
+        compiled(*dispatch_args)
+        return output
+
+    launcher = _get_launcher()
+    compile_args = tuple(
+        _inductor_tensor_arg(tensor) for tensor in dispatch_args[:-1]
+    ) + (stream,)
     if os.environ.get("FLYDSL_COMPILE_ONLY") == "1":
         flyc.compile(launcher, *compile_args)
     else:
