@@ -22,13 +22,17 @@ from torch.nn.functional import scaled_mm, ScalingType  # type: ignore[attr-defi
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     IS_SM90,
+    PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
     rocm_mx_swizzle,
 )
 from torch.testing._internal.common_device_type import (
     Capability,
     instantiate_device_type_tests,
+    onlyCUDA,
+    onlyOn,
     requires_capabilities,
+    skipCUDAIf,
     skipCPUIf,
     skipMPSIf,
     skipXPUIf,
@@ -57,6 +61,8 @@ from torch.utils._triton import has_triton_tma_device
 
 
 _PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
 
 
 def setUpModule():
@@ -567,9 +573,6 @@ class TestFP8TypesCuda(TestCase):
         self.assertEqual(actual, expected)
 
     @unittest.skipIf(not HAS_TRITON, "requires triton")
-    @skipCPUIf(True, "CUDA-specific test")
-    @skipMPSIf(True, "CUDA-specific test")
-    @skipXPUIf(True, "CUDA-specific test")
     @skipIfRocm
     def test_cuda_fp8_cast_fallback_for_unsupported_triton_dtype(self, device):
         def fp8_cast(x, dtype):
@@ -623,8 +626,6 @@ class TestFP8TypesCuda(TestCase):
         self.assertEqual(actual.dtype, dst_dtype)
         torch.testing.assert_close(actual.float(), expected.float(), rtol=0, atol=0)
 
-
-class TestScaledMMNativeChoice(TestCase):
     @onlyCUDA
     @skipCUDAIf(not torch.version.hip, "fnuz fp8 Triton types are only used on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -652,6 +653,8 @@ class TestScaledMMNativeChoice(TestCase):
         self.assertEqual(actual.dtype, dst_dtype)
         torch.testing.assert_close(actual.float(), expected.float(), rtol=0, atol=0)
 
+
+class TestScaledMMNativeChoice(TestCase):
     def test_v2_native_choice_schema(self):
         a, b, sa, sb, out = (object() for _ in range(5))
         kernel = mock.Mock(return_value=out)
