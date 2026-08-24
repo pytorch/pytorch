@@ -105,11 +105,46 @@ def install_libuv(workdir: Path, python_prefix: Path) -> Path:
     return libuv_root
 
 
+def constrain_cython_for_cp315() -> None:
+    """Hold Cython below 3.3.0 for the cp315 Windows builds.
+
+    Cython 3.3.0 (released 2026-08-22) crashes with STATUS_ACCESS_VIOLATION
+    (0xC0000005) when merely asked for its version under the GIL-enabled
+    CPython 3.15 build on Windows, so any package pip has to build from an
+    sdist dies in its PEP 517 hook. meson-backed projects report this as the
+    misleading "Unknown compiler(s): [['cython'], ['cython3']]"; setuptools
+    ones just exit 3221225477 with no output.
+
+    The Windows nightly went red on 2026-08-22, the first run after that
+    release, having passed on 2026-08-21 with Cython 3.2.9. The freethreaded
+    cp315t builds are unaffected, so this is specific to the GIL-enabled 3.15
+    build; the condition still covers both, because 3.15t gains nothing from
+    3.3.0 and one version check is easier to delete later.
+
+    PIP_CONSTRAINT is used rather than installing Cython here because pip
+    propagates it into the isolated build environments where the crashing
+    Cython actually gets installed. Remove once Cython ships a fix.
+    """
+    if sys.version_info[:2] != (3, 15):
+        return
+    if os.environ.get("PIP_CONSTRAINT"):
+        print(
+            "PIP_CONSTRAINT already set, not overriding; "
+            "cp315 builds may pick up the crashing Cython 3.3.0"
+        )
+        return
+    constraints = WIN_CI_DIR / "cp315-constraints.txt"
+    constraints.write_text("cython<3.3.0\n")
+    os.environ["PIP_CONSTRAINT"] = str(constraints)
+    print(f"Constrained Cython for cp315 source builds: {constraints}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-out", type=Path)
     args = parser.parse_args()
 
+    constrain_cython_for_cp315()
     pip_install("-q", f"numpy=={numpy_pin()}")
     pip_install("-q", *PIP_PACKAGES)
 
