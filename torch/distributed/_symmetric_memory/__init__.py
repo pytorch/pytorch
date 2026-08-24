@@ -828,6 +828,13 @@ def _fused_all_gather_matmul_impl(
     ]
     output_shards = [output.chunk(group.size()) for output in outputs]
 
+    # _scaled_mm_v2 takes the scales as lists; _scaled_mm and aten.mm take a bare
+    # tensor. Derived from the op rather than passed in so the two cannot disagree.
+    scale_as_list = mm_out_op is torch.ops.aten._scaled_mm_v2.out
+
+    def scale_a_arg(t: torch.Tensor) -> Any:
+        return [t] if scale_as_list else t
+
     scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
         shard=A_shard,
         scale=A_scale,
@@ -852,7 +859,7 @@ def _fused_all_gather_matmul_impl(
                 mm_out_op(
                     shard[0],
                     B,
-                    [shard[1]],
+                    scale_a=scale_a_arg(shard[1]),
                     **kwargs,
                     out=output_shards[idx][rank],
                 )
@@ -878,7 +885,7 @@ def _fused_all_gather_matmul_impl(
                 mm_out_op(
                     shard[0],
                     B,
-                    scale_a=shard[1],
+                    scale_a=scale_a_arg(shard[1]),
                     **kwargs,
                     out=output_shards[idx][rank],
                 )
@@ -902,7 +909,7 @@ def _fused_all_gather_matmul_impl(
                 mm_out_op(
                     shard,
                     B,
-                    scale_a=A_scale_shards[rank],
+                    scale_a=scale_a_arg(A_scale_shards[rank]),
                     **kwargs,
                     out=output_shards[idx][rank],
                 )
@@ -919,7 +926,7 @@ def _fused_all_gather_matmul_impl(
             if A_scale is None:
                 raise AssertionError
             for kwargs in kwargs_list:
-                kwargs["scale_a"] = A_scale
+                kwargs["scale_a"] = scale_a_arg(A_scale)
         else:
             if scale_mode != _ScaleMode.UNSCALED:
                 raise AssertionError
@@ -1482,8 +1489,7 @@ def _fused_all_gather_scaled_matmul(
     else:
         recipe_a, sw_a = _resolve_recipe(A_scale, scale_recipe_a, swizzle_a)
         recipes_b = [
-            _resolve_recipe(B_scale, scale_recipe_b, swizzle_b)
-            for B_scale in B_scales
+            _resolve_recipe(B_scale, scale_recipe_b, swizzle_b) for B_scale in B_scales
         ]
         mm_out_op = torch.ops.aten._scaled_mm_v2.out
         kwargs_list = [
@@ -1909,6 +1915,13 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # Partition A along the first dim to prepare for sharding across TP process group.
     A_shards = A_2D_with_scatter_dim_0.chunk(group.size())
 
+    # _scaled_mm_v2 takes the scales as lists; _scaled_mm and aten.mm take a bare
+    # tensor. Derived from the op rather than passed in so the two cannot disagree.
+    scale_as_list = mm_out_op is torch.ops.aten._scaled_mm_v2.out
+
+    def scale_a_arg(t: torch.Tensor) -> Any:
+        return [t] if scale_as_list else t
+
     # Now that 'A' is sharded along the first dim, we need to update its scale(s) accordingly.
     # How we do this depends on if we are using tensorwise scaling, rowwise scaling,
     # MXFP8 block-wise scaling, or no scaling.
@@ -1960,18 +1973,14 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     else:
         raise ValueError("A_scale cannot be none for scaled_mm")
 
-    # Computing block-wise matmul along the first dim of A
-    if mx_scaling:
-        # _scaled_mm_v2 takes the scales positionally as lists; see the caller.
-        def chunk_producer(rank: int, out: torch.Tensor) -> None:
-            mm_out_op(A_shards[rank], B, [A_scale_shards[rank]], **kwargs, out=out)
-
-    else:
-
-        def chunk_producer(rank: int, out: torch.Tensor) -> None:
-            mm_out_op(
-                A_shards[rank], B, scale_a=A_scale_shards[rank], **kwargs, out=out
-            )
+    def chunk_producer(rank: int, out: torch.Tensor) -> None:
+        mm_out_op(
+            A_shards[rank],
+            B,
+            scale_a=scale_a_arg(A_scale_shards[rank]),
+            **kwargs,
+            out=out,
+        )
 
     # Stacked partials will be the 2D outputs of the pipelined scaled mm, and will
     # have the shape (A_with_scatter_dim_0_tensor.shape[0], B.shape[1]) to align with the formula:
