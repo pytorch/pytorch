@@ -107,12 +107,12 @@ struct XPUEvent {
   void record(const XPUStream& stream) {
     namespace syclex = sycl::ext::oneapi::experimental;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    bool submitted_on_create = false;
+    bool just_created = false;
     if (!isCreated()) {
       createEvent(stream.device_index());
+      just_created = true;
       if (!reusable_) {
         assignEvent(stream.queue());
-        submitted_on_create = true;
       }
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_creation(
@@ -131,8 +131,10 @@ struct XPUEvent {
 #if SYCL_COMPILER_VERSION >= 20260200
       syclex::enqueue_signal_event(stream.queue(), *event_);
 #endif
-    } else if (!submitted_on_create) {
-      reassignEvent(stream.queue());
+    } else {
+      if (!just_created) {
+        reassignEvent(stream.queue());
+      }
     }
 
     if (C10_UNLIKELY(interp)) {
