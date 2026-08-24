@@ -17,8 +17,9 @@ from torch.testing._internal.common_utils import (
 )
 
 
-class TestCheckpointReader(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+class _CheckpointReaderTestBase(TestCase):
+    def _get_state_dict(self) -> dict[str, Any]:
+        raise NotImplementedError
 
     def setUp(self):
         super().setUp()
@@ -37,7 +38,26 @@ class TestCheckpointReader(TestCase):
         )
 
         # Create a test state dictionary
-        self.state_dict = {
+        self.state_dict = self._get_state_dict()
+
+        # Create a test checkpoint file
+        self.checkpoint_path = os.path.join(self.temp_dir, "checkpoint")
+        os.makedirs(self.checkpoint_path, exist_ok=True)
+        checkpoint_file = os.path.join(
+            self.checkpoint_path, f"checkpoint_{self.rank_info.global_rank}.pt"
+        )
+        torch.save(self.state_dict, checkpoint_file)
+
+    def tearDown(self):
+        # Clean up the temporary directory
+        shutil.rmtree(self.temp_dir)
+
+
+class TestCheckpointReader(_CheckpointReaderTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def _get_state_dict(self) -> dict[str, Any]:
+        return {
             "model": {
                 "weight": torch.randn(10, 5),
                 "bias": torch.randn(5),
@@ -51,14 +71,6 @@ class TestCheckpointReader(TestCase):
             "epoch": 5,
             "step": 1000,
         }
-
-        # Create a test checkpoint file
-        self.checkpoint_path = os.path.join(self.temp_dir, "checkpoint")
-        os.makedirs(self.checkpoint_path, exist_ok=True)
-        checkpoint_file = os.path.join(
-            self.checkpoint_path, f"checkpoint_{self.rank_info.global_rank}.pt"
-        )
-        torch.save(self.state_dict, checkpoint_file)
 
     def deep_compare(self, obj1: Any, obj2: Any) -> bool:
         if isinstance(obj1, dict) and isinstance(obj2, dict):
@@ -75,10 +87,6 @@ class TestCheckpointReader(TestCase):
             return torch.equal(obj1, obj2)
         else:
             return obj1 == obj2
-
-    def tearDown(self):
-        # Clean up the temporary directory
-        shutil.rmtree(self.temp_dir)
 
     def test_read_checkpoint(self):
         """Test that read correctly reads a checkpoint file."""
@@ -207,14 +215,11 @@ class TestCheckpointReader(TestCase):
             )
 
 
-class TestCheckpointReaderDevice(TestCase):
+class TestCheckpointReaderDevice(_CheckpointReaderTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def setUp(self):
-        super().setUp()
-        self.temp_dir = tempfile.mkdtemp()
-        self.rank_info = RankInfo(global_rank=0, global_world_size=1)
-        self.state_dict = {
+    def _get_state_dict(self) -> dict[str, Any]:
+        return {
             "model": {
                 "weight": torch.randn(10, 5),
                 "bias": torch.randn(5),
@@ -222,20 +227,10 @@ class TestCheckpointReaderDevice(TestCase):
             "epoch": 5,
             "step": 1000,
         }
-        self.checkpoint_path = os.path.join(self.temp_dir, "checkpoint")
-        os.makedirs(self.checkpoint_path, exist_ok=True)
-        checkpoint_file = os.path.join(
-            self.checkpoint_path, f"checkpoint_{self.rank_info.global_rank}.pt"
-        )
-        torch.save(self.state_dict, checkpoint_file)
-
-    def tearDown(self):
-        shutil.rmtree(self.temp_dir)
 
     def test_read_with_map_location(self, device):
-        reader = CheckpointReader(rank_info=self.rank_info)
         map_location = torch.device(device).type
-        read_state_dict, _ = reader.read(
+        read_state_dict, _ = self.reader.read(
             self.checkpoint_path, map_location=map_location
         )
         self.assertIn("model", read_state_dict)
