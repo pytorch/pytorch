@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import warnings
 from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
 
@@ -56,9 +55,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
 _ModuleToHandleDict = dict[nn.Module, RemovableHandle]  # for state dict
-# Every parameter group with a mixed grad_dtype would otherwise warn, which is
-# once per layer on a real model.
-_warned_non_uniform_grad_dtype = False
 _GradInputs = TypeVarTuple("_GradInputs")
 
 
@@ -306,30 +302,6 @@ class FSDPParamGroup:
         self._reduce_dtype = (
             next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
         )
-        # Gradients are produced at grad_dtype, and one reduce-scatter copy-in
-        # cannot take mixed dtypes, so a group has to be uniform. Fall back to
-        # the pre-existing behavior of ignoring grad_dtype rather than failing a
-        # configuration that runs today.
-        grad_dtypes = {p._explicit_grad_dtype or p.orig_dtype for p in trainable_params}
-        if len(trainable_params) > 0 and len(grad_dtypes) != 1:
-            global _warned_non_uniform_grad_dtype
-            # Only the warning is rank-gated. The fallback below must run on
-            # every rank, or they would disagree on gradient dtypes and the
-            # reduce-scatter would mismatch. `get_rank` is a local lookup, so
-            # this adds no collective and cannot deadlock.
-            if not _warned_non_uniform_grad_dtype and (
-                not dist.is_initialized() or dist.get_rank() == 0
-            ):
-                _warned_non_uniform_grad_dtype = True
-                warnings.warn(
-                    "FSDP expects uniform grad_dtype within a parameter group "
-                    f"but got {grad_dtypes}; ignoring grad_dtype for the "
-                    "affected groups. Set the same grad_dtype on every "
-                    "parameter in a group to have it honored. This warning is "
-                    "shown once."
-                )
-            for fsdp_param in self.fsdp_params:
-                fsdp_param.clear_explicit_grad_dtype()
 
     def lazy_init(self):
         # Lazy init should be idempotent
