@@ -2,6 +2,7 @@
 
 import functools
 import logging
+import unittest
 from types import SimpleNamespace
 from unittest import mock
 
@@ -19,16 +20,13 @@ from torch._inductor.virtualized import NullHandler, V
 from torch.autograd import DeviceType
 from torch.fx.experimental._constant_symnode import ConstantIntNode
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -215,7 +213,7 @@ class TestBenchCuda(TestCase):
             functools.partial(torch.nn.functional.linear, x, w)
         )
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_benchmarker(self):
         res = benchmarker.benchmark_gpu(self._bench_fn)
         log.warning("do_bench result: %s", res)
