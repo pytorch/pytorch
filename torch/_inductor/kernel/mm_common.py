@@ -226,12 +226,13 @@ def _fits_int32_buffer_span(
     # Descriptor fields are signed int32, but AMD buffer voffset is an unsigned
     # 32-bit byte offset.
     int32_max = (1 << 31) - 1
+    uint32_max = (1 << 32) - 1
     return (
         0 < rows <= int32_max
         and 0 < cols <= int32_max
         and row_stride is not None
         and 0 <= row_stride <= int32_max
-        and ((rows - 1) * row_stride + cols) * itemsize < 1 << 32
+        and ((rows - 1) * row_stride + cols) * itemsize <= uint32_max
     )
 
 
