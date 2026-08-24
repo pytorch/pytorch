@@ -608,6 +608,9 @@ class TestFlyDSLTemplate(TestCase):
     def test_flydsl_grouped_gemm_config_schema(self):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
 
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
         flydsl_heuristics.get_default_grouped_gemm_configs.cache_clear()
         self.addCleanup(flydsl_heuristics.get_default_grouped_gemm_configs.cache_clear)
         default_config = flydsl_heuristics.DEFAULT_GROUPED_GEMM_CONFIG
