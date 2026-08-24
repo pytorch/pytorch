@@ -37,11 +37,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     requires_capabilities,
 )
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    instantiate_parametrized_tests,
-    parametrize,
-)
+from torch.testing._internal.common_utils import HardwareClassification, parametrize
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
@@ -85,7 +81,6 @@ class MockSchedulerTest(TestCase):
 
 
 @inductor_config.patch(loop_ordering_after_fusion=True)
-@instantiate_parametrized_tests
 class ImplDetailTest(MockSchedulerTest):
     hw_classification = HardwareClassification.GENERIC
 
