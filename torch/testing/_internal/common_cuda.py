@@ -530,17 +530,7 @@ def _get_torch_rocm_version():
     if rocm_version is None:
         return (0, 0)
     rocm_version = str(rocm_version).split("-", maxsplit=1)[0]    # ignore git sha
-    parts = []
-    for x in rocm_version.split("."):
-        digits = []
-        for c in x:
-            if not c.isdigit():
-                break
-            digits.append(c)
-        if not digits:
-            break
-        parts.append(int("".join(digits)))
-    return tuple(parts) if parts else (0, 0)
+    return tuple(int(x) for x in rocm_version.split("."))
 
 def _get_torch_hipblaslt_version():
     if not TEST_WITH_ROCM:
