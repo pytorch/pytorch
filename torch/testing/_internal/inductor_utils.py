@@ -7,11 +7,11 @@ import os
 import re
 import sys
 import unittest
-from collections.abc import Callable
 from subprocess import CalledProcessError
 
 import torch
 import torch._inductor.config as config
+
 from torch._inductor import compile_fx  # noqa: F401
 from torch._inductor.utils import (
     get_gpu_shared_memory,
@@ -21,15 +21,21 @@ from torch._inductor.utils import (
     is_gpu,
     OrderedSet,
 )
-from torch.testing._internal.common_device_type import (
-    get_desired_device_type_test_bases,
-)
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, LazyVal, TestCase
-from torch.utils._config_module import ConfigModule
 from torch.utils._helion import has_helion
 from torch.utils._pallas import has_pallas_package, has_tpu_pallas
 from torch.utils._triton import has_triton
+from torch.utils._config_module import ConfigModule
+from torch.testing._internal.common_device_type import (
+    get_desired_device_type_test_bases,
+)
+from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_WINDOWS,
+    LazyVal,
+    TestCase,
+)
 
+from collections.abc import Callable
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -89,10 +95,8 @@ RUN_GPU = HAS_GPU and any(
 )
 
 RUN_CPU = LazyVal(
-    lambda: (
-        HAS_CPU
-        and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
-    )
+    lambda: HAS_CPU
+    and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
 )
 
 HAS_TPU = LazyVal(has_tpu_pallas)
@@ -101,13 +105,11 @@ HAS_TPU = LazyVal(has_tpu_pallas)
 # directly, matching the same semantics as RUN_CPU/RUN_GPU: when the env var is
 # unset, run if the hardware is available; when set, only run if "tpu" is listed.
 RUN_TPU = LazyVal(
-    lambda: (
-        HAS_TPU
-        and (
-            "tpu" in os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "").split(",")
-            if os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "")
-            else True
-        )
+    lambda: HAS_TPU
+    and (
+        "tpu" in os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "").split(",")
+        if os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "")
+        else True
     )
 )
 
@@ -476,10 +478,7 @@ def patch_inductor_backend(
             original_custom_backend_config,
         )
 
-
-def patch_custom_fallback_pass(
-    predicate: Callable[[torch.fx.Node], bool],
-) -> contextlib.ContextDecorator:
+def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> contextlib.ContextDecorator:
     """
     Create a custom pass which falls back based on the provided predicate. For example,
     we could provide a predicate which returns True for all aten.add.default nodes.
@@ -495,5 +494,6 @@ def patch_custom_fallback_pass(
 
         def uuid(self):
             return None
+
 
     return config.patch(post_grad_custom_pre_pass=Pass())
