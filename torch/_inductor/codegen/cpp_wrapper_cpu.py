@@ -3144,7 +3144,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
                     )
 
-        for arg, arg_type in zip(raw_args, arg_types):
+        # serialize_inputs (which produced V.extern_kernel_nodes[-1]) omits unprovided
+        # kwarg-only default args, and the host proxy executor prefills those statically
+        # rather than consuming them as runtime (dynamic) args. raw_args still carries their
+        # default values (appended via ordered_kwargs), so counting them into new_int_args /
+        # new_tensor_args here would desync num_ints/num_tensors from what the host consumes
+        # ("Mismatch between ints consumed and num_ints" at runtime). Skip exactly those --
+        # kwarg-only schema args whose name was not serialized.
+        serialized_input_names = OrderedSet(
+            [inp.name for inp in V.extern_kernel_nodes[-1].node.inputs]
+        )
+        for arg, arg_type, schema_arg in zip(raw_args, arg_types, schema.arguments):
+            if schema_arg.kwarg_only and schema_arg.name not in serialized_input_names:
+                continue
             if arg is not None:
                 if isinstance(arg_type, torch.OptionalType):
                     fill_args(arg, arg_type.getElementType())
