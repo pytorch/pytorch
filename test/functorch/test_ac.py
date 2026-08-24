@@ -1,19 +1,19 @@
 # Owner(s): ["oncall: pt2"]
 import random
+import unittest
 from math import prod
 
 import torch
 import torch._functorch.config as config
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
     onlyAccelerator,
-    requires_capabilities,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
     skipIfRocm,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.utils._triton import has_triton
@@ -356,7 +356,7 @@ class MemoryBudgetBackendSpecificTest(TestCase):
         try_seq_length(4, 7, "mm")
         try_seq_length(4, 9, "attn")
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not has_triton(), "test needs triton")
     def test_custom_triton_kernel(self, device):
         @triton.jit
         def relu_kernel_(inp_ptr, out_ptr, sz, BLOCK_SIZE: tl.constexpr):
@@ -444,4 +444,5 @@ instantiate_device_type_tests(
 
 
 if __name__ == "__main__":
-    run_tests()
+    if not TEST_WITH_ROCM:
+        run_tests()
