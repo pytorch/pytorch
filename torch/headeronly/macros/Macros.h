@@ -610,7 +610,7 @@ template <unsigned N>
 __device__ __attribute__((flatten)) void rocm_assert_one_shot(
     const char (&msg)[N]) {
   auto d = __ockl_fprintf_stderr_begin();
-  __ockl_fprintf_append_string_n(d, msg, N - 1, 1);
+  __ockl_fprintf_append_string_n(d, msg, N, 1);
   __builtin_trap();
 }
 
