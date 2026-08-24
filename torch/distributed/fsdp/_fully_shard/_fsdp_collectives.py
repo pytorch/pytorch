@@ -693,7 +693,14 @@ def foreach_reduce(
         # AR to finish. The reduce-dtype buffer is held across layers by
         # FSDPParamGroup._all_reduce_state (captured above) to prevent
         # this. See PR #140044, regression test PR #180900.
-        reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
+        # grad_dtype is uniform within the group (enforced at lazy_init), so a
+        # single cast over the shared buffer. Skipping orig_dtype avoids a lossy
+        # round-trip such as fp32 reduce -> bf16 orig -> fp32.
+        reduce_output = _to_dtype_if_needed(
+            reduce_output,
+            (fsdp_params[0]._explicit_grad_dtype if fsdp_params else None)
+            or orig_dtype,
+        )
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
         for padded_unsharded_size, fsdp_param in zip(
