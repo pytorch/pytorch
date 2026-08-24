@@ -13,6 +13,7 @@ from .flex_bwd_utils import (
     schedule_pack1_pipeline,
     schedule_score_pipeline,
     schedule_update_tail,
+    scheduled_workgroup_barrier,
 )
 
 _LOG2E = 1.4426950408889634
@@ -299,8 +300,7 @@ def make_dq_mfma32_body(context, f32, exp2):
                     )
                 recycle_short = overlap_next and reduction_sub == DQ32_BN // 32 - 1
                 if const_expr(recycle_short):
-                    fx.rocdl.sched_barrier(0)
-                    fx.rocdl.s_barrier()
+                    scheduled_workgroup_barrier()
                     stage_short(next_kchunk)
                 kvbase = kchunk * fx.Int32(DQ32_BN) + fx.Int32(reduction_sub * 32)
                 key_lane_base = fx.Int32(4) * lane_half
@@ -329,7 +329,9 @@ def make_dq_mfma32_body(context, f32, exp2):
                         make_fragment(load_b_pack(ppersistent, stage, reduction_sub, 0, d_chunk), 8, fx.BFloat16)
                     )
                 schedule_pack0_pipeline(
-                    vmem_count=DQ32_K_LOAD_IT if recycle_short else 0, exp_count=8, dsrd_count=4 * (DQK // 32)
+                    vmem_count=DQ32_K_LOAD_IT if recycle_short else 0,
+                    exp_count=8,
+                    dsrd_count=4 * (DQK // 32),
                 )
                 second_ds_values = []
                 for element in fx.range_constexpr(8):
@@ -355,7 +357,11 @@ def make_dq_mfma32_body(context, f32, exp2):
                     )
                 for d_chunk in fx.range_constexpr(DQK // 32):
                     fx.gemm(atom, dq_acc[d_chunk], first_update_fragments[d_chunk], first_ds_fragment, dq_acc[d_chunk])
-                schedule_pack1_pipeline(mfma_count=DQK // 32, exp_count=8, dsrd_count=2 * (DQK // 32))
+                schedule_pack1_pipeline(
+                    mfma_count=DQK // 32,
+                    exp_count=8,
+                    dsrd_count=2 * (DQK // 32),
+                )
                 for d_chunk in fx.range_constexpr(DQK // 32):
                     fx.gemm(
                         atom, dq_acc[d_chunk], second_update_fragments[d_chunk], second_ds_fragment, dq_acc[d_chunk]

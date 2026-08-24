@@ -6,9 +6,28 @@ from flydsl.expr import const_expr
 from .flex_attn_mask import evaluate_mask_program
 from .flex_attn_utils import load_scalar
 
+# FlyDSL 0.3 lacks stable grouped scheduling, fence-free barriers, and native exp2.
+_SCHED_MFMA, _SCHED_VMEM_READ, _SCHED_LDS_READ, _SCHED_EXP = (0x008, 0x020, 0x100, 0x400)
+
+
+def _schedule_group(mask: int, count: int, group: int):
+    fx.rocdl.sched_group_barrier(mask, count, group)
+
+
+def schedule_fence():
+    fx.rocdl.sched_barrier(0)
+
+
+def scheduled_workgroup_barrier():
+    schedule_fence()
+    fx.rocdl.s_barrier()
+
+
+def fast_exp2(value):
+    return fx.Float32(fx.rocdl.exp2(fx.Float32.ir_type, value.ir_value()))
+
 
 def schedule_score_pipeline(*, mfma_count: int, dsrd_count: int, vmem_count: int):
-    """Overlap next-tile DMA with the current tile's score MFMAs."""
     mfma_group = 2
     groups = mfma_count // mfma_group
     dsrd_preload = min(4 + dsrd_count % 2, dsrd_count)
@@ -22,41 +41,38 @@ def schedule_score_pipeline(*, mfma_count: int, dsrd_count: int, vmem_count: int
         fx.rocdl.sched_mfma(mfma_group)
         if const_expr(group < dsrd_groups):
             fx.rocdl.sched_dsrd(2)
-    fx.rocdl.sched_barrier(0)
+    schedule_fence()
 
 
 def schedule_pack0_pipeline(*, vmem_count: int, exp_count: int, dsrd_count: int):
-    """Prime the update pipeline while producing the first BF16 dS/P pack."""
     slots = 4
     vmem_per_slot = vmem_count // slots
     exp_per_slot = exp_count // slots
     dsrd_per_slot = dsrd_count // slots
     for _ in fx.range_constexpr(slots):
         if const_expr(vmem_per_slot):
-            fx.rocdl.sched_group_barrier(fx.rocdl.mask_vmem_rd, vmem_per_slot, 1)
-        fx.rocdl.sched_group_barrier(fx.rocdl.mask_dsrd, dsrd_per_slot, 1)
-        fx.rocdl.sched_group_barrier(1024, exp_per_slot, 1)
+            _schedule_group(_SCHED_VMEM_READ, vmem_per_slot, 1)
+        _schedule_group(_SCHED_LDS_READ, dsrd_per_slot, 1)
+        _schedule_group(_SCHED_EXP, exp_per_slot, 1)
 
 
 def schedule_pack1_pipeline(*, mfma_count: int, exp_count: int, dsrd_count: int):
-    """Consume pack 0 while building pack 1 and priming two operands."""
     exp_per_mfma = exp_count // mfma_count
     dsrd_per_operand = dsrd_count // 2
     for mfma_index in fx.range_constexpr(mfma_count):
-        fx.rocdl.sched_group_barrier(fx.rocdl.mask_mfma, 1, 2)
+        _schedule_group(_SCHED_MFMA, 1, 2)
         if const_expr(mfma_index < 2):
-            fx.rocdl.sched_group_barrier(fx.rocdl.mask_dsrd, dsrd_per_operand, 2)
-        fx.rocdl.sched_group_barrier(1024, exp_per_mfma, 2)
+            _schedule_group(_SCHED_LDS_READ, dsrd_per_operand, 2)
+        _schedule_group(_SCHED_EXP, exp_per_mfma, 2)
 
 
 def schedule_update_tail(*, mfma_count: int, dsrd_count: int):
-    """Consume pack 1 with a two-operand LDS-read look-ahead."""
     dsrd_per_operand = dsrd_count // 2
     for mfma_index in fx.range_constexpr(mfma_count):
         if const_expr(mfma_index < 2):
-            fx.rocdl.sched_group_barrier(fx.rocdl.mask_dsrd, dsrd_per_operand, 3)
-        fx.rocdl.sched_group_barrier(fx.rocdl.mask_mfma, 1, 3)
-    fx.rocdl.sched_barrier(0)
+            _schedule_group(_SCHED_LDS_READ, dsrd_per_operand, 3)
+        _schedule_group(_SCHED_MFMA, 1, 3)
+    schedule_fence()
 
 
 def make_mask_buffers(gview, count, sizes, buffer0, buffer1, buffer2, buffer3):

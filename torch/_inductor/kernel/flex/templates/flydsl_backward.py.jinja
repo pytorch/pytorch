@@ -7,55 +7,15 @@ import torch
 from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     build_flex_attn_bwd_module,
 )
-from torch._inductor.runtime.flydsl_cache import (
-    ensure_flydsl_cache_dir,
-    run_cached_flydsl,
-)
 
 
 {{gen_defines()}}
 
 
-class _CacheParam:
-    def __init__(self, signature):
-        self.signature = signature
-
-    def __cache_signature__(self):
-        return self.signature
-
-
-_cache_param = _CacheParam(
-    (
-        "flex_attn_bwd_gfx950",
-        BATCH_SIZE,
-        NUM_HEADS,
-        SEQ_LEN,
-        QK_HEAD_DIM,
-        V_HEAD_DIM,
-        SPARSE_Q_BLOCK_SIZE,
-        SPARSE_KV_BLOCK_SIZE,
-        float(SM_SCALE),
-        MAX_PARTIAL_BLOCKS,
-        MAX_FULL_BLOCKS,
-        BLOCK_MASK_BATCH,
-        BLOCK_MASK_HEADS,
-        CAUSAL_PARTIAL_BLOCKS,
-        MASK_PROGRAM,
-        MASK_PROGRAM_OUTPUT,
-        MASK_BUFFER_SHAPES,
-        MASK_BUFFER_STRIDES,
-        Q_STRIDE,
-        K_STRIDE,
-        V_STRIDE,
-        OUT_STRIDE,
-        DO_STRIDE,
-        DQ_STRIDE,
-        DK_STRIDE,
-        DV_STRIDE,
-    )
-)
 _launcher = None
 _launcher_lock = threading.Lock()
+_compiled_dispatchers = {}
+_compiled_dispatchers_lock = threading.Lock()
 
 
 def _get_launcher():
@@ -100,6 +60,27 @@ def _get_launcher():
 
 def _inductor_tensor_arg(tensor):
     return flyc.from_torch_tensor(tensor).mark_layout_dynamic()
+
+
+def _run_compiled(launcher, compile_args, dispatch_args):
+    device = getattr(dispatch_args[0], "device", None)
+    device_index = getattr(device, "index", None)
+    compiled = _compiled_dispatchers.get(device_index)
+    if compiled is not None:
+        compiled(*dispatch_args)
+        return
+
+    dispatch_after_wait = False
+    with _compiled_dispatchers_lock:
+        compiled = _compiled_dispatchers.get(device_index)
+        if compiled is None:
+            compiled = flyc.compile(launcher, *compile_args)
+            _compiled_dispatchers[device_index] = compiled
+        else:
+            dispatch_after_wait = True
+
+    if dispatch_after_wait:
+        compiled(*dispatch_args)
 
 
 @contextlib.contextmanager
@@ -156,11 +137,6 @@ def _run_flydsl_backward(
     stream,
 ):
     launcher = _get_launcher()
-    compact_dispatch = getattr(
-        launcher,
-        "_flydsl_compact_dispatch",
-        False,
-    )
 {% if MASK_BUFFER_COUNT < 1 %}
     MASK_BUFFER_0 = KV_NUM_BLKS
 {% endif %}
@@ -173,105 +149,68 @@ def _run_flydsl_backward(
 {% if MASK_BUFFER_COUNT < 4 %}
     MASK_BUFFER_3 = KV_NUM_BLKS
 {% endif %}
-    def make_compile_args():
-        if compact_dispatch:
-            return (
-                _inductor_tensor_arg(Q),
-                _inductor_tensor_arg(K),
-                _inductor_tensor_arg(V),
-                _inductor_tensor_arg(OUT),
-                _inductor_tensor_arg(LSE),
-                _inductor_tensor_arg(D_OUT),
-                _inductor_tensor_arg(DQ),
-                _inductor_tensor_arg(DK),
-                _inductor_tensor_arg(DV),
-                _inductor_tensor_arg(DELTA),
-                stream,
-            )
-        return (
-            _inductor_tensor_arg(Q),
-            _inductor_tensor_arg(K),
-            _inductor_tensor_arg(V),
-            _inductor_tensor_arg(OUT),
-            _inductor_tensor_arg(LSE),
-            _inductor_tensor_arg(D_OUT),
-            _inductor_tensor_arg(DQ),
-            _inductor_tensor_arg(DK),
-            _inductor_tensor_arg(DV),
-            _inductor_tensor_arg(KV_NUM_BLKS),
-            _inductor_tensor_arg(KV_IDX),
-            _inductor_tensor_arg(FULL_KV_NUM_BLKS),
-            _inductor_tensor_arg(FULL_KV_IDX),
-            _inductor_tensor_arg(DELTA),
-            _inductor_tensor_arg(CP_Q),
-            _inductor_tensor_arg(IP_Q),
-            _inductor_tensor_arg(CF_Q),
-            _inductor_tensor_arg(IF_Q),
-            _inductor_tensor_arg(CP_K),
-            _inductor_tensor_arg(IP_K),
-            _inductor_tensor_arg(CF_K),
-            _inductor_tensor_arg(IF_K),
-            _inductor_tensor_arg(MASK_BUFFER_0),
-            _inductor_tensor_arg(MASK_BUFFER_1),
-            _inductor_tensor_arg(MASK_BUFFER_2),
-            _inductor_tensor_arg(MASK_BUFFER_3),
-            stream,
-        )
-    if compact_dispatch:
-        dispatch_args = (
-            Q,
-            K,
-            V,
-            OUT,
-            LSE,
-            D_OUT,
-            DQ,
-            DK,
-            DV,
-            DELTA,
-            stream,
-        )
-    else:
-        dispatch_args = (
-            Q,
-            K,
-            V,
-            OUT,
-            LSE,
-            D_OUT,
-            DQ,
-            DK,
-            DV,
-            KV_NUM_BLKS,
-            KV_IDX,
-            FULL_KV_NUM_BLKS,
-            FULL_KV_IDX,
-            DELTA,
-            CP_Q,
-            IP_Q,
-            CF_Q,
-            IF_Q,
-            CP_K,
-            IP_K,
-            CF_K,
-            IF_K,
-            MASK_BUFFER_0,
-            MASK_BUFFER_1,
-            MASK_BUFFER_2,
-            MASK_BUFFER_3,
-            stream,
-        )
-    ensure_flydsl_cache_dir()
+    compile_args = (
+        _inductor_tensor_arg(Q),
+        _inductor_tensor_arg(K),
+        _inductor_tensor_arg(V),
+        _inductor_tensor_arg(OUT),
+        _inductor_tensor_arg(LSE),
+        _inductor_tensor_arg(D_OUT),
+        _inductor_tensor_arg(DQ),
+        _inductor_tensor_arg(DK),
+        _inductor_tensor_arg(DV),
+        _inductor_tensor_arg(KV_NUM_BLKS),
+        _inductor_tensor_arg(KV_IDX),
+        _inductor_tensor_arg(FULL_KV_NUM_BLKS),
+        _inductor_tensor_arg(FULL_KV_IDX),
+        _inductor_tensor_arg(DELTA),
+        _inductor_tensor_arg(CP_Q),
+        _inductor_tensor_arg(IP_Q),
+        _inductor_tensor_arg(CF_Q),
+        _inductor_tensor_arg(IF_Q),
+        _inductor_tensor_arg(CP_K),
+        _inductor_tensor_arg(IP_K),
+        _inductor_tensor_arg(CF_K),
+        _inductor_tensor_arg(IF_K),
+        _inductor_tensor_arg(MASK_BUFFER_0),
+        _inductor_tensor_arg(MASK_BUFFER_1),
+        _inductor_tensor_arg(MASK_BUFFER_2),
+        _inductor_tensor_arg(MASK_BUFFER_3),
+        stream,
+    )
+    dispatch_args = (
+        Q,
+        K,
+        V,
+        OUT,
+        LSE,
+        D_OUT,
+        DQ,
+        DK,
+        DV,
+        KV_NUM_BLKS,
+        KV_IDX,
+        FULL_KV_NUM_BLKS,
+        FULL_KV_IDX,
+        DELTA,
+        CP_Q,
+        IP_Q,
+        CF_Q,
+        IF_Q,
+        CP_K,
+        IP_K,
+        CF_K,
+        IF_K,
+        MASK_BUFFER_0,
+        MASK_BUFFER_1,
+        MASK_BUFFER_2,
+        MASK_BUFFER_3,
+        stream,
+    )
     if os.environ.get("FLYDSL_COMPILE_ONLY") == "1":
-        flyc.compile(launcher, *make_compile_args())
+        flyc.compile(launcher, *compile_args)
     else:
-        run_cached_flydsl(
-            launcher,
-            constexpr_param=_cache_param,
-            compiler=flyc.compile,
-            dispatch_args=dispatch_args,
-            compile_args_factory=make_compile_args,
-        )
+        _run_compiled(launcher, compile_args, dispatch_args)
     return DQ
 
 

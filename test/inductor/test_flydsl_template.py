@@ -1,7 +1,5 @@
 # Owner(s): ["module: inductor"]
 import os
-import threading
-from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest import mock
 
@@ -9,12 +7,11 @@ import torch
 from torch._inductor.codegen.flydsl import flydsl_utils
 from torch._inductor.codegen.flydsl.flydsl_kernel import FlyDSLTemplateKernel
 from torch._inductor.codegen.flydsl.flydsl_scheduling import (
-    FlyDSLScheduling,
     _get_flydsl_device_arch,
+    FlyDSLScheduling,
 )
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
 from torch._inductor.ir import Buffer, FixedLayout
-from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import OrderedSet
@@ -23,14 +20,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-
-
-class _CacheParam:
-    def __init__(self, key="param"):
-        self.key = key
-
-    def __cache_signature__(self):
-        return (self.key,)
 
 
 @instantiate_parametrized_tests
@@ -305,108 +294,6 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(metadata["precompile_shapes"], {"output": [1]})
         self.assertEqual(metadata["precompile_strides"], {"output": [1]})
         self.assertEqual(metadata["precompile_dtypes"], {"output": "float32"})
-
-    def test_compiled_cache_keys_on_device_and_param(self):
-        jit_func = SimpleNamespace()
-        compiled = mock.Mock()
-        compiler = mock.Mock(return_value=compiled)
-
-        def invoke(device_index):
-            dispatch = SimpleNamespace(device=SimpleNamespace(index=device_index))
-            return run_cached_flydsl(
-                jit_func,
-                object(),
-                constexpr_param=_CacheParam(),
-                compiler=compiler,
-                dispatch_args=(dispatch,),
-            )
-
-        first = invoke(0)
-        with mock.patch(
-            "torch._inductor.runtime.flydsl_cache._compiled_cache_lock"
-        ) as cache_lock:
-            second = invoke(0)
-        third = invoke(1)
-
-        self.assertIs(first, compiled)
-        self.assertIs(second, compiled)
-        self.assertIs(third, compiled)
-        cache_lock.__enter__.assert_not_called()
-        self.assertEqual(compiler.call_count, 2)
-        compiled.assert_called_once()
-
-    def test_compiled_cache_serializes_same_param(self):
-        jit_func = SimpleNamespace()
-        compile_started = threading.Event()
-        allow_compile = threading.Event()
-        compiled = mock.Mock()
-        compile_calls = 0
-
-        def compiler(*args):
-            nonlocal compile_calls
-            compile_calls += 1
-            compile_started.set()
-            self.assertTrue(allow_compile.wait(5))
-            return compiled
-
-        def invoke(value):
-            return run_cached_flydsl(
-                jit_func,
-                object(),
-                constexpr_param=_CacheParam(),
-                compiler=compiler,
-                dispatch_args=(value,),
-            )
-
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            first = pool.submit(invoke, "first")
-            self.assertTrue(compile_started.wait(5))
-            second = pool.submit(invoke, "second")
-            allow_compile.set()
-            self.assertIs(first.result(), compiled)
-            self.assertIs(second.result(), compiled)
-
-        self.assertEqual(compile_calls, 1)
-        compiled.assert_called_once_with("second")
-
-    def test_compiled_cache_lazily_builds_compile_args(self):
-        jit_func = SimpleNamespace()
-        dispatch = SimpleNamespace(device=SimpleNamespace(index=0))
-        compiled = mock.Mock()
-        compiler = mock.Mock(return_value=compiled)
-        compile_args_factory = mock.Mock(return_value=("compile-arg",))
-
-        first = run_cached_flydsl(
-            jit_func,
-            constexpr_param=_CacheParam("lazy"),
-            compiler=compiler,
-            dispatch_args=(dispatch,),
-            compile_args_factory=compile_args_factory,
-        )
-        second = run_cached_flydsl(
-            jit_func,
-            constexpr_param=_CacheParam("lazy"),
-            compiler=compiler,
-            dispatch_args=(dispatch,),
-            compile_args_factory=compile_args_factory,
-        )
-
-        self.assertIs(first, compiled)
-        self.assertIs(second, compiled)
-        compile_args_factory.assert_called_once_with()
-        compiler.assert_called_once_with(jit_func, "compile-arg")
-        compiled.assert_called_once_with(dispatch)
-
-    def test_compiled_cache_rejects_two_compile_arg_sources(self):
-        with self.assertRaisesRegex(ValueError, "either compile_args"):
-            run_cached_flydsl(
-                SimpleNamespace(),
-                object(),
-                constexpr_param=_CacheParam("ambiguous"),
-                compiler=mock.Mock(),
-                dispatch_args=(SimpleNamespace(device=None),),
-                compile_args_factory=mock.Mock(),
-            )
 
 
 if __name__ == "__main__":

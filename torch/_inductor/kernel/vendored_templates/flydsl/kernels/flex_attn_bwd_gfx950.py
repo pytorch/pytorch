@@ -37,11 +37,13 @@ registers without an intermediate LDS round trip.
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
+from flydsl.expr import const_expr
 
 from .flex_attn_mask import is_causal_document_mask_program
 from .flex_attn_utils import load_scalar, make_global_view, store_scalar
 from .flex_bwd_dkdv import make_dkdv_mfma32_body
 from .flex_bwd_dq import make_dq_mfma32_body
+from .flex_bwd_utils import fast_exp2
 
 _LOG2E = 1.4426950408889634
 _BATCHED_CAUSAL_DOCUMENT_MASK_PROGRAM = (
@@ -57,12 +59,6 @@ _DENSE_MASK_PROGRAM = (("const_i32", 0), ("ge", 2, 4))
 
 def _f32(x):
     return fx.Float32(x)
-
-
-def _exp2(x):
-    """Single-instruction v_exp_f32 (no denormal guard)."""
-    value = _f32(x)
-    return fx.Float32(fx.rocdl.exp2(fx.Float32.ir_type, value.ir_value()))
 
 
 def _causal_window_size(mask_program, mask_program_output):
@@ -469,8 +465,8 @@ def _build_flex_attn_bwd_module(
         b: fx.Array[fx.BFloat16, COMPUTE_B_ELEMS, 16]
         ld: fx.Array[fx.Float32, COMPUTE_LD_ELEMS, 16]
 
-    _emit_dq_mfma32_body = make_dq_mfma32_body(locals(), _f32, _exp2)
-    _emit_dkdv_mfma32_body = make_dkdv_mfma32_body(locals(), _f32, _exp2)
+    _emit_dq_mfma32_body = make_dq_mfma32_body(locals(), _f32, fast_exp2)
+    _emit_dkdv_mfma32_body = make_dkdv_mfma32_body(locals(), _f32, fast_exp2)
 
     @flyc.jit
     def _emit_owner(
@@ -608,25 +604,6 @@ def _build_flex_attn_bwd_module(
         )
 
     @flyc.jit
-    def _launch_direct(
-        Q: fx.Tensor,
-        K: fx.Tensor,
-        V: fx.Tensor,
-        OUT: fx.Tensor,
-        LSE: fx.Tensor,
-        DO: fx.Tensor,
-        DQ: fx.Tensor,
-        DK: fx.Tensor,
-        DVALUE: fx.Tensor,
-        DELTA: fx.Tensor,
-        stream: fx.Stream = fx.Stream(None),
-    ):
-        delta_kernel(OUT, DO, DELTA).launch(grid=(DGRID, BH, 1), block=(NT, 1, 1), stream=stream)
-        compute_kernel(Q, K, V, LSE, DELTA, DO, DQ, DK, DVALUE, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q).launch(
-            grid=(FUSED_GRID, BH, 1), block=(COMPUTE_NT, 1, 1), stream=stream
-        )
-
-    @flyc.jit
     def _launch(
         Q: fx.Tensor,
         K: fx.Tensor,
@@ -657,9 +634,10 @@ def _build_flex_attn_bwd_module(
         stream: fx.Stream = fx.Stream(None),
     ):
         delta_kernel(OUT, DO, DELTA).launch(grid=(DGRID, BH, 1), block=(NT, 1, 1), stream=stream)
-        prologue(KVN, KVI, FKVN, FKVI, CP_Q, IP_Q, CF_Q, IF_Q, CP_K, IP_K, CF_K, IF_K).launch(
-            grid=(BH, 1, 1), block=(NT, 1, 1), stream=stream
-        )
+        if const_expr(INDIRECT_MASK):
+            prologue(KVN, KVI, FKVN, FKVI, CP_Q, IP_Q, CF_Q, IF_Q, CP_K, IP_K, CF_K, IF_K).launch(
+                grid=(BH, 1, 1), block=(NT, 1, 1), stream=stream
+            )
         compute_kernel(
             Q,
             K,
@@ -684,7 +662,4 @@ def _build_flex_attn_bwd_module(
             MaskBuffer3,
         ).launch(grid=(FUSED_GRID, BH, 1), block=(COMPUTE_NT, 1, 1), stream=stream)
 
-    if DIRECT_MASK:
-        _launch_direct._flydsl_compact_dispatch = True
-        return _launch_direct
     return _launch

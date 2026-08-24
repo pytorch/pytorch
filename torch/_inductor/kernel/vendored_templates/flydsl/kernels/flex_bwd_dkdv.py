@@ -9,6 +9,7 @@ from .flex_bwd_utils import (
     make_mask_buffers,
     make_mask_evaluator,
     make_mfma32_ops,
+    schedule_fence,
     schedule_pack0_pipeline,
     schedule_pack1_pipeline,
     schedule_score_pipeline,
@@ -20,6 +21,8 @@ _NEG_BIG = -1e30
 _MASK_NONE = 0
 _MASK_ALL = 1
 _MASK_CAUSAL_BOUNDARY = 2
+
+
 def make_dkdv_mfma32_body(context, f32, exp2):
     CAUSAL_MASK = context["CAUSAL_MASK"]
     DENSE_MASK = context["DENSE_MASK"]
@@ -548,7 +551,7 @@ def make_dkdv_mfma32_body(context, f32, exp2):
                     )
                 if const_expr(half == 0):
                     fx.rocdl.sched_dsrd(1 + 2 * (DV // 32))
-                    fx.rocdl.sched_barrier(0)
+                    schedule_fence()
                     fx.rocdl.s_waitcnt(lgkmcnt=0)
                 return probability, update_fragments
 
@@ -576,7 +579,7 @@ def make_dkdv_mfma32_body(context, f32, exp2):
                     reads = min(2, max(0, remaining_reads - 2 * mfma_index))
                     if const_expr(reads):
                         fx.rocdl.sched_dsrd(reads)
-                fx.rocdl.sched_barrier(0)
+                schedule_fence()
                 fx.rocdl.s_waitcnt(lgkmcnt=0)
                 for d_chunk in fx.range_constexpr(DV // 32):
                     fx.gemm(
@@ -593,7 +596,7 @@ def make_dkdv_mfma32_body(context, f32, exp2):
                     fx.rocdl.sched_mfma(1)
                 for _ in fx.range_constexpr(max(0, next_vmem_count - DV // 32)):
                     fx.rocdl.sched_vmem(1)
-                fx.rocdl.sched_barrier(0)
+                schedule_fence()
 
             def run_consumer(
                 tile_count,
@@ -636,7 +639,7 @@ def make_dkdv_mfma32_body(context, f32, exp2):
                                 )
                                 stage_do(next_qchunk, previous_stage)
                                 fx.rocdl.sched_vmem(PAIR_DO_LOAD_IT)
-                                fx.rocdl.sched_barrier(0)
+                                schedule_fence()
                             else:
                                 consume_dv_tile(
                                     first_probability,
