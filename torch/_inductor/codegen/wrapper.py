@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import collections
 import contextlib
 import dataclasses
 import dis
+import enum
 import functools
 import inspect
 import logging
@@ -12,6 +14,7 @@ import operator
 import os
 import random
 import re
+import sys
 import tempfile
 from collections.abc import Callable
 from itertools import chain, count
@@ -337,6 +340,100 @@ def user_defined_kernel_grid_fn_code(
                 writeline(statement, f"if {guards}: return {example_grid}")
 
     return fn_name, output.getvalue()
+
+
+def _constexpr_constant(value: Any) -> Any:
+    """A ``tl.constexpr`` value in a form the generated kernel can be parsed with.
+
+    ``triton_meta`` is emitted with ``repr()``, so a value whose repr is not an
+    expression makes the generated file unimportable and loses the kernel --
+    ``'ROUNDING_MODE': <RoundingMode.even: 2>`` is a ``SyntaxError``, and every
+    frame above it silently falls back to eager.
+
+    Only ``IntEnum`` is rewritten, and only to its int. That is safe because the
+    value reaches ``ASTSource`` as a Triton specialisation input: an ``IntEnum``
+    compares and hashes equal to that int, so the kernel Triton builds and the
+    key it is cached under are unchanged. A plain ``Enum`` is NOT equal to its
+    value, so rewriting one would change what a kernel comparing against it
+    computes; ``_constexpr_source`` reconstructs those by name instead.
+    """
+    if isinstance(value, enum.IntEnum):
+        return int(value)
+    return value
+
+
+def _constexpr_source(value: Any) -> tuple[str, str | None] | None:
+    """Source for a ``tl.constexpr`` value, plus any import it needs.
+
+    Returns None when the value cannot be written as an expression the
+    generated file could evaluate back to the same object.
+
+    A plain ``Enum`` cannot be replaced by its value -- it does not compare
+    equal to one -- so it is emitted as ``Cls.member`` with an import for the
+    class. The import must work in the compile worker, a different process, so
+    the class has to be reachable from a real module: anything defined in
+    ``__main__`` or inside a function body is not, and is reported rather than
+    emitted as something that would import the worker's own ``__main__``.
+    """
+    if isinstance(value, enum.Enum):
+        cls = type(value)
+        module, qualname = cls.__module__, cls.__qualname__
+        root = qualname.split(".")[0]
+        if module and module != "__main__" and "<locals>" not in qualname:
+            owner = sys.modules.get(module)
+            if owner is not None and getattr(owner, root, None) is not None:
+                expr = f"{qualname}.{value.name}"
+                try:
+                    if eval(expr, {root: getattr(owner, root)}) is value:
+                        return expr, f"from {module} import {root}"
+                except Exception:
+                    pass
+        return None
+    text = repr(value)
+    try:
+        ast.parse(text, mode="eval")
+    except SyntaxError:
+        return None
+    return text, None
+
+
+def _render_constexpr_constants(
+    constants: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Constants with unreprable values replaced by source, plus their imports.
+
+    The substitutes carry their own ``__repr__`` so the caller can keep
+    formatting ``triton_meta`` with ``!r``; the dict handed to Triton in this
+    process is untouched.
+    """
+    rendered: dict[str, Any] = {}
+    imports: list[str] = []
+    for name, value in constants.items():
+        source = _constexpr_source(value)
+        if source is None:
+            raise RuntimeError(
+                f"Triton kernel constexpr argument {name!r} has value {value!r} "
+                f"of type {type(value).__name__}, which cannot be written into "
+                f"the generated kernel: its repr is not an expression and it "
+                f"cannot be reconstructed by name. Pass an int, an IntEnum, or "
+                f"a value whose type is defined in an importable module (not "
+                f"__main__ and not inside a function)."
+            )
+        expr, import_line = source
+        rendered[name] = _SourceLiteral(expr) if expr != repr(value) else value
+        if import_line is not None and import_line not in imports:
+            imports.append(import_line)
+    return rendered, imports
+
+
+class _SourceLiteral:
+    """Reprs as the source it was built from, so ``{d!r}`` emits an expression."""
+
+    def __init__(self, source: str) -> None:
+        self.source = source
+
+    def __repr__(self) -> str:
+        return self.source
 
 
 def user_defined_triton_kernel_transitive_closure_source_code(
@@ -3419,7 +3516,7 @@ class PythonWrapperCodegen(CodeGen):
                 if arg.name in kwargs:
                     # the arg may not appear in kwargs if it is an autotuned arg.
                     # in this case, it will be added in triton_heuristics after autotuning.
-                    constants[arg.name] = kwargs[arg.name]
+                    constants[arg.name] = _constexpr_constant(kwargs[arg.name])
 
             else:
                 # the only case where arg name isn't in kwargs, should be
@@ -3664,6 +3761,14 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
+        # A constexpr the generated file cannot spell -- a plain Enum -- needs
+        # its class imported before the decorator that mentions it.
+        constexpr_constants, constexpr_imports = _render_constexpr_constants(
+            triton_meta.get("constants", {})
+        )
+        triton_meta = {**triton_meta, "constants": constexpr_constants}
+        for import_line in constexpr_imports:
+            compile_wrapper.writeline(import_line)
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
