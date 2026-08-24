@@ -74,6 +74,12 @@ class Node(abc.ABC):
     @property
     @abc.abstractmethod
     def next_functions(self) -> tuple[tuple[Optional["Node"], int], ...]:
+        r"""Return the edges from this node to its input functions.
+
+        Each entry is a ``(Node, int)`` pair. The node is ``None`` for an input
+        that does not require gradients. The integer is the output index of the
+        input function to which this edge connects.
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -249,7 +255,7 @@ def increment_version(tensor: torch.Tensor | Iterable[torch.Tensor]) -> None:
     This is to enable more accurate error checking within the autograd engine.
     It is already done automatically by PyTorch functions and within custom Function
     when mark_dirty() is called appropriately so you only need to call this explicitly
-    if you are doing inplace operation on the Tensor data in a way that Pytorch doesn't
+    if you are doing inplace operation on the Tensor data in a way that PyTorch doesn't
     know about. For example a custom kernel that reads the Tensor data_ptr and modifies
     the memory inplace based on this pointer. Can accept either a tensor, or a list of tensors.
 

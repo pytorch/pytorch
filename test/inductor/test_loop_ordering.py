@@ -14,11 +14,18 @@ from torch import nn
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, ir, metrics
-from torch._inductor.codegen.simd import SIMDScheduling
+from torch._inductor.codegen.simd import MemoryCoalescing, SIMDScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
-from torch._inductor.scheduler import _LoopMutationTracker, Scheduler, SchedulerNode
+from torch._inductor.scheduler import (
+    _LoopMutationTracker,
+    ForeachKernelSchedulerNode,
+    FusedSchedulerNode,
+    refresh_group_node_dependencies,
+    Scheduler,
+    SchedulerNode,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
@@ -75,6 +82,7 @@ class MockSchedulerTest(TestCase):
 
 
 @inductor_config.patch(loop_ordering_after_fusion=True)
+@instantiate_parametrized_tests
 class ImplDetailTest(MockSchedulerTest):
     @staticmethod
     def _get_snode_body_sym_prefix(snode):
@@ -282,6 +290,66 @@ class ImplDetailTest(MockSchedulerTest):
         self.assertIsNone(template_node._body)
         self.assertIs(computed_node._body, original_body)
 
+    def test_nested_loop_mutation_trackers(self):
+        """A nested scope committing must not hide the mutation from the outer one."""
+        snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        original_body = snode._body
+        outer = _LoopMutationTracker.create((snode,))
+        inner = _LoopMutationTracker.create((snode,))
+
+        try:
+            snode.apply_new_loop_order([1, 0])
+            self.assertIsNot(snode._body, original_body)
+            # The inner scope keeps the mutation, but the outer scope still saw
+            # it via the chained listener and can roll it back.
+            inner.finish(rollback=False)
+            self.assertIsNot(snode._body, original_body)
+        finally:
+            outer.finish(rollback=True)
+
+        self.assertIs(snode._body, original_body)
+        self.assertIsNone(snode._loop_mutation_listener)
+
+    def test_expand_dimension_loop_state_rollback(self):
+        snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        original_state = snode.snapshot_loop_state()
+        tracker = _LoopMutationTracker.create((snode,))
+
+        snode.expand_dimension_for_pointwise_node(0, 64)
+        self.assertNotEqual(snode.snapshot_loop_state(), original_state)
+        tracker.finish(rollback=True)
+
+        self.assertEqual(snode.snapshot_loop_state(), original_state)
+
+    def test_foreach_nested_fused_loop_state_rollback(self):
+        snodes = [
+            SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+            for _ in range(2)
+        ]
+        for order, snode in enumerate(snodes):
+            snode.min_order = snode.max_order = order
+            snode.min_input_distance = snode.max_input_distance = 0
+        subkernel = FusedSchedulerNode(V.graph.scheduler, snodes)
+        foreach = ForeachKernelSchedulerNode(
+            V.graph.scheduler,
+            [subkernel],
+            use_custom_partition_algo=False,
+        )
+        original_body = snodes[0]._body
+        original_group = subkernel.group
+        original_read_writes = foreach.read_writes
+        tracker = _LoopMutationTracker.create((foreach,))
+
+        snodes[0].expand_dimension_for_pointwise_node(0, 64)
+        subkernel.group = (original_group[0], (sympy.S.One, sympy.S.One))
+        refresh_group_node_dependencies(subkernel)
+        refresh_group_node_dependencies(foreach)
+        tracker.finish(rollback=True)
+
+        self.assertIs(snodes[0]._body, original_body)
+        self.assertEqual(subkernel.group, original_group)
+        self.assertEqual(foreach.read_writes, original_read_writes)
+
     def test_reorder_modular_indexing(self):
         """
         There was a bug that we wrongly map i0 to the dimension with size 49
@@ -323,6 +391,81 @@ class ImplDetailTest(MockSchedulerTest):
             z2 + 49 * z1 + 2401 * ModularIndexing(z3, 1, 64),
         )
 
+    def test_weighted_cost_penalizes_uncoalesced(self):
+        self.assertEqual(MemoryCoalescing(10, 0).weighted_cost(), 10)
+        self.assertEqual(MemoryCoalescing(0, 10).weighted_cost(), 160)
+        # Uncoalesced traffic is what the fusion guard weighs against.
+        self.assertGreater(
+            MemoryCoalescing(0, 1).weighted_cost(),
+            MemoryCoalescing(10, 0).weighted_cost(),
+        )
+
+    @parametrize(
+        "fused_cost,reject",
+        [(100_999_999, False), (101_000_000, False), (101_000_001, True)],
+    )
+    def test_reindexing_memory_guard_credits_launch(self, fused_cost, reject):
+        scheduler = Scheduler.__new__(Scheduler)
+        unfused_memory = (
+            MemoryCoalescing(50_000_000, 0),
+            MemoryCoalescing(50_000_000, 0),
+        )
+        fused_memory = MemoryCoalescing(fused_cost, 0)
+
+        with (
+            mock.patch(
+                "torch._inductor.scheduler.get_gpu_dram_gbps", return_value=1_000
+            ),
+            mock.patch.object(
+                scheduler, "_selected_tiling_memory", return_value=fused_memory
+            ),
+        ):
+            self.assertEqual(
+                scheduler._reindexing_regresses_memory_coalescing(
+                    mock.Mock(), mock.Mock(), unfused_memory
+                ),
+                reject,
+            )
+
+    @parametrize("dram_gbps", [None, 0, -1, float("nan"), float("inf")])
+    def test_reindexing_memory_guard_with_invalid_bandwidth(self, dram_gbps):
+        scheduler = Scheduler.__new__(Scheduler)
+        with (
+            mock.patch(
+                "torch._inductor.scheduler.get_gpu_dram_gbps",
+                return_value=dram_gbps,
+            ),
+            mock.patch.object(
+                scheduler,
+                "_selected_tiling_memory",
+                return_value=MemoryCoalescing(101, 0),
+            ),
+        ):
+            self.assertTrue(
+                scheduler._reindexing_regresses_memory_coalescing(
+                    mock.Mock(), mock.Mock(), (MemoryCoalescing(100, 0),)
+                )
+            )
+
+    def test_reindexing_memory_guard_when_bandwidth_lookup_fails(self):
+        scheduler = Scheduler.__new__(Scheduler)
+        with (
+            mock.patch(
+                "torch._inductor.scheduler.get_gpu_dram_gbps",
+                side_effect=RuntimeError,
+            ),
+            mock.patch.object(
+                scheduler,
+                "_selected_tiling_memory",
+                return_value=MemoryCoalescing(101, 0),
+            ),
+        ):
+            self.assertTrue(
+                scheduler._reindexing_regresses_memory_coalescing(
+                    mock.Mock(), mock.Mock(), (MemoryCoalescing(100, 0),)
+                )
+            )
+
 
 @inductor_config.patch(
     {
@@ -331,6 +474,7 @@ class ImplDetailTest(MockSchedulerTest):
         "triton.unique_kernel_names": True,
     }
 )
+@instantiate_parametrized_tests
 class LoopOrderingTest(TestCase):
     device = GPU_TYPE
 
@@ -357,6 +501,48 @@ class LoopOrderingTest(TestCase):
     def setUp(self):
         super().setUp()
         metrics.reset()
+
+    @staticmethod
+    def _get_node_origins(node):
+        return {
+            origin.target
+            for snode in node.get_nodes()
+            if isinstance(snode, SchedulerNode) and snode.node is not None
+            for origin in snode.node.get_origins()
+        }
+
+    @contextlib.contextmanager
+    def _record_reindexing_memory_decisions(self):
+        """Record (origins, reject, fused_selection) per reindexing guard call."""
+        decisions = []
+        original = Scheduler._reindexing_regresses_memory_coalescing
+        original_selection = SIMDScheduling.select_tiling_with_memory
+        last_selection = {}
+
+        def record_selection(*args, **kwargs):
+            selection = original_selection(*args, **kwargs)
+            last_selection["value"] = selection
+            return selection
+
+        def record(scheduler, node1, node2, unfused_memory):
+            last_selection.clear()
+            reject = original(scheduler, node1, node2, unfused_memory)
+            origins = self._get_node_origins(node1) | self._get_node_origins(node2)
+            # The guard's last tiling selection is the fused one, when reached.
+            decisions.append((origins, reject, last_selection.get("value")))
+            return reject
+
+        with (
+            mock.patch.object(
+                Scheduler, "_reindexing_regresses_memory_coalescing", record
+            ),
+            mock.patch.object(
+                SIMDScheduling,
+                "select_tiling_with_memory",
+                staticmethod(record_selection),
+            ),
+        ):
+            yield decisions
 
     def test_for_reordering_reindex(self):
         """
@@ -569,6 +755,7 @@ class LoopOrderingTest(TestCase):
             optf = torch.compile(f)
             print(f"ms={do_bench(lambda: optf(x))}")
 
+    @inductor_config.patch("triton.coalesce_tiling_analysis", True)
     def test_reshape_reindexing_transposed_input(self):
         """
         Same RMS norm pattern but with a transposed input. The reshape
@@ -586,14 +773,24 @@ class LoopOrderingTest(TestCase):
             x_normed = x_f32 * torch.rsqrt(variance + 1e-5)
             return x_normed.reshape(M, N).to(x.dtype)
 
-        M = 16
+        M, N = 16, 8192
         # Transposed input: shape [M, 8192] but stride (1, M)
-        x = torch.randn(8192, M, dtype=torch.bfloat16).T
+        x = torch.randn(N, M, dtype=torch.bfloat16).T
 
         ref = f(x)
-        actual = torch.compile(f)(x)
+        with self._record_reindexing_memory_decisions() as decisions:
+            actual = torch.compile(f)(x)
         torch.testing.assert_close(actual, ref, atol=1e-2, rtol=1e-2)
         self.assertEqual(1, metrics.generated_kernel_count)
+        self.assertTrue(
+            any(
+                not reject
+                and selection is not None
+                and selection.tiling == {"y": M, "x": 64, "r0_": 128}
+                for origins, reject, selection in decisions
+                if torch.ops.aten.mean.dim in origins
+            )
+        )
 
     @inductor_config.patch("loop_ordering_after_fusion", False)
     def test_reshape_reindexing_without_loop_ordering(self):
@@ -763,6 +960,80 @@ class LoopOrderingTest(TestCase):
         self.assertTrue(same(expect, actual, tol=1e-2))
         # variance reduction + block reduction = 2 kernels
         self.assertEqual(2, metrics.generated_kernel_count)
+
+    @inductor_config.patch(
+        layout_optimization=True,
+        force_layout_optimization=True,
+    )
+    @inductor_config.patch("triton.coalesce_tiling_analysis", True)
+    def test_upsample_into_reduction_keeps_coalesced_loops(self):
+        """Reindexing upsample onto GroupNorm's split loses coalescing (#189488)."""
+
+        class Mod(nn.Module):
+            def __init__(self, channels, groups):
+                super().__init__()
+                self.conv = nn.Conv2d(channels, channels, 3, padding=1)
+                self.norm = nn.GroupNorm(groups, channels, eps=1e-6)
+                self.skip = nn.Conv2d(channels, channels, 1)
+
+            def forward(self, x, residual):
+                x = (x + residual) / 1.41421356237
+                x = F.interpolate(x, scale_factor=2.0, mode="nearest")
+                x = self.conv(x)
+                y = F.silu(self.norm(x))
+                return y + (self.skip(x) * 0.01)
+
+        batch, channels, groups, spatial = 8, 128, 32, 64
+        mod = Mod(channels, groups).eval()
+        x = torch.randn(batch, channels, spatial // 2, spatial // 2)
+        residual = torch.randn_like(x)
+        target_origins = {torch.ops.aten.var_mean.correction}
+
+        with (
+            torch.no_grad(),
+            mock.patch(
+                "torch._inductor.scheduler.get_gpu_dram_gbps",
+                return_value=3_350,
+            ),
+            self._record_reindexing_memory_decisions() as decisions,
+        ):
+            self.do_acc_test(mod, x, residual)
+        self.assertTrue(
+            any(
+                target_origins <= origins
+                and reject
+                and selection is not None
+                and selection.memory.uncoalesced > 0
+                for origins, reject, selection in decisions
+            ),
+            decisions,
+        )
+
+    @inductor_config.patch("triton.coalesce_tiling_analysis", True)
+    def test_horizontal_reindexing_memory_guard(self):
+        def f(x):
+            return x + 1, x.reshape(-1, 128).sum(dim=-1)
+
+        target_origins = {torch.ops.aten.add.Tensor, torch.ops.aten.sum.dim_IntList}
+        target_decisions = []
+        original = Scheduler._reindexing_regresses_memory_coalescing
+
+        def reject_target(scheduler, node1, node2, unfused_memory):
+            reject = original(scheduler, node1, node2, unfused_memory)
+            origins = self._get_node_origins(node1) | self._get_node_origins(node2)
+            is_vertical = bool(node1.get_operation_names() & node2.ancestors)
+            if target_origins <= origins and not is_vertical:
+                target_decisions.append(reject)
+                return True
+            return reject
+
+        x = torch.randn(16, 8192)
+        with mock.patch.object(
+            Scheduler, "_reindexing_regresses_memory_coalescing", reject_target
+        ):
+            self.assertEqual(torch.compile(f)(x), f(x))
+        self.assertEqual(2, metrics.generated_kernel_count)
+        self.assertIn(False, target_decisions)
 
     @inductor_config.patch(
         {
@@ -1303,6 +1574,31 @@ class MemoryCoalescingTest(MockSchedulerTest):
         super().setUp()
         metrics.reset()
 
+    def _check_memory_metrics(self, node, expected_tiling):
+        analysis = node.get_coalesce_analysis()
+        self.assertIsNotNone(analysis)
+        _, (numel, rnumel) = node.group
+        selection = SIMDScheduling.select_tiling_with_memory(
+            node.get_nodes(), numel, rnumel, analysis
+        )
+        self.assertIsNotNone(selection.tiling_scores)
+        self.assertIsNotNone(selection.memory)
+        self.assertEqual(list(selection.tiling), expected_tiling)
+        self.assertEqual(list(selection.tiling_scores), expected_tiling)
+
+        # Coalesced memory is never penalized, so it dominates the tiling score.
+        self.assertGreaterEqual(
+            selection.memory.coalesced, sum(selection.tiling_scores.values())
+        )
+        # Every access either coalesces under the selected tiling or does not.
+        total_cost = sum(analysis.coalesced_by_var.values()) + sum(
+            analysis.uncoalesced_addrs.values()
+        )
+        self.assertEqual(
+            selection.memory.coalesced + selection.memory.uncoalesced, total_cost
+        )
+        return analysis, selection
+
     def _create_buffer(self, name, sizes):
         """Create a buffer with specified sizes"""
 
@@ -1625,6 +1921,51 @@ class MemoryCoalescingTest(MockSchedulerTest):
             out = torch.compile(foo)(inp)
             self.assertEqual(out, out_eager)
 
+    def test_reduction_memory_costs_follow_selected_tiling(self):
+        def foo(x, y):
+            return (x + y).sum((1, 3))
+
+        def check_metrics(nodes):
+            self.assertEqual(len(nodes), 1)
+            node = nodes[0]
+            analysis, selection = self._check_memory_metrics(node, ["x", "r0_"])
+            index_vars = analysis.norm_read_writes.index_vars
+            reduction_vars = analysis.norm_read_writes.reduce_vars
+            self.assertEqual(len(index_vars), 1)
+            self.assertEqual(len(reduction_vars), 2)
+            self.assertGreater(analysis.coalesced_by_var[reduction_vars[0]], 0)
+            self.assertGreater(analysis.coalesced_by_var[reduction_vars[1]], 0)
+
+            self.assertEqual(
+                selection.tiling_scores["r0_"],
+                analysis.coalesced_by_var[reduction_vars[-1]],
+            )
+            # The x score is penalized for leaving a small block; the memory is not.
+            self.assertLess(
+                selection.tiling_scores["x"],
+                analysis.coalesced_by_var[index_vars[-1]],
+            )
+            expected_coalesced = (
+                analysis.coalesced_by_var[index_vars[-1]]
+                + analysis.coalesced_by_var[reduction_vars[-1]]
+            )
+            self.assertEqual(selection.memory.coalesced, expected_coalesced)
+            # reduction_vars[0] could coalesce, but the selected tiling did not
+            # pick it, so its memory counts as uncoalesced.
+            self.assertEqual(
+                selection.memory.uncoalesced,
+                analysis.coalesced_by_var[reduction_vars[0]],
+            )
+            return nodes
+
+        x = torch.randn(1, 2, 4, 8, device=GPU_TYPE)
+        y = torch.randn(1, 8, 4, 2, device=GPU_TYPE).permute(0, 3, 2, 1)
+        with (
+            torch._inductor.config.patch(_post_fusion_custom_pass=check_metrics),
+            torch.no_grad(),
+        ):
+            self.assertEqual(torch.compile(foo)(x, y), foo(x, y))
+
     def test_solve_for_zero(self):
         from torch._inductor import tiling_utils
 
@@ -1698,8 +2039,16 @@ class MemoryCoalescingTest(MockSchedulerTest):
         def fn(nodes):
             self.assertTrue(len(nodes) == 1)
 
-            coalesce_analysis = nodes[0].get_coalesce_analysis()
+            node = nodes[0]
+            coalesce_analysis = node.get_coalesce_analysis()
             self.assertEqual(coalesce_analysis.suggested_split.tiling_factor, 64)
+            if not dynamic:
+                expected_tiling = ["y", "x", "r0_"]
+                coalesce_analysis, memory_metrics = self._check_memory_metrics(
+                    node, expected_tiling
+                )
+                suggested_score = coalesce_analysis.suggested_split.score
+                self.assertEqual(memory_metrics.tiling_scores["y"], suggested_score)
             return nodes
 
         with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():

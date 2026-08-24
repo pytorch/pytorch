@@ -13,10 +13,10 @@ import json
 import logging
 import os
 import pickle
-import random
 import shutil
 import time
 import traceback
+import uuid
 from copy import copy
 from typing import Any, TYPE_CHECKING
 from typing_extensions import override
@@ -172,6 +172,13 @@ def check_node_safe(node: Node) -> None:
         "torch.sym_sum",
         "torch.autograd.grad",
         "torch.distributed.tensor._api.from_local",
+        # An autocast context manager *inside* a compiled region is traced into
+        # these calls. What they do is fully determined by their arguments
+        # (device type, dtype, enabled, cache_enabled), which are constants in
+        # the graph and therefore part of the cache key, so a graph compiled
+        # under one autocast setting can never be reused for another.
+        "torch.amp.autocast_mode._enter_autocast",
+        "torch.amp.autocast_mode._exit_autocast",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
@@ -600,7 +607,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return (_ident, (name,))
 
     # pyrefly: ignore [bad-override]
-    def reducer_override(self, obj: Any) -> Any:
+    def reducer_override(self, obj: object) -> Any:
         """
         Override to handle tensor subclasses (like DTensor) that aren't caught
         by the dispatch_table's exact type matching.
@@ -621,7 +628,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return super().reducer_override(obj)
 
     @staticmethod
-    def _format_global_for_cache_key(name: str, obj: Any) -> str:
+    def _format_global_for_cache_key(name: str, obj: object) -> str:
         if (numpy_key := numpy_wrapper_cache_key(obj)) is not None:
             return f"# cache_key_numpy_wrapper {name}: {numpy_key!r}"
 
@@ -667,10 +674,10 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
     def _hash_bytes_for_cache(self, data: bytes) -> str:
         return hashlib.blake2b(data, digest_size=16).hexdigest()
 
-    def _hash_pickled_value_for_cache(self, value: Any) -> str:
+    def _hash_pickled_value_for_cache(self, value: object) -> str:
         return self._hash_bytes_for_cache(pickle.dumps(value))
 
-    def _stable_hash_for_cache_value(self, obj: Any) -> str:
+    def _stable_hash_for_cache_value(self, obj: object) -> str:
         """Get a stable hash for an object used inside tensor subclass metadata."""
         from torch._custom_class_base import CustomClassBase
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -955,7 +962,9 @@ def autograd_cache_key(
                 "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
                 exc_info=True,
             )
-            return str(random.random()), []
+            # Use UUID rather than random.random() so fallback keys are independent of
+            # application RNG state and remain unique across processes with the same seed.
+            return uuid.uuid4().hex, []
         else:
             raise
 
