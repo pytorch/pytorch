@@ -556,15 +556,19 @@ __host__ __device__
 #else
 #if defined(USE_ROCM) && defined(__HIPCC__)
 namespace torch::headeronly::detail {
+// Count '%' in s[0..N-2] at compile time (HIP device compile requires a constant
+// array bound; a runtime loop over extra is not acceptable here).
+template <unsigned N, unsigned I = 0>
+constexpr unsigned rocm_assert_count_percent(const char (&s)[N]) {
+  return I >= N - 1 ? 0u
+                      : static_cast<unsigned>(s[I] == '%') +
+                            rocm_assert_count_percent<N, I + 1>(s);
+}
+
 // OCKL treats is_last=1 append as printf format; double '%' for literal output.
 template <unsigned N>
 constexpr auto rocm_assert_escape_format(const char (&s)[N]) {
-  unsigned extra = 0;
-  for (unsigned i = 0; i < N - 1; ++i) {
-    if (s[i] == '%') {
-      extra++;
-    }
-  }
+  constexpr unsigned extra = rocm_assert_count_percent<N>(s);
   struct {
     char data[N + extra]; // = N - 1 (content excluding '\0') + extra + 1 ('\0')
   } out{};
