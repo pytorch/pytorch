@@ -337,6 +337,415 @@ void test_aoti_constants_update(
   }
 }
 
+// Exercises the free_fold_input_only_constants release/re-arm cycle end to end
+// through the C++ runtime: load, predict, update the released fold inputs,
+// re-fold, predict again. Without the re-arm in update_constant_buffer, the
+// second run_const_fold() either throws (inputs released) or silently returns,
+// leaving the stale folded constant and an unchanged output.
+#if defined(USE_CUDA) || defined(USE_ROCM)
+// Live allocator bytes, the C++ equivalent of torch.cuda.memory_allocated().
+// reserved_bytes (used elsewhere in this file) does not shrink on free, so it
+// cannot show a release.
+size_t cudaAllocatedBytes() {
+  int device_idx = -1;
+  if (cudaGetDevice(&device_idx) != cudaSuccess || device_idx == -1) {
+    throw std::runtime_error("cudaGetDevice failed!");
+  }
+  return c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx)
+      .allocated_bytes[0]
+      .current;
+}
+
+// Runs once and reports how many bytes the run gave back, which for this model
+// is dominated by the fold input released after folding.
+size_t runAndMeasureFreed(
+    torch::inductor::AOTIModelContainerRunner* runner,
+    const std::vector<at::Tensor>& inputs,
+    std::vector<at::Tensor>& out) {
+  if (cudaDeviceSynchronize() != cudaSuccess) {
+    throw std::runtime_error("cudaDeviceSynchronize failed!");
+  }
+  size_t before = cudaAllocatedBytes();
+  out = runner->run(inputs);
+  if (cudaDeviceSynchronize() != cudaSuccess) {
+    throw std::runtime_error("cudaDeviceSynchronize failed!");
+  }
+  size_t after = cudaAllocatedBytes();
+  return before > after ? before - after : 0;
+}
+
+void test_aoti_free_fold_constants_update() {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+
+  const auto& model_so_path =
+      data_loader.attr("model_so_path_free_fold").toStringRef();
+  auto input_tensors =
+      data_loader.attr("inputs_free_fold").toTensorList().vec();
+  const auto& ref_output_tensors =
+      data_loader.attr("outputs_free_fold").toTensorList().vec();
+  const auto& ref_updated_output_tensors =
+      data_loader.attr("outputs_updated_free_fold").toTensorList().vec();
+  const auto& w_pre_updated =
+      data_loader.attr("w_pre_updated_free_fold").toTensor();
+  const auto& b_updated = data_loader.attr("b_updated_free_fold").toTensor();
+  size_t fold_input_bytes = static_cast<size_t>(
+      data_loader.attr("fold_input_bytes_free_fold").toInt());
+
+  auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+      model_so_path);
+
+  // First run folds the const graph, then releases w_pre/b.
+  std::vector<at::Tensor> actual_output_tensors;
+  size_t freed =
+      runAndMeasureFreed(runner.get(), input_tensors, actual_output_tensors);
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+  // Numerics alone cannot tell a release from a constant left resident, so
+  // pin the release itself.
+  ASSERT_GT(freed, fold_input_bytes * 9 / 10);
+
+  // Folding is idempotent: a second fold on an already-folded buffer must be a
+  // no-op rather than tripping the released-inputs assertion.
+  runner->run_const_fold(/* use_inactive = */ false);
+  actual_output_tensors = runner->run(input_tensors);
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+
+  // Supplying the released constants again must restore them and re-arm the
+  // buffer so the next fold actually recomputes.
+  torch::inductor::TensorConstantMap updated_map;
+  updated_map.emplace("L__self___w_pre", new at::Tensor(w_pre_updated));
+  updated_map.emplace("L__self___b", new at::Tensor(b_updated));
+  runner->update_constant_buffer(updated_map, false, false);
+
+  // The re-fold has to release again, not just recompute.
+  freed =
+      runAndMeasureFreed(runner.get(), input_tensors, actual_output_tensors);
+  ASSERT_TRUE(
+      torch::allclose(ref_updated_output_tensors[0], actual_output_tensors[0]));
+  // The perturbed weights must actually move the output; an unchanged result
+  // means the re-fold was skipped and the stale folded constant survived.
+  ASSERT_FALSE(
+      torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+  ASSERT_GT(freed, fold_input_bytes * 9 / 10);
+
+  for (auto& pair : updated_map) {
+    delete pair.second;
+  }
+}
+
+// A weight update has to re-fold correctly in every update flavor. Each one
+// restores the released fold inputs by a different route: an owning clone
+// (default), the caller's own pointer (user_managed), or a CPU tensor copied
+// H2D into fresh owned storage (allow_h2d_copy, which the runtime reaches
+// through update_constant_buffer_from_cpu). user_managed and allow_h2d_copy
+// are mutually exclusive, so there is no fourth combination to cover.
+enum class FoldInputUpdateMode { kDefault, kUserManaged, kAllowH2DCopy };
+
+void test_aoti_free_fold_constants_update_mode(FoldInputUpdateMode mode) {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+
+  const auto& model_so_path =
+      data_loader.attr("model_so_path_free_fold").toStringRef();
+  auto input_tensors =
+      data_loader.attr("inputs_free_fold").toTensorList().vec();
+  const auto& ref_output_tensors =
+      data_loader.attr("outputs_free_fold").toTensorList().vec();
+  size_t fold_input_bytes = static_cast<size_t>(
+      data_loader.attr("fold_input_bytes_free_fold").toInt());
+
+  // Mirrors FoldInputHeavyNet.forward in test.py, so the reference tracks
+  // whatever weights each round supplies rather than a value from data.pt.
+  auto eager_forward =
+      [](const at::Tensor& x, const at::Tensor& w_pre, const at::Tensor& b) {
+        return x * (at::relu(w_pre).sum(0) + b);
+      };
+
+  auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+      model_so_path);
+
+  // First run folds the const graph, then releases w_pre/b. This always goes
+  // through the load-time owned-storage path, whatever the update mode is.
+  std::vector<at::Tensor> outputs;
+  size_t freed = runAndMeasureFreed(runner.get(), input_tensors, outputs);
+  at::Tensor previous = outputs[0];
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], previous));
+  ASSERT_GT(freed, fold_input_bytes * 9 / 10);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA);
+  // Twice, so the release/re-arm cycle is exercised past the first update.
+  for (int round = 0; round < 2; round++) {
+    at::Tensor w_pre =
+        at::randn({static_cast<int64_t>(fold_input_bytes / 16), 4}, options);
+    at::Tensor b = at::randn({4}, options);
+    at::Tensor expected = eager_forward(input_tensors[0], w_pre, b);
+
+    bool from_cpu = mode == FoldInputUpdateMode::kAllowH2DCopy;
+    // Must outlive the update call; under user_managed the container keeps no
+    // copy of them. The H2D source is deliberately non-contiguous (transposed
+    // twice around a contiguous copy, so the values match but the strides do
+    // not): the runtime has to copy it element-wise, where a raw byte copy off
+    // data_ptr() would silently produce garbage.
+    at::Tensor w_pre_arg = from_cpu ? w_pre.cpu().t().contiguous().t() : w_pre;
+    at::Tensor b_arg = from_cpu ? b.cpu() : b;
+    if (from_cpu) {
+      ASSERT_FALSE(w_pre_arg.is_contiguous());
+    }
+
+    torch::inductor::TensorConstantMap update_map;
+    update_map.emplace("L__self___w_pre", &w_pre_arg);
+    update_map.emplace("L__self___b", &b_arg);
+
+    if (from_cpu) {
+      runner->update_constant_buffer_from_cpu(
+          update_map,
+          /* use_inactive = */ false,
+          /* validate_full_update = */ false);
+    } else {
+      runner->update_constant_buffer(
+          update_map,
+          /* use_inactive = */ false,
+          /* validate_full_update = */ false,
+          /* user_managed = */ mode == FoldInputUpdateMode::kUserManaged);
+    }
+
+    freed = runAndMeasureFreed(runner.get(), input_tensors, outputs);
+    at::Tensor actual = outputs[0];
+    ASSERT_TRUE(torch::allclose(expected, actual));
+    // An unchanged result would mean the re-fold was skipped and the stale
+    // folded constant survived.
+    ASSERT_FALSE(torch::allclose(previous, actual));
+
+    if (mode == FoldInputUpdateMode::kUserManaged) {
+      // The container never copied, so there is nothing of its own to reclaim;
+      // w_pre above is still held by this scope. Asserting the release frees
+      // (almost) nothing is what pins that user_managed forgoes the saving.
+      ASSERT_LT(freed, fold_input_bytes / 2);
+    } else {
+      // default clones and allow_h2d_copy allocates owned device storage, so
+      // both must hand that storage back at the next fold.
+      ASSERT_GT(freed, fold_input_bytes * 9 / 10);
+    }
+    previous = actual;
+  }
+}
+
+// The sequence production serving actually runs, from nativert's
+// AOTIDelegateExecutor: publish new weights into the inactive buffer, fold it
+// there while the active buffer keeps serving, then swap. This is the only
+// coverage of run_const_fold(use_inactive = true) -- a shared lock, the
+// temporary swap of the model's constants map, and
+// inactive().drop_fold_input_only() -- none of which the active-buffer tests
+// reach. update_inactive_constant_buffer also forces validate_full_update, so
+// it doubles as the check that the released fold inputs are always re-supplied
+// on the path that matters.
+void test_aoti_free_fold_inactive_update_fold_swap() {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  const auto& model_so_path =
+      data_loader.attr("model_so_path_free_fold").toStringRef();
+  auto input_tensors =
+      data_loader.attr("inputs_free_fold").toTensorList().vec();
+  const auto& ref_output_tensors =
+      data_loader.attr("outputs_free_fold").toTensorList().vec();
+  size_t fold_input_bytes = static_cast<size_t>(
+      data_loader.attr("fold_input_bytes_free_fold").toInt());
+  int64_t fold_rows = static_cast<int64_t>(fold_input_bytes / 16);
+
+  auto eager_forward =
+      [](const at::Tensor& x, const at::Tensor& w_pre, const at::Tensor& b) {
+        return x * (at::relu(w_pre).sum(0) + b);
+      };
+
+  auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+      model_so_path);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA);
+
+  // Load-time fold of the active buffer, which releases its fold inputs.
+  at::Tensor previous = runner->run(input_tensors)[0];
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], previous));
+
+  // Twice, so the second round updates a buffer whose fold inputs were
+  // released by the first round's fold rather than at load.
+  for (int round = 0; round < 2; round++) {
+    at::Tensor w_pre = at::randn({fold_rows, 4}, options);
+    at::Tensor b = at::randn({4}, options);
+    at::Tensor expected = eager_forward(input_tensors[0], w_pre, b);
+
+    torch::inductor::TensorConstantMap weight_map;
+    weight_map.emplace("L__self___w_pre", &w_pre);
+    weight_map.emplace("L__self___b", &b);
+    runner->update_inactive_constant_buffer(weight_map);
+
+    // Folding the inactive buffer must release its fold inputs too, not just
+    // the active buffer's.
+    if (cudaDeviceSynchronize() != cudaSuccess) {
+      throw std::runtime_error("cudaDeviceSynchronize failed!");
+    }
+    size_t before = cudaAllocatedBytes();
+    runner->run_const_fold(/* use_inactive = */ true);
+    if (cudaDeviceSynchronize() != cudaSuccess) {
+      throw std::runtime_error("cudaDeviceSynchronize failed!");
+    }
+    size_t after = cudaAllocatedBytes();
+    ASSERT_GT(before > after ? before - after : 0, fold_input_bytes * 9 / 10);
+
+    // Still unswapped: the active buffer keeps serving the old weights.
+    ASSERT_TRUE(torch::allclose(previous, runner->run(input_tensors)[0]));
+
+    runner->swap_constant_buffer();
+    at::Tensor actual = runner->run(input_tensors)[0];
+    ASSERT_TRUE(torch::allclose(expected, actual));
+    ASSERT_FALSE(torch::allclose(previous, actual));
+    previous = actual;
+  }
+}
+
+// Folding the same weights repeatedly must be discarded, not repeated. Once
+// the first fold has released the fold inputs there is nothing left to fold
+// from, so every later call has to return without touching them and without
+// disturbing the folded result. A weight update is the only thing that re-arms
+// the buffer.
+void test_aoti_free_fold_repeated_const_fold() {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  const auto& model_so_path =
+      data_loader.attr("model_so_path_free_fold").toStringRef();
+  auto input_tensors =
+      data_loader.attr("inputs_free_fold").toTensorList().vec();
+  const auto& ref_output_tensors =
+      data_loader.attr("outputs_free_fold").toTensorList().vec();
+  size_t fold_input_bytes = static_cast<size_t>(
+      data_loader.attr("fold_input_bytes_free_fold").toInt());
+  int64_t fold_rows = static_cast<int64_t>(fold_input_bytes / 16);
+
+  auto eager_forward =
+      [](const at::Tensor& x, const at::Tensor& w_pre, const at::Tensor& b) {
+        return x * (at::relu(w_pre).sum(0) + b);
+      };
+
+  auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+      model_so_path);
+
+  // First run folds and releases the fold inputs.
+  std::vector<at::Tensor> outputs;
+  size_t freed = runAndMeasureFreed(runner.get(), input_tensors, outputs);
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], outputs[0]));
+  ASSERT_GT(freed, fold_input_bytes * 9 / 10);
+
+  // Every subsequent fold of the same weights is discarded. None may throw on
+  // the released inputs, and the prediction may not drift.
+  for (int i = 0; i < 5; i++) {
+    runner->run_const_fold(/* use_inactive = */ false);
+    ASSERT_TRUE(
+        torch::allclose(ref_output_tensors[0], runner->run(input_tensors)[0]));
+  }
+
+  // A weight update re-arms, so the next fold is honoured rather than
+  // discarded -- and the extra folds after it are discarded again.
+  at::Tensor w_pre = at::randn(
+      {fold_rows, 4}, at::TensorOptions().dtype(at::kFloat).device(at::kCUDA));
+  at::Tensor b =
+      at::randn({4}, at::TensorOptions().dtype(at::kFloat).device(at::kCUDA));
+  torch::inductor::TensorConstantMap update_map;
+  update_map.emplace("L__self___w_pre", &w_pre);
+  update_map.emplace("L__self___b", &b);
+  runner->update_constant_buffer(update_map, false, false);
+
+  at::Tensor expected = eager_forward(input_tensors[0], w_pre, b);
+  for (int i = 0; i < 3; i++) {
+    runner->run_const_fold(/* use_inactive = */ false);
+    ASSERT_TRUE(torch::allclose(expected, runner->run(input_tensors)[0]));
+  }
+  ASSERT_FALSE(torch::allclose(ref_output_tensors[0], expected));
+}
+
+// Back-to-back weight updates, in the two shapes serving can produce: update
+// then predict (each update arms a fold that releases again), and several
+// updates with no fold in between (only the last one's values may survive).
+// The prediction after each has to match eager.
+void test_aoti_free_fold_repeated_updates() {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  const auto& model_so_path =
+      data_loader.attr("model_so_path_free_fold").toStringRef();
+  auto input_tensors =
+      data_loader.attr("inputs_free_fold").toTensorList().vec();
+  size_t fold_input_bytes = static_cast<size_t>(
+      data_loader.attr("fold_input_bytes_free_fold").toInt());
+  int64_t fold_rows = static_cast<int64_t>(fold_input_bytes / 16);
+
+  auto eager_forward =
+      [](const at::Tensor& x, const at::Tensor& w_pre, const at::Tensor& b) {
+        return x * (at::relu(w_pre).sum(0) + b);
+      };
+
+  auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+      model_so_path);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA);
+
+  auto update = [&](const at::Tensor& w_pre, const at::Tensor& b) {
+    torch::inductor::TensorConstantMap map;
+    // TensorConstantMap borrows, so these must outlive the call; they do,
+    // since the caller's tensors are alive for the whole round.
+    map.emplace("L__self___w_pre", const_cast<at::Tensor*>(&w_pre));
+    map.emplace("L__self___b", const_cast<at::Tensor*>(&b));
+    runner->update_constant_buffer(
+        map,
+        /* use_inactive = */ false,
+        /* validate_full_update = */ false);
+  };
+
+  // First run folds and releases.
+  runner->run(input_tensors);
+
+  // Phase 1: update, predict, repeat. Every round re-arms, re-folds and
+  // releases again.
+  for (int round = 0; round < 4; round++) {
+    at::Tensor w_pre = at::randn({fold_rows, 4}, options);
+    at::Tensor b = at::randn({4}, options);
+    update(w_pre, b);
+    ASSERT_TRUE(torch::allclose(
+        eager_forward(input_tensors[0], w_pre, b),
+        runner->run(input_tensors)[0]));
+  }
+
+  // Phase 2: several updates with no fold in between. Each one overwrites the
+  // previous, still-unfolded values, so the single fold at the end must use
+  // the last ones.
+  std::vector<at::Tensor> w_pres;
+  std::vector<at::Tensor> bs;
+  for (int round = 0; round < 4; round++) {
+    w_pres.push_back(at::randn({fold_rows, 4}, options));
+    bs.push_back(at::randn({4}, options));
+    update(w_pres.back(), bs.back());
+  }
+  ASSERT_TRUE(torch::allclose(
+      eager_forward(input_tensors[0], w_pres.back(), bs.back()),
+      runner->run(input_tensors)[0]));
+}
+#endif
+
 void test_aoti_extract_constants_map(const std::string& device) {
   torch::NoGradGuard no_grad;
 
@@ -1280,6 +1689,34 @@ TEST_F(AotInductorTest, RuntimeUpdateConstantsCuda) {
 
 TEST_F(AotInductorTest, UpdateConstantsCuda) {
   test_aoti_constants_update("cuda", false);
+}
+
+TEST_F(AotInductorTest, FreeFoldInputOnlyConstantsUpdateCuda) {
+  test_aoti_free_fold_constants_update();
+}
+
+TEST_F(AotInductorTest, FreeFoldInputOnlyConstantsUpdateDefaultCuda) {
+  test_aoti_free_fold_constants_update_mode(FoldInputUpdateMode::kDefault);
+}
+
+TEST_F(AotInductorTest, FreeFoldInputOnlyConstantsUpdateUserManagedCuda) {
+  test_aoti_free_fold_constants_update_mode(FoldInputUpdateMode::kUserManaged);
+}
+
+TEST_F(AotInductorTest, FreeFoldInputOnlyConstantsUpdateAllowH2DCopyCuda) {
+  test_aoti_free_fold_constants_update_mode(FoldInputUpdateMode::kAllowH2DCopy);
+}
+
+TEST_F(AotInductorTest, FreeFoldInputOnlyConstantsInactiveUpdateFoldSwapCuda) {
+  test_aoti_free_fold_inactive_update_fold_swap();
+}
+
+TEST_F(AotInductorTest, FreeFoldInputOnlyConstantsRepeatedConstFoldCuda) {
+  test_aoti_free_fold_repeated_const_fold();
+}
+
+TEST_F(AotInductorTest, FreeFoldInputOnlyConstantsRepeatedUpdatesCuda) {
+  test_aoti_free_fold_repeated_updates();
 }
 
 TEST_F(AotInductorTest, ExtractConstantsMapCuda) {
