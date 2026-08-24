@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import contextlib
 import functools
-import inspect
 import warnings
 from collections import deque
 from dataclasses import dataclass
@@ -541,15 +540,11 @@ class TraceableWrapperSubclass(Protocol):
 TensorWithFlatten = TraceableWrapperSubclass
 
 
-def _has_traceable_wrapper_subclass_protocol(t: object) -> bool:
-    # Look up on the class MRO, never the instance. Instance hasattr() is True
-    # whenever __getattr__ returns without raising, which is not the flatten
-    # protocol. getattr_static also skips metaclass __getattr__.
-    cls = t if isinstance(t, type) else type(t)
-    return (
-        inspect.getattr_static(cls, "__tensor_flatten__", None) is not None
-        and inspect.getattr_static(cls, "__tensor_unflatten__", None) is not None
-    )
+@functools.lru_cache(maxsize=None)
+def _has_traceable_wrapper_subclass_protocol(cls: type) -> bool:
+    # Class lookup so instance __getattr__ cannot fake the flatten protocol.
+    # hasattr (not getattr_static) so Dynamo can trace nn.Module._apply.
+    return hasattr(cls, "__tensor_flatten__") and hasattr(cls, "__tensor_unflatten__")
 
 
 def is_traceable_wrapper_subclass(t: object) -> TypeIs[TraceableWrapperSubclass]:
@@ -564,7 +559,7 @@ def is_traceable_wrapper_subclass(t: object) -> TypeIs[TraceableWrapperSubclass]
     with ``return_and_correct_aliasing()`` when needed.
     """
     is_subclass = isinstance(t, torch.Tensor) and type(t) is not torch.Tensor
-    return is_subclass and _has_traceable_wrapper_subclass_protocol(t)
+    return is_subclass and _has_traceable_wrapper_subclass_protocol(type(t))
 
 
 def is_traceable_wrapper_subclass_type(

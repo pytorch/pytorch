@@ -1291,9 +1291,6 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)""",
     def test_traceable_wrapper_subclass_protocol_ignores_instance_getattr(
         self,
     ) -> None:
-        # Keep the assertions out of dynamo_wrapped compilation. The classes
-        # define __getattr__, and tracing construction of the wrapper crashes
-        # with InternalTorchDynamoError (AttributeError: elem).
         @torch._dynamo.disable
         def run_checks() -> None:
             class BareGetattrTensor(torch.Tensor):
@@ -1310,7 +1307,7 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)""",
             bare = BareGetattrTensor([1.0, 2.0])
             # __getattr__ returning None makes instance hasattr a false positive.
             self.assertTrue(hasattr(bare, "__tensor_flatten__"))
-            self.assertIsNone(getattr(bare, "__tensor_flatten__"))
+            self.assertIsNone(bare.__tensor_flatten__)
             self.assertFalse(is_traceable_wrapper_subclass(bare))
             self.assertFalse(is_traceable_wrapper_subclass_type(BareGetattrTensor))
 

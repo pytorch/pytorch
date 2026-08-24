@@ -2989,7 +2989,9 @@ class VariableBuilder:
         # By this point, we should have deduplicated all tensors
         self.assert_not_wrapped_by_this_graph(value)
 
-        if getattr_swallows_missing_attrs(value):
+        # Do not graph-break legitimate wrapper subclasses that also define __getattr__.
+        is_wrapper = is_traceable_wrapper_subclass(value)
+        if not is_wrapper and getattr_swallows_missing_attrs(value):
             unimplemented(
                 gb_type="Tensor subclass __getattr__ swallows missing attributes",
                 context=type(value).__name__,

@@ -4572,13 +4572,13 @@ def getattr_swallows_missing_attrs(value: Any) -> bool:
     """True if type(value).__getattr__ returns for names that are not on the object.
 
     Instance hasattr()/getattr(..., default) are unreliable in that case, because a
-    missing name does not raise AttributeError.
+    missing name does not raise AttributeError. A sentinel probe is required to
+    tell a raising __getattr__ from a swallowing one; get_custom_getattr only
+    tells us that __getattr__ exists.
     """
-    if inspect.getattr_static(type(value), "__getattr__", None) is None:
+    if get_custom_getattr(value) is None:
         return False
     sentinel = "__dynamo_missing_attr_probe__"
-    if inspect.getattr_static(value, sentinel, None) is not None:
-        return False
     try:
         object.__getattribute__(value, sentinel)
         return False
@@ -4586,7 +4586,7 @@ def getattr_swallows_missing_attrs(value: Any) -> bool:
         pass
     try:
         getattr(value, sentinel)
-    except Exception:
+    except AttributeError:
         return False
     return True
 
