@@ -359,6 +359,7 @@ class Benchmarker:
         self: Self,
         _callable: Callable[[], Any],
         grad_to_none: list[torch.Tensor] | None = None,
+        cudagraph_unroll: int | None = None,
         **kwargs: Any,
     ) -> float:
         """Benchmark a GPU callable using CUDA graph capture and replay.
@@ -367,6 +368,11 @@ class Benchmarker:
         which eliminates kernel launch overhead for fair comparison between different
         implementations.
         """
+        if cudagraph_unroll is None:
+            cudagraph_unroll = inductor_config.autotune_cudagraph_unroll
+        if cudagraph_unroll < 1:
+            raise ValueError("cudagraph_unroll must be at least 1")
+
         # Warmup
         torch.cuda.synchronize()
         _callable()
@@ -389,13 +395,17 @@ class Benchmarker:
             if grad_to_none is not None:
                 for x in grad_to_none:
                     x.grad = None
-            _callable()
+            for _ in range(cudagraph_unroll):
+                _callable()
 
         torch.cuda.current_stream().wait_stream(stream)
         torch.cuda.synchronize()
 
         # grad clearing is captured in the graph, don't pass it through.
-        return self.benchmark_gpu(cuda_graph.replay, **kwargs)
+        result = self.benchmark_gpu(cuda_graph.replay, **kwargs)
+        if isinstance(result, list):
+            return [timing / cudagraph_unroll for timing in result]  # type: ignore[return-value]
+        return result / cudagraph_unroll
 
 
 # Make built-in defaults explicit via the registry
