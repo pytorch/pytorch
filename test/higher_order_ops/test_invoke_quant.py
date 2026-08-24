@@ -22,10 +22,8 @@ from torch._inductor.pattern_matcher import (
 from torch._inductor.utils import is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
     onlyAccelerator,
-    requires_capabilities,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
@@ -34,6 +32,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import requires_triton
 
 
 invoke_quant_tracer = InvokeQuant()
@@ -202,8 +201,8 @@ class TestInvokeQuantInductor(TestInvokeQuant):
 class TestInvokeQuantInductorPrologue(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @requires_triton()
     @skipXPUIf(
         True,
         "MM Triton template fusion does not speed up on XPU; see #146568.",
