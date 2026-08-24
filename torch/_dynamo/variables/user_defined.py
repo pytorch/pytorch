@@ -182,7 +182,6 @@ if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-
     from torch._dynamo.variables.constant import ConstantVariable
 
     from .lists import ListVariable, TupleVariable
