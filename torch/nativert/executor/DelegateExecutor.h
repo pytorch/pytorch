@@ -41,12 +41,12 @@ class DelegateExecutor {
   // also release the refcount for weight tensor if it's no longer active. The
   // underlying storage for weight tensors will be freed when the refcount
   // reaches 0.
-  virtual void processWeights(std::shared_ptr<Weights> weights) = 0;
+  virtual void processWeights(const std::shared_ptr<Weights>& weights) = 0;
 
   // This call activates the processed weights.
   virtual void commitWeights() = 0;
 
-  virtual void initWeights(std::shared_ptr<Weights> weights) = 0;
+  virtual void initWeights(const std::shared_ptr<Weights>& weights) = 0;
 
   virtual std::vector<at::Tensor> run(std::vector<at::Tensor>& inputs) = 0;
 };

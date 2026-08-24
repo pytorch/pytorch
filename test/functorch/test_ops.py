@@ -403,7 +403,6 @@ aliasing_ops_list_return = {
 skip_noncontig = {
     "_batch_norm_with_update",
     "as_strided_copy",
-    "native_group_norm",
 }
 
 bool_unsupported_ordered_ops = {
@@ -991,17 +990,6 @@ class TestOperators(TestCase):
                 xfail(
                     "nn.functional.layer_norm"
                 ),  # vmap: inplace into a regular tensor
-                # RuntimeError: NYI: querying is_contiguous inside of vmap
-                # for memory_format other than torch.contiguous_formats
-                xfail("nn.functional.max_pool2d"),
-                # RuntimeError: NYI: Tensor.clone(memory_format) inside vmap is only
-                # supported with memory_format torch.preserve_format or
-                # torch.contiguous_format (got ChannelsLast)
-                xfail("nn.functional.max_unpool2d"),
-                # RuntimeError: NYI: Tensor.clone(memory_format) inside vmap is only
-                # supported with memory_format torch.preserve_format
-                # or torch.contiguous_format (got ChannelsLast)s
-                xfail("nn.functional.max_unpool2d", "grad"),
                 xfail(
                     "nn.functional.rrelu"
                 ),  # RuntimeError: vmap: we do not yet support aten::rrelu_with_noise.
@@ -1031,6 +1019,7 @@ class TestOperators(TestCase):
                 xfail("_native_batch_norm_legit"),
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
+                skip("native_group_norm"),  # takes too long
             }
         ),
     )
@@ -1053,7 +1042,6 @@ class TestOperators(TestCase):
         {
             xfail("as_strided", "partial_views"),
             xfail("as_strided_copy"),
-            xfail("native_group_norm"),
         },
     )
     def test_vmapvjpvjp(self, device, dtype, op):
@@ -1160,9 +1148,6 @@ class TestOperators(TestCase):
             xfail("scatter_reduce", "prod"),  # item call
             # Batching rule not implemented for aten::_use_cudnn_ctc_loss.Tensor
             xfail("nn.functional.ctc_loss", device_type="cuda"),
-            # NYI: querying is_contiguous inside of vmap for memory_format other than torch.contiguous_format
-            xfail("nn.functional.max_unpool2d"),
-            xfail("nn.functional.max_unpool2d", "grad"),
             xfail("sparse.sampled_addmm", ""),
             xfail("sparse.mm", "reduce"),
             xfail("as_strided_scatter", ""),  # calls as_strided
@@ -1213,7 +1198,6 @@ class TestOperators(TestCase):
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
-                xfail("native_group_norm"),
             }
         ),
     )
@@ -1323,13 +1307,16 @@ class TestOperators(TestCase):
                 "linalg.householder_product",
                 {torch.float32: tol(atol=2e-04, rtol=9e-3)},
             ),
+            tol1(
+                "linalg.polar",
+                {torch.float32: tol(atol=2e-04, rtol=1e-4)},
+            ),
         ),
     )
     @skipOps(
         vmapjvpall_fail.union(
             {
                 xfail("as_strided_copy"),
-                xfail("native_group_norm"),
             }
         ),
     )
@@ -1349,9 +1336,7 @@ class TestOperators(TestCase):
             return
 
         for sample in samples:
-            arg_values = [sample.input] + list(sample.args)
             kwarg_values = sample.kwargs
-            args = tuple(arg_values) + tuple(kwarg_values)
             fn, args = get_jvp_variant_primals_tangents(op, sample)
             is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
             generator = get_fallback_and_vmap_exhaustive(
@@ -1370,7 +1355,6 @@ class TestOperators(TestCase):
                 xfail(
                     "cdouble"
                 ),  # RuntimeError: required rank 4 tensor to use channels_last format
-                xfail("fill"),
                 skip("masked.mean"),  # ???
                 xfail("masked_scatter"),
                 xfail("put"),
@@ -1394,7 +1378,6 @@ class TestOperators(TestCase):
                 xfail("nn.functional.dropout3d", ""),
                 xfail("as_strided_scatter", ""),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
-                xfail("native_group_norm"),
             }
         ),
     )
@@ -1413,9 +1396,7 @@ class TestOperators(TestCase):
 
         def test():
             for sample in samples:
-                arg_values = [sample.input] + list(sample.args)
                 kwarg_values = sample.kwargs
-                args = tuple(arg_values) + tuple(kwarg_values)
                 fn, args = get_jvp_variant_primals_tangents(op, sample)
                 is_batch_norm_and_training = is_batch_norm_training(
                     op.name, kwarg_values
@@ -1442,7 +1423,6 @@ class TestOperators(TestCase):
                 xfail("view_as_complex"),
                 xfail("cummax"),
                 xfail("cummin"),
-                xfail("fill"),
                 xfail(
                     "narrow"
                 ),  # Batching rule not implemented for `narrow.Tensor` (and view op)
@@ -1514,7 +1494,6 @@ class TestOperators(TestCase):
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
-                xfail("native_group_norm"),
                 xfail(
                     "torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"
                 ),  # aten::_scaled_dot_product_flash_attention_for_cpu hit the vmap fallback which is currently disabled
@@ -1609,7 +1588,6 @@ class TestOperators(TestCase):
                 xfail("nn.functional.dropout2d", ""),
                 xfail("svd_lowrank", ""),
                 xfail("pca_lowrank", ""),
-                xfail("clamp"),
                 # something weird happening with channels_last
                 xfail("bfloat16"),
                 xfail("double"),
@@ -1626,7 +1604,6 @@ class TestOperators(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("as_strided", "partial_views"),
-                xfail("native_group_norm"),
             }
         ),
     )
@@ -1874,6 +1851,7 @@ class TestOperators(TestCase):
                 skip("broadcast_tensors"),
                 skip("linalg.lstsq"),
                 skip("nn.functional.bilinear"),
+                skip("native_group_norm"),
                 skip("native_layer_norm"),
                 skip("ormqr"),
                 # Not actually a problem
@@ -1958,10 +1936,6 @@ class TestOperators(TestCase):
                 # running_mean or running_var, which will be updated in place,
                 # were not batched.
                 xfail("nn.functional.instance_norm"),
-                # NYI: Tensor.clone(memory_format) inside vmap is only supported with
-                # memory_format torch.preserve_format or torch.contiguous_format (got ChannelsLast)
-                xfail("nn.functional.max_unpool2d"),
-                xfail("nn.functional.max_unpool2d", "grad"),
                 xfail(
                     "nn.functional.multi_margin_loss"
                 ),  # Forward AD not implemented and no decomposition
@@ -2012,7 +1986,6 @@ class TestOperators(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("native_dropout_backward"),
-                xfail("native_group_norm"),
             }
         ),
     )
@@ -2305,8 +2278,6 @@ class TestOperators(TestCase):
         {
             # The size of tensor a (4) must match the size of tensor b (10) at non-singleton dimension 0
             xfail("masked_select"),
-            xfail("nn.functional.max_unpool2d", "grad"),  # contiguous call
-            xfail("nn.functional.max_unpool2d"),  # contiguous call
             xfail("to_sparse"),  # dispatch key issue
             xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
             # https://github.com/pytorch/pytorch/issues/96560#issuecomment-2151063723
@@ -2337,8 +2308,6 @@ class TestOperators(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
-            # Removed in next PR
-            skip("native_group_norm", dtypes=(torch.float32,), device_type="cpu"),
         },
     )
     @opsToleranceOverride(
@@ -2372,11 +2341,9 @@ class TestOperators(TestCase):
             tol1(
                 "nn.functional.conv2d",
                 {torch.float32: tol(atol=5e-05, rtol=5e-05)},
-                device_type="cuda",
             ),
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
-            tol1("native_group_norm", {torch.float32: tol(atol=5e-5, rtol=5e-6)}),
         ),
     )
     def test_vmap_autograd_grad(self, device, dtype, op):
@@ -2945,9 +2912,9 @@ class TestOperators(TestCase):
         sample_inputs = op.sample_inputs(device, dtype)
 
         for sample_input in sample_inputs:
-            # Check that the op raises NotImplementedError or appropriate failure
+            # Ordered operations either reject complex inputs or lack complex support.
             self.assertRaises(
-                RuntimeError,
+                (TypeError, NotImplementedError),
                 op,
                 sample_input.input,
                 *sample_input.args,

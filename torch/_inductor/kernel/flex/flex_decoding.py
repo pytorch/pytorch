@@ -23,6 +23,7 @@ from ...utils import can_use_tma
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
+    can_skip_boundary_checks,
     create_indices_fake,
     create_num_blocks_fake_generator,
     freeze_irnodes,
@@ -221,12 +222,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
         for k, v in kernel_options.items()
     }
 
-    seq_q_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_q, 128), 0)
-    )
-    seq_kv_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_kv, 128), 0)
-    )
+    seq_q_divisible = can_skip_boundary_checks(seq_len_q, SPARSE_Q_BLOCK_SIZE)
+    seq_kv_divisible = can_skip_boundary_checks(seq_len_kv, SPARSE_KV_BLOCK_SIZE)
     if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
     else:

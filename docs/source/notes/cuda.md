@@ -67,7 +67,7 @@ with torch.cuda.device(1):
 
 ## TensorFloat-32 (TF32) on Ampere (and later) devices
 
-After Pytorch 2.9, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way, and
+After PyTorch 2.9, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way, and
 suggest to use the new APIs for better control.
 We can set float32 precision per backend and per operators. We can also override the global setting for a specific operator.
 
@@ -344,6 +344,8 @@ As an exception, several functions such as {meth}`~torch.Tensor.to` and
 {meth}`~torch.Tensor.copy_` admit an explicit {attr}`non_blocking` argument,
 which lets the caller bypass synchronization when it is unnecessary.
 Another exception is CUDA streams, explained below.
+
+(cuda-stream-semantics)=
 
 ### CUDA streams
 

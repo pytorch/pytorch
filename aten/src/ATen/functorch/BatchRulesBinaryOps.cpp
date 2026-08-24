@@ -117,6 +117,17 @@ static void binary_pointwise_inplace_batch_rule(
   (tensor_.*Meth)(other_, std::forward<ExtraArgs>(extra_args)...);
 }
 
+static Tensor move_cpu_logical_scalar_to_device(
+    const Tensor& tensor,
+    std::optional<int64_t> tensor_batch_dim,
+    const Tensor& other) {
+  if (tensor.device() != other.device() && tensor.device().is_cpu() &&
+      rankWithoutBatchDim(tensor, tensor_batch_dim) == 0) {
+    return tensor.to(other.device());
+  }
+  return tensor;
+}
+
 template <typename F, F Func>
 static std::tuple<Tensor, std::optional<int64_t>> comparison_pointwise_batch_rule(
     const Tensor& tensor, std::optional<int64_t> tensor_batch_dim,
@@ -128,6 +139,8 @@ static std::tuple<Tensor, std::optional<int64_t>> comparison_pointwise_batch_rul
 
   auto tensor_ = moveBatchDimToFront(tensor, tensor_batch_dim);
   auto other_ = moveBatchDimToFront(other, other_batch_dim);
+  tensor_ = move_cpu_logical_scalar_to_device(tensor_, tensor_batch_dim, other_);
+  other_ = move_cpu_logical_scalar_to_device(other_, other_batch_dim, tensor_);
 
   // If the dimensions aren't aligned, we need to line them up.
   // Tensor[B, 3] + Tensor[2, 5, 3] -> Tensor[B, 1, 1, 3] + Tensor[2, 5, 3]
@@ -258,23 +271,80 @@ static std::tuple<Tensor, std::optional<int64_t>> cdist_backward_batch_rule(
   return std::make_tuple(std::move(out), out_bdim);
 }
 
-static void fill__Tensor_batch_rule(
+static Tensor prepare_batched_fill_value(
+    const Tensor& self,
+    const Tensor& value,
+    std::optional<int64_t> value_bdim,
+    int64_t self_logical_rank,
+    const char* schema_name) {
+  TORCH_INTERNAL_ASSERT(value_bdim.has_value());
+  const auto value_logical_rank = rankWithoutBatchDim(value, value_bdim);
+  TORCH_CHECK(
+      value_logical_rank == 0,
+      "vmap: ",
+      schema_name,
+      "(self, value) expects `value` to be a tensor with logical rank 0, "
+      "but got logical rank ",
+      value_logical_rank,
+      ".");
+
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  value_ = maybePadToLogicalRank(value_, value_bdim, self_logical_rank);
+  if (value_.device() != self.device()) {
+    value_ = value_.to(self.device());
+  }
+  return value_;
+}
+
+static void fill__Tensor_batch_rule_impl(
     Tensor& self,
     std::optional<int64_t> self_bdim,
-    const Tensor& other,
-    std::optional<int64_t> other_bdim) {
-  if (!other_bdim.has_value()) {
+    const Tensor& value,
+    std::optional<int64_t> value_bdim,
+    const char* schema_name) {
+  if (!value_bdim.has_value()) {
     // Optimization: fill_ is faster than the other path which does
     // reshaping + copy_
-    self.fill_(other);
+    self.fill_(value);
     return;
   }
   if (!self_bdim) {
-    vmapIncompatibleInplaceError("fill_");
+    vmapIncompatibleInplaceError(schema_name);
   }
-  auto self_and_other = _binary_pointwise_helper(
-      self, self_bdim, other, other_bdim, /*do_type_promotion*/false);
-  std::get<0>(self_and_other).copy_(std::get<1>(self_and_other));
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto value_ = prepare_batched_fill_value(
+      self_, value, value_bdim, rankWithoutBatchDim(self, self_bdim), schema_name);
+  if (self_.is_alias_of(value_)) {
+    value_ = value_.clone();
+  }
+  self_.copy_(value_);
+}
+
+static void fill__Tensor_batch_rule(
+    Tensor& self,
+    std::optional<int64_t> self_bdim,
+    const Tensor& value,
+    std::optional<int64_t> value_bdim) {
+  fill__Tensor_batch_rule_impl(self, self_bdim, value, value_bdim, "fill_");
+}
+
+static std::tuple<Tensor, std::optional<int64_t>> fill_Tensor_batch_rule(
+    const Tensor& self,
+    std::optional<int64_t> self_bdim,
+    const Tensor& value,
+    std::optional<int64_t> value_bdim) {
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  std::optional<int64_t> result_bdim = std::nullopt;
+  if (self_bdim.has_value()) {
+    result_bdim = 0;
+  } else if (value_bdim.has_value()) {
+    self_ = ensure_has_bdim(
+        self_, /*has_bdim*/false, get_bdim_size2(self, self_bdim, value, value_bdim));
+    result_bdim = 0;
+  }
+  auto result = at::empty_like(self_);
+  fill__Tensor_batch_rule_impl(result, result_bdim, value, value_bdim, "fill");
+  return std::make_tuple(std::move(result), result_bdim);
 }
 
 static
@@ -488,6 +558,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   POINTWISE_BOXED(frexp.Tensor);
   BINARY_POINTWISE(heaviside);
   BINARY_POINTWISE(hypot);
+  UNARY_POINTWISE2(fill, Scalar);
+  VMAP_SUPPORT2(fill, Tensor, fill_Tensor_batch_rule);
   BINARY_POINTWISE(gcd);
   BINARY_POINTWISE(igamma);
   BINARY_POINTWISE(igammac);

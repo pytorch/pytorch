@@ -42,11 +42,22 @@ HUD_API = "https://hud.pytorch.org/api/hud/pytorch/pytorch"
 # we fetch whole pages and trim to the exact commit count requested.
 PER_PAGE = 100
 
-# Conclusions without a completed signal for a commit/job pair. "pending" is an
-# in-progress run (no result yet), so it is treated as no-data rather than
-# breaking a streak -- otherwise an in-flight rerun at the tip would reset the
-# streak of a job that is otherwise consistently failing.
-SKIPPED_CONCLUSIONS = {"neutral", "skipped", "pending"}
+# Conclusions without a completed signal for a commit/job pair. "pending",
+# "queued" and "in_progress" are in-flight runs (no result yet), so they are
+# treated as no-data rather than breaking a streak -- otherwise an in-flight
+# rerun, or a runner-queue backlog at the tip, would look like a failure streak
+# for a job that is actually green (queue-backlogged jobs report "queued").
+# "cancelled" is a superseded/aborted run (e.g. a concurrency cancel-in-progress
+# when a newer commit lands), not a real result -- counting it as a failure
+# makes jobs that are otherwise skipped/green look like they are failing.
+SKIPPED_CONCLUSIONS = {
+    "neutral",
+    "skipped",
+    "pending",
+    "queued",
+    "in_progress",
+    "cancelled",
+}
 # Two failures whose captured error text is at least this similar are treated
 # as the same underlying failure.
 SIMILARITY_THRESHOLD = 0.75
@@ -58,7 +69,7 @@ def is_skipped(job: dict[str, Any]) -> bool:
 
 def is_failure(job: dict[str, Any]) -> bool:
     conclusion = job.get("conclusion")
-    return conclusion is not None and conclusion not in ("success", "pending")
+    return conclusion is not None and conclusion != "success" and not is_skipped(job)
 
 
 def transpose_grid(
@@ -124,7 +135,10 @@ def group_failures(jobs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]
 
 
 def summarize_job(
-    name: str, statuses: list[dict[str, Any]], oldest_sha: str | None
+    name: str,
+    statuses: list[dict[str, Any]],
+    oldest_sha: str | None,
+    commit_meta: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     real = [j for j in statuses if not is_skipped(j)]
     streak = current_failure_streak(statuses)
@@ -135,25 +149,36 @@ def summarize_job(
         reverse=True,
     )
     latest_real = real[0] if real else None
+    failing_since_sha = streak[-1].get("sha") if streak else None
+    # Clipped means the true start may predate the window, so more --commits
+    # could help. That needs two things: (A) every completed run in the
+    # window is a failure, so nothing pins the start (len(streak) == len(real)),
+    # and (B) the job still has data at the oldest fetched commit, so older
+    # data plausibly exists. (B) uses the oldest cell, not the oldest failure,
+    # to tolerate no-data gaps at the window edge. A job that simply stopped
+    # running earlier fails (B) and is not clipped.
+    clipped = (
+        bool(streak)
+        and len(streak) == len(real)
+        and bool(statuses)
+        and statuses[-1].get("sha") == oldest_sha
+    )
+    # When the start is pinned (not clipped), surface the suspected culprit: the
+    # commit/PR the streak began at. Left blank when clipped -- we don't know it.
+    meta = commit_meta.get(failing_since_sha) if (commit_meta and not clipped) else None
+    pr_num = meta.get("prNum") if meta else None
     return {
         "job_name": name,
         "current_conclusion": latest_real.get("conclusion") if latest_real else None,
         "total_runs": len(real),
         "current_streak": len(streak),
-        "failing_since_sha": streak[-1].get("sha") if streak else None,
-        # Clipped means the true start may predate the window, so more --commits
-        # could help. That needs two things: (A) every completed run in the
-        # window is a failure, so nothing pins the start (len(streak) == len(real)),
-        # and (B) the job still has data at the oldest fetched commit, so older
-        # data plausibly exists. (B) uses the oldest cell, not the oldest failure,
-        # to tolerate no-data gaps at the window edge. A job that simply stopped
-        # running earlier fails (B) and is not clipped.
-        "failing_since_clipped": (
-            bool(streak)
-            and len(streak) == len(real)
-            and bool(statuses)
-            and statuses[-1].get("sha") == oldest_sha
+        "failing_since_sha": failing_since_sha,
+        "failing_since_clipped": clipped,
+        "failing_since_date": (meta.get("time") or "")[:10] if meta else "",
+        "failing_since_pr_url": (
+            f"https://github.com/pytorch/pytorch/pull/{pr_num}" if pr_num else ""
         ),
+        "failing_since_pr_title": (meta.get("commitTitle") or "") if meta else "",
         "distinct_failures": distinct,
     }
 
@@ -172,6 +197,11 @@ def collect_stats(
     oldest_sha = next(
         (grid[-1].get("sha") for _, grid in reversed(pages) if grid), None
     )
+    # Per-commit metadata (time, PR number, title) to attribute a pinned streak
+    # start to its commit/PR.
+    commit_meta = {
+        row["sha"]: row for _, grid in pages for row in grid if row.get("sha")
+    }
     stats = []
     for name, statuses in transpose_grid(pages).items():
         if pattern and not pattern.match(name):
@@ -180,7 +210,7 @@ def collect_stats(
         # so its "streak" is ancient history, not a current failure.
         if not statuses or statuses[0].get("sha") != newest_sha:
             continue
-        summary = summarize_job(name, statuses, oldest_sha)
+        summary = summarize_job(name, statuses, oldest_sha, commit_meta)
         if summary["current_streak"] < min_streak:
             continue
         stats.append(summary)
@@ -248,6 +278,9 @@ def print_report(stats: list[dict[str, Any]], ref: str) -> None:
                 print(
                     "        (or earlier; failing throughout window, rerun with more --commits)"
                 )
+            elif s["failing_since_pr_url"]:
+                print(f"        {s['failing_since_date']} {s['failing_since_pr_url']}")
+                print(f"        {s['failing_since_pr_title']}")
         for failure in s["distinct_failures"]:
             capture = failure["capture"]
             if len(capture) > 100:
@@ -269,6 +302,9 @@ def write_csv(stats: list[dict[str, Any]]) -> None:
             "current_streak",
             "failing_since_sha",
             "failing_since_clipped",
+            "failing_since_date",
+            "failing_since_pr_url",
+            "failing_since_pr_title",
             "distinct_failures",
         ]
     )
@@ -284,6 +320,9 @@ def write_csv(stats: list[dict[str, Any]]) -> None:
                 s["current_streak"],
                 s["failing_since_sha"],
                 s["failing_since_clipped"],
+                s["failing_since_date"],
+                s["failing_since_pr_url"],
+                s["failing_since_pr_title"],
                 failures,
             ]
         )

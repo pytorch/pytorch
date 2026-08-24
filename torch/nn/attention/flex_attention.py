@@ -20,6 +20,7 @@ import torch
 from torch import Tensor
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import setup_compilation_env
+from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import (
     GetAttrKey,
@@ -77,6 +78,48 @@ def _warn_once(
         if not torch.compiler.is_compiling():
             warnings.warn(message, category, stacklevel=2)
         _WARNINGS_SHOWN.add(warning_id)
+
+
+def _validate_block_mask_shape(
+    query: Tensor,
+    key: Tensor,
+    q_len: int | torch.SymInt,
+    kv_len: int | torch.SymInt,
+    block_mask_q_len: int | torch.SymInt,
+    block_mask_kv_len: int | torch.SymInt,
+) -> None:
+    """Preserve unbacked checks without specializing regular dynamic lengths."""
+    has_unbacked_input_lengths = has_free_unbacked_symbols(
+        query
+    ) or has_free_unbacked_symbols(key)
+    if not torch.compiler.is_dynamo_compiling():
+        lengths = (q_len, kv_len, block_mask_q_len, block_mask_kv_len)
+        has_unbacked_input_lengths = (
+            has_unbacked_input_lengths or has_free_unbacked_symbols(lengths)
+        )
+
+    # Case 1: unbacked lengths need symbolic checks that can become runtime assertions.
+    if has_unbacked_input_lengths:
+        torch._check(q_len <= block_mask_q_len, _BLOCK_MASK_TOO_SMALL_ERROR)
+        torch._check(kv_len <= block_mask_kv_len, _BLOCK_MASK_TOO_SMALL_ERROR)
+        torch._check(q_len >= block_mask_q_len, _BLOCK_MASK_TOO_LARGE_ERROR)
+        torch._check(kv_len >= block_mask_kv_len, _BLOCK_MASK_TOO_LARGE_ERROR)
+        return
+
+    # Case 2: backed lengths use regular validation so Dynamo can generalize equality.
+    if q_len > block_mask_q_len or kv_len > block_mask_kv_len:
+        raise RuntimeError(_BLOCK_MASK_TOO_SMALL_ERROR)
+    if q_len < block_mask_q_len or kv_len < block_mask_kv_len:
+        raise RuntimeError(_BLOCK_MASK_TOO_LARGE_ERROR)
+
+    if q_len != block_mask_q_len:
+        raise AssertionError(
+            f"query.size(-2) ({q_len}) != block_mask_q_len ({block_mask_q_len})"
+        )
+    if kv_len != block_mask_kv_len:
+        raise AssertionError(
+            f"key.size(-2) ({kv_len}) != block_mask_kv_len ({block_mask_kv_len})"
+        )
 
 
 __all__ = [
@@ -2214,7 +2257,7 @@ def _enforce_mem_layouts(
     def is_col_major(tensor: Tensor) -> bool:
         return tensor.stride()[-2] == 1
 
-    # These memory layout constraint are only for FP8 GEMMs on NVIDIA GPU architectures >= SM89 and < SM100.
+    # These memory layout constraints are only for FP8 GEMMs on NVIDIA GPU architectures >= SM89 and < SM100.
     # This is because GPU arch < SM89 does not support FP8 GEMMs, and
     # SM100 has support for TN, NT, TT, NN layouts for FP8 GEMMs
     # (i.e., left and right operands can be in row or column major layouts)
@@ -2457,23 +2500,8 @@ def flex_attention(
         block_mask_q_len = block_mask.shape[-2]
         block_mask_kv_len = block_mask.shape[-1]
 
-        # Keep these as separate checks: explicit sym_and/sym_or calls become
-        # trace-visible non-Tensor ops under Dynamo.
-        torch._check(
-            q_len <= block_mask_q_len,
-            _BLOCK_MASK_TOO_SMALL_ERROR,
-        )
-        torch._check(
-            kv_len <= block_mask_kv_len,
-            _BLOCK_MASK_TOO_SMALL_ERROR,
-        )
-        torch._check(
-            q_len >= block_mask_q_len,
-            _BLOCK_MASK_TOO_LARGE_ERROR,
-        )
-        torch._check(
-            kv_len >= block_mask_kv_len,
-            _BLOCK_MASK_TOO_LARGE_ERROR,
+        _validate_block_mask_shape(
+            query, key, q_len, kv_len, block_mask_q_len, block_mask_kv_len
         )
 
     if scale is None:

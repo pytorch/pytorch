@@ -10,10 +10,12 @@ from unittest import mock
 import torch
 import torch._inductor.kernel.flex.flex_flash_attention as flex_flash_attention_module
 from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
+from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor.kernel.flex.flex_flash_attention import (
     _flash_attention_unavailable_message,
     _hierarchical_indexer_cute,
     ensure_flash_available,
+    flash_supports_aux_scalars,
     HierarchicalIndex,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -979,6 +981,72 @@ class TestFlexFlash(InductorTestCase):
 
         q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
         flash_vs_triton(q, k, v, score_mod=score_mod)
+
+    @xfailIfSM120OrLater
+    def test_inline_asm_score_mod(self):
+        """score_mod using the inline_asm_elementwise HOP lowers to a PTX call
+        inside the generated CuteDSL score_mod."""
+        seq_len = 512
+        bias = torch.randn(seq_len, device="cuda")
+
+        def score_mod(score, _b, _h, _q, kv_idx):
+            return inline_asm_elementwise(
+                score,
+                bias[kv_idx],
+                asm_str="fma.rn.f32 $0, $1, 0f40000000, $2;",
+                constraints="=f,f,f",
+                dtype=torch.float32,
+            )
+
+        q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+        flash_vs_triton(q, k, v, score_mod=score_mod)
+
+    @xfailIfSM120OrLater
+    def test_inline_asm_score_mod_pack2(self):
+        """pack=2 inline asm requires compile, so compare flash against the
+        compiled Triton backend directly."""
+
+        def score_mod(score, _b, _h, _q, _kv):
+            return inline_asm_elementwise(
+                score,
+                asm_str="add.f32 $0, $2, $2; add.f32 $1, $3, $3;",
+                constraints="=f,=f,f,f",
+                dtype=torch.float32,
+                pack=2,
+            )
+
+        q, k, v = create_test_tensors(seq_len=512, device="cuda")
+        compiled_fn = torch.compile(flex_attention)
+        out_flash = compiled_fn(
+            q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
+        )
+        out_triton = compiled_fn(
+            q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "TRITON"}
+        )
+        torch.testing.assert_close(out_flash, out_triton, atol=2e-3, rtol=2e-3)
+
+    @xfailIfSM120OrLater
+    def test_inline_asm_mask_mod(self):
+        """mask_mod using the inline_asm_elementwise HOP: multi-line PTX
+        predicate runs in block-mask construction and on partial blocks."""
+        seq_len = 512
+        asm_str = "{\n.reg .pred p;\nsetp.ge.s32 p, $1, $2;\nselp.u32 $0, 1, 0, p;\n}"
+
+        def asm_causal_mask(_b, _h, q_idx, kv_idx):
+            pred = inline_asm_elementwise(
+                q_idx.to(torch.int32),
+                kv_idx.to(torch.int32),
+                asm_str=asm_str,
+                constraints="=r,r,r",
+                dtype=torch.int32,
+            )
+            return pred != 0
+
+        block_mask = _create_block_mask_for_device(
+            asm_causal_mask, 2, 4, seq_len, seq_len, device="cuda"
+        )
+        q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+        flash_vs_triton(q, k, v, block_mask=block_mask)
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
@@ -2043,7 +2111,7 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertTrue(
             prof_result["found"],
-            f"Flash attention kernel not found. Available kernels: {prof_result['kernel_names']}",
+            lambda msg: f"{msg}\nFlash attention kernel not found. Available kernels: {prof_result['kernel_names']}",
         )
 
         with cuda_kernel_profiler("flash_attncute") as prof_result:
@@ -2053,7 +2121,7 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertFalse(
             prof_result["found"],
-            f"Flash attention kernel unexpectedly found when BACKEND='TRITON'. Kernels: {prof_result['kernel_names']}",
+            lambda msg: f"{msg}\nFlash attention kernel unexpectedly found when BACKEND='TRITON'. Kernels: {prof_result['kernel_names']}",
         )
 
     @dtypes(torch.float16, torch.bfloat16)
@@ -2144,7 +2212,7 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertTrue(
             prof_result["found"],
-            f"Flash attention backward kernel not found. Kernels: {prof_result['kernel_names']}",
+            lambda msg: f"{msg}\nFlash attention backward kernel not found. Kernels: {prof_result['kernel_names']}",
         )
 
     @xfailIfSM120OrLater
@@ -2393,22 +2461,72 @@ class TestFlexFlash(InductorTestCase):
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_backend_raises_on_grad_logsumexp(self, device, dtype):
-        from torch._dynamo.exc import BackendCompilerFailed
-
-        q, k, v = create_test_tensors(dtype=dtype, device=device, requires_grad=True)
-        lse_mask = torch.randn(2, 4, 512, device=device)
-
-        compiled_flex = torch.compile(flex_attention)
-        out, lse = compiled_flex(
-            q, k, v, return_lse=True, kernel_options={"BACKEND": "FLASH"}
+    def test_flash_backend_supports_grad_logsumexp(self, device, dtype):
+        torch.manual_seed(0)
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=128,
+            dim=32,
+            dtype=dtype,
+            device=device,
         )
-        loss = out.mean() + (lse * lse_mask).sum()
-        with self.assertRaisesRegex(
-            BackendCompilerFailed,
-            "FLASH backend backward does not support differentiating through logsumexp",
+        grad_out = torch.randn_like(q)
+        grad_lse = torch.randn(1, 1, 128, device=device, dtype=torch.float32) * 3
+
+        def run_backend(backend, q_in, k_in, v_in):
+            compiled_flex = torch.compile(
+                functools.partial(
+                    flex_attention,
+                    score_mod=_times_two,
+                    scale=1.0,
+                    return_lse=True,
+                    kernel_options={"BACKEND": backend},
+                )
+            )
+            out, lse = compiled_flex(q_in, k_in, v_in)
+            return torch.autograd.grad(
+                (out, lse), (q_in, k_in, v_in), (grad_out, grad_lse)
+            )
+
+        q_flash, k_flash, v_flash = [
+            t.detach().clone().requires_grad_() for t in (q, k, v)
+        ]
+        q_triton, k_triton, v_triton = [
+            t.detach().clone().requires_grad_() for t in (q, k, v)
+        ]
+        grads_flash = run_backend("FLASH", q_flash, k_flash, v_flash)
+        grads_triton = run_backend("TRITON", q_triton, k_triton, v_triton)
+
+        q_ref, k_ref, v_ref = [t.detach().float().requires_grad_() for t in (q, k, v)]
+        out_ref, lse_ref = flex_attention(
+            q_ref,
+            k_ref,
+            v_ref,
+            score_mod=_times_two,
+            scale=1.0,
+            return_lse=True,
+        )
+        grads_ref = torch.autograd.grad(
+            (out_ref, lse_ref),
+            (q_ref, k_ref, v_ref),
+            (grad_out.float(), grad_lse),
+        )
+
+        for grad_flash, grad_triton, grad_ref in zip(
+            grads_flash, grads_triton, grads_ref
         ):
-            loss.backward()
+            self.assertTrue(torch.isfinite(grad_flash).all())
+            self.assertTrue(torch.isfinite(grad_triton).all())
+            self.assertTrue(torch.isfinite(grad_ref).all())
+            atol = 2 * (grad_ref + 0.3 - 0.3 - grad_ref).abs().max().item()
+            triton_error = (
+                (grad_triton - grad_ref.to(grad_triton.dtype)).abs().max().item()
+            )
+            flash_error = (
+                (grad_flash - grad_ref.to(grad_flash.dtype)).abs().max().item()
+            )
+            self.assertLessEqual(flash_error, 2 * triton_error + atol)
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_backend_raises_on_return_max_scores(self, device, dtype):
@@ -2639,7 +2757,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             self._flash_triton_dynamic(q, k, v)
 
     def test_captured_float_fails_with_dynamic(self):
-        """Test that captured Python float still fails as a CPU scalar tensor."""
+        """Test that a captured Python float is rejected under dynamic shapes."""
         val = 2.0
 
         def score_mod(score, _b, _h, _q, _k):
@@ -2648,7 +2766,14 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         compiled_fn = torch.compile(flex_attention, dynamic=True)
         q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
 
-        with self.assertRaisesRegex(RuntimeError, r"captures a 0-dim CPU tensor"):
+        # The unspecialized float reaches the HOP either as a 0-dim CPU scalar
+        # tensor, rejected by the FLASH lowering, or as a SymFloat, rejected by
+        # the flex_attention operand check, depending on which tracer owns its
+        # `.item()` proxy. Both are valid rejections.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"captures a 0-dim CPU tensor|can only be of.*but got.*SymFloat",
+        ):
             compiled_fn(
                 q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
             )
@@ -2922,6 +3047,11 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         )
 
     def test_dynamic_scalar_closure_in_mask_mod(self):
+        if not flash_supports_aux_scalars():
+            self.skipTest(
+                "Flash attention (CUTE) scalar capture support is not available"
+            )
+
         major, _ = torch.cuda.get_device_capability()
         if SM120OrLater:
             self.skipTest("block sparse mask_mod is not supported on SM120")
@@ -3159,7 +3289,7 @@ class TestHierarchicalIndex(InductorTestCase):
         self.assertIn(
             expected_pattern,
             code_str,
-            f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
+            lambda msg: f"{msg}\nExpected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
         )
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
@@ -3206,7 +3336,7 @@ class TestHierarchicalIndex(InductorTestCase):
         self.assertIn(
             expected_pattern,
             code_str,
-            f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
+            lambda msg: f"{msg}\nExpected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
         )
 
     @xfailIfSM120OrLater

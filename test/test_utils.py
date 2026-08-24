@@ -969,6 +969,47 @@ class TestCppExtensionUtils(TestCase):
 
 
 class TestTraceback(TestCase):
+    @staticmethod
+    @torch._dynamo.disable
+    def _context_decorator_traceback_frame_names():
+        @torch.no_grad()
+        def decorated():
+            raise RuntimeError("test")
+
+        try:
+            decorated()
+        except RuntimeError as e:
+            return [frame.name for frame in traceback.extract_tb(e.__traceback__)]
+        else:
+            raise AssertionError("Expected RuntimeError")
+
+    def test_context_decorator_traceback_frame_name(self):
+        frame_names = self._context_decorator_traceback_frame_names()
+        self.assertIn("no_grad", frame_names)
+        self.assertNotIn("decorate_context", frame_names)
+
+    @staticmethod
+    @torch._dynamo.disable
+    def _context_decorator_generator_traceback_frame_names():
+        @torch.no_grad()
+        def decorated_generator():
+            yield None
+            raise RuntimeError("test")
+
+        gen = decorated_generator()
+        next(gen)
+        try:
+            next(gen)
+        except RuntimeError as e:
+            return [frame.name for frame in traceback.extract_tb(e.__traceback__)]
+        else:
+            raise AssertionError("Expected RuntimeError")
+
+    def test_context_decorator_generator_traceback_frame_name(self):
+        frame_names = self._context_decorator_generator_traceback_frame_names()
+        self.assertIn("no_grad", frame_names)
+        self.assertNotIn("generator_context", frame_names)
+
     def test_basic(self):
         source = """\
 def f(x):
@@ -1133,6 +1174,50 @@ class TestDeviceLazyInit(TestCase):
 instantiate_device_type_tests(
     TestDeviceLazyInit, globals(), except_for=["cpu"], allow_xpu=True
 )
+
+
+class TestEnv(TestCase):
+    def test_getenv_matches_os(self):
+        for name in ("PATH", "PATH_DOES_NOT_EXIST_TORCH_TEST"):
+            self.assertEqual(torch._utils.getenv(name), os.environ.get(name))
+
+    def test_setenv_roundtrip(self):
+        name = "TORCH_TEST_SETENV_VAR"
+        torch._utils.setenv(name, "hello")
+        self.assertEqual(torch._utils.getenv(name), "hello")
+
+    def test_setenv_overwrite(self):
+        name = "TORCH_TEST_SETENV_OVERWRITE"
+        torch._utils.setenv(name, "first")
+        torch._utils.setenv(name, "second", overwrite=False)
+        self.assertEqual(torch._utils.getenv(name), "first")
+        torch._utils.setenv(name, "second")
+        self.assertEqual(torch._utils.getenv(name), "second")
+
+    def test_unsetenv(self):
+        name = "TORCH_TEST_UNSETENV"
+        torch._utils.setenv(name, "gone")
+        self.assertEqual(torch._utils.getenv(name), "gone")
+        torch._utils.unsetenv(name)
+        self.assertIsNone(torch._utils.getenv(name))
+
+    def test_os_environ_hook(self):
+        name = "TORCH_TEST_ENVIRON_HOOK"
+        torch._utils.install_os_environ_hook()
+        try:
+            os.environ[name] = "hooked"
+            # Both the cached os.environ dict and c10 observe the write.
+            self.assertEqual(os.environ.get(name), "hooked")
+            self.assertEqual(torch._utils.getenv(name), "hooked")
+            del os.environ[name]
+            self.assertIsNone(os.environ.get(name))
+            self.assertIsNone(torch._utils.getenv(name))
+            # Idempotent while installed.
+            torch._utils.install_os_environ_hook()
+        finally:
+            torch._utils.remove_os_environ_hook()
+        # After removal os.putenv is restored, so it is no longer our hook.
+        self.assertIsNot(os.putenv, torch._utils._torch_putenv)
 
 
 if __name__ == "__main__":

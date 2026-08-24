@@ -753,7 +753,20 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 }
 
 const std::vector<uint64_t>& ProcessGroupGloo::groupRanks() const {
-  if (options_->global_ranks_in_group.empty() && local_id_ == 0) {
+  // An empty global_ranks_in_group means "this group spans the whole world, in
+  // rank order": _new_process_group_helper() only fills the vector in for
+  // subgroups, and a directly-constructed (stateless) ProcessGroupGloo leaves
+  // it at its default. Deriving the identity mapping is therefore the right
+  // answer whenever it is empty.
+  //
+  // This must NOT be gated on local_id_ == 0. local_id_ is a process-global
+  // counter over every ProcessGroupGloo ever constructed in this process, so
+  // the default group only gets 0 when it happens to be the first gloo backend
+  // built. If any gloo pg was created earlier -- a stateless pg, or one
+  // inherited across fork() -- the default group fell through to the empty
+  // global_ranks_in_group below and split() then indexed an empty vector,
+  // segfaulting on a null data pointer.
+  if (options_->global_ranks_in_group.empty()) {
     if (defaultRanks_.size() != static_cast<size_t>(size_)) {
       defaultRanks_.resize(size_);
       std::iota(defaultRanks_.begin(), defaultRanks_.end(), 0);
@@ -781,27 +794,15 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
     glooOpts = ProcessGroupGloo::Options::create_default();
   }
 
-  // The child must not share the parent's devices: a gloo device routes
-  // incoming connections to pairs via a per-device sequence counter, and the
-  // lazy-init connect path assumes a remote pair's sequence number equals its
-  // rank, which only holds for a device serving a single context. Sharing
-  // devices would hang the child's first collective under lazy init.
-  auto childOpts = ProcessGroupGloo::Options::create_default(glooOpts->timeout);
-  childOpts->threads = glooOpts->threads;
-  childOpts->group_name = glooOpts->group_name;
-  childOpts->group_desc = glooOpts->group_desc;
-  childOpts->use_pg_for_symm_mem_rendezvous =
-      glooOpts->use_pg_for_symm_mem_rendezvous;
-
   // TODO: we need to get rid of globalRanksInGroup eventually.
   std::vector<uint64_t> globalRanksInGroup;
   globalRanksInGroup.reserve(ranks.size());
   for (auto rank : ranks) {
     globalRanksInGroup.emplace_back(groupRanks()[rank]);
   }
-  childOpts->global_ranks_in_group = std::move(globalRanksInGroup);
+  glooOpts->global_ranks_in_group = std::move(globalRanksInGroup);
   auto pg = c10::make_intrusive<ProcessGroupGloo>(
-      store->clone(), groupRank, ranks.size(), childOpts);
+      store->clone(), groupRank, ranks.size(), glooOpts);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
 
@@ -1536,7 +1537,7 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
   std::vector<c10::Event> outputEvents;
 };
 
-// A work that takes an lambda on construction and calls it on wait.
+// A work that takes a lambda on construction and calls it on wait.
 // It is useful for add a continuation to another work, and/or
 // composing multiple works together.
 class LambdaWork : public Work {
@@ -2329,8 +2330,6 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
       gloo::alltoall(opts);
     } else {
       // Gloo alltoallv
-      c10d::checkSplitSizes(inputCounts, inputTensor, context_->size);
-      c10d::checkSplitSizes(outputCounts, outputTensor, context_->size);
       std::vector<int64_t> sendCounts(context_->size);
       std::vector<int64_t> recvCounts(context_->size);
       std::vector<int64_t> sendOffsets(context_->size);
@@ -2445,6 +2444,9 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::all_to_all_single(
   if (!inputTensor.is_contiguous(inputTensor.suggest_memory_format())) {
     C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
   }
+
+  c10d::checkSplitSizes(inputCounts, inputTensor, getSize());
+  c10d::checkSplitSizes(outputCounts, outputTensor, getSize());
 
   const auto& device = outputTensor.device();
   c10::intrusive_ptr<AsyncAlltoallWork> work;

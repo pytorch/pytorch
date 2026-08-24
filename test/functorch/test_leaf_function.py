@@ -840,6 +840,16 @@ class outer(torch.nn.Module):
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionDynamo(PytreeRegisteringTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        config.canonicalize_output_graph_node_order = True
+
+    @classmethod
+    def tearDownClass(cls):
+        config.canonicalize_output_graph_node_order = False
+        super().tearDownClass()
+
     def _assert_models_equal(
         self,
         model_expected,
