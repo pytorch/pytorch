@@ -1,6 +1,7 @@
 #pragma once
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/Float8_e4m3fn.h>
 #include <torch/headeronly/util/Float8_e4m3fnuz.h>
 #include <torch/headeronly/util/Float8_e5m2.h>
@@ -10,8 +11,6 @@
 #include <torch/headeronly/util/complex.h>
 #include <torch/headeronly/util/overflows.h>
 
-#include <sstream>
-#include <stdexcept>
 #include <type_traits>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -279,10 +278,11 @@ C10_HOST_DEVICE To convert(From f) {
 
 // Shared error-formatting helper for checked_convert/unsafe_wrapping_convert.
 [[noreturn]] inline void report_overflow(const char* name) {
-  std::ostringstream oss;
-  oss << "value cannot be converted to type " << name << " without overflow";
-  throw std::runtime_error(
-      std::move(oss).str()); // rather than domain_error (issue 33562)
+  STD_TORCH_CHECK(
+      false,
+      "value cannot be converted to type ",
+      name,
+      " without overflow"); // rather than domain_error (issue 33562)
 }
 
 template <typename To, typename From>
