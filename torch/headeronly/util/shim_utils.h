@@ -15,6 +15,9 @@ HIDDEN_NAMESPACE_BEGIN(torch, headeronly, detail)
     int64_t line) {
   std::stringstream ss;
   ss << call << " API call failed at " << file << ", line " << line;
+  // STD_TORCH_CHECK would stamp this helper's file and line over the
+  // caller's, which the message above already carries.
+  // @allow-raw-throw: keeps the caller's location in the message
   throw std::runtime_error(std::move(ss).str());
 }
 HIDDEN_NAMESPACE_END(torch, headeronly, detail)

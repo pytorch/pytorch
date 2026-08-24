@@ -145,6 +145,7 @@ from ..source import (
     GetItemSource,
     GradSource,
     is_constant_source,
+    is_from_attr_proxy_source,
     is_from_closure_source,
     is_from_global_source,
     is_from_nonlocal_source,
@@ -161,6 +162,7 @@ from ..source import (
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
+    TypeMROSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
@@ -662,7 +664,7 @@ class GraphArg:
     # TODO: storing a SymInt here but not a FakeTensor is a pretty strange
     # thing to do.  Probably should have example (which stores an int) and
     # fake_example
-    _example: Any
+    _example: object
     # When True, this indicates that this GraphArg is a Python quantity (e.g.,
     # a float or int) which we pass to the FX graph as a Tensor.  This
     # controls how we codegen calls into the Dynamo graph: we will call
@@ -707,7 +709,11 @@ class GraphArg:
                 raise AssertionError("TensorWeakRef expired unexpectedly")
             return r
         else:
-            return self._example
+            # The declared return type is known-incomplete: torch.ScriptObject
+            # and list-of-tensor graphargs also reach here, and output_graph.py
+            # reads them back (1827, 3424, 3441). Do not tighten `_example` to
+            # this union without fixing those paths first.
+            return cast("torch.SymInt | BackwardState | None", self._example)
 
     def __post_init__(self) -> None:
         if isinstance(self._example, torch.Tensor):
@@ -828,24 +834,8 @@ class VariableBuilder:
 
     def _call_impl(self, value: object) -> VariableTracker:
         self.tx.output.current_tracer.traced_sources.add(self.source)
-        if value in self.tx.output.side_effects:
-            side_effect_result = self.tx.output.side_effects[value]
-            dup_guard = make_dupe_guard(self.source, side_effect_result.source)
-            if dup_guard:
-                self.install_guards(dup_guard)
-
-            if isinstance(value, torch.nn.Module) and isinstance(
-                side_effect_result, UnspecializedNNModuleVariable
-            ):
-                # This means that two nn module instances with different sources
-                # have the same id. NN modules are somewhat special objects,
-                # because we have to track their nn_module_stack for ease of
-                # use. But if we don't do anything, we will just return the
-                # older variable tracker with the older nn_module_stack. So,
-                # lets return the old variable tracker but update its
-                # nn_module_stack
-                side_effect_result.set_nn_module_stack_source(self.source)
-            return side_effect_result
+        if (result := self._reuse_tracked_variable(value)) is not None:
+            return result
 
         cached_vt = self.tx.output.variable_tracker_cache.get(self.source)
         if cached_vt:
@@ -889,6 +879,49 @@ class VariableBuilder:
         if "JVP_NESTING" not in self.source.name:
             self.tx.output.variable_tracker_cache[self.source] = vt
         return vt
+
+    def _reuse_tracked_variable(
+        self,
+        value: object,
+    ) -> VariableTracker | None:
+        if value not in self.tx.output.side_effects:
+            return None
+
+        result = self.tx.output.side_effects[value]
+        if self.source != result.source:
+            dup_guard = make_dupe_guard(self.source, result.source)
+            if dup_guard is not None:
+                self.install_guards(dup_guard)
+            elif is_from_attr_proxy_source(self.source) or (
+                result.source is not None and is_from_attr_proxy_source(result.source)
+            ):
+                if result.source is None:
+                    raise AssertionError("Tracked AttrProxy module must have a source")
+                # make_dupe_guard cannot relate local and global sources. Reusing
+                # the tracker still requires both sources to resolve to the same
+                # base module, so pin each source to its compile-time object.
+                install_guard(
+                    self.source.make_guard(GuardBuilder.ID_MATCH),
+                    result.source.make_guard(GuardBuilder.ID_MATCH),
+                )
+
+        if (
+            isinstance(value, torch.nn.Module)
+            and isinstance(result, UnspecializedNNModuleVariable)
+            # WeakKeyDictionary internals are an implementation detail, not a
+            # useful module path. Keep the existing source until a user-facing
+            # source is observed.
+            and not self.source.is_dict_key()
+        ):
+            # This means that two nn module instances with different sources
+            # have the same id. NN modules are somewhat special objects,
+            # because we have to track their nn_module_stack for ease of
+            # use. But if we don't do anything, we will just return the
+            # older variable tracker with the older nn_module_stack. So,
+            # lets return the old variable tracker but update its
+            # nn_module_stack
+            result.set_nn_module_stack_source(self.source)
+        return result
 
     def _can_lift_attrs_to_inputs(self, vt: VariableTracker) -> bool:
         return type(vt) in {
@@ -2403,10 +2436,31 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return TupleVariable([ConstantVariable.create(item) for item in value])
 
+        list_source = self.get_source()
+        first_item_source = None
+        if (
+            config.assume_dunder_attributes_remain_unchanged
+            and isinstance(list_source, TypeMROSource)
+            and isinstance(value, tuple)
+            and value
+        ):
+            first_item = value[0]
+            if (
+                isinstance(first_item, type)
+                and type.__getattribute__(first_item, "__mro__") is value
+            ):
+                first_item_source = list_source.base
         output = [
             LazyVariableTracker.create(
                 item,
-                source=GetItemSource(self.get_source(), i),
+                # Reuse the type source when this really is the type's own
+                # first MRO entry. A custom metaclass may return an MRO whose
+                # first item is a different type.
+                source=(
+                    first_item_source
+                    if i == 0 and first_item_source is not None
+                    else GetItemSource(list_source, i)
+                ),
                 tx=self.tx,
             )
             for i, item in enumerate(value)
@@ -2666,6 +2720,10 @@ class VariableBuilder:
                 # type: ignore[attr-defined]
                 value = value.get_base()
                 self.source = AttrProxySource(self.source)
+                # _call_impl checked the AttrProxy identity, while side effects
+                # track the unwrapped module. Check again after normalization.
+                if (result := self._reuse_tracked_variable(value)) is not None:
+                    return result
 
             freezing = is_parameter_freezing()
 
@@ -2772,25 +2830,29 @@ class VariableBuilder:
                         f"{int_spec!r} (expected int, IntVar, or None)"
                     )
 
-            if is_dynamic_source(self.source.name):
+            # Precedence, highest first: static-sources, dynamic-sources,
+            # unbacked-sources, dynamic-values.
+            if is_static_source(self.source.name):
+                log.debug("%s marked static via static-sources list", self.source.name)
+                self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                return ConstantVariable.create(value=value, source=self.source)
+            elif is_dynamic_source(self.source.name):
                 log.debug(
                     "%s marked dynamic via dynamic-sources list", self.source.name
                 )
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
-
-            if is_dynamic_value(value):
+            elif is_unbacked_source(self.source.name):
+                log.debug(
+                    "%s marked unbacked via unbacked-sources list", self.source.name
+                )
+                return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
+            elif is_dynamic_value(value):
                 log.debug(
                     "%s marked dynamic via dynamic-values list (value=%s)",
                     self.source.name,
                     value,
                 )
                 return self.wrap_symint(value, dynamism=DimDynamic.DYNAMIC)
-
-            if is_unbacked_source(self.source.name):
-                log.debug(
-                    "%s marked unbacked via unbacked-sources list", self.source.name
-                )
-                return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
 
             if not config.specialize_int:
                 # unspecializing int by default, but still
@@ -3624,9 +3686,18 @@ class VariableBuilder:
         )
 
         # Directly do item to bypass capture_scalar_outputs
+        #
+        # Must use root_tracer, not output.create_proxy (current tracer):
+        # this VariableTracker (and the proxy it wraps) gets reused across
+        # every later reference to the same source, via
+        # output.variable_tracker_cache. If it's first built while tracing a
+        # HOP body (e.g. torch.utils.checkpoint), a sibling HOP subgraph
+        # reusing the same source later gets the cached proxy back verbatim
+        # but can't reach it via its own tracer's parent chain.
+        # See https://github.com/pytorch/pytorch/issues/193194.
         r = wrap_fx_proxy(
             self.tx,
-            self.tx.output.create_proxy(
+            self.tx.output.root_tracer.create_proxy(
                 "call_method",
                 "item",
                 *proxy_args_kwargs([unspec_var], {}),
@@ -4199,7 +4270,8 @@ def handle_traced_output(
         ]
         or (
             # TODO: this is a little sus, because we didn't check what the self is
-            proxy.node.op == "call_method" and proxy.node.target == "bit_length"
+            proxy.node.op == "call_method"
+            and proxy.node.target in {"bit_length", "__index__"}
         )
     ):
         set_example_value(proxy.node, example_value)
@@ -4408,6 +4480,21 @@ def get_dynamic_sources() -> list[tuple[str, int | None]]:
     return _DYNAMIC_SOURCES
 
 
+def _match_source_list(
+    sources: list[tuple[str, int | None]], source_name: str, dim: int | None
+) -> str | None:
+    """Return the matching entry, pretty printed, or None if nothing matches.
+
+    Unlike the ``is_*_source`` wrappers this does not log, so it is safe to call
+    when merely resolving precedence between the source lists.
+    """
+    for pattern, pat_dim in sources:
+        if pattern == source_name or re.match(pattern, source_name):
+            if dim is None or pat_dim is None or pat_dim == dim:
+                return pattern if pat_dim is None else f"{pattern}:{pat_dim}"
+    return None
+
+
 def is_dynamic_source(source_name: str, dim: int | None = None) -> bool:
     """Check whether ``source_name`` is in the dynamic-sources list.
 
@@ -4419,23 +4506,16 @@ def is_dynamic_source(source_name: str, dim: int | None = None) -> bool:
     If ``dim`` is given, returns True only when a matching entry either has no
     dim qualifier ("all dims dynamic") or its dim qualifier equals ``dim``.
     """
-    dynamic_sources = get_dynamic_sources()
-    for pattern, pat_dim in dynamic_sources:
-        if pattern == source_name or re.match(pattern, source_name):
-            if dim is None or pat_dim is None or pat_dim == dim:
-                pretty = pattern if pat_dim is None else f"{pattern}:{pat_dim}"
-                log.debug(
-                    "%s was marked dynamic due to dynamic-sources entry: %s",
-                    source_name,
-                    pretty,
-                )
-                symbolic_shape_log.info(
-                    "%s was marked dynamic due to dynamic-sources entry: %s",
-                    source_name,
-                    pretty,
-                )
-                return True
-    return False
+    entry = _match_source_list(get_dynamic_sources(), source_name, dim)
+    if entry is None:
+        return False
+    log.debug(
+        "%s was marked dynamic due to dynamic-sources entry: %s", source_name, entry
+    )
+    symbolic_shape_log.info(
+        "%s was marked dynamic due to dynamic-sources entry: %s", source_name, entry
+    )
+    return True
 
 
 def record_automatic_dynamic(
@@ -4501,17 +4581,59 @@ def is_unbacked_source(source_name: str, dim: int | None = None) -> bool:
 
     See :func:`is_dynamic_source` for the ``dim`` argument semantics.
     """
-    unbacked_sources = get_unbacked_sources()
-    for pattern, pat_dim in unbacked_sources:
-        if pattern == source_name or re.match(pattern, source_name):
-            if dim is None or pat_dim is None or pat_dim == dim:
-                log.debug(
-                    "%s was marked unbacked due to unbacked-sources entry: %s",
-                    source_name,
-                    pattern if pat_dim is None else f"{pattern}:{pat_dim}",
-                )
-                return True
-    return False
+    entry = _match_source_list(get_unbacked_sources(), source_name, dim)
+    if entry is None:
+        return False
+    log.debug(
+        "%s was marked unbacked due to unbacked-sources entry: %s", source_name, entry
+    )
+    return True
+
+
+# Same per-dim suffix syntax as _DYNAMIC_SOURCES: optional ":N" restricts the
+# match to dim N of the matched tensor.
+_STATIC_SOURCES: list[tuple[str, int | None]] | None = None
+_STATIC_SOURCES_CONFIG_HASH: int | None = None
+
+
+def get_static_sources() -> list[tuple[str, int | None]]:
+    global _STATIC_SOURCES, _STATIC_SOURCES_CONFIG_HASH
+
+    current_hash = hash(torch.compiler.config.static_sources)
+
+    # If we have already calculated the sources and the config hasn't changed, return cached result
+    if _STATIC_SOURCES is not None and _STATIC_SOURCES_CONFIG_HASH == current_hash:
+        return _STATIC_SOURCES
+
+    # Config has changed or first time, (re)calculate the sources
+    _STATIC_SOURCES = [
+        _parse_source_entry(s)
+        for s in torch.compiler.config.static_sources.replace(" ", "").split(",")
+        if s
+    ]
+    _STATIC_SOURCES_CONFIG_HASH = current_hash
+
+    return _STATIC_SOURCES
+
+
+def is_static_source(source_name: str, dim: int | None = None) -> bool:
+    """Check whether ``source_name`` is in the static-sources list.
+
+    Precedence against the dynamic-/unbacked-sources lists is resolved by the
+    callers, which check static-sources first.
+
+    See :func:`is_dynamic_source` for the ``dim`` argument semantics.
+    """
+    entry = _match_source_list(get_static_sources(), source_name, dim)
+    if entry is None:
+        return False
+    log.debug(
+        "%s was marked static due to static-sources entry: %s", source_name, entry
+    )
+    symbolic_shape_log.info(
+        "%s was marked static due to static-sources entry: %s", source_name, entry
+    )
+    return True
 
 
 # Cache for the parsed `torch.compiler.config.dynamic_values` config.
@@ -4766,21 +4888,33 @@ def _automatic_dynamic(
             config.automatic_dynamic_shapes and frame_state_entry.is_stride_dynamic(i)
         )
 
-        if is_dynamic_source(name, i):
+        # Precedence, highest first: static-sources, dynamic-sources,
+        # unbacked-sources, dynamic-values.
+        unbacked_via_source = False
+        if is_static_source(name, i):
+            log.debug("%s dim %d marked static via static-sources list", name, i)
+            marked_static = True
+            automatic_dynamic_size = False
+            automatic_dynamic_stride = False
+            # Weak/propagated dynamism is a hint (maybe_mark_dynamic, or AOTAutograd
+            # propagating dynamism across a graph break), so the explicit static
+            # request wins. A hard mark_dynamic still takes precedence, matching
+            # the precedence mark_static has.
+            marked_weak_dynamic = False
+        elif is_dynamic_source(name, i):
             log.debug("%s dim %d marked dynamic via dynamic-sources list", name, i)
             automatic_dynamic_size = True
-
-        if is_dynamic_value(e.size(i)):
+        elif is_unbacked_source(name, i):
+            log.debug("%s dim %d marked unbacked via unbacked-sources list", name, i)
+            unbacked_via_source = True
+            automatic_dynamic_size = True
+        elif is_dynamic_value(e.size(i)):
             log.debug(
                 "%s dim %d marked dynamic via dynamic-values list (value=%s)",
                 name,
                 i,
                 e.size(i),
             )
-            automatic_dynamic_size = True
-
-        if is_unbacked_source(name, i):
-            log.debug("%s dim %d marked unbacked via unbacked-sources list", name, i)
             automatic_dynamic_size = True
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
@@ -4833,7 +4967,7 @@ def _automatic_dynamic(
         constraint_sizes.append(constraint_size)
         constraint_strides.append(constraint_stride)
 
-        if marked_unbacked or is_unbacked_source(name, i):
+        if marked_unbacked or unbacked_via_source:
             dynamic_size = DimDynamic.UNBACKED
         elif (
             constraint_size is not None

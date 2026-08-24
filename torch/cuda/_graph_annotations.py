@@ -91,12 +91,38 @@ _tools_id_available: bool | None = None
 # can span threads (e.g. autograd).
 _annotations_enabled: bool = False
 
+# How the active capture discovers which nodes a ``mark_kernels`` scope contains:
+#
+# "edge_walk" -- snapshot the capture frontier on scope entry and walk the dependent
+#   edges added by scope exit. Needs nothing but the CUDA runtime, but only sees nodes
+#   reachable from the snapshotted frontier and rescans a nested scope's nodes once per
+#   enclosing scope.
+# "cupti" -- CUPTI names each node as it is created (see
+#   ``torch.cuda._graph_node_callbacks``), so the scope only has to publish which
+#   annotation is active; ``_active_scopes`` below is that ambient state.
+#
+# Set alongside _annotations_enabled by ``torch.cuda.graph``; only meaningful while
+# annotations are enabled.
+_annotation_backend: str = "edge_walk"
 
-# Id of the top-level capture graph of the active capture. A conditional node's body is
-# captured into a separate cudaGraph_t (see CUDAGraph::begin_capture_to_conditional_node),
-# and its node ids live in that graph's id space, which remap_to_exec_graph never rekeys --
-# so mark_kernels compares against this to detect a scope inside a body.
+# Merged annotations of the ``mark_kernels`` scopes currently open, innermost last: each
+# entry already includes its enclosing scopes, with the inner scope winning shared keys. So
+# the innermost entry is what to annotate with, and leaving a scope just pops. Only the
+# "cupti" backend reads this (at node-creation time); the edge walk derives the same
+# information from graph topology after the fact.
+_active_scopes: list[dict[str, Any]] = []
+
+# Id of the top-level capture graph of the active capture, read once at capture_begin (see
+# maybe_stamp_capture_root) and then used by everyone who needs it: mark_kernels compares
+# against it to detect a scope inside a conditional-node body, the CUPTI backend filters out
+# body nodes the same way, and the graph object is stamped with it for the later remap.
 _capture_root_graph_id: int | None = None
+
+
+def capture_root_graph_id() -> int | None:
+    """The active capture's top-level graph id, or ``None`` outside a capture that recorded
+    one. Not a public API."""
+    return _capture_root_graph_id
 
 
 def _set_annotations_enabled(enabled: bool) -> None:
@@ -106,6 +132,34 @@ def _set_annotations_enabled(enabled: bool) -> None:
     _annotations_enabled = enabled
     if not enabled:
         _capture_root_graph_id = None
+        # A capture that raised mid-scope would otherwise leak its scopes into the next one.
+        _active_scopes.clear()
+
+
+def _set_annotation_backend(backend: str) -> None:
+    """Set how ``mark_kernels`` scopes discover their nodes for this capture.
+
+    Separate from :func:`_set_annotations_enabled` because the two are decided at different
+    points: recording is enabled before ``capture_begin`` (``maybe_stamp_capture_root`` is
+    gated on it), while the backend is only final once the CUPTI callback has actually been
+    armed, which needs the capture live. Not a public API."""
+    global _annotation_backend
+    _annotation_backend = backend
+
+
+def current_annotation() -> dict[str, Any] | None:
+    """The merged annotation for the ``mark_kernels`` scopes currently open, or ``None`` when
+    none are. Not a public API."""
+    return _active_scopes[-1] if _active_scopes else None
+
+
+def record_node_annotation(tools_id: int, annotation: dict[str, Any]) -> None:
+    """Attribute one graph node, keyed by its capture-side ``toolsId``.
+
+    The CUPTI backend's entry point into the same store the edge walk fills, so both
+    backends are remapped to exec-graph ids by ``remap_to_exec_graph`` identically. Not a
+    public API."""
+    _kernel_annotations[tools_id].append(annotation)
 
 
 def _graph_id(graph: Any) -> int:
@@ -119,21 +173,31 @@ def _graph_id(graph: Any) -> int:
     )
 
 
-def maybe_stamp_capture_root(stream: Any) -> None:
-    """Record the top-level capture graph of the capture just begun on ``stream``.
+def maybe_stamp_capture_root(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
+    """Record the top-level capture graph of the capture just begun, and stamp it on the
+    graph for the later remap.
 
-    Called by ``torch.cuda.graph`` right after ``capture_begin``, while ``stream`` is
-    still capturing into the top-level graph. Not a public API."""
+    Called by ``torch.cuda.graph`` right after ``capture_begin``, while the current stream is
+    still capturing into the top-level graph. It has to go through the stream because the
+    ``cudaGraph_t`` does not exist until ``capture_end`` -- ``raw_cuda_graph()`` raises before
+    then -- but the template graph keeps that one id for its whole life, so this single read
+    serves every consumer: the conditional-body checks in ``mark_kernels``, the CUPTI
+    backend's body-node filter, and ``remap_to_exec_graph`` via the stamp below. Not a public
+    API."""
     global _capture_root_graph_id
     _capture_root_graph_id = None
     if not _annotations_enabled or _is_tools_id_unavailable():
         return
     stream_handle = _cuda_runtime.cudaStream_t(  # pyrefly: ignore[missing-attribute]
-        init_value=stream.cuda_stream
+        init_value=torch.cuda.current_stream().cuda_stream
     )
     state = _get_capture_state(stream_handle)
-    if state is not None:
-        _capture_root_graph_id = _graph_id(state[0])
+    if state is None:
+        return
+    _capture_root_graph_id = _graph_id(state[0])
+    torch_cuda_graph._capture_graph_id = _capture_root_graph_id
+    # Fresh capture: annotations are keyed by this capture id until remapped.
+    torch_cuda_graph._remapped_exec_id = None
 
 
 def _probe_tools_id() -> bool:
@@ -306,6 +370,12 @@ _kernel_annotations: defaultdict[int, list[Any]] = defaultdict(list)
 # avoid touching cuda.bindings at import time.
 _ANNOTATABLE_TYPES: set[Any] | None = None
 
+# The same set as raw driver enum values, for callers handed a plain int rather than a
+# CUgraphNodeType (CUPTI reports ``GraphData.node_type`` that way). Derived from
+# _get_annotatable_types so the membership is defined in exactly one place; cached because
+# the CUPTI backend consults it once per node created.
+_ANNOTATABLE_TYPE_VALUES: frozenset[int] | None = None
+
 
 def _get_annotatable_types() -> set[Any]:
     global _ANNOTATABLE_TYPES
@@ -321,6 +391,14 @@ def _get_annotatable_types() -> set[Any]:
             node_types.CU_GRAPH_NODE_TYPE_HOST,
         }
     return _ANNOTATABLE_TYPES
+
+
+def _get_annotatable_type_values() -> frozenset[int]:
+    """:func:`_get_annotatable_types` as raw driver enum values."""
+    global _ANNOTATABLE_TYPE_VALUES
+    if _ANNOTATABLE_TYPE_VALUES is None:
+        _ANNOTATABLE_TYPE_VALUES = frozenset(int(t) for t in _get_annotatable_types())
+    return _ANNOTATABLE_TYPE_VALUES
 
 
 # Node types whose work lives in a separate cudaGraph_t (child graphs, conditional
@@ -708,6 +786,20 @@ def mark_kernels(annotation: str | dict[str, Any], *, backward: bool = True):
     if isinstance(annotation, str):
         annotation = {"name": annotation}
 
+    if _annotation_backend == "cupti":
+        # Nodes are attributed as CUPTI reports their creation, so the scope only has to
+        # publish itself as the ambient annotation -- no frontier snapshot, and no rescan
+        # per enclosing scope. Merge into the enclosing scope on the way in (inner wins), so
+        # leaving is a pop and the enclosing annotation is restored as it was.
+        _active_scopes.append(
+            {**_active_scopes[-1], **annotation} if _active_scopes else annotation
+        )
+        try:
+            yield
+        finally:
+            _active_scopes.pop()
+        return
+
     scope = _begin_kernel_scope()
     if scope is None:
         yield
@@ -754,32 +846,6 @@ def mark_kernels(annotation: str | dict[str, Any], *, backward: bool = True):
         _pending_scopes.append((annotation, tools_ids))
 
 
-def maybe_stamp_capture_graph_id(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
-    """Record the captured graph's id on the graph object for later remap.
-
-    Called from ``capture_end`` in the window after capture ends and before the
-    graph is finalized, where the template ``cudaGraph_t`` is live for both
-    ``keep_graph`` modes (and reachable via ``raw_cuda_graph``). ``remap_to_exec_graph``
-    later matches this graph's annotations to its exec id via this stamp, without
-    relying on call ordering. No-op if annotations are disabled or
-    ``cudaGraphNodeGetToolsId`` is unavailable. Harmless when no ``mark_kernels``
-    regions run: the annotation map stays empty so resolve and remap are no-ops.
-    """
-    if not _annotations_enabled or _is_tools_id_unavailable():
-        return
-    # Past the _is_tools_id_unavailable() guard cuda-bindings is present and the
-    # driver supports the toolsId API (same version gate as cudaGraphGetId), so
-    # any error here is unexpected: error-check and let it raise. cudaGraphGetId
-    # accepts the raw cudaGraph_t handle (int) directly.
-    torch_cuda_graph._capture_graph_id = _check_cuda_bindings(
-        _cuda_runtime.cudaGraphGetId(  # pyrefly: ignore[missing-attribute]
-            torch_cuda_graph.raw_cuda_graph()
-        )
-    )
-    # Fresh capture: annotations are keyed by this capture id until remapped.
-    torch_cuda_graph._remapped_exec_id = None
-
-
 def resolve_pending_annotations() -> None:
     """Resolve pending scope toolsIds into kernel annotations."""
     if not _pending_scopes:
@@ -818,7 +884,7 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     This function rewrites the keys so annotations match the trace.
 
     The graph's capture id is read from the ``_capture_graph_id`` stamped on it
-    by ``maybe_stamp_capture_graph_id`` in the capture_end window, so only the annotations
+    by ``maybe_stamp_capture_root`` at capture_begin, so only the annotations
     belonging to this graph are rekeyed. This is order-independent and correct
     when several graphs are captured in sequence: call once per graph. Graphs
     captured with annotations disabled have no capture id and are skipped.

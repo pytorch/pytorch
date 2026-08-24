@@ -326,6 +326,31 @@ def replace_needed(unpacked_torch: Path, original: str, replacement: str) -> Non
                 patchelf("--replace-needed", entry, replacement, str(sofile))
 
 
+def check_no_dangling_bundled_needed(torch_lib: Path) -> None:
+    """Fail the build if a lib in torch/lib NEEDs a versioned soname of a
+    bundled lib without a file of that name in the wheel (a missed
+    replace_needed rewrite). Such a reference only resolves against a system
+    ROCm install, so the wheel silently stops being self-contained."""
+    names = {f.name for f in torch_lib.iterdir()}
+    dangling = []
+    for sofile in sorted(torch_lib.glob("*.so*")):
+        if not sofile.is_file():
+            continue
+        try:
+            needed = subprocess.check_output(
+                [PATCHELF, "--print-needed", str(sofile)], text=True
+            ).splitlines()
+        except subprocess.CalledProcessError:
+            continue
+        for entry in needed:
+            stem = entry.split(".so", 1)[0] + ".so"
+            if stem in names and entry not in names:
+                dangling.append(f"{sofile.name} -> {entry}")
+    if dangling:
+        joined = "\n".join(sorted(set(dangling)))
+        sys.exit(f"Dangling NEEDED entries after bundling (missed rewrite?):\n{joined}")
+
+
 def repair_wheel(
     wheel: Path,
     output_dir: Path,
@@ -366,10 +391,7 @@ def repair_wheel(
         # Copy follows symlinks so versioned sonames become real files we can
         # rename to their bare .so form to match what the wheel links against.
         for lib in bundled_libs:
-            dest = torch_lib / lib.dest_name
-            shutil.copy(lib.src, dest)
-            if lib.needed_alias:
-                replace_needed(torch_dir, lib.needed_alias, lib.dest_name)
+            shutil.copy(lib.src, torch_lib / lib.dest_name)
             # Some bundled deps are dlopen'd by their *bare* soname at runtime,
             # not just via NEEDED. In particular rocSHMEM's NUMAWrapper global
             # ctor does dlopen("libnuma.so"). The original build_rocm.sh shipped
@@ -384,6 +406,16 @@ def repair_wheel(
                 bare_path = torch_lib / bare
                 if not bare_path.exists():
                     bare_path.symlink_to(lib.dest_name)
+        # Rewrite NEEDED entries only after every bundled lib has been copied
+        # in: bundled libs reference each other (e.g. libhiprtc.so needs
+        # libamd_comgr.so.3), and replace_needed only visits files present in
+        # the wheel at call time, so rewriting inside the copy loop misses
+        # references from libs bundled after their dependency (#189194).
+        for lib in bundled_libs:
+            if lib.needed_alias:
+                replace_needed(torch_dir, lib.needed_alias, lib.dest_name)
+        if bundled_libs:
+            check_no_dangling_bundled_needed(torch_lib)
 
         # Copy auxiliary content (gfx kernel files, MIOpen db, RCCL algos, ...)
         for aux in aux_files:
