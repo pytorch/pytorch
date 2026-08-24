@@ -258,11 +258,15 @@ struct hermite_polynomial_he_functor {
   }
 };
 
-// bfloat16 layout: 1 sign bit, 8 exponent bits, 7 mantissa bits.
-constexpr constant ushort kBFloatSignMask = 1 << 15; // 0x8000
-constexpr constant ushort kBFloatMagMask = (1 << 15) - 1; // 0x7FFF
-constexpr constant ushort kBFloatInf = 0xFF << 7; // 0x7F80, exponent all ones
-constexpr constant ushort kBFloatQuietBit = 1 << 6; // 0x0040, top mantissa bit
+// Metal defines denorm_min() as BFLT_MIN, so it
+// reports the smallest normal (0x0080) instead of 0x0001.
+using bfloat_bits_t = ushort;
+constexpr constant bfloat_bits_t kBFloatSignMask = bfloat_bits_t(1)
+    << (sizeof(bfloat_bits_t) * 8 - 1);
+constexpr constant bfloat_bits_t kBFloatMagMask = kBFloatSignMask - 1;
+constexpr constant bfloat_bits_t kBFloatInf =
+    as_type<bfloat_bits_t>(::metal::numeric_limits<bfloat>::infinity());
+constexpr constant bfloat_bits_t kBFloatSmallestSubnormal = 1;
 
 struct nextafter_functor {
   template <typename T>
@@ -288,7 +292,7 @@ struct nextafter_functor {
       return ut; // +-0 -> +-0, sign taken from `to`
     }
     if (af == 0) {
-      return ushort((ut & kBFloatSignMask) | 1); // +-0 -> smallest subnormal
+      return ushort((ut & kBFloatSignMask) | kBFloatSmallestSubnormal);
     }
     // Sign-magnitude is not ordered like an integer, so re-apply the sign.
     const bool neg = (uf & kBFloatSignMask) != 0;
