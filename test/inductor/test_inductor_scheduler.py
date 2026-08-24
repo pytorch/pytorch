@@ -20,7 +20,9 @@ from torch._inductor.scheduler import (
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedNestedReductions,
+    MemoryDepMatch,
     NestedReduction,
+    ProjectedConsumerAccess,
     Scheduler,
 )
 from torch._inductor.sizevars import SizeVarAllocator
@@ -206,6 +208,7 @@ class TestScheduler(TestCase):
         other = self._mock_base_snode("other")
         grouped_node = self._mock_base_snode("grouped_node")
         stage = Mock()
+        plan = Mock(nested_stage=stage)
         scheduler.node_to_mempool = {node2: (7, 0)}
 
         nested = object.__new__(FusedNestedReductions)
@@ -216,13 +219,33 @@ class TestScheduler(TestCase):
             patch.object(
                 FusedNestedReductions,
                 "_plan_append",
-                return_value=(grouped_node, stage),
+                return_value=(grouped_node, plan),
             ),
             patch.object(FusedNestedReductions, "__init__", return_value=None),
         ):
             FusedNestedReductions.fuse_with(nested, other)
 
         self.assertEqual(scheduler.node_to_mempool[grouped_node], (7, 0))
+
+    def test_nested_reduction_append_replans_after_legality(self):
+        scheduler = Mock()
+        grouped_node = self._mock_base_snode("grouped")
+        other = self._mock_base_snode("other")
+        grouped_node.get_operation_names.return_value = OrderedSet(["grouped"])
+        other.ancestors = OrderedSet(["grouped"])
+        plan = Mock()
+        plan.nested_stage.pointwise_domains = (
+            (other, NestedReduction.PointwiseDomain.SUB_PARENT),
+        )
+        scheduler._can_fuse_nested_reduction_append.return_value = True
+
+        nested = object.__new__(FusedNestedReductions)
+        nested.scheduler = scheduler
+        nested.node2 = grouped_node
+        nested._plan_append = Mock(side_effect=[(grouped_node, plan), None])
+
+        self.assertFalse(nested.can_fuse_with(other, can_reorder=True))
+        self.assertEqual(nested._plan_append.call_count, 2)
 
     @inductor_config.patch(combo_kernel_max_num_nodes=16)
     def test_combo_kernel_grouping_respects_mempool(self):
@@ -355,16 +378,45 @@ class TestScheduler(TestCase):
             )
             for read, write in equivalent_only:
                 self.assertFalse(scheduler.fusable_read_and_write(read, write))
+                self.assertTrue(
+                    scheduler._fusable_read_after_index_equivalence(read, write)
+                )
 
-    @parametrize("extra_dep", [None, "star", "weak"])
-    def test_index_equivalent_names_only_relax_memory_deps(self, extra_dep):
+            rejected_equivalence = [
+                (
+                    MemoryDep(
+                        "buf",
+                        32 * d0 + FloorDiv(d1, 128) + d1,
+                        (d0, d1),
+                        (128, 4096),
+                    ),
+                    MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32)),
+                ),
+                (
+                    MemoryDep("buf", d0, (d0, d1), (8, 4)),
+                    MemoryDep("buf", w1, (w0, w1), (8, 4)),
+                ),
+                (
+                    MemoryDep("buf", d0 + d1, (d0, d1), (2, 2)),
+                    MemoryDep("buf", w0 + w1, (w0, w1), (2, 2)),
+                ),
+            ]
+            for read, write in rejected_equivalence:
+                self.assertFalse(
+                    scheduler._fusable_read_after_index_equivalence(read, write)
+                )
+
+    @parametrize("extra_dep", [None, "memory", "star", "weak"])
+    def test_planned_dependency_matches_only_relax_memory_deps(self, extra_dep):
         read_var, write_var = sympy.symbols(
             "read_var write_var", integer=True, nonnegative=True
         )
         read = MemoryDep("buf", read_var + 1, (read_var,), (4,))
         write = MemoryDep("buf", write_var, (write_var,), (4,))
         deps = OrderedSet([read])
-        if extra_dep == "star":
+        if extra_dep == "memory":
+            deps.add(MemoryDep("buf", read_var + 2, (read_var,), (4,)))
+        elif extra_dep == "star":
             deps.add(StarDep("buf"))
         elif extra_dep == "weak":
             deps.add(WeakDep("buf", "mutated"))
@@ -390,42 +442,43 @@ class TestScheduler(TestCase):
             scheduler.can_fuse_vertical(
                 producer,
                 consumer,
-                index_equivalent_dep_names=OrderedSet(["buf"]),
+                fusion_dependency_matches=(MemoryDepMatch(write, read),),
             ),
             extra_dep is None,
         )
 
     @parametrize("write_kind", ["dense", "alias"])
-    def test_nested_index_equivalent_names_require_injective_producer(self, write_kind):
+    def test_nested_dependency_matches_require_injective_producer(self, write_kind):
         d0, d1 = sympy.symbols("d0 d1", integer=True, nonnegative=True)
         index = 2 * d0 + d1 if write_kind == "dense" else d0 + d1
         write = MemoryDep("buf", index, (d0, d1), (2, 2))
-        read = MemoryDep("buf", d0, (d0,), (4,))
+        read = MemoryDep("buf", d0 + 1, (d0,), (4,))
 
         producer = Mock()
         producer.get_buffer_names.return_value = OrderedSet(["buf"])
         producer.read_writes.writes = OrderedSet([write])
         consumer = Mock()
         consumer.read_writes.reads = OrderedSet([read])
+        consumer.unmet_dependencies = OrderedSet([read])
 
         scheduler = Scheduler.__new__(Scheduler)
         scheduler.mutation_renames = {}
         graph = Mock(sizevars=SizeVarAllocator())
+        projected_source = Mock(
+            sources=(write,), consumers=(ProjectedConsumerAccess(read),)
+        )
+        plan = Mock(sub_parent_stages=(Mock(source_projections=(projected_source,)),))
         with (
             V.set_graph_handler(graph),
             patch.object(NestedReduction, "is_candidate", return_value=True),
-            patch.object(
-                NestedReduction,
-                "plan",
-                return_value=Mock(sub_parent_stages=()),
-            ),
+            patch.object(NestedReduction, "plan", return_value=plan),
         ):
-            names = scheduler._nested_index_equivalent_dep_names(producer, consumer)
-        expected = OrderedSet(["buf"]) if write_kind == "dense" else OrderedSet()
-        self.assertEqual(names, expected)
+            matches = scheduler._nested_fusion_dependency_matches(producer, consumer)
+        expected = (MemoryDepMatch(write, read),) if write_kind == "dense" else None
+        self.assertEqual(matches, expected)
 
     @parametrize("read_kind", ["star", "weak"])
-    def test_nested_index_equivalent_names_require_memory_consumer(self, read_kind):
+    def test_nested_dependency_matches_require_memory_consumer(self, read_kind):
         d0 = sympy.Symbol("d0", integer=True, nonnegative=True)
         write = MemoryDep("buf", d0, (d0,), (4,))
         read = StarDep("buf") if read_kind == "star" else WeakDep("buf", "mutated")
@@ -435,6 +488,7 @@ class TestScheduler(TestCase):
         producer.read_writes.writes = OrderedSet([write])
         consumer = Mock()
         consumer.read_writes.reads = OrderedSet([read])
+        consumer.unmet_dependencies = OrderedSet([read])
 
         scheduler = Scheduler.__new__(Scheduler)
         scheduler.mutation_renames = {}
@@ -448,11 +502,11 @@ class TestScheduler(TestCase):
                 return_value=Mock(sub_parent_stages=()),
             ),
         ):
-            names = scheduler._nested_index_equivalent_dep_names(producer, consumer)
-        self.assertEqual(names, OrderedSet())
+            matches = scheduler._nested_fusion_dependency_matches(producer, consumer)
+        self.assertEqual(matches, ())
 
     @parametrize("read_kind", ["memory", "star", "weak"])
-    def test_index_equivalent_names_only_score_memory_deps(self, read_kind):
+    def test_planned_dependency_matches_only_score_memory_deps(self, read_kind):
         d0 = sympy.Symbol("d0", integer=True, nonnegative=True)
         deps = {
             "memory": MemoryDep("buf", d0 + 1, (d0,), (4,)),
@@ -460,9 +514,10 @@ class TestScheduler(TestCase):
             "weak": WeakDep("buf", "mutated"),
         }
 
+        write = MemoryDep("buf", d0, (d0,), (4,))
         producer = Mock()
         producer.get_operation_names.return_value = OrderedSet(["producer"])
-        producer.read_writes.writes = OrderedSet([MemoryDep("buf", d0, (d0,), (4,))])
+        producer.read_writes.writes = OrderedSet([write])
         consumer = Mock()
         consumer.ancestors = OrderedSet(["producer"])
         consumer.read_writes.reads = OrderedSet([deps[read_kind]])
@@ -473,9 +528,98 @@ class TestScheduler(TestCase):
         score = scheduler._score_fusion_memory_by_fusable_read_write(
             producer,
             consumer,
-            index_equivalent_dep_names=OrderedSet(["buf"]),
+            fusion_dependency_matches=(
+                (MemoryDepMatch(write, deps[read_kind]),)
+                if isinstance(deps[read_kind], MemoryDep)
+                else ()
+            ),
         )
         self.assertEqual(score, 1 if read_kind == "memory" else 0)
+
+    def test_planned_dependency_matches_score_each_write_once(self):
+        d0 = sympy.Symbol("d0", integer=True, nonnegative=True)
+        write = MemoryDep("buf", d0, (d0,), (4,))
+        reads = tuple(
+            MemoryDep("buf", d0 + offset, (d0,), (4,)) for offset in range(1, 5)
+        )
+        producer = Mock()
+        producer.get_operation_names.return_value = OrderedSet(["producer"])
+        producer.read_writes.writes = OrderedSet([write])
+        consumer = Mock()
+        consumer.ancestors = OrderedSet(["producer"])
+        consumer.read_writes.reads = OrderedSet(reads)
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+        scheduler.dep_size_hint = Mock(return_value=1)
+        score = scheduler._score_fusion_memory_by_fusable_read_write(
+            producer,
+            consumer,
+            fusion_dependency_matches=tuple(
+                MemoryDepMatch(write, read) for read in reads
+            ),
+        )
+        self.assertEqual(score, 1)
+
+    def test_planned_dependency_matches_prevent_later_loop_rewrites(self):
+        d0 = sympy.Symbol("d0", integer=True, nonnegative=True)
+        write = MemoryDep("buf", d0, (d0,), (4,))
+        read = MemoryDep("buf", d0 + 1, (d0,), (4,))
+        match = MemoryDepMatch(write, read)
+
+        producer = self._mock_base_snode("producer", torch.device("cpu"))
+        consumer = self._mock_base_snode("consumer", torch.device("cpu"))
+        producer.has_strict_reduction.return_value = False
+        consumer.has_strict_reduction.return_value = False
+        producer.ancestors = OrderedSet()
+        consumer.ancestors = OrderedSet(["producer"])
+        producer.get_operation_names.return_value = OrderedSet(["producer"])
+        consumer.get_operation_names.return_value = OrderedSet(["consumer"])
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler._fusion_blocked_by_placement = Mock(return_value=False)
+        scheduler._score_fusion_memory_for_can_fuse = Mock(return_value=0)
+        scheduler.get_expand_dim_for_pointwise_nodes = Mock(
+            side_effect=AssertionError("planned matches must prevent expansion")
+        )
+        scheduler.shared_data_after_reordering_loop = Mock(
+            side_effect=AssertionError("planned matches must prevent reordering")
+        )
+        scheduler.shared_data_after_inverting_indexing = Mock(
+            side_effect=AssertionError("planned matches must prevent inversion")
+        )
+        scheduler.can_fuse_vertical = Mock(return_value=True)
+        backend = Mock()
+        backend.can_fuse_vertical.return_value = True
+        scheduler.get_backend = Mock(return_value=backend)
+        graph = Mock(no_fuse_buffer_names=OrderedSet())
+        choices = Mock()
+        choices.can_fuse.return_value = True
+        choices.can_fuse_vertical.return_value = True
+
+        with (
+            V.set_graph_handler(graph),
+            V.set_choices_handler(choices),
+            inductor_config.patch(
+                {
+                    "expand_dimension_for_pointwise_nodes": True,
+                    "loop_ordering_after_fusion": True,
+                    "loop_index_inversion_in_fusion": True,
+                }
+            ),
+        ):
+            self.assertTrue(
+                scheduler._can_fuse(
+                    producer,
+                    consumer,
+                    can_reorder=True,
+                    fusion_dependency_matches=(match,),
+                )
+            )
+
+        scheduler.get_expand_dim_for_pointwise_nodes.assert_not_called()
+        scheduler.shared_data_after_reordering_loop.assert_not_called()
+        scheduler.shared_data_after_inverting_indexing.assert_not_called()
 
     def test_nested_reduction_sub_parent_rate_preserves_group_axis(self):
         grouped = Mock()
@@ -922,9 +1066,7 @@ class TestScheduler(TestCase):
             scheduler._has_multi_stream_nodes = Mock(return_value=False)
             scheduler._mempool_nodes = False
             scheduler.node_to_mempool = {}
-            scheduler._nested_index_equivalent_dep_names = Mock(
-                return_value=OrderedSet()
-            )
+            scheduler._nested_fusion_dependency_matches = Mock(return_value=())
             scheduler._score_fusion_memory_for_can_fuse = Mock(return_value=1_000_000)
             scheduler.check_prologue_fusion_heuristics_fusable = Mock(return_value=True)
             scheduler.can_fuse_vertical = Mock(return_value=True)
