@@ -115,9 +115,7 @@ def _supported_fake_forward_inputs(
         "subgraph": SimpleNamespace(
             graph_module=torch.fx.symbolic_trace(lambda score, b, h, q, kv: score)
         ),
-        "mask_graph": SimpleNamespace(
-            graph_module=torch.fx.symbolic_trace(mask_fn)
-        ),
+        "mask_graph": SimpleNamespace(graph_module=torch.fx.symbolic_trace(mask_fn)),
         "score_mod_other_buffers": [],
         "mask_mod_other_buffers": [],
         "scale": q_size[-1] ** -0.5,
@@ -423,8 +421,7 @@ class TestFlyDSLFlexAttention(TestCase):
                 q_size=(2, 3, 384, 128),
                 k_size=(2, 3, 384, 128),
                 index_width=3,
-                mask_fn=lambda b, h, q, kv: (q >= kv)
-                & ((q - kv) % (2 + h) == 0),
+                mask_fn=lambda b, h, q, kv: (q >= kv) & ((q - kv) % (2 + h) == 0),
             )
         )
         append.assert_called_once()
@@ -440,7 +437,7 @@ class TestFlyDSLFlexAttention(TestCase):
         _, append = _append_fake_choice(inputs)
         append.assert_not_called()
 
-    def test_decode_falls_back(self):
+    def test_appends_supported_gqa_decode_choice(self):
         _, append = _append_fake_choice(
             _supported_fake_forward_inputs(
                 q_size=(32, 64, 4, 128),
@@ -450,9 +447,38 @@ class TestFlyDSLFlexAttention(TestCase):
                 mask_fn=lambda b, h, q, kv: q + 8188 >= kv,
             )
         )
+        append.assert_called_once()
+        kwargs = append.call_args.kwargs
+        self.assertEqual(kwargs["SEQ_Q"], 4)
+        self.assertEqual(kwargs["SEQ_KV"], 8192)
+        self.assertEqual(kwargs["BLOCK_MASK_HEADS"], 4)
+
+    def test_appends_supported_single_token_decode_choice(self):
+        _, append = _append_fake_choice(
+            _supported_fake_forward_inputs(
+                q_size=(32, 64, 1, 128),
+                k_size=(32, 4, 8192, 128),
+                mask_heads=1,
+                index_width=16,
+                mask_fn=lambda b, h, q, kv: q + 8191 >= kv,
+            )
+        )
+        append.assert_called_once()
+        self.assertEqual(append.call_args.kwargs["SEQ_Q"], 1)
+
+    def test_decode_per_q_head_mask_falls_back(self):
+        _, append = _append_fake_choice(
+            _supported_fake_forward_inputs(
+                q_size=(32, 64, 4, 128),
+                k_size=(32, 4, 8192, 128),
+                mask_heads=64,
+                index_width=16,
+                mask_fn=lambda b, h, q, kv: q + 8188 >= kv,
+            )
+        )
         append.assert_not_called()
 
-    def test_four_gib_kv_buffer_falls_back(self):
+    def test_four_gib_kv_buffer_uses_rebased_head_slice(self):
         inputs = _supported_fake_forward_inputs(
             q_size=(64, 64, 4, 128),
             k_size=(64, 4, 65536, 128),
@@ -461,6 +487,18 @@ class TestFlyDSLFlexAttention(TestCase):
             mask_fn=lambda b, h, q, kv: q + 65532 >= kv,
         )
         inputs["key"]._numel = 1 << 31
+        _, append = _append_fake_choice(inputs)
+        append.assert_called_once()
+
+    def test_four_gib_head_slice_falls_back(self):
+        huge_seq = 1 << 24
+        inputs = _supported_fake_forward_inputs(
+            q_size=(1, 16, 1, 128),
+            k_size=(1, 1, huge_seq, 128),
+            mask_heads=1,
+            index_width=16,
+            mask_fn=lambda b, h, q, kv: q + huge_seq - 1 >= kv,
+        )
         _, append = _append_fake_choice(inputs)
         append.assert_not_called()
 
@@ -494,9 +532,7 @@ class TestFlyDSLFlexAttention(TestCase):
             seq_q=seq,
             qk_dim=head_dim,
         )
-        kv_num_blocks = torch.tensor(
-            [[[1, 1, 1, 0]]], device="cuda", dtype=torch.int32
-        )
+        kv_num_blocks = torch.tensor([[[1, 1, 1, 0]]], device="cuda", dtype=torch.int32)
         kv_indices = torch.tensor(
             [[[[0], [1], [2], [0]]]], device="cuda", dtype=torch.int32
         )
@@ -533,6 +569,99 @@ class TestFlyDSLFlexAttention(TestCase):
         self.assertEqual(output[:, :, 384:].abs().max().item(), 0.0)
         self.assertTrue(torch.isneginf(aux.lse[:, :, 384:]).all())
         self.assertTrue(torch.isneginf(aux.max_scores[:, :, 384:]).all())
+
+    def _check_gfx950_public_api_per_kv_head_decode(self, seq_q):
+        if not _has_gfx950_flydsl():
+            self.skipTest("requires gfx950 and a built FlyDSL runtime")
+
+        batch, q_heads, kv_heads = 1, 64, 4
+        seq_kv, head_dim = 8192, 128
+        query, key, value = _make_qkv(
+            batch=batch,
+            q_heads=q_heads,
+            kv_heads=kv_heads,
+            seq_q=seq_q,
+            seq_kv=seq_kv,
+            qk_dim=head_dim,
+            seed=9,
+        )
+        kv_num_blocks = torch.ones(
+            1,
+            kv_heads,
+            1,
+            device="cuda",
+            dtype=torch.int32,
+        )
+        kv_indices = torch.zeros(
+            1,
+            kv_heads,
+            1,
+            16,
+            device="cuda",
+            dtype=torch.int32,
+        )
+        kv_indices[..., 0] = 63
+        full_kv_num_blocks = torch.full(
+            (1, kv_heads, 1),
+            15,
+            device="cuda",
+            dtype=torch.int32,
+        )
+        full_kv_indices = torch.zeros_like(kv_indices)
+        for kv_head in range(kv_heads):
+            full_kv_indices[0, kv_head, 0, :15] = torch.arange(
+                kv_head * 8,
+                kv_head * 8 + 15,
+                device="cuda",
+                dtype=torch.int32,
+            )
+
+        q_offset = seq_kv - seq_q
+
+        def bottom_right_causal(b, h, q_idx, kv_idx):
+            del b, h
+            return q_idx + q_offset >= kv_idx
+
+        block_mask = BlockMask.from_kv_blocks(
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            BLOCK_SIZE=128,
+            mask_mod=bottom_right_causal,
+            seq_lengths=(seq_q, seq_kv),
+            compute_q_blocks=False,
+        )
+        group_size = q_heads // kv_heads
+        reference_block_mask = BlockMask.from_kv_blocks(
+            kv_num_blocks.repeat_interleave(group_size, dim=1),
+            kv_indices.repeat_interleave(group_size, dim=1),
+            full_kv_num_blocks.repeat_interleave(group_size, dim=1),
+            full_kv_indices.repeat_interleave(group_size, dim=1),
+            BLOCK_SIZE=128,
+            mask_mod=bottom_right_causal,
+            seq_lengths=(seq_q, seq_kv),
+            compute_q_blocks=False,
+        )
+        self._compare_forward(
+            query,
+            key,
+            value,
+            block_mask=block_mask,
+            reference_block_mask=reference_block_mask,
+            scale=head_dim**-0.5,
+            enable_gqa=True,
+            return_aux=True,
+        )
+
+    def test_gfx950_public_api_per_kv_head_decode_q4(self):
+        self._check_gfx950_public_api_per_kv_head_decode(4)
+
+    def test_gfx950_public_api_per_kv_head_decode_q8(self):
+        self._check_gfx950_public_api_per_kv_head_decode(8)
+
+    def test_gfx950_public_api_per_kv_head_decode_q1(self):
+        self._check_gfx950_public_api_per_kv_head_decode(1)
 
     def test_gfx950_public_api_transposed_document_qk192_v128(self):
         if not _has_gfx950_flydsl():
@@ -651,9 +780,7 @@ class TestFlyDSLFlexAttention(TestCase):
         seq = 256
         query, key, value = _make_qkv(seed=4)
         document_ids = torch.arange(seq, device="cuda", dtype=torch.int32) // 128
-        document_starts = torch.tensor(
-            [0, 128], device="cuda", dtype=torch.int32
-        )
+        document_starts = torch.tensor([0, 128], device="cuda", dtype=torch.int32)
 
         def document_causal(b, h, q_idx, kv_idx):
             del b, h
@@ -754,15 +881,9 @@ class TestFlyDSLFlexAttention(TestCase):
         )
 
         kv_num_blocks = torch.ones(1, 1, 2, device="cuda", dtype=torch.int32)
-        kv_indices = torch.tensor(
-            [[[[0], [1]]]], device="cuda", dtype=torch.int32
-        )
-        full_kv_num_blocks = torch.tensor(
-            [[[0, 1]]], device="cuda", dtype=torch.int32
-        )
-        full_kv_indices = torch.tensor(
-            [[[[0], [0]]]], device="cuda", dtype=torch.int32
-        )
+        kv_indices = torch.tensor([[[[0], [1]]]], device="cuda", dtype=torch.int32)
+        full_kv_num_blocks = torch.tensor([[[0, 1]]], device="cuda", dtype=torch.int32)
+        full_kv_indices = torch.tensor([[[[0], [0]]]], device="cuda", dtype=torch.int32)
 
         def causal(b, h, q_idx, kv_idx):
             del b, h
