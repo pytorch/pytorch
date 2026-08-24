@@ -202,6 +202,17 @@ def _check_allocator_settings_on_tear_down(test_case):
     test_case.assertEqual(md["expandable_segments"], EXPANDABLE_SEGMENTS)
 
 
+def _rocm_kernel_assert_enabled():
+    if not torch.version.hip:
+        return False
+    cfg = torch.__config__.show()
+    return (
+        "USE_ROCM_KERNEL_ASSERT : ON" in cfg
+        or "USE_ROCM_KERNEL_ASSERT=1" in cfg
+        or "USE_ROCM_KERNEL_ASSERT=ON" in cfg
+    )
+
+
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCuda(TestCase):
@@ -2119,6 +2130,56 @@ if __name__ == '__main__':
         self.assertTrue(
             has_device_side_assert(stderr),
             lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+        )
+
+    @unittest.skipIf(
+        not _rocm_kernel_assert_enabled(),
+        "requires ROCm build with USE_ROCM_KERNEL_ASSERT=ON",
+    )
+    @slowTest
+    def test_rocm_kernel_assert_percent_in_condition(self):
+        # Device assert with '%' in #cond; stderr must include the full condition.
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+import torch
+from torch.utils.cpp_extension import load_inline
+
+cuda_source = r'''
+#include <c10/macros/Macros.h>
+#include <cuda_runtime.h>
+
+__global__ void assert_mod_kernel(const int* x) {
+  CUDA_KERNEL_ASSERT(x[0] % 2 == 0);
+}
+
+void trigger_device_assert() {
+  int h = 1;
+  int* d = nullptr;
+  cudaMalloc(&d, sizeof(int));
+  cudaMemcpy(d, &h, sizeof(int), cudaMemcpyHostToDevice);
+  assert_mod_kernel<<<1, 1>>>(d);
+  cudaDeviceSynchronize();
+}
+'''
+cpp_source = "void trigger_device_assert();"
+
+mod = load_inline(
+    name="rocm_kernel_assert_percent_test",
+    cpp_sources=cpp_source,
+    cuda_sources=cuda_source,
+    functions=["trigger_device_assert"],
+    verbose=False,
+)
+mod.trigger_device_assert()
+""")
+        self.assertIn(
+            "Device-side assertion",
+            stderr,
+            msg=f"expected device assert message in stderr, got:\n{stderr}",
+        )
+        self.assertIn(
+            "x[0] % 2 == 0",
+            stderr,
+            msg=f"expected full condition with %%, got:\n{stderr}",
         )
 
     @slowTest
