@@ -1,9 +1,10 @@
 #pragma once
 
-#include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
+#include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Half.h>
 
-namespace c10 {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
 // Note: Explicit implementation of copysign for Half and BFloat16
 // is needed to workaround g++-7/8 crash on aarch64, but also makes
@@ -15,13 +16,16 @@ inline auto copysign(const T& a, const U& b) {
 
 // Implement copysign for half precision floats using bit ops
 // Sign is the most significant bit for both half and bfloat16 types
-inline c10::Half copysign(c10::Half a, c10::Half b) {
-  return c10::Half((a.x & 0x7fff) | (b.x & 0x8000), c10::Half::from_bits());
+inline Half copysign(Half a, Half b) {
+  return Half((a.x & 0x7fff) | (b.x & 0x8000), Half::from_bits());
 }
 
-inline c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
-  return c10::BFloat16(
-      (a.x & 0x7fff) | (b.x & 0x8000), c10::BFloat16::from_bits());
+inline BFloat16 copysign(BFloat16 a, BFloat16 b) {
+  return BFloat16((a.x & 0x7fff) | (b.x & 0x8000), BFloat16::from_bits());
 }
 
+HIDDEN_NAMESPACE_END(torch, headeronly)
+
+namespace c10 {
+using torch::headeronly::copysign;
 } // namespace c10

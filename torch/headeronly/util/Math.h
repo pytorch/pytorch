@@ -1,12 +1,13 @@
 #pragma once
 
-#include <ATen/AccumulateType.h>
-#include <ATen/NumericUtils.h>
-#include <ATen/jiterator_macros.h>
-#include <c10/macros/Macros.h>
-#include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
-#include <c10/util/MathConstants.h>
+#include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/AccumulateType.h>
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Half.h>
+#include <torch/headeronly/util/MathConstants.h>
+#include <torch/headeronly/util/NumericUtils.h>
+#include <torch/headeronly/util/complex.h>
+#include <torch/headeronly/util/jiterator_macros.h>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
@@ -18,6 +19,8 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 #endif
+
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly, native)
 
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
@@ -189,8 +192,8 @@ Date:  February 1996
 #endif
   }
   /* Two steps of Newton-Raphson correction */
-  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
-  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
+  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)*frac_1_sqrt_pi<T>)*std::exp(-x*x));
+  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)*frac_1_sqrt_pi<T>)*std::exp(-x*x));
 
   return x;
 }
@@ -234,7 +237,7 @@ Date:  February 1996
  */
 template <typename scalar_t, bool is_cuda=false>
 C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_float_divide_by_zero__ {
-  using acc_t = at::acc_type<scalar_t, is_cuda>;
+  using acc_t = acc_type<scalar_t, is_cuda>;
   const acc_t MACHEP = acc_t{1.11022302462515654042E-16};
   constexpr acc_t zero = acc_t{0.0};
   constexpr acc_t half = acc_t{0.5};
@@ -337,8 +340,8 @@ inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
   double result = 0;
   if (x < 0.5) {
     sign = -1;
-    const double sin_pi_x = sin(c10::pi<double> * x);
-    result -= (c10::pi<double> * c10::pi<double>) / (sin_pi_x * sin_pi_x);
+    const double sin_pi_x = sin(pi<double> * x);
+    result -= (pi<double> * pi<double>) / (sin_pi_x * sin_pi_x);
     x = 1 - x;
   }
   for (int i = 0; i < 6; ++i) {
@@ -355,8 +358,8 @@ inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
   float result = 0;
   if (x < 0.5f) {
     sign = -1;
-    const float sin_pi_x = sinf(c10::pi<float> * x);
-    result -= (c10::pi<float> * c10::pi<float>) / (sin_pi_x * sin_pi_x);
+    const float sin_pi_x = sinf(pi<float> * x);
+    result -= (pi<float> * pi<float>) / (sin_pi_x * sin_pi_x);
     x = 1 - x;
   }
   for (int i = 0; i < 6; ++i) {
@@ -394,7 +397,7 @@ inline double calc_digamma(double x) {
     // the computation of pi * x is a source of error (when |x| > 1).
     double q, r;
     r = std::modf(x, &q);
-    return calc_digamma(1 - x) - c10::pi<double> / tan(c10::pi<double> * r);
+    return calc_digamma(1 - x) - pi<double> / tan(pi<double> * r);
   }
 
   // Push x to be >= 10
@@ -452,7 +455,7 @@ inline float calc_digamma(float x) {
     // the computation of pi * x is a source of error (when |x| > 1).
     double q, r;
     r = std::modf(x, &q);
-    float pi_over_tan_pi_x = (float)(c10::pi<double> / tan(c10::pi<double> * r));
+    float pi_over_tan_pi_x = (float)(pi<double> / tan(pi<double> * r));
     return calc_digamma(1 - x) - pi_over_tan_pi_x;
   }
 
@@ -485,11 +488,11 @@ inline float calc_digamma(float x) {
   return result + logf(x) - (0.5f / x) - y;
 }
 
-inline c10::BFloat16 calc_digamma(c10::BFloat16 a) {
+inline BFloat16 calc_digamma(BFloat16 a) {
   return calc_digamma(static_cast<float>(a));
 }
 
-inline c10::Half calc_digamma(c10::Half a) {
+inline Half calc_digamma(Half a) {
   return calc_digamma(static_cast<float>(a));
 }
 
@@ -994,7 +997,7 @@ static scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam
     absoldterm = absterm;
     afac /= a;
   }
-  res += sgn * std::exp(-0.5 * a * eta * eta) * sum / std::sqrt(2 * c10::pi<float> * a);
+  res += sgn * std::exp(-0.5 * a * eta * eta) * sum / std::sqrt(2 * pi<float> * a);
 
   return res;
 }
@@ -1203,34 +1206,34 @@ scalar_t calc_igamma(scalar_t a, scalar_t x) {
 }
 
 template <>
-[[maybe_unused]] inline c10::BFloat16 calc_igamma<c10::BFloat16>(
-    c10::BFloat16 a,
-    c10::BFloat16 x) {
+[[maybe_unused]] inline BFloat16 calc_igamma<BFloat16>(
+    BFloat16 a,
+    BFloat16 x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-[[maybe_unused]] inline c10::Half calc_igamma<c10::Half>(
-    c10::Half a,
-    c10::Half x) {
+[[maybe_unused]] inline Half calc_igamma<Half>(
+    Half a,
+    Half x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-[[maybe_unused]] inline c10::BFloat16 calc_igammac<c10::BFloat16>(
-    c10::BFloat16 a,
-    c10::BFloat16 x) {
+[[maybe_unused]] inline BFloat16 calc_igammac<BFloat16>(
+    BFloat16 a,
+    BFloat16 x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
 template <>
-[[maybe_unused]] inline c10::Half calc_igammac<c10::Half>(
-    c10::Half a,
-    c10::Half x) {
+[[maybe_unused]] inline Half calc_igammac<Half>(
+    Half a,
+    Half x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
-inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
+inline BFloat16 calc_erfinv(BFloat16 a) { return calc_erfinv(float(a)); }
 
 template <typename T>
 inline T abs_impl(T v) {
@@ -1261,10 +1264,10 @@ C10_HOST_DEVICE T exp2_impl(T x) {
 }
 
 template <typename T>
-C10_HOST_DEVICE c10::complex<T> exp2_impl(c10::complex<T> x) {
+C10_HOST_DEVICE complex<T> exp2_impl(complex<T> x) {
   // There is no std::exp2 overload for complex, so instead
   // use the identity 2^x = e^(ln(2) * x)
-  constexpr auto ln2 = c10::ln_2<T>;
+  constexpr auto ln2 = ln_2<T>;
   return std::exp(ln2 * x);
 }
 
@@ -1485,8 +1488,8 @@ calc_i0(T _x) {
 }
 
 // Upcast bfloat16/half input to float for numerical accuracy purposes
-inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }
-inline c10::Half calc_i0(c10::Half a) { return calc_i0(static_cast<float>(a)); }
+inline BFloat16 calc_i0(BFloat16 a) { return calc_i0(static_cast<float>(a)); }
+inline Half calc_i0(Half a) { return calc_i0(static_cast<float>(a)); }
 
 /*
  * This function is derived from the implementation of the i1 function in the Cephes Math Library.
@@ -1514,8 +1517,8 @@ calc_i1(T _x) {
 }
 
 // Upcast bfloat16/half input to float for numerical accuracy purposes
-inline c10::BFloat16 calc_i1(c10::BFloat16 a) { return calc_i1(static_cast<float>(a)); }
-inline c10::Half calc_i1(c10::Half a) { return calc_i1(static_cast<float>(a)); }
+inline BFloat16 calc_i1(BFloat16 a) { return calc_i1(static_cast<float>(a)); }
+inline Half calc_i1(Half a) { return calc_i1(static_cast<float>(a)); }
 
 
 /*
@@ -1544,8 +1547,8 @@ calc_i1e(T _x) {
 }
 
 // Upcast bfloat16/half input to float for numerical accuracy purposes
-inline c10::BFloat16 calc_i1e(c10::BFloat16 a) { return calc_i1e(static_cast<float>(a)); }
-inline c10::Half calc_i1e(c10::Half a) { return calc_i1e(static_cast<float>(a)); }
+inline BFloat16 calc_i1e(BFloat16 a) { return calc_i1e(static_cast<float>(a)); }
+inline Half calc_i1e(Half a) { return calc_i1e(static_cast<float>(a)); }
 
 
 /*
@@ -2158,7 +2161,7 @@ template <typename T>
 C10_HOST_DEVICE inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
 calc_erfcx(T x)
 {
-  if (at::_isnan(x)) {
+  if (_isnan(x)) {
     return x;
   }
 
@@ -2196,7 +2199,7 @@ calc_erfcx(T x)
  */
 template <typename T>
 inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
-  T t = x * c10::frac_sqrt_2<T>;
+  T t = x * frac_sqrt_2<T>;
   if (x < T{-1.0}) {
     return std::log(calc_erfcx(-t) / 2) - t * t;
   } else {
@@ -2322,7 +2325,7 @@ inline C10_HOST_DEVICE T airy_ai_forward(T x) {
             agd = agd * (z * z) + AGD[index];
         }
 
-        T t = T(-2.0) * x * std::sqrt(-x) / T(3.0) + T(0.25) * c10::pi<T>;
+        T t = T(-2.0) * x * std::sqrt(-x) / T(3.0) + T(0.25) * pi<T>;
 
         return T(5.64189583547756286948e-01) / std::sqrt(std::sqrt(-x)) * (std::sin(t) * (T(1.0) + z * z * afn / afd) - std::cos(t) * (z * agn / agd));
     }
@@ -3923,5 +3926,7 @@ inline C10_HOST_DEVICE T spherical_bessel_j0_forward(T x) {
 
     return std::sin(x) / x;
 } // T spherical_bessel_j0_forward(T x)
+
+HIDDEN_NAMESPACE_END(torch, headeronly, native)
 
 C10_CLANG_DIAGNOSTIC_POP()

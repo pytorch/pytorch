@@ -1,13 +1,14 @@
 #pragma once
-#include <ATen/Config.h>
-#include <c10/core/DeviceType.h>
-#include <c10/core/ScalarType.h>
-#include <c10/util/BFloat16.h>
-#include <c10/util/Float8_e4m3fn.h>
-#include <c10/util/Float8_e4m3fnuz.h>
-#include <c10/util/Float8_e5m2.h>
-#include <c10/util/Float8_e5m2fnuz.h>
-#include <c10/util/Half.h>
+
+#include <torch/headeronly/core/DeviceType.h>
+#include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Float8_e4m3fn.h>
+#include <torch/headeronly/util/Float8_e4m3fnuz.h>
+#include <torch/headeronly/util/Float8_e5m2.h>
+#include <torch/headeronly/util/Float8_e5m2fnuz.h>
+#include <torch/headeronly/util/Half.h>
+#include <torch/headeronly/util/complex.h>
 
 // Defines the accumulation type for a scalar type.
 // Example:
@@ -52,7 +53,7 @@
 #include <hip/hip_runtime.h>
 #endif
 
-namespace at {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
 template <typename T, c10::DeviceType D>
 struct AccumulateTypeDevice {};
@@ -101,9 +102,9 @@ MPS_ACC_TYPE(int16_t, int64_t)
 MPS_ACC_TYPE(int32_t, int64_t)
 MPS_ACC_TYPE(int64_t, int64_t)
 MPS_ACC_TYPE(bool, bool)
-MPS_ACC_TYPE(c10::complex<Half>, c10::complex<float>)
-MPS_ACC_TYPE(c10::complex<float>, c10::complex<float>)
-MPS_ACC_TYPE(c10::complex<double>, c10::complex<float>)
+MPS_ACC_TYPE(complex<Half>, complex<float>)
+MPS_ACC_TYPE(complex<float>, complex<float>)
+MPS_ACC_TYPE(complex<double>, complex<float>)
 
 XPU_ACC_TYPE(BFloat16, float)
 XPU_ACC_TYPE(Half, float)
@@ -120,9 +121,9 @@ XPU_ACC_TYPE(int16_t, int64_t)
 XPU_ACC_TYPE(int32_t, int64_t)
 XPU_ACC_TYPE(int64_t, int64_t)
 XPU_ACC_TYPE(bool, bool)
-XPU_ACC_TYPE(c10::complex<Half>, c10::complex<float>)
-XPU_ACC_TYPE(c10::complex<float>, c10::complex<float>)
-XPU_ACC_TYPE(c10::complex<double>, c10::complex<double>)
+XPU_ACC_TYPE(complex<Half>, complex<float>)
+XPU_ACC_TYPE(complex<float>, complex<float>)
+XPU_ACC_TYPE(complex<double>, complex<double>)
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 CUDA_ACC_TYPE(half, float)
@@ -142,9 +143,9 @@ CUDA_ACC_TYPE(int16_t, int64_t)
 CUDA_ACC_TYPE(int32_t, int64_t)
 CUDA_ACC_TYPE(int64_t, int64_t)
 CUDA_ACC_TYPE(bool, bool)
-CUDA_ACC_TYPE(c10::complex<Half>, c10::complex<float>)
-CUDA_ACC_TYPE(c10::complex<float>, c10::complex<float>)
-CUDA_ACC_TYPE(c10::complex<double>, c10::complex<double>)
+CUDA_ACC_TYPE(complex<Half>, complex<float>)
+CUDA_ACC_TYPE(complex<float>, complex<float>)
+CUDA_ACC_TYPE(complex<double>, complex<double>)
 
 CPU_ACC_TYPE(BFloat16, float)
 CPU_ACC_TYPE(Half, float)
@@ -161,13 +162,21 @@ CPU_ACC_TYPE(int16_t, int64_t)
 CPU_ACC_TYPE(int32_t, int64_t)
 CPU_ACC_TYPE(int64_t, int64_t)
 CPU_ACC_TYPE(bool, bool)
-CPU_ACC_TYPE(c10::complex<Half>, c10::complex<float>)
-CPU_ACC_TYPE(c10::complex<float>, c10::complex<double>)
-CPU_ACC_TYPE(c10::complex<double>, c10::complex<double>)
+CPU_ACC_TYPE(complex<Half>, complex<float>)
+CPU_ACC_TYPE(complex<float>, complex<double>)
+CPU_ACC_TYPE(complex<double>, complex<double>)
 
-TORCH_API c10::ScalarType toAccumulateType(
-    c10::ScalarType type,
-    c10::DeviceType device);
-TORCH_API c10::ScalarType toAccumulateType(c10::ScalarType type, bool is_cuda);
+#undef ACC_TYPE
+#undef MPS_ACC_TYPE
+#undef XPU_ACC_TYPE
+#undef CUDA_ACC_TYPE
+#undef CPU_ACC_TYPE
 
+HIDDEN_NAMESPACE_END(torch, headeronly)
+
+namespace at {
+using torch::headeronly::acc_type;
+using torch::headeronly::acc_type_device;
+using torch::headeronly::AccumulateType;
+using torch::headeronly::AccumulateTypeDevice;
 } // namespace at

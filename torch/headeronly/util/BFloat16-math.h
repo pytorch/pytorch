@@ -1,23 +1,29 @@
 #pragma once
 
-#include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
+#include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Half.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 #endif
 
-namespace c10 {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 template <typename T>
 struct is_reduced_floating_point
     : std::integral_constant<
           bool,
-          std::is_same_v<T, c10::Half> || std::is_same_v<T, c10::BFloat16>> {};
+          std::is_same_v<T, Half> || std::is_same_v<T, BFloat16>> {};
 
 template <typename T>
 constexpr bool is_reduced_floating_point_v =
     is_reduced_floating_point<T>::value;
+HIDDEN_NAMESPACE_END(torch, headeronly)
+
+namespace c10 {
+using torch::headeronly::is_reduced_floating_point;
+using torch::headeronly::is_reduced_floating_point_v;
 } // namespace c10
 
 namespace std {
