@@ -7,6 +7,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
+#include <fmt/ostream.h>
 #include <chrono>
 #include <optional>
 #include <stdexcept>
@@ -350,20 +351,7 @@ struct CollectiveFingerPrint {
 std::ostream& operator<<(
     std::ostream& output,
     const CollectiveFingerPrint& collective_fingerprint) {
-  std::string collectiveInfo;
   auto op_type_str = opTypeToString(collective_fingerprint.op_type_);
-  std::string debug_info;
-  if (collective_fingerprint.python_gc_counts_.has_value()) {
-    const auto& gc = *collective_fingerprint.python_gc_counts_;
-    debug_info =
-        c10::str(", PythonGcCounts=[", gc[0], ", ", gc[1], ", ", gc[2], "]");
-  }
-  if (collective_fingerprint.steady_clock_time_ms_.has_value()) {
-    debug_info = c10::str(
-        debug_info,
-        ", SteadyClockTimeMs=",
-        *collective_fingerprint.steady_clock_time_ms_);
-  }
   if (collective_fingerprint.num_tensors_ != 0) {
     // Convert dtype and device type info to string.
     std::vector<std::string> dtype_strs =
@@ -373,31 +361,33 @@ std::ostream& operator<<(
     std::vector<std::string> size_strs =
         CollectiveFingerPrint::get_size_strs(collective_fingerprint);
 
-    collectiveInfo = c10::str(
-        "CollectiveFingerPrint(",
-        "SequenceNumber=",
+    fmt::print(
+        output,
+        "CollectiveFingerPrint(SequenceNumber={}, OpType={}, TensorShape=[{}], TensorDtypes={}, TensorDeviceTypes={}",
         collective_fingerprint.sequence_number_,
-        ", OpType=",
         op_type_str,
-        ", TensorShape=[",
         c10::Join(", ", size_strs),
-        "], TensorDtypes=",
-        dtype_strs,
-        ", TensorDeviceTypes=",
-        device_type_strs,
-        debug_info,
-        ")");
+        fmt::streamed(dtype_strs),
+        fmt::streamed(device_type_strs));
   } else {
-    collectiveInfo = c10::str(
-        "CollectiveFingerPrint(",
-        "SequenceNumber=",
+    fmt::print(
+        output,
+        "CollectiveFingerPrint(SequenceNumber={}, OpType={}",
         collective_fingerprint.sequence_number_,
-        ", OpType=",
-        op_type_str,
-        debug_info,
-        ")");
+        op_type_str);
   }
-  return output << collectiveInfo;
+  if (collective_fingerprint.python_gc_counts_.has_value()) {
+    const auto& gc = *collective_fingerprint.python_gc_counts_;
+    fmt::print(output, ", PythonGcCounts=[{}, {}, {}]", gc[0], gc[1], gc[2]);
+  }
+  if (collective_fingerprint.steady_clock_time_ms_.has_value()) {
+    fmt::print(
+        output,
+        ", SteadyClockTimeMs={}",
+        *collective_fingerprint.steady_clock_time_ms_);
+  }
+  fmt::print(output, ")");
+  return output;
 }
 
 bool check_same_size(const std::vector<at::Tensor>& input_tensors) {
