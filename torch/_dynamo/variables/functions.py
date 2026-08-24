@@ -4396,6 +4396,9 @@ class MethodWrapperVariable(VariableTracker):
     # python constant, which would break e.g. a list holding non-constant items.
     # Every entry in CPython's wrapper_getsets has a NULL setter.
     tp_getset = {
+        "__name__": GetSet(
+            lambda s, tx: ConstantVariable.create(s.descriptor.__name__), None
+        ),
         "__qualname__": GetSet(
             lambda s, tx: ConstantVariable.create(s.descriptor.__qualname__), None
         ),
@@ -4659,6 +4662,11 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
     def get_real_python_backed_value(self) -> types.ClassMethodDescriptorType:
         return self.descriptor
 
+    tp_members = {
+        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__), None),
+        "__name__": Member(getset_build(lambda s: s.descriptor.__name__), None),
+    }
+
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -4671,7 +4679,7 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         return BoundBuiltinMethodVariable(self.descriptor, owner, source=self.source)
 
 
-class StaticMethodVariable(DescriptorVariable):
+class StaticMethodVariable(VariableTracker):
     """staticmethod descriptor wrapping a callable.
 
     CPython's staticmethod (PyStaticMethod_Type) is a non-data descriptor
@@ -4716,7 +4724,7 @@ class StaticMethodVariable(DescriptorVariable):
         return VariableTracker.build(tx, self.descriptor.__func__, func_source)
 
 
-class ClassMethodVariable(DescriptorVariable):
+class ClassMethodVariable(VariableTracker):
     """classmethod descriptor wrapping a callable.
 
     CPython's classmethod (PyClassMethod_Type) is a non-data descriptor
@@ -4958,7 +4966,7 @@ class GetSetDescriptorVariable(DescriptorVariable):
         return VariableTracker.build(tx, resolved, result_source)
 
 
-class PropertyVariable(DescriptorVariable):
+class PropertyVariable(VariableTracker):
     """Python property descriptor.
 
     The property type is a data descriptor with tp_descr_get =
@@ -4970,23 +4978,6 @@ class PropertyVariable(DescriptorVariable):
     _nonvar_fields = {
         "descriptor",
         *VariableTracker._nonvar_fields,
-    }
-
-    tp_members = {
-        "fget": Member(getset_build(lambda s: s.descriptor.fget), None),
-        "fset": Member(getset_build(lambda s: s.descriptor.fset), None),
-        "fdel": Member(getset_build(lambda s: s.descriptor.fdel), None),
-        "__doc__": Member(
-            getset_load_or_build(lambda s: s.descriptor.__doc__, "__doc__"),
-            getset_set("__doc__"),
-        ),
-    }
-
-    tp_getset = {
-        "__name__": GetSet(
-            getset_load_or_build(lambda s: s.descriptor.__name__, "__name__"),
-            getset_set("__name__"),
-        ),
     }
 
     def __init__(
