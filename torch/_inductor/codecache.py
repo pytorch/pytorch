@@ -42,7 +42,7 @@ from types import (
     ModuleType,
 )
 from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import NotRequired, override, Self, TypedDict
+from typing_extensions import override, Self, TypedDict
 
 import torch
 import torch._library.opaque_object as opaque_object
@@ -163,9 +163,9 @@ class SystemVersionInfo(TypedDict, total=False):
 
 
 class SystemCacheInfo(TypedDict, total=False):
-    device: NotRequired[SystemDeviceInfo]
-    version: NotRequired[SystemVersionInfo]
-    device_interfaces: NotRequired[dict[str, dict[str, Any]]]
+    device: SystemDeviceInfo
+    version: SystemVersionInfo
+    device_interfaces: dict[str, dict[str, object]]
 
 
 class SystemInfo(SystemCacheInfo):
@@ -340,10 +340,10 @@ class CacheBase:
         with dynamo_timed("CacheBase.get_system.triton_key"):
             triton_version = triton_key()
 
-        system_info: SystemCacheInfo = {}
+        version_info: SystemVersionInfo = {"triton": triton_version}
+        hash_input: SystemCacheInfo = {"version": version_info}
         try:
             device_info: SystemDeviceInfo = {"name": None}
-            version_info: SystemVersionInfo = {"triton": triton_version}
             device_properties = torch.cuda.get_device_properties(
                 torch.cuda.current_device()
             )
@@ -353,30 +353,29 @@ class CacheBase:
             else:
                 device_info["name"] = device_properties.gcnArchName
                 version_info["hip"] = torch.version.hip
-            system_info["device"] = device_info
-            system_info["version"] = version_info
+            hash_input["device"] = device_info
         except (AssertionError, RuntimeError):
-            # If cuda is not installed, none of the above config is relevant.
+            # If CUDA is not installed, omit CUDA/HIP-specific device information.
             pass
 
-        device_interface_info: dict[str, dict[str, Any]] = {}
+        device_interface_info: dict[str, dict[str, object]] = {}
         for name, interface in get_registered_device_interfaces():
             if ":" in name:
                 continue
 
+            # CacheBase.get_system() participates in every compile's FX graph
+            # cache key, so a broken third-party backend must not break CPU-only
+            # compilation.
             try:
                 if not interface.is_available():
                     continue
-            except Exception:
-                log.warning(
-                    "Failed to check availability for device interface %s",
-                    name,
-                    exc_info=True,
-                )
-                continue
-
-            try:
                 info = interface.get_cache_system_info()
+                if info is not None:
+                    if not isinstance(info, dict):
+                        raise TypeError(
+                            "get_cache_system_info() must return a dict or None"
+                        )
+                    json.dumps(info, sort_keys=True)
             except Exception:
                 log.warning(
                     "Failed to collect cache system info from device interface %s",
@@ -388,11 +387,11 @@ class CacheBase:
                 device_interface_info[name] = info
 
         if device_interface_info:
-            system_info["device_interfaces"] = device_interface_info
+            hash_input["device_interfaces"] = device_interface_info
 
         return {
-            **system_info,
-            "hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json(system_info),
+            **hash_input,
+            "hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json(hash_input),
         }
 
     @staticmethod

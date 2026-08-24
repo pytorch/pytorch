@@ -329,17 +329,27 @@ class TestCacheKeyStrategy(TestCase):
                 ),
             ):
                 system = CacheBase.get_system()
+                expected_payload = {
+                    "version": {"triton": None},
+                    "device_interfaces": {"fake": {"runtime": "1"}},
+                }
                 self.assertEqual(
-                    system["device_interfaces"], {"fake": {"runtime": "1"}}
+                    system,
+                    {
+                        **expected_payload,
+                        "hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json(
+                            expected_payload
+                        ),
+                    },
                 )
                 self.assertEqual(
                     fake_strategy.key_from_json.call_args.args[0],
-                    {"device_interfaces": {"fake": {"runtime": "1"}}},
+                    expected_payload,
                 )
         finally:
             CacheBase.get_system.cache_clear()
 
-    def test_cache_base_get_system_without_cuda_preserves_empty_hash(self):
+    def test_cache_base_get_system_without_cuda_preserves_triton_hash(self):
         CacheBase.get_system.cache_clear()
         try:
             with (
@@ -357,11 +367,19 @@ class TestCacheKeyStrategy(TestCase):
                 ),
             ):
                 system = CacheBase.get_system()
+                expected_payload = {"version": {"triton": None}}
                 self.assertEqual(
                     system,
-                    {"hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json({})},
+                    {
+                        **expected_payload,
+                        "hash": SYSTEM_CACHE_KEY_STRATEGY.key_from_json(
+                            expected_payload
+                        ),
+                    },
                 )
-                self.assertEqual(fake_strategy.key_from_json.call_args.args[0], {})
+                self.assertEqual(
+                    fake_strategy.key_from_json.call_args.args[0], expected_payload
+                )
         finally:
             CacheBase.get_system.cache_clear()
 
@@ -395,9 +413,12 @@ class TestCacheKeyStrategy(TestCase):
                 ),
             ):
                 system = CacheBase.get_system()
+                expected_payload = {"version": {"triton": None}}
                 self.assertNotIn("device_interfaces", system)
                 self.assertEqual(FakeDeviceInterface.calls, 0)
-                self.assertEqual(fake_strategy.key_from_json.call_args.args[0], {})
+                self.assertEqual(
+                    fake_strategy.key_from_json.call_args.args[0], expected_payload
+                )
         finally:
             CacheBase.get_system.cache_clear()
 
@@ -429,10 +450,126 @@ class TestCacheKeyStrategy(TestCase):
                 mock.patch("torch._inductor.codecache.log") as fake_log,
             ):
                 system = CacheBase.get_system()
+                expected_payload = {"version": {"triton": None}}
                 self.assertNotIn("device_interfaces", system)
-                self.assertEqual(fake_strategy.key_from_json.call_args.args[0], {})
+                self.assertEqual(
+                    fake_strategy.key_from_json.call_args.args[0], expected_payload
+                )
                 fake_log.warning.assert_called_once()
                 self.assertIn("fake", fake_log.warning.call_args.args[1])
+        finally:
+            CacheBase.get_system.cache_clear()
+
+    def test_device_interface_cache_system_info_empty_dict(self):
+        class FakeDeviceInterface(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @classmethod
+            def get_cache_system_info(cls):
+                return {}
+
+        CacheBase.get_system.cache_clear()
+        try:
+            with (
+                mock.patch(
+                    "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY",
+                    wraps=SYSTEM_CACHE_KEY_STRATEGY,
+                ) as fake_strategy,
+                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch.object(
+                    torch.cuda, "current_device", side_effect=RuntimeError
+                ),
+                mock.patch(
+                    "torch._inductor.codecache.get_registered_device_interfaces",
+                    return_value=[("fake", FakeDeviceInterface)],
+                ),
+            ):
+                system = CacheBase.get_system()
+                expected_payload = {
+                    "version": {"triton": None},
+                    "device_interfaces": {"fake": {}},
+                }
+                self.assertEqual(system["device_interfaces"], {"fake": {}})
+                self.assertEqual(
+                    fake_strategy.key_from_json.call_args.args[0], expected_payload
+                )
+        finally:
+            CacheBase.get_system.cache_clear()
+
+    def test_device_interface_cache_system_info_invalid_metadata(self):
+        class FakeDeviceInterface(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @classmethod
+            def get_cache_system_info(cls):
+                return {"v": {1, 2}}
+
+        CacheBase.get_system.cache_clear()
+        try:
+            with (
+                mock.patch(
+                    "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY",
+                    wraps=SYSTEM_CACHE_KEY_STRATEGY,
+                ) as fake_strategy,
+                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch.object(
+                    torch.cuda, "current_device", side_effect=RuntimeError
+                ),
+                mock.patch(
+                    "torch._inductor.codecache.get_registered_device_interfaces",
+                    return_value=[("fake", FakeDeviceInterface)],
+                ),
+                mock.patch("torch._inductor.codecache.log") as fake_log,
+            ):
+                system = CacheBase.get_system()
+                expected_payload = {"version": {"triton": None}}
+                self.assertNotIn("device_interfaces", system)
+                self.assertEqual(
+                    fake_strategy.key_from_json.call_args.args[0], expected_payload
+                )
+                fake_log.warning.assert_called_once()
+                self.assertIn("fake", fake_log.warning.call_args.args[1])
+        finally:
+            CacheBase.get_system.cache_clear()
+
+    def test_device_interface_cache_system_info_non_dict_metadata(self):
+        class FakeDeviceInterface(DeviceInterface):
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @classmethod
+            def get_cache_system_info(cls):
+                return ["runtime", "1"]
+
+        CacheBase.get_system.cache_clear()
+        try:
+            with (
+                mock.patch(
+                    "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY",
+                    wraps=SYSTEM_CACHE_KEY_STRATEGY,
+                ) as fake_strategy,
+                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch.object(
+                    torch.cuda, "current_device", side_effect=RuntimeError
+                ),
+                mock.patch(
+                    "torch._inductor.codecache.get_registered_device_interfaces",
+                    return_value=[("fake", FakeDeviceInterface)],
+                ),
+                mock.patch("torch._inductor.codecache.log") as fake_log,
+            ):
+                system = CacheBase.get_system()
+                expected_payload = {"version": {"triton": None}}
+                self.assertNotIn("device_interfaces", system)
+                self.assertEqual(
+                    fake_strategy.key_from_json.call_args.args[0], expected_payload
+                )
+                self.assertEqual(fake_log.warning.call_count, 1)
         finally:
             CacheBase.get_system.cache_clear()
 

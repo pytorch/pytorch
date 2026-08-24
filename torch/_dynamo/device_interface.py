@@ -132,11 +132,14 @@ class DeviceInterface:
         return cls.Worker.get_device_properties(device)
 
     @classmethod
-    def get_cache_system_info(cls) -> dict[str, Any] | None:
+    def get_cache_system_info(cls) -> dict[str, object] | None:
         """Return stable, JSON-serializable metadata for the code cache key.
 
+        Returning None opts out. An empty dict still contributes metadata.
         Implementations should return only metadata that invalidates generated
         or autotuned code when changed, without unnecessarily initializing hardware.
+        This hook is sampled through the cached CacheBase.get_system() path, so
+        interfaces must be registered before its first use.
         """
         return None
 
