@@ -20,6 +20,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.license_files_audit import audit_repo_license_files, load_project
 
+
 sys.path.remove(str(REPO_ROOT))
 
 # Audit for https://github.com/pytorch/pytorch/issues/183434:
@@ -102,7 +103,9 @@ class TestLicense(TestCase):
             [("third_party/shipped/LICENSE", "MIT\n")],
         )
         self.assertIsNone(skip_reason)
-        self.assertTrue(any("SPDX table missing paths" in e for e in errors), msg=errors)
+        self.assertTrue(
+            any("SPDX table missing paths" in e for e in errors), msg=errors
+        )
 
     def test_audit_license_expression_mismatch(self) -> None:
         errors, skip_reason = _audit_fixture(

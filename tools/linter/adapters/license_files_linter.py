@@ -80,7 +80,9 @@ def main() -> None:
     report_path = str(REPO_ROOT / "pyproject.toml")
     errors, skip_reason = audit_repo_license_files(REPO_ROOT)
     if skip_reason:
-        _emit(report_path, LintSeverity.ADVICE, "license-files-audit-skipped", skip_reason)
+        _emit(
+            report_path, LintSeverity.ADVICE, "license-files-audit-skipped", skip_reason
+        )
         return
     for msg in errors:
         _emit(report_path, LintSeverity.ERROR, "license-files-audit", msg)
