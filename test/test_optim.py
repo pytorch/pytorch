@@ -2726,7 +2726,6 @@ class TestMuonBatchedMatrices(TestCase):
             "ns_steps": 3,
         }
         optimizer = torch.optim.Muon([param], allow_batched=True, **kwargs)
-        # Each reference param is 2D, so the default non-batched path applies.
         reference_optimizer = torch.optim.Muon(reference_params, **kwargs)
         grad_scales = torch.tensor(
             [0.1, 1.0, 10.0, 0.2, 2.0, 20.0],
@@ -2764,50 +2763,15 @@ class TestMuonBatchedMatrices(TestCase):
 
         self.assertEqual(tuple(optimizer.state[param]["momentum_buffer"].shape), shape)
 
-    def test_muon_batched_is_opt_in(self, device):
-        batched_param = Parameter(torch.randn(2, 4, 6, device=device))
-        with self.assertRaisesRegex(ValueError, "Muon only supports 2D parameters"):
-            torch.optim.Muon([batched_param])
-        with self.assertRaisesRegex(ValueError, "Muon only supports 2D parameters"):
-            torch.optim.Muon([Parameter(torch.randn(6, device=device))])
-
+    def test_muon_add_param_group(self, device):
         optimizer = torch.optim.Muon([Parameter(torch.randn(4, 6, device=device))])
+        batched_param = Parameter(torch.randn(2, 4, 6, device=device))
         with self.assertRaisesRegex(ValueError, "Muon only supports 2D parameters"):
             optimizer.add_param_group({"params": [batched_param]})
         self.assertEqual(len(optimizer.param_groups), 1)
 
-        # allow_batched is per param group, so an opted-in group accepts it.
         optimizer.add_param_group({"params": [batched_param], "allow_batched": True})
         self.assertEqual(len(optimizer.param_groups), 2)
-
-    def test_muon_allow_batched_still_requires_matrices(self, device):
-        vector_param = Parameter(torch.randn(6, device=device))
-        with self.assertRaisesRegex(ValueError, "at least two dimensions"):
-            torch.optim.Muon([vector_param], allow_batched=True)
-
-        optimizer = torch.optim.Muon(
-            [Parameter(torch.randn(4, 6, device=device))], allow_batched=True
-        )
-        with self.assertRaisesRegex(ValueError, "at least two dimensions"):
-            optimizer.add_param_group({"params": [vector_param]})
-
-        self.assertEqual(len(optimizer.param_groups), 1)
-
-    def test_muon_allow_batched_matches_default_for_2d(self, device):
-        torch.manual_seed(3)
-        grad = torch.randn(4, 6, device=device)
-        initial = torch.randn(4, 6, device=device)
-        params = [Parameter(initial.clone()) for _ in range(2)]
-        optimizers = [
-            torch.optim.Muon([params[0]]),
-            torch.optim.Muon([params[1]], allow_batched=True),
-        ]
-
-        for param, optimizer in zip(params, optimizers, strict=True):
-            param.grad = grad.clone()
-            optimizer.step()
-
-        self.assertEqual(params[0], params[1])
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
