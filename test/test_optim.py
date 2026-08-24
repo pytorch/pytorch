@@ -2705,19 +2705,23 @@ class TestMuon(TestCase):
     def test_muon_does_not_alias_momentum_buffer(self, device):
         # With nesterov=False the momentum buffer is handed straight to
         # Newton-Schulz, which normalizes in place, so a bf16 param must not
-        # end up aliasing it.
+        # end up aliasing it. Check the whole trajectory, not just one step:
+        # Newton-Schulz renormalizes its input, so an aliased buffer only shows
+        # up in the parameters from the second step onwards.
+        torch.manual_seed(7)
         momentum = 0.9
-        param = Parameter(torch.randn(4, 6, device=device, dtype=torch.bfloat16))
-        grad = torch.randn(4, 6, device=device, dtype=torch.bfloat16)
-        param.grad = grad.clone()
+        param = Parameter(torch.randn(8, 5, device=device, dtype=torch.bfloat16))
         optimizer = torch.optim.Muon([param], momentum=momentum, nesterov=False)
+        expected = torch.zeros_like(param)
 
-        optimizer.step()
+        for _ in range(4):
+            grad = torch.randn(8, 5, device=device, dtype=torch.bfloat16)
+            param.grad = grad.clone()
+            expected.lerp_(grad, 1 - momentum)
 
-        self.assertEqual(
-            optimizer.state[param]["momentum_buffer"],
-            torch.zeros_like(grad).lerp_(grad, 1 - momentum),
-        )
+            optimizer.step()
+
+            self.assertEqual(optimizer.state[param]["momentum_buffer"], expected)
 
     @parametrize("matrix_shape", [(2, 5), (5, 2)])
     def test_muon_batched_matrices(self, device, matrix_shape):

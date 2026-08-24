@@ -62,7 +62,6 @@ def _zeropower_via_newtonschulz(
     if len(ns_coefficients) != 3:
         raise ValueError("Coefficients must be a tuple of exactly 3 values")
     a, b, c = ns_coefficients
-    # NS normalizes in place, so never alias the momentum buffer.
     ortho_grad = grad.to(dtype=torch.bfloat16, copy=True)
     transposed = grad.size(-2) > grad.size(-1)
     if transposed:
