@@ -7082,6 +7082,7 @@ def meta__efficient_attention_backward(
     key: Tensor,
     value: Tensor,
     bias: Tensor | None,
+    out: Tensor,
     cu_seqlens_q: Tensor | None,
     cu_seqlens_k: Tensor | None,
     max_seqlen_q: torch.SymInt,
@@ -7094,6 +7095,7 @@ def meta__efficient_attention_backward(
     bias_requires_grad: bool,
     scale: float | None = None,
     num_splits_key: int | None = None,
+    window_size: int | None = None,
     shared_storage_dqdkdv: bool = False,
 ):
     if shared_storage_dqdkdv:
@@ -7102,7 +7104,7 @@ def meta__efficient_attention_backward(
             lambda: "seqlen must match for `shared_storage_dqdkdv",
         )
         torch._check(
-            query.shape[3] == key.shape[3],
+            query.shape[3] == key.shape[3] == value.shape[3],
             lambda: "embedding dim must match for `shared_storage_dqdkdv",
         )
         torch._check(
