@@ -267,10 +267,7 @@ class _IndependentConstraint(Constraint):
             raise ValueError(
                 f"Expected value.dim() >= {expected} but got {value.dim()}"
             )
-        result = result.reshape(
-            result.shape[: result.dim() - self.reinterpreted_batch_ndims] + (-1,)
-        )
-        result = result.all(-1)
+        result = result.all(dim=tuple(range(-self.reinterpreted_batch_ndims, 0)))
         return result
 
     def __repr__(self):

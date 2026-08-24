@@ -107,6 +107,18 @@ def test_constraint(constraint_fn, result, value, is_cuda):
         )
 
 
+def test_independent_constraint_zero_batch():
+    # Regression test for https://github.com/pytorch/pytorch/issues/194548
+    # `_IndependentConstraint.check` used to flatten the reinterpreted dims
+    # via `result.reshape(result.shape[:-ndims] + (-1,))`, which is ambiguous
+    # (and raises) when both the tensor's numel and the un-flattened prefix
+    # are zero, e.g. shape (0, 2) -> reshape(0, -1).
+    value = torch.zeros(0, 2)
+    result = constraints.real_vector.check(value)
+    if result.shape != (0,):
+        raise AssertionError(f"Expected shape (0,), got {result.shape}")
+
+
 @pytest.mark.parametrize(
     ("constraint_fn", "args"), [(c[0], c[1:]) for c in CONSTRAINTS]
 )

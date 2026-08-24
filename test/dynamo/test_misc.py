@@ -9380,6 +9380,23 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.rand([4, 4])
         self.assertEqual(opt_fn(x), fn(x))
 
+    def test_torch_distributions_categorical_zero_batch_size(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/194548
+        # A zero-batch input used to raise in eager (see gh-71689) but
+        # silently succeed under torch.compile, since the underlying
+        # arg-validation bug (an ambiguous reshape for zero-sized batches)
+        # was only reachable through eager's `validate_args` check.
+        # validate_args is forced explicitly since merely constructing
+        # `opt_fn` flips `Distribution._validate_args` off process-wide.
+        def fn(logits):
+            return torch.distributions.Categorical(
+                logits=logits, validate_args=True
+            ).sample()
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(0, 2)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_torch_distributions_gamma_dynamic(self):
         def fn(n: int):
             distribution = torch.distributions.Gamma(
