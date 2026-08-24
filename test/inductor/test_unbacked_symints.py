@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import unittest
 from unittest import mock
 
 import sympy
@@ -16,7 +17,11 @@ from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_device_type import onlyAccelerator, skipCUDAIf
+from torch.testing._internal.common_device_type import (
+    onlyAccelerator,
+    skipCPUIf,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
@@ -129,6 +134,9 @@ class UnbackedSymintsTritonTemplate:
 
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_kernel_grid(self, device):
+        if device == "cpu":
+            raise unittest.SkipTest("Triton kernel requires GPU")
+
         from torch.testing._internal.triton_utils import add_kernel
 
         def fn(x):
@@ -190,8 +198,10 @@ class UnbackedSymintsTritonTemplate:
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipCPUIf(True, "precision not good enough on CPU")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_vertical_pointwise_reduction_fusion(self, device):
+        # reset in case we run both cpu and cuda tests
         torch._inductor.metrics.reset()
 
         # Tests fusing a pointwise & reduction op with unbacked numel/rnumel.
@@ -505,6 +515,11 @@ class UnbackedSymintsTritonTemplate:
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):
+        if device == "cpu":
+            raise unittest.SkipTest(
+                "scaled_dot_product_flash_attention has no CPU backend"
+            )
+
         def fn(x):
             B, H, d_h = 2, 4, 8
             nz = torch.nonzero(x)
@@ -525,6 +540,9 @@ class UnbackedSymintsTritonTemplate:
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdfpa_unbacked_strides(self, device):
+        if device == "cpu":
+            raise unittest.SkipTest("scaled_dot_product_attention has no CPU backend")
+
         def fn(x, y):
             B, H, d_h = 2, 4, 16
             nz = torch.nonzero(x)
@@ -597,6 +615,9 @@ class UnbackedSymintsTritonTemplate:
     @inductor_config.patch({"combo_kernels": True, "benchmark_combo_kernel": True})
     def test_combo_kernel_size_hint_failure(self, device):
         # A size hint failure is "TypeError: Cannot convert symbols to int"
+        if device == "cpu":
+            raise unittest.SkipTest("Combo kernels must be for GPU.")
+
         def fn(x):
             nz = torch.nonzero(x)
             u0 = nz.size(0)
@@ -672,6 +693,7 @@ class UnbackedSymintsTritonTemplate:
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_pow_type_mismatch(self, device):
         """
@@ -700,6 +722,7 @@ class UnbackedSymintsTritonTemplate:
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_trunc_large_float_scalar_tensor(self, device):
         import math
@@ -715,6 +738,7 @@ class UnbackedSymintsTritonTemplate:
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_trunc_float_scalar_tensor_preserves_positive_zero(self, device):
         import math
@@ -731,6 +755,7 @@ class UnbackedSymintsTritonTemplate:
         expected = fn(*example_inputs)
         self.assertEqual(actual, expected)
 
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_pow_symbolic_int_exponent(self, device):
         """
@@ -766,6 +791,7 @@ class UnbackedSymintsTritonTemplate:
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_pow_symbolic_negative_int_exponent(self, device):
         def fn(x, exponent_src):
@@ -812,6 +838,7 @@ class UnbackedSymintsTritonTemplate:
 
 class UnbackedSymintsStandaloneCompileTemplate:
     @skipIfXpu(msg="standalone_compile coverage is CUDA-only")
+    @skipCPUIf(True, "requires gpu and triton")
     def test_standalone_compile_reuses_fallback_unbacked_binding(self, device):
         from torch._inductor import standalone_compile
         from torch._subclasses.fake_tensor import FakeTensor
@@ -1398,24 +1425,6 @@ _TRITON_TEMPLATES = (
     UnbackedSymintsOptimizationHintsTemplate,
     UnbackedSymintsCatTemplate,
 )
-_CPU_SKIP_NAMES = {
-    "test_combo_kernel_size_hint_failure",
-    "test_sdfpa_unbacked_strides",
-    "test_sdpfa",
-    "test_standalone_compile_reuses_fallback_unbacked_binding",
-    "test_triton_kernel_grid",
-    "test_triton_pow_symbolic_int_exponent",
-    "test_triton_pow_symbolic_negative_int_exponent",
-    "test_triton_pow_type_mismatch",
-    "test_triton_trunc_float_scalar_tensor_preserves_positive_zero",
-    "test_triton_trunc_large_float_scalar_tensor",
-    "test_vertical_pointwise_reduction_fusion",
-}
-_CPU_FAILURES = {
-    name: test_torchinductor.TestFailure(("cpu",), is_skip=True)
-    for name in _CPU_SKIP_NAMES
-}
-
 test_torchinductor.instantiate_device_type_tests_from_templates(
     TestUnbackedSymintsCPU,
     globals(),
@@ -1424,7 +1433,6 @@ test_torchinductor.instantiate_device_type_tests_from_templates(
         UnbackedSymintsDeviceLogicTemplate,
         UnbackedSymintsStandaloneCompileTemplate,
     ),
-    test_failures=_CPU_FAILURES,
     class_name_overrides={"cpu": "TestUnbackedSymintsCPU"},
     only_for=("cpu",),
 )
