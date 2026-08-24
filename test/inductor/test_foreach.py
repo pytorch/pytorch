@@ -10,21 +10,23 @@ from torch._higher_order_ops import foreach_map
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    TEST_WITH_ROCM,
     HardwareClassification,
+    IS_FBCODE,
     parametrize,
     skipIfRocm,
+    TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU,
+    HAS_TRITON,
+)
+from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 from torch.utils._pytree import tree_flatten
+
 
 aten = torch.ops.aten
 
@@ -273,25 +275,25 @@ class ForeachTestsAccelerator(TestCase):
             ),
         )
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @all_ops
     def test_single_list(self, device, op):
         self._test_single_list(op, device)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
     def test_single_scalar(self, device, op):
         self._test_single_scalar(op, device)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_tensor_bin_ops
     def test_single_scalar_tensor(self, device, op):
         self._test_single_scalar_tensor(op, device)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @all_ops
     def test_scheduler_fusion_list(self, device, op):
         if op in un_ops_under_test:
@@ -319,7 +321,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
     def test_scheduler_fusion_scalar(self, device, op):
         def fn(a0, a1):
@@ -336,7 +338,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
     def test_broadcasting(self, device, op):
         def fn(a0, a1, b0, b1):
@@ -355,7 +357,7 @@ class ForeachTestsAccelerator(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @all_ops
     def test_singleton_lists(self, device, op):
         if op in un_ops_under_test:
@@ -392,7 +394,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @bin_ops
     def test_type_promotion(self, device, op):
         def fn(a0, a1, b0, b1):
@@ -413,7 +415,7 @@ class ForeachTestsAccelerator(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
     def test_kernel_split_arg_limit_list(self, device, op):
         # NB: foeach_copy won't pass this test because it will dce one set of buffers
@@ -435,7 +437,7 @@ class ForeachTestsAccelerator(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
     @unittest.skip(
         "Triton recursion depth exceeded: https://github.com/triton-lang/triton/issues/1763"
@@ -455,7 +457,7 @@ class ForeachTestsAccelerator(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @bin_ops
     def test_fusion_duplicate_buffer_list(self, device, op):
         def fn(a0, a1, b0, b1):
@@ -479,7 +481,7 @@ class ForeachTestsAccelerator(TestCase):
             kernel_count = 2
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, kernel_count)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @all_ops
     def test_non_foreach_consumer_list(self, device, op):
         if op in un_ops_under_test:
@@ -507,7 +509,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
     def test_non_foreach_consumer_scalar(self, device, op):
         def fn(a0, a1):
@@ -524,7 +526,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @all_ops
     def test_non_foreach_producer_list(self, device, op):
         if op in un_ops_under_test:
@@ -554,7 +556,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
     def test_non_foreach_producer_scalar(self, device, op):
         def fn(a0, a1, b0, b1):
@@ -574,7 +576,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @all_ops
     def test_non_foreach_consumer_producer_list(self, device, op):
         if op in un_ops_under_test:
@@ -616,7 +618,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @scalar_bin_ops
     def test_non_foreach_consumer_producer_scalar(self, device, op):
         def fn(a0, a1, b0, b1):
@@ -641,7 +643,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @bin_ops
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
@@ -661,7 +663,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
@@ -680,7 +682,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @decomp_ops
     def test_decomp(self, device, op):
         def fn(a0, a1, b0, b1, c0, c1):
@@ -700,7 +702,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_fuse_concat(self, device):
         def fn(x1, x2, x3, w1, w2, w3):
             x = torch.stack([x1, x2, x3])
@@ -758,7 +760,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, n)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_zero_elems(self, device):
         def fn(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
@@ -775,7 +777,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @bin_ops
     def test_2d_blocking(self, device, op):
         def fn(a0, a1, b0, b1):
@@ -793,7 +795,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @bin_ops
     def test_2d_blocking_partitioning(self, device, op):
         def fn(a0, a1, b0, b1):
@@ -811,7 +813,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @bin_ops
     def test_2d_blocking_partitioning_elems(self, device, op):
         """2D blocking should be grouped by number of yelems"""
@@ -833,7 +835,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @bin_ops
     @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 2)
     def test_2d_blocking_partitioning_mixed_sizes(self, device, op):
@@ -856,7 +858,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @inplace_bin_ops
     def test_reinplacing(self, device, op):
         def fn(a0, a1, b0, b1):
@@ -874,7 +876,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @inplace_bin_ops
     def test_reinplacing_mut_before(self, device, op):
         def fn(a0, a1, b0, b1):
@@ -893,7 +895,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @inplace_bin_ops
     def test_reinplacing_mut_after(self, device, op):
         def fn(a0, a1, b0, b1):
@@ -971,8 +973,7 @@ class ForeachTestsAccelerator(TestCase):
         self.assertEqual(self._nodes_pre_fusion(fn, x), 2)
         self.assertEqual(x, expected)
 
-    @requires_gpu
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_multi_device(self, device):
         def test_foreach_add(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
@@ -990,7 +991,7 @@ class ForeachTestsAccelerator(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_aliasing(self, device):
         def test_foreach_add(a0, a1, a2, b0, b1, b2):
             return torch._foreach_add_([a0, a1, a2], [b0, b1, b2])
@@ -1012,7 +1013,7 @@ class ForeachTestsAccelerator(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 1)
     def test_2d_block_no_mixed_sizes_no_mask(self, device):
         """2D blocking with no mixed sizes constant mask"""
@@ -1034,7 +1035,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 2)
     @config.patch({"combo_kernel_per_subkernel_blocks": True})
     def test_2d_block_mixed_sizes_with_mask(self, device):
@@ -1060,7 +1061,7 @@ class ForeachTestsAccelerator(TestCase):
         self.assertNotIn("SequentialFlattenComboKernelGrid", code)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @foreach_map_bin_ops
     def test_foreach_map_backward_binary(self, device, op):
         from torch._dynamo.polyfills import foreach_map_fn
@@ -1101,7 +1102,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_foreach_map_input_mutation(self, device):
         def fn(xs, ys):
             outs = foreach_map_add_inplace(xs, ys)
@@ -1137,7 +1138,7 @@ class ForeachTestsAccelerator(TestCase):
             ):
                 _ = run_fw_bw_and_get_code(lambda: torch.compile(fn)(*inps))
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @torch._inductor.config.patch("_use_fp64_for_unbacked_floats", True)
     @parametrize(
@@ -1209,7 +1210,7 @@ class ForeachTestsAccelerator(TestCase):
         for a, b in zip(compiled_item_scalar, compiled_tensor_scalar):
             self.assertEqual(a, b, atol=0, rtol=0)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize(
         "op",
@@ -1290,7 +1291,7 @@ class ForeachTestsAccelerator(TestCase):
         for a, b in zip(eager_tensor_scalar, compiled_tensor_scalar):
             self.assertEqual(a, b, atol=0, rtol=0)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @skipIfRocm
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @torch._inductor.config.patch("emulate_precision_casts", True)
@@ -1358,7 +1359,7 @@ class ForeachTestsAccelerator(TestCase):
         for a, b in zip(eager_result, compiled_result):
             self.assertEqual(a, b, atol=0, rtol=0)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @foreach_map_un_ops
     def test_foreach_map_backward_unary(self, device, op):
         from torch._dynamo.polyfills import foreach_map_fn
@@ -1390,7 +1391,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_foreach_sub(self, device):
         def fn(a, b):
             return torch._foreach_sub(a, b, alpha=2.0)
@@ -1404,7 +1405,7 @@ class ForeachTestsAccelerator(TestCase):
 
         self.assertEqual(eager, compiled)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_foreach_reorder_loops_with_nested_foreach_snodes(self, device):
         def fn(x0, x1, y0, y1):
             xs, ys = [x0, x1], [y0, y1]
@@ -1467,7 +1468,7 @@ class ForeachTestsCuda(TestCase):
         super().tearDown()
         torch._inductor.metrics.reset()
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @config.patch({"emulate_precision_casts": True})
     def test_foreach_addcmul_fma_bitwise_equal(self, device):
         """Test that _foreach_addcmul with FMA lowering produces bitwise equal results to eager."""
@@ -1513,7 +1514,7 @@ class ForeachTestsCuda(TestCase):
         for eager, compiled in zip(eager_result2, compiled_result2):
             self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @config.patch({"emulate_precision_casts": True})
     def test_foreach_addcmul_uses_fma_instruction(self, device):
         """Test that _foreach_addcmul generates code using FMA instruction."""
@@ -1539,78 +1540,6 @@ class ForeachTestsCuda(TestCase):
         _, code = run_and_get_code(fn, self_tensors, tensor1_list, tensor2_list)
         code = " ".join(code)
         self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
-
-
-class ForeachCppWrapperTests(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-    check_model = torch._inductor.config.patch("triton.cudagraphs", False)(check_model)
-    check_kernel_count = True
-
-    def setUp(self):
-        super().setUp()
-        torch._inductor.metrics.reset()
-
-    def tearDown(self):
-        super().tearDown()
-        torch._inductor.metrics.reset()
-
-    # called in test_gpu_cpp_wrapper.py
-    @requires_capabilities(Capability.lib.triton)
-    def test_foreach_cpp_wrapper(self, device):
-        self._test_single_list_gpu(op=torch._foreach_add, device=device)
-
-    def _test_single_list_gpu(self, op, device):
-        if op in un_ops_under_test:
-
-            def fn(a0, a1):
-                return op([a0, a1])
-
-        elif op in bin_ops_under_test:
-
-            def fn(a0, a1, b0, b1):
-                return op([a0, a1], [b0, b1])
-
-        else:
-
-            def fn(a0, a1, b0, b1, c0, c1):
-                return op([a0, a1], [b0, b1], [c0, c1])
-
-        self.check_model(
-            fn,
-            gen_args(op, device),
-        )
-
-    # called in test_gpu_cpp_wrapper.py
-    @requires_capabilities(Capability.lib.triton)
-    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
-    @torch._dynamo.config.patch("assume_static_by_default", False)
-    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
-    @torch._inductor.config.patch("cpp_wrapper", True)
-    def test_enable_dynamic_shapes_cpp_wrapper(self, device, op=torch._foreach_add):
-        def fn(a0, a1, b0, b1):
-            return op([a0, a1], [b0, b1])
-
-        inputs = (
-            torch.rand(10, 10, device=device),
-            torch.rand(20, 20, device=device),
-            torch.rand(10, 10, device=device),
-            torch.rand(20, 20, device=device),
-        )
-
-        self.check_model(fn, inputs)
-
-
-instantiate_device_type_tests(
-    ForeachTestsAccelerator, globals(), except_for="cpu", allow_xpu=True
-)
-
-instantiate_device_type_tests(ForeachTestsCpu, globals(), only_for="cpu")
-
-instantiate_device_type_tests(ForeachTestsCuda, globals(), only_for="cuda")
-
-instantiate_device_type_tests(
-    ForeachCppWrapperTests, globals(), except_for="cpu", allow_xpu=True
-)
 
     @requires_cuda_and_triton
     def test_foreach_pow_int_fallback(self):
@@ -1648,6 +1577,76 @@ instantiate_device_type_tests(
         self.assertGreaterEqual(create_foreach_nodes_calls, 2)
 
 
+class ForeachCppWrapperTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    check_model = torch._inductor.config.patch("triton.cudagraphs", False)(check_model)
+    check_kernel_count = True
+
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
+
+    def tearDown(self):
+        super().tearDown()
+        torch._inductor.metrics.reset()
+
+    # called in test_gpu_cpp_wrapper.py
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_foreach_cpp_wrapper(self, device):
+        self._test_single_list_gpu(op=torch._foreach_add, device=device)
+
+    def _test_single_list_gpu(self, op, device):
+        if op in un_ops_under_test:
+
+            def fn(a0, a1):
+                return op([a0, a1])
+
+        elif op in bin_ops_under_test:
+
+            def fn(a0, a1, b0, b1):
+                return op([a0, a1], [b0, b1])
+
+        else:
+
+            def fn(a0, a1, b0, b1, c0, c1):
+                return op([a0, a1], [b0, b1], [c0, c1])
+
+        self.check_model(
+            fn,
+            gen_args(op, device),
+        )
+
+    # called in test_gpu_cpp_wrapper.py
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_enable_dynamic_shapes_cpp_wrapper(self, device, op=torch._foreach_add):
+        def fn(a0, a1, b0, b1):
+            return op([a0, a1], [b0, b1])
+
+        inputs = (
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+            torch.rand(10, 10, device=device),
+            torch.rand(20, 20, device=device),
+        )
+
+        self.check_model(fn, inputs)
+
+
+instantiate_device_type_tests(
+    ForeachTestsAccelerator, globals(), except_for="cpu", allow_xpu=True
+)
+
+instantiate_device_type_tests(ForeachTestsCpu, globals(), only_for="cpu")
+
+instantiate_device_type_tests(ForeachTestsCuda, globals(), only_for="cuda")
+
+instantiate_device_type_tests(
+    ForeachCppWrapperTests, globals(), except_for="cpu", allow_xpu=True
+)
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
     from torch.utils._triton import has_triton
