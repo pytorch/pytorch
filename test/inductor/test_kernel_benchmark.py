@@ -16,16 +16,13 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, run_and_get_code, run_and_get_kernels
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     recover_orig_fp32_precision,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
+from torch.utils._triton import has_triton
 
 
 class TestKernelBenchmark(TestCase):
@@ -158,7 +155,6 @@ class TestKernelBenchmark(TestCase):
             exactly=1,
         ).run(bench_out)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_plus1_kernel_benchmark(self, device):
         @torch.compile
         def f(x):
@@ -170,7 +166,6 @@ class TestKernelBenchmark(TestCase):
         bench_output = self.run_kernel_benchmark(path)
         self.assertTrue("GB/s" in bench_output)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_pw_kernel_benchmark(self, device):
         @torch.compile
         def f(x):
@@ -182,7 +177,6 @@ class TestKernelBenchmark(TestCase):
 
     # TODO: Currently the Triton mm template +  relu fusion causes slowdown on XPU,
     # Need to refine the template and config for XPU.
-    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
@@ -204,7 +198,6 @@ class TestKernelBenchmark(TestCase):
         f(a, b)
         self.verify_compiled_kernels()
 
-    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", shape_padding=False
     )
@@ -230,7 +223,6 @@ class TestKernelBenchmark(TestCase):
 
         self.verify_compiled_kernels(GB_count=1)
 
-    @requires_capabilities(Capability.lib.triton)
     @recover_orig_fp32_precision
     def test_matmul_bandwidth_computation(self, device):
         """
@@ -263,7 +255,6 @@ class TestKernelBenchmark(TestCase):
 
         self.check_bandwidth(compiled_module, 0.008)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_unused_input_bandwidth_computation(self, device):
         M, N = 5, 1000000
 
@@ -286,7 +277,6 @@ class TestKernelBenchmark(TestCase):
         #        = 0.030
         self.check_bandwidth(compiled_module, "0.030")
 
-    @requires_capabilities(Capability.lib.triton)
     def test_reduction_bandwidth_computation(self, device):
         @torch.compile
         def f(a):
@@ -302,7 +292,6 @@ class TestKernelBenchmark(TestCase):
         #        = 0.042
         self.check_bandwidth(compiled_module, "0.042")
 
-    @requires_capabilities(Capability.lib.triton)
     @config.patch(max_autotune=True)
     def test_fused_layernorm_bandwidth_computation(self, device):
         M, N = 10, 1000000
@@ -329,7 +318,6 @@ class TestKernelBenchmark(TestCase):
         #        = 0.046
         self.check_bandwidth(compiled_module, "0.046")
 
-    @requires_capabilities(Capability.lib.triton)
     def test_slice_add_cat_bandwidth_computation(self, device):
         M, N = 5, 1000000
 
@@ -355,7 +343,6 @@ class TestKernelBenchmark(TestCase):
         #        = 0.052
         self.check_bandwidth(compiled_module, "0.052")
 
-    @requires_capabilities(Capability.lib.triton)
     def test_slice_add_bandwidth_computation(self, device):
         M, N = 5, 1000000
 
@@ -378,7 +365,6 @@ class TestKernelBenchmark(TestCase):
         #        = 0.032
         self.check_bandwidth(compiled_module, "0.032")
 
-    @requires_capabilities(Capability.lib.triton)
     def test_mm_slice_add_bandwidth_computation(self, device):
         M, N, K = 1000, 1000, 30
 
@@ -404,7 +390,6 @@ class TestKernelBenchmark(TestCase):
         num_gb = "0.006"
         self.check_bandwidth(compiled_module, num_gb)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_mm_slice_add_bandwidth_computation_2(self, device):
         M, N, K = 1000, 1000, 30
 
@@ -431,7 +416,6 @@ class TestKernelBenchmark(TestCase):
         # have the same index.
         self.check_bandwidth(compiled_module, "0.006")
 
-    @requires_capabilities(Capability.lib.triton)
     @xfailIfSM89
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
@@ -461,7 +445,6 @@ class TestKernelBenchmark(TestCase):
         #        = 0.022
         self.check_bandwidth(compiled_module, "0.022")
 
-    @requires_capabilities(Capability.lib.triton)
     def test_star_dep(self, device):
         """
         Test the bandwidth estimation for StarDep
@@ -481,7 +464,6 @@ class TestKernelBenchmark(TestCase):
         # 20000 * 5000 * 4 = 200MB for a
         self.check_bandwidth(compiled_module, "0.200")
 
-    @requires_capabilities(Capability.lib.triton)
     def test_split_scan(self, device):
         @torch.compile
         def f(a):
@@ -494,7 +476,6 @@ class TestKernelBenchmark(TestCase):
         # Double that for output as well
         self.check_bandwidth(compiled_module, "0.400")
 
-    @requires_capabilities(Capability.lib.triton)
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
     @config.patch(compile_threads=1)
@@ -508,7 +489,6 @@ class TestKernelBenchmark(TestCase):
         compiled_module = self.get_compiled_module()
         cleaned_triton = self.verify_remove_inductor_deps(compiled_module)
 
-    @requires_capabilities(Capability.lib.triton)
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
     @config.patch(compile_threads=1)
@@ -526,7 +506,6 @@ class TestKernelBenchmark(TestCase):
         compiled_module = self.get_compiled_module()
         self.verify_remove_inductor_deps(compiled_module)
 
-    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
@@ -548,7 +527,6 @@ class TestKernelBenchmark(TestCase):
         compiled_module = self.get_compiled_module()
         self.verify_remove_inductor_deps(compiled_module)
 
-    @requires_capabilities(Capability.lib.triton)
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
     @config.patch(compile_threads=1)
@@ -563,7 +541,6 @@ class TestKernelBenchmark(TestCase):
         compiled_module = self.get_compiled_module()
         self.verify_remove_inductor_deps(compiled_module)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_benchmark_compiled_module_device_arg(self, device):
         """Regression test for https://github.com/pytorch/pytorch/issues/181954."""
 
@@ -586,4 +563,5 @@ instantiate_device_type_tests(
 
 
 if __name__ == "__main__":
-    run_tests()
+    if has_triton():
+        run_tests()
