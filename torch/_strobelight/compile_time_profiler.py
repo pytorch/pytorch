@@ -135,7 +135,7 @@ class StrobelightCompileTimeProfiler:
         cls.enabled = True
         cls._cls_init()
         # profiler_class should have public API similar to that of StrobelightCLIFunctionProfiler.
-        # we have pass different functionProfilerClass for meta-internal fbcode targets.
+        # we have to pass different functionProfilerClass for meta-internal fbcode targets.
         # NB: the actual implementation in Meta is at
         # fbcode/caffe2/fb/strobelight/function_profiler.py
         cls.profiler = profiler_class(

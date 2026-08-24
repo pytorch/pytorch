@@ -11,7 +11,7 @@ namespace torch::jit {
  * Deserializes debug_pkl and callstack_map records from PT model's zip archive
  * and stores them in a map of debug handles to DebugInfoPair. Debug handles are
  * unique per model and runtime, be in lite interpreter or delegate, an
- * exception of BackendRuntimeException should raised using debug handles.
+ * exception of BackendRuntimeException should be raised using debug handles.
  * getSourceDebugString method is responsible for translating debug
  * handles to correspond debug information.
  * This debug information includes stack trace of model level source code and

@@ -206,7 +206,7 @@ class FuzzedTensor:
                 A string identifier for the generated Tensor.
             size:
                 A tuple of integers or strings specifying the size of the generated
-                Tensor. String values will replaced with a concrete int during the
+                Tensor. String values will be replaced with a concrete int during the
                 generation process, while ints are simply passed as literals.
             steps:
                 An optional tuple with the same length as `size`. This indicates

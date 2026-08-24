@@ -70,7 +70,7 @@ void ArgumentSpecCreator::scan(
 }
 
 // this is a coarse-grained guarantee that the slots of a class will not be
-// modified by the function. It works fine for things that used be read-only
+// modified by the function. It works fine for things that used to be read-only
 // modules, but will be overly conservative when some classes are written to.
 // Doing alias analysis and looking for writes to the class would be more
 // accurate.

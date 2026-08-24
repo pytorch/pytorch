@@ -367,7 +367,7 @@ namespace {
         %sigrid_hash_out : Tensor, %clipped : Tensor = fb::placeholder(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32)
         return (%sigrid_hash_out, %clipped))IR";
 
-  // the second gather_ranges can be eliminated because the `lengths` is
+  // the second gather_ranges can be eliminated because the `lengths` it
   // produces is identical to the lengths produced by
   // clip_ranges_gather_sigrid_hash_v3 (caveat, the fused ops makes some
   // simplifying assumptions about the ranges input)

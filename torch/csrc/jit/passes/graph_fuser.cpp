@@ -143,7 +143,7 @@ struct GraphFuser {
         aliasDb_(aliasDb),
         strict_fuser_check_(strict_fuser_check) {}
 
-  // Custom passes require kind to specified
+  // Custom passes require kind to be specified
   GraphFuser(
       AliasDb* aliasDb,
       Block* block,
@@ -1219,7 +1219,7 @@ void PeepholeOptimizeShapeExpressions(Block* block, AliasDb* db) {
         --it; // Revisit the node with deduplicated inputs
         continue;
       }
-      // Remove compose simple chains of broadcasts into a single node.
+      // Compose simple chains of broadcasts into a single node.
       const auto& uses = node->output()->uses();
       if (uses.size() == 1 && uses[0].user->kind() == prim::BroadcastSizes) {
         Node* user = uses[0].user;

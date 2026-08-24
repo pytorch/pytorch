@@ -398,7 +398,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
   UnpackInstructions input_instructions_;
   // we need to track input lists to fwd graph
   // since in backward graphs these will become
-  // an undefined tensors if gradients are zeros
+  // an undefined tensor if gradients are zeros
   // we will need to convert an undefined tensor
   // back to a list
   // TODO: switch to using UnpackInstructions

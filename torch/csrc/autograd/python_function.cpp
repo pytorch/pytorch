@@ -968,7 +968,7 @@ static void _get_tensors_to_save(
     Py_CLEAR(self->to_save);
   }
 }
-// Save any variables that requested by to_save
+// Save any variables that were requested by to_save
 static void _save_variables(
     const std::vector<std::optional<at::Tensor>>& tensors_to_save,
     THPFunction* self,
