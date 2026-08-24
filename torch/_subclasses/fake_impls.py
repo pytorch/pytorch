@@ -421,6 +421,67 @@ def resize_as_(
         return func(*args, **kwargs)
 
 
+_foreach_pointwise_tensor_to_scalar_list = {
+    aten._foreach_addcdiv.Tensor: aten._foreach_addcdiv.ScalarList,
+    aten._foreach_addcdiv_.Tensor: aten._foreach_addcdiv_.ScalarList,
+    aten._foreach_addcmul.Tensor: aten._foreach_addcmul.ScalarList,
+    aten._foreach_addcmul_.Tensor: aten._foreach_addcmul_.ScalarList,
+}
+_foreach_packed_scalar_dtypes = frozenset(
+    {
+        torch.bool,
+        torch.uint8,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+        torch.complex32,
+        torch.bcomplex32,
+        torch.complex64,
+        torch.complex128,
+    }
+)
+
+
+@register_op_impl(tuple(_foreach_pointwise_tensor_to_scalar_list))
+def foreach_pointwise_tensor(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    inputs: list[torch.Tensor],
+    tensor1: list[torch.Tensor],
+    tensor2: list[torch.Tensor],
+    scalars: torch.Tensor,
+) -> list[FakeTensor] | None:
+    if scalars.device.type != "cpu":
+        raise RuntimeError(
+            f"Expected scalars to be on CPU, got {scalars.device} instead."
+        )
+    if not scalars.is_contiguous():
+        raise RuntimeError("Expected scalars to be contiguous.")
+    if scalars.dim() != 1:
+        raise RuntimeError(
+            f"Expected packed scalar Tensor to be of dimension 1. Got {scalars.dim()} instead."
+        )
+    if scalars.dtype not in _foreach_packed_scalar_dtypes:
+        raise NotImplementedError(
+            f"Packed scalar Tensor dtype {scalars.dtype} is not supported"
+        )
+    if scalars.size(0) != len(inputs):
+        raise RuntimeError(
+            f"Expected length of scalars to match input of length {len(inputs)} "
+            f"but got {scalars.size(0)} instead."
+        )
+
+    scalar = utils.dtype_to_type(scalars.dtype)(1)
+    return _foreach_pointwise_tensor_to_scalar_list[func](
+        inputs, tensor1, tensor2, [scalar] * len(inputs)
+    )
+
+
 @register_op_impl(aten._sparse_coo_tensor_with_dims_and_tensors.default)
 def _sparse_coo_tensor_with_dims_and_tensors(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
@@ -2212,19 +2273,30 @@ def bincount(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    new_size = fake_mode.shape_env.create_unbacked_symint()
+    from torch.fx.experimental.symbolic_shapes import (
+        _constrain_range_for_size,
+        has_free_symbols,
+    )
 
-    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+    if not has_free_symbols(inputs.numel()) and inputs.numel() == 0:
+        return inputs.new_empty(minlength, dtype=torch.int64)  # type: ignore[return]
+
+    new_size = fake_mode.shape_env.create_unbacked_symint()
 
     _constrain_range_for_size(new_size)
     torch._check(new_size >= minlength)
-
     if weights is None:
-        return inputs.new_empty(new_size, dtype=torch.long)  # type: ignore[return]
-    elif weights.dtype == torch.float32:
-        return inputs.new_empty(new_size, dtype=torch.float32)  # type: ignore[return]
+        return inputs.new_empty(new_size, dtype=torch.int64)  # type: ignore[return]
+
+    if weights.device.type == "mps":
+        dtype = (
+            weights.dtype
+            if weights.dtype in (torch.float32, torch.int32, torch.float16)
+            else torch.int32
+        )
     else:
-        return inputs.new_empty(new_size, dtype=torch.float64)  # type: ignore[return]
+        dtype = weights.dtype if weights.dtype == torch.float32 else torch.float64
+    return weights.new_empty(new_size, dtype=dtype)  # type: ignore[return]
 
 
 @register_op_impl(torch.ops.aten._pack_padded_sequence.default)

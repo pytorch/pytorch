@@ -1284,6 +1284,18 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         # model can be compiled without error
         y = model(x)
 
+    def test_rnn_modules_compile_by_default(self):
+        for module_cls in (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM):
+            with self.subTest(module_cls=module_cls):
+                torch._dynamo.reset()
+                mod = module_cls(4, 8, batch_first=True).eval()
+                x = torch.randn(2, 3, 4)
+
+                ref = mod(x)
+                res = torch.compile(mod, backend="eager", fullgraph=True)(x)
+
+                self.assertEqual(ref, res)
+
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
         x = torch.rand([10, 10])
@@ -3122,6 +3134,77 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         self.assertFalse(hasattr(model, "foo"))
         self.assertFalse(hasattr(compiled_model, "foo"))
+
+    def test_custom_getattr_hasattr_no_recursion(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def __getattr__(self, name):
+                try:
+                    return super().__getattr__(name)
+                except AttributeError:
+                    if (
+                        hasattr(self, "custom_attributes")
+                        and name in self.custom_attributes
+                    ):
+                        return self.custom_attributes[name]
+                    raise
+
+            def forward(self, x):
+                return self.linear(x).relu()
+
+        mod = Mod()
+        x = torch.randn(2, 4)
+        compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        self.assertEqual(mod(x), compiled_mod(x))
+
+        class ModWithAttrs(Mod):
+            def __init__(self):
+                super().__init__()
+                self.custom_attributes = {"scale": 2.0}
+
+            def forward(self, x):
+                return self.linear(x) * self.scale
+
+        mod2 = ModWithAttrs()
+        compiled_mod2 = torch.compile(mod2, backend="eager", fullgraph=True)
+        self.assertEqual(mod2(x), compiled_mod2(x))
+
+    def test_lazy_module_custom_getattr_no_recursion(self):
+        class LazyMod(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.UninitializedParameter()
+
+            def initialize_parameters(self, x):
+                with torch.no_grad():
+                    self.weight.materialize((x.shape[-1],))
+                    self.weight.fill_(2.0)
+
+            def forward(self, x):
+                return x * self.weight
+
+        class LazyModWithGetattr(LazyMod):
+            def __getattr__(self, name):
+                try:
+                    return super().__getattr__(name)
+                except AttributeError:
+                    if (
+                        hasattr(self, "custom_attributes")
+                        and name in self.custom_attributes
+                    ):
+                        return self.custom_attributes[name]
+                    raise
+
+        mod = LazyMod()
+        mod.__class__ = LazyModWithGetattr
+        x = torch.randn(2, 4)
+        compiled_mod = torch.compile(mod, backend="eager")
+        compiled_mod(x)
+        res = compiled_mod(x)
+        self.assertEqual(x * 2.0, res)
 
     def test_globals_change_in_other_file(self):
         global _variable, _variable1

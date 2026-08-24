@@ -418,6 +418,10 @@ def trace(data):
                 out.write(
                     f"raise OutOfMemoryError # {Bytes(size)} requested, {Bytes(free)} free in CUDA\n"
                 )
+            elif e["action"] == "annotate":
+                addr = e["addr"]
+                name, _, _ = allocation_addr_to_name.get(addr, (addr, None, None))
+                out.write(f"# annotate {name}: {e['user_metadata']}\n")
             else:
                 out.write(f"{e}\n")
         out.write(f"TOTAL MEM: {Bytes(count)}")

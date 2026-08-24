@@ -62,6 +62,7 @@ ContextPtr addRecvRpcBackward(
         torch::autograd::set_history(tensor, grad_fn);
       }
     }
+    torch::autograd::fire_node_creation_hooks(grad_fn);
 
     // Now update the autograd context with the necessary information.
     autogradContext->addRecvFunction(
