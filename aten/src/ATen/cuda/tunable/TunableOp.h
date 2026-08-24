@@ -12,6 +12,7 @@
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/StreamTimer.h>
 #include <ATen/cuda/Sleep.h>
+#include <ATen/native/TunableOp.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #ifndef USE_ROCM
 #include <c10/cuda/CUDAGraphsC10Utils.h>
@@ -27,7 +28,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <deque>
 
 namespace at::cuda::tunable {
 
@@ -42,75 +42,6 @@ class Callable {
       return Call(params);
     }
 };
-
-namespace {
-
-/** http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance */
-
-class Stats {
-  public:
-    Stats() {
-      _n = 0UL;
-      _mean = 0.0;
-      _M2 = 0.0;
-      _sum = 0.0;
-      _min = 0.0;
-      _max = 0.0;
-    }
-
-    void sample_value(const double x) {
-      double delta = 0;
-      _sum = _sum + x;
-      if (0UL == _n) {
-          _min = x;
-          _max = x;
-      }
-      else {
-          _min = _min < x ? _min : x;
-          _max = _max > x ? _max : x;
-      }
-      _n = _n + 1UL;
-      delta = x - _mean;
-      _mean = _mean + delta/_n;
-      _M2 = _M2 + delta * (x - _mean);
-    }
-
-    double variance() const {
-      return _M2/(_n-1);
-    }
-
-    double stddev() const {
-      return std::sqrt(variance());
-    }
-
-    unsigned long _n;
-    double _mean;
-    double _M2;
-    double _sum;
-    double _min;
-    double _max;
-};
-
-class FixedSizeStack {
-  private:
-      std::deque<std::string> stack;
-      const size_t max_size;
-
-  public:
-      FixedSizeStack(size_t size) : max_size(size) {}
-
-      void push(const std::string& value) {
-          if (stack.size() >= max_size) {
-              stack.pop_front(); // Remove the oldest entry
-          }
-          stack.push_back(value); // Add new entry
-      }
-
-      auto rbegin() { return stack.rbegin(); }
-      auto rend() { return stack.rend(); }
-};
-
-} // anonymous namespace
 
 template <typename ParamsT>
 class TunableOp {
@@ -263,14 +194,15 @@ class TunableOp {
       return timer.Duration() / num_iter;
     }
 
-    static Stats ProfileStats(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
+    // warmup_iter reduces outliers on a candidate's first touch. It is
+    // redundant when profiling a candidate that was just profiled, so
+    // back-to-back passes over the same candidate pass 0.
+    static at::native::tunable::Stats ProfileStats(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset, size_t warmup_iter = 2) {
       TuningContext* ctx = getTuningContext();
       bool do_flush = ctx->IsICacheFlushEnabled();
       std::vector<StreamTimerNoSync> timer(num_iter);
 
-      // Small Mandatory Warmup
-      // Reduces outliers
-      for (size_t i = 0; i < 2; i++) {
+      for (size_t i = 0; i < warmup_iter; i++) {
         TORCH_CHECK(op->Call(param[(i+offset++)%param.size()]) == OK);
       }
 
@@ -282,11 +214,28 @@ class TunableOp {
           at::cuda::flush_icache();
         }
       }
-      Stats s;
+      at::native::tunable::Stats s;
       for (size_t i = 0; i < num_iter; i++) {
         s.sample_value(timer[i].Duration());
       }
       return s;
+    }
+
+    // A screening pass exists only to avoid the cost of the final tuning
+    // profile, so it must never cost more than that profile is allowed to.
+    // Size it by the same limits, capped at the pass's nominal count.
+    // A limit of zero means that limit is disabled.
+    static int ScreenIters(TuningContext* ctx, double per_iter_ms, int nominal_iter) {
+      int iters = nominal_iter;
+      double max_tuning_duration = ctx->GetMaxTuningDurationMs();
+      int max_tuning_iter = ctx->GetMaxTuningIterations();
+      if (max_tuning_duration > 0 && per_iter_ms > 0) {
+        iters = std::min(iters, static_cast<int>(max_tuning_duration / per_iter_ms));
+      }
+      if (max_tuning_iter > 0) {
+        iters = std::min(iters, max_tuning_iter);
+      }
+      return std::max(1, iters);
     }
 
   protected:
@@ -300,7 +249,7 @@ class TunableOp {
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
       ParamsT* reference_params = nullptr;
-      auto top_solns = FixedSizeStack(5);
+      auto top_solns = at::native::tunable::FixedSizeStack(5);
 
       // numeric check option is controlled by non-static env var, so check it once per tuned operator
       bool do_numerics_check = ctx->IsNumericsCheckEnabled();
@@ -336,18 +285,28 @@ class TunableOp {
       // for rotating buffer
       size_t offset = 0;
 
+      // reused across candidates; StreamTimer does not free its events
+      StreamTimer probe_timer{};
+
       for (size_t i = 0; i < candidate_names.size(); i++) {
         auto* candidate = GetOp(candidate_names[i]); // borrow pointer
         TORCH_CHECK(candidate != nullptr);
 
+        // this support probe is also the candidate's first touch, so time it
+        // and use it to size the screening passes below. It carries one-time
+        // setup cost and therefore over-estimates, which is the safe direction
+        // when the estimate is only used to bound work.
+        probe_timer.Start();
         auto status = candidate->Call(reusable_params[0]);
+        probe_timer.End();
         if (status != OK) {
           TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", candidate_names[i]);
           continue;
         }
+        double probe_duration = probe_timer.Duration();
 
         // collect a small profile
-        int approx_num_iter = 3;
+        int approx_num_iter = ScreenIters(ctx, probe_duration, 3);
         auto s = ProfileStats(candidate, reusable_params, approx_num_iter, offset);
         double approx_duration = s._mean;
         // bail if too slow
@@ -356,14 +315,19 @@ class TunableOp {
           continue;
         }
 
-        // 2nd phase skip, more aggressive
-        approx_num_iter = 10;
-        s = ProfileStats(candidate, reusable_params, approx_num_iter, offset);
-        approx_duration = s._mean;
-        // bail if too slow
-        if (approx_duration > 1.15 * min_duration_ms) {
-          TUNABLE_LOG3("├──2nd skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", candidate_names[i]);
-          continue;
+        // 2nd phase skip, more aggressive. This pass only earns its cost by
+        // producing a better estimate than the one above, so run it only when
+        // the tuning limits leave room for more iterations than phase 1 got.
+        int second_num_iter = ScreenIters(ctx, approx_duration, 10);
+        if (second_num_iter > approx_num_iter) {
+          approx_num_iter = second_num_iter;
+          s = ProfileStats(candidate, reusable_params, approx_num_iter, offset, 0);
+          approx_duration = s._mean;
+          // bail if too slow
+          if (approx_duration > 1.15 * min_duration_ms) {
+            TUNABLE_LOG3("├──2nd skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", candidate_names[i]);
+            continue;
+          }
         }
 
         if (do_numerics_check) {
@@ -431,7 +395,7 @@ class TunableOp {
             "instance id=", i, ", ", op_sig, "(", params_sig, ") ", candidate_names[i]);
         TUNABLE_LOG3("├──offset at ", offset);
         WarmUp(candidate, reusable_params, warmup_iter, offset);
-        s = ProfileStats(candidate, reusable_params, tuning_iter, offset);
+        s = ProfileStats(candidate, reusable_params, tuning_iter, offset, 0);
         auto s_stddev = s.stddev();
         // Assume normal distribution.
         // Solution with smallest mean + 2*sigma will be a better solution?

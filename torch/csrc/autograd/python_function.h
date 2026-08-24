@@ -140,6 +140,11 @@ struct THPFunction {
   bool clear_saved_tensors_on_access;
   bool saved_tensors_accessed_and_cleared;
 
+  // Owned tuple of per-output grad dtype declarations recorded by
+  // set_output_grad_dtype; consumed while wrapping outputs. nullptr when the
+  // API was not called.
+  PyObject* output_grad_dtypes = nullptr;
+
   PyObject* saved_for_forward;
   // The C++ PyNode for this THPFunction. Ownership follows the same
   // pattern as TensorImpl/THPVariable: THPFunction holds a strong
