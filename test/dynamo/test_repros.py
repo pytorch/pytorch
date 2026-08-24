@@ -77,6 +77,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     serialTest,
@@ -87,7 +88,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
-from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
+from torch.testing._internal.logging_utils import LoggingTestCase
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -98,9 +99,6 @@ _orig_module_call = torch.nn.Module.__call__
 lib = torch.library.Library("test_sample", "DEF")  # noqa: SCOPED_LIBRARY
 lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
-
-
-requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 _GLOBAL_CPU_TENSOR = torch.randn(3)
@@ -1008,6 +1006,8 @@ class LRUCacheWarningTests(LoggingTestCase):
 
 
 class ReproTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         try:
@@ -8848,6 +8848,547 @@ SavedForBackwardsAOTOutput(idx=5)""",
         self.assertEqual(opt_fn(inp2, grid2), fn(inp2, grid2))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_getattr_return(self):
+        _WrapperDescriptor = type(type.__call__)
+        _MethodWrapper = type(all.__call__)
+        _ClassMethodWrapper = type(int.__dict__["from_bytes"])
+
+        _NonUserDefinedCallables = (
+            _WrapperDescriptor,
+            _MethodWrapper,
+            _ClassMethodWrapper,
+            types.BuiltinFunctionType,
+        )
+
+        def _signature_get_user_defined_method(cls, method_name):
+            try:
+                meth = getattr(cls, method_name)
+            except AttributeError:
+                return
+            else:
+                if not isinstance(meth, _NonUserDefinedCallables):
+                    # Once '__signature__' will be added to 'C'-level
+                    # callables, this check won't be necessary
+                    return meth
+
+        def fn(x):
+            s = _signature_get_user_defined_method(type(torch.nn.Linear), "__call__")
+            if s is None:
+                return torch.cos(x)
+
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_dependent_error_log_no_print(self):
+        # This is a regression test case for
+        # https://github.com/pytorch/pytorch/pull/149831
+        from io import StringIO
+
+        capturedOutput = StringIO()
+        sys.stderr = capturedOutput
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def func(a):
+            if a.sum() > 0:
+                return a + 1
+            return a + 2
+
+        a = torch.rand(10, 10)
+        try:
+            func(a)
+        except Exception:
+            pass
+        sys.stderr = sys.__stderr__
+
+        # Make sure we don't _print_ out the graph module.
+        output = capturedOutput.getvalue()
+        self.assertNotIn("class GraphModule", output)
+
+    def test_deepcopy_constant_tensor_in_aot_bwd(self):
+        class Fn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x + 1
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out * torch.tensor(2) * grad_out.shape[0]
+
+        def f(x):
+            return Fn.apply(x)
+
+        x = torch.randn(8, requires_grad=True)
+        out = f(x)  # should not raise
+        c_out = torch.compile(f, backend="aot_eager", dynamic=True)(x)
+        expected = torch.autograd.grad(out.sum(), inputs=(x,))
+        actual = torch.autograd.grad(c_out.sum(), inputs=(x,))
+        self.assertEqual(expected, actual)
+
+    def test_module_attribute_error(self):
+        @torch.compile(backend="eager")
+        def f1(x):
+            return torch._bar(x)
+
+        @torch.compile(backend="eager")
+        def f2(x):
+            try:
+                return torch._bar(x)
+            except AttributeError:
+                return x + 1
+
+        with self.assertRaises(AttributeError):
+            f1(torch.ones(3))
+
+        self.assertEqual(f2(torch.ones(3)), torch.ones(3) + 1)
+
+    def test_named_tuple_vt_clone(self):
+        # https://github.com/pytorch/pytorch/issues/157945
+        class SVDCompressor(nn.Module):
+            def __init__(self, k=10):
+                super().__init__()
+                self.k = k
+
+            def forward(self, x):
+                U, S = torch.linalg.svd(x)[:2]
+                reduced = U[:, :, : self.k] @ torch.diag_embed(S[:, : self.k])
+                return reduced
+
+        input = torch.randn(4, 8, 6)
+        model = SVDCompressor(k=5)
+
+        out1 = model(input.clone())
+        out2 = torch.compile(model, backend="eager")(input.clone())
+        self.assertEqual(out1, out2)
+
+    def test_filter_warnings(self):
+        x = torch.ones(2, 2, requires_grad=True)
+
+        def call_foobar(x):
+            warnings.warn("foobar")
+
+        @torch.compile(backend="eager")
+        def f(x):
+            call_foobar(x)
+            call_foobar(x)
+            call_foobar(x)
+            call_foobar(x)
+            return call_foobar(x)
+
+        with warnings.catch_warnings(record=True) as w:
+            f(x)
+            self.assertEqual(len(w), 1)
+            self.assertEqual(str(w[0].message), "foobar")
+
+    def test_filter_safe_grad_warning(self):
+        x = torch.ones(2, 2, requires_grad=True)
+        y = x * 5  # non-leaf, .grad should warn
+        torch._subclasses.meta_utils.safe_grad(y)  # filters out warning
+
+        def unsafe_grad(y):
+            return y.grad
+
+        with warnings.catch_warnings(record=True) as w:
+            unsafe_grad(y)  # should still warn, different callsite
+            self.assertEqual(len(w), 1)
+            self.assertTrue("The .grad attribute of a Tensor" in str(w[0].message))
+
+            unsafe_grad(y)  # should not warn
+            self.assertEqual(len(w), 1)
+
+    def test_filter_user_warnings(self):
+        x = torch.ones(2, 2, requires_grad=True)
+        y = x * 5  # non-leaf, .grad should warn
+
+        @torch._dynamo.eval_frame.TorchPatcher.suppress_torch_distributed_warnings
+        def mute_warn(y):
+            return y.grad
+
+        mute_warn(y)  # filters out warning
+
+        def unsafe_grad(y):
+            return y.grad
+
+        with warnings.catch_warnings(record=True) as w:
+            unsafe_grad(y)  # should still warn, different callsite
+            self.assertEqual(len(w), 1)
+            self.assertTrue("The .grad attribute of a Tensor" in str(w[0].message))
+
+            unsafe_grad(y)  # should not warn
+            self.assertEqual(len(w), 1)
+
+    def test_partial_export(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def parallelize(self):
+                fn = self._call_impl
+
+                def wrapped_fn(fn, *args, **kwargs):
+                    new_args_0 = args[0].to(torch.bfloat16)
+                    new_args_1 = args[1].to(torch.bfloat16)
+                    return fn(new_args_0, new_args_1)
+
+                fn = functools.partial(wrapped_fn, fn)
+                self._call_impl = fn
+
+            def forward(self, a, b):
+                return a + b
+
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+
+        foo = Foo()
+        foo.parallelize()
+        x = torch.randn(4, 4, dtype=torch.float32)
+        y = torch.randn(4, 4, dtype=torch.float32)
+        ref = foo(x, y)
+        gm = dynamo_graph_capture_for_export(foo)(x, y)
+        res = gm(x, y)
+        self.assertEqual(res, ref)
+
+    def test_current_accelerator(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            torch.accelerator.current_accelerator()
+            return x + 1
+
+        self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
+
+    def test_pytree_get_node_type_not_traced(self):
+        # Test that torch.utils._pytree._get_node_type is not traced into
+        # and doesn't cause excessive trace time overhead
+        from torch.utils._pytree import _get_node_type
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, y):
+            # Call _get_node_type which is used internally by pytree operations
+            node_type = _get_node_type([x, y])
+            assert node_type is list  # noqa: S101
+            # Do some work with pytree structures
+            data = {"a": x, "b": y}
+            flat, spec = pytree.tree_flatten(data)
+            result = flat[0] + flat[1]
+            return result
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_pytree_get_node_type_with_namedtuple(self):
+        # Test that torch.utils._pytree._get_node_type handles namedtuples correctly
+        # without being traced into, even when is_namedtuple_class is True
+        from collections import namedtuple
+
+        from torch.utils._pytree import _get_node_type
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            # Create a namedtuple
+            point = Point(a, b)
+            # Call _get_node_type with a namedtuple instance
+            node_type = _get_node_type(point)
+            assert node_type is namedtuple  # noqa: S101
+            # Use pytree operations with namedtuples
+            flat, spec = pytree.tree_flatten(point)
+            result = flat[0] + flat[1]
+            return result
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_pytree_tree_is_leaf_not_traced(self):
+        # Test that torch.utils._pytree.tree_is_leaf is not traced into
+        # when is_leaf parameter is None (the common case)
+        from torch.utils._pytree import tree_is_leaf
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, y):
+            # Test with various types
+            # Tensors are leaves
+            is_leaf_tensor = tree_is_leaf(x)
+            assert is_leaf_tensor is True  # noqa: S101
+
+            # Lists are not leaves (they're in SUPPORTED_NODES)
+            is_leaf_list = tree_is_leaf([x, y])
+            assert is_leaf_list is False  # noqa: S101
+
+            # Dicts are not leaves
+            is_leaf_dict = tree_is_leaf({"a": x, "b": y})
+            assert is_leaf_dict is False  # noqa: S101
+
+            return x + y
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_ordered_set_doesnt_recompile_with_ac(self):
+        import torch
+
+        with torch._dynamo.config.patch({"error_on_recompile": True}):
+            import functools
+
+            from torch.utils._ordered_set import OrderedSet
+            from torch.utils.checkpoint import (
+                checkpoint,
+                CheckpointPolicy,
+                create_selective_checkpoint_contexts,
+            )
+
+            def policy(compute_heavy_ops, ctx, func, *args, **kwargs):
+                if func in compute_heavy_ops:
+                    return CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+            def g(x):
+                return torch.mm(x, x).sin().exp()
+
+            @torch.compile(fullgraph=True, backend="eager")
+            def f(x, policy):
+                return checkpoint(g, x, use_reentrant=False, context_fn=policy)
+
+            x = torch.randn(4, 4, requires_grad=True)
+            f(
+                x,
+                functools.partial(
+                    create_selective_checkpoint_contexts,
+                    functools.partial(policy, OrderedSet([torch.ops.aten.mm.default])),
+                ),
+            )
+            f(
+                x,
+                functools.partial(
+                    create_selective_checkpoint_contexts,
+                    functools.partial(policy, OrderedSet([torch.ops.aten.mm.default])),
+                ),
+            )
+
+    def test_mro_source_cache_includes_attr_name(self):
+        # Base -> Mid -> A hierarchy: two class attributes with the same
+        # interned integer value share the same id().  The mro_source_cache
+        # must include the attribute name in its key; otherwise the second
+        # lookup returns the first attribute's source, installing a guard
+        # on the wrong key and missing mutations to the second attribute.
+        class Base:
+            x = 1
+            y = 1
+
+        class Mid(Base):
+            pass
+
+        class A(Mid):
+            pass
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(obj, t):
+            return t * obj.x + t * obj.y
+
+        obj = A()
+        t = torch.tensor([1.0])
+        result = fn(obj, t)
+        self.assertEqual(result, torch.tensor([2.0]))
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Changing y on Base must trigger recompilation.
+        Base.y = 42
+        result = fn(obj, t)
+        self.assertEqual(result, torch.tensor([43.0]))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_pytree_tree_is_leaf_with_namedtuple(self):
+        # Test that torch.utils._pytree.tree_is_leaf handles namedtuples correctly
+        from collections import namedtuple
+
+        from torch.utils._pytree import tree_is_leaf
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            # Namedtuples are not leaves (they're in SUPPORTED_NODES)
+            point = Point(a, b)
+            is_leaf_namedtuple = tree_is_leaf(point)
+            assert is_leaf_namedtuple is False  # noqa: S101
+
+            # But individual tensors are leaves
+            is_leaf_tensor = tree_is_leaf(a)
+            assert is_leaf_tensor is True  # noqa: S101
+
+            return a + b
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_data_attr_mutation_with_noop_add(self):
+        # Regression test: remove_no_ops incorrectly eliminated add(x, 0) -> x
+        # when x was subsequently mutated by set_, causing the return value to
+        # alias the mutated input instead of being an independent copy.
+        def fn(a, b):
+            a.data = b
+            b.data = torch.zeros_like(b)
+            return a + b
+
+        a = torch.tensor([True, False, True, False])
+        b = torch.tensor([False, False, True, True])
+        a_ = a.clone()
+        b_ = b.clone()
+        cfunc = torch.compile(fn, backend="inductor")
+        res1 = fn(a, b)
+        res2 = cfunc(a_, b_)
+        self.assertEqual(res1, res2)
+
+    def test_custom_op_mutation_with_noop_add(self):
+        @torch.library.custom_op("test_repros::mutate_tensor", mutates_args={"x"})
+        def mutate_tensor(x: torch.Tensor, src: torch.Tensor) -> None:
+            x.copy_(src)
+
+        def fn(b):
+            zeros = torch.zeros_like(b)
+            result = b + zeros
+            mutate_tensor(b, zeros)
+            return result
+
+        b = torch.tensor([4.0, 5.0, 6.0])
+        b_ = b.clone()
+        cfunc = torch.compile(fn, backend="inductor")
+        res1 = fn(b)
+        res2 = cfunc(b_)
+        self.assertEqual(res1, res2)
+
+    def test_getset_descriptor_objclass_identity(self):
+        # GetSetDescriptor.__objclass__ should preserve identity with the class
+        # under torch.compile. This is needed for inspect.getattr_static (and
+        # therefore inspect.signature) to work on callable class instances.
+        class Foo:
+            pass
+
+        desc = Foo.__dict__["__dict__"]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if desc.__objclass__ is Foo:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_inspect_signature_callable_class(self):
+        # inspect.signature should work on callable class instances under
+        # torch.compile, needed by flex_attention's _get_mod_type.
+        class MyCallable:
+            def __call__(self, b, h, q_idx, kv_idx):
+                return q_idx >= kv_idx
+
+        obj = MyCallable()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            sig = inspect.signature(obj)
+            num_params = sum(
+                1
+                for p in sig.parameters.values()
+                if p.default is inspect.Parameter.empty
+            )
+            return x + num_params
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 4.0)
+
+    def test_enum_with_class_values(self):
+        from enum import Enum
+
+        class AvgMetric:
+            def __init__(self):
+                self.sum = None
+                self.count = 0
+
+            def append(self, x):
+                if self.count > 0:
+                    self.sum = self.sum + x
+                else:
+                    self.sum = x.clone()
+                self.count += 1
+
+        class GlobalReduction(Enum):
+            AVG = AvgMetric
+
+        class ScalarLogger:
+            def __init__(self):
+                self.metrics = {}
+
+            def log(self, key, value, global_reduction):
+                if key not in self.metrics:
+                    self.metrics[key] = global_reduction.value()
+                self.metrics[key].append(value)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(logger, x):
+            logger.log("test", x, GlobalReduction.AVG)
+            return x + 1
+
+        logger = ScalarLogger()
+        fn(logger, torch.tensor(1.0))
+
+    def test_class_attr_mutation_recompiles(self):
+        class GlobalState:
+            factor = 1.0
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            return x * GlobalState.factor
+
+        x = torch.tensor([4.0])
+
+        GlobalState.factor = 1.0
+        result1 = fn(x)
+        self.assertEqual(result1, torch.tensor([4.0]))
+        self.assertEqual(cnt.frame_count, 1)
+
+        GlobalState.factor = 10.0
+        result2 = fn(x)
+        self.assertEqual(result2, torch.tensor([40.0]))
+        self.assertEqual(cnt.frame_count, 2)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     @serialTest()
@@ -9403,121 +9944,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         # (aka if you set torch._functorch.config.treat_parameters_as_free_to_save = False)
         self.assertEqual(mode.ops_counter[torch.ops.aten._to_copy.default], 5)
 
-    def test_getattr_return(self):
-        _WrapperDescriptor = type(type.__call__)
-        _MethodWrapper = type(all.__call__)
-        _ClassMethodWrapper = type(int.__dict__["from_bytes"])
-
-        _NonUserDefinedCallables = (
-            _WrapperDescriptor,
-            _MethodWrapper,
-            _ClassMethodWrapper,
-            types.BuiltinFunctionType,
-        )
-
-        def _signature_get_user_defined_method(cls, method_name):
-            try:
-                meth = getattr(cls, method_name)
-            except AttributeError:
-                return
-            else:
-                if not isinstance(meth, _NonUserDefinedCallables):
-                    # Once '__signature__' will be added to 'C'-level
-                    # callables, this check won't be necessary
-                    return meth
-
-        def fn(x):
-            s = _signature_get_user_defined_method(type(torch.nn.Linear), "__call__")
-            if s is None:
-                return torch.cos(x)
-
-            return torch.sin(x)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_data_dependent_error_log_no_print(self):
-        # This is a regression test case for
-        # https://github.com/pytorch/pytorch/pull/149831
-        from io import StringIO
-
-        capturedOutput = StringIO()
-        sys.stderr = capturedOutput
-
-        @torch.compile(fullgraph=True, backend="eager")
-        def func(a):
-            if a.sum() > 0:
-                return a + 1
-            return a + 2
-
-        a = torch.rand(10, 10)
-        try:
-            func(a)
-        except Exception:
-            pass
-        sys.stderr = sys.__stderr__
-
-        # Make sure we don't _print_ out the graph module.
-        output = capturedOutput.getvalue()
-        self.assertNotIn("class GraphModule", output)
-
-    def test_deepcopy_constant_tensor_in_aot_bwd(self):
-        class Fn(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x + 1
-
-            @staticmethod
-            def backward(ctx, grad_out):
-                return grad_out * torch.tensor(2) * grad_out.shape[0]
-
-        def f(x):
-            return Fn.apply(x)
-
-        x = torch.randn(8, requires_grad=True)
-        out = f(x)  # should not raise
-        c_out = torch.compile(f, backend="aot_eager", dynamic=True)(x)
-        expected = torch.autograd.grad(out.sum(), inputs=(x,))
-        actual = torch.autograd.grad(c_out.sum(), inputs=(x,))
-        self.assertEqual(expected, actual)
-
-    def test_module_attribute_error(self):
-        @torch.compile(backend="eager")
-        def f1(x):
-            return torch._bar(x)
-
-        @torch.compile(backend="eager")
-        def f2(x):
-            try:
-                return torch._bar(x)
-            except AttributeError:
-                return x + 1
-
-        with self.assertRaises(AttributeError):
-            f1(torch.ones(3))
-
-        self.assertEqual(f2(torch.ones(3)), torch.ones(3) + 1)
-
-    def test_named_tuple_vt_clone(self):
-        # https://github.com/pytorch/pytorch/issues/157945
-        class SVDCompressor(nn.Module):
-            def __init__(self, k=10):
-                super().__init__()
-                self.k = k
-
-            def forward(self, x):
-                U, S = torch.linalg.svd(x)[:2]
-                reduced = U[:, :, : self.k] @ torch.diag_embed(S[:, : self.k])
-                return reduced
-
-        input = torch.randn(4, 8, 6)
-        model = SVDCompressor(k=5)
-
-        out1 = model(input.clone())
-        out2 = torch.compile(model, backend="eager")(input.clone())
-        self.assertEqual(out1, out2)
-
     @onlyAccelerator
     def test_zero_dim_param_mixed_device_grad(self, device):
         # cpu 0-dim params with cuda grads
@@ -9542,432 +9968,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(model.b.grad)
         self.assertEqual(model.a.grad.device, torch.device("cpu"))
         self.assertEqual(model.b.grad.device, torch.device("cpu"))
-
-    def test_filter_warnings(self):
-        x = torch.ones(2, 2, requires_grad=True)
-
-        def call_foobar(x):
-            warnings.warn("foobar")
-
-        @torch.compile(backend="eager")
-        def f(x):
-            call_foobar(x)
-            call_foobar(x)
-            call_foobar(x)
-            call_foobar(x)
-            return call_foobar(x)
-
-        with warnings.catch_warnings(record=True) as w:
-            f(x)
-            self.assertEqual(len(w), 1)
-            self.assertEqual(str(w[0].message), "foobar")
-
-    def test_filter_safe_grad_warning(self):
-        x = torch.ones(2, 2, requires_grad=True)
-        y = x * 5  # non-leaf, .grad should warn
-        torch._subclasses.meta_utils.safe_grad(y)  # filters out warning
-
-        def unsafe_grad(y):
-            return y.grad
-
-        with warnings.catch_warnings(record=True) as w:
-            unsafe_grad(y)  # should still warn, different callsite
-            self.assertEqual(len(w), 1)
-            self.assertTrue("The .grad attribute of a Tensor" in str(w[0].message))
-
-            unsafe_grad(y)  # should not warn
-            self.assertEqual(len(w), 1)
-
-    def test_filter_user_warnings(self):
-        x = torch.ones(2, 2, requires_grad=True)
-        y = x * 5  # non-leaf, .grad should warn
-
-        @torch._dynamo.eval_frame.TorchPatcher.suppress_torch_distributed_warnings
-        def mute_warn(y):
-            return y.grad
-
-        mute_warn(y)  # filters out warning
-
-        def unsafe_grad(y):
-            return y.grad
-
-        with warnings.catch_warnings(record=True) as w:
-            unsafe_grad(y)  # should still warn, different callsite
-            self.assertEqual(len(w), 1)
-            self.assertTrue("The .grad attribute of a Tensor" in str(w[0].message))
-
-            unsafe_grad(y)  # should not warn
-            self.assertEqual(len(w), 1)
-
-    def test_partial_export(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def parallelize(self):
-                fn = self._call_impl
-
-                def wrapped_fn(fn, *args, **kwargs):
-                    new_args_0 = args[0].to(torch.bfloat16)
-                    new_args_1 = args[1].to(torch.bfloat16)
-                    return fn(new_args_0, new_args_1)
-
-                fn = functools.partial(wrapped_fn, fn)
-                self._call_impl = fn
-
-            def forward(self, a, b):
-                return a + b
-
-        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
-
-        foo = Foo()
-        foo.parallelize()
-        x = torch.randn(4, 4, dtype=torch.float32)
-        y = torch.randn(4, 4, dtype=torch.float32)
-        ref = foo(x, y)
-        gm = dynamo_graph_capture_for_export(foo)(x, y)
-        res = gm(x, y)
-        self.assertEqual(res, ref)
-
-    def test_current_accelerator(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            torch.accelerator.current_accelerator()
-            return x + 1
-
-        self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
-
-    def test_pytree_get_node_type_not_traced(self):
-        # Test that torch.utils._pytree._get_node_type is not traced into
-        # and doesn't cause excessive trace time overhead
-        from torch.utils._pytree import _get_node_type
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt, fullgraph=True)
-        def fn(x, y):
-            # Call _get_node_type which is used internally by pytree operations
-            node_type = _get_node_type([x, y])
-            assert node_type is list  # noqa: S101
-            # Do some work with pytree structures
-            data = {"a": x, "b": y}
-            flat, spec = pytree.tree_flatten(data)
-            result = flat[0] + flat[1]
-            return result
-
-        x = torch.randn(3, 4)
-        y = torch.randn(3, 4)
-        result = fn(x, y)
-        expected = x + y
-
-        self.assertTrue(torch.allclose(result, expected))
-        # Should compile successfully with fullgraph=True
-        self.assertEqual(cnt.frame_count, 1)
-
-    def test_pytree_get_node_type_with_namedtuple(self):
-        # Test that torch.utils._pytree._get_node_type handles namedtuples correctly
-        # without being traced into, even when is_namedtuple_class is True
-        from collections import namedtuple
-
-        from torch.utils._pytree import _get_node_type
-
-        Point = namedtuple("Point", ["x", "y"])
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt, fullgraph=True)
-        def fn(a, b):
-            # Create a namedtuple
-            point = Point(a, b)
-            # Call _get_node_type with a namedtuple instance
-            node_type = _get_node_type(point)
-            assert node_type is namedtuple  # noqa: S101
-            # Use pytree operations with namedtuples
-            flat, spec = pytree.tree_flatten(point)
-            result = flat[0] + flat[1]
-            return result
-
-        x = torch.randn(3, 4)
-        y = torch.randn(3, 4)
-        result = fn(x, y)
-        expected = x + y
-
-        self.assertTrue(torch.allclose(result, expected))
-        # Should compile successfully with fullgraph=True
-        self.assertEqual(cnt.frame_count, 1)
-
-    def test_pytree_tree_is_leaf_not_traced(self):
-        # Test that torch.utils._pytree.tree_is_leaf is not traced into
-        # when is_leaf parameter is None (the common case)
-        from torch.utils._pytree import tree_is_leaf
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt, fullgraph=True)
-        def fn(x, y):
-            # Test with various types
-            # Tensors are leaves
-            is_leaf_tensor = tree_is_leaf(x)
-            assert is_leaf_tensor is True  # noqa: S101
-
-            # Lists are not leaves (they're in SUPPORTED_NODES)
-            is_leaf_list = tree_is_leaf([x, y])
-            assert is_leaf_list is False  # noqa: S101
-
-            # Dicts are not leaves
-            is_leaf_dict = tree_is_leaf({"a": x, "b": y})
-            assert is_leaf_dict is False  # noqa: S101
-
-            return x + y
-
-        x = torch.randn(3, 4)
-        y = torch.randn(3, 4)
-        result = fn(x, y)
-        expected = x + y
-
-        self.assertTrue(torch.allclose(result, expected))
-        # Should compile successfully with fullgraph=True
-        self.assertEqual(cnt.frame_count, 1)
-
-    def test_ordered_set_doesnt_recompile_with_ac(self):
-        import torch
-
-        with torch._dynamo.config.patch({"error_on_recompile": True}):
-            import functools
-
-            from torch.utils._ordered_set import OrderedSet
-            from torch.utils.checkpoint import (
-                checkpoint,
-                CheckpointPolicy,
-                create_selective_checkpoint_contexts,
-            )
-
-            def policy(compute_heavy_ops, ctx, func, *args, **kwargs):
-                if func in compute_heavy_ops:
-                    return CheckpointPolicy.MUST_SAVE
-                return CheckpointPolicy.PREFER_RECOMPUTE
-
-            def g(x):
-                return torch.mm(x, x).sin().exp()
-
-            @torch.compile(fullgraph=True, backend="eager")
-            def f(x, policy):
-                return checkpoint(g, x, use_reentrant=False, context_fn=policy)
-
-            x = torch.randn(4, 4, requires_grad=True)
-            f(
-                x,
-                functools.partial(
-                    create_selective_checkpoint_contexts,
-                    functools.partial(policy, OrderedSet([torch.ops.aten.mm.default])),
-                ),
-            )
-            f(
-                x,
-                functools.partial(
-                    create_selective_checkpoint_contexts,
-                    functools.partial(policy, OrderedSet([torch.ops.aten.mm.default])),
-                ),
-            )
-
-    def test_mro_source_cache_includes_attr_name(self):
-        # Base -> Mid -> A hierarchy: two class attributes with the same
-        # interned integer value share the same id().  The mro_source_cache
-        # must include the attribute name in its key; otherwise the second
-        # lookup returns the first attribute's source, installing a guard
-        # on the wrong key and missing mutations to the second attribute.
-        class Base:
-            x = 1
-            y = 1
-
-        class Mid(Base):
-            pass
-
-        class A(Mid):
-            pass
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt)
-        def fn(obj, t):
-            return t * obj.x + t * obj.y
-
-        obj = A()
-        t = torch.tensor([1.0])
-        result = fn(obj, t)
-        self.assertEqual(result, torch.tensor([2.0]))
-        self.assertEqual(cnt.frame_count, 1)
-
-        # Changing y on Base must trigger recompilation.
-        Base.y = 42
-        result = fn(obj, t)
-        self.assertEqual(result, torch.tensor([43.0]))
-        self.assertEqual(cnt.frame_count, 2)
-
-    def test_pytree_tree_is_leaf_with_namedtuple(self):
-        # Test that torch.utils._pytree.tree_is_leaf handles namedtuples correctly
-        from collections import namedtuple
-
-        from torch.utils._pytree import tree_is_leaf
-
-        Point = namedtuple("Point", ["x", "y"])
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt, fullgraph=True)
-        def fn(a, b):
-            # Namedtuples are not leaves (they're in SUPPORTED_NODES)
-            point = Point(a, b)
-            is_leaf_namedtuple = tree_is_leaf(point)
-            assert is_leaf_namedtuple is False  # noqa: S101
-
-            # But individual tensors are leaves
-            is_leaf_tensor = tree_is_leaf(a)
-            assert is_leaf_tensor is True  # noqa: S101
-
-            return a + b
-
-        x = torch.randn(3, 4)
-        y = torch.randn(3, 4)
-        result = fn(x, y)
-        expected = x + y
-
-        self.assertTrue(torch.allclose(result, expected))
-        # Should compile successfully with fullgraph=True
-        self.assertEqual(cnt.frame_count, 1)
-
-    def test_data_attr_mutation_with_noop_add(self):
-        # Regression test: remove_no_ops incorrectly eliminated add(x, 0) -> x
-        # when x was subsequently mutated by set_, causing the return value to
-        # alias the mutated input instead of being an independent copy.
-        def fn(a, b):
-            a.data = b
-            b.data = torch.zeros_like(b)
-            return a + b
-
-        a = torch.tensor([True, False, True, False])
-        b = torch.tensor([False, False, True, True])
-        a_ = a.clone()
-        b_ = b.clone()
-        cfunc = torch.compile(fn, backend="inductor")
-        res1 = fn(a, b)
-        res2 = cfunc(a_, b_)
-        self.assertEqual(res1, res2)
-
-    def test_custom_op_mutation_with_noop_add(self):
-        @torch.library.custom_op("test_repros::mutate_tensor", mutates_args={"x"})
-        def mutate_tensor(x: torch.Tensor, src: torch.Tensor) -> None:
-            x.copy_(src)
-
-        def fn(b):
-            zeros = torch.zeros_like(b)
-            result = b + zeros
-            mutate_tensor(b, zeros)
-            return result
-
-        b = torch.tensor([4.0, 5.0, 6.0])
-        b_ = b.clone()
-        cfunc = torch.compile(fn, backend="inductor")
-        res1 = fn(b)
-        res2 = cfunc(b_)
-        self.assertEqual(res1, res2)
-
-    def test_getset_descriptor_objclass_identity(self):
-        # GetSetDescriptor.__objclass__ should preserve identity with the class
-        # under torch.compile. This is needed for inspect.getattr_static (and
-        # therefore inspect.signature) to work on callable class instances.
-        class Foo:
-            pass
-
-        desc = Foo.__dict__["__dict__"]
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(x):
-            if desc.__objclass__ is Foo:
-                return x + 1.0
-            return x + 2.0
-
-        result = f(torch.tensor(0.0))
-        self.assertEqual(result.item(), 1.0)
-
-    def test_inspect_signature_callable_class(self):
-        # inspect.signature should work on callable class instances under
-        # torch.compile, needed by flex_attention's _get_mod_type.
-        class MyCallable:
-            def __call__(self, b, h, q_idx, kv_idx):
-                return q_idx >= kv_idx
-
-        obj = MyCallable()
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(x):
-            sig = inspect.signature(obj)
-            num_params = sum(
-                1
-                for p in sig.parameters.values()
-                if p.default is inspect.Parameter.empty
-            )
-            return x + num_params
-
-        result = f(torch.tensor(0.0))
-        self.assertEqual(result.item(), 4.0)
-
-    def test_enum_with_class_values(self):
-        from enum import Enum
-
-        class AvgMetric:
-            def __init__(self):
-                self.sum = None
-                self.count = 0
-
-            def append(self, x):
-                if self.count > 0:
-                    self.sum = self.sum + x
-                else:
-                    self.sum = x.clone()
-                self.count += 1
-
-        class GlobalReduction(Enum):
-            AVG = AvgMetric
-
-        class ScalarLogger:
-            def __init__(self):
-                self.metrics = {}
-
-            def log(self, key, value, global_reduction):
-                if key not in self.metrics:
-                    self.metrics[key] = global_reduction.value()
-                self.metrics[key].append(value)
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(logger, x):
-            logger.log("test", x, GlobalReduction.AVG)
-            return x + 1
-
-        logger = ScalarLogger()
-        fn(logger, torch.tensor(1.0))
-
-    def test_class_attr_mutation_recompiles(self):
-        class GlobalState:
-            factor = 1.0
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt)
-        def fn(x):
-            return x * GlobalState.factor
-
-        x = torch.tensor([4.0])
-
-        GlobalState.factor = 1.0
-        result1 = fn(x)
-        self.assertEqual(result1, torch.tensor([4.0]))
-        self.assertEqual(cnt.frame_count, 1)
-
-        GlobalState.factor = 10.0
-        result2 = fn(x)
-        self.assertEqual(result2, torch.tensor([40.0]))
-        self.assertEqual(cnt.frame_count, 2)
 
     @skipIfHpu
     def test_deterministic_pad_replicate_compile(self, device):
