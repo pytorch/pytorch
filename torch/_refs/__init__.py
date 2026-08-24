@@ -6602,15 +6602,11 @@ def log_normal(self, mean=1, std=2, generator=None):
 
 # TODO: add support for functionalization aten.normal_functional
 # NOTE: the device and dtype will be ignored when shape is None
+# NOTE: no @elementwise_type_promotion_wrapper on (mean, std): eager's
+# normal(Tensor, Tensor) always returns mean's dtype rather than promoting,
+# and the wrapper's pre-cast of mean would corrupt that below (#194547).
 @register_decomposition(aten.normal)
 @out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=(
-        "mean",
-        "std",
-    ),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
 def normal(
     mean=0,
     std=1,
@@ -6661,11 +6657,15 @@ def normal(
         requires_grad=False,
         generator=generator,
     )
-    return std * normal_samples + mean
+    # std * normal_samples + mean promotes dtype through ordinary elementwise
+    # op rules when mean/std differ, so narrow back to the resolved dtype to
+    # match eager's in-place (non-promoting) accumulation.
+    return (std * normal_samples + mean).to(dtype)
 
 
 @register_decomposition(aten.normal_)
 def normal_(self, mean=0, std=1, *, generator=None):
+    # pyrefly: ignore [unexpected-keyword]
     return normal(mean, std, self.shape, out=self, generator=generator)
 
 

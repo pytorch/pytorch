@@ -2793,6 +2793,24 @@ class TestDistributions(DistributionsTestCase):
         self._check_forward_ad(lambda x: torch.normal(x, x))
         self._check_forward_ad(lambda x: x.normal_())
 
+    def test_normal_sample_dtype_compile_matches_eager(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/194547:
+        # torch.compile silently promoted the output dtype instead of
+        # preserving loc's dtype like eager does when loc/scale differ.
+        torch._dynamo.reset()
+        loc = torch.zeros(8, dtype=torch.float16)
+        scale = torch.ones(8)  # float32
+
+        eager = Normal(loc, scale).sample()
+        self.assertEqual(eager.dtype, torch.float16)
+        compiled = torch.compile(lambda l, s: Normal(l, s).sample())(loc, scale)
+        self.assertEqual(compiled.dtype, eager.dtype)
+
+        eager = torch.normal(loc, scale)
+        self.assertEqual(eager.dtype, torch.float16)
+        compiled = torch.compile(torch.normal)(loc, scale)
+        self.assertEqual(compiled.dtype, eager.dtype)
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
