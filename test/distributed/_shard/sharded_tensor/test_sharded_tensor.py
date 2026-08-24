@@ -52,6 +52,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
+    TEST_ACCELERATOR,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_XPU,
     TestCase,
