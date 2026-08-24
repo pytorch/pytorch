@@ -569,6 +569,11 @@ def raise_observed_exception(
     tx.do_raise(exception_vt, None)
 
 
+def raise_attribute_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
+    """Raise an AttributeError as an observed exception during tracing."""
+    raise_observed_exception(AttributeError, tx, args=[msg])
+
+
 def raise_type_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
     """Raise a TypeError as an observed exception during tracing."""
     raise_observed_exception(TypeError, tx, args=[msg])
