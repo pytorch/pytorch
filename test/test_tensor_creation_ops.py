@@ -4348,14 +4348,6 @@ class TestAsArray(_TestAsArrayBase):
     def test_copy_from_dlpack(self, device, dtype):
         self._test_copy_with_cvt(to_dlpack, device, dtype)
 
-    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
-    def test_copy_from_numpy(self, device, dtype):
-        self._test_copy_with_cvt(to_numpy, device, dtype)
-
-    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
-    def test_copy_from_buffer(self, device, dtype):
-        self._test_copy_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)
-
     def _test_copy_mult_devices(self, devices, dtype, cvt):
         dev1 = devices[0]
         dev2 = devices[1]
@@ -4485,6 +4477,14 @@ class TestAsArrayCpuOnly(_TestAsArrayBase):
     @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_alias_from_buffer(self, device, dtype):
         self._test_alias_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)
+
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
+    def test_copy_from_numpy(self, device, dtype):
+        self._test_copy_with_cvt(to_numpy, device, dtype)
+
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
+    def test_copy_from_buffer(self, device, dtype):
+        self._test_copy_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)
 
     def test_astensor_consistency(self, device):
         # See issue: https://github.com/pytorch/pytorch/pull/71757
