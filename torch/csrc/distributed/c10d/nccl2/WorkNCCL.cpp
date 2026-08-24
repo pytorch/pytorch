@@ -19,114 +19,52 @@
 
 namespace c10d::nccl2 {
 
-struct WorkNCCL::Events {
-  Events(ProcessGroupNCCL* comm, bool timing_enabled)
-      : comm(comm),
-        timing_enabled(timing_enabled),
-        start(comm->getEvent(timing_enabled)),
-        end(comm->getEvent(timing_enabled)) {}
-
-  Events(const Events&) = delete;
-  Events(Events&&) = delete;
-  Events& operator=(const Events&) = delete;
-  Events& operator=(Events&&) = delete;
-
-  ~Events() {
-    comm->returnEvent(std::move(start), timing_enabled);
-    comm->returnEvent(std::move(end), timing_enabled);
-  }
-
-  ProcessGroupNCCL* comm;
-  bool timing_enabled;
-  std::unique_ptr<at::cuda::CUDAEvent> start;
-  std::unique_ptr<at::cuda::CUDAEvent> end;
-};
-
-WorkNCCL::InputTensorShelf::InputTensorShelf(std::vector<at::Tensor> tensors)
-    : tensors(std::move(tensors)) {}
-
-std::vector<at::Tensor> WorkNCCL::InputTensorShelf::copy() const {
-  std::lock_guard<std::mutex> lock(mutex);
-  return tensors;
-}
-
-void WorkNCCL::InputTensorShelf::clear() {
-  std::lock_guard<std::mutex> lock(mutex);
-  tensors.clear();
-}
-
-struct WorkNCCL::State {
-  State(
-      ProcessGroupNCCL* comm,
-      cudaStream_t stream,
-      std::chrono::milliseconds timeout)
-      : comm(comm),
-        reconfigure_uuid(comm->reconfigure_uuid_),
-        blocking_wait(comm->blocking_wait_),
-        stream(
-            at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
-        work_start_time(std::chrono::steady_clock::now()),
-        timeout(timeout),
-        timing_enabled(comm->collectivesTimingEnabled()),
-        events(std::make_shared<Events>(comm, timing_enabled)),
-        duration_start_events(events),
-        future_work_result(
-            c10::make_intrusive<c10::ivalue::Future>(c10::AnyEnumType::get())) {
-  }
-
-  ProcessGroupNCCL* comm;
-  int64_t reconfigure_uuid;
-  bool blocking_wait;
-  at::cuda::CUDAStream stream;
-  std::chrono::steady_clock::time_point work_start_time;
-  std::chrono::milliseconds timeout;
-  std::chrono::milliseconds owned_ephemeral_timeout{0};
-  std::atomic<bool> ephemeral_timeout_released{false};
-  bool timing_enabled;
-  uint64_t seq{0};
-  std::shared_ptr<Events> events;
-  std::shared_ptr<Events> duration_start_events;
-  std::mutex terminal_status_mutex;
-  std::atomic<WorkStatus> status{WorkStatus::NOT_STARTED};
-  std::exception_ptr exception;
-  c10::intrusive_ptr<c10::ivalue::Future> future_work_result;
-  bool host_blocking{false};
-};
-
 WorkNCCL::WorkNCCL(
     ProcessGroupNCCL* comm,
     cudaStream_t stream,
     std::chrono::milliseconds timeout_ms,
     const std::vector<at::Tensor>& inputTensors)
-    : state_(std::make_shared<State>(comm, stream, timeout_ms)),
-      input_tensors_(std::make_shared<InputTensorShelf>(inputTensors)) {}
+    : inputTensors_(inputTensors),
+      comm_(comm),
+      reconfigure_uuid_(comm->reconfigure_uuid_),
+      blocking_wait_(comm->blocking_wait_),
+      stream_(
+          at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
+      work_start_time_(std::chrono::steady_clock::now()),
+      timeout_ms_(timeout_ms),
+      timing_enabled_(comm->collectivesTimingEnabled()) {
+  start_event_ = comm_->getEvent(timing_enabled_);
+  end_event_ = comm_->getEvent(timing_enabled_);
+  future_work_result_ =
+      c10::make_intrusive<c10::ivalue::Future>(c10::AnyEnumType::get());
+}
 
 WorkNCCL::WorkNCCL(
     ProcessGroupNCCL* comm,
     cudaStream_t stream,
     std::chrono::milliseconds timeout_ms,
     at::Tensor inputTensor)
-    : state_(std::make_shared<State>(comm, stream, timeout_ms)),
-      input_tensors_(std::make_shared<InputTensorShelf>(
-          std::vector<at::Tensor>{std::move(inputTensor)})) {}
-
-WorkNCCL::WorkNCCL(
-    TrackingTag tracking_tag,
-    WorkNCCL& work,
-    bool retain_input_tensors)
-    : state_(work.state_),
-      input_tensors_(retain_input_tensors ? work.input_tensors_ : nullptr) {}
-
-WorkNCCL::~WorkNCCL() = default;
-
-c10::intrusive_ptr<WorkNCCL> WorkNCCL::createTrackingWork(
-    bool retain_input_tensors) {
-  return c10::make_intrusive<WorkNCCL>(
-      TrackingTag{}, *this, retain_input_tensors);
+    : inputTensor_(std::move(inputTensor)),
+      comm_(comm),
+      reconfigure_uuid_(comm->reconfigure_uuid_),
+      blocking_wait_(comm->blocking_wait_),
+      stream_(
+          at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
+      work_start_time_(std::chrono::steady_clock::now()),
+      timeout_ms_(timeout_ms),
+      timing_enabled_(comm->collectivesTimingEnabled()) {
+  start_event_ = comm_->getEvent(timing_enabled_);
+  end_event_ = comm_->getEvent(timing_enabled_);
+  future_work_result_ =
+      c10::make_intrusive<c10::ivalue::Future>(c10::AnyEnumType::get());
 }
 
-std::shared_ptr<WorkNCCL::InputTensorShelf> WorkNCCL::inputTensors() const {
-  return input_tensors_;
+WorkNCCL::~WorkNCCL() {
+  if (!comm_) {
+    return;
+  }
+  comm_->returnEvent(std::move(start_event_), timing_enabled_);
+  comm_->returnEvent(std::move(end_event_), timing_enabled_);
 }
 
 void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
@@ -135,16 +73,18 @@ void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
     return;
   }
 
-  auto input_tensors = input_tensors_->copy();
-  if (!input_tensors.empty()) {
+  if (!inputTensors_.empty()) {
     std::vector<c10::IValue> inputs;
-    inputs.reserve(input_tensors.size());
-    for (const auto& tensor : input_tensors) {
+    inputs.reserve(inputTensors_.size());
+    for (const auto& tensor : inputTensors_) {
       inputs.emplace_back(tensor);
     }
     recordFunction_->before(
         coll_name,
         c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
+  } else if (inputTensor_.defined()) {
+    recordFunction_->before(
+        coll_name, c10::ArrayRef<const c10::IValue>(inputTensor_));
   } else {
     recordFunction_->before(coll_name, c10::ArrayRef<const c10::IValue>{});
   }
@@ -152,11 +92,11 @@ void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
 
 void WorkNCCL::recordStart(std::string_view coll_name) {
   recordFunctionStart(coll_name);
-  state_->events->start->record(state_->stream);
+  start_event_->record(stream_);
 }
 
 void WorkNCCL::recordEnd() {
-  state_->events->end->record(state_->stream);
+  end_event_->record(stream_);
 
   if (recordFunction_ && recordFunction_->isActive()) {
     recordFunction_->end();
@@ -169,28 +109,27 @@ bool WorkNCCL::setTerminalStatus(WorkStatus terminal_status) {
       terminal_status == WorkStatus::TIMEDOUT ||
       terminal_status == WorkStatus::ERROR);
 
-  WorkResult result = WorkResult::SUCCESS;
-  {
-    std::lock_guard<std::mutex> lock(state_->terminal_status_mutex);
-    WorkStatus current = status();
-    if (current == WorkStatus::COMPLETED || current == WorkStatus::TIMEDOUT ||
-        current == WorkStatus::ERROR) {
-      return false;
-    }
-
-    if (terminal_status == WorkStatus::TIMEDOUT) {
-      result = WorkResult::TIMEOUT;
-      state_->exception = std::make_exception_ptr(
-          C10_BUILD_ERROR(DistBackendError, "NCCL operation timed out"));
-    } else if (terminal_status == WorkStatus::ERROR) {
-      result = WorkResult::COMM_ERROR;
-      state_->exception = std::make_exception_ptr(
-          C10_BUILD_ERROR(DistBackendError, "NCCL operation failed"));
-    }
-    state_->status.store(terminal_status, std::memory_order_release);
+  std::lock_guard<std::mutex> lock(terminal_status_mutex_);
+  WorkStatus current = status();
+  if (current == WorkStatus::COMPLETED || current == WorkStatus::TIMEDOUT ||
+      current == WorkStatus::ERROR) {
+    return false;
   }
-  state_->future_work_result->markCompleted(
-      c10::IValue(static_cast<uint8_t>(result)));
+
+  WorkResult result = WorkResult::SUCCESS;
+  std::exception_ptr exception;
+  if (terminal_status == WorkStatus::TIMEDOUT) {
+    result = WorkResult::TIMEOUT;
+    exception = std::make_exception_ptr(
+        C10_BUILD_ERROR(DistBackendError, "NCCL operation timed out"));
+  } else if (terminal_status == WorkStatus::ERROR) {
+    result = WorkResult::COMM_ERROR;
+    exception = std::make_exception_ptr(
+        C10_BUILD_ERROR(DistBackendError, "NCCL operation failed"));
+  }
+  finish(std::move(exception));
+  status_.store(terminal_status, std::memory_order_release);
+  future_work_result_->markCompleted(c10::IValue(static_cast<uint8_t>(result)));
   return true;
 }
 
@@ -199,11 +138,11 @@ void WorkNCCL::notifyCompletion() {
   // for success -- a timed-out or failed work reports nothing, because a
   // consumer that read that as "finished" would lose the very fact a
   // post-mortem needs.
-  if (!state_->comm->hasCompletionHooks()) {
+  if (!comm_->hasCompletionHooks()) {
     return;
   }
   std::optional<float> duration;
-  if (state_->timing_enabled) {
+  if (timing_enabled_) {
     try {
       // cudaEventElapsedTime on two events that have already been observed to
       // complete: no synchronization, and no NCCL call, so it is legal on the
@@ -211,42 +150,11 @@ void WorkNCCL::notifyCompletion() {
       // from its own completion hook for the same reason.
       duration = getDuration();
     } catch (const std::exception& e) {
-      TC_LOG(WARNING, state_->comm)
+      TC_LOG(WARNING, comm_)
           << "Cannot measure collective duration: " << e.what();
     }
   }
-  state_->comm->runCompletionHooks(this, duration);
-}
-
-WorkNCCL::WorkStatus WorkNCCL::status() const {
-  return state_->status.load(std::memory_order_acquire);
-}
-
-std::exception_ptr WorkNCCL::exception() const {
-  std::lock_guard<std::mutex> lock(state_->terminal_status_mutex);
-  return state_->exception;
-}
-
-std::chrono::milliseconds WorkNCCL::getTimeout() const {
-  return state_->timeout;
-}
-
-void WorkNCCL::setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children) {
-  if (!children.empty()) {
-    state_->duration_start_events = children.front()->state_->events;
-  }
-}
-
-void WorkNCCL::setSequenceNumber(uint64_t seq) {
-  state_->seq = seq;
-}
-
-void WorkNCCL::setOwnedEphemeralTimeout(std::chrono::milliseconds timeout) {
-  state_->owned_ephemeral_timeout = timeout;
-}
-
-void WorkNCCL::setHostBlocking(bool host_blocking) {
-  state_->host_blocking = host_blocking;
+  comm_->runCompletionHooks(this, duration);
 }
 
 WorkNCCL::WorkStatus WorkNCCL::checkStatus(
@@ -257,7 +165,7 @@ WorkNCCL::WorkStatus WorkNCCL::checkStatus(
     return current;
   }
 
-  auto comm_error = state_->comm->getError();
+  auto comm_error = comm_->getError();
   if (comm_error == ErrorType::TIMEOUT) {
     setTerminalStatus(WorkStatus::TIMEDOUT);
     return status();
@@ -269,14 +177,14 @@ WorkNCCL::WorkStatus WorkNCCL::checkStatus(
 
   if (current == WorkStatus::NOT_STARTED) {
     try {
-      if (state_->events->start->query()) {
+      if (start_event_->query()) {
         WorkStatus expected = WorkStatus::NOT_STARTED;
-        state_->status.compare_exchange_strong(
+        status_.compare_exchange_strong(
             expected, WorkStatus::INPROGRESS, std::memory_order_relaxed);
       }
     } catch (const std::exception& e) {
-      TC_LOG(ERROR, state_->comm)
-          << "CUDA error during start event query: " << e.what();
+      TC_LOG(ERROR, comm_) << "CUDA error during start event query: "
+                           << e.what();
       setTerminalStatus(WorkStatus::ERROR);
     }
   }
@@ -286,29 +194,27 @@ WorkNCCL::WorkStatus WorkNCCL::checkStatus(
 
   if (status() == WorkStatus::INPROGRESS) {
     try {
-      if (state_->events->end->query()) {
+      if (end_event_->query()) {
         if (setTerminalStatus(WorkStatus::COMPLETED) &&
-            state_->owned_ephemeral_timeout.count() > 0 &&
-            !state_->ephemeral_timeout_released.exchange(true)) {
-          state_->comm->releaseEphemeralTimeout(
-              state_->owned_ephemeral_timeout);
+            owned_ephemeral_timeout_.count() > 0 &&
+            !ephemeral_timeout_released_.exchange(true)) {
+          comm_->releaseEphemeralTimeout(owned_ephemeral_timeout_);
         }
         return status();
       }
     } catch (const std::exception& e) {
-      TC_LOG(ERROR, state_->comm)
-          << "CUDA error during end event query: " << e.what();
+      TC_LOG(ERROR, comm_) << "CUDA error during end event query: " << e.what();
       setTerminalStatus(WorkStatus::ERROR);
       return status();
     }
   }
 
   auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - state_->work_start_time);
-  auto work_timeout = timeout.value_or(state_->timeout);
+      std::chrono::steady_clock::now() - work_start_time_);
+  auto work_timeout = timeout.value_or(timeout_ms_);
   if (elapsed >= work_timeout) {
-    TC_LOG(ERROR, state_->comm)
-        << "Operation timed out after " << elapsed.count() << " ms";
+    TC_LOG(ERROR, comm_) << "Operation timed out after " << elapsed.count()
+                         << " ms";
     setTerminalStatus(WorkStatus::TIMEDOUT);
   }
   return status();
@@ -327,26 +233,23 @@ bool WorkNCCL::isSuccess() const {
 
 void WorkNCCL::synchronizeInternal() {
   WorkStatus local_state = status();
-  if (local_state == WorkStatus::COMPLETED) {
-    input_tensors_->clear();
-    return;
-  }
-  if (local_state == WorkStatus::ERROR || local_state == WorkStatus::TIMEDOUT) {
+  if (local_state == WorkStatus::COMPLETED ||
+      local_state == WorkStatus::ERROR || local_state == WorkStatus::TIMEDOUT) {
     return;
   }
 
   TracingGuard tracingGuard(
-      std::string(state_->comm->getCommName()),
-      state_->comm->getSize(),
+      std::string(comm_->getCommName()),
+      comm_->getSize(),
       "wait",
-      state_->comm->getRank(),
-      state_->seq);
+      comm_->getRank(),
+      seq_);
 
   // Make the current stream wait for the end event recorded on the work's
   // stream, ordering subsequent current-stream ops after this collective.
   auto current_stream =
-      at::cuda::getCurrentCUDAStream(state_->comm->getDevice().index());
-  state_->events->end->block(current_stream);
+      at::cuda::getCurrentCUDAStream(comm_->getDevice().index());
+  end_event_->block(current_stream);
 
   // For a synchronous barrier, mirror stock ProcessGroupNCCL by host-blocking
   // the CPU thread until prior current-stream work has completed, not just
@@ -357,21 +260,22 @@ void WorkNCCL::synchronizeInternal() {
   // clear and both ranks spin forever). Skip while the stream is capturing a
   // CUDA graph: cudaStreamSynchronize is illegal during capture and the
   // captured work is replayed on-device where a host sync is meaningless.
-  if (state_->host_blocking && !state_->blocking_wait &&
+  if (hostBlocking_ && !blocking_wait_ &&
       !c10::cuda::isStreamCapturingMayInitCtx(current_stream)) {
     C10_CUDA_CHECK(cudaStreamSynchronize(current_stream));
   }
 
   // Release tensor references. The CUDA caching allocator manages stream
   // semantics and will not reclaim memory until the stream operations complete.
-  input_tensors_->clear();
+  inputTensors_.clear();
+  inputTensor_.reset();
 }
 
 bool WorkNCCL::wait(std::chrono::milliseconds timeout) {
   synchronize();
 
   auto current_stream =
-      at::cuda::getCurrentCUDAStream(state_->comm->getDevice().index());
+      at::cuda::getCurrentCUDAStream(comm_->getDevice().index());
   if (timeout == kNoTimeout &&
       c10::cuda::isStreamCapturingMayInitCtx(current_stream)) {
     WorkStatus current = status();
@@ -383,7 +287,7 @@ bool WorkNCCL::wait(std::chrono::milliseconds timeout) {
 
   const auto wait_timeout =
       timeout == kNoTimeout ? std::nullopt : std::make_optional(timeout);
-  if (state_->blocking_wait || wait_timeout.has_value()) {
+  if (blocking_wait_ || wait_timeout.has_value()) {
     while (true) {
       WorkStatus current = checkStatus(wait_timeout);
       if (current == WorkStatus::COMPLETED || current == WorkStatus::TIMEDOUT ||
@@ -395,13 +299,13 @@ bool WorkNCCL::wait(std::chrono::milliseconds timeout) {
   }
 
   WorkStatus current = checkStatus(wait_timeout);
-  if (state_->blocking_wait &&
+  if (blocking_wait_ &&
       (current == WorkStatus::TIMEDOUT || current == WorkStatus::ERROR)) {
-    state_->comm->handleBlockingWaitFailure(current, state_->reconfigure_uuid);
+    comm_->handleBlockingWaitFailure(current, reconfigure_uuid_);
   }
-  if (state_->blocking_wait) {
+  if (blocking_wait_) {
     // Blocking-wait mode has no watchdog to drain completed work.
-    state_->comm->workq_.garbageCollect();
+    comm_->workq_.garbageCollect();
   }
   if (current == WorkStatus::TIMEDOUT || current == WorkStatus::ERROR) {
     std::rethrow_exception(exception());
@@ -423,24 +327,21 @@ std::vector<at::Tensor> WorkNCCL::result() {
 
 float WorkNCCL::getDuration() const {
   TORCH_CHECK(
-      state_->timing_enabled,
+      timing_enabled_,
       "getDuration only works if timing was enabled, see ProcessGroup::_enable_collectives_timing");
+  TORCH_CHECK(start_event_ && end_event_, "getDuration requires CUDA events");
+  // A coalesced work owns the last op of the group and holds the earlier ops as
+  // children, so span from the first op's start event to this work's end event.
+  const auto& start_event =
+      children_.empty() ? *start_event_ : *children_.front()->start_event_;
   TORCH_CHECK(
-      state_->events->start && state_->events->end,
-      "getDuration requires CUDA events");
-  TORCH_CHECK(
-      state_->events->end->isCreated() && state_->events->end->query(),
+      end_event_->isCreated() && end_event_->query(),
       "getDuration only works after the work has completed");
-  return state_->duration_start_events->start->elapsed_time(
-      *state_->events->end);
+  return start_event.elapsed_time(*end_event_);
 }
 
 uint64_t WorkNCCL::getSequencenumber() const {
-  return state_->seq;
-}
-
-const void* WorkNCCL::getCompletionKey() const {
-  return state_.get();
+  return seq_;
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
@@ -473,7 +374,7 @@ c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
 
 c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFutureResult() {
   checkStatus();
-  return state_->future_work_result;
+  return future_work_result_;
 }
 
 } // namespace c10d::nccl2

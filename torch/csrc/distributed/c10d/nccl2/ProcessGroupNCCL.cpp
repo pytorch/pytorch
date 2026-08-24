@@ -1718,7 +1718,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
 
   // A synchronous barrier host-blocks the CPU thread in synchronizeInternal(),
   // matching stock ProcessGroupNCCL; async barriers stay stream-ordered.
-  work->setHostBlocking(!async_op);
+  work->hostBlocking_ = !async_op;
 
   // Record start event before NCCL operation
   work->recordStart("barrier");

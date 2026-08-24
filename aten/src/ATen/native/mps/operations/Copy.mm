@@ -205,9 +205,6 @@ static std::pair<id<MTLBuffer>, NSUInteger> buffer_with_offset_from_tensor(const
 }
 
 static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
-  auto sameMemFormat =
-      src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
-
   MPSStream* stream = getCurrentMPSStream();
   Tensor dst = dst_;
   Tensor src = src_;

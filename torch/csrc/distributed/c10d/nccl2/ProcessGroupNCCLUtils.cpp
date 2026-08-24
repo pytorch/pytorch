@@ -456,7 +456,7 @@ void ProcessGroupNCCL::addEphemeralTimeout(
 }
 
 void ProcessGroupNCCL::enqueueWork(
-    const c10::intrusive_ptr<WorkNCCL>& work,
+    c10::intrusive_ptr<WorkNCCL> work,
     cudaStream_t stream) {
   // In graph capture mode, keep a reference to the work object to prevent
   // premature destruction until the graph gets destroyed, organized per graph
@@ -468,9 +468,8 @@ void ProcessGroupNCCL::enqueueWork(
       // Check if this is the first work object for this graph
       bool is_first_work = graph_capture_work_refs_[capture_info.id].empty();
 
-      // Retain completion state and events without extending tensor lifetimes.
-      graph_capture_work_refs_[capture_info.id].push_back(
-          work->createTrackingWork(false));
+      // Add work reference to the per-graph container
+      graph_capture_work_refs_[capture_info.id].push_back(work);
 
       // If this is the first work object for this graph, set up automatic
       // cleanup
@@ -483,7 +482,7 @@ void ProcessGroupNCCL::enqueueWork(
     }
   } else {
     // Add work to stream's queue after events have been recorded
-    workq_.enqueueWork(work, stream);
+    workq_.enqueueWork(std::move(work), stream);
   }
 }
 
