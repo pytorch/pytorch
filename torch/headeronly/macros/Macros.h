@@ -556,6 +556,29 @@ __host__ __device__
 #else
 #if defined(USE_ROCM) && defined(__HIPCC__)
 namespace torch::headeronly::detail {
+// OCKL treats is_last=1 append as printf format; double '%' for literal output.
+template <unsigned N>
+constexpr auto rocm_assert_escape_format(const char (&s)[N]) {
+  unsigned extra = 0;
+  for (unsigned i = 0; i < N - 1; ++i) {
+    if (s[i] == '%') {
+      extra++;
+    }
+  }
+  struct {
+    char data[N + extra]; // = N - 1 (content excluding '\0') + extra + 1 ('\0')
+  } out{};
+  unsigned j = 0;
+  for (unsigned i = 0; i < N - 1; ++i) {
+    if (s[i] == '%') {
+      out.data[j++] = '%';
+    }
+    out.data[j++] = s[i];
+  }
+  out.data[j] = '\0';
+  return out;
+}
+
 // Merge prefix + __func__ + suffix at the macro call site (not via helper
 // params).
 template <
@@ -580,7 +603,7 @@ constexpr auto rocm_assert_concat(
   for (unsigned j = 0; j < N3; ++j) {
     msg.data[i++] = c[j];
   }
-  return msg;
+  return rocm_assert_escape_format(msg.data);
 }
 
 template <unsigned N>
