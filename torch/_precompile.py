@@ -2316,7 +2316,7 @@ def _dynamo_input_contract(
     example_inputs: Sequence[ExampleInput],
 ) -> _DynamoInputContract | None:
     def module_signature(module: torch.nn.Module) -> tuple[object, ...]:
-        tensors = [
+        tensors: list[tuple[str, str, torch.Tensor]] = [
             ("parameter", name, tensor)
             for name, tensor in module.named_parameters(remove_duplicate=False)
         ]
@@ -2916,7 +2916,7 @@ def _precompile_dynamo(
             recompile_limit=recompile_limit,
             isolate_recompiles=True,
         )
-        region = context._isolate_recompiles_id
+        region = context._isolate_recompiles_id  # type: ignore[attr-defined]
         compiled = context(fn)
         saved_grads = _dynamo_example_grads(fn, examples)
         try:
