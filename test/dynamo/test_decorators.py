@@ -1244,15 +1244,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             def _(x, /, *, newline=True):
                 return b""
 
-        def polyfill(
-            data,
-            /,
-            *,
-            padded=True,
-            alphabet=binascii.BASE64_ALPHABET,
-            wrapcol=0,
-            newline=True,
-        ):
+        def polyfill(data, /, *, newline=True):
             buffer = []
             cipher = []
             for byte in data:
@@ -1289,12 +1281,20 @@ class DecoratorTests(PytreeRegisteringTestCase):
             return "".join(cipher).encode()
 
         if sys.version_info < (3, 15):
+            wrapper = polyfill
+        else:
 
-            def wrapper(data, /, *, newline=True):
+            def wrapper(
+                data,
+                /,
+                *,
+                padded=True,
+                alphabet=binascii.BASE64_ALPHABET,
+                wrapcol=0,
+                newline=True,
+            ):
                 return polyfill(data, newline=newline)
 
-        else:
-            wrapper = polyfill
         torch._dynamo.substitute_in_graph(binascii.b2a_base64)(wrapper)
 
         cnts = torch._dynamo.testing.CompileCounter()

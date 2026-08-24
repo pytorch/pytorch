@@ -1,37 +1,81 @@
 # Owner(s): ["module: sparse"]
 # ruff: noqa: F841
 
-import torch
-import random
+import functools
 import io
 import itertools
+import operator
+import random
 import unittest
-import functools
 from contextlib import redirect_stderr
-from torch.testing import make_tensor, FileCheck
+
+import torch
+from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_BF16, PLATFORM_SUPPORTS_BF16_ATOMICS, PLATFORM_SUPPORTS_HALF_ATOMICS)
-from torch.testing._internal.common_utils import \
-    (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_CUDSS, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase,
-     run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo,
-     IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
-from torch.testing._internal.common_device_type import \
-    (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
-     precisionOverride, toleranceOverride, tol, skipMeta, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
-from torch.testing._internal.common_methods_invocations import \
-    (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
-from torch.testing._internal.common_cuda import TEST_CUDA
+    PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_BF16_ATOMICS,
+    PLATFORM_SUPPORTS_HALF_ATOMICS,
+    TEST_CUDA,
+)
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    dtypesIfCUDA,
+    instantiate_device_type_tests,
+    largeTensorTest,
+    onlyCPU,
+    onlyCUDA,
+    OpDTypes,
+    ops,
+    precisionOverride,
+    skipCPUIfNoMklSparse,
+    skipCUDAIfNoSparseGeneric,
+    skipCUDAIfRocm,
+    skipMeta,
+    tol,
+    toleranceOverride,
+)
 from torch.testing._internal.common_dtype import (
-    floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
-    all_types_and_complex, floating_and_complex_types_and)
+    all_types_and_complex,
+    all_types_and_complex_and,
+    floating_and_complex_types,
+    floating_and_complex_types_and,
+    floating_types,
+    floating_types_and,
+)
+from torch.testing._internal.common_methods_invocations import (
+    op_db,
+    ReductionOpInfo,
+    sparse_csr_unary_ufuncs,
+)
+from torch.testing._internal.common_utils import (
+    coalescedonoff,
+    HardwareClassification,
+    IS_FBCODE,
+    IS_LINUX,
+    IS_REMOTE_GPU,
+    IS_WINDOWS,
+    load_tests,
+    parametrize,
+    run_tests,
+    skipIfRocm,
+    skipIfTorchDynamo,
+    subtest,
+    suppress_warnings,
+    TEST_CUDA_CUDSS,
+    TEST_MKL,
+    TEST_NUMPY,
+    TEST_SCIPY,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
+    TEST_WITH_TORCHINDUCTOR,
+    TestCase,
+)
 from torch.testing._internal.opinfo.definitions.linalg import sample_inputs_linalg_solve
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
-from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED, HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
-import operator
-from torch.testing._internal.common_utils import (
-    IS_LINUX,
-    TEST_WITH_SLOW,
-    skipIfRocm,
+
+from test_sparse import (
+    CUSPARSE_SPMM_COMPLEX128_SUPPORTED,
+    HIPSPARSE_SPMM_COMPLEX128_SUPPORTED,
 )
 
 if TEST_SCIPY:
@@ -133,6 +177,7 @@ def _test_addmm_addmv(
 
 
 class TestSparseCSRSampler(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_make_crow_indices(self):
         # Here we test the correctness of the crow_indices algorithm
