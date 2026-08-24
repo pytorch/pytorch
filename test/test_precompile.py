@@ -4134,6 +4134,34 @@ class TestPrecompile(TestCase):
         path = _offending_value_path(state, holder.deep.it)
         self.assertIn("local_scope['p'].deep.it", path)
 
+    def test_unpicklable_value_reachable_only_through_a_global_is_named(self):
+        # pickle_guards_state empties global_scope before dumping, so a walk
+        # that reads the scope afterwards finds nothing and the error arrives as
+        # a bare type name. Capturing the roots first is what keeps a value
+        # reachable only through a global nameable -- which is how a real
+        # "cannot pickle '_thread.RLock' object" arrived with no path at all.
+        from torch._dynamo.guards import _offending_value_path, _scope_roots
+
+        class _Scope:
+            pass
+
+        holder = _Scope()
+        holder.cfg = _Scope()
+        holder.cfg.lock = threading.RLock()
+        state = _Scope()
+        state.output_graph = _Scope()
+        state.output_graph.local_scope = {}
+        state.output_graph.global_scope = {"CFG": holder}
+
+        roots = _scope_roots(state.output_graph)
+        state.output_graph.global_scope = {}  # what the pruning does
+
+        self.assertEqual(_offending_value_path(state, holder.cfg.lock), "")
+        self.assertIn(
+            "global_scope['CFG'].cfg.lock",
+            _offending_value_path(state, holder.cfg.lock, roots),
+        )
+
     def test_offending_value_path_never_masks_the_real_error(self):
         # It is a diagnostic appended to an error already being raised, so any
         # failure inside it must stay silent.

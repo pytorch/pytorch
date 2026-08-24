@@ -5015,7 +5015,20 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
-def _offending_value_path(state: Any, target: Any) -> str:
+def _scope_roots(graph: Any) -> list[tuple[str, Any]]:
+    """The named values a guard state can reach, for the diagnostic walk."""
+    return [
+        (f"local_scope[{k!r}]", v)
+        for k, v in (getattr(graph, "local_scope", None) or {}).items()
+    ] + [
+        (f"global_scope[{k!r}]", v)
+        for k, v in (getattr(graph, "global_scope", None) or {}).items()
+    ]
+
+
+def _offending_value_path(
+    state: Any, target: Any, roots: list[tuple[str, Any]] | None = None
+) -> str:
     """Best-effort attribute path to the value that could not be pickled.
 
     The error names WHAT failed and never WHERE it lives, which in a large model
@@ -5031,14 +5044,8 @@ def _offending_value_path(state: Any, target: Any) -> str:
     try:
         if target is None:
             return ""
-        graph = state.output_graph
-        roots = [
-            (f"local_scope[{k!r}]", v)
-            for k, v in (getattr(graph, "local_scope", None) or {}).items()
-        ] + [
-            (f"global_scope[{k!r}]", v)
-            for k, v in (getattr(graph, "global_scope", None) or {}).items()
-        ]
+        if roots is None:
+            roots = _scope_roots(state.output_graph)
         seen: set[int] = set()
         queue = collections.deque(roots)
         while queue:
@@ -5104,6 +5111,12 @@ def pickle_guards_state(
             missing_values[id(leaf)] = leaf
     pickler = GuardsStatePickler(guard_tree_values, empty_values, missing_values, buf)
 
+    # Snapshot the search roots before the pruning below empties global_scope.
+    # The diagnostic that names the unpicklable value walks these, so pruning
+    # first leaves anything reachable only through a global unnameable -- which
+    # is how "cannot pickle '_thread.RLock' object" arrived with no path at all.
+    scope_roots = _scope_roots(state.output_graph)
+
     if all(
         torch.compiler.keep_portable_guards_unsafe(
             [
@@ -5135,7 +5148,7 @@ def pickle_guards_state(
         # not actionable in a model with a thousand-frame guard tree.
         raise torch._dynamo.exc.PackageError(
             f"{type(e).__name__}: {e}"
-            f"{_offending_value_path(state, pickler.last_reduced)}"
+            f"{_offending_value_path(state, pickler.last_reduced, scope_roots)}"
         ) from e
     return buf.getvalue()
 
