@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 def _make_post_grad_fx(f, *inps):
@@ -92,6 +93,7 @@ class MicroPipelineTPTest(TestCase):
         return device_type
 
     @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_find_all_gather_patterns(self, device):
         device_type = self._init_device(device)
@@ -176,6 +178,7 @@ class MicroPipelineTPTest(TestCase):
         )
 
     @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_find_reduce_scatter_patterns(self, device):
         device_type = self._init_device(device)
@@ -227,6 +230,7 @@ class MicroPipelineTPTest(TestCase):
         self.assertEqual(reduce_scatters[1].scatter_dim, 1)
 
     @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_get_unexposed_collectives(self, device):
         device_type = self._init_device(device)
@@ -252,7 +256,8 @@ class MicroPipelineTPTest(TestCase):
             ["all_gather_into_tensor", "reduce_scatter_tensor"],
         )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.lib.triton, Capability.distributed.backend)
+    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_fuse_all_gather_matmul(self, device):
         device_type = self._init_device(device)
@@ -298,7 +303,8 @@ class MicroPipelineTPTest(TestCase):
                             self.assertNotIn("all_gather_into_tensor", code)
                             self.assertEqual("return_A=True" in code, return_A)
 
-    @requires_capabilities(Capability.compile.inductor, Capability.lib.triton, Capability.distributed.backend)
+    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_fuse_all_gather_matmul_view_optimization(self, device):
         """When batch=1 and gather_dim=1, _maybe_view_chunk_cat uses a view
@@ -324,6 +330,7 @@ class MicroPipelineTPTest(TestCase):
         self.assertNotIn("fused_all_gather_matmul", code)
 
     @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_fuse_all_gather_matmul_slice_cat(self, device):
         device_type = self._init_device(device)
@@ -355,6 +362,7 @@ class MicroPipelineTPTest(TestCase):
         self.assertNotIn("all_gather_into_tensor", str(gm.graph))
 
     @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_fuse_all_gather_matmul_slice_cat_trim(self, device):
         device_type = self._init_device(device)
@@ -387,10 +395,10 @@ class MicroPipelineTPTest(TestCase):
 
     @requires_capabilities(
         Capability.compile.inductor,
-        Capability.lib.triton,
         Capability.distributed.backend,
         Capability.dtype.fp8,
     )
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_fuse_all_gather_scaled_matmul(self, device):
         device_type = self._init_device(device)
@@ -462,7 +470,8 @@ class MicroPipelineTPTest(TestCase):
                             self.assertIn("fused_all_gather_scaled_matmul", code)
                             self.assertNotIn("all_gather_into_tensor", code)
 
-    @requires_capabilities(Capability.compile.inductor, Capability.lib.triton, Capability.distributed.backend)
+    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_fuse_matmul_reduce_scatter(self, device):
         device_type = self._init_device(device)
@@ -492,6 +501,7 @@ class MicroPipelineTPTest(TestCase):
                     self.assertNotIn("reduce_scatter_tensor", code)
 
     @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_fuse_matmul_reduce_scatter_slice_cat(self, device):
         device_type = self._init_device(device)
@@ -522,10 +532,10 @@ class MicroPipelineTPTest(TestCase):
 
     @requires_capabilities(
         Capability.compile.inductor,
-        Capability.lib.triton,
         Capability.distributed.backend,
         Capability.dtype.fp8,
     )
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_fuse_scaled_matmul_reduce_scatter(self, device):
         device_type = self._init_device(device)
@@ -576,12 +586,77 @@ class MicroPipelineTPTest(TestCase):
                     self.assertIn("fused_scaled_matmul_reduce_scatter", code)
                     self.assertNotIn("reduce_scatter_tensor", code)
 
+    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        TEST_WITH_TORCHINDUCTOR or IS_LINUX or TEST_WITH_ROCM,
+        "https://github.com/pytorch/pytorch/issues/153223",
+    )
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/145924")
+    @fresh_cache()
+    def test_dtensor_seq_par(self, device):
+        device_type = self._init_device(device)
+        for shard_dim in [0, 1]:
+            with self.subTest(shard_dim=shard_dim):
+                model: torch.nn.Module = MLPModule(device=device_type, bias=False)
+                device_mesh = DeviceMesh(
+                    device_type,
+                    torch.arange(0, self.world_size),
+                )
+                parallelize_plan = {
+                    "net1": ColwiseParallel(input_layouts=Shard(shard_dim)),
+                    "net2": RowwiseParallel(output_layouts=Shard(shard_dim)),
+                }
+                model = parallelize_module(model, device_mesh, parallelize_plan)
+                if shard_dim == 0:
+                    inp = torch.rand(8, 10, device=device_type)
+                elif shard_dim == 1:
+                    inp = torch.rand(2, 8, 10, device=device_type)
+                else:
+                    raise AssertionError("Invalid shard_dim")
+
+                with _test_mode():
+                    compiled = torch.compile(model)
+                    code = run_and_get_triton_code(compiled, inp)
+
+                self.assertIn("fused_all_gather_matmul", code)
+                self.assertNotIn("all_gather_into_tensor", code)
+                self.assertIn("fused_matmul_reduce_scatter", code)
+                self.assertNotIn("reduce_scatter_tensor", code)
+
+
+class MicroPipelineTPTestCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        super().setUp()
+        torch._inductor.config._micro_pipeline_tp = True
+
+        self.rank = 0
+        self.world_size = 2
+
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+    def tearDown(self):
+        dist.destroy_process_group()
+
+    def _init_device(self, device):
+        device_type = torch.device(device).type
+        torch.get_device_module(device_type).set_device(self.rank)
+        return device_type
+
     @requires_capabilities(
         Capability.compile.inductor,
-        Capability.lib.triton,
         Capability.distributed.backend,
         Capability.dtype.fp8,
     )
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_fuse_scaled_matmul_reduce_scatter_rowwise_scales_reshape_mm_reshape(
         self, device
@@ -645,43 +720,6 @@ class MicroPipelineTPTest(TestCase):
                 self.assertIn("fused_scaled_matmul_reduce_scatter", code)
                 self.assertNotIn("reduce_scatter_tensor", code)
 
-    @requires_capabilities(Capability.compile.inductor, Capability.lib.triton, Capability.distributed.backend)
-    @unittest.skipIf(
-        TEST_WITH_TORCHINDUCTOR or IS_LINUX or TEST_WITH_ROCM,
-        "https://github.com/pytorch/pytorch/issues/153223",
-    )
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/145924")
-    @fresh_cache()
-    def test_dtensor_seq_par(self, device):
-        device_type = self._init_device(device)
-        for shard_dim in [0, 1]:
-            with self.subTest(shard_dim=shard_dim):
-                model: torch.nn.Module = MLPModule(device=device_type, bias=False)
-                device_mesh = DeviceMesh(
-                    device_type,
-                    torch.arange(0, self.world_size),
-                )
-                parallelize_plan = {
-                    "net1": ColwiseParallel(input_layouts=Shard(shard_dim)),
-                    "net2": RowwiseParallel(output_layouts=Shard(shard_dim)),
-                }
-                model = parallelize_module(model, device_mesh, parallelize_plan)
-                if shard_dim == 0:
-                    inp = torch.rand(8, 10, device=device_type)
-                elif shard_dim == 1:
-                    inp = torch.rand(2, 8, 10, device=device_type)
-                else:
-                    raise AssertionError("Invalid shard_dim")
-
-                with _test_mode():
-                    compiled = torch.compile(model)
-                    code = run_and_get_triton_code(compiled, inp)
-
-                self.assertIn("fused_all_gather_matmul", code)
-                self.assertNotIn("all_gather_into_tensor", code)
-                self.assertIn("fused_matmul_reduce_scatter", code)
-                self.assertNotIn("reduce_scatter_tensor", code)
-
 
 class MicroPipelineTP4GPUTest(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -709,7 +747,8 @@ class MicroPipelineTP4GPUTest(TestCase):
         torch.get_device_module(device_type).set_device(self.rank)
         return device_type
 
-    @requires_capabilities(Capability.compile.inductor, Capability.lib.triton, Capability.distributed.backend)
+    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     @torch._inductor.config.patch(shape_padding=False)
     def test_extra_collectives(self, device):
@@ -747,7 +786,11 @@ instantiate_device_type_tests(
     except_for="cpu",
     allow_xpu=True
 )
-
+instantiate_device_type_tests(
+    MicroPipelineTPTestCUDA,
+    globals(),
+    only_for="cuda"
+)
 instantiate_device_type_tests(
     MicroPipelineTP4GPUTest,
     globals(),
