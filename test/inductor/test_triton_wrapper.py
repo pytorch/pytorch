@@ -154,4 +154,5 @@ instantiate_device_type_tests(
 
 
 if __name__ == "__main__":
-    run_tests()
+    if has_triton():
+        run_tests()
