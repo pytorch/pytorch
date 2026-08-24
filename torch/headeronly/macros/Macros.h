@@ -596,15 +596,17 @@ __host__ __device__ inline void rocm_kernel_assert(
     const char* cond,
     const char* file,
     unsigned int line,
+    const char* func,
     const char (&msg)[N]) {
 #if defined(__HIP_DEVICE_COMPILE__)
   (void)cond;
   (void)file;
   (void)line;
+  (void)func;
   rocm_assert_one_shot(msg);
 #else
   (void)msg;
-  __assert_fail(cond, file, line, __func__);
+  __assert_fail(cond, file, line, func);
 #endif
 }
 } // namespace torch::headeronly::detail
@@ -617,6 +619,7 @@ __host__ __device__ inline void rocm_kernel_assert(
         #cond,                                               \
         __FILE__,                                            \
         static_cast<unsigned int>(__LINE__),                 \
+        __func__,                                            \
         ::torch::headeronly::detail::rocm_assert_concat(     \
             __FILE__ ":" C10_STRINGIZE(__LINE__) ": ",       \
             __func__,                                        \
