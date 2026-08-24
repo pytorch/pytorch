@@ -518,8 +518,8 @@ error_on_nested_fx_trace = True
 # trace over dynamo-compiled functions. Use with error_on_nested_fx_trace=False.
 force_compile_during_fx_trace = False
 
-# Disables graph breaking on rnn. YMMV with backends.
-allow_rnn = False
+# Trace through RNN, GRU, and LSTM modules.
+allow_rnn = True
 
 # If true, enables feature that captures PyTorch sparsity in the
 # exported FX graph. This flag should become the default eventually
@@ -919,9 +919,8 @@ inline_invoke_subgraph: bool = False
 # Single-use subgraphs add overhead without deduplication benefit.
 inline_single_use_invoke_subgraph: bool = True
 
-# Clear WeakIdRef entries from TracingContext.tensor_to_context and
-# MetaTensorDescriber.lookup_tensor at the end of compile. These weakrefs
-# can block torch.utils.swap_tensors from working after compile.
+# Clear compile-context references, including ShapeEnv tracked fakes, at the
+# end of compile. These can retain tensors or block torch.utils.swap_tensors.
 # - None (default): clear for registered backends (inductor, eager, etc.),
 #   don't clear for custom backends (to support standalone_compile, etc.)
 # - True: always clear regardless of backend
