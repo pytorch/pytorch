@@ -26,7 +26,7 @@ from torch.utils._ordered_set import OrderedSet
 from ... import ir
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
-from ...utils import ceildiv, has_free_symbols
+from ...utils import _IntLike, ceildiv, has_free_symbols
 from ...virtualized import V
 from .constraints import (
     FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR,
@@ -164,7 +164,7 @@ def infer_flex_gemm_epilogue_arg_kinds(
 def validate_flex_gemm_aux_outputs(
     gemm_op: torch._ops.OpOverload,
     aux_outputs: tuple[torch.fx.Node, ...],
-    output_size: list[Any],
+    output_size: Sequence[_IntLike],
 ) -> tuple[Any, ...]:
     """Validate QUACK aux-output support and return fake tensor metadata."""
     if not aux_outputs:
@@ -279,8 +279,8 @@ def filter_gemm_configs(
 
 def flex_gemm_config_keys(
     device,
-    m: int,
-    n: int,
+    m: _IntLike,
+    n: _IntLike,
     local_reduce_geometries: tuple[Any, ...],
     tuned: bool,
     output_contraction: FlexGemmOutputContraction | None = None,
