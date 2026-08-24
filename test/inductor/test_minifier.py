@@ -13,7 +13,6 @@ from torch.testing._internal.inductor_utils import (
     has_cpp_wrapper_for_device,
     requires_triton,
     TRITON_TYPE,
-    try_patch_inductor_backend_config,
 )
 from torch.testing._internal.triton_utils import requires_gpu
 
@@ -39,9 +38,7 @@ inner(torch.randn(20, 20).to("{device}"))
     def test_after_aot_cpp_compile_error(self):
         with (
             with_device_backend("cpp", "cpu"),
-            try_patch_inductor_backend_config(
-                "cpu", "inject_relu_bug_TESTING_ONLY", "compile_error"
-            ),
+            inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "compile_error"),
         ):
             self._test_after_aot("cpu", "CppCompileError")
 
@@ -49,9 +46,7 @@ inner(torch.randn(20, 20).to("{device}"))
     def test_after_aot_cpp_accuracy_error(self):
         with (
             with_device_backend("cpp", "cpu"),
-            try_patch_inductor_backend_config(
-                "cpu", "inject_relu_bug_TESTING_ONLY", "accuracy"
-            ),
+            inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy"),
         ):
             self._test_after_aot("cpu", "AccuracyError")
 
@@ -59,8 +54,8 @@ inner(torch.randn(20, 20).to("{device}"))
     def test_after_aot_triton_compile_error(self):
         with (
             with_device_backend("triton", TRITON_TYPE),
-            try_patch_inductor_backend_config(
-                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "compile_error"
+            inductor_config.patch(
+                "triton.inject_relu_bug_TESTING_ONLY", "compile_error"
             ),
         ):
             self._test_after_aot(TRITON_TYPE, "SyntaxError")
@@ -69,9 +64,7 @@ inner(torch.randn(20, 20).to("{device}"))
     def test_after_aot_triton_accuracy_error(self):
         with (
             with_device_backend("triton", TRITON_TYPE),
-            try_patch_inductor_backend_config(
-                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "accuracy"
-            ),
+            inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"),
         ):
             self._test_after_aot(TRITON_TYPE, "AccuracyError")
 
@@ -85,9 +78,7 @@ inner(torch.randn(2))
 """
         with (
             with_device_backend("cpp", "cpu"),
-            try_patch_inductor_backend_config(
-                "cpu", "inject_relu_bug_TESTING_ONLY", "accuracy"
-            ),
+            inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy"),
         ):
             self._run_full_test(run_code, "aot", "AccuracyError", isolate=False)
 
@@ -138,12 +129,8 @@ inner(torch.randn(20))
 
         with (
             with_device_backend("cpp", "cpu"),
-            try_patch_inductor_backend_config(
-                "cpu", "inject_relu_bug_TESTING_ONLY", "accuracy"
-            ),
-            try_patch_inductor_backend_config(
-                "cpu", "inject_log1p_bug_TESTING_ONLY", "accuracy"
-            ),
+            inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy"),
+            inductor_config.patch("cpp.inject_log1p_bug_TESTING_ONLY", "accuracy"),
         ):
             # Strict accuracy gets hung up on the boolean mask difference, which
             # will localize the error to sigmoid, even though it doesn't actually
@@ -200,9 +187,7 @@ inner(torch.randn(20, 20))
 """
         with (
             with_device_backend("cpp", "cpu"),
-            try_patch_inductor_backend_config(
-                "cpu", "inject_relu_bug_TESTING_ONLY", "accuracy"
-            ),
+            inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy"),
         ):
             self._run_full_test(
                 run_code,
@@ -309,9 +294,8 @@ def forward(self, linear_default):
     def test_aoti_cpp_compile_error(self):
         with (
             with_device_backend("cpp", "cpu"),
-            try_patch_inductor_backend_config(
-                "cpu",
-                "inject_relu_bug_TESTING_ONLY",
+            inductor_config.patch(
+                "cpp.inject_relu_bug_TESTING_ONLY",
                 "compile_error",
             ),
         ):
@@ -322,9 +306,8 @@ def forward(self, linear_default):
     def test_aoti_cpp_compile_error_unflatten(self):
         with (
             with_device_backend("cpp", "cpu"),
-            try_patch_inductor_backend_config(
-                "cpu",
-                "inject_relu_bug_TESTING_ONLY",
+            inductor_config.patch(
+                "cpp.inject_relu_bug_TESTING_ONLY",
                 "compile_error",
             ),
         ):
@@ -335,8 +318,8 @@ def forward(self, linear_default):
     def test_aoti_triton_compile_error(self):
         with (
             with_device_backend("triton", TRITON_TYPE),
-            try_patch_inductor_backend_config(
-                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "compile_error"
+            inductor_config.patch(
+                "triton.inject_relu_bug_TESTING_ONLY", "compile_error"
             ),
         ):
             res = self._test_aoti(TRITON_TYPE, "SyntaxError")
@@ -346,8 +329,8 @@ def forward(self, linear_default):
     def test_aoti_triton_compile_error_unflatten(self):
         with (
             with_device_backend("triton", TRITON_TYPE),
-            try_patch_inductor_backend_config(
-                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "compile_error"
+            inductor_config.patch(
+                "triton.inject_relu_bug_TESTING_ONLY", "compile_error"
             ),
         ):
             res = self._test_aoti_unflattened_inputs(TRITON_TYPE, "SyntaxError")
@@ -357,9 +340,7 @@ def forward(self, linear_default):
     def test_aoti_cpp_accuracy_error(self):
         with (
             with_device_backend("cpp", "cpu"),
-            try_patch_inductor_backend_config(
-                "cpu", "inject_relu_bug_TESTING_ONLY", "accuracy"
-            ),
+            inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy"),
         ):
             res = self._test_aoti("cpu", "AccuracyError")
             self._aoti_check_relu_repro(res)
@@ -368,9 +349,7 @@ def forward(self, linear_default):
     def test_aoti_triton_accuracy_error(self):
         with (
             with_device_backend("triton", TRITON_TYPE),
-            try_patch_inductor_backend_config(
-                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "accuracy"
-            ),
+            inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"),
         ):
             res = self._test_aoti(TRITON_TYPE, "AccuracyError")
             self._aoti_check_relu_repro(res)

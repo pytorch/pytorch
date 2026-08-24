@@ -6,7 +6,6 @@ import logging
 import os
 import re
 import sys
-from typing import Any
 import unittest
 from subprocess import CalledProcessError
 
@@ -16,7 +15,6 @@ from torch._inductor.codegen.common import get_custom_backend_config_for_device
 
 from torch._inductor import compile_fx  # noqa: F401
 from torch._inductor.utils import (
-    get_current_backend,
     get_gpu_shared_memory,
     get_gpu_type,
     get_triton_type,
@@ -39,7 +37,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -503,41 +501,3 @@ def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> co
 
 
     return config.patch(post_grad_custom_pre_pass=Pass())
-
-
-@contextlib.contextmanager
-def try_patch_inductor_backend_config(device: str, key: str,
-                                      value: Any) -> Iterator[None]:
-    """
-    Try to patch the backend-specific Inductor config, for the codegen backend
-    corresponding to the given ``device``. If that config can't be found to
-    patch, skip the test.
-
-    Will patch the member of the global ``config.$BACKEND``, if it exists. If
-    the given device also specifies a custom config module, will also try to
-    patch its ``$BACKEND`` member if it exists.
-
-    Note that if ``device`` has an unknown value, will behave as if it was
-    ``"cuda"``.
-
-    """
-    device_backend = get_current_backend(device)
-
-    config_modules = [torch._inductor.config]
-    if custom_config_module := get_custom_backend_config_for_device(device):
-        config_modules.append(custom_config_module)
-
-    contexts: list[contextlib.ContextDecorator] = []
-
-    for mod in config_modules:
-        if hasattr(mod, f"{device_backend}.{key}"):
-            contexts.append(mod.patch(f"{device_backend}.{key}", value))
-
-    with contextlib.ExitStack() as es:
-        if len(contexts) == 0:
-            raise unittest.SkipTest(
-                f"Can't patch Inductor config {key} for device {device}"
-            )
-        for ctx in contexts:
-            es.enter_context(ctx)
-        yield

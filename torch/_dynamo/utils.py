@@ -3808,10 +3808,12 @@ def same(
                 multiplier = get_multiplier()
 
                 def custom_backend_config_value(name: str, default: Any) -> Any:
-                    cfg = torch._inductor.codegen.common.get_custom_backend_config_for_device(ref.device)
+                    cfg = torch._inductor.codegen.common.get_custom_backend_config_for_device(
+                        ref.device.type
+                    )
                     if cfg is None:
                         return default
-                    return cfg.get(name, default)
+                    return getattr(cfg, name, default)
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if (
@@ -3827,8 +3829,12 @@ def same(
                             torch._inductor.config.cpp.inject_log1p_bug_TESTING_ONLY,
                             torch._inductor.config.triton.inject_relu_bug_TESTING_ONLY,
                             torch._inductor.config.triton.inject_log1p_bug_TESTING_ONLY,
-                            custom_backend_config_value("inject_log1p_bug_TESTING_ONLY", None),
-                            custom_backend_config_value("inject_relu_bug_TESTING_ONLY", None),
+                            custom_backend_config_value(
+                                "inject_log1p_bug_TESTING_ONLY", None
+                            ),
+                            custom_backend_config_value(
+                                "inject_relu_bug_TESTING_ONLY", None
+                            ),
                         )
                     )
                 ):

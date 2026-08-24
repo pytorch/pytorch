@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import unittest
 
+import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch._inductor.utils import with_device_backend
 from torch.testing._internal.common_utils import (
@@ -10,11 +11,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import (
-    requires_triton,
-    TRITON_TYPE,
-    try_patch_inductor_backend_config,
-)
+from torch.testing._internal.inductor_utils import requires_triton, TRITON_TYPE
 from torch.utils._triton import get_triton_version
 
 
@@ -47,9 +44,7 @@ inner(torch.randn(2, 2).to("{device}"))
     def test_after_aot_cpp_runtime_error(self):
         with (
             with_device_backend("cpp", "cpu"),
-            try_patch_inductor_backend_config(
-                "cpu", "inject_relu_bug_TESTING_ONLY", "runtime_error"
-            ),
+            inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "runtime_error"),
         ):
             self._test_after_aot_runtime_error("cpu", "")
 
@@ -59,9 +54,7 @@ inner(torch.randn(2, 2).to("{device}"))
         # CUDA's __assertfail surfaces through PyTorch as "device-side assert";
         # ROCm's Triton AMD lowering prints the injected assertion text before trapping.
         expected_errors = {
-            "cuda": "injected assert fail"
-            if TEST_WITH_ROCM
-            else "device-side assert",
+            "cuda": "injected assert fail" if TEST_WITH_ROCM else "device-side assert",
             "xpu": "injected assert fail",
         }
         if TRITON_TYPE not in expected_errors:
@@ -70,8 +63,8 @@ inner(torch.randn(2, 2).to("{device}"))
             )
         with (
             with_device_backend("triton", TRITON_TYPE),
-            try_patch_inductor_backend_config(
-                TRITON_TYPE, "inject_relu_bug_TESTING_ONLY", "runtime_error"
+            inductor_config.patch(
+                "triton.inject_relu_bug_TESTING_ONLY", "runtime_error"
             ),
         ):
             self._test_after_aot_runtime_error(
