@@ -166,6 +166,7 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     HAS_MPS,
     HAS_MULTIGPU,
     HAS_TPU,
+    HAS_TRITON,
     IS_BIG_GPU,
     requires_block_ptr,
     RUN_CPU,
@@ -22698,4 +22699,5 @@ def _run_and_get_stripped_kernels(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    run_tests(needs="filelock")
+    if RUN_CPU or HAS_TRITON or HAS_MPS:
+        run_tests(needs="filelock")
