@@ -14,7 +14,7 @@ def convert_conv2d_weight_memory_format(
     r"""Convert ``memory_format`` of ``nn.Conv2d.weight`` to ``memory_format``.
 
     The conversion recursively applies to nested ``nn.Module``, including ``module``.
-    Note that it only changes the memory_format, but not the semantics of each dimensions.
+    Note that it only changes the memory_format, but not the semantics of each dimension.
     This function is used to facilitate the computation to adopt NHWC kernels, which
     provides considerable speed up for fp16 data on CUDA devices with compute capability >= 7.0
 
@@ -93,7 +93,7 @@ def convert_conv3d_weight_memory_format(
 ) -> _M:
     r"""Convert ``memory_format`` of ``nn.Conv3d.weight`` to ``memory_format``
     The conversion recursively applies to nested ``nn.Module``, including ``module``.
-    Note that it only changes the memory_format, but not the semantics of each dimensions.
+    Note that it only changes the memory_format, but not the semantics of each dimension.
     This function is used to facilitate the computation to adopt NHWC kernels, which
     provides considerable speed up for fp16 data on CUDA devices with compute capability >= 7.0
 
