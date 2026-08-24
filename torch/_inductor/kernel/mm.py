@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import torch
@@ -25,7 +26,7 @@ from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemm
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
-from ..ir import Buffer, ChoiceCaller, is_triton, Layout
+from ..ir import Buffer, ChoiceCaller, IRNode, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     fallback_handler,
@@ -43,6 +44,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    _IntLike,
     _use_cutlass_for_op,
     ceildiv,
     use_aten_gemm_kernels,
@@ -391,7 +393,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
 
-    if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout):
+    if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout.device.type):
         counters["inductor"]["decompose_mm_pointwise"] += 1
         mat1 = L.unsqueeze(mat1, -1)
         mat2 = L.unsqueeze(mat2, 0)
@@ -443,7 +445,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         # Triton will ever win.
         #
         # To be conservative we increase this threshold for N/M by 2.
-        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "exhaustive"
+        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"
         if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
             templates_to_use.append(mm_template)
 
@@ -862,19 +864,22 @@ epilogue_scaling_types = [ScalingType.TensorWise, ScalingType.RowWise]
 main_loop_scaling_types = [ScalingType.BlockWise1x128, ScalingType.BlockWise128x128]
 
 
-def _is_tensorwise_scaling(sz: Any) -> bool:
+def _is_tensorwise_scaling(sz: Sequence[_IntLike]) -> bool:
     return (len(sz) == 0) or all(
         V.graph.sizevars.statically_known_equals(d, 1) for d in sz
     )
 
 
-def _is_rowwise_scaling(sz: Any, transpose: bool) -> bool:
+def _is_rowwise_scaling(sz: Sequence[_IntLike], transpose: bool) -> bool:
     idx = 0 if transpose else -1
     return V.graph.sizevars.statically_known_equals(sz[idx], 1)
 
 
 def _is_blockwise1xTILESIZE_scaling(
-    sz: Any, tensor_sz: Any, tile_size: int, transpose: bool
+    sz: Sequence[_IntLike],
+    tensor_sz: Sequence[_IntLike],
+    tile_size: int,
+    transpose: bool,
 ) -> bool:
     lhs = 1 if transpose else 0
     rhs = 0 if transpose else 1
@@ -885,15 +890,17 @@ def _is_blockwise1xTILESIZE_scaling(
     )
 
 
-def _is_blockwise128x128_scaling(sz: Any, tensor_sz: Any) -> bool:
+def _is_blockwise128x128_scaling(
+    sz: Sequence[_IntLike], tensor_sz: Sequence[_IntLike]
+) -> bool:
     return V.graph.sizevars.statically_known_equals(
         sz[0], ceildiv(tensor_sz[0], 128)
     ) and V.graph.sizevars.statically_known_equals(sz[1], ceildiv(tensor_sz[1], 128))
 
 
 def is_desired_scaling(
-    t: Any,
-    scale_size: torch.Tensor,
+    t: IRNode,
+    scale_size: Sequence[_IntLike],
     scaling_type: ScalingType,
     transpose: bool = False,
 ) -> bool:
@@ -912,7 +919,7 @@ def is_desired_scaling(
             raise AssertionError(f"Unsupported scaling type {scaling_type}")
 
 
-def get_tile_size(scale_option) -> int:
+def get_tile_size(scale_option: ScalingType) -> int:
     match scale_option:
         case ScalingType.BlockWise128x128:
             return 128
@@ -925,10 +932,10 @@ def get_tile_size(scale_option) -> int:
 
 
 def get_scaling_options(
-    mat_a: Any,
-    mat_b: Any,
-    scale_a_size: torch.Tensor,
-    scale_b_size: torch.Tensor,
+    mat_a: IRNode,
+    mat_b: IRNode,
+    scale_a_size: Sequence[_IntLike],
+    scale_b_size: Sequence[_IntLike],
 ) -> tuple[ScalingType, ScalingType]:
     for scale_option_a, scale_option_b in scaling_pairs:
         if is_desired_scaling(

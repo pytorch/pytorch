@@ -61,11 +61,9 @@ Py_ssize_t doPartialWrite<PyObject*>(
 
 static bool isUnsupportedOperation() {
   THPObjectPtr io(PyImport_ImportModule("io"));
-  if (!io)
-    throw python_error();
+  TORCH_CHECK_PYTHON(io);
   THPObjectPtr exception(PyObject_GetAttrString(io, "UnsupportedOperation"));
-  if (!exception)
-    throw python_error();
+  TORCH_CHECK_PYTHON(exception);
   return PyErr_ExceptionMatches(exception.get());
 }
 
@@ -82,8 +80,7 @@ static Py_ssize_t doPartialPythonReadBuffered(
   const size_t nbytes = std::min<size_t>(raw_nbytes, 262144u); // 2^18 (~260 KB)
 
   THPObjectPtr r(PyObject_CallMethod(fildes, "read", "i", nbytes));
-  if (!r)
-    throw python_error();
+  TORCH_CHECK_PYTHON(r);
 
   auto size = PyBytes_GET_SIZE(r.get());
   const void* py_buf = PyBytes_AsString(r.get());
@@ -108,8 +105,7 @@ static Py_ssize_t doPartialPythonIO(
   auto rw_flag = is_read ? PyBUF_WRITE : PyBUF_READ;
   THPObjectPtr memview(PyMemoryView_FromMemory(
       reinterpret_cast<char*>(buf), static_cast<Py_ssize_t>(nbytes), rw_flag));
-  if (!memview)
-    throw python_error();
+  TORCH_CHECK_PYTHON(memview);
 
   std::string method = "write";
   if (is_read) {
@@ -127,6 +123,7 @@ static Py_ssize_t doPartialPythonIO(
     PyErr_Clear();
     return doPartialPythonReadBuffered(fildes, buf, nbytes);
   }
+  // @allow-raw-throw: raises the error left set by the failed call above
   throw python_error();
 }
 
@@ -347,8 +344,9 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     size_t _storage_nbytes = storage->nbytes();
     TORCH_CHECK(
         _storage_nbytes == nbytes,
-        "storage has wrong byte size: expected %ld got %ld",
+        "storage has wrong byte size: expected ",
         nbytes,
+        " got ",
         _storage_nbytes);
   }
 
