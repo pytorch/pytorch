@@ -26,6 +26,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     requires_capabilities,
     skipCPUIf,
+    skipMPSIf,
+    skipXPUIf,
 )
 from torch.testing._internal.common_quantized import ceil_div, to_blocked
 from torch.testing._internal.common_utils import (
@@ -40,6 +42,8 @@ from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,
     _quantize_tensorwise,
     _to_fp8_saturated,
+    HAS_CPU,
+    HAS_TRITON,
     is_big_gpu,
 )
 from torch.utils._sympy.symbol import SymT
@@ -560,7 +564,10 @@ class TestFP8TypesCuda(TestCase):
         expected = fn(t)
         self.assertEqual(actual, expected)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipCPUIf(True, "CUDA-specific test")
+    @skipMPSIf(True, "CUDA-specific test")
+    @skipXPUIf(True, "CUDA-specific test")
     @skipIfRocm
     def test_cuda_fp8_cast_fallback_for_unsupported_triton_dtype(self, device):
         def fp8_cast(x, dtype):
@@ -1947,8 +1954,10 @@ class TestFP8LoweringCuda(TestCase):
 
 
 class TestE8M0ToFloat(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
+    @skipMPSIf(True, "CPU/CUDA test only")
+    @skipXPUIf(True, "CPU/CUDA test only")
     @parametrize(
         "dtype",
         (torch.float64, torch.float32, torch.float16, torch.bfloat16),
@@ -1978,6 +1987,8 @@ class TestE8M0ToFloat(TestCase):
         if dtype is torch.float32:
             self.assertEqual(actual.view(torch.int32), expected.view(torch.int32))
 
+    @skipMPSIf(True, "CPU/CUDA codegen test only")
+    @skipXPUIf(True, "CPU/CUDA codegen test only")
     @parametrize("direct_input", (False, True))
     def test_codegen(self, device, direct_input):
         raw = torch.tensor(
@@ -2035,7 +2046,7 @@ class TestCvtE8M0Rceil(TestCase):
     hw_classification = HardwareClassification.CUDA
     """Tests for cvt_e8m0_rceil prim with PTX lowering on NVIDIA Blackwell."""
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_correctness(self, device):
         """Test correctness for various dtypes."""
 
@@ -2053,7 +2064,7 @@ class TestCvtE8M0Rceil(TestCase):
             compiled_result = torch.compile(fn)(inp)
             self.assertEqual(compiled_result, eager_result)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_pattern_match(self, device):
         """Test that the log2+ceil pattern gets matched and replaced."""
         _misc_patterns_init()
@@ -2075,7 +2086,7 @@ class TestCvtE8M0Rceil(TestCase):
         compiled_result = torch.compile(fn_with_log2_pattern)(inp)
         self.assertEqual(compiled_result, eager_result)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_ptx_code_generation(self, device):
         """Test that PTX instruction appears in generated code."""
 
@@ -2089,7 +2100,7 @@ class TestCvtE8M0Rceil(TestCase):
         code_str = "\n".join(code)
         self.assertIn("cvt.rp.satfinite.ue8m0x2.f32", code_str)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_log2_pattern_near_power_of_two(self, device):
         """Values within 1 ULP above a power of 2 must ceil to the next integer.
 
@@ -2138,7 +2149,7 @@ class TestE8M0Log2PatternBitManip(TestCase):
     software log2 near exact powers of 2 (gh-178045).
     """
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_pattern_fires_and_is_correct(self, device):
         """The log2+ceil pattern should be matched and produce correct uint8."""
         _misc_patterns_init()
@@ -2158,7 +2169,7 @@ class TestE8M0Log2PatternBitManip(TestCase):
         compiled_result = torch.compile(fn)(inp)
         self.assertEqual(compiled_result, eager_result)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_correct_for_values_one_ulp_above_power_of_two(self, device):
         """Values 1 ULP above a power of 2 must produce the correct (higher) exponent.
 
@@ -2189,7 +2200,7 @@ class TestE8M0Log2PatternBitManip(TestCase):
         compiled_result = torch.compile(fn)(inp)
         self.assertEqual(compiled_result, expected)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_regression_gh178045_encoding_correctness(self, device):
         """Regression for gh-178045: encoding must be correct for inputs near power-of-2.
 
@@ -2245,10 +2256,13 @@ instantiate_device_type_tests(TestFP8TypesAccelerator, globals(), allow_xpu=True
 instantiate_device_type_tests(TestFP8TypesCuda, globals(), only_for="cuda")
 instantiate_device_type_tests(TestFP8LoweringAccelerator, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFP8LoweringCuda, globals(), only_for="cuda")
-instantiate_device_type_tests(TestE8M0ToFloat, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(TestE8M0ToFloat, globals())
 instantiate_device_type_tests(TestE8M0Log2PatternBitManip, globals(), only_for="cuda")
 instantiate_device_type_tests(TestCvtE8M0Rceil, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
-    run_tests()
+    from torch.utils._triton import has_triton
+
+    if HAS_CPU or has_triton():
+        run_tests()
