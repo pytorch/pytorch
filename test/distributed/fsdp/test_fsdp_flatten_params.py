@@ -181,6 +181,11 @@ class TestFlattenParams(FlattenParamsTestBase):
             all(p.dtype == new_dtype for p in module.encoder.layers[0].parameters())
         )
 
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     def test_flatten_nothing(self, device):
         """
         Tests that constructing a ``FlatParamHandle`` with no parameters
@@ -237,6 +242,11 @@ class TestFlattenParams(FlattenParamsTestBase):
 
         return EmptyModule()
 
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     def test_numel_without_shared_params(self, device):
         """
         Tests that numel is preserved after flattening when there are no shared
@@ -253,6 +263,11 @@ class TestFlattenParams(FlattenParamsTestBase):
             module = module.half()
         self._test_numel(module)
 
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     def test_numel_with_shared_params(self, device):
         """
         Tests that numel is preserved after flattening when there are shared
@@ -369,6 +384,11 @@ class TestFlattenParams(FlattenParamsTestBase):
         optim.step()
         return torch.norm(torch.stack([p.detach().norm() for p in module.parameters()]))
 
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     def test_flat_param_shard_metadata_unaligned(self, device):
         """
         Tests that ``FlatParameter`` shard metadata are computed as expected
@@ -520,6 +540,11 @@ class TestFlattenParams(FlattenParamsTestBase):
             ),
         )
 
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     def test_flat_param_shard_metadata_aligned_full_precision(self, device):
         """
         Tests that ``FlatParameter`` shard metadata are computed as expected
@@ -573,6 +598,11 @@ class TestFlattenParams(FlattenParamsTestBase):
             ),
         )
 
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     def test_flat_param_shard_metadata_aligned_mixed_precision(self, device):
         """
         Tests that ``FlatParameter`` shard metadata are computed as expected
@@ -654,6 +684,11 @@ class TestFlattenParams(FlattenParamsTestBase):
             msg=lambda msg: f"{msg}\n{handle.shard_metadata()}, {expected}",
         )
 
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize("memory_format", [torch.contiguous_format, torch.channels_last])
     def test_flat_param_shard_metadata_with_memory_format(self, device, memory_format):
         """
