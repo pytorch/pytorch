@@ -992,6 +992,17 @@ def _sfdp_params_check(match):
     return True
 
 
+def _sfdp_pattern_13_check(match):
+    if not _sfdp_params_check(match):
+        return False
+    permutes = filter_nodes(match.nodes, aten.permute.default)
+    if len(permutes) != 1:
+        return False
+    # The serialized pattern wildcard-matches the permute dimensions.
+    permute_dims = permutes[0].args[1]
+    return isinstance(permute_dims, (list, tuple)) and tuple(permute_dims) == (0, 2, 1)
+
+
 def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
     def fn(match):
         if (
@@ -1210,7 +1221,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_13,
                 [g_3d(), g_3d(), g_3d()],
                 d,
-                _sfdp_params_check,
+                _sfdp_pattern_13_check,
             ),
             (
                 _sfdp_pattern_14,

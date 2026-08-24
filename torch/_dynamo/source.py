@@ -1183,6 +1183,27 @@ class SubclassAttrListSource(ChainedSource):
         return "{0}.__tensor_flatten__()[0]"
 
 
+# Guard-only source that yields the inner tensor of an AsyncCollectiveTensor
+# (ACT) and the base value unchanged for a plain Tensor. Used to guard on the
+# unwrapped tensor so a graph traced on an ACT can be reused when the resolved
+# plain Tensor is passed at runtime. See
+# torch._dynamo.variables.builder.VariableBuilder.wrap_tensor.
+@dataclass_with_cached_hash(frozen=True)
+class UnwrapCollectiveTensorSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch._dynamo.guards", "unwrap_async_collective_tensor"
+            )
+        )
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    @property
+    def _name_template(self) -> str:
+        return "___unwrap_async_collective_tensor({0})"
+
+
 # NB: We don't expect you to actually ever generate guards against this
 # source, it is ephemeral
 @dataclass_with_cached_hash(frozen=True)

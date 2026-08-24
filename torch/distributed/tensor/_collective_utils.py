@@ -432,7 +432,9 @@ def _compute_placement_transition_cost(
 
     Returns:
         A tuple of (cost, updated_comm_bytes_gb):
-            - cost: The communication cost for this transition (float("inf") if invalid).
+            - cost: The communication cost for this transition. ``float("inf")``
+              means that the strategy planner must not select the transition
+              implicitly; the explicit redistribution API may still support it.
             - updated_comm_bytes_gb: The updated communication bytes after this step.
     """
     if current_placement == target_placement:
@@ -459,8 +461,11 @@ def _compute_placement_transition_cost(
         comm_bytes_gb /= num_devices_on_mesh_dim
         return cost, comm_bytes_gb
     elif current_placement.is_shard() and target_placement.is_partial():
-        # ban shard -> partial as it does not make sense to perform
-        # this redistribute
+        # Shard -> Partial("sum") is a valid explicit redistribution, but it
+        # materializes a logical-shape tensor and copies the local shard into it.
+        # The cost model accounts only for communication, so assigning zero cost
+        # would make the strategy planner over-prefer this memory- and copy-heavy
+        # transition. Exclude it from implicit strategy selection instead.
         return float("inf"), comm_bytes_gb
     elif current_placement.is_partial() and target_placement.is_partial():
         # we already handled the == case at the top, and we ban converting between partial types.

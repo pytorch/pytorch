@@ -436,26 +436,29 @@ class PreprocessorTracker:
         return found if found is not None else []
 
 
-def _run_git_network_cmd(
-    cmd: list[str], *, timeout: int, attempts: int = 3
+def run_with_retries(
+    cmd: list[str],
+    *,
+    cwd: Path = REPO_ROOT,
+    timeout: int,
+    attempts: int = 3,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """
-    Run a network-bound git command (ls-remote/fetch), retrying on timeout or
-    non-zero exit with exponential backoff.
-
-    These talk to the remote and can transiently stall or fail under CI network
-    contention (lintrunner runs adapters concurrently). Both are idempotent, so
-    retrying is safe. Raises RuntimeError once attempts are exhausted.
-    """
+    """Run a command until it succeeds or the retry limit is exhausted."""
     last_err = ""
     for attempt in range(attempts):
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=timeout
+                cmd,
+                cwd=cwd,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
             )
             if result.returncode == 0:
                 return result
-            last_err = result.stderr.strip()
+            last_err = result.stderr.strip() or result.stdout.strip()
         except subprocess.TimeoutExpired:
             last_err = f"timed out after {timeout}s"
         if attempt < attempts - 1:
@@ -465,110 +468,109 @@ def _run_git_network_cmd(
     )
 
 
-def ensure_diff_blob_local(commit: str, filename: str) -> None:
-    """
-    Prefetch the blob for `filename` at `commit` so a subsequent
-    `git diff commit..HEAD -- filename` runs entirely from local objects.
+def run_git_object_command(
+    args: list[str], *, cwd: Path = REPO_ROOT
+) -> subprocess.CompletedProcess[str]:
+    """Run an object-reading Git command.
 
-    CI checks out a blobless partial clone (git clone --filter=blob:none), so
-    fetching a commit brings down its trees but not file contents. Left alone,
-    `git diff` notices the merge-base blob is missing and triggers an on-demand
-    lazy fetch in the middle of the diff -- an uncontrolled network round-trip
-    that races the diff's short timeout under the network contention of
-    lintrunner running adapters concurrently.
-
-    Trees are present locally under blob:none, so we resolve the blob's OID
-    offline and fetch exactly that one object through the retrying network
-    helper. In a full (non-partial) clone the blob is already present and this
-    is a no-op with no network access. GIT_NO_LAZY_FETCH keeps the local
-    resolution and presence checks from themselves triggering a fetch.
+    If on a partial clone, only if the first local attempt fails, retry 3
+    times and allow lazily fetching over the network.
     """
     no_lazy = {**os.environ, "GIT_NO_LAZY_FETCH": "1"}
-
     try:
-        rel = Path(filename).resolve().relative_to(REPO_ROOT).as_posix()
-    except ValueError:
-        return  # path is outside the repo; nothing we can prefetch
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            env=no_lazy,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result
+        local_error = result.stderr.strip() or result.stdout.strip()
+    except subprocess.TimeoutExpired:
+        local_error = "timed out after 5s"
 
-    rev = subprocess.run(
-        ["git", "rev-parse", f"{commit}:{rel}"],
-        capture_output=True,
-        text=True,
-        timeout=5,
-        env=no_lazy,
-    )
-    blob_oid = rev.stdout.strip()
-    if rev.returncode != 0 or not blob_oid:
-        # Path does not exist at `commit` (e.g. a newly added file), or the tree
-        # is unavailable (treeless clone). There is no merge-base blob to
-        # prefetch; the diff falls back to its own handling.
-        return
+    allow_lazy = os.environ.copy()
+    allow_lazy.pop("GIT_NO_LAZY_FETCH", None)
+    try:
+        return run_with_retries(
+            ["git", *args], cwd=cwd, env=allow_lazy, timeout=120, attempts=3
+        )
+    except RuntimeError as e:
+        raise RuntimeError(
+            f"Git command failed first attempt with no lazy fetching: {local_error}. "
+            f"Second, slower, attempt while allowing fetching over the network also "
+            f"failed, even with retries: {e}"
+        ) from e
 
-    present = subprocess.run(
-        ["git", "cat-file", "-e", blob_oid],
-        capture_output=True,
-        timeout=5,
-        env=no_lazy,
-    )
-    if present.returncode == 0:
-        return
 
-    _run_git_network_cmd(
-        ["git", "fetch", "--no-write-fetch-head", "origin", blob_oid],
-        timeout=30,
+def read_file_at_revision(
+    revision: str, filename: str | Path, *, cwd: Path = REPO_ROOT
+) -> str | None:
+    """Return file contents at `revision`, or None if that path did not exist."""
+    path = Path(filename)
+    if not path.is_absolute():
+        path = cwd / path
+    try:
+        rel_path = path.resolve().relative_to(cwd.resolve()).as_posix()
+    except ValueError as e:
+        raise RuntimeError(f"Path {filename} is outside Git repository {cwd}") from e
+
+    tree_result = run_git_object_command(
+        ["ls-tree", "-z", revision, "--", rel_path], cwd=cwd
     )
+    if not tree_result.stdout:
+        return None
+
+    entries = [entry for entry in tree_result.stdout.split("\0") if entry]
+    if len(entries) != 1:
+        raise RuntimeError(
+            f"Expected one ls-tree entry for {rel_path} at {revision}, got {len(entries)}"
+        )
+    metadata, separator, _ = entries[0].partition("\t")
+    fields = metadata.split()
+    if not separator or len(fields) != 3 or fields[1] != "blob":
+        raise RuntimeError(
+            f"Expected a blob for {rel_path} at {revision}, got {entries[0]!r}"
+        )
+
+    return run_git_object_command(["cat-file", "blob", fields[2]], cwd=cwd).stdout
 
 
 @functools.cache
 def merge_base_with_main() -> str:
     """
-    Merge-base of HEAD with origin's current main. Raises on any git failure.
+    Return the merge-base of HEAD and the already-fetched origin/main ref.
 
-    Cached so git runs once per process no matter how many files the adapter
-    is asked to lint. main is resolved to a SHA and fetched by SHA with
-    --no-write-fetch-head so no local refs are written: lintrunner runs
-    adapters concurrently in one repo, and concurrent fetches racing to update
-    refs/remotes/origin/main fail with "cannot lock ref ... unable to update
-    local ref".
+    This is offline so concurrent linters never mutate refs. Cached so Git runs
+    once per process no matter how many files the adapter is asked to lint.
     """
-    result = _run_git_network_cmd(
-        ["git", "ls-remote", "origin", "refs/heads/main"], timeout=30
-    )
-    if not result.stdout.strip():
-        raise RuntimeError("Failed to resolve main on origin: empty ls-remote output.")
-    main_sha = result.stdout.split()[0]
+    main_ref = "refs/remotes/origin/main"
+    no_lazy = {**os.environ, "GIT_NO_LAZY_FETCH": "1"}
     try:
-        commit_missing = (
-            subprocess.run(
-                ["git", "cat-file", "-e", f"{main_sha}^{{commit}}"],
-                capture_output=True,
-                timeout=5,
-            ).returncode
-            != 0
+        result = subprocess.run(
+            ["git", "merge-base", "HEAD", main_ref],
+            cwd=REPO_ROOT,
+            env=no_lazy,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
     except subprocess.TimeoutExpired:
-        # On partial-clone repos (what's in CI), the git cat-file can take
-        # longer than 5s due to calling the network. Treat this as "not
-        # present locally" and let the longer fetch below retrieve it.
-        commit_missing = True
-    if commit_missing:
-        _run_git_network_cmd(
-            ["git", "fetch", "--no-write-fetch-head", "origin", main_sha],
-            timeout=120,
-        )
+        detail = "timed out after 5s"
+    else:
+        merge_base = result.stdout.strip()
+        if result.returncode == 0 and merge_base:
+            return merge_base
+        detail = result.stderr.strip() or "empty merge-base output"
 
-    result = subprocess.run(
-        ["git", "merge-base", "HEAD", main_sha],
-        capture_output=True,
-        text=True,
-        timeout=5,
+    raise RuntimeError(
+        f"Failed to find merge-base with {main_ref} using local Git objects: {detail}. "
+        "Fetch the ref and commit graph with "
+        "`git fetch origin main:refs/remotes/origin/main`, then retry."
     )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Failed to find merge-base with origin main ({main_sha}). "
-            f"Error: {result.stderr.strip()}"
-        )
-    return result.stdout.strip()
 
 
 def get_current_version() -> tuple[int, int, int]:
