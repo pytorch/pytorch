@@ -80,6 +80,7 @@ done < <(
     ':(exclude,glob)**/third-party/**'
     ':(exclude,glob)**/third_party/**'
     ':(exclude,glob)torch/_vendor/quack/**'
+    ':(exclude,glob)test/cpython/**'
   )
   if [ $# -eq 2 ]; then
     for filename in $(git diff --name-only --unified=0 "$1...$2"); do
