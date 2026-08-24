@@ -3,20 +3,19 @@
 import torch
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
     onlyAccelerator,
-    requires_capabilities,
 )
 from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import requires_triton
 from torch.utils._triton import has_triton
 
 
 class TestTritonSyntacticallyValid(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @requires_triton()
     def test_triton_sqrt(self, device):
         # https://github.com/pytorch/pytorch/issues/142328
         import math
@@ -95,4 +94,5 @@ if torch.mtia.is_available() and has_triton():
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    run_tests()
+    if has_triton():
+        run_tests()
