@@ -14,10 +14,8 @@ _CAUSAL_DOCUMENT_MASK_PROGRAM = (
 )
 
 # Intentional FlyDSL 0.3.1 unstable boundary: no stable API exposes nonzero
-# scheduler groups, a scheduler fence, native exp2, or readfirstlane. Keep
-# those calls centralized here so the kernel otherwise uses the stable surface.
-_SCHED_VMEM_READ = 0x020
-_SCHED_EXP = 0x400
+# scheduler groups, a scheduler fence, or native exp2. Keep those calls
+# centralized here so the kernel otherwise uses the stable surface.
 
 
 def make_global_view(tensor, offset, shape, stride):
@@ -136,8 +134,8 @@ def evaluate_mask_program(
     return values[mask_program_output]
 
 
-def _schedule_group(mask: int, count: int, group: int):
-    fx.rocdl.sched_group_barrier(mask, count, group)
+def _schedule_group(kind: str, count: int, group: int):
+    fx.rocdl.sched_group_barrier(kind, count, group)
 
 
 def schedule_fence():
@@ -146,10 +144,6 @@ def schedule_fence():
 
 def fast_exp2(value):
     return fx.Float32(fx.rocdl.exp2(fx.Float32.ir_type, value.ir_value()))
-
-
-def read_first_lane(value, dtype):
-    return dtype(fx.rocdl.readfirstlane(dtype.ir_type, value.ir_value()))
 
 
 def schedule_fwd_qk_pipeline(*, reduction_steps: int, vmem_count: int = 0):
@@ -176,8 +170,8 @@ def schedule_fwd_softmax_pipeline(*, vmem_count: int):
     for slot in fx.range_constexpr(slots):
         scheduled_vmem = vmem_per_slot + int(slot < vmem_remainder)
         if const_expr(scheduled_vmem):
-            _schedule_group(_SCHED_VMEM_READ, scheduled_vmem, 1)
-        _schedule_group(_SCHED_EXP, 8, 1)
+            _schedule_group("vmem_read", scheduled_vmem, 1)
+        _schedule_group("transcendental", 8, 1)
     schedule_fence()
 
 

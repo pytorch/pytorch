@@ -14,7 +14,6 @@ from .flex_attn_utils import (
     make_global_view,
     make_mask_buffers,
     make_mask_evaluator,
-    read_first_lane,
     schedule_fwd_pv_pipeline,
     schedule_fwd_qk_pipeline,
     schedule_fwd_softmax_pipeline,
@@ -424,7 +423,7 @@ def build_flex_attn_fwd_module(
             return load_scalar(i32_atom, view, index, fx.Int32)
 
         def load_uniform_i32(view, index):
-            return read_first_lane(load_i32(view, index), fx.Int32)
+            return fx.gpu.shuffle_idx(load_i32(view, index), 0, 64)
 
         evaluate_mask = make_mask_evaluator(
             MASK_PROGRAM,
