@@ -2947,104 +2947,6 @@ class GraphModule(torch.nn.Module):
         got = make_grads("inductor")
         self.assertEqual(ref, got)
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [False, True])
-    def test_scan_closure_nested(self, reverse, compile_mode, device, autograd):
-        scan_fct = compile_mode_helper(scan, compile_mode)
-
-        # Simple non-nested case
-        x = torch.randn(3, 20, 5, device=device, requires_grad=autograd)
-        h = torch.randn(3, 7, device=device, requires_grad=autograd)
-        W = torch.randn(5, 7, device=device, requires_grad=autograd)
-        b = torch.randn(7, device=device, requires_grad=autograd)
-
-        def f1(x: torch.Tensor, y: torch.Tensor):
-            c_new = y @ W + b
-            h_new = torch.tanh(c_new + x)
-            return c_new, h_new
-
-        result = scan_fct(f1, h, x, dim=1, reverse=reverse)
-        result_exp = _fake_scan(f1, h, x, dim=1, reverse=reverse)
-        self.assertEqual(result, result_exp)
-
-        if autograd:
-            self.check_autograd(result, result_exp, (h, x, W, b))
-
-        # Nested case
-        def chain_fct(fct, f_1, f_2, xs, h_1, h_2):
-            o1 = fct(
-                f_1,
-                h_1,
-                xs,
-                dim=1,
-                reverse=reverse,
-            )
-            o2 = fct(
-                f_2,
-                h_2,
-                o1[1],
-                dim=1,
-                reverse=reverse,
-            )
-            return o2
-
-        x1 = torch.ones(3, 20, 5, device=device, requires_grad=autograd)
-        h1 = torch.zeros(3, 7, device=device, requires_grad=autograd)
-        h2 = torch.zeros(3, 3, device=device, requires_grad=autograd)
-        W_1 = torch.randn(5, 7, device=device, requires_grad=autograd)
-        b_1 = torch.randn(7, device=device, requires_grad=autograd)
-        W_2 = torch.randn(7, 3, device=device, requires_grad=autograd)
-        b_2 = torch.randn(3, device=device, requires_grad=autograd)
-
-        def f1(x: torch.Tensor, y: torch.Tensor):
-            c_new = y @ W_1 + b_1
-            h_new = torch.tanh(c_new + x)
-            return c_new, h_new
-
-        def f2(x: torch.Tensor, y: torch.Tensor):
-            c_new = y @ W_2 + b_2
-            h_new = torch.tanh(c_new + x)
-            return c_new, h_new
-
-        result1 = chain_fct(scan_fct, f1, f2, x1, h1, h2)
-        expected_result = chain_fct(_fake_scan, f1, f2, x1, h1, h2)
-        self.assertEqual(result1, expected_result)
-
-        if autograd:
-            self.check_autograd(result1, expected_result, (h1, h2, x1, W_1, b_1))
-
-        # Complex case
-        x1 = torch.randn(3, 20, 3, device=device, requires_grad=autograd)
-        h1 = torch.randn(3, 3, device=device, requires_grad=autograd)
-        h2 = torch.randn(3, 3, device=device, requires_grad=autograd)
-        W_1 = torch.randn(3, 3, device=device, requires_grad=autograd)
-        b_1 = torch.randn(3, device=device, requires_grad=autograd)
-        W_2 = torch.randn(3, 3, device=device, requires_grad=autograd)
-        b_2 = torch.randn(3, device=device, requires_grad=autograd)
-
-        def f1(x: torch.Tensor, y: torch.Tensor):
-            c_new = y @ W_1 + b_1
-            h_new = torch.tanh(c_new + x)
-            return c_new, h_new
-
-        def f2(x: torch.Tensor, y: torch.Tensor):
-            c_new = y @ W_2 + b_2 * b_1 + y @ W_1
-            h_new = torch.tanh(c_new + x)
-            return c_new, h_new
-
-        result1 = chain_fct(scan_fct, f1, f2, x1, h1, h2)
-        expected_result = chain_fct(_fake_scan, f1, f2, x1, h1, h2)
-        self.assertEqual(result1, expected_result)
-
-        if autograd:
-            self.check_autograd(
-                result1, expected_result, (h1, h2, x1, W_1, b_1, W_2, b_2)
-            )
-
     @skipIfNoDynamoSupport
     def test_scan_simple_graph_wrong_dtype(self):
         def add_wrong_dtype(x: torch.Tensor, y: torch.Tensor):
@@ -3112,132 +3014,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     out_1 = out.flip([0]);  out = None
     return (carry, out_1)""",
         )
-
-    @requires_cuda
-    def test_scan_input_mutation(self):
-        device = torch.device("cuda")
-
-        def fct_input_mutation(x, y):
-            x.add_(1)
-            return x + y, x + y + 2
-
-        x = torch.randn(3, 2, 2, device=device)
-        init = torch.randn(2, 2, device=device)
-
-        with self.assertRaisesRegex(
-            # Should be
-            # torch._dynamo.exc.Unsupported,
-            # "Encountered aliasing during higher order op tracing for HOP.*"
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
-        ):
-            scan(fct_input_mutation, init, x, dim=0)
-
-    @requires_cuda
-    def test_scan_additional_input_mutation(self):
-        device = torch.device("cuda")
-        buf = torch.randn(2, 2, device=device)
-
-        def fct_additional_input_mutation(x, y):
-            buf.add_(1)
-            return x + y, x + y + 2
-
-        x = torch.randn(3, 2, 2, device=device)
-        init = torch.randn(2, 2, device=device)
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
-        ):
-            scan(fct_additional_input_mutation, init, x, dim=0)
-
-    @requires_cuda
-    def test_scan_input_carry_alias(self):
-        device = torch.device("cuda")
-
-        def fct_input_output_alias(x, y):
-            return (x[0], x[1] + y[1]), (x[1] + y[1] + 1, x[1] + y[1] + 2)
-
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
-        inp = (x, y)
-        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
-
-        with self.assertRaisesRegex(
-            # Should be
-            # torch._dynamo.exc.Unsupported,
-            # "Encountered aliasing during higher order op tracing for HOP.*"
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
-        ):
-            scan(fct_input_output_alias, init, inp, dim=0)
-
-    @requires_cuda
-    def test_scan_input_output_alias(self):
-        device = torch.device("cuda")
-
-        def fct_input_output_alias(x, y):
-            return (x[0] + 1, x[1] + y[1]), (x[1], x[1] + y[1] + 2)
-
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
-        inp = (x, y)
-        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
-
-        with self.assertRaisesRegex(
-            # Should be
-            # torch._dynamo.exc.Unsupported,
-            # "Encountered aliasing during higher order op tracing for HOP.*"
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
-        ):
-            scan(fct_input_output_alias, init, inp, dim=0)
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_scan_carry_carry_alias(self):
-        device = torch.device("cuda")
-
-        def fct_carry_carry_alias(x, y):
-            c = x[0] + y[1]
-            return (c, c), (x[0] + y[1], x[0] + y[1] + 1)
-
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
-        inp = (x, y)
-        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
-
-        with self.assertRaisesRegex(
-            # Should be
-            # torch._dynamo.exc.Unsupported,
-            # "Encountered aliasing during higher order op tracing for HOP.*"
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
-        ):
-            scan(fct_carry_carry_alias, init, inp, dim=0)
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_scan_carry_output_alias(self):
-        device = torch.device("cuda")
-
-        def fct_carry_output_alias(x, y):
-            c = x[0] + y[1]
-            return (x[0] + y[1], c), (c, x[0] + y[1] + 1)
-
-        x = torch.randn(3, 2, 2, device=device)
-        y = torch.randn(3, 2, 2, device=device)
-        inp = (x, y)
-        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
-
-        with self.assertRaisesRegex(
-            # Should be
-            # torch._dynamo.exc.Unsupported,
-            # "Encountered aliasing during higher order op tracing for HOP.*"
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
-        ):
-            scan(fct_carry_output_alias, init, inp, dim=0)
 
     def test_scan_length_validation_pass(self):
         def add(c, x):
@@ -4987,6 +4763,230 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
         if autograd:
             self.check_autograd(result[1], result_exp[1], (h, x))
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    def test_scan_closure_nested(self, reverse, compile_mode, device, autograd):
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        # Simple non-nested case
+        x = torch.randn(3, 20, 5, device=device, requires_grad=autograd)
+        h = torch.randn(3, 7, device=device, requires_grad=autograd)
+        W = torch.randn(5, 7, device=device, requires_grad=autograd)
+        b = torch.randn(7, device=device, requires_grad=autograd)
+
+        def f1(x: torch.Tensor, y: torch.Tensor):
+            c_new = y @ W + b
+            h_new = torch.tanh(c_new + x)
+            return c_new, h_new
+
+        result = scan_fct(f1, h, x, dim=1, reverse=reverse)
+        result_exp = _fake_scan(f1, h, x, dim=1, reverse=reverse)
+        self.assertEqual(result, result_exp)
+
+        if autograd:
+            self.check_autograd(result, result_exp, (h, x, W, b))
+
+        # Nested case
+        def chain_fct(fct, f_1, f_2, xs, h_1, h_2):
+            o1 = fct(
+                f_1,
+                h_1,
+                xs,
+                dim=1,
+                reverse=reverse,
+            )
+            o2 = fct(
+                f_2,
+                h_2,
+                o1[1],
+                dim=1,
+                reverse=reverse,
+            )
+            return o2
+
+        x1 = torch.ones(3, 20, 5, device=device, requires_grad=autograd)
+        h1 = torch.zeros(3, 7, device=device, requires_grad=autograd)
+        h2 = torch.zeros(3, 3, device=device, requires_grad=autograd)
+        W_1 = torch.randn(5, 7, device=device, requires_grad=autograd)
+        b_1 = torch.randn(7, device=device, requires_grad=autograd)
+        W_2 = torch.randn(7, 3, device=device, requires_grad=autograd)
+        b_2 = torch.randn(3, device=device, requires_grad=autograd)
+
+        def f1(x: torch.Tensor, y: torch.Tensor):
+            c_new = y @ W_1 + b_1
+            h_new = torch.tanh(c_new + x)
+            return c_new, h_new
+
+        def f2(x: torch.Tensor, y: torch.Tensor):
+            c_new = y @ W_2 + b_2
+            h_new = torch.tanh(c_new + x)
+            return c_new, h_new
+
+        result1 = chain_fct(scan_fct, f1, f2, x1, h1, h2)
+        expected_result = chain_fct(_fake_scan, f1, f2, x1, h1, h2)
+        self.assertEqual(result1, expected_result)
+
+        if autograd:
+            self.check_autograd(result1, expected_result, (h1, h2, x1, W_1, b_1))
+
+        # Complex case
+        x1 = torch.randn(3, 20, 3, device=device, requires_grad=autograd)
+        h1 = torch.randn(3, 3, device=device, requires_grad=autograd)
+        h2 = torch.randn(3, 3, device=device, requires_grad=autograd)
+        W_1 = torch.randn(3, 3, device=device, requires_grad=autograd)
+        b_1 = torch.randn(3, device=device, requires_grad=autograd)
+        W_2 = torch.randn(3, 3, device=device, requires_grad=autograd)
+        b_2 = torch.randn(3, device=device, requires_grad=autograd)
+
+        def f1(x: torch.Tensor, y: torch.Tensor):
+            c_new = y @ W_1 + b_1
+            h_new = torch.tanh(c_new + x)
+            return c_new, h_new
+
+        def f2(x: torch.Tensor, y: torch.Tensor):
+            c_new = y @ W_2 + b_2 * b_1 + y @ W_1
+            h_new = torch.tanh(c_new + x)
+            return c_new, h_new
+
+        result1 = chain_fct(scan_fct, f1, f2, x1, h1, h2)
+        expected_result = chain_fct(_fake_scan, f1, f2, x1, h1, h2)
+        self.assertEqual(result1, expected_result)
+
+        if autograd:
+            self.check_autograd(
+                result1, expected_result, (h1, h2, x1, W_1, b_1, W_2, b_2)
+            )
+
+    @requires_cuda
+    def test_scan_input_mutation(self):
+        device = torch.device("cuda")
+
+        def fct_input_mutation(x, y):
+            x.add_(1)
+            return x + y, x + y + 2
+
+        x = torch.randn(3, 2, 2, device=device)
+        init = torch.randn(2, 2, device=device)
+
+        with self.assertRaisesRegex(
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
+        ):
+            scan(fct_input_mutation, init, x, dim=0)
+
+    @requires_cuda
+    def test_scan_additional_input_mutation(self):
+        device = torch.device("cuda")
+        buf = torch.randn(2, 2, device=device)
+
+        def fct_additional_input_mutation(x, y):
+            buf.add_(1)
+            return x + y, x + y + 2
+
+        x = torch.randn(3, 2, 2, device=device)
+        init = torch.randn(2, 2, device=device)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
+        ):
+            scan(fct_additional_input_mutation, init, x, dim=0)
+
+    @requires_cuda
+    def test_scan_input_carry_alias(self):
+        device = torch.device("cuda")
+
+        def fct_input_output_alias(x, y):
+            return (x[0], x[1] + y[1]), (x[1] + y[1] + 1, x[1] + y[1] + 2)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
+        ):
+            scan(fct_input_output_alias, init, inp, dim=0)
+
+    @requires_cuda
+    def test_scan_input_output_alias(self):
+        device = torch.device("cuda")
+
+        def fct_input_output_alias(x, y):
+            return (x[0] + 1, x[1] + y[1]), (x[1], x[1] + y[1] + 2)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
+        ):
+            scan(fct_input_output_alias, init, inp, dim=0)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_scan_carry_carry_alias(self):
+        device = torch.device("cuda")
+
+        def fct_carry_carry_alias(x, y):
+            c = x[0] + y[1]
+            return (c, c), (x[0] + y[1], x[0] + y[1] + 1)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
+        ):
+            scan(fct_carry_carry_alias, init, inp, dim=0)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_scan_carry_output_alias(self):
+        device = torch.device("cuda")
+
+        def fct_carry_output_alias(x, y):
+            c = x[0] + y[1]
+            return (x[0] + y[1], c), (c, x[0] + y[1] + 1)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
+        ):
+            scan(fct_carry_output_alias, init, inp, dim=0)
 
 
 class AssociativeScanModels:
