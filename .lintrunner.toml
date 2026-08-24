@@ -1912,6 +1912,16 @@ command = [
 ]
 include_patterns = [
     'torch/header_only_apis.txt',
+    'test/cpp/aoti_abi_check/*.cpp',
+    'test/cpp/aoti_abi_check/cuda/*.cu',
+    'tools/linter/adapters/header_only_linter.py',
+    # headers the listed APIs are filed under
+    'torch/headeronly/**',
+    'c10/util/TypeCast.h',
+    'c10/util/complex.h',
+    'c10/util/generic_math.h',
+    'aten/src/ATen/core/PhiloxRNGEngine.h',
+    'aten/src/ATen/cpu/vec/**',
 ]
 is_formatter = false
 
