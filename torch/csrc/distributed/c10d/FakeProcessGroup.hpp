@@ -591,6 +591,15 @@ class FakeProcessGroup : public Backend {
       case ReduceOp::PREMUL_SUM: {
         // Summing `factor * x` over `size_` equal ranks scales the local
         // value by `size_ * factor`.
+        // mul_ by a floating factor cannot cast into an integral or bool
+        // tensor. Real NCCL PREMUL_SUM is float-only too, so say that rather
+        // than surface an opaque in-place dtype error.
+        TORCH_CHECK(
+            tensor.is_floating_point() || tensor.is_complex(),
+            "FakeProcessGroup: PREMUL_SUM requires a floating point or "
+            "complex tensor, got ",
+            tensor.scalar_type(),
+            ".");
         auto supplement =
             c10::dynamic_intrusive_pointer_cast<PreMulSumSupplement>(
                 reduceOp.supplement_);
@@ -686,10 +695,15 @@ class FakeProcessGroup : public Backend {
     return flat.narrow(0, offset, length);
   }
 
-  // Elements per row along dim 0, matching computeLengthsAndOffsets.
+  // Elements per row along dim 0, matching computeLengthsAndOffsets. Computed
+  // as the trailing-dim product rather than numel/size(0) so a tensor with an
+  // empty leading dim, e.g. (0, 8), still reports 8 instead of 1.
   static int64_t rowSizeOf(const at::Tensor& t) {
-    const auto dim0 = t.dim() > 0 ? t.size(0) : 0;
-    return dim0 ? t.numel() / dim0 : 1;
+    int64_t rowSize = 1;
+    for (int64_t d = 1; d < t.dim(); ++d) {
+      rowSize *= t.size(d);
+    }
+    return rowSize;
   }
   void checkCollectiveError() {
     TORCH_CHECK(
