@@ -102,7 +102,7 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
                 or backend != dist.get_default_backend_for_device(acc)
                 or torch.accelerator.device_count() < self.world_size
             ):
-                sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+                sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
         self.init_comms(init_rpc=init_rpc, backend=backend)
         func(self, *args, **kwargs)
         self.destroy_comms(destroy_rpc=init_rpc)
