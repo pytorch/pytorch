@@ -58,6 +58,7 @@ variable_list Scatter::apply(variable_list&& inputs) {
 
   if (grad_fn) {
     set_history(variables, grad_fn);
+    fire_node_creation_hooks(grad_fn);
   }
 
   return variables;
@@ -131,6 +132,7 @@ variable_list Gather::apply(variable_list&& inputs) {
   }
   if (grad_fn) {
     set_history(variable, grad_fn);
+    fire_node_creation_hooks(grad_fn);
   }
   return {variable};
 }

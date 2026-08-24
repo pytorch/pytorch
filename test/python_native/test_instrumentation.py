@@ -6,18 +6,27 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+import threading
+import time
+import types
 import unittest
+import warnings
 from collections import namedtuple
+from unittest import mock
 
 from torch._logging._internal import TorchLogsFormatter, trace_log
 from torch._native.instrumentation import (
     CompileEvent,
     instrument_cutedsl_compile,
+    instrument_flydsl_compile,
     instrument_helion_kernel,
     instrument_triton_kernel,
+    instrumented_helion_kernel,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.logging_utils import log_settings, preserve_log_state
 
 
 # No shared tlparse harness exists in torch (see test/dynamo/test_structured_trace.py,
@@ -119,23 +128,28 @@ class _CapturingHandler(logging.Handler):
         self.records.append(record)
 
 
+# Both sinks are gated on this off-by-default artifact, so tests asserting on
+# emitted output have to turn it on first.
+_ARTIFACT = "native_dsl_compile"
+_ARTIFACT_LOG_QNAME = f"torch._native.instrumentation.__{_ARTIFACT}"
+
+
 class _LoggerCaptureTest(TestCase):
-    """Captures the native_dsl logger so tests can assert on emitted lines."""
+    """Captures the artifact logger so tests can assert on emitted lines."""
 
     def setUp(self):
         super().setUp()
-        self.log = logging.getLogger("torch._native.instrumentation")
-        self._orig_level = self.log.level
+        self._log_settings = log_settings(f"+{_ARTIFACT}")
+        self.log = logging.getLogger(_ARTIFACT_LOG_QNAME)
         self._orig_propagate = self.log.propagate
-        self.log.setLevel(logging.INFO)
-        self.log.propagate = False
+        self.log.propagate = False  # keep the lines off stderr
         self.handler = _CapturingHandler()
         self.log.addHandler(self.handler)
 
     def tearDown(self):
         self.log.removeHandler(self.handler)
-        self.log.setLevel(self._orig_level)
         self.log.propagate = self._orig_propagate
+        self._log_settings.close()
         super().tearDown()
 
     @property
@@ -201,6 +215,164 @@ class TestInstrumentation(_LoggerCaptureTest):
         self.assertEqual(len(self.messages), 1)
         self.assertIn("error", self.messages[0])
 
+    def test_base_exception_is_preserved(self):
+        interrupt = KeyboardInterrupt("stop")
+
+        def compile_fn():
+            raise interrupt
+
+        instrumented = instrument_cutedsl_compile("aten::topk")(compile_fn)
+        with self.assertRaisesRegex(KeyboardInterrupt, "stop") as raised:
+            instrumented()
+        self.assertIs(raised.exception, interrupt)
+        self.assertIn("error", self.messages[0])
+
+    def test_reporting_failure_preserves_result_and_error(self):
+        fake = _FakeJitCache()
+        compile_fn = instrument_cutedsl_compile("aten::topk")(fake)
+
+        with mock.patch(
+            "torch._native.instrumentation._emit",
+            side_effect=RuntimeError("reporting failed"),
+        ):
+            self.assertIsNotNone(compile_fn(256, 64))
+            fake.raise_on_call = True
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                compile_fn(512, 128)
+
+    def test_concurrent_calls_are_classified_once(self):
+        class SlowFakeJitCache(_FakeJitCache):
+            def __call__(self, *args, **kwargs):
+                time.sleep(0.05)
+                return super().__call__(*args, **kwargs)
+
+        fake = SlowFakeJitCache()
+        compile_fn = instrument_cutedsl_compile("aten::topk")(fake)
+        start = threading.Barrier(3)
+        errors = []
+
+        def worker():
+            try:
+                start.wait()
+                compile_fn(256, 64)
+            except BaseException as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        start.wait()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(self.messages), 2)
+        self.assertEqual(sum("compiled" in msg for msg in self.messages), 1)
+        self.assertEqual(sum("cache_hit" in msg for msg in self.messages), 1)
+
+    @unittest.skipUnless(hasattr(os, "fork"), "requires os.fork")
+    def test_lock_is_reinitialized_after_fork(self):
+        parent_pid = os.getpid()
+        entered = threading.Event()
+        release = threading.Event()
+
+        def compile_fn():
+            if (
+                os.getpid() == parent_pid
+                and threading.current_thread() is not threading.main_thread()
+            ):
+                entered.set()
+                release.wait()
+            return "ok"
+
+        instrumented = instrument_cutedsl_compile("aten::topk")(compile_fn)
+        worker = threading.Thread(target=instrumented)
+        worker.start()
+        self.assertTrue(entered.wait(timeout=5))
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                child_pid = os.fork()
+            if child_pid == 0:
+                try:
+                    import signal
+
+                    signal.alarm(2)
+                    result = instrumented()
+                    os._exit(0 if result == "ok" else 2)
+                except BaseException:
+                    os._exit(3)
+            _, status = os.waitpid(child_pid, 0)
+        finally:
+            release.set()
+            worker.join(timeout=5)
+
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(os.WIFEXITED(status))
+        self.assertEqual(os.WEXITSTATUS(status), 0)
+
+    @unittest.skipUnless(hasattr(os, "fork"), "requires os.fork")
+    def test_current_thread_can_fork_while_holding_lock(self):
+        parent_pid = os.getpid()
+
+        def compile_fn():
+            return os.fork()
+
+        instrumented = instrument_cutedsl_compile("aten::topk")(compile_fn)
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                child_pid = instrumented()
+        except BaseException:
+            if os.getpid() != parent_pid:
+                os._exit(3)
+            raise
+
+        if child_pid == 0:
+            os._exit(0)
+        _, status = os.waitpid(child_pid, 0)
+        self.assertTrue(os.WIFEXITED(status))
+        self.assertEqual(os.WEXITSTATUS(status), 0)
+
+    def test_callable_op_label_used_in_log(self):
+        # op may be a callable evaluated per-call (e.g. to derive the aten
+        # symbol from the compile args).
+        fake = _FakeJitCache()
+        compile_fn = instrument_cutedsl_compile(lambda N, K: f"aten::topk_{N}")(fake)
+
+        compile_fn(256, 64)
+
+        self.assertIn("aten::topk_256", self.messages[0])
+
+    def test_op_label_failure_preserves_result(self):
+        # The label callback runs in the finally block; if it raises it must not
+        # turn a successful compile into a failure. Falls back to a safe label.
+        fake = _FakeJitCache()
+
+        def bad_op(*args, **kwargs):
+            raise ValueError("label boom")
+
+        compile_fn = instrument_cutedsl_compile(bad_op)(fake)
+
+        result = compile_fn(256, 64)  # must not raise
+        self.assertIsNotNone(result)
+        self.assertEqual(len(self.messages), 1)
+        self.assertIn("<op-label-error>", self.messages[0])
+
+    def test_op_label_failure_preserves_original_error(self):
+        # If the wrapped fn raises, a failing label callback must not mask the
+        # original exception.
+        fake = _FakeJitCache()
+        fake.raise_on_call = True
+
+        def bad_op(*args, **kwargs):
+            raise ValueError("label boom")
+
+        compile_fn = instrument_cutedsl_compile(bad_op)(fake)
+
+        with self.assertRaises(RuntimeError):  # original "boom", not ValueError
+            compile_fn(256, 64)
+
     def test_cache_attrs_forwarded(self):
         fake = _FakeJitCache()
         compile_fn = instrument_cutedsl_compile("aten::topk")(fake)
@@ -209,6 +381,19 @@ class TestInstrumentation(_LoggerCaptureTest):
         # them reachable so it's a drop-in replacement.
         self.assertTrue(hasattr(compile_fn, "cache_info"))
         self.assertEqual(compile_fn.cache_info().misses, 0)
+
+    def test_flydsl_cache_attrs_forwarded(self):
+        from torch._native.flydsl.cache import flydsl_jit_cache
+
+        @flydsl_jit_cache
+        def compile_fn(key):
+            return key
+
+        instrumented = instrument_flydsl_compile("aten::_fused_rms_norm")(compile_fn)
+        self.assertEqual(instrumented("key"), "key")
+        self.assertEqual(instrumented.cache_info().currsize, 1)
+        instrumented.cache_clear()
+        self.assertEqual(instrumented.cache_info().currsize, 0)
 
     def test_works_without_cache_info(self):
         # A plain callable (no cache_info) must still be timed and reported,
@@ -224,10 +409,10 @@ class TestInstrumentation(_LoggerCaptureTest):
         self.assertEqual(calls, [(256, 64)])
         self.assertEqual(len(self.messages), 1)
 
-    def test_no_work_when_not_listening(self):
-        # With no listener (logger above INFO, no trace handlers), the wrapper
-        # must run the wrapped fn but skip all instrumentation: no log line,
-        # and crucially no key_fn call (user code we shouldn't run for nothing).
+    def test_no_work_when_artifact_disabled(self):
+        # With the artifact off, the wrapper must run the wrapped fn but skip
+        # all instrumentation: no log line, and crucially no key_fn call (user
+        # code we shouldn't run for nothing).
         key_calls = []
 
         def key_fn(N, K):
@@ -237,15 +422,8 @@ class TestInstrumentation(_LoggerCaptureTest):
         fake = _FakeJitCache()
         compile_fn = instrument_cutedsl_compile("aten::topk", key_fn=key_fn)(fake)
 
-        self.log.setLevel(logging.WARNING)
-        saved = list(trace_log.handlers)
-        for h in saved:
-            trace_log.removeHandler(h)
-        try:
+        with preserve_log_state():
             compile_fn(256, 64)
-        finally:
-            for h in saved:
-                trace_log.addHandler(h)
 
         self.assertEqual(fake.misses, 1)  # wrapped fn still ran
         self.assertEqual(key_calls, [])  # ... but no instrumentation work
@@ -398,6 +576,68 @@ class TestHelionKernelInstrumentation(_LoggerCaptureTest):
         self.assertIs(kernel.helion_kernel, fake)
         self.assertEqual(kernel.cache_key, "helion-cache")
 
+    def test_alternate_call_is_instrumented(self):
+        fake = _FakeHelionKernel()
+        kernel = instrument_helion_kernel(
+            "aten::add", key_fn=lambda variant: f"variant={variant}"
+        )(fake)
+
+        def alternate_call():
+            return fake("bound")
+
+        self.assertEqual(
+            kernel.run_with_instrumentation(alternate_call, "logical"), "launched"
+        )
+        self.assertEqual(
+            kernel.run_with_instrumentation(alternate_call, "logical"), "launched"
+        )
+
+        self.assertEqual(len(self.messages), 2)
+        self.assertIn("compiled", self.messages[0])
+        self.assertIn("cache_hit", self.messages[1])
+        self.assertIn("variant=logical", self.messages[0])
+
+    def test_combined_aot_prefers_top_level_helion_api(self):
+        fake_kernel = _FakeHelionKernel()
+        calls = []
+
+        def aot_kernel(**settings):
+            calls.append(settings)
+            return lambda fn: fake_kernel
+
+        helion = types.ModuleType("helion")
+        helion.aot_kernel = aot_kernel
+        with mock.patch.dict(sys.modules, {"helion": helion}):
+            kernel = instrumented_helion_kernel(
+                "aten::add", aot=True, static_shapes=True
+            )(lambda: None)
+
+        self.assertIs(kernel.helion_kernel, fake_kernel)
+        self.assertEqual(calls, [{"static_shapes": True}])
+
+    def test_combined_aot_supports_legacy_helion_api(self):
+        fake_kernel = _FakeHelionKernel()
+        calls = []
+
+        def aot_kernel(**settings):
+            calls.append(settings)
+            return lambda fn: fake_kernel
+
+        helion = types.ModuleType("helion")
+        helion.__path__ = []
+        experimental = types.ModuleType("helion.experimental")
+        experimental.aot_kernel = aot_kernel
+        with mock.patch.dict(
+            sys.modules,
+            {"helion": helion, "helion.experimental": experimental},
+        ):
+            kernel = instrumented_helion_kernel(
+                "aten::add", aot=True, static_shapes=True
+            )(lambda: None)
+
+        self.assertIs(kernel.helion_kernel, fake_kernel)
+        self.assertEqual(calls, [{"static_shapes": True}])
+
 
 class TestTlparseOutput(TestCase):
     """The instrumentation's whole point on production jobs is tlparse-
@@ -407,8 +647,18 @@ class TestTlparseOutput(TestCase):
 
     def setUp(self):
         super().setUp()
+        self._log_settings = log_settings(f"+{_ARTIFACT}")
         self.old_level = trace_log.level
         trace_log.setLevel(logging.DEBUG)
+
+        # Own trace_log's handler list outright. _init_logs() (run by
+        # log_settings) installs LazyTraceHandler, which unregisters itself on
+        # its first emit -- and mutating the list mid-dispatch makes
+        # Logger.callHandlers skip the handler right after it, silently
+        # dropping the first record from ours.
+        self._saved_handlers = list(trace_log.handlers)
+        for h in self._saved_handlers:
+            trace_log.removeHandler(h)
 
         # Raw trace file in the on-disk format tlparse consumes, written via
         # the same TorchLogsFormatter(trace=True) that TORCH_TRACE installs.
@@ -437,6 +687,9 @@ class TestTlparseOutput(TestCase):
         self.raw_file.close()
         os.unlink(self.raw_file.name)
         trace_log.setLevel(self.old_level)
+        for h in self._saved_handlers:
+            trace_log.addHandler(h)
+        self._log_settings.close()
         super().tearDown()
 
     def _emit_one(self):
@@ -454,6 +707,16 @@ class TestTlparseOutput(TestCase):
             if getattr(r, "metadata", {}).get("artifact", {}).get("name")
             == "native_dsl_compile"
         ]
+
+    def test_no_artifact_when_disabled(self):
+        # Regression test: a job collecting a structured trace (trace_log has
+        # handlers, as it does here) must not get a record per op call without
+        # an explicit TORCH_LOGS opt-in.
+        with preserve_log_state():
+            for _ in range(10):
+                self._emit_one()
+
+        self.assertEqual(self._artifact_records(), [])
 
     def test_emits_artifact_record(self):
         self._emit_one()
@@ -566,8 +829,19 @@ _DSL_INSTRUMENTATION_RULES = (
         "instrumented_cutedsl_cache",
     ),
     (
+        "flydsl",
+        "flydsl_jit_cache",
+        "instrument_flydsl_compile",
+        "instrumented_flydsl_cache",
+    ),
+    (
         "helion",
-        ("helion.kernel", "helion.jit", "helion.experimental.aot_kernel"),
+        (
+            "helion.kernel",
+            "helion.jit",
+            "helion.aot_kernel",
+            "helion.experimental.aot_kernel",
+        ),
         "instrument_helion_kernel",
         "instrumented_helion_kernel",
     ),
@@ -744,6 +1018,11 @@ class TestInstrumentationCoverage(TestCase):
                 "@instrument_cutedsl_compile('aten::x')\n@jit_cache\ndef c(): ...\n",
                 "@instrumented_cutedsl_cache('aten::x')\ndef c(): ...\n",
             ),
+            "flydsl": (
+                "@flydsl_jit_cache\ndef f(): ...\n",
+                "@instrument_flydsl_compile('aten::x')\n@flydsl_jit_cache\ndef f(): ...\n",
+                "@instrumented_flydsl_cache('aten::x')\ndef f(): ...\n",
+            ),
             "helion": (
                 "@helion.kernel\ndef h(): ...\n",
                 "@instrument_helion_kernel('aten::x')\n@helion.kernel\ndef h(): ...\n",
@@ -762,11 +1041,12 @@ class TestInstrumentationCoverage(TestCase):
                 self.assertEqual(n, 1, f"{dsl}/{form}: scan missed the site")
                 self.assertEqual(v, [], f"{dsl}/{form}: wrongly flagged")
 
-        aot_v, aot_n = _scan_for_missing_instrumentation(
-            "@helion.experimental.aot_kernel\ndef h(): ...\n", "<helion-aot-bad>"
-        )
-        self.assertEqual(aot_n, 1)
-        self.assertEqual(len(aot_v), 1)
+        for decorator in ("helion.aot_kernel", "helion.experimental.aot_kernel"):
+            aot_v, aot_n = _scan_for_missing_instrumentation(
+                f"@{decorator}\ndef h(): ...\n", "<helion-aot-bad>"
+            )
+            self.assertEqual(aot_n, 1)
+            self.assertEqual(len(aot_v), 1)
 
         jit_v, jit_n = _scan_for_missing_instrumentation(
             "@helion.jit\ndef h(): ...\n", "<helion-jit-bad>"

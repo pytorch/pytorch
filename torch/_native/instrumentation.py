@@ -3,13 +3,15 @@
 Native DSL ops compile device kernels lazily on first call. Those compiles
 are the dominant first-call latency, and a silent cache miss is a common
 "why is this slow again?" question. This module surfaces both, with no
-runtime cost when neither ``TORCH_LOGS`` nor structured tracing is enabled.
+runtime cost unless ``TORCH_LOGS=+native_dsl_compile`` is set. That artifact
+is off by default to avoid log spew: these wrappers sit on the compile
+*cache*, so they run on every op call, cache hits included.
 
-Two sinks, both fed by a single :class:`CompileEvent`:
+Two sinks, both gated on that artifact and fed by a single
+:class:`CompileEvent`:
 
-* The ``native_dsl`` logger (``TORCH_LOGS=+native_dsl``): a one-line
-  human-readable summary per compile -- outcome, wall time, and running
-  hit/miss totals.
+* The ``native_dsl_compile`` artifact logger: a one-line human-readable
+  summary per compile -- outcome, wall time, and running hit/miss totals.
 * ``trace_structured`` artifacts (tlparse): a JSON record per compile, for
   production jobs where only the structured trace is retrievable.
 
@@ -29,6 +31,11 @@ counter advanced. They differ only in how a snapshot is sampled:
   A ``cache_info().misses`` delta means the cache ran a real
   ``cute.compile``, so the measured wall time *is* the compile time;
   otherwise the key was served from the in-memory or on-disk ``.o`` cache.
+
+* :func:`instrument_flydsl_compile` -- for FlyDSL, stacked *above* the
+  ``@flydsl_jit_cache`` decorator, exactly like the CuTeDSL entry point.
+  Both cache wrappers expose ``cache_info().hits`` and ``.misses``, so they
+  share a sampler and differ only in the reported DSL name.
 
 * :func:`instrument_triton_kernel` -- for Triton ``@triton.jit`` kernels,
   which compile *and* launch in one ``kernel[grid](...)`` call and keep
@@ -57,10 +64,15 @@ capture Inductor's unrelated Triton compiles).
 from __future__ import annotations
 
 import functools
-import logging
+import os
+import threading
 import time
+import weakref
 from dataclasses import asdict, dataclass
 from typing import Any, TYPE_CHECKING, TypeVar
+
+import torch._logging
+from torch._native.flydsl.cache import flydsl_jit_cache
 
 
 if TYPE_CHECKING:
@@ -72,20 +84,50 @@ __all__ = [
     "InstrumentedHelionKernel",
     "InstrumentedTritonKernel",
     "instrument_cutedsl_compile",
+    "instrument_flydsl_compile",
     "instrument_helion_kernel",
     "instrument_triton_kernel",
     "instrumented_cutedsl_cache",
+    "instrumented_flydsl_cache",
     "instrumented_helion_kernel",
     "instrumented_triton_cache",
 ]
 
-log = logging.getLogger(__name__)
-
-# tlparse artifact name. The "artifact" envelope (see trace_structured_artifact)
-# is the well-supported transport; the name lets tlparse group these events.
+# tlparse artifact name, and the TORCH_LOGS switch gating both sinks. The
+# "artifact" envelope (see trace_structured_artifact) is the well-supported
+# transport; the name lets tlparse group these events.
 _ARTIFACT_NAME = "native_dsl_compile"
 
+log = torch._logging.getArtifactLogger(__name__, _ARTIFACT_NAME)
+
 R = TypeVar("R")
+
+
+class _ForkSafeRLock:
+    __slots__ = ("_lock", "__weakref__")
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        with _instrumentation_locks_guard:
+            _instrumentation_locks.add(self)
+
+    def _reset_after_fork(self) -> None:
+        self._lock = threading.RLock()
+
+
+_instrumentation_locks: weakref.WeakSet[_ForkSafeRLock] = weakref.WeakSet()
+_instrumentation_locks_guard = threading.Lock()
+
+
+def _reset_instrumentation_locks_after_fork() -> None:
+    global _instrumentation_locks_guard
+    _instrumentation_locks_guard = threading.Lock()
+    for lock in tuple(_instrumentation_locks):
+        lock._reset_after_fork()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_instrumentation_locks_after_fork)
 
 
 @dataclass(frozen=True)
@@ -113,28 +155,27 @@ class CompileEvent:
 
 
 def _listening() -> bool:
-    """True if either sink would record an event.
+    """True if the ``native_dsl_compile`` artifact is enabled.
 
     Lets the wrapper skip all instrumentation work (cache sampling, timing,
     key formatting, event construction) on the hot path when nothing is
     listening -- important because the CuTeDSL wrapper sits on the compile
     *cache* and so runs on every op call, cache hits included.
 
-    Mirrors the gates the sinks apply internally: the logger on its effective
-    level, and structured tracing on ``trace_log.handlers`` (the documented
-    "is tracing enabled" idiom, also used by ``trace_structured`` itself).
-    """
-    from torch._logging._internal import trace_log
+    Both sinks share this one gate; tlparse emission cannot be left to
+    ``trace_structured``'s internal ``trace_log.handlers`` check, which is
+    true in any job collecting a structured trace.
 
-    return log.isEnabledFor(logging.INFO) or bool(trace_log.handlers)
+    ``log_state`` is read off the module because ``TORCH_LOGS`` parsing
+    rebinds it.
+    """
+    from torch._logging import _internal
+
+    return _internal.log_state.is_artifact_enabled(_ARTIFACT_NAME)
 
 
 def _emit(event: CompileEvent) -> None:
-    """Fan the event out to the native_dsl logger and tlparse.
-
-    Both sinks self-gate (logging on level, trace_structured on
-    ``trace_log.handlers``), so this is cheap when nothing is listening.
-    """
+    """Fan the event out to the artifact logger and tlparse."""
     log.info(
         "%s [%s] %s in %.1fms (key=%s, cache hits=%d misses=%d)",
         event.op,
@@ -183,10 +224,11 @@ def _format_key(args: tuple, kwargs: dict, key_fn: Callable | None) -> str:
 
 def _make_wrapper(
     fn: Callable[..., R],
-    op: str,
+    op: str | Callable[..., str],
     dsl: str,
     key_fn: Callable[..., str] | None,
     sample: Callable[[], tuple[int | None, int | None]],
+    lock: _ForkSafeRLock | None = None,
 ) -> Callable[..., R]:
     """Shared instrumentation core for both DSL entry points.
 
@@ -196,6 +238,8 @@ def _make_wrapper(
     only ``sample`` (and the reported ``dsl``) differ.
     """
 
+    instrumentation_lock = lock if lock is not None else _ForkSafeRLock()
+
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> R:
         # Fast path: do nothing extra unless a sink is listening. This runs on
@@ -204,42 +248,79 @@ def _make_wrapper(
         if not _listening():
             return fn(*args, **kwargs)
 
-        _, misses_before = sample()
-        start = time.perf_counter()
-        try:
-            result = fn(*args, **kwargs)
-            outcome_is_error = False
-        except Exception:
-            outcome_is_error = True
-            raise
-        finally:
-            wall_ms = (time.perf_counter() - start) * 1e3
-            hits_after, misses_after = sample()
-            compiled = (
-                not outcome_is_error
-                and misses_before is not None
-                and misses_after is not None
-                and misses_after > misses_before
-            )
-            if outcome_is_error:
-                outcome = "error"
-            else:
-                outcome = "compiled" if compiled else "cache_hit"
-            _emit(
-                CompileEvent(
-                    op=op,
-                    dsl=dsl,
-                    outcome=outcome,
-                    compiled=compiled,
-                    wall_ms=wall_ms,
-                    key=_format_key(args, kwargs, key_fn),
-                    hits=hits_after or 0,
-                    misses=misses_after or 0,
-                )
-            )
-        return result
+        return _invoke_with_instrumentation(
+            lambda: fn(*args, **kwargs),
+            op,
+            dsl,
+            key_fn,
+            sample,
+            args,
+            kwargs,
+            instrumentation_lock,
+        )
 
     return wrapper
+
+
+def _invoke_with_instrumentation(
+    call: Callable[[], R],
+    op: str | Callable[..., str],
+    dsl: str,
+    key_fn: Callable[..., str] | None,
+    sample: Callable[[], tuple[int | None, int | None]],
+    key_args: tuple[Any, ...],
+    key_kwargs: dict[str, Any],
+    lock: _ForkSafeRLock,
+) -> R:
+    """Run ``call`` and attribute its cache event to the logical call arguments."""
+    # Keep the acquired lock object local: an at-fork callback can replace
+    # ``lock._lock`` before this context exits in the child.
+    with lock._lock:
+        _, misses_before = sample()
+        start = time.perf_counter()
+        outcome_is_error = True
+        try:
+            result = call()
+            outcome_is_error = False
+        finally:
+            try:
+                wall_ms = (time.perf_counter() - start) * 1e3
+                hits_after, misses_after = sample()
+                compiled = (
+                    not outcome_is_error
+                    and misses_before is not None
+                    and misses_after is not None
+                    and misses_after > misses_before
+                )
+                if outcome_is_error:
+                    outcome = "error"
+                else:
+                    outcome = "compiled" if compiled else "cache_hit"
+                if callable(op):
+                    # A label callback must never change the wrapped fn's outcome:
+                    # this runs in the finally block, so a raised exception would
+                    # mask the real result/error. Fall back to a safe label.
+                    try:
+                        op_label = op(*key_args, **key_kwargs)
+                    except Exception:
+                        op_label = "<op-label-error>"
+                else:
+                    op_label = op
+                _emit(
+                    CompileEvent(
+                        op=op_label,
+                        dsl=dsl,
+                        outcome=outcome,
+                        compiled=compiled,
+                        wall_ms=wall_ms,
+                        key=_format_key(key_args, key_kwargs, key_fn),
+                        hits=hits_after or 0,
+                        misses=misses_after or 0,
+                    )
+                )
+            except Exception:
+                pass
+        return result
 
 
 def _cache_info_sampler(fn: Any) -> Callable[[], tuple[int | None, int | None]]:
@@ -263,15 +344,21 @@ def _cache_info_sampler(fn: Any) -> Callable[[], tuple[int | None, int | None]]:
     return sample
 
 
-def instrument_cutedsl_compile(
-    op: str,
+def _instrument_cached_compile(
+    op: str | Callable[..., str],
+    dsl: str,
     *,
     key_fn: Callable[..., str] | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
-    """Instrument a CuTeDSL (``@jit_cache``-decorated) compile function.
+    """Shared implementation behind the per-DSL compile instrumentation.
 
     Args:
-        op: Operator symbol being compiled for, e.g. ``"aten::topk"``.
+        op: Operator symbol being compiled for, e.g. ``"aten::topk"``. May
+            instead be a callable receiving the wrapped function's arguments
+            and returning the label per call; if that callable raises, the
+            label falls back to ``"<op-label-error>"`` without changing the
+            wrapped function's result or exception.
+        dsl: DSL name reported in the event, e.g. ``"cutedsl"``.
         key_fn: Optional callable with the wrapped function's signature
             returning a short string describing the compile key for logs.
             Defaults to a repr of the args/kwargs.
@@ -283,7 +370,7 @@ def instrument_cutedsl_compile(
     """
 
     def decorator(fn: Callable[..., R]) -> Callable[..., R]:
-        wrapper = _make_wrapper(fn, op, "cutedsl", key_fn, _cache_info_sampler(fn))
+        wrapper = _make_wrapper(fn, op, dsl, key_fn, _cache_info_sampler(fn))
         # Forward jit_cache's bespoke attributes (functools.wraps doesn't copy
         # them) so the instrumented function stays a drop-in for callers that
         # introspect the cache.
@@ -293,6 +380,34 @@ def instrument_cutedsl_compile(
         return wrapper
 
     return decorator
+
+
+def instrument_cutedsl_compile(
+    op: str | Callable[..., str],
+    *,
+    key_fn: Callable[..., str] | None = None,
+) -> Callable[[Callable[..., R]], Callable[..., R]]:
+    """Instrument a CuTeDSL (``@jit_cache``-decorated) compile function.
+
+    See :func:`_instrument_cached_compile` for the arguments and for what the
+    returned decorator guarantees.
+    """
+
+    return _instrument_cached_compile(op, "cutedsl", key_fn=key_fn)
+
+
+def instrument_flydsl_compile(
+    op: str | Callable[..., str],
+    *,
+    key_fn: Callable[..., str] | None = None,
+) -> Callable[[Callable[..., R]], Callable[..., R]]:
+    """Instrument a FlyDSL (``@flydsl_jit_cache``-decorated) compile function.
+
+    Same contract as :func:`_instrument_cached_compile`; only the DSL name
+    reported in the event differs.
+    """
+
+    return _instrument_cached_compile(op, "flydsl", key_fn=key_fn)
 
 
 def _triton_cache_size(kernel: Any) -> int | None:
@@ -341,6 +456,7 @@ class InstrumentedTritonKernel:
         self._kernel = kernel
         self._op = op
         self._key_fn = key_fn
+        self._lock = _ForkSafeRLock()
 
     @property
     def jit_kernel(self) -> Any:
@@ -356,7 +472,9 @@ class InstrumentedTritonKernel:
         # kernel[grid](*args) is the launch path -- wrap the bound launcher in
         # the shared core so the compile that may fire inside it is recorded.
         launcher = self._kernel[grid]
-        return _make_wrapper(launcher, self._op, "triton", self._key_fn, self._sample)
+        return _make_wrapper(
+            launcher, self._op, "triton", self._key_fn, self._sample, self._lock
+        )
 
     def __getattr__(self, name: str) -> Any:
         # Delegate everything else (warmup, cache_key, wrap_triton hooks, ...)
@@ -427,7 +545,12 @@ class InstrumentedHelionKernel:
         key_fn: Callable[..., str] | None,
     ) -> None:
         self._kernel = kernel
-        self._wrapped = _make_wrapper(kernel, op, "helion", key_fn, self._sample)
+        self._op = op
+        self._key_fn = key_fn
+        self._lock = _ForkSafeRLock()
+        self._wrapped = _make_wrapper(
+            kernel, op, "helion", key_fn, self._sample, self._lock
+        )
 
     @property
     def helion_kernel(self) -> Any:
@@ -438,6 +561,27 @@ class InstrumentedHelionKernel:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self._wrapped(*args, **kwargs)
+
+    def run_with_instrumentation(
+        self,
+        call: Callable[[], R],
+        /,
+        *key_args: Any,
+        **key_kwargs: Any,
+    ) -> R:
+        """Run an alternate call and attribute its event to the supplied key args."""
+        if not _listening():
+            return call()
+        return _invoke_with_instrumentation(
+            call,
+            self._op,
+            "helion",
+            self._key_fn,
+            self._sample,
+            key_args,
+            key_kwargs,
+            self._lock,
+        )
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._kernel, name)
@@ -466,7 +610,7 @@ def instrument_helion_kernel(
 
 
 def instrumented_cutedsl_cache(
-    op: str,
+    op: str | Callable[..., str],
     *,
     key_fn: Callable[..., str] | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
@@ -485,6 +629,27 @@ def instrumented_cutedsl_cache(
 
     def decorator(fn: Callable[..., R]) -> Callable[..., R]:
         return instrument_cutedsl_compile(op, key_fn=key_fn)(jit_cache(fn))
+
+    return decorator
+
+
+def instrumented_flydsl_cache(
+    op: str | Callable[..., str],
+    *,
+    key_fn: Callable[..., str] | None = None,
+) -> Callable[[Callable[..., R]], Callable[..., R]]:
+    """Cache + instrument a FlyDSL compile function in one decorator::
+
+        @instrumented_flydsl_cache("aten::_fused_rms_norm")
+        def _compile_rmsnorm_fwd(n, dtype, arch, ...):
+            return flyc.compile(...)
+
+    Equivalent to ``instrument_flydsl_compile(op)`` stacked above
+    ``@flydsl_jit_cache``.
+    """
+
+    def decorator(fn: Callable[..., R]) -> Callable[..., R]:
+        return instrument_flydsl_compile(op, key_fn=key_fn)(flydsl_jit_cache(fn))
 
     return decorator
 
@@ -522,9 +687,15 @@ def instrumented_helion_kernel(
 ) -> Callable[[Callable[..., R]], InstrumentedHelionKernel]:
     """Create and instrument a regular or AOT Helion kernel."""
     import helion  # pyrefly: ignore[missing-import]
-    import helion.experimental  # pyrefly: ignore[missing-import]
 
-    kernel_decorator = helion.experimental.aot_kernel if aot else helion.kernel
+    if not aot:
+        kernel_decorator = helion.kernel
+    elif hasattr(helion, "aot_kernel"):
+        kernel_decorator = helion.aot_kernel
+    else:
+        from helion.experimental import aot_kernel  # pyrefly: ignore[missing-import]
+
+        kernel_decorator = aot_kernel
 
     def decorator(fn: Callable[..., R]) -> InstrumentedHelionKernel:
         return instrument_helion_kernel(op, key_fn=key_fn)(

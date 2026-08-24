@@ -297,7 +297,7 @@ class _Broadcast(Function):
     def forward(ctx, src, group, tensor):
         ctx.src = src
         ctx.group = group
-        ctx.rank = dist.get_rank(group=group)
+        ctx.global_rank = dist.get_rank()
         # torch.distributed makes all the calls in place
         # we allocate new tensors to avoid this
         tensor = tensor.clone()
@@ -308,7 +308,7 @@ class _Broadcast(Function):
     # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         gx = _Reduce.apply(ctx.src, ReduceOp.SUM, ctx.group, grad_output)
-        if ctx.src != ctx.rank:
+        if ctx.src != ctx.global_rank:
             gx.zero_()
         return (None, None, gx)
 

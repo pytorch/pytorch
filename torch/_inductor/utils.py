@@ -170,6 +170,13 @@ ALIGNMENT = 16
 TMA_ALIGNMENT = 16
 TMA_DESCRIPTOR_SIZE = 128
 
+TRITON_FLOAT8_DTYPES = (
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
+    torch.float8_e4m3fnuz,
+    torch.float8_e5m2fnuz,
+)
+
 # PyTorch dtypes with valid CUtensorMapDataType mappings.
 # Ref: triton/backends/nvidia/include/cuda.h (CUtensorMapDataType enum)
 #      triton/_internal_testing.py (tma_dtypes test list)
@@ -186,10 +193,7 @@ _TMA_SUPPORTED_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
         torch.bfloat16,
         torch.float32,
         torch.float64,
-        torch.float8_e4m3fn,
-        torch.float8_e5m2,
-        torch.float8_e4m3fnuz,
-        torch.float8_e5m2fnuz,
+        *TRITON_FLOAT8_DTYPES,
     ]
 )
 
@@ -1087,7 +1091,16 @@ def get_kernel_metadata(
                     return ""
                 shape_annotation = f"{stringify_shape(layout.size)}"
                 stride_annotation = f"{stringify_shape(layout.stride)}"
-                device_annotation = f"{layout.device}"
+                # Under compile-on-one-rank, render the bare device type so this kernel
+                # provenance comment is byte-identical across ranks.
+                from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+                device = layout.device
+                device_annotation = (
+                    device.type
+                    if (_coor_enabled() and device is not None)
+                    else f"{device}"
+                )
 
                 return (
                     f'"{dtype_abbrs[layout.dtype]}{shape_annotation}'
@@ -1126,16 +1139,13 @@ def get_kernel_metadata(
 
         for node in inductor_nodes:
             formatted_node = node.format_node(include_tensor_metadata=True)
-            if formatted_node is not None and torch.version.hip:
-                # AMDGCN asm strings can contain newlines, which propagate
-                # into format_node() output.  Split so every line gets the
-                # comment prefix; otherwise bare newlines break the wrapper.
-                detailed_metadata.extend(
-                    f"{wrapper.comment}   {line}"
-                    for line in formatted_node.splitlines()
-                )
-            else:
-                detailed_metadata.append(f"{wrapper.comment}   {formatted_node}")
+            # Asm strings can contain newlines, which propagate into
+            # format_node() output.  Split so every line gets the comment
+            # prefix; otherwise bare newlines break the wrapper.
+            detailed_metadata.extend(
+                f"{wrapper.comment}   {line}"
+                for line in str(formatted_node).splitlines()
+            )
 
         detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
@@ -2087,6 +2097,29 @@ def _descriptor_shape_fits_in_int32(
     from .virtualized import V
 
     condition = conditions[0] if len(conditions) == 1 else sympy.And(*conditions)
+    return (
+        V.graph.sizevars.guard_or_false(condition)
+        if add_guards
+        else V.graph.sizevars.statically_known_true(condition)
+    )
+
+
+def _tma_descriptor_max_offset_fits_in_int32(
+    mat: IRNode, add_guards: bool = False
+) -> bool:
+    # Unlike _descriptor_shape_fits_in_int32, catches overflow in the
+    # descriptor's max addressable offset even when every per-dim size
+    # fits.
+    int32_max = torch.iinfo(torch.int32).max
+    max_offset = sum(
+        (size - 1) * stride for size, stride in zip(mat.get_size(), mat.get_stride())
+    )
+    if isinstance(max_offset, (int, sympy.Integer)):
+        return max_offset <= int32_max
+
+    from .virtualized import V
+
+    condition = sympy.Le(max_offset, int32_max)
     return (
         V.graph.sizevars.guard_or_false(condition)
         if add_guards
@@ -3471,12 +3504,7 @@ def is_triton_fp8_dtype_supported(
     triton_arch: int | str | None = None,
     warp_size: int | None = None,
 ) -> bool:
-    if dtype not in (
-        torch.float8_e4m3fn,
-        torch.float8_e5m2,
-        torch.float8_e4m3fnuz,
-        torch.float8_e5m2fnuz,
-    ):
+    if dtype not in TRITON_FLOAT8_DTYPES:
         return True
 
     triton_dtype = _type_of(dtype).removeprefix("*")
@@ -4215,13 +4243,13 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
     - Ops in FORBIDDEN_CUDAGRAPH_OPS (CPU sync, dynamic alloc, etc.)
     - Ops with the cudagraph_unsafe tag
     - index_put_ with boolean indices (triggers .nonzero() during capture)
-    - Control flow nodes (Conditional, WhileLoop)
+    - Control flow nodes (Switch, WhileLoop)
     - Ops with sparse tensor outputs
     """
     from . import ir
 
     # Control flow nodes are cudagraph-unsafe
-    if isinstance(node, (ir.Conditional, ir.WhileLoop)):
+    if isinstance(node, (ir.Switch, ir.WhileLoop)):
         return True
 
     if not isinstance(node, (ir.FallbackKernel, ir.ExternKernel)):
@@ -4520,12 +4548,16 @@ def python_subprocess_env() -> dict[str, str]:
     Get a base environment for running Python subprocesses.
     """
 
+    torch_package_root = os.path.dirname(
+        os.path.dirname(os.path.abspath(torch.__file__))
+    )
     env = {
         # Inherit the environment of the current process.
         **os.environ,
         # Set the PYTHONPATH so the subprocess can find torch.
         "PYTHONPATH": os.environ.get(
-            "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+            "TORCH_CUSTOM_PYTHONPATH",
+            os.pathsep.join((torch_package_root, *sys.path)),
         ),
     }
 
@@ -4714,6 +4746,14 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
         [
             torch.ops.aten._assert_scalar.default,
             torch.ops.aten.lift_fresh_copy.default,
+            # `x.size(dim)` returns a SymInt, which cannot be serialized as a generic
+            # fallback kernel; route it to its symbolic (no-kernel) handling.
+            torch.ops.aten.sym_size.int,
+            # `.item()` returns a Scalar, which cannot be serialized as a generic
+            # fallback kernel; route it to its dedicated DynamicScalar lowering.
+            torch.ops.aten._local_scalar_dense.default,
+            # `x.stride(dim)` returns a SymInt too; same symbolic handling as sym_size.
+            torch.ops.aten.sym_stride.int,
         ]
     )
 
@@ -4820,18 +4860,30 @@ def _infer_scale_swizzle_impl(
 
     # NVFP4: BlockWise1x16 with float8_e4m3fn scales
     if mat_dtype == torch.float4_e2m1fn_x2 and scale_dtype == torch.float8_e4m3fn:
-        expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
-            ceildiv(K_multiplier * mat_size[1], 16), 4
-        )
-        expected_numel_b = _round_up(mat_size[1], 128) * _round_up(
-            ceildiv(K_multiplier * mat_size[0], 16), 4
-        )
-        if eq_fn(scale_numel, expected_numel_a) or eq_fn(scale_numel, expected_numel_b):
-            return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
+        if torch.xpu._is_compiled():
+            # XPU: no swizzle
+            expected_numel_a = ceildiv(mat_size[0], 16) * K_multiplier * mat_size[1]
+            expected_numel_b = ceildiv(K_multiplier * mat_size[1], 16) * mat_size[0]
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x16, SwizzleType.NO_SWIZZLE
+        else:
+            # NVIDIA: uses swizzled 32x4x4 layout
+            expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
+                ceildiv(K_multiplier * mat_size[1], 16), 4
+            )
+            expected_numel_b = _round_up(mat_size[1], 128) * _round_up(
+                ceildiv(K_multiplier * mat_size[0], 16), 4
+            )
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
 
     # MXFP8: BlockWise1x32 with float8_e8m0fnu scales
     if scale_dtype == torch.float8_e8m0fnu:
-        if not torch.version.hip:
+        if not torch.version.hip and not torch.xpu._is_compiled():
             # NVIDIA: uses swizzled 32x4x4 layout
             expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
                 ceildiv(K_multiplier * mat_size[1], 32), 4
@@ -4844,7 +4896,7 @@ def _infer_scale_swizzle_impl(
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
         else:
-            # AMD: no swizzle
+            # AMD/XPU: no swizzle
             expected_numel_a = ceildiv(mat_size[0], 32) * K_multiplier * mat_size[1]
             expected_numel_b = ceildiv(K_multiplier * mat_size[1], 32) * mat_size[0]
             if eq_fn(scale_numel, expected_numel_a) or eq_fn(

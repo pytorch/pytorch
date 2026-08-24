@@ -4,6 +4,7 @@ from . import (
     foreach_mm,
     norm,
     polar,
+    reductions,
     scatter_add,
     topk,
 )

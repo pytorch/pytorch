@@ -40,6 +40,7 @@ aspects of contributing to PyTorch.
 - [Managing multiple build trees](#managing-multiple-build-trees)
 - [C++ development tips](#c-development-tips)
   - [Build only what you need](#build-only-what-you-need)
+  - [Profile build time](#profile-build-time)
   - [Code completion and IDE support](#code-completion-and-ide-support)
   - [Make no-op build fast](#make-no-op-build-fast)
     - [Use Ninja](#use-ninja)
@@ -90,6 +91,20 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
   Afterwards rebuilding a library (for example to rebuild `libtorch_cpu.so` issue `ninja torch_cpu` from `build` folder),
   would be sufficient to make change visible in `torch` package.
 
+  Alternatively, scikit-build-core's editable install can rebuild the project
+  automatically on the first `import torch` in a process. This is off by default
+  (a plain editable install does not rebuild on import); opt in at install time
+  by setting the `SKBUILD_EDITABLE_REBUILD` environment variable:
+  ```bash
+  SKBUILD_EDITABLE_REBUILD=true spin develop
+  ```
+  (equivalently, via config-settings with a raw pip install:
+  `python -m pip install -e . -v --no-build-isolation -C editable.rebuild=true`).
+  With this enabled, editing a source file and re-importing `torch` runs
+  `cmake --build & --install` before the import proceeds, so changes are picked
+  up without an explicit reinstall. Set `SKBUILD_EDITABLE_VERBOSE=1` to see the
+  build output, or `=0` to silence it.
+
 
   To reinstall, first uninstall all existing PyTorch installs. You may need to run `pip
   uninstall torch` multiple times. You'll know `torch` is fully
@@ -102,12 +117,12 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
   pip uninstall torch
   ```
 
-  Next run `python setup.py clean`. After that, you can install in editable mode again.
+  Next run `spin clean`. After that, you can install in editable mode again.
 
 * If you run into errors when running `python -m pip install -e . -v --no-build-isolation`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
   your CMake works and can compile this simple Hello World program without errors.
-  2. Nuke your `build` directory. The `setup.py` script compiles binaries into the `build` folder and caches many
+  2. Nuke your `build` directory. The build compiles binaries into the `build` folder and caches many
   details along the way, which saves time the next time you build. If you're running into issues, you can always
   `rm -rf build` from the toplevel `pytorch` directory and start over.
   3. If you have made edits to the PyTorch repo, commit any change you'd like to keep and clean the repo with the
@@ -115,15 +130,17 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
       ```bash
       git submodule deinit -f .
       git clean -xdf
-      python setup.py clean
+      spin clean
       git submodule update --init --recursive
       python -m pip install --group dev
       python -m pip install --no-build-isolation -v -e .
       ```
-  4. The main step within `python -m pip install -e . -v --no-build-isolation` is running `make` from the `build` directory. If you want to
-    experiment with some environment variables, you can pass them into the command:
+  4. The main step within `python -m pip install -e . -v --no-build-isolation` is the CMake build in the
+    `build` directory (`ninja` by default). If you want to experiment with some environment variables, you
+    can pass them into the command (see
+    [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake) for the environment variables the build forwards):
       ```bash
-      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* CMAKE_FRESH=1 python -m pip install --no-build-isolation -v -e .
+      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python -m pip install --no-build-isolation -v -e .
       ```
   5. Try installing PyTorch without build isolation by adding `--no-build-isolation` to the `pip install` command.
   This will use the current environment's packages instead of creating a new isolated environment for the build.
@@ -243,10 +260,9 @@ dependencies as well as the nightly binaries into the repo directory.
   in [csrc](torch/csrc) is a Python module, following the PyTorch Python
   frontend module structure.
   * [csrc](torch/csrc) - C++ files composing the PyTorch library. Files
-    in this directory tree are a mix of Python binding code, and C++
-    heavy lifting. Consult `setup.py` for the canonical list of Python
-    binding files; conventionally, they are often prefixed with
-    `python_`. [README](torch/csrc/README.md)
+    in this directory tree are a mix of Python binding code
+    (conventionally prefixed with `python_`) and C++ heavy lifting.
+    [README](torch/csrc/README.md)
     * [jit](torch/csrc/jit) - Compiler and frontend for TorchScript JIT
       frontend. [README](torch/csrc/jit/README.md)
     * [autograd](torch/csrc/autograd) - Implementation of reverse-mode automatic differentiation. [README](torch/csrc/autograd/README.md)
@@ -761,7 +777,7 @@ will want to keep in mind:
 
 ### Build only what you need
 
-`python setup.py build` will build everything by default, but sometimes you are
+`spin develop` will build everything by default, but sometimes you are
 only interested in a specific component.
 
 - Working on a test binary? Run `(cd build && ninja bin/test_binary_name)` to
@@ -778,7 +794,6 @@ On the initial build, you can also speed things up by disabling the features you
 - `BUILD_TEST=0` will disable building C++ test binaries.
 - `USE_FBGEMM=0` will disable using FBGEMM (quantized 8-bit server operators).
 - `USE_NNPACK=0` will disable compiling with NNPACK.
-- `USE_QNNPACK=0` will disable QNNPACK build (quantized 8-bit operators).
 - `USE_XNNPACK=0` will disable compiling with XNNPACK.
 - `USE_FLASH_ATTENTION=0` and `USE_MEM_EFF_ATTENTION=0` will disable compiling flash attention and memory efficient kernels respectively.
 - `BUILD_LAZY_TS_BACKEND=0` will disable the lazy TorchScript backend (Lazy Tensor Core).
@@ -786,9 +801,12 @@ On the initial build, you can also speed things up by disabling the features you
 - `USE_CPU_VECTORIZATION=0` will disable building vectorized CPU kernel variants (AVX2, AVX512, VSX, ZVECTOR, SVE). Only the scalar DEFAULT kernels are built. Fine for correctness/dispatch work; not for CPU benchmarking.
 - `USE_COLORIZE_OUTPUT=1` will colorize compiler output for easier reading.
 
+The full list of build environment variables, what each one does, and how it reaches CMake is
+documented at the top of [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).
+
 For example, a good default for the most minimal build is to add to your bashrc is:
 ```bash
-alias BUILD_CONFIG='CMAKE_GENERATOR=Ninja USE_DISTRIBUTED=0 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 BUILD_LAZY_TS_BACKEND=0 USE_PYTORCH_QNNPACK=0 USE_CPU_VECTORIZATION=0 USE_COLORIZE_OUTPUT=1'
+alias BUILD_CONFIG='CMAKE_GENERATOR=Ninja USE_DISTRIBUTED=0 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_XNNPACK=0 BUILD_LAZY_TS_BACKEND=0 USE_PYTORCH_QNNPACK=0 USE_CPU_VECTORIZATION=0 USE_COLORIZE_OUTPUT=1'
 ```
 
 You can then re-enable features selectively
@@ -808,6 +826,18 @@ options passed for the first time will persist; please run `ccmake build/`, run
 `cmake-gui build/`, or directly edit `build/CMakeCache.txt` to adapt build
 options.
 
+### Profile build time
+
+With CMake 4.3 or newer, you can collect timing information for compile, link,
+and custom build commands by enabling CMake instrumentation:
+
+```bash
+USE_CMAKE_INSTRUMENTATION=1 pip install --no-build-isolation -v -e .
+```
+
+The build prints a timing summary and the path to a trace that can be loaded in
+[Perfetto](https://ui.perfetto.dev/) for further analysis.
+
 ### Code completion and IDE support
 
 When using `python -m pip install -e . -v --no-build-isolation`, PyTorch will generate
@@ -824,7 +854,7 @@ information for the code in `torch/csrc`. More information at:
 By default, cmake will use its Makefile generator to generate your build
 system.  You can get faster builds if you install the ninja build system
 with `pip install ninja`.  If PyTorch was already built, you will need
-to run `python setup.py clean` once after installing ninja for builds to
+to run `spin clean` once after installing ninja for builds to
 succeed.
 
 Note: Make sure to use a machine with a larger number of CPU cores;this will significantly reduce your build times.
@@ -865,7 +895,7 @@ Each of these 3 variables should contain ccache, e.g.
 CMAKE_CXX_COMPILER_LAUNCHER:STRING=/usr/bin/ccache
 ```
 
-If not, you can define these variables on the command line before invoking `setup.py`.
+If not, you can define these variables on the command line before building.
 
 ```bash
 export CMAKE_C_COMPILER_LAUNCHER=ccache
@@ -1063,9 +1093,14 @@ Set `TORCH_SHOW_CPP_STACKTRACES=1` to get the C++ stacktrace when an error occur
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
 
-1. `CUDA_DEVICE_DEBUG=1` will enable CUDA device function debug symbols (`-g -G`).
+1. `CUDA_DEVICE_DEBUG` will enable CUDA device function debug symbols (`-g -G`).
     This will be particularly helpful in debugging device code. However, it will
     slow down the build process for about 50% (compared to only `DEBUG=1`), so use wisely.
+    Unlike `DEBUG`, it is read as a CMake variable rather than forwarded from the environment, so
+    pass it at install time (it has no effect on MSVC builds):
+      ```bash
+      python -m pip install -e . -v --no-build-isolation -C cmake.define.CUDA_DEVICE_DEBUG=1
+      ```
 2. `cuda-gdb` and `compute-sanitizer` are your best CUDA debugging friends. Unlike`gdb`,
    `cuda-gdb` can display actual values in a CUDA tensor (rather than all zeros).
 3. CUDA supports a lot of C++17/20 features, which include `std::numeric_limits`, `std::nextafter`,
@@ -1345,7 +1380,7 @@ are Caffe2/PyTorch specific. Here they are:
   `scripts` are Caffe2-specific. Don't put PyTorch code in them without
   extra coordination.
 
-- `mypy*`, `requirements.txt`, `setup.py`, `test`, `tools` are
+- `mypy*`, `requirements.txt`, `pyproject.toml`, `test`, `tools` are
   PyTorch-specific. Don't put Caffe2 code in them without extra
   coordination.
 

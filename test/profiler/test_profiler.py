@@ -2,7 +2,6 @@
 # ruff: noqa: F841
 
 import collections
-import contextlib
 import copy
 import gc
 import json
@@ -145,59 +144,6 @@ class TestProfilerCUDA(TestCase):
         self.assertGreater(
             profiler_stats.function_events_build_tree_call_duration_us, 0
         )
-
-    @xfailIfNoAcceleratorTriton
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_compile_timeline_provenance_survives_reset_scope(self):
-        import torch._inductor.config as inductor_config
-        import torch._inductor.debug as inductor_debug
-
-        previous_kernel_information_jsons = copy.deepcopy(
-            inductor_debug.get_kernel_information_jsons()
-        )
-        inductor_debug.get_kernel_information_jsons().clear()
-
-        def fn(x):
-            return torch.sin(x + 1).relu()
-
-        try:
-            with (
-                inductor_config.patch(
-                    {
-                        "force_disable_caches": True,
-                        "trace.provenance_tracking_to_timeline": True,
-                        "triton.unique_kernel_names": True,
-                    }
-                ),
-                TemporaryFileName(mode="w+") as trace_path,
-            ):
-                compiled_fn = torch.compile(fn, backend="inductor")
-                x = torch.randn(64, 64, device="cuda")
-                with profile(
-                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                ) as prof:
-                    compiled_fn(x)
-                    torch.cuda.synchronize()
-
-                prof.export_chrome_trace(trace_path)
-                with open(trace_path) as f:
-                    trace = json.load(f)
-
-            kernel_stacks = [
-                event.get("args", {}).get("stack")
-                for event in trace["traceEvents"]
-                if event.get("cat") == "kernel"
-            ]
-            self.assertTrue(
-                any(stack for stack in kernel_stacks),
-                "Expected a generated kernel in the exported trace to carry a stack",
-            )
-            self.assertEqual(inductor_debug.get_kernel_information_jsons(), {})
-        finally:
-            inductor_debug.get_kernel_information_jsons().clear()
-            inductor_debug.get_kernel_information_jsons().update(
-                previous_kernel_information_jsons
-            )
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/78457")
     def test_mem_leak(self):
@@ -496,403 +442,6 @@ class TestProfilerITT(TestCase):
 
 @instantiate_parametrized_tests
 class TestProfiler(TestCase):
-    @contextlib.contextmanager
-    def _kernel_information_jsons(self, kernel_information_jsons):
-        import torch._inductor.debug as inductor_debug
-
-        previous = copy.deepcopy(inductor_debug.get_kernel_information_jsons())
-        current = inductor_debug.get_kernel_information_jsons()
-        current.clear()
-        current.update(kernel_information_jsons)
-        try:
-            yield
-        finally:
-            current.clear()
-            current.update(previous)
-
-    def test_build_flow_mapping_supports_sparse_flow_ids(self):
-        flow_id = 1_000_000_000
-        trace = {
-            "traceEvents": [
-                {
-                    "name": "aten::add",
-                    "cat": "cpu_op",
-                    "ph": "X",
-                    "ts": 0,
-                    "dur": 5,
-                    "tid": 1,
-                    "args": {},
-                },
-                {
-                    "name": "ac2g",
-                    "cat": "ac2g",
-                    "ph": "s",
-                    "id": flow_id,
-                    "ts": 5,
-                    "tid": 1,
-                    "args": {},
-                },
-                {
-                    "name": "triton_poi_fused_add_0",
-                    "cat": "kernel",
-                    "ph": "X",
-                    "ts": 10,
-                    "dur": 7,
-                    "tid": 2,
-                    "args": {},
-                },
-                {
-                    "name": "ac2g",
-                    "cat": "ac2g",
-                    "ph": "f",
-                    "id": flow_id,
-                    "ts": 17,
-                    "tid": 2,
-                    "args": {},
-                },
-            ]
-        }
-
-        prof = _profile()
-        prof._assign_uniq_id_to_event(trace)
-
-        src2dst, dst2src = prof._build_flow_mapping(
-            trace,
-            [trace["traceEvents"][1], trace["traceEvents"][3]],
-        )
-
-        self.assertEqual(src2dst, {0: 2})
-        self.assertEqual(dst2src, {2: 0})
-
-    def test_maybe_triton_call_uses_inductor_prefix(self):
-        prof = _profile()
-
-        self.assertTrue(prof._maybe_triton_call("triton_poi_fused_add_0"))
-        self.assertFalse(prof._maybe_triton_call("not_triton_related"))
-
-    def test_add_inductor_kernel_stack_to_chrome_trace(self):
-        kernel_name = "triton_poi_fused_add_0"
-        stack = ["model.py:7 in forward"]
-        kernel_information_jsons = {
-            str(("Torch-Compiled Region: 0/0", False)): {
-                kernel_name: {
-                    "stack_traces": stack,
-                    "post_grad_nodes": ["add"],
-                    "pre_grad_nodes": ["add"],
-                }
-            }
-        }
-        with self._kernel_information_jsons(kernel_information_jsons):
-            trace = {
-                "traceEvents": [
-                    {
-                        "name": "Torch-Compiled Region: 0/0",
-                        "cat": "cpu_op",
-                        "ph": "X",
-                        "ts": 0,
-                        "dur": 100,
-                        "tid": 1,
-                        "args": {},
-                    },
-                    {
-                        "name": "aten::add",
-                        "cat": "cpu_op",
-                        "ph": "X",
-                        "ts": 10,
-                        "dur": 5,
-                        "tid": 1,
-                        "args": {},
-                    },
-                    {
-                        "name": "ac2g",
-                        "cat": "ac2g",
-                        "ph": "s",
-                        "id": 0,
-                        "ts": 15,
-                        "tid": 1,
-                        "args": {},
-                    },
-                    {
-                        "name": kernel_name,
-                        "cat": "cuda_driver",
-                        "ph": "X",
-                        "ts": 20,
-                        "dur": 7,
-                        "tid": 2,
-                        "args": {},
-                    },
-                    {
-                        "name": "ac2g",
-                        "cat": "ac2g",
-                        "ph": "f",
-                        "id": 0,
-                        "ts": 27,
-                        "tid": 2,
-                        "args": {},
-                    },
-                ]
-            }
-
-            prof = _profile()
-            updated_trace = prof.add_to_chrome_trace(trace)
-
-            self.assertEqual(updated_trace["traceEvents"][3]["args"]["stack"], stack)
-
-    def test_add_inductor_kernel_stack_to_chrome_trace_by_external_id(self):
-        kernel_name = "triton_poi_fused_add_0"
-        stack = ["model.py:7 in forward"]
-        kernel_information_jsons = {
-            str(("Torch-Compiled Region: 0/0", False)): {
-                kernel_name + ":1": {
-                    "stack_traces": stack,
-                    "post_grad_nodes": ["add"],
-                    "pre_grad_nodes": ["add"],
-                }
-            }
-        }
-        with self._kernel_information_jsons(kernel_information_jsons):
-            trace = {
-                "traceEvents": [
-                    {
-                        "name": "Torch-Compiled Region: 0/0",
-                        "cat": "cpu_op",
-                        "ph": "X",
-                        "ts": 0,
-                        "dur": 100,
-                        "tid": 1,
-                        "args": {},
-                    },
-                    {
-                        "name": kernel_name,
-                        "cat": "cpu_op",
-                        "ph": "X",
-                        "ts": 10,
-                        "dur": 5,
-                        "tid": 1,
-                        "args": {"External id": 6},
-                    },
-                    {
-                        "name": kernel_name,
-                        "cat": "kernel",
-                        "ph": "X",
-                        "ts": 20,
-                        "dur": 3,
-                        "tid": 2,
-                        "args": {"External id": 6},
-                    },
-                ]
-            }
-
-            prof = _profile()
-            updated_trace = prof.add_to_chrome_trace(trace)
-
-            self.assertEqual(updated_trace["traceEvents"][2]["args"]["stack"], stack)
-
-    def test_add_inductor_kernel_stack_to_chrome_trace_by_external_id_without_triton_kernel_name(
-        self,
-    ):
-        kernel_name = "triton_poi_fused_add_0"
-        stack = ["model.py:7 in forward"]
-        kernel_information_jsons = {
-            str(("Torch-Compiled Region: 0/0", False)): {
-                kernel_name + ":1": {
-                    "stack_traces": stack,
-                    "post_grad_nodes": ["add"],
-                    "pre_grad_nodes": ["add"],
-                }
-            }
-        }
-        with self._kernel_information_jsons(kernel_information_jsons):
-            trace = {
-                "traceEvents": [
-                    {
-                        "name": "Torch-Compiled Region: 0/0",
-                        "cat": "cpu_op",
-                        "ph": "X",
-                        "ts": 0,
-                        "dur": 100,
-                        "tid": 1,
-                        "args": {},
-                    },
-                    {
-                        "name": "hipLaunchKernel",
-                        "cat": "cuda_runtime",
-                        "ph": "X",
-                        "ts": 10,
-                        "dur": 5,
-                        "tid": 1,
-                        "args": {"External id": 6},
-                    },
-                    {
-                        "name": "kernel",
-                        "cat": "kernel",
-                        "ph": "X",
-                        "ts": 20,
-                        "dur": 3,
-                        "tid": 2,
-                        "args": {"External id": 6},
-                    },
-                ]
-            }
-
-            prof = _profile()
-            updated_trace = prof.add_to_chrome_trace(trace)
-
-            self.assertEqual(updated_trace["traceEvents"][2]["args"]["stack"], stack)
-
-    def test_add_inductor_kernel_stack_to_chrome_trace_skips_missing_stack(self):
-        kernel_name = "triton_poi_fused_add_0"
-        kernel_information_jsons = {
-            str(("Torch-Compiled Region: 0/0", False)): {
-                kernel_name: {
-                    "post_grad_nodes": ["add"],
-                    "pre_grad_nodes": ["add"],
-                }
-            }
-        }
-        with self._kernel_information_jsons(kernel_information_jsons):
-            trace = {
-                "traceEvents": [
-                    {
-                        "name": "Torch-Compiled Region: 0/0",
-                        "cat": "cpu_op",
-                        "ph": "X",
-                        "ts": 0,
-                        "dur": 100,
-                        "tid": 1,
-                        "args": {},
-                    },
-                    {
-                        "name": "aten::add",
-                        "cat": "cpu_op",
-                        "ph": "X",
-                        "ts": 10,
-                        "dur": 5,
-                        "tid": 1,
-                        "args": {},
-                    },
-                    {
-                        "name": "ac2g",
-                        "cat": "ac2g",
-                        "ph": "s",
-                        "id": 0,
-                        "ts": 15,
-                        "tid": 1,
-                        "args": {},
-                    },
-                    {
-                        "name": kernel_name,
-                        "cat": "kernel",
-                        "ph": "X",
-                        "ts": 20,
-                        "dur": 7,
-                        "tid": 2,
-                        "args": {},
-                    },
-                    {
-                        "name": "ac2g",
-                        "cat": "ac2g",
-                        "ph": "f",
-                        "id": 0,
-                        "ts": 27,
-                        "tid": 2,
-                        "args": {},
-                    },
-                ]
-            }
-
-            prof = _profile()
-            updated_trace = prof.add_to_chrome_trace(trace)
-
-            self.assertNotIn("stack", updated_trace["traceEvents"][3]["args"])
-
-    def test_add_inductor_kernel_stack_to_chrome_trace_backward_quoted_region(self):
-        compile_name = "Torch-Compiled Region: odd', True) name"
-        kernel_name = "triton_poi_fused_mul_0"
-        stack = ["model.py:9 in backward"]
-        kernel_information_jsons = {
-            str((compile_name + "_backward_0", True)): {
-                kernel_name: {
-                    "stack_traces": stack,
-                    "post_grad_nodes": ["mul"],
-                    "pre_grad_nodes": ["mul"],
-                }
-            }
-        }
-        with self._kernel_information_jsons(kernel_information_jsons):
-            trace = {
-                "traceEvents": [
-                    {
-                        "name": compile_name,
-                        "cat": "cpu_op",
-                        "ph": "X",
-                        "ts": 0,
-                        "dur": 100,
-                        "tid": 1,
-                        "args": {},
-                    },
-                    {
-                        "name": "aten::add",
-                        "cat": "cpu_op",
-                        "ph": "X",
-                        "ts": 10,
-                        "dur": 5,
-                        "tid": 1,
-                        "args": {},
-                    },
-                    {
-                        "name": "fwdbwd",
-                        "cat": "fwdbwd",
-                        "ph": "s",
-                        "id": 0,
-                        "ts": 16,
-                        "tid": 1,
-                        "args": {},
-                    },
-                    {
-                        "name": "CompiledFunctionBackward",
-                        "cat": "cpu_op",
-                        "ph": "X",
-                        "ts": 200,
-                        "dur": 100,
-                        "tid": 1,
-                        "args": {},
-                    },
-                    {
-                        "name": "fwdbwd",
-                        "cat": "fwdbwd",
-                        "ph": "f",
-                        "id": 0,
-                        "ts": 201,
-                        "tid": 1,
-                        "args": {},
-                    },
-                    {
-                        "name": "aten::mul",
-                        "cat": "cpu_op",
-                        "ph": "X",
-                        "ts": 210,
-                        "dur": 5,
-                        "tid": 1,
-                        "args": {"External id": 6},
-                    },
-                    {
-                        "name": kernel_name,
-                        "cat": "kernel",
-                        "ph": "X",
-                        "ts": 220,
-                        "dur": 3,
-                        "tid": 2,
-                        "args": {"External id": 6},
-                    },
-                ]
-            }
-
-            prof = _profile()
-            updated_trace = prof.add_to_chrome_trace(trace)
-
-            self.assertEqual(updated_trace["traceEvents"][6]["args"]["stack"], stack)
-
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
@@ -1209,18 +758,20 @@ class TestProfiler(TestCase):
             "TOP(C)::forward.",
         ]
         with TemporaryFileName(mode="w+") as fname:
-            with profile(
-                activities=[torch.profiler.ProfilerActivity.CPU],
-                with_modules=True,
-            ) as prof:
-                model(input_a, input_b)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                with profile(
+                    activities=[torch.profiler.ProfilerActivity.CPU],
+                    with_modules=True,
+                ) as prof:
+                    model(input_a, input_b)
             prof.export_chrome_trace(fname)
             with open(fname) as f:
                 trace = json.load(f)
                 if "traceEvents" not in trace:
                     raise AssertionError("Expected 'traceEvents' in trace")
                 events = trace["traceEvents"]
-                found_memory_events = False
+                checked = 0
                 for evt in events:
                     if "name" not in evt:
                         raise AssertionError("Expected 'name' in event")
@@ -1229,10 +780,14 @@ class TestProfiler(TestCase):
                         if "Module Hierarchy" in evt["args"]:
                             hierarchy = evt["args"]["Module Hierarchy"]
                             if op_name in op_to_module_hierarchy:
+                                checked += 1
                                 if hierarchy not in op_to_module_hierarchy[op_name]:
                                     raise AssertionError(
                                         f"Expected hierarchy '{hierarchy}' in {op_to_module_hierarchy[op_name]}"
                                     )
+                # Without this the comparisons above are vacuous: a trace with no
+                # module hierarchy at all satisfies every branch.
+                self.assertGreater(checked, 0)
 
     def test_high_level_trace(self):
         """Checks that python side high level events are recorded."""
@@ -1403,6 +958,26 @@ class TestProfiler(TestCase):
                 if not is_int:
                     raise AssertionError("Invalid stacks record")
 
+    def test_export_chrome_trace_escapes_names(self):
+        from torch.autograd.profiler_util import EventList, FunctionEvent
+
+        tricky_name = 'aten::mm C:\\src\\"foo".cpp'
+        evt = FunctionEvent(
+            id=0,
+            name=tricky_name,
+            trace_name=tricky_name,
+            thread=0,
+            start_us=0,
+            end_us=10,
+        )
+        event_list = EventList([evt])
+
+        with TemporaryFileName(mode="w+") as fname:
+            event_list.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+        self.assertEqual(trace[0]["name"], tricky_name)
+
     def test_experimental_config_pickle(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", BytesWarning)
@@ -1449,6 +1024,23 @@ class TestProfiler(TestCase):
                     experimental_config=cfg,
                 ):
                     pass
+
+    def test_adjust_profiler_step_deprecated(self):
+        # adjust_profiler_step is a deprecated no-op: passing it must warn with
+        # FutureWarning and not error.
+        with self.assertWarnsRegex(FutureWarning, "adjust_profiler_step"):
+            with profile(
+                activities=[ProfilerActivity.CPU],
+                experimental_config=_ExperimentalConfig(adjust_profiler_step=True),
+            ):
+                pass
+
+    def test_with_modules_deprecated(self):
+        # with_modules only collects data for TorchScript models and is on its
+        # way out: passing it must warn with FutureWarning and not error.
+        with self.assertWarnsRegex(FutureWarning, "with_modules is deprecated"):
+            with profile(activities=[ProfilerActivity.CPU], with_modules=True):
+                torch.ones(1)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @parametrize("use_cuda", [False, True])
@@ -2593,23 +2185,6 @@ class TestProfilerDevice(TestCase):
             profiler_stats.function_events_build_tree_call_duration_us, 0
         )
 
-    def _step_helper_func(self, prof):
-        time.sleep(0.1)
-        torch.randn(1, 3, 224, 224)
-        prof.step()
-
-    def _partial_overlap(self, prof_step, step_helper_func):
-        p_start = prof_step["ts"]
-        p_end = prof_step["ts"] + prof_step["dur"]
-        h_start = step_helper_func["ts"]
-        h_end = step_helper_func["ts"] + step_helper_func["dur"]
-
-        if p_start < h_start and p_end < h_end and p_end > h_start:
-            return True
-        if p_start > h_start and p_start < h_end and p_end > h_end:
-            return True
-        return False
-
     def _check_all_gpu_present(self, gpu_dict, max_gpu_count):
         for i in range(max_gpu_count):
             self.assertEqual(gpu_dict["GPU " + str(i)], 1)
@@ -3151,39 +2726,6 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
         self._test_chrome_trace_basic_helper(device)
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
-    def test_cpu_annotation_overlap(self, device):
-        device_type = device.split(":")[0]
-        with torch.profiler.profile(
-            activities=get_profiler_activities(device_type),
-            record_shapes=True,
-            with_stack=True,
-            schedule=torch.profiler.schedule(wait=0, warmup=0, active=5, repeat=1),
-            experimental_config=torch._C._profiler._ExperimentalConfig(
-                adjust_profiler_step=True
-            ),
-        ) as prof:
-            for _ in range(5):
-                self._step_helper_func(prof)
-        with TemporaryFileName(mode="w+") as fname:
-            prof.export_chrome_trace(fname)
-            prof_steps = []
-            step_helper_funcs = []
-            with open(fname) as f:
-                report = json.load(f)
-                for event in report["traceEvents"]:
-                    if "ProfilerStep" in event["name"]:
-                        prof_steps.append(event)
-                    if "step_helper_func" in event["name"]:
-                        step_helper_funcs.append(event)
-            self.assertEqual(len(prof_steps), 5)
-            self.assertEqual(len(step_helper_funcs), 5)
-            for i in range(len(step_helper_funcs)):
-                for j in range(len(step_helper_funcs)):
-                    self.assertTrue(
-                        not self._partial_overlap(prof_steps[i], step_helper_funcs[j])
-                    )
-
-    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_user_annotation(self, device):
         device_type = device.split(":")[0]
         with profile(activities=supported_activities()) as p:
@@ -3470,6 +3012,38 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 "Error: No kernel events in trace contained grid/block metadata",
             )
 
+    @onlyAccelerator
+    @skipIfRocm(msg="ROCm does not emit OVERHEAD activity records")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_overhead_activities_own_no_device_time(self, device):
+        """
+        OVERHEAD events (profiler-internal host cost) must report zero device time
+        """
+        device_type = device.split(":")[0]
+        # Skip warm-up: the first traced launches are the ones that emit overhead records.
+        with profile(activities=get_profiler_activities(device_type)) as prof:
+            self.payload(device=device)
+
+        events = prof.events()
+        total_device_time = sum(
+            e.self_device_time_total for e in events if e.device_type != DeviceType.CPU
+        )
+
+        overhead_events = [e for e in events if e.activity_type == "overhead"]
+        self.assertGreater(
+            len(overhead_events), 0, "Expected at least one overhead event"
+        )
+        for e in overhead_events:
+            self.assertEqual(e.self_device_time_total, 0)
+            self.assertEqual(e.device_time_total, 0)
+
+        # No single row may own more device time than the whole trace spent on device.
+        for e in events:
+            self.assertLessEqual(
+                e.self_device_time_total,
+                total_device_time,
+            )
+
 
 instantiate_device_type_tests(TestProfilerDevice, globals())
 
@@ -3696,6 +3270,24 @@ class TestExperimentalUtils(TestCase):
             torch.add(1, 5)
 
         check_metadata(prof, op_name="aten::add", metadata_key="Ev Idx")
+
+    def test_function_event_metadata(self):
+        from torch.autograd.profiler_util import FunctionEvent
+
+        extra_meta = {"grid": "[1, 2, 3]"}
+        typed_metadata = {"grid": [1, 2, 3], "new metadata": {"nested": True}}
+        event = FunctionEvent(
+            1,
+            "test",
+            1,
+            0,
+            1,
+            extra_meta=extra_meta,
+            typed_metadata=typed_metadata,
+        )
+
+        self.assertEqual(event.metadata, typed_metadata)
+        self.assertEqual(event.event_metadata.grid, [1, 2, 3])
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
@@ -4801,6 +4393,65 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
                 expected_meta,
                 lambda msg: f"{msg}\n{key}: structured metadata differs between events() and Chrome trace JSON",
             )
+
+    def test_typed_metadata_matches_chrome_trace(self):
+        # Match events to Chrome trace records by identity (via name, cat, external/correlation id),
+        # then verify every metadata field has the same value in the matching trace record.
+        target_cats = ("cuda_runtime", "gpu_memcpy", "kernel")
+
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            experimental_config=torch._C._profiler._ExperimentalConfig(
+                expose_kineto_event_metadata=True
+            ),
+        ) as prof:
+            x = torch.randn(10, 10, device="cuda")
+            y = torch.mm(x, x)
+            z = x + y
+            z.cpu()
+
+        event_records = {}
+        for event in prof.events():
+            if (
+                event.external_id == 0
+                or event.id == 0
+                or event.activity_type not in target_cats
+            ):
+                continue
+            key = (event.name, event.activity_type, event.external_id, event.id)
+            self.assertNotIn(key, event_records)
+            event_records[key] = dict(event.metadata or {})
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+
+        json_records = {}
+        for trace_event in trace["traceEvents"]:
+            category = trace_event.get("cat", "")
+            args = trace_event.get("args", {})
+            external_id = args.get("External id")
+            correlation = args.get("correlation")
+            if (
+                external_id is None
+                or correlation is None
+                or category not in target_cats
+            ):
+                continue
+            key = (trace_event["name"], category, external_id, correlation)
+            self.assertNotIn(key, json_records)
+            json_records[key] = args
+
+        self.assertGreater(len(json_records), 0)
+        self.assertEqual(set(event_records), set(json_records))
+
+        for key, trace_metadata in json_records.items():
+            typed_metadata = event_records[key]
+            self.assertGreater(len(typed_metadata), 0)
+            self.assertEqual(set(typed_metadata) - set(trace_metadata), set())
+            for field, value in typed_metadata.items():
+                self.assertEqual(value, trace_metadata[field])
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")

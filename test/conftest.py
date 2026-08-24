@@ -116,13 +116,8 @@ class HardwareClassificationPytestPlugin:
     def _resolve_hw_classification(hw_classification):
         if hw_classification is None:
             return None
-        # Temporary workaround needed until HardwareClassification makes it into a
-        # nightly because main / PR's tests are sometimes run against the previous
-        # day's nightly which won't have this class.
-        try:
-            from torch.testing._internal.common_utils import HardwareClassification
-        except ImportError:
-            return None
+        from torch.testing._internal.common_utils import HardwareClassification
+
         return {HardwareClassification[name] for name in hw_classification}
 
     def pytest_collection_modifyitems(self, items):

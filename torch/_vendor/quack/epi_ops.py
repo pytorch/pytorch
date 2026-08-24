@@ -157,6 +157,14 @@ class EpiSmemBytes(NamedTuple):
         return self.__add__(other)
 
 
+LOCAL_REDUCE_FRAGMENT_WIDTH = 32
+
+
+def grouped_local_reduce_uses_smem(axis: int, group: int) -> bool:
+    """Return whether a grouped-M reduction crosses lane fragments."""
+    return axis == 0 and group > LOCAL_REDUCE_FRAGMENT_WIDTH
+
+
 class EpiOp:
     """Base class for composable epilogue operations."""
 
@@ -555,6 +563,39 @@ class RowVecTupleLoad(VecTupleLoad):
 
 class ColVecTupleLoad(VecTupleLoad):
     vec_op_cls = CapturedColVecLoad
+
+
+class CapturedScalarLoad(EpiOp):
+    """Loads a captured (1,)-shaped tensor's element once per tile. No smem."""
+
+    def param_fields(self):
+        return [(self.name, object, None)]
+
+    def to_params(self, gemm, args):
+        return {self.name: getattr(args, self.name)}
+
+    @cute.jit
+    def begin(self, gemm, param, smem_tensor, ctx):
+        return param.load()
+
+
+class ScalarTupleLoad(EpiOp):
+    """Loads a tuple of captured scalar tensors once per tile. No smem."""
+
+    def param_fields(self):
+        return [(self.name, object, None)]
+
+    def to_params(self, gemm, args):
+        return {self.name: getattr(args, self.name)}
+
+    @cute.jit
+    def begin(self, gemm, param, smem_tensor, ctx):
+        values = []
+        for i, tensor in enumerate(param):
+            values.append(
+                CapturedScalarLoad(f"{self.name}{i}").begin(gemm, tensor, None, ctx)
+            )
+        return tuple(values)
 
 
 class TileStore(EpiOp):
@@ -1100,6 +1141,9 @@ class VecReduce(EpiOp):
         warps = warp_shape_mnk[self._reduce_dim()] if warp_shape_mnk is not None else 1
         return max(warps - 1, 0)
 
+    def _uses_smem(self, gemm):
+        return True
+
     def smem_bytes(self, arg_tensor, cta_tile_shape_mnk, epi_tile, warp_shape_mnk=None):
         smem_warps = self._smem_warps(warp_shape_mnk)
         if smem_warps == 0:
@@ -1110,14 +1154,14 @@ class VecReduce(EpiOp):
 
     def smem_struct_field(self, gemm, params):
         smem_warps = self._smem_warps(gemm.epi_smem_warp_shape_mnk())
-        if smem_warps == 0:
+        if smem_warps == 0 or not self._uses_smem(gemm):
             return None
         size = self._tile_size(gemm.cta_tile_shape_mnk) * smem_warps
         return (f"s_{self.name}", cute.struct.Align[cute.struct.MemRange[Float32, size], 16])
 
     def get_smem_tensor(self, gemm, params, storage_epi):
         smem_warps = self._smem_warps(gemm.epi_smem_warp_shape_mnk())
-        if smem_warps == 0:
+        if smem_warps == 0 or not self._uses_smem(gemm):
             return None
         return getattr(storage_epi, f"s_{self.name}").get_tensor(
             cute.make_layout((self._tile_size(gemm.cta_tile_shape_mnk), smem_warps))
@@ -1146,6 +1190,7 @@ class _GroupedLocalReduceParams(NamedTuple):
     combine_fn: object
     finalize_fn: object
     feeds_main: bool
+    logical_n: object
 
 
 class _GroupedLocalReduceFeedState(NamedTuple):
@@ -1192,40 +1237,34 @@ def grouped_rowvec_reduce_value(gemm, tRS_rInput, row_state, combine_fn, finaliz
 
 
 class GroupedLocalReduce(VecReduce):
-    """Store or broadcast generated grouped local-reduce values."""
+    """Store or broadcast grouped reductions using the main output's M/N bounds."""
 
-    dim = 0
+    dim = 1
     epi_m_major_preference = -1
+
+    def _uses_smem(self, gemm):
+        return grouped_local_reduce_uses_smem(
+            gemm.local_reduce_axis, gemm.local_reduce_group
+        )
 
     def smem_bytes(self, arg_tensor, cta_tile_shape_mnk, epi_tile, warp_shape_mnk=None):
         return EpiSmemBytes()
 
-    def smem_struct_field(self, gemm, params):
-        group = gemm.local_reduce_group
-        axis = gemm.local_reduce_axis
-        smem_warps = max(gemm.epi_smem_warp_shape_mnk()[0] - 1, 0)
-        if axis == 0 and group > 32 and smem_warps > 0:
-            size = gemm.cta_tile_shape_mnk[1] * smem_warps
-            return (f"s_{self.name}", cute.struct.Align[cute.struct.MemRange[Float32, size], 16])
-        return None
-
-    def get_smem_tensor(self, gemm, params, storage_epi):
-        group = gemm.local_reduce_group
-        axis = gemm.local_reduce_axis
-        smem_warps = max(gemm.epi_smem_warp_shape_mnk()[0] - 1, 0)
-        if axis == 0 and group > 32 and smem_warps > 0:
-            return getattr(storage_epi, f"s_{self.name}").get_tensor(
-                cute.make_layout((gemm.cta_tile_shape_mnk[1], smem_warps))
-            )
-        return None
-
     def to_params(self, gemm, args):
+        tensor = getattr(args, self.name)
+        reference_output = (
+            args.mAuxOut[0] if args.tensor_epilogue_returns_aux else args.mAuxOut
+        )
+        if tensor is not None and args.local_reduce_output_layout is not None:
+            tensor = args.local_reduce_output_layout(tensor)
         return {
             self.name: _GroupedLocalReduceParams(
-                getattr(args, self.name),
+                tensor,
                 args.local_reduce_combine_fn,
                 args.local_reduce_finalize_fn,
                 args.local_reduce_feeds_main,
+                cute.size(reference_output, mode=[1])
+                * gemm.grouped_n_contract_group,
             )
         }
 
@@ -1239,9 +1278,21 @@ class GroupedLocalReduce(VecReduce):
             tile = tile_N if const_expr(axis == 1) else tile_M
             assert group != 0 and group <= tile
             assert tile % group == 0
+            tiled_copy = (
+                ctx.tiled_copy_t2r
+                if ctx.tiled_copy_t2r is not None
+                else ctx.tiled_copy_r2s
+            )
+            if const_expr(gemm.arch == 100 and axis == 1 and group == tile_N):
+                _, warp_layout_MN = _get_lane_warp_layouts(
+                    tiled_copy, ctx.tiled_copy_t2r is None
+                )
+                warps_in_N = const_expr(cute.size(warp_layout_MN, mode=[1]))
+                assert warps_in_N == 1, (
+                    "full-N GroupedLocalReduce requires one epilogue N-warp partition"
+                )
             if const_expr(param.feeds_main):
                 assert axis == 0
-                tiled_copy = ctx.tiled_copy_t2r if ctx.tiled_copy_t2r is not None else ctx.tiled_copy_r2s
                 lane_layout_MN, _ = _get_lane_warp_layouts(
                     tiled_copy, ctx.tiled_copy_t2r is None
                 )
@@ -1320,11 +1371,16 @@ class GroupedLocalReduce(VecReduce):
             tDrReduce_flt = cute.filter_zeros(tDrReduce_cur)
             tDcD_flt = cute.filter_zeros(tDcD_cur)
             batch_idx = tile_coord_mnkl[3]
-            limit_m = min(
-                varlen_manager.len_m(batch_idx) - tile_coord_mnkl[0] * tile_M,
-                tile_M,
+            logical_m = varlen_manager.len_m(batch_idx)
+            limit_m = min(logical_m - tile_coord_mnkl[0] * tile_M, tile_M)
+            limit_n = min(
+                param.logical_n - tile_coord_mnkl[1] * tile_N,
+                tile_N,
             )
-            limit_n = min(cute.size(param_tensor, mode=[2]) - tile_coord_mnkl[1] * tile_N, tile_N)
+            if const_expr(axis == 1):
+                limit_groups = param.logical_n // group
+            else:
+                limit_groups = logical_m // group
             if const_expr(axis == 1):
                 local_fragment_n = const_expr(cute.size(tDrReduce_cur.shape, mode=[0]))
             if const_expr(axis == 1 and group > local_fragment_n):
@@ -1334,11 +1390,6 @@ class GroupedLocalReduce(VecReduce):
                 fragments_per_group = const_expr(group // local_fragment_n)
                 if const_expr((epi_coord[1] + 1) % fragments_per_group == 0):
                     group_start_epi_n = const_expr(epi_coord[1] + 1 - fragments_per_group)
-                    limit_groups = (
-                        param_tensor.shape[2]
-                        if not varlen_manager.varlen_m
-                        else param_tensor.shape[1]
-                    )
                     if const_expr(not varlen_manager.varlen_m):
                         mReduce = param_tensor[batch_idx, None, None]
                     else:
@@ -1389,6 +1440,7 @@ class GroupedLocalReduce(VecReduce):
                 )
                 lanes_in_M = cute.size(lane_layout_MN, mode=[0])
                 lanes_in_N = cute.size(lane_layout_MN, mode=[1])
+                assert lanes_in_M == LOCAL_REDUCE_FRAGMENT_WIDTH
                 assert group <= tile_M
                 if const_expr(group <= lanes_in_M):
                     assert lanes_in_M % group == 0
@@ -1410,7 +1462,7 @@ class GroupedLocalReduce(VecReduce):
                                 ),
                             )
                             reduction_rows = reduction_rows // 2
-                if const_expr(group > lanes_in_M):
+                if const_expr(grouped_local_reduce_uses_smem(axis, group)):
                     sReduce = state[1]
                     assert sReduce is not None
                     warp_M = warp_layout_MN[0]
@@ -1420,11 +1472,6 @@ class GroupedLocalReduce(VecReduce):
                     assert groups_per_cta * group_warps <= warps_in_M
                     warp_idx = cute.arch.make_warp_uniform(tidx // cute.arch.WARP_SIZE)
                     warp_m_idx = warp_layout_MN.get_hier_coord(warp_idx)[0]
-                    limit_groups = (
-                        param_tensor.shape[1]
-                        if not varlen_manager.varlen_m
-                        else param_tensor.shape[0]
-                    )
                     if const_expr(not varlen_manager.varlen_m):
                         mReduce = param_tensor[batch_idx, None, None]
                     else:
@@ -1472,11 +1519,9 @@ class GroupedLocalReduce(VecReduce):
                     gemm.epilogue_barrier.arrive_and_wait()
                     return
             if const_expr(axis == 1):
-                limit_groups = param_tensor.shape[2] if not varlen_manager.varlen_m else param_tensor.shape[1]
                 tile_shape = (tile_M, groups_per_cta)
                 tile_coord = (tile_coord_mnkl[0], tile_coord_mnkl[1])
             else:
-                limit_groups = param_tensor.shape[1] if not varlen_manager.varlen_m else param_tensor.shape[0]
                 tile_shape = (groups_per_cta, tile_N)
                 tile_coord = (tile_coord_mnkl[0], tile_coord_mnkl[1])
             if const_expr(not varlen_manager.varlen_m):
@@ -1491,6 +1536,7 @@ class GroupedLocalReduce(VecReduce):
                 axis == 0
                 and param_tensor.element_type == Float32
                 and param_tensor.iterator.alignment >= 16
+                and param_tensor.stride[2] == 1
                 and cute.size(tDrReduce_flt) % 4 == 0
                 and tile_N % 4 == 0
             ):

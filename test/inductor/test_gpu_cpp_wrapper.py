@@ -153,8 +153,12 @@ class TestGpuWrapper(InductorTestCase):
         debug_sync = IndentedBuffer()
         wrapper.generate_debug_sync(debug_sync)
         code = debug_sync.getvalue()
-        self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
-        self.assertIn("DeviceSynchronize", code)
+        if torch.version.hip is not None:
+            self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
+            self.assertIn("DeviceSynchronize", code)
+        else:
+            self.assertIn("CUDA_DRIVER_CHECK", code)
+            self.assertIn("CtxSynchronize", code)
         self.assertNotIn("torch.cuda.synchronize()", code)
 
         wrapper.prefix = IndentedBuffer()
@@ -166,8 +170,12 @@ class TestGpuWrapper(InductorTestCase):
         ):
             wrapper._codegen_entry_impl_prologue()
         code = wrapper.prefix.getvalue()
-        self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
-        self.assertIn("DeviceSynchronize", code)
+        if torch.version.hip is not None:
+            self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
+            self.assertIn("DeviceSynchronize", code)
+        else:
+            self.assertIn("CUDA_DRIVER_CHECK", code)
+            self.assertIn("CtxSynchronize", code)
         self.assertNotIn("torch.cuda.synchronize()", code)
 
         wrapper.device = "xpu"
