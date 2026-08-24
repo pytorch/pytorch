@@ -565,9 +565,6 @@ class TestFP8TypesCuda(TestCase):
         self.assertEqual(actual, expected)
 
     @unittest.skipIf(not HAS_TRITON, "requires triton")
-    @skipCPUIf(True, "CUDA-specific test")
-    @skipMPSIf(True, "CUDA-specific test")
-    @skipXPUIf(True, "CUDA-specific test")
     @skipIfRocm
     def test_cuda_fp8_cast_fallback_for_unsupported_triton_dtype(self, device):
         def fp8_cast(x, dtype):
