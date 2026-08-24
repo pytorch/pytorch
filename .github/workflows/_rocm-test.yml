@@ -94,8 +94,8 @@ jobs:
         with:
           no-sudo: true
 
-      # - name: Setup ROCm
-      #   uses: ./.github/actions/setup-rocm
+      - name: Setup ROCm
+        uses: $/.github/actions/setup-rocm
 
       - name: Runner check GPU count (distributed jobs)
         if: ${{ contains(matrix.config, 'distributed') }}
