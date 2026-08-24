@@ -1329,7 +1329,7 @@ def enable_activation_quantization(
                 continue
             node.meta["saved_for_quantization"] = True
             node.meta["dequant_type"] = node.meta["val"].dtype
-            # some of the fwd outputs and bwd inputs are not share the same object
+            # some of the fwd outputs and bwd inputs do not share the same object
             bwd_module_inputs[node.name].meta["saved_for_quantization"] = True
             bwd_module_inputs[node.name].meta["dequant_type"] = node.meta["val"].dtype
             should_perform_fp8_quant = True

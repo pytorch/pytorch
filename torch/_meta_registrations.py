@@ -4829,7 +4829,15 @@ def shift_dtype_check(fn_name, self, val):
         )
 
 
-@register_meta([aten.__rshift__.Tensor, aten.__rshift__.Scalar])
+@register_meta(
+    [
+        aten.__rshift__.Tensor,
+        aten.__rshift__.Scalar,
+        aten.__rshift__.Scalar_out,
+        aten.__rshift__.Tensor_out,
+    ]
+)
+@out_wrapper(exact_dtype=True)
 def meta_rshifts(self, other):
     shift_dtype_check("rshift", self, other)
     return elementwise_meta(
@@ -4837,7 +4845,15 @@ def meta_rshifts(self, other):
     )
 
 
-@register_meta([aten.__lshift__.Tensor, aten.__lshift__.Scalar])
+@register_meta(
+    [
+        aten.__lshift__.Tensor,
+        aten.__lshift__.Scalar,
+        aten.__lshift__.Scalar_out,
+        aten.__lshift__.Tensor_out,
+    ]
+)
+@out_wrapper(exact_dtype=True)
 def meta_lshifts(self, other):
     shift_dtype_check("lshift", self, other)
     return elementwise_meta(
@@ -7082,6 +7098,7 @@ def meta__efficient_attention_backward(
     key: Tensor,
     value: Tensor,
     bias: Tensor | None,
+    out: Tensor,
     cu_seqlens_q: Tensor | None,
     cu_seqlens_k: Tensor | None,
     max_seqlen_q: torch.SymInt,
@@ -7094,6 +7111,7 @@ def meta__efficient_attention_backward(
     bias_requires_grad: bool,
     scale: float | None = None,
     num_splits_key: int | None = None,
+    window_size: int | None = None,
     shared_storage_dqdkdv: bool = False,
 ):
     if shared_storage_dqdkdv:
@@ -7102,7 +7120,7 @@ def meta__efficient_attention_backward(
             lambda: "seqlen must match for `shared_storage_dqdkdv",
         )
         torch._check(
-            query.shape[3] == key.shape[3],
+            query.shape[3] == key.shape[3] == value.shape[3],
             lambda: "embedding dim must match for `shared_storage_dqdkdv",
         )
         torch._check(
@@ -8206,7 +8224,7 @@ def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
 
 # From aten/src/ATen/native/UnaryOps.cpp
 @register_meta([aten.nan_to_num.default, aten.nan_to_num.out])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def nan_to_num(self, nan=None, posinf=None, neginf=None):
     return torch.empty_like(self)
 
