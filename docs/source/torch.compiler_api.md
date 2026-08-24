@@ -77,13 +77,12 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       With ``tracer="dynamo"``, every tuple in ``example_inputs`` is executed during
       capture. Recompilations become guarded variants in the artifact, including
       automatically dynamic graphs produced when dimensions vary across examples. The
-      artifact drops a serialized guard record only when doing so preserves how every
-      example matches the captured variants. This filtering is at guard-record
-      granularity, so a retained composite record can still contain invariant leaf
-      checks. Conditions removed from the dispatch guards become unchecked caller
-      assumptions; changing one from all capture examples can silently miscompute. The
-      loaded artifact raises only when a call fails every retained guard set, and never
-      compiles a new variant. Graph breaks are captured as Dynamo resume frames.
+      artifact retains guards derived from runtime inputs and drops an environment guard
+      only when doing so preserves how every example matches the captured variants. The
+      environment is therefore a caller-provided invariant, while input changes remain
+      responsible for variant dispatch. The loaded artifact raises when a call fails
+      every retained guard set, and never compiles a new variant. Graph breaks are
+      captured as Dynamo resume frames.
       Closure-free Python functions wrapped with ``torch._dynamo.disable`` are embedded
       and execute eagerly between compiled graph segments. Global names left in
       transformed bytecode must resolve to recursive literal values or independently
@@ -101,7 +100,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       capture differentiable graphs. Each compiled segment contains readable Inductor
       source for both its AOTAutograd forward and backward, bridged by an emitted
       ``torch.autograd.Function``. Outputs retain their ``grad_fn``, so a later
-      ``backward()`` executes the captured backward kernels. Training works across the
+      ``backward()`` executes the captured backward kernels. Training works across
       captured recompilations and graph breaks. Only first-order backward is supported;
       tensor-subclass and ``BackwardState`` training graphs are rejected.
 

@@ -15,18 +15,17 @@ that computes the wrong thing.
 With ``tracer="dynamo"``, precompile executes every tuple in ``example_inputs`` and
 captures the guarded specializations, recompilations, and graph-break resume frames
 Dynamo produces. Closure-free functions wrapped with ``torch._dynamo.disable`` are
-embedded for eager execution between compiled segments. The serialized guard records
-are minimized while preserving how every example dispatches among the captured
-variants. Conditions removed this way are unchecked caller assumptions after loading,
-so changing one can silently miscompute. The artifact never compiles after loading; a
-call that fails every retained guard set raises. Compiled graphs and kernels remain
-Python source, while guard trees, transformed entry/resume bytecode, and disabled-
-function bytecode are stored as opaque inline data.
+embedded for eager execution between compiled segments. Guards derived from runtime
+locals are retained for dispatch; guards covering the Python environment may be dropped
+because that environment is a caller-provided invariant. The artifact never compiles
+after loading; a call that fails every retained guard set raises. Compiled graphs and
+kernels remain Python source, while guard trees, transformed entry/resume bytecode, and
+disabled-function bytecode are stored as opaque inline data.
 
-With ``tracer="dynamo", training=True`` (inductor backend only), every compiled segment
+With ``tracer="dynamo", training=True`` (inductor backend only), every compiled graph
 contains AOTAutograd's forward and backward as readable Inductor source. The served
 output retains its ``grad_fn`` and a later ``backward()`` executes those captured
-backward kernels, including across captured recompilations and graph breaks.
+backward kernels across captured recompilations and graph breaks.
 
 ``precompile`` returns a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
@@ -1412,7 +1411,7 @@ def _filter_dynamo_guards(
     guarded_codes: Sequence[Any],
     example_scopes: Sequence[dict[str, object]],
 ) -> list[bytes]:
-    """Minimize guard records while preserving every example's match vector."""
+    """Drop environment guards while preserving every local-derived guard."""
     import dataclasses
     import functools
 
@@ -1421,6 +1420,14 @@ def _filter_dynamo_guards(
     from torch._dynamo.package import load_guard_manager, load_guards_state
     from torch._guards import GuardsSet
     from torch.utils._ordered_set import OrderedSet
+
+    local_roots = {f"L[{name!r}]" for scope in example_scopes for name in scope}
+
+    def is_local_source(source: str) -> bool:
+        return any(
+            source == root or source.startswith((f"{root}.", f"{root}["))
+            for root in local_roots
+        )
 
     def fresh_guard(guard: Any, *, final: bool = False) -> Any:
         create_fn = guard.create_fn
@@ -1487,6 +1494,11 @@ def _filter_dynamo_guards(
             )
 
         def try_drop(records: list[Any], index: int) -> bool:
+            if records is kept_aot_guards or records is kept_key_order:
+                return False
+            guard = records[index]
+            if not guard.name or is_local_source(guard.name):
+                return False
             candidate = records[:index] + records[index + 1 :]
             trial_guards = candidate if records is kept_guards else kept_guards
             trial_aot = candidate if records is kept_aot_guards else kept_aot_guards
@@ -1707,6 +1719,17 @@ def _precompile_dynamo(
             "capture local variables."
         )
 
+    capture_target = types.FunctionType(
+        target.__code__.replace(),
+        target.__globals__,
+        target.__name__,
+        target.__defaults__,
+        target.__closure__,
+    )
+    capture_target.__kwdefaults__ = target.__kwdefaults__
+    capture_target.__module__ = target.__module__
+    capture_target.__qualname__ = target.__qualname__
+
     def is_literal(value: object) -> bool:
         if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):
             return True
@@ -1839,8 +1862,7 @@ def _precompile_dynamo(
 
     _DYNAMO_COMPILE_LOCK.acquire()
     try:
-        torch._dynamo.reset()
-        package = CompilePackage(fn)
+        package = CompilePackage(capture_target)
 
         unsupported_capture_guards: set[tuple[str, str]] = set()
 
@@ -1866,7 +1888,7 @@ def _precompile_dynamo(
             guard_filter_fn=keep_portable_capture_guards,
             package=package,
             dynamic=None,
-        )(fn)
+        )(capture_target)
         captured_scopes: list[tuple[Any, dict[str, object]]] = []
         previous_profile = sys.getprofile()
 
@@ -2057,8 +2079,8 @@ def _precompile_dynamo(
                     "global_bindings": global_bindings,
                     "value_globals": value_globals,
                     "import_sources": dict(code.import_sources),
-                    "defaults": target.__defaults__ if index == 0 else None,
-                    "kwdefaults": target.__kwdefaults__ if index == 0 else None,
+                    "defaults": capture_target.__defaults__ if index == 0 else None,
+                    "kwdefaults": capture_target.__kwdefaults__ if index == 0 else None,
                     "variants": variants,
                 }
             )
@@ -2100,10 +2122,7 @@ def _precompile_dynamo(
             "cannot serialize yet (for example a module or callable guard)."
         ) from e
     finally:
-        try:
-            torch._dynamo.reset()
-        finally:
-            _DYNAMO_COMPILE_LOCK.release()
+        _DYNAMO_COMPILE_LOCK.release()
 
 
 class PrecompiledModule:
@@ -2445,8 +2464,8 @@ class _PrecompileApi:
         The outer sequence supports capture front-ends that can specialize one artifact
         from multiple calls. The ``make_fx`` tracer accepts exactly one tuple because it
         records only one execution; ``dynamo`` executes every tuple and records the
-        guarded recompilations they trigger. The Dynamo artifact minimizes serialized
-        guard records while preserving how every example dispatches among those variants.
+        guarded recompilations they trigger. The Dynamo artifact retains serialized
+        local-derived guards and treats the Python environment as invariant.
 
         THREADING: the inductor lowering step drives process-global compiler state
         and is serialized by an internal lock, so concurrent ``backend="inductor"``
@@ -2478,13 +2497,11 @@ class _PrecompileApi:
           to the example (the source of the programming-model contract).
         - ``"dynamo"``: analyze a Python function's bytecode and capture every guarded
           specialization/recompilation exercised by ``example_inputs``. The emitted
-          artifact drops a serialized guard record only when doing so preserves every
-          example's variant-match results. Filtering is at guard-record granularity, so
-          a retained composite record can still rebuild invariant leaf checks. Removed
-          conditions are unchecked caller assumptions: changing one from all capture
-          examples is outside this experimental contract and can silently miscompute.
-          A call that fails every retained guard set raises instead of compiling at
-          runtime. Graph breaks are preserved through their Dynamo resume frames;
+          artifact retains guards derived from runtime locals. Guards covering the
+          Python environment may be removed because that environment is required to be
+          unchanged between capture and runtime. A call that fails every retained guard
+          set raises instead of compiling at runtime. Graph breaks are preserved through
+          their Dynamo resume frames;
           closure-free Python functions wrapped with ``torch._dynamo.disable`` are
           embedded and execute eagerly between graph segments. The top-level function
           must not have closure cells or nested functions that capture locals. Globals
@@ -2501,11 +2518,11 @@ class _PrecompileApi:
         is not yet supported with ``tracer="dynamo"``.
 
         ``training=True`` is supported with ``tracer="dynamo"`` and
-        ``backend="inductor"``. Capture runs with grad enabled, and each compiled graph
-        carries a readable AOTAutograd forward and backward bridged by an emitted
+        ``backend="inductor"``. Capture runs with gradients enabled, and each compiled
+        graph carries a readable AOTAutograd forward and backward bridged by an emitted
         ``torch.autograd.Function``. A served output therefore retains its ``grad_fn``;
-        calling ``backward()`` executes the precompiled backward kernels. The input
-        tensors that require gradients must do so in every example and at runtime.
+        calling ``backward()`` executes the precompiled backward kernels. Training works
+        across captured recompilations and graph breaks.
 
         With ``tracer="dynamo"``, shape variation across ``example_inputs`` uses
         Dynamo's ordinary automatic dynamic-shape policy: for example, a static first
