@@ -346,22 +346,6 @@ class WeakIdKeyDictionary(MutableMapping):
 WeakTensorKeyDictionary = WeakIdKeyDictionary
 
 
-class _TensorWeakRef(weakref.ref):
-    """Tensor-only weakref that fixes Tensor weakrefs before returning them."""
-
-    __slots__ = ()
-
-    def __call__(self):
-        out = super().__call__()
-        if out is None:
-            return out
-        if not isinstance(out, Tensor):
-            raise AssertionError(f"expected torch.Tensor, got {type(out)}.")
-        # TODO, add _fix_weakref type binding
-        out._fix_weakref()  # type: ignore[attr-defined]
-        return out
-
-
 class TensorWeakRef:
     """Wrapper around a weak ref of a Tensor that handles the _fix_weakref() call required when unwrapping a Tensor weakref."""
 
@@ -370,7 +354,14 @@ class TensorWeakRef:
     def __init__(self, tensor: Tensor) -> None:
         if not isinstance(tensor, Tensor):
             raise AssertionError(f"expected torch.Tensor, got {type(tensor)}.")
-        self.ref = _TensorWeakRef(tensor)
+        self.ref = weakref.ref(tensor)
 
     def __call__(self):
-        return self.ref()
+        out = self.ref()
+        if out is None:
+            return out
+        if not isinstance(out, Tensor):
+            raise AssertionError(f"expected torch.Tensor, got {type(out)}.")
+        # TODO, add _fix_weakref type binding
+        out._fix_weakref()  # type: ignore[attr-defined]
+        return out

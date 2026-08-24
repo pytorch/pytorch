@@ -645,7 +645,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv_depthwise3d_backward_cuda_out(const T
     Tensor& grad_bias) {
   if (grad_weight.defined()) {
     grad_weight.resize_(weight.sizes());
-    grad_weight.zero_();
   }
 
   return _depthwise_3d_backward_cuda_out(

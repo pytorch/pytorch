@@ -11,7 +11,7 @@ from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import Self
 
 import torch
-from torch import device, dtype, Tensor
+from torch import device, dtype, memory_format, Tensor
 from torch._prims_common import DeviceLikeType
 from torch.nn.parameter import Buffer, Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -1253,6 +1253,9 @@ class Module:
     @overload
     def to(self, tensor: Tensor, non_blocking: bool = ...) -> Self: ...
 
+    @overload
+    def to(self, memory_format: memory_format) -> Self: ...
+
     def to(self, *args, **kwargs):
         r"""Move and/or cast the parameters and buffers.
 
@@ -1374,10 +1377,14 @@ class Module:
                     non_blocking,
                 )
             except NotImplementedError as e:
-                if str(e) == "Cannot copy out of meta tensor; no data!":
+                message = str(e)
+                base_message = "Cannot copy out of meta tensor; no data!"
+                if message.startswith(base_message):
+                    diagnostic_suffix = message[len(base_message) :]
                     raise NotImplementedError(
-                        f"{e} Please use torch.nn.Module.to_empty() instead of torch.nn.Module.to() "
-                        f"when moving module from meta to a different device."
+                        f"{base_message} Please use torch.nn.Module.to_empty() instead of "
+                        f"torch.nn.Module.to() when moving module from meta to a different device."
+                        f"{diagnostic_suffix}"
                     ) from None
                 else:
                     raise
@@ -2666,6 +2673,10 @@ class Module:
 
     def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
         r"""Return an iterator over module parameters.
+
+        The exact order of the returned parameters is unspecified, but repeated
+        calls to the ``parameters()`` method of an unchanged module return the
+        parameters in the same order.
 
         This is typically passed to an optimizer.
 
