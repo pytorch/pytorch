@@ -73,7 +73,7 @@ from torch.fx.experimental.recording import (
     shape_env_check_state_equal,
     ShapeEnvEvent,
 )
-from torch.fx.experimental.sym_node import SymNode, SymTypes
+from torch.fx.experimental.sym_node import _NO_HINT, SymNode, SymTypes
 from torch.types import py_sym_types
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -3014,6 +3014,47 @@ class _ShapeGuardCppPrinter(_ShapeGuardPrinter, CppPrinter):
 
     def doprint(self, expr: sympy.Expr) -> str:
         return CppPrinter.doprint(self, expr)
+
+
+class _SymExprLocals(dict):  # type: ignore[type-arg]
+    """eval() locals for a printed sympy expression.
+
+    Binds symbols on demand, so deserializing a stride expression naming two
+    symbols does not build a SymNode for every symbol in the ShapeEnv. Names that
+    are not symbols raise KeyError, which LOAD_NAME turns into a globals lookup,
+    leaving SYMPY_INTERP entries like `math` and `torch` resolvable.
+    """
+
+    def __init__(self, shape_env: ShapeEnv, symbols: dict[str, sympy.Symbol]) -> None:
+        super().__init__()
+        self._shape_env = shape_env
+        self._symbols = symbols
+
+    def __missing__(self, name: str) -> SymInt | SymFloat:
+        symbol = self._symbols.get(name)
+        if symbol is None:
+            raise KeyError(name)
+        shape_env = self._shape_env
+        is_float = symbol_is_type(symbol, (SymT.FLOAT, SymT.UNBACKED_FLOAT))
+        pytype: type = float if is_float else int
+        val = shape_env.backed_var_to_val.get(symbol)
+        # _NO_HINT, not None: None asks SymNode to derive a hint via
+        # _maybe_evaluate_static, which for a nested-tensor symbol substitutes its
+        # SingletonInt and then fails expanding it. Unbacked symbols have no hint
+        # either, so both say so explicitly.
+        hint = (
+            pytype(val) if isinstance(val, (sympy.Integer, sympy.Float)) else _NO_HINT
+        )
+        node = SymNode(
+            symbol,
+            shape_env,
+            pytype,
+            hint,
+            fx_node=shape_env._create_fx_placeholder_and_z3var(symbol, pytype),
+        )
+        out = SymFloat(node) if is_float else SymInt(node)
+        self[name] = out
+        return out
 
 
 # A dataclass for storing shape guards
@@ -7053,22 +7094,14 @@ class ShapeEnv:
         """
         To be used by compile_fx to deserialize symexprs
         """
-        args = {}
-        for symbol in self.var_to_range:
-            val = self.backed_var_to_val.get(symbol)
-            # Unbacked symbols have no hint, and nested-tensor symbols hint to a
-            # SingletonInt which has no integer value; both bind hintless.
-            hint = int(val) if isinstance(val, (sympy.Integer, sympy.Float)) else None
-            args[str(symbol)] = SymInt(
-                SymNode(
-                    symbol,
-                    self,
-                    int,
-                    hint,
-                    fx_node=self._create_fx_placeholder_and_z3var(symbol, int),
-                )
-            )
-        return eval(code, SYMPY_INTERP, args)
+        # Neither map alone is the full namespace. var_to_range omits
+        # nested-tensor SingletonInt symbols, which create_symbol deliberately
+        # gives no range, and add_backed_var_to_val only writes
+        # backed_var_to_val. A symbol missing from the union would eval() to a
+        # NameError.
+        symbols = {str(s): s for s in self.var_to_range}
+        symbols.update((str(s), s) for s in self.backed_var_to_val)
+        return eval(code, SYMPY_INTERP, _SymExprLocals(self, symbols))
 
     def evaluate_guards_expression(self, code: str, args: Sequence[object]) -> bool:
         """

@@ -72,7 +72,9 @@ from torch.utils._sympy.functions import (
     Mod,
 )
 from torch.utils._sympy.numbers import int_oo
-from torch.utils._sympy.value_ranges import ValueRangeError
+from torch.utils._sympy.singleton_int import SingletonInt
+from torch.utils._sympy.symbol import make_symbol, SymT
+from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
 
 aten = torch.ops.aten
@@ -3678,6 +3680,58 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(
             shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s0)])
         )
+
+    def test_deserialize_symexpr_keeps_symbolic(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 24)
+        expr = shape_env.deserialize_symexpr(f"128*{s0.node.expr}")
+        # Must stay symbolic; collapsing to the hint (3072) is the bug this guards.
+        self.assertIsInstance(expr, torch.SymInt)
+        self.assertEqual(str(expr.node.expr), f"128*{s0.node.expr}")
+
+    def test_deserialize_symexpr_float_symbol(self):
+        shape_env = ShapeEnv()
+        f0 = shape_env.create_unbacked_symfloat()
+        out = shape_env.deserialize_symexpr(str(f0.node.expr))
+        # A float symbol must not be rebuilt as an int.
+        self.assertIsInstance(out, torch.SymFloat)
+        self.assertIs(out.node.pytype, float)
+
+    def test_deserialize_symexpr_float_hint_not_truncated(self):
+        shape_env = ShapeEnv()
+        f0 = make_symbol(SymT.FLOAT, 0)
+        shape_env.var_to_range[f0] = ValueRanges(-sympy.oo, sympy.oo)
+        shape_env.backed_var_to_val[f0] = sympy.Float(1.5)
+        out = shape_env.deserialize_symexpr(str(f0))
+        self.assertIsInstance(out, torch.SymFloat)
+        self.assertEqual(out.node.hint, 1.5)
+
+    def test_deserialize_symexpr_singleton_int_symbol(self):
+        # Nested-tensor symbols land in backed_var_to_val but deliberately get no
+        # var_to_range entry, so a namespace built from var_to_range alone raises
+        # NameError. Their SingletonInt is not a scalar, so they bind hintless.
+        shape_env = ShapeEnv()
+        s0 = make_symbol(SymT.SIZE, 0, positive=True, integer=True)
+        shape_env.backed_var_to_val[s0] = SingletonInt(1, coeff=1)
+        self.assertNotIn(s0, shape_env.var_to_range)
+        out = shape_env.deserialize_symexpr(str(s0))
+        self.assertIsInstance(out, torch.SymInt)
+        self.assertIsNone(out.node.hint)
+
+    def test_deserialize_symexpr_add_backed_var_to_val_symbol(self):
+        # add_backed_var_to_val does not populate var_to_range either.
+        shape_env = ShapeEnv()
+        s0 = make_symbol(SymT.SIZE, 0, positive=True, integer=True)
+        shape_env.add_backed_var_to_val(s0, 7)
+        self.assertNotIn(s0, shape_env.var_to_range)
+        out = shape_env.deserialize_symexpr(str(s0))
+        self.assertIsInstance(out, torch.SymInt)
+        self.assertEqual(out.node.hint, 7)
+
+    def test_deserialize_symexpr_resolves_sympy_interp_names(self):
+        # Lazy locals must fall through to SYMPY_INTERP for non-symbol names.
+        shape_env = ShapeEnv()
+        self.assertEqual(shape_env.deserialize_symexpr("math.trunc(3.7)"), 3)
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
