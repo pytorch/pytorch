@@ -3,7 +3,7 @@
 
 import os
 
-from torch.testing._internal.common_utils import periodic, run_tests, slowTest, TestCase
+from torch.testing._internal.common_utils import run_tests, slowTest, TestCase
 
 
 class TestCISanityCheck(TestCase):
@@ -14,12 +14,6 @@ class TestCISanityCheck(TestCase):
     @slowTest
     def test_env_vars_exist_slow(self):
         # Same as the above, but for the slow suite
-        self.assertTrue(os.environ.get("CI") is None)
-
-    @periodic
-    def test_env_vars_exist_periodic(self):
-        # Same as the above, but for the periodic suite (periodic-strict skips
-        # every test not marked @periodic, so it needs its own failing canary)
         self.assertTrue(os.environ.get("CI") is None)
 
 

@@ -23,8 +23,8 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_SKIP_NON_PERIODIC, TEST_WITH_PERIODIC, TEST_WITH_ROCM, check_if_enable, decorateIf, periodic,
-    skipIfTorchDynamo, skipIfXpu, suppress_warnings,
+    TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
+    TemporaryFileName,
 )
 from torch.testing._internal.common_cuda import has_device_side_assert
 from torch.testing._internal.common_device_type import \
@@ -607,203 +607,163 @@ if __name__ == '__main__':
 
 
 class TestPeriodicDecorator(TestCase):
-    @staticmethod
-    def _patch_test_env(**overrides):
-        """Patches the common_utils globals consulted by @periodic, slowTest,
-        and check_if_enable so inner test classes are hermetic to the outer
-        test run's environment."""
-        defaults = dict(
-            TEST_WITH_PERIODIC=False,
-            TEST_SKIP_NON_PERIODIC=False,
-            TEST_WITH_SLOW=False,
-            TEST_SKIP_FAST=False,
-            IS_SANDCASTLE=False,
-            RERUN_DISABLED_TESTS=False,
-            slow_tests_dict={},
-            disabled_tests_dict={},
-        )
-        defaults.update(overrides)
-        return unittest.mock.patch.multiple("torch.testing._internal.common_utils", **defaults)
-
     @parametrize("periodic_enabled", [False, True])
     def test_periodic_gates_on_periodic_mode(self, periodic_enabled):
-        with self._patch_test_env(TEST_WITH_PERIODIC=periodic_enabled):
-            class TestP(TestCase):
-                @periodic
-                def test_p(self):
-                    pass
-
-        self.assertTrue(TestP.test_p.__dict__.get("periodic_test"))
-        self.assertEqual(getattr(TestP.test_p, "__unittest_skip__", False), not periodic_enabled)
-        if not periodic_enabled:
-            self.assertIn("PYTORCH_TEST_WITH_PERIODIC", TestP.test_p.__unittest_skip_why__)
-
-    def test_periodic_rejects_classes(self):
-        with self.assertRaisesRegex(TypeError, "cannot be applied to a class"):
-            @periodic
-            class TestP(TestCase):
-                def test_p(self):
-                    pass
-
-    @skipIfTorchDynamo("nested TestCase.run calls set_stance, which is disallowed inside a compiled region")
-    def test_periodic_skip_happens_before_setup(self):
-        with self._patch_test_env():
-            class TestP(TestCase):
+        calls = []
+        with unittest.mock.patch(
+            "torch.testing._internal.common_utils.TEST_WITH_PERIODIC",
+            periodic_enabled,
+        ):
+            class TestP(unittest.TestCase):
                 def setUp(self):
-                    self.fail("setUp ran for a disabled periodic test")
+                    calls.append("setUp")
 
                 @periodic
                 def test_p(self):
-                    pass
+                    calls.append("test")
 
-            result = unittest.TestResult()
-            TestP("test_p").run(result)
-        self.assertEqual(len(result.skipped), 1)
+        result = unittest.TestResult()
+        unittest.defaultTestLoader.loadTestsFromTestCase(TestP).run(result)
+
+        marks = {mark.name for mark in getattr(TestP.test_p, "pytestmark", ())}
+        self.assertIn("periodic", marks)
+        self.assertEqual(calls, ["setUp", "test"] if periodic_enabled else [])
+        self.assertEqual(len(result.skipped), 0 if periodic_enabled else 1)
         self.assertEqual(result.failures, [])
         self.assertEqual(result.errors, [])
 
     @parametrize("periodic_enabled", [False, True])
-    def test_periodic_composes_with_parametrize(self, periodic_enabled):
-        with self._patch_test_env(TEST_WITH_PERIODIC=periodic_enabled):
-            class TestP(TestCase):
-                @parametrize("x", [1])
-                @periodic
-                def test_under(self, x):
-                    pass
+    def test_periodic_class_gates_setup(self, periodic_enabled):
+        calls = []
+        with unittest.mock.patch(
+            "torch.testing._internal.common_utils.TEST_WITH_PERIODIC",
+            periodic_enabled,
+        ):
+            @periodic
+            class TestP(unittest.TestCase):
+                @classmethod
+                def setUpClass(cls):
+                    calls.append("setUpClass")
 
-                @periodic
-                @parametrize("x", [2])
-                def test_over(self, x):
-                    pass
+                def test_p(self):
+                    calls.append("test")
 
-                @parametrize("x", [subtest(1, name="marked", decorators=[periodic]), subtest(2, name="plain")])
-                def test_sub(self, x):
+                @classmethod
+                def tearDownClass(cls):
+                    calls.append("tearDownClass")
+
+        result = unittest.TestResult()
+        unittest.defaultTestLoader.loadTestsFromTestCase(TestP).run(result)
+
+        marks = {mark.name for mark in getattr(TestP, "pytestmark", ())}
+        self.assertIn("periodic", marks)
+        expected_calls = ["setUpClass", "test", "tearDownClass"]
+        self.assertEqual(calls, expected_calls if periodic_enabled else [])
+        self.assertEqual(len(result.skipped), 0 if periodic_enabled else 1)
+        self.assertEqual(result.failures, [])
+        self.assertEqual(result.errors, [])
+
+    @skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+    def test_periodic_config_selects_only_periodic_tests(self):
+        source = """\
+import os
+
+from torch.testing._internal.common_utils import periodic, run_tests, serialTest
+
+def test_plain_pytest():
+    if os.getenv("EXPECT_PERIODIC") == "1":
+        raise AssertionError("plain pytest test ran in periodic mode")
+    print("PLAIN_PYTEST_RAN")
+
+@periodic
+def test_periodic_pytest():
+    if os.getenv("EXPECT_PERIODIC") != "1":
+        raise AssertionError("periodic pytest test ran outside periodic mode")
+    print("PERIODIC_PYTEST_RAN")
+
+@serialTest()
+@periodic
+def test_periodic_serial_pytest():
+    if os.getenv("EXPECT_PERIODIC") != "1":
+        raise AssertionError("periodic serial test ran outside periodic mode")
+    print("PERIODIC_SERIAL_PYTEST_RAN")
+
+if __name__ == "__main__":
+    run_tests()
+"""
+        test_dir = os.path.dirname(os.path.realpath(__file__))
+        with TemporaryFileName(
+            prefix="test_periodic_filter_", suffix=".py", dir=test_dir
+        ) as test_file:
+            with open(test_file, "w") as f:
+                f.write(source)
+
+            env = os.environ.copy()
+            env.pop("CI", None)
+            env.pop("TEST_SHOWLOCALS", None)
+            test_mode_prefixes = ("PYTORCH_TEST_WITH_", "PYTORCH_TEST_SKIP_")
+            for flag in [k for k in env if k.startswith(test_mode_prefixes)]:
+                del env[flag]
+            for flag in (
+                "PYTORCH_TEST_CUDA_MEM_LEAK_CHECK",
+                "PYTORCH_TEST_DO_NOT_USE_PYTEST",
+                "PYTORCH_TEST_RERUN_DISABLED_TESTS",
+                "PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL",
+                "TESTS_TO_INCLUDE",
+            ):
+                env.pop(flag, None)
+            test_name = os.path.splitext(os.path.basename(test_file))[0]
+
+            def run_test(periodic_mode):
+                test_env = env.copy()
+                test_env["EXPECT_PERIODIC"] = "1" if periodic_mode else "0"
+                if periodic_mode:
+                    test_env["TEST_CONFIG"] = "periodic"
+                    test_env["PYTORCH_TEST_WITH_SLOW"] = "1"
+                else:
+                    test_env.pop("TEST_CONFIG", None)
+                result = subprocess.run(
+                    [sys.executable, "run_test.py", "--include", test_name, "-s"],
+                    cwd=test_dir,
+                    env=test_env,
+                    capture_output=True,
+                    text=True,
+                )
+                output = result.stdout + result.stderr
+                self.assertEqual(result.returncode, 0, msg=output)
+                return output
+
+            periodic_output = run_test(periodic_mode=True)
+            default_output = run_test(periodic_mode=False)
+
+        self.assertIn("PERIODIC_PYTEST_RAN", periodic_output)
+        self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", periodic_output)
+        self.assertNotIn("PLAIN_PYTEST_RAN", periodic_output)
+        self.assertIn("PLAIN_PYTEST_RAN", default_output)
+        self.assertNotIn("PERIODIC_PYTEST_RAN", default_output)
+        self.assertNotIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
+
+    def test_periodic_does_not_leak_across_parametrized_tests(self):
+        with unittest.mock.patch(
+            "torch.testing._internal.common_utils.TEST_WITH_PERIODIC", True
+        ):
+            class TestP(unittest.TestCase):
+                @parametrize("x", [1, 2])
+                @decorateIf(periodic, lambda params: params["x"] == 1)
+                def test_p(self, x):
                     pass
 
             instantiate_parametrized_tests(TestP)
 
-        for name in ("test_under_x_1", "test_over_x_2", "test_sub_marked"):
-            test_fn = getattr(TestP, name)
-            self.assertTrue(test_fn.__dict__.get("periodic_test"), msg=name)
-            self.assertEqual(getattr(test_fn, "__unittest_skip__", False), not periodic_enabled, msg=name)
-        # a subtest's periodic decorator must not leak onto sibling subtests
-        self.assertFalse(TestP.test_sub_plain.__dict__.get("periodic_test", False))
-        self.assertFalse(getattr(TestP.test_sub_plain, "__unittest_skip__", False))
+        marked = TestP.test_p_x_1
+        plain = TestP.test_p_x_2
+        self.assertIn("periodic", {mark.name for mark in marked.pytestmark})
+        plain_marks = {mark.name for mark in getattr(plain, "pytestmark", ())}
+        self.assertNotIn("periodic", plain_marks)
 
-    @parametrize("periodic_enabled", [False, True])
-    def test_periodic_composes_with_device_type_instantiation(self, periodic_enabled):
-        # CI device filters (e.g. PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda) override
-        # only_for="cpu" and would leave TestPCPU uninstantiated; clear them.
-        no_device_filters = {PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY: "", PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY: ""}
-        env_patch = self._patch_test_env(TEST_WITH_PERIODIC=periodic_enabled)
-        with env_patch, unittest.mock.patch.dict(os.environ, no_device_filters):
-            class TestP(TestCase):
-                @periodic
-                def test_p(self, device):
-                    pass
-
-            scope = {"TestP": TestP}
-            instantiate_device_type_tests(TestP, scope, only_for="cpu")
-
-        test_fn = scope["TestPCPU"].test_p_cpu
-        self.assertTrue(test_fn.__dict__.get("periodic_test"))
-        self.assertEqual(getattr(test_fn, "__unittest_skip__", False), not periodic_enabled)
-
-    def test_periodic_strict_env_runs_dynamically_slow_periodic_tests(self):
-        # periodic-strict sets PYTORCH_TEST_WITH_SLOW, so a @periodic test that
-        # lands in slow-tests.json (auto-marked slow from its own runtime) still
-        # runs in the only workflow that runs it.
-        with self._patch_test_env(TEST_WITH_PERIODIC=True):
-            class TestP(TestCase):
-                @periodic
-                def test_p(self):
-                    pass
-
-                def test_plain(self):
-                    pass
-
-        slow_tests = {"test_p (__main__.TestP)": None, "test_plain (__main__.TestP)": None}
-        env = dict(TEST_WITH_PERIODIC=True, TEST_WITH_SLOW=True, TEST_SKIP_NON_PERIODIC=True)
-        with self._patch_test_env(**env, slow_tests_dict=slow_tests):
-            check_if_enable(TestP("test_p"))
-            with self.assertRaisesRegex(unittest.SkipTest, "test is not periodic"):
-                check_if_enable(TestP("test_plain"))
-
-    def test_slowtest_gates_on_slow_mode(self):
-        class TestP(TestCase):
-            @slowTest
-            def test_s(self):
-                pass
-
-        # periodic mode must not unlock a plain @slowTest test
-        with self._patch_test_env(TEST_WITH_PERIODIC=True):
-            with self.assertRaisesRegex(unittest.SkipTest, "test is slow"):
-                TestP("test_s").test_s()
-        with self._patch_test_env(TEST_WITH_SLOW=True):
-            TestP("test_s").test_s()
-
-    @parametrize(
-        "decorate",
-        [
-            subtest(lambda fn: periodic(slowTest(fn)), name="periodic_outside_slow"),
-            subtest(lambda fn: slowTest(periodic(fn)), name="slow_outside_periodic"),
-            subtest(
-                lambda fn: periodic(suppress_warnings(slowTest(fn))),
-                name="periodic_with_intervening_decorator",
-            ),
-        ],
-    )
-    def test_periodic_composes_with_slowtest(self, decorate):
-        # periodic-strict sets PYTORCH_TEST_WITH_SLOW, so the slow gate does not
-        # block a test marked both @periodic and @slowTest there.
-        with self._patch_test_env(TEST_WITH_PERIODIC=True, TEST_WITH_SLOW=True):
-            class TestP(TestCase):
-                @decorate
-                def test_b(self):
-                    pass
-
-            self.assertTrue(TestP.test_b.__dict__.get("periodic_test"))
-            self.assertTrue(TestP.test_b.__dict__.get("slow_test"))
-            self.assertFalse(getattr(TestP.test_b, "__unittest_skip__", False))
-            TestP("test_b").test_b()
-
-        # Outside periodic mode the periodic gate applies even when slow mode
-        # is on: a test marked both runs only in periodic CI.
-        with self._patch_test_env(TEST_WITH_SLOW=True):
-            class TestS(TestCase):
-                @decorate
-                def test_b(self):
-                    pass
-
-        self.assertTrue(getattr(TestS.test_b, "__unittest_skip__", False))
-        self.assertIn("PYTORCH_TEST_WITH_PERIODIC", TestS.test_b.__unittest_skip_why__)
-
-    def test_check_if_enable_skips_non_periodic_in_periodic_only_mode(self):
-        with self._patch_test_env(TEST_WITH_PERIODIC=True):
-            class TestP(TestCase):
-                @periodic
-                def test_p(self):
-                    pass
-
-                def test_plain(self):
-                    pass
-
-        with self._patch_test_env(TEST_WITH_PERIODIC=True, TEST_SKIP_NON_PERIODIC=True):
-            check_if_enable(TestP("test_p"))
-            with self.assertRaisesRegex(unittest.SkipTest, "test is not periodic"):
-                check_if_enable(TestP("test_plain"))
-
-    # Not a tautology: if the @periodic gate ever breaks, this test runs in
-    # every non-periodic CI job, where TEST_WITH_PERIODIC is False, and fails.
     @periodic
     def test_periodic_smoke(self):
         self.assertTrue(TEST_WITH_PERIODIC)
-
-    # Inverse canary to test_periodic_smoke: in the periodic-strict workflow
-    # (where PYTORCH_TEST_SKIP_NON_PERIODIC is set) this unmarked test must be
-    # skipped by check_if_enable; executing there means the mode is broken.
-    def test_non_periodic_smoke(self):
-        self.assertFalse(TEST_SKIP_NON_PERIODIC)
 
 
 instantiate_parametrized_tests(TestPeriodicDecorator)
