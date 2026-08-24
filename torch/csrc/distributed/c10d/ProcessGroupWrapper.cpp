@@ -355,8 +355,8 @@ std::ostream& operator<<(
   std::string debug_info;
   if (collective_fingerprint.python_gc_counts_.has_value()) {
     const auto& gc = *collective_fingerprint.python_gc_counts_;
-    debug_info = c10::str(
-        ", PythonGcCounts=[", gc[0], ", ", gc[1], ", ", gc[2], "]");
+    debug_info =
+        c10::str(", PythonGcCounts=[", gc[0], ", ", gc[1], ", ", gc[2], "]");
   }
   if (collective_fingerprint.steady_clock_time_ms_.has_value()) {
     debug_info = c10::str(
