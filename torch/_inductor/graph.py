@@ -418,6 +418,8 @@ class GraphLowering(torch.fx.Interpreter):
         inputs_to_check: Sequence[int] | None = None,
         fx_wrapper: bool = False,
         get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+        use_cudagraph_partition: bool | None = None,
+        cudagraph_partition_only_regions: bool = False,
     ) -> None:
         super().__init__(gm)
         self.get_decomp_fn = get_decomp_fn
@@ -461,6 +463,7 @@ class GraphLowering(torch.fx.Interpreter):
             sympy.Symbol, tuple[str, Literal["size", "stride"], int]
         ] = {}
         self.partition_maps: list[GraphPartitionMap] | None = None
+        self.has_skipped_cudagraph_partition = False
         self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
@@ -580,6 +583,12 @@ class GraphLowering(torch.fx.Interpreter):
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: str | None = None
         self.kernel_free_cudagraph: bool = False
+        self.use_cudagraph_partition = (
+            config.graph_partition and config.triton.cudagraphs
+            if use_cudagraph_partition is None
+            else use_cudagraph_partition
+        )
+        self.cudagraph_partition_only_regions = cudagraph_partition_only_regions
 
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: dict[torch.device, torch.fx.Node] = {}
@@ -973,6 +982,8 @@ class GraphLowering(torch.fx.Interpreter):
             is_inference=self.is_inference,
             is_backward=self.is_backward,
             name=self.qualify_name(subgraph_name),
+            use_cudagraph_partition=False,
+            cudagraph_partition_only_regions=False,
         )
 
     def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
