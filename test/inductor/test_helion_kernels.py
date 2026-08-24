@@ -1,13 +1,15 @@
 # Owner(s): ["module: inductor"]
+import unittest
+
 import torch
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
-from torch.testing._internal.inductor_utils import HAS_HELION, requires_helion
+from torch.testing._internal.inductor_utils import (
+    HAS_HELION,
+    HAS_TRITON,
+    requires_helion,
+)
 
 
 if HAS_HELION:
@@ -18,7 +20,7 @@ if HAS_HELION:
 class HelionTests(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @requires_helion()
     def test_add_kernel(self, device):
         @helion.kernel(config=helion.Config(block_sizes=[1, 2]))
@@ -49,7 +51,7 @@ class HelionTests(TestCase):
         self.assertEqual(out, x + y)
         self.assertEqual(compiled_out, x + y)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @requires_helion()
     def test_softmax_view_reshape(self, device):
         @helion.kernel(config={"block_size": 1})
@@ -71,9 +73,7 @@ class HelionTests(TestCase):
         )
 
 
-instantiate_device_type_tests(
-    HelionTests, globals(), except_for="cpu", allow_mps=True, allow_xpu=True
-)
+instantiate_device_type_tests(HelionTests, globals(), except_for="cpu", allow_xpu=True)
 
 
 if __name__ == "__main__":
