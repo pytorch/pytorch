@@ -741,26 +741,48 @@ class TensorLikePair(Pair):
     def _process_inputs(
         self, actual: Any, expected: Any, *, id: tuple[Any, ...], allow_subclasses: bool
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        directly_related = isinstance(actual, type(expected)) or isinstance(
-            expected, type(actual)
+        is_actual_scalar = isinstance(actual, (bool, int, float, complex)) or (
+            np is not None and (
+                isinstance(actual, np.generic) or (isinstance(actual, np.ndarray) and actual.ndim == 0)
+            )
         )
-        if not directly_related:
-            self._inputs_not_supported()
+        is_expected_scalar = isinstance(expected, (bool, int, float, complex)) or (
+            np is not None and (
+                isinstance(expected, np.generic) or (isinstance(expected, np.ndarray) and expected.ndim == 0)
+            )
+        )
 
-        if not allow_subclasses and type(actual) is not type(expected):
-            self._inputs_not_supported()
+        if not (is_actual_scalar or is_expected_scalar):
+            directly_related = isinstance(actual, type(expected)) or isinstance(
+                expected, type(actual)
+            )
+            if not directly_related:
+                self._inputs_not_supported()
 
-        actual, expected = (self._to_tensor(input) for input in (actual, expected))
+            if not allow_subclasses and type(actual) is not type(expected):
+                self._inputs_not_supported()
+
+        device = None
+        if isinstance(actual, torch.Tensor):
+            device = actual.device
+        elif isinstance(expected, torch.Tensor):
+            device = expected.device
+
+        actual, expected = (
+            self._to_tensor(input, device=device) for input in (actual, expected)
+        )
         for tensor in (actual, expected):
             self._check_supported(tensor, id=id)
         return actual, expected
 
-    def _to_tensor(self, tensor_like: Any) -> torch.Tensor:
+    def _to_tensor(
+        self, tensor_like: Any, *, device: torch.device | None = None
+    ) -> torch.Tensor:
         if isinstance(tensor_like, torch.Tensor):
             return tensor_like
 
         try:
-            return torch.as_tensor(tensor_like)
+            return torch.as_tensor(tensor_like, device=device)
         except Exception:
             self._inputs_not_supported()
 
