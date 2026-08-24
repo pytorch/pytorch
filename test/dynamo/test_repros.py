@@ -83,7 +83,6 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfRocm,
     skipIfWindows,
-    skipIfXpu,
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
