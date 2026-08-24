@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 # ruff: noqa: F841
 import contextlib
-import copy
 import dataclasses
 import functools
 import importlib
@@ -24,11 +23,9 @@ from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    requires_capabilities,
 )
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -42,7 +39,7 @@ from torch.testing._internal.common_utils import (
     subtest,
 )
 from torch.testing._internal.inductor_utils import (
-    HAS_CUDA_AND_TRITON,
+    HAS_TRITON,
     requires_block_ptr,
     skip_windows_ci,
     TRITON_HAS_CPU,
@@ -110,25 +107,6 @@ def xfail_if_tensor_descriptor(fn):
     fn._expected_failure_cpu_tensor_descriptor = True
     fn._expected_failure_cuda_tensor_descriptor = True
     return fn
-
-
-def copy_device_tests(my_cls, other_cls, xfail_prop=None, *, accelerator=True):
-    for name, value in my_cls.__dict__.items():
-        if not name.startswith("test_"):
-            continue
-
-        @functools.wraps(value)
-        def new_test(self, device, value=value):
-            self.device = device
-            return value(self)
-
-        new_test.__dict__ = copy.deepcopy(value.__dict__)
-        if xfail_prop is not None and hasattr(value, xfail_prop):
-            new_test = unittest.expectedFailure(new_test)
-        if accelerator:
-            new_test = onlyAccelerator(new_test)
-        new_test = requires_capabilities(Capability.lib.triton)(new_test)
-        setattr(other_cls, name, new_test)
 
 
 class BlockDescriptorTestBase(InductorTestCase):
@@ -1254,6 +1232,7 @@ class CommonTemplate:
         self.assertTrue("Min" not in code[0])
 
     @xfail_if_tensor_descriptor
+    @onlyAccelerator
     def test_3d_permute_tiling(self):
         """
         Test 3D tiling with permute.
@@ -1622,24 +1601,15 @@ class CommonTemplate:
                 self.assertTrue("boundary_check=[0, 1]" in code)
 
 
+@unittest.skipIf(not HAS_TRITON, "requires triton GPU backend")
 @requires_block_ptr
 @config.patch("triton.use_block_ptr", True)
 class TritonBlockPointerTest(BlockDescriptorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
 
-copy_device_tests(CommonTemplate, TritonBlockPointerTest)
-instantiate_device_type_tests(
-    TritonBlockPointerTest,
-    globals(),
-    except_for=("cpu", "hpu"),
-    allow_xpu=True,
-)
-
-
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
 @config.patch({"triton.use_tensor_descriptor": True, "cpu_backend": "triton"})
-@instantiate_parametrized_tests
 class TritonTensorDescriptorTestCPU(BlockDescriptorTestBase):
     hw_classification = HardwareClassification.CPU
 
@@ -1648,7 +1618,12 @@ class TritonTensorDescriptorTestCPU(BlockDescriptorTestBase):
 
 
 @unittest.skipIf(
-    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
+    not HAS_TRITON,
+    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
+)
+@unittest.skipIf(
+    not torch.cuda.is_available()
+    or torch.cuda.get_device_capability()[0] < 9
     or torch.version.hip,
     "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
     # ROCm triton doesn't support/generate "tl.make_tensor_descriptor" which is exactly what this unit test is about
@@ -1659,7 +1634,6 @@ class TritonTensorDescriptorTest(BlockDescriptorTestBase):
 
     block_descriptor_constructor_str = "tl.make_tensor_descriptor"
 
-    @requires_capabilities(Capability.lib.triton)
     @config.patch({"triton.transpose_discontiguous_tensor_descriptor": True})
     @parametrize(
         "view_size,permute_order,num_tensor_descriptors,expect_transpose",
@@ -1702,7 +1676,6 @@ class TritonTensorDescriptorTest(BlockDescriptorTestBase):
         transpose_count = code.count("tl.trans")
         self.assertEqual(transpose_count, 1 if expect_transpose else 0)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_rms_norm_backward_does_not_crash_with_tma(self, device):
         self.device = device
         B, S, D = 1, 1024, 40096
@@ -1721,7 +1694,6 @@ class TritonTensorDescriptorTest(BlockDescriptorTestBase):
         self.assertIsNotNone(w.grad)
 
     @largeTensorTest("1GB", inductor=True)
-    @requires_capabilities(Capability.lib.triton)
     def test_large_tensor_pointwise(self, device):
         def fn(a):
             return a + 4
@@ -1731,7 +1703,6 @@ class TritonTensorDescriptorTest(BlockDescriptorTestBase):
         actual = compiled_fn(t)
         self.assertTrue((actual == 4).all())
 
-    @requires_capabilities(Capability.lib.triton)
     def test_slice_constant_offset_disables_tma(self, device):
         """TMA requires 16-byte aligned base; x[1:] with float32 yields 4-byte offset."""
 
@@ -1743,7 +1714,6 @@ class TritonTensorDescriptorTest(BlockDescriptorTestBase):
         self.assertEqual(result, fn(x))
         self.assertIn("tl.load", code)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_slice_view_dtype_unaligned_buffer(self, device):
         offset = 1
 
@@ -1755,7 +1725,6 @@ class TritonTensorDescriptorTest(BlockDescriptorTestBase):
         actual = torch.compile(f)(x)
         self.assertEqual(actual, expected)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_persistent_reduction_store_small_rblock_skips_tma(self, device):
         """
         When a persistent reduction has rnumel < 16/element_size, the fixed
@@ -1785,7 +1754,6 @@ class TritonTensorDescriptorTest(BlockDescriptorTestBase):
         self.assertIn("tl.store", code)
         self.assertNotIn("make_tensor_descriptor", code)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_bool_dtype_skips_tma(self, device):
         """
         torch.bool buffers map to Triton tl.int1 which has no
@@ -1800,33 +1768,10 @@ class TritonTensorDescriptorTest(BlockDescriptorTestBase):
         self._run_and_compare(fn, inp, expected_num_block_pointers=0)
 
 
-test_torchinductor.instantiate_device_type_tests_from_templates(
-    TritonTensorDescriptorTestCPU,
-    globals(),
-    templates=(CommonTemplate,),
-    xfail_prop="_expected_failure_cpu_tensor_descriptor",
-    class_name_overrides={"cpu": "TritonTensorDescriptorTestCPU"},
-    only_for="cpu",
-)
-
-copy_device_tests(
-    CommonTemplate,
-    TritonTensorDescriptorTest,
-    xfail_prop="_expected_failure_cuda_tensor_descriptor",
-    accelerator=False,
-)
-
-instantiate_device_type_tests(
-    TritonTensorDescriptorTest,
-    globals(),
-    only_for=("cuda",),
-)
-
-
+@unittest.skipIf(not HAS_TRITON, "requires triton")
 class TestTilingExtra(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
     def test_tiling_split_valid(self, device):
         import torch.nn.functional as F
@@ -2366,16 +2311,13 @@ class TestTilingExtra(InductorTestCase):
             )
 
 
-instantiate_device_type_tests(
-    TestTilingExtra,
-    globals(),
-    except_for=("cpu", "hpu"),
-    allow_xpu=True,
-)
-
-
 @unittest.skipIf(
-    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
+    not HAS_TRITON,
+    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
+)
+@unittest.skipIf(
+    not torch.cuda.is_available()
+    or torch.cuda.get_device_capability()[0] < 9
     or torch.version.hip,
     "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
 )
@@ -2397,7 +2339,6 @@ class TritonHostSideTMATest(BlockDescriptorTestBase):
         kwargs["expected_num_block_pointers"] = None
         return super()._run_and_compare(*args, **kwargs)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_host_tma_codegen_markers(self, device):
         self.device = device
 
@@ -2415,7 +2356,6 @@ class TritonHostSideTMATest(BlockDescriptorTestBase):
         self.assertNotIn("tl.make_tensor_descriptor", code)
         self.assertIn("host_tma_descriptor_args", code)
 
-    @requires_capabilities(Capability.lib.triton)
     def test_misaligned_offset_disables_host_tma(self, device):
         self.device = device
 
@@ -2432,7 +2372,6 @@ class TritonHostSideTMATest(BlockDescriptorTestBase):
         self.assertIn("tl.load", "\n".join(code_list))
 
     @config.patch("use_static_triton_launcher", True)
-    @requires_capabilities(Capability.lib.triton)
     def test_static_launcher_runs_for_host_tma(self, device):
         self.device = device
         import torch._inductor.runtime.triton_heuristics as triton_heuristics
@@ -2469,56 +2408,21 @@ class TritonHostSideTMATest(BlockDescriptorTestBase):
         self.assertTrue(torch.allclose(compiled_out, eager_out))
 
 
-copy_device_tests(CommonTemplate, TritonHostSideTMATest, accelerator=False)
-
-# The (9, True) meta-test checks that _run_and_compare raises on wrong block
-# pointer counts. Host-side TMA disables this count check, so skip it.
-TritonHostSideTMATest.test_expected_num_block_pointers_expected_num_block_pointers_9_raises_True = unittest.skip(
-    "block pointer count check is disabled for host-side TMA"
-)(
-    TritonHostSideTMATest.test_expected_num_block_pointers_expected_num_block_pointers_9_raises_True
-)
-
-# Known TMA API limitations: these cases also fail for device-side TMA (they
-# carry @xfail_if_use_tensor_descriptor). For host-side TMA they either produce
-# different (still-correct) codegen that breaks the device-specific code asserts,
-# or hit the same descriptor constraints (e.g. the 16-byte last-dim minimum in
-# test_reduction_padded_output_tiling).
-_HOST_TMA_EXPECTED_FAILURES = [
+# Preserve the Host-side TMA-specific xfails previously applied after copy_tests.
+_HOST_TMA_EXPECTED_FAILURES = (
     "test_boundary_check_block_multiple_False_ynumel_exceed_ygrid_size_False_include_z_True",
     "test_boundary_check_block_multiple_True_ynumel_exceed_ygrid_size_True_include_z_False",
     "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_False",
     "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_True",
     "test_pointwise_index_order",
     "test_reduction_padded_output_tiling",
-]
-for _name in _HOST_TMA_EXPECTED_FAILURES:
-    setattr(
-        TritonHostSideTMATest,
-        _name,
-        unittest.expectedFailure(getattr(TritonHostSideTMATest, _name)),
-    )
-
-# Dynamic shapes are not yet supported for host-side TMA (the launcher cannot
-# resolve symbolic block/shape dims). Tracked as a follow-up.
-TritonHostSideTMATest.test_dynamic_shapes_pointwise_nd_tiling_False_num_block_pointers_1 = unittest.expectedFailure(
-    TritonHostSideTMATest.test_dynamic_shapes_pointwise_nd_tiling_False_num_block_pointers_1
+    "test_dynamic_shapes_pointwise_nd_tiling_False_num_block_pointers_1",
+    "test_ensure_integral_dims_and_strides",
 )
-
-# Unlike the cases above (which also fail device-side), this one passes for
-# device-side TMA and non-TMA. Its im2col output store is emitted as a host-side
-# TMA tensordesc store, so the generated code has no tl.make_block_ptr and the
-# base block_descriptor_constructor_str assert does not hold. Numerics still
-# match (the _run_and_compare check passes before the code-string assert).
-TritonHostSideTMATest.test_ensure_integral_dims_and_strides = unittest.expectedFailure(
-    TritonHostSideTMATest.test_ensure_integral_dims_and_strides
-)
-
-instantiate_device_type_tests(
-    TritonHostSideTMATest,
-    globals(),
-    only_for=("cuda",),
-)
+_HOST_TMA_TEST_FAILURES = {
+    name: test_torchinductor.TestFailure(("cuda",))
+    for name in _HOST_TMA_EXPECTED_FAILURES
+}
 
 
 class HostTMAHelperTest(InductorTestCase):
@@ -2545,14 +2449,18 @@ class HostTMAHelperTest(InductorTestCase):
 
 
 @unittest.skipIf(
-    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
+    not HAS_TRITON,
+    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
+)
+@unittest.skipIf(
+    not torch.cuda.is_available()
+    or torch.cuda.get_device_capability()[0] < 9
     or torch.version.hip,
     "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
 )
 class TritonHostSideTMAConfigTest(InductorTestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @requires_capabilities(Capability.lib.triton)
     @config.patch(
         {
             "triton.enable_host_side_tma": True,
@@ -2572,6 +2480,59 @@ class TritonHostSideTMAConfigTest(InductorTestCase):
         self.assertTrue(torch.allclose(result, fn(x)))
         self.assertNotIn("host_tma_descriptor_args", "\n".join(code_list))
 
+
+test_torchinductor.instantiate_device_type_tests_from_templates(
+    TritonBlockPointerTest,
+    globals(),
+    templates=(CommonTemplate,),
+    test_decorator=onlyAccelerator,
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
+
+test_torchinductor.instantiate_device_type_tests_from_templates(
+    TritonTensorDescriptorTestCPU,
+    globals(),
+    templates=(CommonTemplate,),
+    xfail_prop="_expected_failure_cpu_tensor_descriptor",
+    class_name_overrides={"cpu": "TritonTensorDescriptorTestCPU"},
+    only_for="cpu",
+)
+
+test_torchinductor.instantiate_device_type_tests_from_templates(
+    TritonTensorDescriptorTest,
+    globals(),
+    templates=(CommonTemplate,),
+    xfail_prop="_expected_failure_cuda_tensor_descriptor",
+    only_for=("cuda",),
+)
+
+instantiate_device_type_tests(
+    TestTilingExtra,
+    globals(),
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
+
+_host_tma_classes = test_torchinductor.instantiate_device_type_tests_from_templates(
+    TritonHostSideTMATest,
+    globals(),
+    templates=(CommonTemplate,),
+    test_failures=_HOST_TMA_TEST_FAILURES,
+    only_for=("cuda",),
+)
+if _host_tma_classes:
+    _host_tma_cls = _host_tma_classes[0]
+    _host_tma_count_test = "test_expected_num_block_pointers_expected_num_block_pointers_9_raises_True_cuda"
+    setattr(
+        _host_tma_cls,
+        _host_tma_count_test,
+        unittest.skip("block pointer count check is disabled for host-side TMA")(
+            getattr(_host_tma_cls, _host_tma_count_test)
+        ),
+    )
+    del _host_tma_cls
+del _host_tma_classes
 
 instantiate_device_type_tests(
     TritonHostSideTMAConfigTest,
