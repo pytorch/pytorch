@@ -1145,6 +1145,30 @@ if HAS_CUDA_AND_TRITON:
             if self.get_manager() is not None:
                 raise AssertionError
 
+        def test_cudagraph_backward_override_affects_aot_cache_key(self):
+            """Verify backward cudagraph annotations distinguish AOT cache entries."""
+            counters.clear()
+            AOTAutogradCache.clear()
+            FxGraphCache.clear()
+
+            def fn(x):
+                return torch.sin(x).sum()
+
+            def run(annotated):
+                torch._dynamo.reset()
+                x = torch.randn(10, 4, device="cuda", requires_grad=True)
+                if annotated:
+                    with torch._dynamo.override_cudagraphs(bwd=False):
+                        result = torch.compile(fn, fullgraph=True)(x)
+                else:
+                    result = torch.compile(fn, fullgraph=True)(x)
+                result.backward()
+
+            run(False)
+            run(True)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)

@@ -967,6 +967,10 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
 
 class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
+    backward_cudagraphs_annotation_override: bool | None
+    # None uses the shared BoxedBool; True/False forces a graph-local decision
+    # that CompiledFxGraph.post_compile preserves across cache loads.
+    cudagraphs_post_compile_override: bool | None
     static_input_idxs: Sequence[int]
     is_backward: bool
     graph_id: int | None
@@ -997,6 +1001,7 @@ def compile_fx_inner(
     **kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
     kwargs.setdefault("cudagraphs", None)
+    kwargs.setdefault("cudagraphs_post_compile_override", None)
     kwargs.setdefault("static_input_idxs", ())
     kwargs.setdefault("is_backward", False)
     kwargs.setdefault("graph_id", None)
@@ -2981,6 +2986,9 @@ def compile_fx_backward(
                 example_inputs,
                 static_input_idxs=static_input_idxs,
                 cudagraphs=cudagraphs,
+                cudagraphs_post_compile_override=(
+                    compiler_config_extra.cudagraphs_bwd_override
+                ),
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
                 boxed_forward_device_index=compiler_config_extra.forward_device,
