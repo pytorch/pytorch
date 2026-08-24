@@ -2408,15 +2408,24 @@ class TritonHostSideTMATest(BlockDescriptorTestBase):
         self.assertTrue(torch.allclose(compiled_out, eager_out))
 
 
-# Preserve the Host-side TMA-specific xfails previously applied after copy_tests.
 _HOST_TMA_EXPECTED_FAILURES = (
+    # Known TMA API limitations: these cases also fail for device-side TMA (they
+    # carry @xfail_if_use_tensor_descriptor). For host-side TMA they either produce
+    # different (still-correct) codegen that breaks the device-specific code asserts,
+    # or hit the same descriptor constraints (e.g. the 16-byte last-dim minimum in
+    # test_reduction_padded_output_tiling).
     "test_boundary_check_block_multiple_False_ynumel_exceed_ygrid_size_False_include_z_True",
     "test_boundary_check_block_multiple_True_ynumel_exceed_ygrid_size_True_include_z_False",
     "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_False",
     "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_True",
     "test_pointwise_index_order",
     "test_reduction_padded_output_tiling",
+    # Dynamic shapes are not yet supported for host-side TMA because the launcher
+    # cannot resolve symbolic block and shape dimensions.
     "test_dynamic_shapes_pointwise_nd_tiling_False_num_block_pointers_1",
+    # Unlike the cases above, this passes for device-side TMA and non-TMA. Its im2col
+    # output store uses a host-side TMA tensordesc store, so the generated code has no
+    # tl.make_block_ptr for the base code-string assertion. Numerics still match.
     "test_ensure_integral_dims_and_strides",
 )
 _HOST_TMA_TEST_FAILURES = {
@@ -2514,6 +2523,8 @@ instantiate_device_type_tests(
     allow_xpu=True,
 )
 
+# The (9, True) meta-test expects _run_and_compare to reject a wrong block pointer
+# count. Host-side TMA disables that count check, so skip the generated CUDA test.
 _host_tma_classes = test_torchinductor.instantiate_device_type_tests_from_templates(
     TritonHostSideTMATest,
     globals(),
@@ -2531,6 +2542,7 @@ if _host_tma_classes:
             getattr(_host_tma_cls, _host_tma_count_test)
         ),
     )
+    # Avoid exposing a second module-level class alias to unittest discovery.
     del _host_tma_cls
 del _host_tma_classes
 
