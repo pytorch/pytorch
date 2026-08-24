@@ -15,11 +15,10 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_MACOS,
     IS_WINDOWS,
+    TestCase,
     run_tests,
     skipIfTorchDynamo,
-    TestCase,
 )
-
 
 log = logging.getLogger(__name__)
 
@@ -368,6 +367,8 @@ class TestPublicBindings(TestCase):
             "torch._inductor.kernel.vendored_templates.cutedsl.dense_blockscaled_gemm_persistent",  # depends on cutlass
             "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass_api
             "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass_api
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_fwd_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils",  # depends on flydsl
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
