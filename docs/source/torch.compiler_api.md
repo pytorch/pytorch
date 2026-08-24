@@ -50,7 +50,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *, example_inputs, backend="inductor", tracer="make_fx", decompositions=None)
+.. py:function:: precompile(fn, *, example_inputs, backend="inductor", tracer="make_fx", decompositions=None, training=False)
 
    Ahead-of-time precompile ``fn`` against example inputs, returning a self-contained,
    runnable Python source string plus an acceleration cache as ``(python_code, cache)``.
@@ -77,18 +77,25 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       With ``tracer="dynamo"``, every tuple in ``example_inputs`` is executed during
       capture. Recompilations become guarded variants in the artifact, including
       automatically dynamic graphs produced when dimensions vary across examples. The
-      artifact drops a serialized guard record only when doing so preserves how every
-      example matches the captured variants. This filtering is at guard-record
-      granularity, so a retained composite record can still contain invariant leaf
-      checks. Conditions removed from the dispatch guards become unchecked caller
-      assumptions; changing one from all capture examples can silently miscompute. The
-      loaded artifact raises only when a call fails every retained guard set, and never
-      compiles a new variant. Graph breaks are not supported yet. Compiled graphs and
+      artifact retains guards derived from explicit inputs and drops an environment
+      guard only when doing so preserves how every example matches the captured
+      variants. The environment is therefore a caller-provided invariant, while input
+      changes remain responsible for variant dispatch. The loaded artifact raises when
+      a call fails every retained guard set, and never compiles a new variant. Graph
+      breaks are not supported yet. Compiled graphs and
       kernels remain Python source; guard trees and transformed Dynamo bytecode are
       stored as opaque inline data because they have no Python-source representation.
       This initial path accepts a Python function with tensor/scalar arguments; closures
       and ``nn.Module`` arguments are not supported yet because their identity guards
       are not serializable.
+
+      Pass ``training=True`` with ``tracer="dynamo"`` and ``backend="inductor"`` to
+      capture differentiable graphs. Each compiled segment contains readable Inductor
+      source for both its AOTAutograd forward and backward, bridged by an emitted
+      ``torch.autograd.Function``. Outputs retain their ``grad_fn``, so a later
+      ``backward()`` executes the captured backward kernels. Training works across
+      captured recompilations. Only first-order backward is supported;
+      tensor-subclass and ``BackwardState`` training graphs are rejected.
 
    With ``tracer="make_fx"``, if ``fn`` runs a backward, the artifact re-runs the whole
    forward and backward and scatters the resulting parameter gradients onto the runtime
@@ -115,6 +122,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
        decomposition function) forwarded to ``make_fx``; defaults to ``None`` and is not
        yet supported with ``tracer="dynamo"``.
+   :param training: If ``True``, capture a differentiable Dynamo/Inductor artifact whose
+       outputs can be passed to ``backward()``. Defaults to ``False`` and currently
+       requires ``tracer="dynamo"`` and ``backend="inductor"``.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string (the
        single source of truth for the calling convention) and a binary acceleration
        cache (no weights, no calling-convention metadata; it carries a small
@@ -138,6 +148,16 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        )
        f = torch.compiler.precompile.load(python_code, cache)
        out = f(torch.randn(7, 4))  # served by the captured dynamic variant
+
+   Dynamo training::
+
+       examples = [(torch.randn(n, 4, requires_grad=True),) for n in (2, 3)]
+       python_code, cache = torch.compiler.precompile(
+           fn, example_inputs=examples, tracer="dynamo", training=True
+       )
+       f = torch.compiler.precompile.load(python_code, cache)
+       x = torch.randn(7, 4, requires_grad=True)
+       f(x).sum().backward()  # executes the captured backward kernels
 ```
 
 ```{eval-rst}

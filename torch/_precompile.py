@@ -14,12 +14,16 @@ that computes the wrong thing.
 
 With ``tracer="dynamo"``, precompile executes every tuple in ``example_inputs`` and
 captures the guarded specializations and recompilations Dynamo produces. Graph breaks
-are not supported yet. The serialized guard records are minimized while preserving how
-every example dispatches among the captured variants. Conditions removed this way are
-unchecked caller assumptions after loading, so changing one can silently miscompute.
-The artifact never compiles after loading; a call that fails every retained guard set
-raises. Compiled graphs and kernels remain Python source, while guard trees and
-transformed bytecode are stored as opaque inline data.
+are not supported yet. Guards derived from explicit inputs are retained for dispatch;
+guards covering the Python environment may be dropped because that environment is a
+caller-provided invariant. The artifact never compiles after loading; a call that fails
+every retained guard set raises. Compiled graphs and kernels remain Python source, while
+guard trees and transformed bytecode are stored as opaque inline data.
+
+With ``tracer="dynamo", training=True`` (inductor backend only), every compiled graph
+contains AOTAutograd's forward and backward as readable Inductor source. The served
+output retains its ``grad_fn`` and a later ``backward()`` executes those captured
+backward kernels across captured recompilations.
 
 ``precompile`` returns a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
@@ -1116,7 +1120,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "USER_INPUT_DEVICES",
         "USER_INPUT_BOUNDS",
     }
-    wanted = {"BACKEND", "TRACER", *make_fx_metadata}
+    wanted = {"BACKEND", "TRACER", "TRAINING", *make_fx_metadata}
     found: dict[str, object] = {}
     try:
         tree = ast.parse(python_code)
@@ -1361,7 +1365,9 @@ def _build_dynamo_eager_graph_source(gm: torch.fx.GraphModule) -> str:
     return "\n".join(parts)
 
 
-def _dynamo_backend_compiler(backend: str) -> Callable[..., _DynamoPythonBackend]:
+def _dynamo_backend_compiler(
+    backend: str, training: bool
+) -> Callable[..., _DynamoPythonBackend]:
     def compile_graph(
         gm: torch.fx.GraphModule, example_inputs: list[object]
     ) -> _DynamoPythonBackend:
@@ -1386,7 +1392,10 @@ def _dynamo_backend_compiler(backend: str) -> Callable[..., _DynamoPythonBackend
                 if node.op == "placeholder"
             ]
             python_code, cache = aot_autograd.compile_to_python(
-                gm, graph_inputs, options={"size_asserts": True}
+                gm,
+                graph_inputs,
+                options={"size_asserts": True},
+                grad_enabled=training,
             )
             call = aot_autograd.load_from_python(python_code, cache)
         return _DynamoPythonBackend(python_code, cache, is_dynamic, call)
@@ -1399,7 +1408,7 @@ def _filter_dynamo_guards(
     guarded_codes: Sequence[Any],
     example_inputs: Sequence[tuple[object, ...]],
 ) -> list[bytes]:
-    """Minimize guard records while preserving every example's match vector."""
+    """Drop environment guards while preserving every input-derived guard."""
     import dataclasses
     import functools
     import inspect
@@ -1416,6 +1425,13 @@ def _filter_dynamo_guards(
         bound = signature.bind(*example)
         bound.apply_defaults()
         example_scopes.append(dict(bound.arguments))
+    input_roots = {f"L[{name!r}]" for scope in example_scopes for name in scope}
+
+    def is_input_source(source: str) -> bool:
+        return any(
+            source == root or source.startswith((f"{root}.", f"{root}["))
+            for root in input_roots
+        )
 
     def fresh_guard(guard: Any, *, final: bool = False) -> Any:
         create_fn = guard.create_fn
@@ -1482,6 +1498,11 @@ def _filter_dynamo_guards(
             )
 
         def try_drop(records: list[Any], index: int) -> bool:
+            if records is kept_aot_guards or records is kept_key_order:
+                return False
+            guard = records[index]
+            if not guard.name or is_input_source(guard.name):
+                return False
             candidate = records[:index] + records[index + 1 :]
             trial_guards = candidate if records is kept_guards else kept_guards
             trial_aot = candidate if records is kept_aot_guards else kept_aot_guards
@@ -1559,6 +1580,7 @@ def _dynamo_backend_source_literal(source: str) -> str:
 def _build_dynamo_python_source(
     *,
     backend: str,
+    training: bool,
     state: dict[str, Any],
     backend_ids: list[str],
     compiled_backends: list[_DynamoPythonBackend],
@@ -1591,6 +1613,7 @@ def _build_dynamo_python_source(
         "# " + "=" * 70,
         f"BACKEND = {backend!r}",
         'TRACER = "dynamo"',
+        f"TRAINING = {training!r}",
         f"VARIANT_COUNT = {len(state['variants'])}",
         f"GRAPH_COUNT = {len(compiled_backends)}",
         f"DYNAMIC_GRAPH_COUNT = {dynamic_count}",
@@ -1648,8 +1671,10 @@ def _precompile_dynamo(
     *,
     backend: str,
     decompositions: dict | None,
+    training: bool,
 ) -> tuple[str, bytes]:
     import inspect
+    import types
 
     if not example_inputs:
         raise AssertionError(
@@ -1687,18 +1712,33 @@ def _precompile_dynamo(
             "cells; pass captured values as explicit arguments."
         )
 
+    capture_target = types.FunctionType(
+        target.__code__.replace(),
+        target.__globals__,
+        target.__name__,
+        target.__defaults__,
+        target.__closure__,
+    )
+    capture_target.__kwdefaults__ = target.__kwdefaults__
+    capture_target.__module__ = target.__module__
+    capture_target.__qualname__ = target.__qualname__
+
     _DYNAMO_COMPILE_LOCK.acquire()
     try:
-        torch._dynamo.reset()
-        package = CompilePackage(fn)
+        package = CompilePackage(capture_target)
         compiled = torch._dynamo.optimize(
-            backend=_dynamo_backend_compiler(backend),
+            backend=_dynamo_backend_compiler(backend, training),
             nopython=True,
             package=package,
             dynamic=None,
-        )(fn)
-        for example in example_inputs:
-            compiled(*example)
+        )(capture_target)
+        if training:
+            with torch.enable_grad():
+                for example in example_inputs:
+                    compiled(*example)
+        else:
+            for example in example_inputs:
+                compiled(*example)
 
         cache_entry = package.cache_entry()
         active_codes = [code for code in cache_entry.codes if not code.bypassed]
@@ -1713,7 +1753,7 @@ def _precompile_dynamo(
                 "precompile tracer='dynamo' did not capture a runnable entry frame."
             )
         filtered_guard_states = _filter_dynamo_guards(
-            target, code.guarded_codes, example_inputs
+            capture_target, code.guarded_codes, example_inputs
         )
 
         compiled_backends = []
@@ -1730,8 +1770,8 @@ def _precompile_dynamo(
             "code": code.python_code,
             "python_module": code.python_module,
             "import_sources": dict(code.import_sources),
-            "defaults": target.__defaults__,
-            "kwdefaults": target.__kwdefaults__,
+            "defaults": capture_target.__defaults__,
+            "kwdefaults": capture_target.__kwdefaults__,
             "closure": None,
             "variants": [
                 {
@@ -1746,6 +1786,7 @@ def _precompile_dynamo(
         backend_ids = [str(backend_id) for backend_id in code.backend_ids]
         python_code = _build_dynamo_python_source(
             backend=backend,
+            training=training,
             state=state,
             backend_ids=backend_ids,
             compiled_backends=compiled_backends,
@@ -1776,10 +1817,7 @@ def _precompile_dynamo(
             "cannot serialize yet (for example a module or callable guard)."
         ) from e
     finally:
-        try:
-            torch._dynamo.reset()
-        finally:
-            _DYNAMO_COMPILE_LOCK.release()
+        _DYNAMO_COMPILE_LOCK.release()
 
 
 class PrecompiledModule:
@@ -2102,6 +2140,7 @@ class _PrecompileApi:
         backend: str = "inductor",
         tracer: str = "make_fx",
         decompositions: dict | None = None,
+        training: bool = False,
     ) -> tuple[str, bytes]:
         """Ahead-of-time precompile ``fn`` against ``example_inputs``.
 
@@ -2120,8 +2159,8 @@ class _PrecompileApi:
         The outer sequence supports capture front-ends that can specialize one artifact
         from multiple calls. The ``make_fx`` tracer accepts exactly one tuple because it
         records only one execution; ``dynamo`` executes every tuple and records the
-        guarded recompilations they trigger. The Dynamo artifact minimizes serialized
-        guard records while preserving how every example dispatches among those variants.
+        guarded recompilations they trigger. The Dynamo artifact retains serialized
+        input-derived guards and treats the Python environment as invariant.
 
         THREADING: the inductor lowering step drives process-global compiler state
         and is serialized by an internal lock, so concurrent ``backend="inductor"``
@@ -2153,15 +2192,12 @@ class _PrecompileApi:
           to the example (the source of the programming-model contract).
         - ``"dynamo"``: analyze a Python function's bytecode and capture every guarded
           specialization/recompilation exercised by ``example_inputs``. The emitted
-          artifact drops a serialized guard record only when doing so preserves every
-          example's variant-match results. Filtering is at guard-record granularity, so
-          a retained composite record can still rebuild invariant leaf checks. Removed
-          conditions are unchecked caller assumptions: changing one from all capture
-          examples is outside this experimental contract and can silently miscompute.
-          A call that fails every retained guard set raises instead of compiling at
-          runtime. This initial path requires one full graph (graph breaks are rejected),
-          a function without closure cells, and tensor/scalar arguments (``nn.Module``
-          arguments are not supported yet).
+          artifact retains guards derived from explicit inputs. Guards covering the
+          Python environment may be removed because that environment is required to be
+          unchanged between capture and runtime. A call that fails every retained guard
+          set raises instead of compiling at runtime. This initial path requires one full
+          graph (graph breaks are rejected), a function without closure cells, and
+          tensor/scalar arguments (``nn.Module`` arguments are not supported yet).
 
         ``decompositions`` is an optional decomposition table (a dict mapping each
         ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
@@ -2169,10 +2205,17 @@ class _PrecompileApi:
         broken down in the captured graph. Defaults to ``None`` (make_fx's default) and
         is not yet supported with ``tracer="dynamo"``.
 
+        ``training=True`` is supported with ``tracer="dynamo"`` and
+        ``backend="inductor"``. Capture runs with grad enabled, and each compiled graph
+        carries a readable AOTAutograd forward and backward bridged by an emitted
+        ``torch.autograd.Function``. A served output therefore retains its ``grad_fn``;
+        calling ``backward()`` executes the precompiled backward kernels. The input
+        tensors that require gradients must do so in every example and at runtime.
+
         With ``tracer="dynamo"``, shape variation across ``example_inputs`` uses
         Dynamo's ordinary automatic dynamic-shape policy: for example, a static first
         graph can recompile into a symbolic graph when a later tuple changes a dimension.
-        The symbolic graphs and the minimized dispatch guard records are retained in the
+        The symbolic graphs and their input-derived dispatch guards are retained in the
         artifact.
 
         With ``tracer="make_fx"``, dynamic shapes are opt-in via
@@ -2251,12 +2294,18 @@ class _PrecompileApi:
             raise ValueError(
                 f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
             )
+        if training and (tracer != "dynamo" or backend != "inductor"):
+            raise NotImplementedError(
+                "precompile training=True currently requires tracer='dynamo' and "
+                "backend='inductor'."
+            )
         if tracer == "dynamo":
             return _precompile_dynamo(
                 fn,
                 example_inputs,
                 backend=backend,
                 decompositions=decompositions,
+                training=training,
             )
         compiled = PrecompiledModule(
             fn, backend=backend, tracer=tracer, decompositions=decompositions
