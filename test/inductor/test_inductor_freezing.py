@@ -16,16 +16,15 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, tf32_on_and_off
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_FBCODE,
-    TEST_WITH_SLOW_GRADCHECK,
+    IS_MACOS,
     parametrize,
+    skipIfRocm,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW_GRADCHECK,
 )
 
 
@@ -33,14 +32,10 @@ from torch.testing._internal.common_utils import (
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
-
-
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_MPS, HAS_TRITON
 
 
 aten = torch.ops.aten
@@ -920,7 +915,7 @@ class OptimizeForInferenceAcceleratorTemplate(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
     _do_cuda_non_default_stream = False
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton")
     def test_autocast(self, device):
         mod = torch.nn.Linear(10, 10).to(device).eval()
         inp = torch.rand([10, 10]).to(device).to(torch.half)
@@ -937,7 +932,7 @@ class OptimizeForInferenceAcceleratorTemplate(TestCase):
                 FileCheck().check_not("@triton.jit").run(code[0])
                 self.assertEqual(out_eager, out_compiled)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton")
     def test_conv_multiple_uses(self, device):
         from torch import nn
 
@@ -964,7 +959,7 @@ class OptimizeForInferenceAcceleratorTemplate(TestCase):
 
         self.assertEqual(output, output2)
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton")
     def test_param_deallocated(self, device):
         # TODO: cpu path keeps an extra copy of graph around somewhere,
         # memory not as important for cpu
@@ -999,7 +994,7 @@ class OptimizeForInferenceCudaTemplate(TestCase):
     hw_classification = HardwareClassification.CUDA
     _do_cuda_non_default_stream = False
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_static_indices_cudagraph(self, device):
         mod1 = torch.nn.Sequential(
             torch.nn.Linear(2, 2).to(device), torch.nn.Linear(2, 2).to(device)
@@ -1027,10 +1022,16 @@ class OptimizeForInferenceCudaTemplate(TestCase):
         self.assertEqual(y1, y2)
 
 
-instantiate_device_type_tests(OptimizeForInferenceTemplate, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    OptimizeForInferenceTemplate, globals(), allow_mps=True, allow_xpu=True
+)
 
 instantiate_device_type_tests(
-    OptimizeForInferenceAcceleratorTemplate, globals(), except_for="cpu", allow_xpu=True
+    OptimizeForInferenceAcceleratorTemplate,
+    globals(),
+    except_for="cpu",
+    allow_mps=True,
+    allow_xpu=True,
 )
 
 instantiate_device_type_tests(
