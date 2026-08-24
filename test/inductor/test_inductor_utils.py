@@ -2,24 +2,32 @@
 
 import functools
 import logging
+import unittest
 from unittest import mock
 
 import torch
-from torch._inductor import utils
+from torch._inductor import config, utils
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import do_bench_using_profiling
 from torch.autograd import DeviceType
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
+
+
+class TestFallbackByDefault(TestCase):
+    def test_sym_size_uses_inductor_lowering_in_lite_mode(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        sym_size = graph.call_function(torch.ops.aten.sym_size.int, (x, 0))
+
+        with config.patch({"fallback_by_default": True}):
+            self.assertFalse(utils.should_fallback_by_default(sym_size))
 
 
 class FakeKinetoEvent:
@@ -192,7 +200,7 @@ class TestBenchCuda(TestCase):
             functools.partial(torch.nn.functional.linear, x, w)
         )
 
-    @requires_capabilities(Capability.lib.triton)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_benchmarker(self):
         res = benchmarker.benchmark_gpu(self._bench_fn)
         log.warning("do_bench result: %s", res)
