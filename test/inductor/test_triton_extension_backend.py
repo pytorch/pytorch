@@ -51,17 +51,15 @@ from torch._inductor.codegen.common import (
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.utils import get_triton_code, run_and_get_triton_code
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
     onlyAccelerator,
-    requires_capabilities,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_FBCODE,
     IS_MACOS,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, TRITON_HAS_CPU
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON, TRITON_HAS_CPU
 from torch.utils._triton import has_triton_package
 
 
@@ -73,6 +71,9 @@ except ImportError:
 if has_triton_package():
     import triton
     import triton.language as tl
+
+
+requires_triton_backend = unittest.skipUnless(HAS_TRITON, "Requires Triton backend.")
 
 
 def mock_triton_hash_with_backend(*args, **kwargs):
@@ -284,13 +285,13 @@ class TritonExtensionBackendCPUTests(TritonExtensionBackendTestBase):
 class TritonExtensionBackendAcceleratorTests(TritonExtensionBackendTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @requires_triton_backend
     def test_codegen_with_custom_heuristics_module(self, device):
         self._test_codegen_with_custom_heuristics_module(device)
 
-    @requires_capabilities(Capability.lib.triton)
     @onlyAccelerator
+    @requires_triton_backend
     def test_codegen_with_custom_heuristics_module_udtk(self, device):
         self._test_codegen_with_custom_heuristics_module_udtk(device)
 
