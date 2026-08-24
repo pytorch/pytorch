@@ -21,7 +21,7 @@ class BackwardPassCleanupGuard;
 
 // Unlike the vanilla autograd engine, the distributed autograd engine
 // accumulates the gradients in the appropriate DistAutogradContext. This avoids
-// multiple trainer nodes stomping on each others gradients.
+// multiple trainer nodes stomping on each other's gradients.
 class TORCH_API DistEngine {
  public:
   // Retrieve the singleton instance.
