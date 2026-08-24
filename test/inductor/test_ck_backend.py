@@ -2,6 +2,7 @@
 import contextlib
 import logging
 import os
+import re
 import shlex
 import subprocess
 import tempfile
@@ -47,6 +48,13 @@ _test_env = {}
 
 def _dtype_test_name(dtype):
     return {torch.float16: "float16", torch.bfloat16: "bfloat16"}[dtype]
+
+
+_parametrize_dtype = parametrize(
+    "dtype",
+    (torch.float16, torch.bfloat16),
+    name_fn=_dtype_test_name,
+)
 
 
 @instantiate_parametrized_tests
@@ -342,11 +350,7 @@ class TestCKBackend(TestCase):
         ([4096, 2048], [2048], [4096, 1]),
         name_fn=lambda x_shape: f"x_shape_{'x'.join(map(str, x_shape))}",
     )
-    @parametrize(
-        "dtype",
-        (torch.float16, torch.bfloat16),
-        name_fn=_dtype_test_name,
-    )
+    @_parametrize_dtype
     def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape, dtype):
         m, k, n = 4096, 224, 2048
         alpha, beta = 1.0, 1.0
@@ -620,11 +624,10 @@ class TestCKTileUniversalGemmTemplate(TestCase):
         from torch._inductor.codegen.rocm import ck_tile_universal_gemm_template
 
         self._ck_tile = ck_tile_universal_gemm_template
-        # Both are functools.cache'd. ops() snapshots ck_dtype_to_size on first call.
+        # _ck_tile_universal_gemm_v2_api is functools.cache'd on the search path.
         self._ck_tile._ck_tile_universal_gemm_v2_api.cache_clear()
-        self._ck_tile.ops.cache_clear()
 
-    def _make_template(self, m=2048, n=2048, k=2048, dtype=torch.float16):
+    def _make_template(self, m=2048, n=2048, k=2048, *, dtype):
         device = torch.device("cuda")
         X = Buffer(name="X", layout=FixedLayout(device, dtype, [m, k]))
         W = Buffer(name="W", layout=FixedLayout(device, dtype, [k, n]))
@@ -632,9 +635,7 @@ class TestCKTileUniversalGemmTemplate(TestCase):
             [X, W], FixedLayout(device, dtype, [m, n])
         )
 
-    def _find_ck_tile_op(
-        self, pipeline="CompV3", epilogue="Default", dtype=torch.float16
-    ):
+    def _find_ck_tile_op(self, pipeline="CompV3", epilogue="Default", *, dtype):
         ck_dtype = self._ck_tile.CKTileGemmTemplate._TORCH_DTYPE_TO_CK[dtype]
         for op in self._ck_tile.ops():
             if (
@@ -806,22 +807,31 @@ struct FlatmmPipelineProblem
 
     def test_ops_dtype_labels_agree_with_maps(self):
         template_cls = self._ck_tile.CKTileGemmTemplate
-        mapped = set(template_cls._TORCH_DTYPE_TO_CK.values())
-        sized = set(template_cls.ck_dtype_to_size)
+        # Must match the `using` aliases CKTileTemplate.globals() emits, not the
+        # full _TORCH_DTYPE_TO_CK map (which also lists F64, I32, I8, etc.).
+        cpp_aliases = set(
+            re.findall(
+                r"using (\w+) =",
+                self._make_template(dtype=torch.float16).globals().getvalue(),
+            )
+        )
+        # Explicit GEMM catalog: do not derive from ck_dtype_to_size, which is
+        # also used for alignment math and may grow independently.
+        expected_gemm_dtypes = {
+            template_cls._TORCH_DTYPE_TO_CK[torch.float16],
+            template_cls._TORCH_DTYPE_TO_CK[torch.bfloat16],
+        }
         labels = {
             dt
             for op in self._ck_tile.ops()
             for dt in (op.datatype_a, op.datatype_b, op.datatype_c)
         }
         self.assertTrue(labels)
-        self.assertEqual(labels - mapped, set())
-        self.assertEqual(labels, sized)
+        self.assertEqual(labels, expected_gemm_dtypes)
+        self.assertEqual(labels - cpp_aliases, set())
+        self.assertLessEqual(expected_gemm_dtypes, set(template_cls.ck_dtype_to_size))
 
-    @parametrize(
-        "dtype",
-        (torch.float16, torch.bfloat16),
-        name_fn=_dtype_test_name,
-    )
+    @_parametrize_dtype
     @parametrize("epilogue", ("Default", "CShuffle"))
     def test_emit_v1_legacy_instance(self, dtype, epilogue):
         code = self._make_template(dtype=dtype).emit_ck_instance(
@@ -833,11 +843,7 @@ struct FlatmmPipelineProblem
         self.assertIn("ck_tile::GemmPipelineProblem<", code)
         self.assertIn("BaseGemmPipeline", code)
 
-    @parametrize(
-        "dtype",
-        (torch.float16, torch.bfloat16),
-        name_fn=_dtype_test_name,
-    )
+    @_parametrize_dtype
     @parametrize("epilogue", ("Default", "CShuffle"))
     def test_emit_v2_simplified_instance(self, dtype, epilogue):
         code = self._make_template(dtype=dtype).emit_ck_instance(
@@ -867,11 +873,7 @@ struct FlatmmPipelineProblem
         self.assertNotIn("BaseGemmPipeline", code)
         self.assertIn("Kernel::GridSize", code)
 
-    @parametrize(
-        "dtype",
-        (torch.float16, torch.bfloat16),
-        name_fn=_dtype_test_name,
-    )
+    @_parametrize_dtype
     @parametrize("use_v2_api", (True, False))
     def test_cshuffle_epilogue_offered_only_with_v2_api(self, dtype, use_v2_api):
         """
@@ -891,11 +893,7 @@ struct FlatmmPipelineProblem
         self.assertIn("Default", epilogues)
         self.assertEqual("CShuffle" in epilogues, use_v2_api)
 
-    @parametrize(
-        "dtype",
-        (torch.float16, torch.bfloat16),
-        name_fn=_dtype_test_name,
-    )
+    @_parametrize_dtype
     @parametrize("pipeline", ("CompV3", "CompV4", "Mem"))
     @parametrize("epilogue", ("Default", "CShuffle"))
     def test_offered_instance_compiles(self, dtype, epilogue, pipeline):
