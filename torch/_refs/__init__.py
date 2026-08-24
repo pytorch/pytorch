@@ -6793,7 +6793,9 @@ def log_normal(self, mean=1, std=2, generator=None):
 
 
 # NOTE: the device and dtype will be ignored when shape is None
-# NOTE: normal follows its native overload's output dtype instead of promoting.
+# NOTE: no @elementwise_type_promotion_wrapper on (mean, std): eager's
+# normal(Tensor, Tensor) always returns mean's dtype rather than promoting,
+# and the wrapper's pre-cast of mean would corrupt that below (#194547).
 @register_decomposition(aten.normal)
 @out_wrapper()
 def normal(
@@ -6851,7 +6853,10 @@ def normal(
         requires_grad=False,
         generator=generator,
     )
-    return std * normal_samples + mean
+    # std * normal_samples + mean promotes dtype through ordinary elementwise
+    # op rules when mean/std differ, so narrow back to the resolved dtype to
+    # match eager's in-place (non-promoting) accumulation.
+    return (std * normal_samples + mean).to(dtype)
 
 
 @register_decomposition(aten.normal_)
