@@ -2815,7 +2815,10 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    if device_id is not None and (device_id.index is None or device_id.type == "cpu"):
+    is_gloo = backend.lower() == Backend.GLOO
+    if device_id is not None and not is_gloo and (
+        device_id.index is None or device_id.type == "cpu"
+    ):
         raise ValueError(
             "init_process_group device_id parameter must be an accelerator with an index"
         )
