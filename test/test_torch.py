@@ -4251,6 +4251,15 @@ class TestTorchDeviceType(TestCase):
             out = torch.addcmul(a, b, c, value=-2)
             self.assertTrue(not (out.isnan() or out.isinf()))
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float)
+    def test_addcdiv_zero_divisor(self, device, dtype):
+        input = torch.ones(17, dtype=dtype, device=device)
+        tensor1 = torch.ones(17, dtype=dtype, device=device)
+        tensor2 = torch.zeros(17, dtype=dtype, device=device)
+        expected = torch.full((17,), float("inf"), dtype=dtype, device=device)
+        self.assertEqual(torch.addcdiv(input, tensor1, tensor2), expected)
+
     def test_nullary_op_mem_overlap(self, device):
         ops = (
             ("random_", ()),
@@ -6543,6 +6552,45 @@ class TestTorchDeviceType(TestCase):
         y = torch.randn(8, device=device)
         with self.assertRaisesRegex(RuntimeError, "same nbytes"):
             x.untyped_storage()._swap_data_ptr_(y.untyped_storage())
+
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/193288")
+    @dtypes(
+        torch.uint8,
+        torch.int8,
+        torch.int16,
+        torch.uint16,
+        torch.int32,
+        torch.uint32,
+        torch.int64,
+        torch.uint64,
+    )
+    def test_clamp_integral_out_of_range_bounds(self, device, dtype):
+        info = torch.iinfo(dtype)
+        x = torch.tensor([info.min, 0, info.max], device=device, dtype=dtype)
+        min_bound = info.min if dtype is torch.int64 else info.min - 1
+        max_bound = info.max if dtype is torch.uint64 else info.max + 1
+
+        self.assertEqual(torch.clamp(x, min=min_bound), x)
+        self.assertEqual(torch.clamp_min(x, min_bound), x)
+        self.assertEqual(torch.clamp(x, max=max_bound), x)
+        self.assertEqual(torch.clamp_max(x, max_bound), x)
+        if dtype not in (torch.int64, torch.uint64):
+            self.assertEqual(
+                torch.nn.functional.hardtanh(x, min_bound, max_bound), x
+            )
+
+        # An upper bound below the dtype range (or a lower bound above it) would
+        # force every element to an unrepresentable value and must raise.
+        if dtype is not torch.int64:
+            with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+                torch.clamp(x, max=info.min - 1)
+            with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+                torch.clamp_max(x, info.min - 1)
+        if dtype is not torch.uint64:
+            with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+                torch.clamp(x, min=info.max + 1)
+            with self.assertRaisesRegex(RuntimeError, "outside the representable range"):
+                torch.clamp_min(x, info.max + 1)
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.

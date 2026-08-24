@@ -12,13 +12,24 @@ import unittest
 from collections.abc import Callable
 from unittest.mock import patch
 
+import sympy
+
 import torch
+import torch._functorch.config as functorch_config
 from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import CompileCounterWithBackend, rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config, cpu_vec_isa, metrics, test_operators
-from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
+from torch._inductor.codegen.cpp import (
+    CppKernelProxy,
+    CppOverrides,
+    CppVecKernel,
+    CppVecOverrides,
+    KernelGroup,
+    LoopLevel,
+    LoopNest,
+)
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
@@ -144,6 +155,77 @@ class LstmModule(torch.nn.Module):
 @instantiate_parametrized_tests
 class CPUReproTests(TestCase):
     common = check_model
+
+    def _check_interpolate_mutated_input_backward(
+        self, fn, activation_memory_budget=1.0
+    ):
+        torch.manual_seed(0)
+        base = torch.randn(1, 3, 16, 16)
+        mean = torch.randn(3, 1, 1)
+        std = torch.randn(3, 1, 1).abs().add(0.5)
+
+        def make_args():
+            base_arg = base.detach().clone().requires_grad_(True)
+            x_arg = (base_arg * 1.0).squeeze(0)
+            mean_arg = mean.detach().clone().requires_grad_(True)
+            std_arg = std.detach().clone().requires_grad_(True)
+            return base_arg, x_arg, mean_arg, std_arg
+
+        def run(fn_to_run):
+            base_arg, x_arg, mean_arg, std_arg = make_args()
+            y, z = fn_to_run(x_arg, mean_arg, std_arg)
+            (y.sum() + z.sum()).backward()
+            return y.detach(), z.detach(), base_arg.grad, mean_arg.grad, std_arg.grad
+
+        expected = run(fn)
+        with functorch_config.patch(activation_memory_budget=activation_memory_budget):
+            actual = run(torch.compile(fn, backend="inductor", fullgraph=True))
+        self.assertEqual(actual, expected)
+
+    @parametrize("activation_memory_budget", (0, 1))
+    def test_interpolate_mutated_input_backward(self, activation_memory_budget):
+        def fn(x, mean, std):
+            y = F.interpolate(
+                x[:, :8, :8].unsqueeze(0),
+                size=(4, 4),
+                mode="bilinear",
+                align_corners=False,
+            )
+            x.sub_(mean).div_(std)
+            return y, x
+
+        self._check_interpolate_mutated_input_backward(fn, activation_memory_budget)
+
+    def test_interpolate_mutated_input_backward_with_effect_token(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::_issue185497_effect", mutates_args=())
+        def effect(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @effect.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        handle = _register_effectful_op(effect, EffectType.ORDERED)
+
+        try:
+
+            def fn(x, mean, std):
+                torch.ops.test._issue185497_effect(x)
+                y = F.interpolate(
+                    x[:, :8, :8].unsqueeze(0),
+                    size=(4, 4),
+                    mode="bilinear",
+                    align_corners=False,
+                )
+                x.sub_(mean).div_(std)
+                return y, x
+
+            self._check_interpolate_mutated_input_backward(fn)
+        finally:
+            handle.destroy()
 
     @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
@@ -828,6 +910,18 @@ class CPUReproTests(TestCase):
                     inps_var = [v_var]
                     self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
 
+    def test_lstm_compile_default_grad_enabled(self):
+        mod = LstmModule(4, 8, 1, batch_first=True).eval()
+        x = torch.randn(2, 3, 4)
+
+        fn_opt = torch.compile(mod, backend="inductor", fullgraph=True)
+
+        actual = fn_opt(x)
+        self.assertEqual(actual, mod(x))
+        actual[0].sum().backward()
+        for param in mod.parameters():
+            self.assertIsNotNone(param.grad)
+
     @parametrize(
         "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
         itertools.product(
@@ -1457,6 +1551,102 @@ class CPUReproTests(TestCase):
             # Use same criterion as test_inplace_squeeze_needed
             # for parallel reduction.
             self.common(mod, (x, weight), atol=5e-1, rtol=5e-1)
+
+    @requires_vectorization
+    def test_max_parallel_depth_sub_vector_width_loop(self):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/190757
+        # A vectorized loop smaller than the vector width runs 1 iteration, not
+        # 0. Counting it as 0 zeroed the outer-work estimate and relocated
+        # parallelism onto the inner reduction, nesting an OpenMP parallel
+        # region inside a serial loop.
+        kernel_group = KernelGroup()
+        proxy = CppKernelProxy(kernel_group)
+        # Populate `kernels` with a vec kernel so the relocation guard's
+        # `has_scalar_kernel(self)` is intentionally False (the repro's softmax
+        # kernel is vectorized), rather than relying on `kernels` being empty.
+        proxy.kernels = [
+            CppVecKernel(kernel_group.args, 1, tiling_factor=16, tiling_idx=0)
+        ]
+        outer = LoopLevel(sympy.Symbol("x0"), sympy.Integer(4)).tile(16)
+        reduction = LoopLevel(sympy.Symbol("x1"), sympy.Integer(64))
+        reduction.is_reduction = True
+        nest = LoopNest([outer, reduction], proxy)
+        depth = nest.max_parallel_depth()
+        self.assertEqual(depth.start_depth, 0)
+        self.assertEqual(depth.parallel_depth, 1)
+
+    @requires_vectorization
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @config.patch(freezing=True)
+    def test_masked_softmax_freezing_no_parallel_reduction(self):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/190757
+        # End-to-end check of the symptom: under freezing, the shifted-window
+        # masked-softmax reduction was left with a size-4 (num heads) vectorized
+        # outer loop, whose trip count underflowed to 0 and relocated
+        # parallelism onto the inner reduction -- nesting an OpenMP parallel
+        # region inside a serial loop (30-50x slowdown). Assert that parallelism
+        # never lands on a reduction loop.
+        C, WS, SHIFT, NH = 96, 8, 4, 4
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = torch.nn.Conv2d(1, C, 4, 4)
+                self.gate = torch.nn.Conv2d(C, C, 1)
+                self.ln = torch.nn.LayerNorm(C)
+                self.qkv = torch.nn.Linear(C, 3 * C)
+                self.out = torch.nn.Linear(C, C)
+
+            def forward(self, x):
+                x = F.interpolate(
+                    x, (1024, 64), mode="bicubic", align_corners=True
+                ).reshape(1, 1, 256, 256)
+                g = self.proj(x)
+                x = g * torch.sigmoid(self.gate(g))
+                b, c, h, w = x.shape
+                x = self.ln(x.flatten(2).transpose(1, 2)).view(b, h, w, c)
+                x = torch.roll(x, (-SHIFT, -SHIFT), (1, 2))
+                win = (
+                    x.view(b, h // WS, WS, w // WS, WS, c)
+                    .permute(0, 1, 3, 2, 4, 5)
+                    .reshape(-1, WS * WS, c)
+                )
+                n = win.shape[0]
+                r = (torch.arange(h) >= h - WS).long() + (
+                    torch.arange(h) >= h - SHIFT
+                ).long()
+                reg = (
+                    (r[:, None] * 3 + r[None, :])
+                    .view(h // WS, WS, w // WS, WS)
+                    .permute(0, 2, 1, 3)
+                    .reshape(-1, WS * WS)
+                )
+                mask = (
+                    (reg.unsqueeze(1) - reg.unsqueeze(2))
+                    .to(x.dtype)
+                    .masked_fill_(reg.unsqueeze(1) != reg.unsqueeze(2), -100.0)
+                )
+                q, k, v = (
+                    self.qkv(win)
+                    .view(n, WS * WS, 3, NH, c // NH)
+                    .permute(2, 0, 3, 1, 4)
+                )
+                s = q @ k.transpose(-1, -2) / math.sqrt(c // NH)
+                s = (
+                    s.view(1, n, NH, WS * WS, WS * WS) + mask.unsqueeze(1).unsqueeze(0)
+                ).view(-1, NH, WS * WS, WS * WS)
+                o = (s.softmax(-1) @ v).transpose(1, 2).reshape(n, WS * WS, c)
+                return self.out(o)
+
+        mod = Model().eval()
+        x = torch.randn(1, 1, 1001, 64)
+        with torch.no_grad():
+            metrics.reset()
+            expected = mod(x)
+            compiled_m = torch.compile(mod)
+            actual = compiled_m(x)
+            self.assertEqual(expected, actual, atol=1e-3, rtol=1e-3)
+            self.assertEqual(metrics.parallel_reduction_count, 0)
 
     def test_cat_mul(self):
         # https://github.com/pytorch/pytorch/issues/93365
