@@ -685,7 +685,7 @@ class InitDeviceMeshTest(DTensorTestBase):
         def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
             return (
                 mesh.get_group(dim_idx)
-                ._get_backend(torch.device(f"{self.device_type}:{self.rank}"))
+                ._get_backend(torch.device(self.device_type))
                 .options
             )
 
@@ -731,7 +731,7 @@ class InitDeviceMeshTest(DTensorTestBase):
         def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
             return (
                 mesh.get_group(dim_idx)
-                ._get_backend(torch.device(f"{self.device_type}:{self.rank}"))
+                ._get_backend(torch.device(self.device_type))
                 .options
             )
 
@@ -1602,9 +1602,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         )
         # This API directly calls the pybind API, so we need to manually track the comm for finalization.
         _world.comms.append(
-            split_group_2._get_backend(
-                torch.device(f"{self.device_type}:{self.rank}")
-            ).get_comm()
+            split_group_2._get_backend(torch.device(self.device_type)).get_comm()
         )
         gpu_tensor = torch.ones(3, 3, device=self.device_type)
         dist.all_reduce(gpu_tensor, group=split_group_2)
