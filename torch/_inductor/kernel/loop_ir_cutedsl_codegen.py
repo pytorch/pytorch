@@ -79,10 +79,55 @@ class LoopIRCuteDSLCodegen:
             )
         return op(*lowered_args, **lowered_kwargs)
 
+    def _output_scale_name(self, value: Any) -> str | None:
+        """Recognize a pure accumulator-times-scalar epilogue."""
+
+        def load_name(expr: Any) -> str | None:
+            while isinstance(expr, GemmEpilogueIRExpression) and expr.op in (
+                "to_dtype",
+                "identity",
+            ):
+                expr = expr.args[0]
+            if (
+                isinstance(expr, GemmEpilogueIRExpression)
+                and expr.op == "load"
+                and expr.args[2] is None
+            ):
+                return expr.args[0]
+            return None
+
+        if not isinstance(value, GemmEpilogueIRExpression) or value.op != "mul":
+            return None
+        lhs, rhs = value.args[:2]
+        lhs_name, rhs_name = load_name(lhs), load_name(rhs)
+        scale_name = None
+        if lhs_name == self.accumulator and rhs_name != self.accumulator:
+            scale_name = rhs_name
+        elif rhs_name == self.accumulator and lhs_name != self.accumulator:
+            scale_name = lhs_name
+        if scale_name is None:
+            return None
+
+        scale = V.graph.name_to_buffer.get(scale_name)
+        if scale is None:
+            scale = V.graph.graph_inputs.get(scale_name)
+        if scale is None or scale.get_dtype() != torch.float32:
+            return None
+        if not all(
+            V.graph.sizevars.statically_known_equals(dim, 1) for dim in scale.get_size()
+        ):
+            return None
+        return scale_name
+
     def render(
         self, buffers: Sequence[ComputedBuffer], fn_name: str
     ) -> GemmEpiloguePlan:
         analysis = GemmEpilogueIRAnalysis.from_buffers(buffers)
+        output_scale = None
+        if self.accumulator in self.removed_buffers and len(analysis.stores) == 1:
+            output_scale = self._output_scale_name(
+                next(iter(analysis.stores.values())).value
+            )
         outputs: list[tuple[str, Any]] = []
         if self.accumulator not in self.removed_buffers:
             outputs.append((self.accumulator, self.accumulator_value))
@@ -111,6 +156,7 @@ class LoopIRCuteDSLCodegen:
             reads=tuple(self.reads),
             writes=tuple(name for name, _ in outputs),
             renames=renames,
+            output_scale=output_scale,
         )
 
     @classmethod

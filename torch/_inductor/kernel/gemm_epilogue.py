@@ -26,6 +26,10 @@ class GemmEpiloguePlan:
     reads: tuple[str, ...] = ()
     writes: tuple[str, ...] = ()
     renames: dict[str, Any] = dataclasses.field(default_factory=dict)
+    # A pure ``GEMM_output * scalar`` epilogue can be routed through a
+    # backend's dedicated output-scale argument instead of compiling a generic
+    # elementwise epilogue. The value is the graph buffer name of that scalar.
+    output_scale: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
