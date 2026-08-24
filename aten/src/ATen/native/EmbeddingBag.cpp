@@ -886,14 +886,22 @@ void check_arguments(
 
   AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_embedding_bag_cpu_impl", [&]() {
     if (offsets.size(0) > 0) {
-      index_t offset_0 = offsets.const_data_ptr<index_t>()[0];
-      index_t offset_n = offsets.const_data_ptr<index_t>()[offsets.size(0)-1];
+      const auto* offsets_data = offsets.const_data_ptr<index_t>();
+      index_t offset_0 = offsets_data[0];
+      index_t offset_n = offsets_data[offsets.size(0)-1];
       TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
                                 "in the mini-batch has to start from position 0. "
                                 "However, got ", offsets[0]);
       TORCH_CHECK(offset_n <= indices.size(0), "offsets[-1] can not "
                   "be greater than input's length ", indices.size(0), " but got offsets[-1] of ",
                   offset_n);
+      for (const auto i : c10::irange(1, offsets.size(0))) {
+        TORCH_CHECK(offsets_data[i - 1] <= offsets_data[i],
+                    "embedding_bag: offsets have to be monotonically "
+                    "non-decreasing, but got offsets[", i - 1, "] of ",
+                    offsets_data[i - 1], " and offsets[", i, "] of ",
+                    offsets_data[i]);
+      }
     }
   });
 
