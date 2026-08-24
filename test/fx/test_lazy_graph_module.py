@@ -18,10 +18,11 @@ from torch.fx._lazy_graph_module import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.package import PackageExporter, PackageImporter
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 class TestLazyGraphModule(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     exit_stack = None
 
     @classmethod
