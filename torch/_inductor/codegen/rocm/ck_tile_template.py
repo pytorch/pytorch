@@ -22,7 +22,15 @@ class CKTileTemplate(ROCmTemplate):
         torch.float8_e5m2: "BF8",  # gfx95
     }
 
-    # Keys are _TORCH_DTYPE_TO_CK values and must match the C++ aliases in globals().
+    _CK_DTYPE_ALIASES = {
+        "F8": "ck_tile::fp8_t",
+        "BF8": "ck_tile::bf8_t",
+        "F16": "ck_tile::half_t",
+        "F32": "float",
+        "BF16": "ck_tile::bfloat16_t",
+    }
+
+    # Keys are _TORCH_DTYPE_TO_CK values and must match _CK_DTYPE_ALIASES.
     ck_dtype_to_size = {
         _TORCH_DTYPE_TO_CK[torch.float16]: 2,
         _TORCH_DTYPE_TO_CK[torch.bfloat16]: 2,
@@ -41,15 +49,11 @@ class CKTileTemplate(ROCmTemplate):
 
     def globals(self) -> IndentedBuffer:
         res = super().globals()
-        res.splice(
-            """
-                using F8  = ck_tile::fp8_t;
-                using BF8 = ck_tile::bf8_t;
-                using F16 = ck_tile::half_t;
-                using F32 = float;
-                using BF16 = ck_tile::bfloat16_t;
-            """
+        alias_lines = "\n".join(
+            f"                using {name} = {ctype};"
+            for name, ctype in self._CK_DTYPE_ALIASES.items()
         )
+        res.splice(f"\n{alias_lines}\n")
         return res
 
     def torch_type_to_ck(self, node: IRNode, ptr: str) -> str:

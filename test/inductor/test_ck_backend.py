@@ -807,29 +807,22 @@ struct FlatmmPipelineProblem
 
     def test_ops_dtype_labels_agree_with_maps(self):
         template_cls = self._ck_tile.CKTileGemmTemplate
-        # Must match the `using` aliases CKTileTemplate.globals() emits, not the
-        # full _TORCH_DTYPE_TO_CK map (which also lists F64, I32, I8, etc.).
-        cpp_aliases = set(
-            re.findall(
-                r"using (\w+) =",
-                self._make_template(dtype=torch.float16).globals().getvalue(),
-            )
-        )
-        # Explicit GEMM catalog: do not derive from ck_dtype_to_size, which is
-        # also used for alignment math and may grow independently.
-        expected_gemm_dtypes = {
-            template_cls._TORCH_DTYPE_TO_CK[torch.float16],
-            template_cls._TORCH_DTYPE_TO_CK[torch.bfloat16],
-        }
+        globals_src = self._make_template(dtype=torch.float16).globals().getvalue()
+        cpp_aliases = set(re.findall(r"using (\w+) =", globals_src))
         labels = {
             dt
             for op in self._ck_tile.ops()
             for dt in (op.datatype_a, op.datatype_b, op.datatype_c)
         }
         self.assertTrue(labels)
-        self.assertEqual(labels, expected_gemm_dtypes)
-        self.assertEqual(labels - cpp_aliases, set())
-        self.assertLessEqual(expected_gemm_dtypes, set(template_cls.ck_dtype_to_size))
+        self.assertEqual(labels, set(self._ck_tile.GEMM_DTYPES))
+        self.assertEqual(
+            set(template_cls._CK_DTYPE_ALIASES),
+            cpp_aliases - {"Row", "Col"},
+        )
+        self.assertLessEqual(
+            set(self._ck_tile.GEMM_DTYPES), set(template_cls.ck_dtype_to_size)
+        )
 
     @_parametrize_dtype
     @parametrize("epilogue", ("Default", "CShuffle"))

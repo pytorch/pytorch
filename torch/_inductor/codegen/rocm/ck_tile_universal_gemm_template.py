@@ -21,6 +21,12 @@ from ...utils import IndentedBuffer
 
 log = logging.getLogger(__name__)
 
+# Dtypes for which universal GEMM instances are generated. Every entry must have
+# a ck_dtype_to_size entry and a _CK_DTYPE_ALIASES entry on CKTileTemplate.
+GEMM_DTYPES = (
+    CKTileTemplate._TORCH_DTYPE_TO_CK[torch.float16],
+    CKTileTemplate._TORCH_DTYPE_TO_CK[torch.bfloat16],
+)
 
 _CK_TILE_PIPELINE_PROBLEM_HEADER = "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 _STRUCT_ANCHOR = "struct UniversalGemmPipelineProblem"
@@ -187,7 +193,7 @@ def ops():
     """
     import itertools
 
-    gemm_dtypes = [(d,) * 3 for d in CKTileTemplate.ck_dtype_to_size]
+    gemm_dtypes = [(d,) * 3 for d in GEMM_DTYPES]
 
     compute_v3_instances = [
         CKTileGemmOperation(
