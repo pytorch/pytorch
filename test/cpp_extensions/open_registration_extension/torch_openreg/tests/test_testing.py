@@ -319,7 +319,6 @@ class TestCapabilityGating(TestCase):
                 Capability.dtype.fp8: lambda: True,
                 Capability.dtype.bf16: lambda: False,
                 Capability.attention.flash_attention: lambda: True,
-                Capability.attention.mem_efficient_attention: lambda: False,
             }
         )
 
@@ -398,21 +397,26 @@ class TestCapabilityGating(TestCase):
         type(self)._executed["test_any_supported"] += 1
         self.assertEqual(torch.device(device).type, "openreg")
 
-    @requires_capabilities(Capability.attention.mem_efficient_attention, any=True)
+    @requires_capabilities(Capability.dtype.bf16, any=True)
     def test_any_unsupported(self, device):
         type(self)._executed["test_any_unsupported"] += 1
-        self.fail("Expected skip: mem_efficient_attention is unsupported")
+        self.fail("Expected skip: dtype.bf16 is unsupported under any=True")
 
     def test_any_missing(self, device):
         """any=True asserts when none of the capabilities are declared."""
 
-        @requires_capabilities(Capability.attention.cudnn_attention, any=True)
+        @requires_capabilities(
+            Capability.attention.cudnn_attention,
+            Capability.attention.mem_efficient_attention,
+            any=True,
+        )
         def dummy(self):
             self.fail("should not execute")
 
         with self.assertRaisesRegex(
             AssertionError,
-            r"has not declared any of the required capabilities: attention\.cudnn_attention",
+            r"has not declared any of the required capabilities: "
+            r"attention\.cudnn_attention, attention\.mem_efficient_attention",
         ):
             dummy(self)
         type(self)._executed["test_any_missing"] += 1
@@ -422,8 +426,8 @@ class TestCapabilityGating(TestCase):
         none are supported, even if others are undeclared."""
 
         @requires_capabilities(
-            Capability.attention.mem_efficient_attention,  # declared, unsupported
-            Capability.attention.cudnn_attention,  # undeclared
+            Capability.dtype.bf16,
+            Capability.attention.cudnn_attention,
             any=True,
         )
         def dummy(self):
@@ -431,7 +435,9 @@ class TestCapabilityGating(TestCase):
 
         with self.assertRaisesRegex(
             unittest.SkipTest,
-            r"does not satisfy any of the required capabilities",
+            r"does not satisfy any of the required capabilities: "
+            r"unsupported capabilities: dtype\.bf16; "
+            r"missing capabilities: attention\.cudnn_attention",
         ):
             dummy(self)
         type(self)._executed["test_any_partially_missing"] += 1
