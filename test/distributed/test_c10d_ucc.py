@@ -156,10 +156,6 @@ class ProcessGroupUCCTest(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return "ucc"
 
-    @property
-    def world_size(self):
-        return 4
-
     def _create_process_group_ucc(self):
         store = c10d.FileStore(self.rdvz_file, self.world_size)
         return c10d.ProcessGroupUCC(store, self.rank, self.world_size)
