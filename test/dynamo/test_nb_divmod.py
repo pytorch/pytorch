@@ -169,6 +169,17 @@ class TestNbDivmod(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(ret, opt_fn(x))
 
+    def test_divmod_scalar_tensor_inductor(self):
+        """divmod(Scalar, Tensor), examine aten.divmod.Scalar_Tensor decomp path."""
+        def fn(x):
+            return divmod(8, x)
+
+        x = 2
+        qt, rt = torch.compile(fn, backend="inductor", fullgraph=True)(torch.as_tensor(x))
+        q, r = fn(x)
+        self.assertEqual(torch.as_tensor(q), qt)
+        self.assertEqual(torch.as_tensor(r), rt)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
