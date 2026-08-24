@@ -55,9 +55,6 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
-
 # Simple and boring model
 class TestDummyModel(torch.nn.Module):
     def __init__(self) -> None:
@@ -76,12 +73,12 @@ class TestDummyModel(torch.nn.Module):
         return x
 
     def get_input(self):
-        return torch.rand(8, 8, device=device_type)
+        return torch.rand(8, 8, device=self.net1.weight.device)
 
 
 class TestStatefulObj:
     def __init__(self) -> None:
-        self.data = torch.rand(10, 10, device=device_type)
+        self.data = torch.rand(10, 10)
 
     def state_dict(self):
         return {"data": self.data}
