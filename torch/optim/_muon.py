@@ -375,7 +375,7 @@ def _single_tensor_muon(
     ns_steps: int,
     eps: float,
     adjust_lr_fn: str | None,
-    allow_batched: bool = False,
+    allow_batched: bool,
     has_complex: bool,
 ) -> None:
     lr = _to_scalar(lr)
