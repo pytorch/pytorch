@@ -1412,7 +1412,7 @@ def _filter_dynamo_guards(
     guarded_codes: Sequence[Any],
     example_scopes: Sequence[dict[str, object]],
 ) -> list[bytes]:
-    """Minimize frozen guard records while preserving variant dispatch."""
+    """Drop environment guards while preserving every local-derived guard."""
     import dataclasses
     import functools
 
@@ -1421,6 +1421,14 @@ def _filter_dynamo_guards(
     from torch._dynamo.package import load_guard_manager, load_guards_state
     from torch._guards import GuardsSet
     from torch.utils._ordered_set import OrderedSet
+
+    local_roots = {f"L[{name!r}]" for scope in example_scopes for name in scope}
+
+    def is_local_source(source: str) -> bool:
+        return any(
+            source == root or source.startswith((f"{root}.", f"{root}["))
+            for root in local_roots
+        )
 
     def fresh_guard(guard: Any, *, final: bool = False) -> Any:
         create_fn = guard.create_fn
@@ -1487,6 +1495,11 @@ def _filter_dynamo_guards(
             )
 
         def try_drop(records: list[Any], index: int) -> bool:
+            if records is kept_aot_guards or records is kept_key_order:
+                return False
+            guard = records[index]
+            if not guard.name or is_local_source(guard.name):
+                return False
             candidate = records[:index] + records[index + 1 :]
             trial_guards = candidate if records is kept_guards else kept_guards
             trial_aot = candidate if records is kept_aot_guards else kept_aot_guards
@@ -1759,6 +1772,17 @@ def _precompile_dynamo(
             "capture local variables."
         )
 
+    capture_target = types.FunctionType(
+        target.__code__.replace(),
+        target.__globals__,
+        target.__name__,
+        target.__defaults__,
+        target.__closure__,
+    )
+    capture_target.__kwdefaults__ = target.__kwdefaults__
+    capture_target.__module__ = target.__module__
+    capture_target.__qualname__ = target.__qualname__
+
     def is_literal(value: object) -> bool:
         if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):
             return True
@@ -1891,7 +1915,6 @@ def _precompile_dynamo(
 
     _DYNAMO_COMPILE_LOCK.acquire()
     try:
-        torch._dynamo.reset()
         unsupported_capture_guards: set[tuple[str, str]] = set()
 
         def keep_portable_capture_guards(guards: Sequence[Any]) -> list[bool]:
@@ -1911,14 +1934,14 @@ def _precompile_dynamo(
             return result
 
         package = CompilePackage(
-            fn, serialization_guard_filter_fn=keep_portable_capture_guards
+            capture_target, serialization_guard_filter_fn=keep_portable_capture_guards
         )
         compiled = torch._dynamo.optimize(
             backend=_dynamo_backend_compiler(backend, training),
             nopython=False,
             package=package,
             dynamic=None,
-        )(fn)
+        )(capture_target)
         if training:
             with torch.enable_grad():
                 for example in example_inputs:
@@ -2043,8 +2066,8 @@ def _precompile_dynamo(
                     "global_bindings": global_bindings,
                     "value_globals": value_globals,
                     "import_sources": dict(code.import_sources),
-                    "defaults": target.__defaults__ if index == 0 else None,
-                    "kwdefaults": target.__kwdefaults__ if index == 0 else None,
+                    "defaults": capture_target.__defaults__ if index == 0 else None,
+                    "kwdefaults": capture_target.__kwdefaults__ if index == 0 else None,
                     "variants": variants,
                 }
             )
@@ -2087,10 +2110,7 @@ def _precompile_dynamo(
             "cannot serialize yet (for example a module or callable guard)."
         ) from e
     finally:
-        try:
-            torch._dynamo.reset()
-        finally:
-            _DYNAMO_COMPILE_LOCK.release()
+        _DYNAMO_COMPILE_LOCK.release()
 
 
 class PrecompiledModule:
