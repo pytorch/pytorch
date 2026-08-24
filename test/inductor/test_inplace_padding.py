@@ -243,7 +243,6 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
-
     @requires_gpu_with_enough_memory(2e10)
     @inductor_config.patch(force_shape_pad=True)
     @serialTest()
