@@ -45,7 +45,7 @@ class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
   /// the paper `Layer Normalization`_ .
   ///
   /// The mean and standard-deviation are calculated separately over the last
-  /// certain number dimensions which have to be of the shape specified by
+  /// certain number of dimensions which have to be of the shape specified by
   /// input `normalized_shape`.
   ///
   /// `Layer Normalization`: https://arxiv.org/abs/1607.06450
