@@ -6657,10 +6657,11 @@ def normal(
         requires_grad=False,
         generator=generator,
     )
-    # std * normal_samples + mean promotes dtype through ordinary elementwise
-    # op rules when mean/std differ, so narrow back to the resolved dtype to
-    # match eager's in-place (non-promoting) accumulation.
-    return (std * normal_samples + mean).to(dtype)
+    # Eager computes this as two in-place ops, narrowing to `dtype` after
+    # each one (ret.mul_(std).add_(mean)); narrowing only once at the end
+    # here would round differently when mean/std differ in dtype.
+    result = (std * normal_samples).to(dtype)
+    return (result + mean).to(dtype)
 
 
 @register_decomposition(aten.normal_)
