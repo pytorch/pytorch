@@ -13,6 +13,7 @@ if not dist.is_available():
 
 from torch.testing._internal.common_distributed import DistributedTestBase, TEST_SKIPS
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -57,6 +58,8 @@ def with_comms(func=None):
 
 
 class TestObjectCollectives(DistributedTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("weights_only", [True, False])
     @with_comms()
     def test_all_gather_object(self, weights_only):
