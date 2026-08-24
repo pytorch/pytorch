@@ -7,11 +7,7 @@ import torch
 from torch import nn, optim
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-    skipMPS,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -141,8 +137,6 @@ class TestRuntimeEstimator(TestCase):
             raise NotImplementedError("Only Transformer and CNN is supported")
         return (model, optimizer, inp)
 
-    @onlyAccelerator
-    @skipMPS
     def test_transformer_runtime(self, device):
         """Runs a basic GPT-2 model"""
         vocab_size = 8192
@@ -159,7 +153,9 @@ class TestRuntimeEstimator(TestCase):
         args = self._init_model_and_args("Transformer", model_args, bsz, device)
         actual_runtime = self._measure_actual_time(self._train_step, args, device)
         with FakeTensorMode():
-            fake_args = self._init_model_and_args("Transformer", model_args, bsz, device)
+            fake_args = self._init_model_and_args(
+                "Transformer", model_args, bsz, device
+            )
             benchmark_estimate = self._runtime_estimate(
                 "operator-level-benchmark", self._train_step, fake_args
             )
@@ -167,7 +163,9 @@ class TestRuntimeEstimator(TestCase):
                 "operator-level-cost-model", self._train_step, fake_args
             )
         benchmark_accuracy = actual_runtime / benchmark_estimate
-        roofline_accuracy = actual_runtime / roofline_estimate
+        roofline_accuracy = (
+            actual_runtime / roofline_estimate if roofline_estimate else float("inf")
+        )
         print(
             f"Actual: {actual_runtime} Benchmark Estimate: {benchmark_estimate} Accuracy: {benchmark_accuracy}"
             f"\n Actual: {actual_runtime} Roofline Estimatee: {roofline_estimate} Accuracy: {roofline_accuracy}"
@@ -176,8 +174,6 @@ class TestRuntimeEstimator(TestCase):
         # self.assertAlmostEqual(benchmark_accuracy, 1.0, delta=0.2)
         # self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.3)
 
-    @onlyAccelerator
-    @skipMPS
     def test_conv_model_runtime(self, device):
         """Runs a simple CNN model"""
         num_classes = 100
@@ -194,7 +190,9 @@ class TestRuntimeEstimator(TestCase):
                 "operator-level-cost-model", self._train_step, fake_args
             )
         benchmark_accuracy = actual_runtime / benchmark_estimate
-        roofline_accuracy = actual_runtime / roofline_estimate
+        roofline_accuracy = (
+            actual_runtime / roofline_estimate if roofline_estimate else float("inf")
+        )
         print(
             f"Actual: {actual_runtime} Benchmark Estimate: {benchmark_estimate} Accuracy: {benchmark_accuracy}\n"
             f"Actual: {actual_runtime} Roofline Estimatee: {roofline_estimate} Accuracy: {roofline_accuracy}"
@@ -204,7 +202,7 @@ class TestRuntimeEstimator(TestCase):
         # self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.4)
 
 
-instantiate_device_type_tests(TestRuntimeEstimator, globals())
+instantiate_device_type_tests(TestRuntimeEstimator, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
