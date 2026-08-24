@@ -71,8 +71,8 @@ struct TORCH_API MPSGuardImpl final
     return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
 
-  Stream getNewStream(Device, int priority = 0) const override {
-    (void)priority;
+  Stream getNewStream(Device /* unused */, int /* priority */ = 0)
+      const override {
     return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
 
@@ -85,14 +85,15 @@ struct TORCH_API MPSGuardImpl final
     return Stream(Stream::DEFAULT, Device(c10::DeviceType::MPS, 0));
   }
   DeviceCapability getDeviceCapability(Device /* unused */) const override {
-    DeviceCapability cap;
-    cap.capability_data.capability_bits = (1ULL << kIndex_Byte) |
+    constexpr uint64_t kSupportedTypeBits = (1ULL << kIndex_Byte) |
         (1ULL << kIndex_Char) | (1ULL << kIndex_Short) | (1ULL << kIndex_Int) |
         (1ULL << kIndex_Long) | (1ULL << kIndex_Half) | (1ULL << kIndex_Float) |
         (1ULL << kIndex_ComplexHalf) | (1ULL << kIndex_ComplexFloat) |
         (1ULL << kIndex_Bool) | (1ULL << kIndex_BFloat16) |
         (1ULL << kIndex_UInt32) | (1ULL << kIndex_UInt16) |
         (1ULL << kIndex_UInt64);
+    DeviceCapability cap;
+    cap.capability_data.capability_bits = kSupportedTypeBits;
     return cap;
   }
 
@@ -131,7 +132,7 @@ struct TORCH_API MPSGuardImpl final
 
 /// A variant of OptionalDeviceGuard that is specialized for MPS.
 struct OptionalMPSGuard {
-  explicit OptionalMPSGuard() : guard_() {}
+  explicit OptionalMPSGuard() = default;
 
   explicit OptionalMPSGuard(std::optional<Device> device_opt)
       : guard_(device_opt) {}
@@ -146,6 +147,7 @@ struct OptionalMPSGuard {
   OptionalMPSGuard& operator=(const OptionalMPSGuard&) = delete;
   OptionalMPSGuard(OptionalMPSGuard&& other) = delete;
   OptionalMPSGuard& operator=(OptionalMPSGuard&& other) = delete;
+  ~OptionalMPSGuard() = default;
 
   /// Sets the MPS device to the given device, initializing the guard if it
   /// is not already initialized.  Errors if the given device is not a MPS

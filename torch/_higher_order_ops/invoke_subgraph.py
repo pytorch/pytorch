@@ -1120,11 +1120,9 @@ def _(ctx, subgraph, identifier, *operands):
     else:
         hop_instance = HopInstance(invoke_subgraph, functionalize_schema)
 
+    functionalized_identifier = None
     if can_auto_functionalize(hop_instance):
         # NOTE: [auto_functionalize x invoke_subgraph caching]
-        # We call auto_functionalized_v2 to support input mutation of invoke_subgraph.
-        # See NOTE [Support input mutation of hops] for the overall design.
-        #
         # invoke_subgraph is special because of its identifier based caching mechanism.
         # In invoke_subgraph's functionalization key implementation, we create a new
         # identifier because the subgraph is replaced by FunctionWithNoFreeVars in a
@@ -1133,19 +1131,55 @@ def _(ctx, subgraph, identifier, *operands):
             raise AssertionError(
                 f"identifier must be a string for auto_functionalize, got {type(identifier)}"
             )
-        return do_auto_functionalize_v2(
-            ctx.mode,
-            hop_instance,
-            (subgraph, "auto_functionalized_" + identifier, *operands),
-            {},
-        )
 
-    with ctx.redispatch_to_next():
-        # NB: There is an assumption that subgraph does not mutate inputs and
-        # there is no aliasing. It's Dynamo's responsibility to prevent formation
-        # of invoke_subgraph ops if input aliasing/mutation is detected.
-        functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
-        out = invoke_subgraph(functionalized_subgraph, identifier, *unwrapped_operands)
+        if ctx.mode._keep_input_mutations:
+            # With keep_input_mutations=True, wrap invoke_subgraph in
+            # auto_functionalized_v2. This allows copy_ epilogues in the subgraph for
+            # Inductor to fuse where useful.
+            # See NOTE [Support input mutation of hops] for the overall design.
+            return do_auto_functionalize_v2(
+                ctx.mode,
+                hop_instance,
+                (subgraph, "auto_functionalized_" + identifier, *operands),
+                {},
+            )
+
+        # With keep_input_mutations=False, the subgraph must not mutate its inputs.
+        # Return updated inputs so AOTAutograd can generate the copy_ epilogue.
+        mutated_operand_indices = tuple(
+            idx
+            for idx, arg in enumerate(hop_instance._schema.arguments[2:])
+            if arg.alias_info is not None and arg.alias_info.is_write
+        )
+        functionalized_subgraph = FunctionalizeCtxWrapper(
+            ctx, subgraph, mutated_input_indices=mutated_operand_indices
+        )
+        functionalized_identifier = "functionalized_" + identifier
+        with ctx.redispatch_to_next():
+            out = invoke_subgraph(
+                functionalized_subgraph,
+                functionalized_identifier,
+                *unwrapped_operands,
+            )
+
+        num_outputs = len(hop_instance._schema.returns)
+        actual_out = out[:num_outputs]
+        mutated_out = out[num_outputs:]
+        for operand_idx, updated_operand in zip(mutated_operand_indices, mutated_out):
+            operand = operands[operand_idx]
+            ctx.replace(operand, updated_operand)
+            ctx.commit_update(operand)
+            ctx.sync(operand)
+        out = actual_out
+    else:
+        with ctx.redispatch_to_next():
+            # NB: There is an assumption that subgraph does not mutate inputs and
+            # there is no aliasing. It's Dynamo's responsibility to prevent formation
+            # of invoke_subgraph ops if input aliasing/mutation is detected.
+            functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
+            out = invoke_subgraph(
+                functionalized_subgraph, identifier, *unwrapped_operands
+            )
 
     if effects:
         (new_token, *out) = out
@@ -1165,9 +1199,13 @@ def _(ctx, subgraph, identifier, *operands):
             raise AssertionError(
                 f"Number of tokens changed by {len(discovered_effects)} when tracing subgraph {subgraph}."
             )
-        # Store discovered effects in the cache by identifier
+        # Later passes look up effects using the identifier on the emitted HOP.
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_effects(identifier, discovered_effects)
+            if functionalized_identifier is not None:
+                invoke_subgraph_cache.add_effects(
+                    functionalized_identifier, discovered_effects
+                )
 
     return ctx.wrap_tensors(out)
 

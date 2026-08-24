@@ -252,8 +252,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                   out,
                   gqa_factor,
                   N,
-                  std::array<uint32_t, 3>{q_head_stride, k_head_stride, v_head_stride},
-                  std::array<uint32_t, 3>{q_seq_stride, k_seq_stride, v_seq_stride},
+                  c10::metal::vec3<uint32_t>{q_head_stride, k_head_stride, v_head_stride},
+                  c10::metal::vec3<uint32_t>{q_seq_stride, k_seq_stride, v_seq_stride},
                   scale_factor);
 
       if (has_mask) {
@@ -351,8 +351,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
                   maxs,
                   gqa_factor,
                   N,
-                  std::array<uint32_t, 3>{q_head_stride, k_head_stride, v_head_stride},
-                  std::array<uint32_t, 3>{q_seq_stride, k_seq_stride, v_seq_stride},
+                  c10::metal::vec3<uint32_t>{q_head_stride, k_head_stride, v_head_stride},
+                  c10::metal::vec3<uint32_t>{q_seq_stride, k_seq_stride, v_seq_stride},
                   scale_factor);
 
       if (has_mask) {

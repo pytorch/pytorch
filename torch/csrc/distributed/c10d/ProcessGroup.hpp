@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/c10d/Hooks.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <atomic>
+#include <map>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -36,13 +37,16 @@ C10_EXPORT void register_work(
 
 C10_EXPORT at::Tensor wait_tensor(const at::Tensor& tensor);
 
+C10_EXPORT std::vector<at::Tensor> wait_tensors(at::TensorList tensors);
+
 // We only call `unregister_work()` in one case:
 // 1. If the work object is created from a non-functional collective call within
 //    the `with allow_inflight_collective_as_graph_input_ctx()` context manager.
 //
 // Q: What about the functional collective case?
 // A: The unregistration of work object for functional collective is done in
-//    the required user-side explicit call to `wait_tensor()`.
+//    the required user-side explicit call to `wait_tensor()` or
+//    `wait_tensors()`.
 C10_EXPORT void unregister_work(const c10::intrusive_ptr<c10d::Work>& work);
 
 C10_EXPORT size_t get_work_registry_size();
@@ -187,6 +191,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   virtual void setTimeout(std::chrono::milliseconds timeout) {
     for (auto& backend : backendTypeToBackend_) {
       backend.second->setTimeout(timeout);
+    }
+  }
+
+  // Experimental. Forward a temporary timeout extension to every backend.
+  virtual void addEphemeralTimeout(const std::chrono::milliseconds& timeout) {
+    for (auto& backend : backendTypeToBackend_) {
+      backend.second->addEphemeralTimeout(timeout);
     }
   }
 
@@ -510,7 +521,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   // Gathers a single tensor inputBuffer from every rank into a single flat
   // outputBuffer on the root rank. Single-tensor analog of gather.
-  virtual c10::intrusive_ptr<Work> gather_into_tensor(
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> gather_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const GatherOptions& opts = GatherOptions()) {
@@ -537,6 +549,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       c10d::register_work(outputBuffer, work);
     }
     return work;
+  }
+
+  // Deprecated: use gather_single instead. Kept as an alias for backward
+  // compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::gather_into_tensor is deprecated, use gather_single instead.")
+  virtual c10::intrusive_ptr<Work> gather_into_tensor(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts = GatherOptions()) {
+    return gather_single(outputBuffer, inputBuffer, opts);
   }
 
   virtual c10::intrusive_ptr<Work> scatter(
@@ -1097,12 +1120,31 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // opaque hook_id so they can be individually unregistered. Registration is
   // expected to happen at setup time, not concurrently with collectives. See
   // Hooks.hpp.
+  virtual bool supportsAbortHooks() const {
+    return getDefaultBackend()->supportsAbortHooks();
+  }
+
   virtual void registerAbortHook(int64_t hook_id, AbortHook hook) {
     getDefaultBackend()->registerAbortHook(hook_id, std::move(hook));
   }
 
   virtual void unregisterAbortHook(int64_t hook_id) {
     getDefaultBackend()->unregisterAbortHook(hook_id);
+  }
+
+  // Completion hooks forward to the default backend for the same reason abort
+  // hooks do: completion is detected inside the backend, not by the dispatcher
+  // kernels that fire the pre/post hooks below.
+  virtual bool supportsCompletionHooks() const {
+    return getDefaultBackend()->supportsCompletionHooks();
+  }
+
+  virtual void registerCompletionHook(int64_t hook_id, CompletionHook hook) {
+    getDefaultBackend()->registerCompletionHook(hook_id, std::move(hook));
+  }
+
+  virtual void unregisterCompletionHook(int64_t hook_id) {
+    getDefaultBackend()->unregisterCompletionHook(hook_id);
   }
 
   virtual void registerPreHook(int64_t hook_id, PreHook hook) {
@@ -1191,9 +1233,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // collective. They are invoked from the dispatcher kernels (Ops.cpp) rather
   // than here, so they fire wherever a c10d op is dispatched -- including
   // replay of a captured graph that re-dispatches the op directly. See
-  // Hooks.hpp.
-  std::unordered_map<int64_t, PreHook> preHooks_;
-  std::unordered_map<int64_t, PostHook> postHooks_;
+  // Hooks.hpp. Ordered, so hooks fire in hook_id order: a consumer that has to
+  // observe another hook's state (or be observed by it) picks its id instead of
+  // depending on an unspecified traversal.
+  std::map<int64_t, PreHook> preHooks_;
+  std::map<int64_t, PostHook> postHooks_;
   // Monotonic id correlating a pre-hook call with its matching post-hook call.
   std::atomic<int64_t> hookOpIdCounter_{0};
 
