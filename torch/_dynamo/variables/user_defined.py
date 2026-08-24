@@ -3629,14 +3629,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         # TODO(tp_descr_get) - Investigate if we need a separate descriptor
         # VT for instancemethod and cython functions.
-        if inspect.ismethoddescriptor(type_attr):
-            return variables.GetAttrVariable(self, name, source=source)
-
         if (
             torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
             or is_cython_function(type_attr)
         ):
             return variables.GetAttrVariable(self, name, type(type_attr), source=source)
+
+        if inspect.ismethoddescriptor(type_attr):
+            return variables.GetAttrVariable(self, name, source=source)
 
         # Plain class variable (or MethodType, C-level non-data descriptor
         # without __get__, etc.).
