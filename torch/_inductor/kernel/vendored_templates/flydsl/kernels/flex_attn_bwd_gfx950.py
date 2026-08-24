@@ -39,6 +39,8 @@ import flydsl.compiler as flyc
 import flydsl.expr as fx
 from flydsl.expr import const_expr
 
+from .flex_attn_bwd_kv_owner import make_dkdv_mfma32_body
+from .flex_attn_bwd_q_owner import make_dq_mfma32_body
 from .flex_attn_utils import (
     fast_exp2,
     is_causal_document_mask_program,
@@ -46,8 +48,6 @@ from .flex_attn_utils import (
     make_global_view,
     store_scalar,
 )
-from .flex_bwd_dkdv import make_dkdv_mfma32_body
-from .flex_bwd_dq import make_dq_mfma32_body
 
 _LOG2E = 1.4426950408889634
 _BATCHED_CAUSAL_DOCUMENT_MASK_PROGRAM = (

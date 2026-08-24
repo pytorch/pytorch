@@ -1,4 +1,4 @@
-"""Parameterised MFMA32 owner pipelines for ``flex_attn_bwd_gfx950``."""
+"""Parameterised dQ owner pipeline for FlexAttention backward."""
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx

@@ -1,4 +1,4 @@
-"""Parameterised paired dK/dV owner for FlexAttention backward."""
+"""Parameterised paired dK/dV owner pipeline for FlexAttention backward."""
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
