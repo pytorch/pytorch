@@ -475,16 +475,6 @@ _efficient_attention_backward(
   int64_t K = query.size(3);
   int64_t Kv = value.size(3);
 
-  // Local windows can fully mask rows. Without a window, shared cumulative
-  // metadata proves packed Q/K lengths match without reading them from device.
-  const bool may_have_fully_masked_rows =
-      window_size.value_or(0) > 0 ||
-      (custom_mask_type ==
-           static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) &&
-       (cu_seqlens_q.has_value()
-            ? !cu_seqlens_q->is_same(*cu_seqlens_k)
-            : max_seqlen_q > max_seqlen_k));
-
   at::Tensor grad_q, grad_k, grad_v, grad_bias;
   if (shared_storage_dqdkdv) {
     TORCH_CHECK(
@@ -502,10 +492,10 @@ _efficient_attention_backward(
       " query tokens and ", key.size(1), " key/value tokens"
     );
     TORCH_CHECK(
-      query.size(3) == key.size(3) && query.size(3) == value.size(3),
+      query.size(3) == key.size(3),
       "`shared_storage_dqdkdv` is only supported when Q/K/V "
       "have the same embed dim: got ", query.size(3),
-      " for Q, ", key.size(3), " for K, and ", value.size(3), " for V"
+      " for Q, and ", key.size(3), " for K"
     );
     at::Tensor chunk = at::empty({B, M, 3, nH, K}, query.options());
     grad_q = chunk.select(2, 0);
@@ -515,9 +505,6 @@ _efficient_attention_backward(
     grad_q = at::empty(query.sizes(), query.options());
     grad_k = at::empty(key.sizes(), key.options());
     grad_v = at::empty(value.sizes(), value.options());
-  }
-  if (may_have_fully_masked_rows) {
-    grad_q.zero_();
   }
 
   at::Tensor grad_k_expanded = grad_k;
