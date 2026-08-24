@@ -581,11 +581,21 @@ max_autotune_report_choices_stats = (
     os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_REPORT_CHOICES_STATS", "1") == "1"
 )
 
-# Prune configs that have a theoretical maximum shared memory usage than the hardware limit
-# Will over-prune - pruning some valid configs with theoretical shared memory usage higher
-# than real shared memory usage, ensuring that invalid configs are not possibly autotuned
+# Drop GEMM configs whose theoretical shared memory usage exceeds the hardware
+# limit, instead of letting them reach the compiler.
+#
+# Keeping them is expensive. Such a config compiles, then fails to build a
+# launcher with OutOfResources, and when no config for that kernel survives,
+# CachingAutotuner rewrites it to num_stages=1 and compiles a second time. That
+# second compile is cold - LLVM plus ptxas - and runs serially in the
+# benchmarking path, and the num_stages=1 candidate it produces then loses the
+# autotune anyway.
+#
+# The estimate is a theoretical upper bound, so this can also prune a config
+# whose real usage would have fit. Set the environment variable to 0 if a kernel
+# regresses for that reason.
 max_autotune_prune_choices_based_on_shared_mem = (
-    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_PRUNE_CHOICES_BASED_ON_SHARED_MEM", "0")
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_PRUNE_CHOICES_BASED_ON_SHARED_MEM", "1")
     == "1"
 )
 
