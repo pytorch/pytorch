@@ -1849,6 +1849,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             res = opt_gn(*args)
             self.assertEqual(ref, res)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4911")
     @requires_gpu_and_triton
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -2684,6 +2685,62 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             cfn(x).backward()
 
 
+class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase):
+    """Checkpointing the same module at two sibling call sites. See
+    https://github.com/pytorch/pytorch/issues/193194."""
+
+    def test_dynamic_shape_checkpoint_shared_module_two_call_sites(self):
+        # An unspecialized plain-float module attribute (self.eps), read
+        # inside a torch.utils.checkpoint region that's entered from two
+        # sibling call sites under dynamic shapes, used to hard crash with
+        # AssertionError: lift_tracked_freevar_to_input should not be called
+        # on root SubgraphTracer.
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.eps = 1e-6
+
+            def forward(self, x, extra):
+                out = x * self.eps
+                if extra:
+                    out = out + x
+                return out
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = Block()
+
+            def forward(self, x):
+                out1 = torch.utils.checkpoint.checkpoint(
+                    self.block, x, False, use_reentrant=False
+                )
+                out2 = torch.utils.checkpoint.checkpoint(
+                    self.block, x, True, use_reentrant=False
+                )
+                return out1 + out2
+
+        model = Model()
+        cnt = CompileCounterWithBackend("aot_eager")
+        # dynamic=True is what unspecializes self.eps (via wrap_symfloat)
+        # rather than specializing it to a constant; it also happens to
+        # cover the two different sequence lengths below with one compile.
+        compiled_model = torch.compile(model, backend=cnt, dynamic=True, fullgraph=True)
+
+        for seq_len in (8, 16):
+            x = torch.randn(2, seq_len, requires_grad=True)
+            expected = model(x)
+            result = compiled_model(x)
+            self.assertEqual(result, expected)
+            # Exercise the AC joint-graph/recompute boundary, where this
+            # issue was originally reported.
+            result.sum().backward()
+
+        # Confirms dynamic shapes were actually exercised: one compile
+        # covering both sequence lengths, not a silent recompile.
+        self.assertEqual(cnt.frame_count, 1)
+
+
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
 
@@ -3403,7 +3460,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 
 instantiate_device_type_tests(
-    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu"
+    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
 )
 
 
