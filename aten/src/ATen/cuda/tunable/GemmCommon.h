@@ -393,7 +393,8 @@ struct GemmAndBiasParams : OpParams {
   }
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
+    std::string activation_str = to_string_epilogue(activation);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_%s", transa, transb, m, n, k, lda, ldb, ldc, activation_str);
   }
 
   size_t GetSizeA() const {
