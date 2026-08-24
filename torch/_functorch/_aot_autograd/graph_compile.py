@@ -44,6 +44,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals, guard_or_true
 from torch.fx.graph_module import GraphModule
+from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import py_sym_types
@@ -57,7 +58,7 @@ from .autograd_cache import (
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
-from .descriptors import AOTOutput, PlainAOTOutput
+from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -90,6 +91,7 @@ from .schemas import (
 )
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import (
+    _is_primal,
     contain_metadata_mutation_ops,
     get_default_generator,
     make_boxed_func,
@@ -1371,6 +1373,27 @@ def prepare_hook_gm(
     return gm
 
 
+def _materialize_fx_output_containers(x: Any) -> Any:
+    # FX stores an output node's container args as immutable_list /
+    # immutable_dict. The pack hook's return value is handed to the unpack hook
+    # trace (`prepare_hook_gm(unpack_hook_gm, (pack_out_val,))`), and
+    # `create_wrap_fn` tree_maps it, which preserves those immutable types.
+    # Unpack hooks that check `type(c) is list` / `type(c) is dict` rather than
+    # isinstance would therefore see a different container than in eager, so
+    # normalize back to the plain runtime types.
+    #
+    # Note this only recovers `list` / `dict`, not other subclasses: FX's
+    # create_arg already collapses e.g. an OrderedDict pack output to
+    # immutable_dict, so that distinction is gone before we get here.
+    if type(x) in (immutable_list, list):
+        return [_materialize_fx_output_containers(v) for v in x]
+    if type(x) in (immutable_dict, dict):
+        return {k: _materialize_fx_output_containers(v) for k, v in x.items()}
+    if type(x) is tuple:
+        return tuple(_materialize_fx_output_containers(v) for v in x)
+    return x
+
+
 # Inline Autograd saved_tensors_hooks into epilogue of forward graph
 # and prologue of backward graph.
 # This changes forward graph outputs and inputs.
@@ -1508,7 +1531,29 @@ def maybe_inline_graph_saved_tensors_hooks(
             return {"_fw_graph": fw_g, "_bw_graph": bw_g, "_node": saved}
 
         with _saved_tensor_hook_context(_get_extra_info()):
-            pack_out_val = pack_hook_gm(val)
+            pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
+            pack_g = pack_gm.graph
+            maybe_log_graph(
+                pack_gm,
+                f"saved_tensors_pack_hook {saved.name}",  # type: ignore[union-attr]
+                aot_config,
+                lambda: f"aot_saved_tensors_hooks_pack {saved.name}",  # type: ignore[union-attr]
+                structured_logs,
+            )
+
+            # Extract pack_out_val from the traced graph's output-node meta.
+            # `pack_g` is what gets inlined into the joint graph below via
+            # `node_copy`, so its output meta uses the same symbols the
+            # inlined nodes carry -- no identity mismatch, no need to re-run
+            # the hook to get an "example value".
+            pack_out_args = _materialize_fx_output_containers(
+                pack_g.output_node().args[0]
+            )
+            pack_out_val = pytree.tree_map_only(
+                torch.fx.Node,
+                lambda n: n.meta["val"],
+                pack_out_args,
+            )
 
         requires_sc_handling = any(
             is_traceable_wrapper_subclass(x) for x in pytree.tree_leaves(pack_out_val)
@@ -1519,18 +1564,6 @@ def maybe_inline_graph_saved_tensors_hooks(
                 "You can workaround it by manually returning subclass's inner tensors"
                 " in the pack hook, and reconstructing the subclass in the unpack hook"
             )
-
-        with _saved_tensor_hook_context(_get_extra_info()):
-            pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
-            pack_g = pack_gm.graph
-            maybe_log_graph(
-                pack_gm,
-                f"saved_tensors_pack_hook {saved.name}",  # type: ignore[union-attr]
-                aot_config,
-                lambda: f"aot_saved_tensors_hooks_pack {saved.name}",  # type: ignore[union-attr]
-                structured_logs,
-            )
-            pack_out_val = pack_gm(val)
 
         # Install pack hook graph as eiplogue of fw_module.
         # Saved tensor output becomes input of pack hook graph.
@@ -1948,6 +1981,19 @@ def _partition_joint_graph_into_fw_bw(
     if callable(torch._functorch.config.joint_custom_pass):
         # pyrefly: ignore [bad-assignment]
         fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
+
+    # The joint trace clones data-mutated grad inputs so backward sees their
+    # pre-mutation values. The runtime input placeholder itself is not a valid
+    # saved activation because it will be mutated after the AOT forward returns.
+    primals = [
+        node
+        for node in fx_g.graph.nodes
+        if _is_primal(node)
+        and not isinstance(node.meta.get("desc"), ForwardTokenAOTInput)
+    ]
+    for node, info in zip(primals, inner_meta.input_info):
+        if info.requires_grad and info.mutates_data:
+            node.meta["aot_mutated_input_requires_grad"] = True
 
     fw_module, bw_module = partition_fn(
         fx_g,
