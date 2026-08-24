@@ -2718,7 +2718,7 @@ class TensorVariable(VariableTracker):
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
-                divmod,
+                torch.divmod,
                 *proxy_args_kwargs(args, {}),
             ),
         )
