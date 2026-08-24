@@ -1329,7 +1329,7 @@ def enable_activation_quantization(
                 continue
             node.meta["saved_for_quantization"] = True
             node.meta["dequant_type"] = node.meta["val"].dtype
-            # some of the fwd outputs and bwd inputs are not share the same object
+            # some of the fwd outputs and bwd inputs do not share the same object
             bwd_module_inputs[node.name].meta["saved_for_quantization"] = True
             bwd_module_inputs[node.name].meta["dequant_type"] = node.meta["val"].dtype
             should_perform_fp8_quant = True
@@ -1424,7 +1424,11 @@ def _extract_fwd_bwd_modules(
         # then the collective will generally by followed by a wait_tensor() call.
         # we need to peek one node further to see if this wait_tensor is dead as well.
         elif distributed_enabled and all(
-            n.target is torch.ops._c10d_functional.wait_tensor.default
+            n.target
+            in (
+                torch.ops._c10d_functional.wait_tensor.default,
+                torch.ops._c10d_functional.wait_tensors.default,
+            )
             and len(n.users) == 0
             for n in node.users
         ):
@@ -1719,7 +1723,11 @@ def default_partition(
             )
             and (
                 not distributed_enabled
-                or node.target is not torch.ops._c10d_functional.wait_tensor.default
+                or node.target
+                not in (
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    torch.ops._c10d_functional.wait_tensors.default,
+                )
             )
         )
 
@@ -2330,13 +2338,23 @@ def force_save_collectives(joint_module: fx.GraphModule) -> None:
     unless they come from a user-annotated AC region.
     See Note [Recomputing collectives in the partitioner]
     """
+
+    def mark_leaf_tensor_outputs(node: fx.Node) -> None:
+        getitem_users = [user for user in node.users if user.target is operator.getitem]
+        if getitem_users:
+            for user in getitem_users:
+                mark_leaf_tensor_outputs(user)
+            return
+        if not isinstance(node.meta.get("val"), (tuple, list)):
+            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
     for node in joint_module.graph.nodes:
         if (
             isinstance(node.target, torch._ops.OpOverload)
             and node.target.namespace == "_c10d_functional"
             and not must_recompute(node)
         ):
-            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+            mark_leaf_tensor_outputs(node)
 
 
 def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
@@ -2624,6 +2642,8 @@ def solve_min_cut(
         cannot_save_reason is None for finite weights, or a string explaining
         why the node cannot be saved for infinite weights.
         """
+        if node.meta.get("aot_mutated_input_requires_grad", False):
+            return math.inf, "mutated input requiring grad"
         if (
             config.treat_parameters_as_free_to_save
             and node in static_lifetime_input_nodes
@@ -3484,7 +3504,10 @@ def choose_saved_values_set(
             ban_if_materialized_backward=False,
             ban_if_not_in_allowlist=False,
         )
-    if memory_budget == 0:
+    if memory_budget == 0 and not any(
+        node.meta.get("aot_mutated_input_requires_grad", False)
+        for node in node_info.inputs
+    ):
         return node_info.inputs
 
     runtime_optimized_saved_values, _ = solve_min_cut(

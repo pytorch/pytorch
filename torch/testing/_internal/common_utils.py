@@ -30,6 +30,7 @@ import re
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1572,7 +1573,9 @@ def run_tests(argv=None):
         if failed:
             raise AssertionError("Some test shards have failed")
     elif USE_PYTEST:
-        pytest_args = argv + ["--use-main-module"]
+        # xdist workers import the test file as a module, so they cannot collect
+        # tests from the coordinator's __main__ module.
+        pytest_args = argv if "-n" in argv else argv + ["--use-main-module"]
         if HW_CLASSIFICATION is not None:
             pytest_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
         test_report_path = ""
@@ -6468,6 +6471,16 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
         gc.set_debug(0)
 
 
+def _win_rmtree_onerror(func, path, exc_info):
+    # Retry after clearing the read-only attribute (WinError 5); ignore
+    # anything else so cleanup stays best-effort.
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except OSError:
+        pass
+
+
 def remove_cpp_extensions_build_root():
     """
     Removes the default root folder under which extensions are built.
@@ -6475,9 +6488,7 @@ def remove_cpp_extensions_build_root():
     default_build_root = cpp_extension.get_default_build_root()
     if os.path.exists(default_build_root):
         if IS_WINDOWS:
-            # rmtree returns permission error: [WinError 5] Access is denied
-            # on Windows, this is a workaround
-            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
+            shutil.rmtree(default_build_root, onerror=_win_rmtree_onerror)
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
 
