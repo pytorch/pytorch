@@ -278,6 +278,9 @@ exclude_patterns = [
     'torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp',
     'torch/headeronly/util/bit_cast.h',
     'torch/headeronly/util/complex.h',
+    'torch/headeronly/util/BFloat16-math.h',
+    'torch/headeronly/util/irange.h',
+    'torch/headeronly/util/MathConstants.h',
 ]
 init_command = [
     'python3',
