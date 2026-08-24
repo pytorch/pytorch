@@ -59,6 +59,7 @@ from ..runtime.runtime_utils import (
 )
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
+    _IntLike,
     cache_property_on_self,
     decompose_index,
     expr_fits_within_32bit,
@@ -509,8 +510,8 @@ class NodeInfo(NamedTuple):
     node_schedule: list
     tiling: dict
     tiling_scores: dict | None
-    numel: Any
-    rnumel: Any
+    numel: _IntLike
+    rnumel: _IntLike
     features: SIMDKernelFeatures
     is_persistent_reduction: bool
 

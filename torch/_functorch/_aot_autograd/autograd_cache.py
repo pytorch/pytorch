@@ -607,7 +607,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return (_ident, (name,))
 
     # pyrefly: ignore [bad-override]
-    def reducer_override(self, obj: Any) -> Any:
+    def reducer_override(self, obj: object) -> Any:
         """
         Override to handle tensor subclasses (like DTensor) that aren't caught
         by the dispatch_table's exact type matching.
@@ -628,7 +628,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return super().reducer_override(obj)
 
     @staticmethod
-    def _format_global_for_cache_key(name: str, obj: Any) -> str:
+    def _format_global_for_cache_key(name: str, obj: object) -> str:
         if (numpy_key := numpy_wrapper_cache_key(obj)) is not None:
             return f"# cache_key_numpy_wrapper {name}: {numpy_key!r}"
 
@@ -674,10 +674,10 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
     def _hash_bytes_for_cache(self, data: bytes) -> str:
         return hashlib.blake2b(data, digest_size=16).hexdigest()
 
-    def _hash_pickled_value_for_cache(self, value: Any) -> str:
+    def _hash_pickled_value_for_cache(self, value: object) -> str:
         return self._hash_bytes_for_cache(pickle.dumps(value))
 
-    def _stable_hash_for_cache_value(self, obj: Any) -> str:
+    def _stable_hash_for_cache_value(self, obj: object) -> str:
         """Get a stable hash for an object used inside tensor subclass metadata."""
         from torch._custom_class_base import CustomClassBase
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
