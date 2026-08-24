@@ -467,7 +467,6 @@ CROSS_REF_EXCLUDE_SET = {
     ("xpu", torch.uint8, "addmv"),
     ("xpu", torch.int8, "mv"),
     ("xpu", torch.uint8, "mv"),
-
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
