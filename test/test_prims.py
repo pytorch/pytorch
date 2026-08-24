@@ -6,8 +6,8 @@ import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import (parametrize, run_tests, TestCase, TEST_SCIPY,
-                                                  set_default_dtype)
+from torch.testing._internal.common_utils import (HardwareClassification, parametrize, run_tests,
+                                                  TestCase, TEST_SCIPY, set_default_dtype)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -35,6 +35,8 @@ NVPRIM_ATEN_FALLBACK_WARNING = "fallback to aten executor"
 GET_ISOLATED_GRAPHMODULE_ERROR = "get_isolated_graphmodule failed on decomposition"
 
 class TestPrims(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyCUDA
     @dtypes(torch.float32)
     def test_broadcast_in_dim(self, device, dtype):
@@ -332,7 +334,40 @@ class TestPrims(TestCase):
         self.assertEqual(result.device.type, "cpu")
         self.assertEqual(result.shape, (1,))
 
+    def test_functionalized_rng_state_round_trip(self, device):
+        from torch._prims.rng_prims import run_and_save_rng_state, run_with_rng_state
+
+        state, first = run_and_save_rng_state(
+            torch.ops.aten.rand.default, [8], device=device
+        )
+        replay = run_with_rng_state(
+            state, torch.ops.aten.rand.default, [8], device=device
+        )
+        self.assertEqual(first, replay)
+
+    def test_functionalized_rng_state_restored_on_exception(self, device):
+        from torch._prims.rng_prims import _rng_state_fns, run_with_rng_state
+
+        get_rng_state, _ = _rng_state_fns(torch.device(device).type)
+        saved = get_rng_state()
+        torch.rand(8, device=device)  # advance the generator away from `saved`
+        before = get_rng_state()
+
+        class _Boom(Exception):
+            pass
+
+        def _raises(_):
+            raise _Boom
+
+        with self.assertRaises(_Boom):
+            run_with_rng_state(saved, _raises, torch.empty(0, device=device))
+
+        # Without the finally, the generator would be left holding `saved`.
+        self.assertEqual(get_rng_state(), before)
+
 class TestPrimsBasic(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)
         self.assertEqual(torch.ops.prims.sin(r), torch.sin(r))
@@ -382,25 +417,6 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
 
         with self.assertRaisesRegex(RuntimeError, 'requires a device'):
             _rng_state_fns(None)
-
-    def test_run_with_rng_state_restores_state_on_exception(self):
-        from torch._prims.rng_prims import run_with_rng_state
-
-        saved = torch.get_rng_state()
-        torch.rand(4)  # advance the generator away from `saved`
-        before = torch.get_rng_state()
-
-        class _Boom(Exception):
-            pass
-
-        def _raises(_):
-            raise _Boom
-
-        with self.assertRaises(_Boom):
-            run_with_rng_state(saved, _raises, torch.empty(0))
-
-        # Without the finally, the generator would be left holding `saved`.
-        self.assertEqual(torch.get_rng_state(), before)
 
     def test_rng_state_hops_cover_privateuse1(self):
         # An out-of-tree backend registers under PrivateUse1; both HOPs must have
