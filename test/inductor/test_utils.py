@@ -37,15 +37,14 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
 from torch.testing._internal.common_device_type import (
-    Capability,
     dtypes,
     instantiate_device_type_tests,
-    requires_capabilities,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
     TestCase,
+    xfailIfNoAcceleratorTriton,
 )
 from torch.utils import _triton as triton_utils
 from torch.utils._sympy.functions import Identity
@@ -345,7 +344,7 @@ class TestUtils(TestCase):
 class TestDeviceTflops(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @requires_capabilities(Capability.lib.triton)
+    @xfailIfNoAcceleratorTriton
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     def test_get_device_tflops(self, device, dtype):
         with torch.cuda.device(device):
