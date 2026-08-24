@@ -271,7 +271,7 @@ class TestReplicateCastAfterInitPrecision(FSDPTestMultiThread):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
 
 
-instantiate_device_type_tests(TestReplicateCastAfterInitPrecision, globals(), except_for=["cpu", "npu"])
+instantiate_device_type_tests(TestReplicateCastAfterInitPrecision, globals(), except_for="cpu")
 
 
 class TestReplicate1DTrainingCore(FSDPTest):
@@ -497,8 +497,6 @@ class TestReplicate1DTrainingCoreSleep(FSDPTest):
             in (2, 3)
         ):
             return
-        if test_device_type not in ("cuda", "hpu", "xpu", "npu", "cpu"):
-            raise AssertionError(f"Unexpected device type: {test_device_type}")
         torch.manual_seed(42)
         vocab_size = 1024
         model_args = ModelArgs(
@@ -675,7 +673,7 @@ class TestReplicate1DTrainingCoreSleep(FSDPTest):
             self.assertEqual(ref_loss, loss)
 
 
-instantiate_device_type_tests(TestReplicate1DTrainingCoreSleep, globals(), except_for=["cpu", "hpu", "npu"])
+instantiate_device_type_tests(TestReplicate1DTrainingCoreSleep, globals(), except_for=["cpu", "hpu"])
 
 
 class TestReplicateTrainingCompose(FSDPTest):
