@@ -638,16 +638,17 @@ __host__ __device__ inline void rocm_kernel_assert(
 #if defined(USE_ROCM) && defined(__HIPCC__)
 #define CUDA_KERNEL_ASSERT(cond)                             \
   if C10_UNLIKELY (!(cond)) {                                \
+    static constexpr auto _rocm_assert_msg =                 \
+        ::torch::headeronly::detail::rocm_assert_concat(     \
+            __FILE__ ":" C10_STRINGIZE(__LINE__) ": ",       \
+            __func__,                                        \
+            ": Device-side assertion `" #cond "' failed.\n"); \
     ::torch::headeronly::detail::rocm_kernel_assert(         \
         #cond,                                               \
         __FILE__,                                            \
         static_cast<unsigned int>(__LINE__),                 \
         __func__,                                            \
-        ::torch::headeronly::detail::rocm_assert_concat(     \
-            __FILE__ ":" C10_STRINGIZE(__LINE__) ": ",       \
-            __func__,                                        \
-            ": Device-side assertion `" #cond "' failed.\n") \
-            .data);                                          \
+        _rocm_assert_msg.data);                              \
   }
 #else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
