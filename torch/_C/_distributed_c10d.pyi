@@ -834,7 +834,12 @@ class FakeProcessGroup(Backend):
     ) -> FakeProcessGroup: ...
     # getOptions() returns null when the group was built without options, and
     # callers (test_device_mesh) branch on that, so this must stay optional.
+    # Backend.options is not, which makes the narrowing a real LSP violation
+    # rather than a stub inaccuracy: this property is bound to a different C++
+    # method than the base one, and widening it to match would misdescribe
+    # behavior three assertIsNone checks already pin.
     @property
+    # pyrefly: ignore  # bad-override
     def options(self) -> FakeProcessGroup.Options | None: ...
 
 class FakeWork(Work):
