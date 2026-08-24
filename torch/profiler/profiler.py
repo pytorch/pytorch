@@ -683,7 +683,8 @@ class _KinetoProfile:
             if self.use_device and self.use_device != "cuda":
                 device = self.use_device + ":0"
             else:
-                device = "cuda:0" if torch.cuda.is_available() else "cpu"
+                acc = torch.accelerator.current_accelerator(check_available=True)
+                device = f"{acc.type}:0" if acc is not None else "cpu"
 
         # Construct the memory timeline plot data
         self.mem_tl = MemoryProfileTimeline(self._memory_profile())
