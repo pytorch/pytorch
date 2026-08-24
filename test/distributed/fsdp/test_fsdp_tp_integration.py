@@ -410,15 +410,16 @@ class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
         """
         Tests TP + FSDP extension with correct gradient (i.e. no ACT)
         """
-        device = self._resolved_device_type()
         mesh_2d = init_device_mesh(
-            device, (self.world_size // 2, 2), mesh_dim_names=["dp", "tp"]
+            self._resolved_device_type(),
+            (self.world_size // 2, 2),
+            mesh_dim_names=["dp", "tp"],
         )
 
         class TestModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.mlp = MLPModule(device)
+                self.mlp = MLPModule(self._resolved_device_type())
                 self.mlp_norm = RMSNormPython(10)
 
             def forward(self, x):
