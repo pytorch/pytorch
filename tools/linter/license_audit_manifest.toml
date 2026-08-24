@@ -26,6 +26,7 @@ excluded = [
   'third_party/fbgemm/external/json/docs/mkdocs/docs/home/license.md',
   'third_party/fbgemm/fbgemm_gpu/docs/src/general/License.rst',
   'third_party/fbgemm/fbgemm_gpu/test/quantize/mx/LICENSE',
+  'third_party/fmt/doc/LICENSE-exception',
   'third_party/flash-attention/csrc/cutlass/python/LICENSE.txt',
   'third_party/flatbuffers/dart/LICENSE',
   'third_party/flatbuffers/swift/LICENSE',
@@ -68,7 +69,10 @@ excluded = [
   'third_party/mslk/external/cutlass/python/LICENSE.txt',
   'third_party/mslk/external/googletest/LICENSE',
   'third_party/mslk/external/hipify_torch/LICENSE.txt',
-  # NCCL (third_party/nccl/ is gitignored; present only when USE_SYSTEM_NCCL=0)
+  # NCCL: third_party/nccl/ is gitignored and populated only when
+  # USE_SYSTEM_NCCL=0 (FetchContent). Those paths are not git-tracked, so
+  # discovery via git ls-files ignores them; listed here for completeness.
+  # Tradeoff: static-NCCL wheels ship no NCCL license text in license-files.
   'third_party/nccl/LICENSE.txt',
   'third_party/nccl/bindings/nccl4py/LICENSE.txt',
   # docs / test / nested googletest trees

@@ -3,12 +3,13 @@
 #
 # Included paths: [project].license-files in pyproject.toml (only explicit list).
 # Excluded paths + SPDX expressions per shipped file: license_audit_manifest.toml
-# next to this file. Discovery needs populated third_party/ (recursive submodules);
-# authoritative in CI via quick-checks (_lint.yml / setup-linux).
+# next to this file. Discovery uses git ls-files (not filesystem glob) so
+# gitignored FetchContent trees (e.g. third_party/nccl/) are not walked.
+# Authoritative in CI via quick-checks (_lint.yml / setup-linux).
 
 from __future__ import annotations
 
-import glob
+import subprocess
 from pathlib import Path
 
 
@@ -71,24 +72,41 @@ def load_project(repo_root: Path) -> dict:
 
 
 def discover_license_files(repo_root: Path) -> set[str]:
+    if not (repo_root / ".git").exists():
+        return set()
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--", *LICENSE_GLOBS],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return set()
     found: set[str] = set()
-    for pattern in LICENSE_GLOBS:
-        for path in glob.glob(str(repo_root / pattern), recursive=True):
-            p = Path(path)
-            if p.is_file():
-                rel = p.relative_to(repo_root).as_posix()
-                if not _skip_discovery_path(rel):
-                    found.add(rel)
+    for rel in result.stdout.splitlines():
+        rel = rel.strip()
+        if rel and not _skip_discovery_path(rel):
+            found.add(rel)
     return found
 
 
+def _parenthesize_compound_expression(expression: str) -> str:
+    if any(op in expression for op in (" OR ", " AND ", " WITH ")):
+        return f"({expression})"
+    return expression
+
+
 def expected_project_license_expression(spdx: dict[str, str]) -> str:
-    expressions = {
-        expression
-        for expression in spdx.values()
-        if expression not in SPDX_OMIT_FROM_PROJECT_LICENSE
-    }
-    return " AND ".join(sorted(expressions))
+    expressions = sorted(
+        {
+            expression
+            for expression in spdx.values()
+            if expression not in SPDX_OMIT_FROM_PROJECT_LICENSE
+        }
+    )
+    return " AND ".join(_parenthesize_compound_expression(e) for e in expressions)
 
 
 def audit_repo_license_files(repo_root: Path) -> tuple[list[str], str | None]:
@@ -128,6 +146,12 @@ def audit_repo_license_files(repo_root: Path) -> tuple[list[str], str | None]:
             "New license file(s) under audit globs; add each to pyproject license-files or "
             f"manifest excluded list ({_MANIFEST_PATH.name}): "
             + ", ".join(sorted(unknown))
+        )
+
+    if missing := sorted(p for p in inc if not (repo_root / p).is_file()):
+        err.append(
+            "license-files lists path(s) that do not exist in the checkout: "
+            + ", ".join(missing)
         )
 
     spdx_keys = set(spdx)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import glob
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -45,6 +46,8 @@ def _audit_fixture(
             path = root / relpath
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=root, check=True)
         with patch("tools.linter.license_files_audit._MANIFEST_PATH", manifest):
             return audit_repo_license_files(root)
 
@@ -76,6 +79,19 @@ class TestLicense(TestCase):
         )
         self.assertIsNone(skip_reason)
         self.assertTrue(any("New license file(s)" in e for e in errors), msg=errors)
+
+    def test_audit_missing_license_file(self) -> None:
+        errors, skip_reason = _audit_fixture(
+            'license = "MIT"\nlicense-files = ["third_party/shipped/LICENSE", '
+            '"third_party/removed/LICENSE"]',
+            'excluded = []\n\n[[spdx]]\nexpression = "MIT"\n'
+            'paths = ["third_party/shipped/LICENSE", "third_party/removed/LICENSE"]',
+            [("third_party/shipped/LICENSE", "MIT\n")],
+        )
+        self.assertIsNone(skip_reason)
+        self.assertTrue(
+            any("do not exist in the checkout" in e for e in errors), msg=errors
+        )
 
     def test_audit_spdx_table_mismatch(self) -> None:
         errors, skip_reason = _audit_fixture(
