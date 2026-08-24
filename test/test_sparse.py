@@ -3380,6 +3380,7 @@ class TestSparse(TestSparseBase):
         self.assertRaises(TypeError, lambda: s.new([6]))
 
     @onlyAccelerator
+    @skipIfMPS
     def test_dtypes(self, device):
         all_sparse_dtypes = all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)
         do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
