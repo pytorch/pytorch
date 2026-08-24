@@ -380,7 +380,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     @staticmethod
     @functools.cache
     def _in_graph_classes() -> set[type[object]]:
-        _in_graph_class_list = {
+        _in_graph_class_set = {
             torch.Tensor,
             torch.cuda.FloatTensor,  # type: ignore[attr-defined]
             torch.cuda.DoubleTensor,  # type: ignore[attr-defined]
@@ -393,20 +393,28 @@ class UserDefinedClassVariable(UserDefinedVariable):
             torch.cuda.LongTensor,  # type: ignore[attr-defined]
             torch.Stream,
             torch.Event,
-            torch.cuda.Stream,
-            torch.cuda.Event,
-            torch.xpu.Stream,
-            torch.xpu.Event,
         }
         if hasattr(torch, "hpu"):
-            _in_graph_class_list.update(
+            _in_graph_class_set.update(
                 {
                     torch.hpu.Stream,
                     torch.hpu.Event,
                 }
             )
 
-        return set(tensortype_to_dtype.keys()) | _in_graph_class_list
+        from ..device_interface import get_registered_device_interfaces
+
+        for _, iface in get_registered_device_interfaces():
+            for base, cls in ((torch.Stream, iface.Stream), (torch.Event, iface.Event)):
+                # DeviceInterface's Stream/Event placeholders only raise
+                # NotImplementedError, so they must not land in this set --
+                # keeping them out preserves the friendly error message for
+                # backends that forget to subclass torch.Stream/torch.Event.
+                if isinstance(cls, type) and issubclass(cls, base):
+                    _in_graph_class_set.add(cls)
+            _in_graph_class_set.update(iface.tensor_types)
+
+        return set(tensortype_to_dtype.keys()) | _in_graph_class_set
 
     @staticmethod
     @functools.cache
