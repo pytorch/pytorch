@@ -1224,6 +1224,129 @@ class TestFakePGUniformRanks(TestCase):
         for output in outputs:
             self.assertEqual(output, torch.full((2,), 2.0))
 
+    def test_alltoall_tiles_and_truncates_mismatched_slots(self):
+        """The list form lets each slot have its own shape.
+
+        Unlike all_to_all_single there is no size equality to lean on, so a
+        slot wider than our contribution is tiled and a narrower one is cut
+        short. Both must be written in full; a partial write would leave the
+        tail holding whatever the caller's buffer already contained.
+        """
+        pg = self._init(rank=0, world_size=2)
+        inputs = [torch.tensor([1.0, 2.0, 3.0]), torch.tensor([7.0, 8.0, 9.0])]
+        wide = torch.full((7,), -1.0)
+        narrow = torch.full((2,), -1.0)
+
+        pg.alltoall([wide, narrow], inputs).wait()
+
+        self.assertEqual(wide, torch.tensor([1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 1.0]))
+        self.assertEqual(narrow, torch.tensor([1.0, 2.0]))
+
+    def test_all_to_all_single_rejects_inconsistent_splits(self):
+        """Uniformity forces every peer to send us what we send it.
+
+        Splits that disagree mean the caller's world is not uniform after all.
+        Padding or tiling the gap would hand back plausible-looking numbers
+        that no real backend would produce, so it has to raise instead.
+        """
+        pg = self._init(rank=0, world_size=2)
+        send = torch.arange(4.0)
+        recv = torch.empty(4)
+
+        with self.assertRaisesRegex(RuntimeError, "every rank sends the same amount"):
+            pg.all_to_all_single(recv, send, [1, 3], [2, 2]).wait()
+
+    def test_reduce_writes_only_the_root(self):
+        """Real backends leave every non-root tensor unspecified."""
+        for rank, expected in ((0, 4.0), (1, 1.0)):
+            with self.subTest(rank=rank):
+                pg = self._init(rank=rank, world_size=4)
+                try:
+                    tensor = torch.ones(3)
+                    opts = dist.ReduceOptions()
+                    opts.rootRank = 0
+
+                    pg.reduce([tensor], opts).wait()
+
+                    self.assertEqual(tensor, torch.full((3,), expected))
+                finally:
+                    dist.destroy_process_group()
+
+    def test_allreduce_coalesced_scales_every_tensor(self):
+        """Each tensor in the batch is reduced independently."""
+        pg = self._init(rank=0, world_size=3)
+        tensors = [torch.ones(2), torch.full((3,), 2.0)]
+
+        pg.allreduce_coalesced(tensors).wait()
+
+        self.assertEqual(tensors[0], torch.full((2,), 3.0))
+        self.assertEqual(tensors[1], torch.full((3,), 6.0))
+
+    def test_reduce_scatter_list_form_scales_our_entry(self):
+        """We keep the input at our own index, summed over the world."""
+        pg = self._init(rank=2, world_size=4)
+        output = torch.empty(2)
+        inputs = [[torch.full((2,), float(r)) for r in range(4)]]
+
+        pg.reduce_scatter([output], inputs).wait()
+
+        self.assertEqual(output, torch.full((2,), 8.0))
+
+    def test_reduce_scatter_single_coalesced_scales_each_output(self):
+        """Every buffer in the batch keeps its own chunk, scaled."""
+        pg = self._init(rank=1, world_size=2)
+        outputs = [torch.empty(2), torch.empty(1)]
+        inputs = [torch.tensor([1.0, 2.0, 3.0, 4.0]), torch.tensor([5.0, 6.0])]
+
+        pg.reduce_scatter_single_coalesced(outputs, inputs).wait()
+
+        self.assertEqual(outputs[0], torch.tensor([6.0, 8.0]))
+        self.assertEqual(outputs[1], torch.tensor([12.0]))
+
+    def test_bool_sum_and_product_are_identity(self):
+        """Bool has no in-place form of the scaling the other dtypes use.
+
+        Under c10d's nonzero-is-true convention both reductions leave equal
+        bools alone, so take that branch rather than raise where a real
+        backend succeeds.
+        """
+        for op in (dist.ReduceOp.SUM, dist.ReduceOp.PRODUCT):
+            with self.subTest(op=op):
+                pg = self._init(rank=0, world_size=4)
+                try:
+                    tensor = torch.tensor([True, False])
+                    opts = dist.AllreduceOptions()
+                    opts.reduceOp = op
+
+                    pg.allreduce([tensor], opts).wait()
+
+                    self.assertEqual(tensor, torch.tensor([True, False]))
+                finally:
+                    dist.destroy_process_group()
+
+    def test_result_carries_the_reduced_tensor(self):
+        """async_op callers read the output through Work.result()."""
+        pg = self._init(rank=0, world_size=2)
+        tensor = torch.ones(2)
+
+        work = pg.allreduce([tensor])
+        work.wait()
+
+        self.assertEqual(work.result()[0], torch.full((2,), 2.0))
+
+    def test_result_still_raises_without_the_flag(self):
+        """Work::result() errors by default and must keep doing so.
+
+        Nothing outside simulate_uniform_ranks records an output, so returning
+        an empty list here would turn a diagnosable failure into a silent one.
+        """
+        pg = FakeProcessGroup._create_internal(0, world_size=2)
+
+        work = pg.allreduce([torch.ones(2)])
+
+        with self.assertRaisesRegex(RuntimeError, "recorded no output"):
+            work.result()
+
 
 instantiate_parametrized_tests(TestFakePG)
 

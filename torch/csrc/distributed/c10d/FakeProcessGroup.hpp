@@ -16,8 +16,8 @@ class FakeWork : public Work {
 
   // `result` is the tensors the collective produced. Real backends resolve
   // their future to those tensors; callers using async_op=True read them via
-  // get_future().value(). Defaulted so existing no-arg construction is
-  // unchanged and keeps returning a valueless future.
+  // get_future().value(). An empty list means the collective recorded no
+  // output, which is the case for every path outside simulate_uniform_ranks.
   explicit FakeWork(std::vector<at::Tensor> result = {})
       : result_(std::move(result)) {}
 
@@ -34,8 +34,14 @@ class FakeWork : public Work {
   }
 
   // Real backends expose the output through both result() and getFuture();
-  // a caller using the former should not silently get nothing.
+  // a caller using the former should not silently get nothing. Work::result()
+  // errors by default, so keep erring when nothing was recorded rather than
+  // turning a diagnosable failure into an empty list.
   std::vector<at::Tensor> result() override {
+    TORCH_CHECK(
+        !result_.empty(),
+        "FakeProcessGroup: this work recorded no output. result() is only "
+        "populated under simulate_uniform_ranks.");
     return result_;
   }
 
@@ -418,17 +424,31 @@ class FakeProcessGroup : public Backend {
       // the segment we would send to a peer in our own position: our input
       // split at index rank_. Fill each output slot from it, which keeps the
       // split structure self-consistent and lets callers reshape the result.
-      // Zero first: the slots should tile over the whole buffer, but a caller
-      // that reshapes the output must never read uninitialized memory if they
-      // do not, so this is a cheap backstop rather than an assumption.
-      flat_output.zero_();
+      // checkSplitSizes has already proven the slots tile the buffer exactly,
+      // so every element below is written and none is written twice.
       auto mine = splitSegment(
           flat_input, inputSplitSizes, rank_, size_, rowSizeOf(inputBuffer));
       const auto outputRowSize = rowSizeOf(outputBuffer);
       for (int64_t j = 0; j < size_; ++j) {
         auto slot = splitSegment(
             flat_output, outputSplitSizes, j, size_, outputRowSize);
-        fillByTiling(slot, mine);
+        // Uniformity forces every peer to send us exactly what we send it, so
+        // a slot that is not the size of `mine` means the caller's splits were
+        // not the same on every rank. Any output we invented for the gap would
+        // look plausible and be wrong, so refuse instead of padding or tiling.
+        TORCH_CHECK(
+            slot.numel() == mine.numel(),
+            "FakeProcessGroup::all_to_all_single: under "
+            "simulate_uniform_ranks every rank sends the same amount, so "
+            "output split ",
+            j,
+            " must hold ",
+            mine.numel(),
+            " elements, but the given splits size it at ",
+            slot.numel(),
+            ". The input and output split lists are inconsistent with a "
+            "uniform world.");
+        slot.copy_(mine);
       }
       return c10::make_intrusive<FakeWork>(
           std::vector<at::Tensor>{outputBuffer});
@@ -535,7 +555,6 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Options> options_;
 
  private:
-
   // NOTE [FakeProcessGroup uniform-rank simulation]
   // With Options::simulate_uniform_ranks the group models a world in which
   // every rank holds data identical to this one. That single assumption makes
@@ -562,9 +581,17 @@ class FakeProcessGroup : public Backend {
   // `tensor` is an out parameter: every branch mutates it in place.
   void applyUniformReduction(at::Tensor& tensor, const ReduceOp& reduceOp)
       const {
+    // Bool is the one dtype where the scaling below has no in-place form:
+    // mul_/pow_ promote to an integral result that cannot be stored back into
+    // a bool tensor. Under c10d's nonzero-is-true convention both reductions
+    // are the identity on equal bools anyway, so take that branch instead of
+    // raising where a real backend succeeds.
+    const bool isBool = tensor.scalar_type() == at::kBool;
     switch (reduceOp.op_) {
       case ReduceOp::SUM:
-        tensor.mul_(size_);
+        if (!isBool) {
+          tensor.mul_(size_);
+        }
         return;
       case ReduceOp::AVG:
       case ReduceOp::MIN:
@@ -579,7 +606,9 @@ class FakeProcessGroup : public Backend {
         // few ranks wide, and saturates to inf for floats. That matches what a
         // real backend would produce for the same inputs, so it is left alone
         // rather than clamped.
-        tensor.pow_(size_);
+        if (!isBool) {
+          tensor.pow_(size_);
+        }
         return;
       case ReduceOp::BXOR:
         // x ^ x == 0, so an even number of equal contributions cancels out
@@ -626,9 +655,11 @@ class FakeProcessGroup : public Backend {
     }
   }
 
-  // Fill `dst` by repeating `src`. Real backends write the whole slot;
-  // truncating would leave the tail uninitialized, and a caller that reshapes
-  // the output would then read garbage.
+  // Fill `dst` by repeating `src`. The list form of alltoall lets each peer's
+  // slot have its own shape, so unlike all_to_all_single there is no size
+  // equality to lean on here. Real backends write the whole slot; truncating
+  // would leave the tail uninitialized and a caller that reshapes the output
+  // would then read garbage.
   static void fillByTiling(const at::Tensor& dst, const at::Tensor& src) {
     const auto dstNumel = dst.numel();
     const auto srcNumel = src.numel();
@@ -654,12 +685,11 @@ class FakeProcessGroup : public Backend {
     return t.as_strided({t.numel()}, {1}, t.storage_offset());
   }
 
-  // The contiguous segment of `flat` belonging to peer `index`, honoring the
-  // c10d convention that an empty split list means an equal division.
-  // Segment `index` of a flattened buffer. c10d split sizes count rows along
-  // dim 0, not elements, so each one scales by `rowSize` exactly as
-  // computeLengthsAndOffsets does for the real backends. Getting this wrong
-  // silently under-writes the output for anything that is not 1-D.
+  // The contiguous segment of `flat` belonging to peer `index`. An empty split
+  // list is the c10d convention for an equal division; otherwise each split is
+  // a row count that `rowSize` converts into elements, matching
+  // computeLengthsAndOffsets. Getting that conversion wrong silently
+  // under-writes the output for anything that is not 1-D.
   static at::Tensor splitSegment(
       const at::Tensor& flat,
       const std::vector<int64_t>& splitSizes,
@@ -695,16 +725,16 @@ class FakeProcessGroup : public Backend {
     return flat.narrow(0, offset, length);
   }
 
-  // Elements per row along dim 0, matching computeLengthsAndOffsets. Computed
-  // as the trailing-dim product rather than numel/size(0) so a tensor with an
-  // empty leading dim, e.g. (0, 8), still reports 8 instead of 1.
+  // Elements per row along dim 0. c10d split sizes count rows, not elements,
+  // so every split has to be scaled by this to become an offset into the flat
+  // buffer. Kept character-for-character in step with the row_size line of
+  // computeLengthsAndOffsets (Utils.hpp), including its guard for an empty
+  // leading dim, so the fake backend segments a buffer exactly as a real one.
   static int64_t rowSizeOf(const at::Tensor& t) {
-    int64_t rowSize = 1;
-    for (int64_t d = 1; d < t.dim(); ++d) {
-      rowSize *= t.size(d);
-    }
-    return rowSize;
+    const auto dim0 = t.size(0);
+    return dim0 ? t.numel() / dim0 : 1;
   }
+
   void checkCollectiveError() {
     TORCH_CHECK(
         !options_ || !options_->error_on_collective,
