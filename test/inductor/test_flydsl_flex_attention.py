@@ -417,6 +417,18 @@ class TestFlyDSLFlexAttention(TestCase):
             (16, 16, 192, 128),
         )
 
+    def test_appends_128_multiple_prefill_choice(self):
+        _, append = _append_fake_choice(
+            _supported_fake_forward_inputs(
+                q_size=(2, 3, 384, 128),
+                k_size=(2, 3, 384, 128),
+                index_width=3,
+                mask_fn=lambda b, h, q, kv: (q >= kv)
+                & ((q - kv) % (2 + h) == 0),
+            )
+        )
+        append.assert_called_once()
+
     def test_unsupported_q_block_falls_back(self):
         inputs = _supported_fake_forward_inputs(
             q_size=(1, 8, 256, 128),

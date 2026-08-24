@@ -3,7 +3,6 @@
 import importlib
 from typing import Any
 
-
 _EXPORT_MODULES = {
     "GEMM_DTYPE_BF16": "gemm_gfx950",
     "GEMM_DTYPE_FP16": "gemm_gfx950",
