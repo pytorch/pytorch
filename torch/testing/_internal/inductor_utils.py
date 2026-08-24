@@ -7,11 +7,11 @@ import os
 import re
 import sys
 import unittest
+from collections.abc import Callable
 from subprocess import CalledProcessError
 
 import torch
 import torch._inductor.config as config
-
 from torch._inductor import compile_fx  # noqa: F401
 from torch._inductor.utils import (
     get_gpu_shared_memory,
@@ -21,21 +21,15 @@ from torch._inductor.utils import (
     is_gpu,
     OrderedSet,
 )
-from torch.utils._helion import has_helion
-from torch.utils._pallas import has_pallas_package, has_tpu_pallas
-from torch.utils._triton import has_triton
-from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
-    LazyVal,
-    TestCase,
-)
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, LazyVal, TestCase
+from torch.utils._config_module import ConfigModule
+from torch.utils._helion import has_helion
+from torch.utils._pallas import has_pallas_package, has_tpu_pallas
+from torch.utils._triton import has_triton
 
-from collections.abc import Callable
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -185,18 +179,20 @@ requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires h
 
 def requires_gpu_with_enough_memory(min_mem_required):
     def inner(fn):
-        skip_msg = f"Only if the GPU device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
-        # Fail closed: when there is no accelerator or the memory query is
-        # unavailable, skip rather than risk an OOM on an unknown device.
-        if not torch.accelerator.is_available():
-            return unittest.skip(skip_msg)(fn)
-        try:
-            _, total_memory = torch.accelerator.get_memory_info()
-        except Exception:
-            return unittest.skip(skip_msg)(fn)
-        if total_memory < min_mem_required:
-            return unittest.skip(skip_msg)(fn)
-        return fn
+        total_memory = sys.maxsize
+        if torch.xpu.is_available():
+            total_memory = torch.xpu.get_device_properties().total_memory
+        elif torch.cuda.is_available():
+            total_memory = torch.cuda.get_device_properties().total_memory
+        if (
+            not (torch.cuda.is_available() or torch.xpu.is_available())
+            or total_memory < min_mem_required
+        ):
+            return unittest.skip(
+                f"Only if the GPU device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
+            )(fn)
+        else:
+            return fn
 
     return inner
 
