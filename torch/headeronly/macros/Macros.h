@@ -633,9 +633,7 @@ __host__ __device__ inline void rocm_kernel_assert(
 #endif
 }
 } // namespace torch::headeronly::detail
-#endif // defined(USE_ROCM) && defined(__HIPCC__)
 
-#if defined(USE_ROCM) && defined(__HIPCC__)
 #define CUDA_KERNEL_ASSERT(cond)                             \
   if C10_UNLIKELY (!(cond)) {                                \
     static constexpr auto _rocm_assert_msg =                 \
