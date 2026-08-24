@@ -203,8 +203,10 @@ class AbstractWindowTest:
     def test_register_errors(self):
         self._init_pg()
         pool = self._make_pool()
-        self._probe_window_support(pool)
         win = dist._new_window()
+        # These rejections are rank-local and return before any transport work,
+        # so they must be asserted before _probe_window_support, which skips the
+        # test on hosts without a symmetric-memory-capable transport.
         # Registering a tensor outside the backend mempool must fail.
         plain = torch.ones(16, dtype=torch.float, device=self.device)
         with self.assertRaisesRegex(RuntimeError, "mempool|MemPool"):
@@ -220,6 +222,8 @@ class AbstractWindowTest:
             win.put(plain, 0, 0, False)
         with self.assertRaisesRegex(RuntimeError, "not registered"):
             win.signal(0, False)
+        # The remaining check needs a live symmetric window.
+        self._probe_window_support(pool)
         # Double registration must fail.
         with torch.cuda.use_mem_pool(pool):
             win_buf = torch.ones(16, dtype=torch.float, device=self.device)

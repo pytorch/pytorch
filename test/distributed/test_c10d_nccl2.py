@@ -854,11 +854,10 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
         backend = self._backend()
         pool = torch.cuda.MemPool()
         tensor = self._pool_tensor(pool)
-        with self.assertRaisesRegex(RuntimeError, "Failed to register segment"):
+        # register_mem_pool validates provenance before touching any state, so a
+        # rejected pool is never recorded -- nothing to deregister afterwards.
+        with self.assertRaisesRegex(RuntimeError, "mem_allocator|ncclMemAlloc"):
             backend.register_mem_pool(pool, symm=True)
-        # register_mem_pool records the pool before it upgrades each segment.
-        # Remove the plain registration left by the expected upgrade failure.
-        backend.deregister_mem_pool(pool)
         del tensor
 
     @requires_nccl()

@@ -766,12 +766,35 @@ void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
   TC_LOG(INFO, this) << "Registering MemPool " << pool->id().first << ":"
                      << pool->id().second << " (symm=" << symm << ") on "
                      << device_;
+  // One snapshot for both the ROCm provenance pre-check and the registration
+  // loop: taking it twice would let a concurrent allocation change the segment
+  // set between validation and use.
+  const auto segments = poolSegments(pool->id());
+#if defined(USE_ROCM)
+  if (symm) {
+    // RCCL can window-register ordinary HIP allocations, but the NCCL2
+    // symmetric contract requires ncclMemAlloc provenance. Reject up front,
+    // before any state mutation, so a rejected pool never lands in
+    // registeredMemPools_ or leaves plain registrations behind.
+    for (const auto& segment : segments) {
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
+      void* addr = reinterpret_cast<void*>(segment.address);
+      TORCH_CHECK(
+          isNcclAllocatorSegment(addr, segment.total_size),
+          "register_mem_pool(symm=True) on ROCm requires a MemPool created "
+          "with the NCCL backend allocator: MemPool(backend.mem_allocator). "
+          "Segment ",
+          addr,
+          " was not allocated by ncclMemAlloc.");
+    }
+  }
+#endif
   {
     std::lock_guard<std::mutex> lock(memory_registration_mutex_);
     registeredMemPools_.insert(pool->id());
   }
   bool symmUnsupported = false;
-  for (const auto& segment : poolSegments(pool->id())) {
+  for (const auto& segment : segments) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     void* addr = reinterpret_cast<void*>(segment.address);
     {

@@ -345,6 +345,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 #endif
   // Registers the segment containing ptr as a NCCL_WIN_COLL_SYMMETRIC window
   // if it is not one already. Collective: all ranks must call it together.
+  // On ROCm the segment must be a live ncclMemAlloc/getMemAllocator range:
+  // an ineligible segment returns ncclInvalidArgument (caller should throw),
+  // while ncclInvalidUsage stays reserved for a missing symmetric transport
+  // (caller keeps the plain registration and warns).
   ncclResult_t ensureSegmentWindow(const void* ptr);
 
   bool supportsAbortHooks() const override {
