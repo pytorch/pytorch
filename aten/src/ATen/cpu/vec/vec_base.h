@@ -42,6 +42,9 @@
 #include <c10/util/TypeCast.h>
 #include <c10/util/copysign.h>
 #include <c10/util/irange.h>
+#include <c10/util/qint32.h>
+#include <c10/util/qint8.h>
+#include <c10/util/quint8.h>
 
 #if defined(__GNUC__)
 #define __FORCE_INLINE __attribute__((always_inline)) inline
