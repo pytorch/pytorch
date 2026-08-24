@@ -770,7 +770,10 @@ class profile:
                     device_corr_map[corr_id] = []
                 device_corr_map[corr_id].append(fe)
             elif corr_id == 0:
-                frontend_function_events.append(fe)
+                # Skip OVERHEAD events (profiler-internal host cost):
+                # they do no device work and would otherwise inflate reported device time.
+                if fe.activity_type != "overhead":
+                    frontend_function_events.append(fe)
             else:
                 raise RuntimeError(
                     f"Got negative correlation id {corr_id} in profiler post processing"
@@ -1198,7 +1201,7 @@ class emit_nvtx:
 
 
 def load_nvprof(path):
-    """Open an nvprof trace file and parses autograd annotations.
+    """Open an nvprof trace file and parse autograd annotations.
 
     Args:
         path (str): path to nvprof trace
