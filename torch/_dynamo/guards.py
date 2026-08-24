@@ -5033,9 +5033,17 @@ def _offending_value_path(
 
     The error names WHAT failed and never WHERE it lives, which in a large model
     means bisecting by hand across multi-minute captures. The pickler records
-    the object it was reducing, so this walks the scopes the guard state carries
-    and reports the first path holding THAT object -- by identity, not by type,
-    which used to report a same-typed bystander instead.
+    the object it was reducing, so this walks the guard state and reports the
+    first path holding THAT object -- by identity, not by type, which used to
+    report a same-typed bystander instead.
+
+    Searched from ``state``, because that is what gets pickled. Rooting only at
+    the two scopes searched five objects on a real capture while the pickler
+    walked the whole output graph, its guards and its guard-tree values, so a
+    value living anywhere else -- a lock on a compiler internal, say -- was
+    unreachable however well the scopes were preserved. The scopes stay as
+    SEEDS, ahead of ``state`` in the queue, so the common case still reports the
+    short readable path rather than a long one through the graph.
 
     Best-effort by construction: it is a diagnostic appended to an error that is
     already being raised, so any failure here must stay silent rather than mask
@@ -5047,10 +5055,13 @@ def _offending_value_path(
         if roots is None:
             roots = _scope_roots(state.output_graph)
         seen: set[int] = set()
-        queue = collections.deque(roots)
+        queue = collections.deque([*roots, ("state", state)])
+        # Higher than the scope-only walk needed: the whole guard state is
+        # orders of magnitude larger, and this runs once, on a path that is
+        # already raising.
         while queue:
             path, value = queue.popleft()
-            if id(value) in seen or len(seen) > 20000:
+            if id(value) in seen or len(seen) > 200000:
                 continue
             seen.add(id(value))
             if value is target:
