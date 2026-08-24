@@ -346,6 +346,10 @@ if(PYTORCH_FOUND_HIP)
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
+    # hipFile is Linux-only and ships with ROCm 7.14 and later, where it is required.
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0")
+      find_package_and_print_version(hipfile REQUIRED)
+    endif()
   endif()
 
   # Optional components.

@@ -133,7 +133,7 @@ TypePtr TypeParser::parse() {
     }
     contained_types_.insert(token);
     return simpleTypeIt->second;
-  } else if (getNonSimpleType().find(token) != getNonSimpleType().end()) {
+  } else if (getNonSimpleType().contains(token)) {
     contained_types_.insert(token);
     return parseNonSimple(token);
   } else if (token == "__torch__") {

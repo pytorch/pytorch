@@ -140,15 +140,16 @@ struct AddTensorboardFields : public MetadataBase {
     result->visit_if_base<PyExtraFieldsBase>([&, this](const auto& i) -> void {
       this->addMetadata(fields::kPythonId, static_cast<uint64_t>(i.id_));
 
-      std::optional<std::string> parent_id;
+      std::optional<uint64_t> parent_id;
       std::shared_ptr<Result> parent = result->parent_.lock();
       while (parent && !parent_id.has_value()) {
         parent->visit_if_base<PyExtraFieldsBase>(
-            [&](const auto& j) { parent_id = std::to_string(j.id_); });
+            [&](const auto& j) { parent_id = static_cast<uint64_t>(j.id_); });
         parent = parent->parent_.lock();
       }
-      // Dynamic value ("null" or a number) -> stays on the string path.
-      this->addMetadata("Python parent id", parent_id.value_or("null"));
+      if (parent_id.has_value()) {
+        this->addMetadata(fields::kPythonParentId, *parent_id);
+      }
       if (i.caller_.line_no_ > 0) {
         this->addMetadata(
             fields::kCallFrom,
