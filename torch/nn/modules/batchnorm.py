@@ -22,16 +22,11 @@ __all__ = [
     "SyncBatchNorm",
 ]
 
-# SyncBatchNorm is built from batch_norm_stats and friends, which are registered
-# per backend rather than being composite. Ask the dispatcher which devices have
-# them instead of tracking the backend list by hand.
-_SYNC_BATCH_NORM_OP = "aten::batch_norm_stats"
-
 
 @functools.lru_cache
 def _sync_batch_norm_supported(device_type: str) -> bool:
     return torch._C._dispatch_has_kernel_for_dispatch_key(
-        _SYNC_BATCH_NORM_OP, torch._C._dispatch_key_for_device(device_type)
+        "aten::batch_norm_stats", torch._C._dispatch_key_for_device(device_type)
     )
 
 
@@ -857,7 +852,7 @@ class SyncBatchNorm(_BatchNorm):
             if not _sync_batch_norm_supported(input.device.type):
                 raise ValueError(
                     "SyncBatchNorm expected input tensor to be on a device with a "
-                    f"{_SYNC_BATCH_NORM_OP} kernel registered, but got "
+                    f"aten::batch_norm_stats kernel registered, but got "
                     f"{input.device.type}"
                 )
 

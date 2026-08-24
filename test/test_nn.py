@@ -6163,7 +6163,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             4096,
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(not torch.distributed.is_available(), "torch.distributed not available")
     @unittest.skipIf(not torch.distributed.is_gloo_available(), "gloo not available")
     def test_sync_batchnorm_unsupported_device(self):
@@ -6184,6 +6183,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         finally:
             torch.distributed.destroy_process_group()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
         module = torch.nn.Sequential(
             torch.nn.BatchNorm1d(100),
