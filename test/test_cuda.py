@@ -202,17 +202,6 @@ def _check_allocator_settings_on_tear_down(test_case):
     test_case.assertEqual(md["expandable_segments"], EXPANDABLE_SEGMENTS)
 
 
-def _rocm_kernel_assert_enabled():
-    if not torch.version.hip:
-        return False
-    cfg = torch.__config__.show()
-    return (
-        "USE_ROCM_KERNEL_ASSERT : ON" in cfg
-        or "USE_ROCM_KERNEL_ASSERT=1" in cfg
-        or "USE_ROCM_KERNEL_ASSERT=ON" in cfg
-    )
-
-
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCuda(TestCase):
@@ -2132,11 +2121,16 @@ if __name__ == '__main__':
             lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
         )
 
+    @slowTest
     @unittest.skipIf(
-        not _rocm_kernel_assert_enabled(),
+        not TEST_WITH_ROCM
+        or (
+            "USE_ROCM_KERNEL_ASSERT : ON" not in torch.__config__.show()
+            and "USE_ROCM_KERNEL_ASSERT=1" not in torch.__config__.show()
+            and "USE_ROCM_KERNEL_ASSERT=ON" not in torch.__config__.show()
+        ),
         "requires ROCm build with USE_ROCM_KERNEL_ASSERT=ON",
     )
-    @slowTest
     def test_rocm_kernel_assert_percent_in_condition(self):
         # Device assert with '%' in #cond; stderr must include the full condition.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
