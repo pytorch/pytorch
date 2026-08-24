@@ -85,6 +85,11 @@ class CUTLASSTemplate(KernelTemplate):
     def supports_epilogue_fusion(op: GemmOperation, device_type: str) -> bool:
         return False
 
+    def _input_aliasing(self) -> tuple[int, ...]:
+        names = [node.get_name() for node in self.input_nodes]
+        first_seen: dict[str, int] = {}
+        return tuple(first_seen.setdefault(n, i) for i, n in enumerate(names))
+
     def make_key(self, name: str, input_key: str, layout_repr: str) -> str:
         """
         Make a key for the code cache. The idea of the method is to cache
@@ -99,10 +104,10 @@ class CUTLASSTemplate(KernelTemplate):
                 (
                     input_key,
                     self.input_reorder,
-                    # output layout, same as self.output_node.get_layout()
                     layout_repr,
                     self.get_runtime_arg_info(),
                     name,
+                    self._input_aliasing(),
                 )
             ).encode("utf-8")
         ).hexdigest()
