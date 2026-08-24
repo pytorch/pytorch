@@ -4561,8 +4561,8 @@ class TestAsArray(TestCase):
 instantiate_device_type_tests(TestTensorCreation, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestRandomTensorCreation, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestLikeTensorCreation, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu", allow_xpu=True)
-instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
+instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu")
 instantiate_device_type_tests(TestAsArray, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
