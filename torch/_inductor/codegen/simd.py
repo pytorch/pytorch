@@ -19,7 +19,6 @@ import sympy
 
 import torch
 import torch._logging
-import torch.utils._pytree as pytree
 from torch._inductor import metrics
 from torch._inductor.ir import MultiTemplateBuffer
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
@@ -1591,6 +1590,47 @@ class _DerivedIterationFamily:
             raise AssertionError("sub-parent family must have a derived tree")
         return self.flat_index_derived_tree
 
+    def mask_vars_for_shape(
+        self, kernel: TritonKernel, shape: Sequence[int | str] | None
+    ) -> OrderedSet[str]:
+        """Masks from this iteration family that do not widen ``shape``."""
+        if not self.is_active_on(kernel):
+            raise AssertionError("derived iteration family must be active")
+        if shape is None:
+            return OrderedSet()
+        ndim = kernel.triton_tensor_ndim()
+        if len(shape) > ndim:
+            raise AssertionError(f"value rank {len(shape)} exceeds kernel rank {ndim}")
+        # Align lower-rank values to trailing kernel dimensions, matching
+        # Triton broadcasting (for example, [R] is [1, R] in an [X, R] tile).
+        value_shape = (*([1] * (ndim - len(shape))), *shape)
+        mask_vars: OrderedSet[str] = OrderedSet()
+        for tree in self.range_trees:
+            mask_shape = tree.mask_shape(ndim)
+            mask_shape = (*([1] * (ndim - len(mask_shape))), *mask_shape)
+            if all(
+                str(mask_dim) == "1" or str(mask_dim) == str(value_dim)
+                for value_dim, mask_dim in zip(value_shape, mask_shape)
+            ):
+                mask_vars.add(tree.mask_name())
+        kernel.filter_masks(mask_vars)
+        return mask_vars
+
+    def set_value_masks(
+        self, kernel: TritonKernel, values: Iterable[CSEVariable]
+    ) -> None:
+        """Mark values as valid on their materialized derived-domain tiles.
+
+        The planner proves exact divisibility, so the target-family mask is
+        equivalent to projecting the source mask through every lane.
+        """
+        # Internal sources may materialize before epilogue activation. Their
+        # parent body is still pending, so loop-local headers stay in that pass.
+        with self.ensure_active(kernel):
+            for value in values:
+                value = cast("TritonCSEVariable", value)
+                value.mask_vars = self.mask_vars_for_shape(kernel, value.shape)
+
     @contextlib.contextmanager
     def ensure_active(self, kernel: SIMDKernel[Any]):
         """Activate this family if it isn't already active on ``kernel``."""
@@ -1922,6 +1962,10 @@ class _GroupedReductionLayout:
             name_suffix=f"lane{factor}",
             named_constants=self._grouped_axis_named_constants(self.group_tree),
         )
+        # Usually the flattened extent directly proves divisibility by the
+        # factor. Nested codegen may instead retain an opaque but equivalent
+        # extent, so expose its known num_groups * group_size structure. The
+        # planner has already proved that group_size is divisible by factor.
         lane_index_subs = scheduler.NestedReduction.try_get_sub_parent_extent_subs(
             self.group_tree.numel, factor
         )
@@ -1933,7 +1977,7 @@ class _GroupedReductionLayout:
                 self.group_tree.numel, grouped_extent
             ):
                 raise AssertionError(
-                    "sub-parent extent must be divisible by its factor"
+                    "sub-parent extent does not match its grouped layout"
                 )
             lane_index_subs = {self.group_tree.numel: grouped_extent}
         return _DerivedIterationFamily(
@@ -2044,13 +2088,21 @@ class _GroupedReductionLayout:
             return True
         # A value already at child width can be forwarded directly.
         if parent_dim == self.child_block(factor):
+            family.set_value_masks(kernel, (value,))
             family.remapped_values[name] = value
             return True
         # Only a full parent tile can be projected to child width here.
         if parent_dim != self.parent_block:
             if not allow_reduced_broadcast or parent_dim != self.num_groups_str:
                 return False
-            family.remapped_values[name] = value
+            broadcast = self._broadcast_value_to_axis_resolution(
+                kernel,
+                value,
+                parent_extent=self.child_block(factor),
+                elems_per_group=str(FloorDiv(self.local_reduction_size_sym, factor)),
+            )
+            family.set_value_masks(kernel, (broadcast,))
+            family.remapped_values[name] = broadcast
             return True
         interleaved = scheduler.NestedReduction.SubParentSourceLayout.INTERLEAVED
         if source_layout is not interleaved:
@@ -2070,22 +2122,10 @@ class _GroupedReductionLayout:
             for _ in range(factor)
         )
         kernel.emit_split_via_reshape(value, reshape_shape, tuple(map(str, parts)))
+        family.set_value_masks(kernel, parts)
         # Derived loads select the appropriate register value from this tuple.
         family.remapped_values[name] = parts
         return True
-
-    def broadcast_group_value_to_lanes(
-        self,
-        kernel: TritonKernel,
-        value: CSEVariable,
-        factor: int,
-    ) -> CSEVariable:
-        return self._broadcast_value_to_axis_resolution(
-            kernel,
-            value,
-            parent_extent=self.child_block(factor),
-            elems_per_group=str(FloorDiv(self.local_reduction_size_sym, factor)),
-        )
 
     def _broadcast_value_to_axis_resolution(
         self,
@@ -2253,85 +2293,6 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
             self._inner.store(name, remapped_index, value)
 
 
-class _GroupInvariantBroadcast:
-    """Delay widening reduced values while scalar math stays group-invariant."""
-
-    # OpsHandler operations are scalar unless their contract says otherwise.
-    # These operations use lane position, carry state across elements, or invoke
-    # a subgraph, so they must see projected operands even when all explicit
-    # tensor arguments are group-invariant. Add new non-scalar OpsHandler
-    # operations here.
-    _PROJECTION_BARRIERS = frozenset(
-        (
-            "check_bounds",
-            "device_assert_async",
-            "dot",
-            "indirect_indexing",
-            "masked",
-            "partial_accumulate",
-            "rand",
-            "rand_eager",
-            "randint64",
-            "randn",
-            "reduction",
-            "scan",
-            "sort",
-        )
-    )
-
-    def __init__(
-        self,
-        kernel: TritonKernel,
-        layout: _GroupedReductionLayout,
-        factor: int,
-    ) -> None:
-        self._kernel = kernel
-        self._layout = layout
-        self._factor = factor
-
-    def is_group_invariant(self, value: Any) -> bool:
-        return (
-            isinstance(value, CSEVariable)
-            and self._layout.parent_dim(value) == self._layout.num_groups_str
-        )
-
-    def _is_lane_varying(self, value: Any) -> bool:
-        if not isinstance(value, CSEVariable):
-            return False
-        if value.shape == ():
-            return False
-        parent_dim = self._layout.parent_dim(value)
-        return parent_dim not in ("1", self._layout.num_groups_str)
-
-    def widen(self, value: CSEVariable) -> CSEVariable:
-        return self._layout.broadcast_group_value_to_lanes(
-            self._kernel, value, self._factor
-        )
-
-    def _widen_arg(self, value: Any) -> Any:
-        return self.widen(value) if self.is_group_invariant(value) else value
-
-    def apply(
-        self, op: str, args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        operands = pytree.tree_leaves((args, kwargs))
-        if not any(self.is_group_invariant(value) for value in operands):
-            return args, kwargs
-        inline_asm_barrier = op == "inline_asm_elementwise" and (
-            kwargs.get("pack", 1) != 1 or not kwargs.get("is_pure", True)
-        )
-        if (
-            op not in self._PROJECTION_BARRIERS
-            and not inline_asm_barrier
-            and not any(self._is_lane_varying(value) for value in operands)
-        ):
-            return args, kwargs
-        return (
-            pytree.tree_map(self._widen_arg, args),
-            pytree.tree_map(self._widen_arg, kwargs),
-        )
-
-
 class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
     """Pointwise bodies at a remapped iteration range.
 
@@ -2349,7 +2310,6 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
         family: _DerivedIterationFamily,
         load_transform: _ParentFullLoadTransform | None = None,
         load_resolver: _SubParentSourceLoadResolver | None = None,
-        group_broadcast: _GroupInvariantBroadcast | None = None,
         forwarded_store_names: OrderedSet[str] | None = None,
         masked_forward_names: OrderedSet[str] | None = None,
     ):
@@ -2358,14 +2318,8 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
         self._family = family
         self._load_transform = load_transform
         self._load_resolver = load_resolver
-        self._group_broadcast = group_broadcast
         self._forwarded_store_names = forwarded_store_names or OrderedSet()
         self._masked_forward_names = masked_forward_names or OrderedSet()
-
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        if self._group_broadcast is not None:
-            args, kwargs = self._group_broadcast.apply(name, args, kwargs)
-        return super()._default(name, args, kwargs)
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         value = None
@@ -2393,9 +2347,6 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
         mode: Any = None,
     ) -> None:
         k = self._kernel
-        broadcast = self._group_broadcast
-        if broadcast is not None and broadcast.is_group_invariant(value):
-            value = broadcast.widen(value)
         remapped_index = self._family.remap_index(index)
         with self._family.ensure_active(k):
             self._inner.store(name, remapped_index, value, mode=mode)
@@ -2404,7 +2355,12 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
 
 
 class _SubParentSourceLoadResolver(WrapperHandler):  # type: ignore[type-arg]
-    """Projects CSE-live parent values into a sub-parent stage."""
+    """Makes live source values available to a sub-parent epilogue.
+
+    For factor F, a parent value [B, D] is split into F lane values
+    [B, D / F]. A group value [B, D / G] is repeated G / F times per group
+    to form [B, D / F].
+    """
 
     def __init__(
         self,
@@ -2434,7 +2390,7 @@ class _SubParentSourceLoadResolver(WrapperHandler):  # type: ignore[type-arg]
             self._values[name] = value
         return value
 
-    def materialize(self, name: str, *, required: bool = False) -> bool:
+    def materialize(self, name: str) -> bool:
         if name in self._sub_parent_family.remapped_values:
             return True
         if (
@@ -2442,13 +2398,14 @@ class _SubParentSourceLoadResolver(WrapperHandler):  # type: ignore[type-arg]
             and name not in self._broadcast_source_names
         ):
             return False
+        must_forward = name in self._kernel.store_buffer_names
         value = self._values.get(name)
         if value is None or not self._kernel.cse.contains_value(value):
             value = cast(
                 "TritonCSEVariable | None", self._kernel.cse.store_cache.get(name)
             )
         if value is None or not self._kernel.cse.contains_value(value):
-            if required:
+            if must_forward:
                 raise AssertionError(
                     f"sub-parent stage could not materialize planned input {name!r}"
                 )
@@ -2462,7 +2419,7 @@ class _SubParentSourceLoadResolver(WrapperHandler):  # type: ignore[type-arg]
             self._source_layouts.get(name),
             allow_reduced_broadcast=name in self._broadcast_source_names,
         )
-        if required and not materialized:
+        if must_forward and not materialized:
             raise AssertionError(
                 f"sub-parent stage has no usable layout for input {name!r}"
             )
@@ -3278,19 +3235,13 @@ class SIMDScheduling(BaseScheduling):
             outer_numel,
             outer_rnumel,
         )
-        indexing_schedule = cast(
-            list[NodeScheduleEntry],
-            [
-                *combined_schedule,
-                *outer_local_reduction_pointwise,
-                *grouped_schedule,
-                *(
-                    sub_parent_stage.epilogue_nodes
-                    if sub_parent_stage is not None
-                    else ()
-                ),
-            ],
-        )
+        indexing_schedule: list[NodeScheduleEntry] = [
+            *combined_schedule,
+            *outer_local_reduction_pointwise,
+            *grouped_schedule,
+        ]
+        if sub_parent_stage is not None:
+            indexing_schedule.extend(sub_parent_stage.epilogue_nodes)
         coalesce_analysis = (
             outer_node.get_coalesce_analysis()
             if torch._inductor.config.triton.coalesce_tiling_analysis
@@ -3405,20 +3356,8 @@ class SIMDScheduling(BaseScheduling):
             if sub_parent_stage is not None:
                 if sub_parent_family is None or sub_parent_resolver is None:
                     raise AssertionError("sub-parent stage requires its codegen state")
-                internal_names = OrderedSet.union(
-                    *(sn.get_buffer_names() for sn in node.get_nodes())
-                )
-                source_names = OrderedSet(dict(sub_parent_stage.source_layouts))
-                broadcast_names = OrderedSet(sub_parent_stage.broadcast_source_names)
-                for name in source_names | broadcast_names:
-                    sub_parent_resolver.materialize(
-                        name, required=name in internal_names or name in broadcast_names
-                    )
                 forwarded_store_names = OrderedSet(
                     sub_parent_stage.internal_dependency_names
-                )
-                group_broadcast = _GroupInvariantBroadcast(
-                    kernel, layout, sub_parent_stage.factor
                 )
                 for output_lanes, stage_nodes in sub_parent_stage.output_groups:
                     for output_lane in range(output_lanes):
@@ -3434,7 +3373,6 @@ class SIMDScheduling(BaseScheduling):
                             sub_parent_family,
                             sub_parent_source,
                             load_resolver=sub_parent_resolver,
-                            group_broadcast=group_broadcast,
                             forwarded_store_names=forwarded_store_names,
                             masked_forward_names=forwarded_store_names,
                         )
@@ -3664,7 +3602,6 @@ class SIMDScheduling(BaseScheduling):
         *,
         load_transform: _ParentFullLoadTransform | None = None,
         load_resolver: _SubParentSourceLoadResolver | None = None,
-        group_broadcast: _GroupInvariantBroadcast | None = None,
         forwarded_store_names: OrderedSet[str] | None = None,
         masked_forward_names: OrderedSet[str] | None = None,
     ) -> None:
@@ -3689,7 +3626,6 @@ class SIMDScheduling(BaseScheduling):
                     family=family,
                     load_transform=load_transform,
                     load_resolver=load_resolver,
-                    group_broadcast=group_broadcast,
                     forwarded_store_names=forwarded_store_names,
                     masked_forward_names=masked_forward_names,
                 )
@@ -3819,7 +3755,7 @@ class SIMDScheduling(BaseScheduling):
                 kernel.codegen_body()
             if internal_source_names:
                 for name in internal_source_names:
-                    source_resolver.materialize(name, required=True)
+                    source_resolver.materialize(name)
             for output_lanes, stage_nodes in stage.output_groups:
                 for output_lane in range(output_lanes):
                     sub_parent_source = layout.sub_parent_iteration_values(

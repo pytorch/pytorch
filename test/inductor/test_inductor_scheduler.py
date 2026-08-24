@@ -212,8 +212,14 @@ class TestScheduler(TestCase):
         nested.scheduler = scheduler
         nested.node1 = node1
         nested.node2 = node2
-        nested._append_approval = (other, grouped_node, stage)
-        with patch.object(FusedNestedReductions, "__init__", return_value=None):
+        with (
+            patch.object(
+                FusedNestedReductions,
+                "_plan_append",
+                return_value=(grouped_node, stage),
+            ),
+            patch.object(FusedNestedReductions, "__init__", return_value=None),
+        ):
             FusedNestedReductions.fuse_with(nested, other)
 
         self.assertEqual(scheduler.node_to_mempool[grouped_node], (7, 0))
