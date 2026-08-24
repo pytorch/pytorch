@@ -34,6 +34,7 @@ from .immutable_collections import immutable_dict
 from .node import (
     _device_annotation,
     _get_qualified_name,
+    _is_pybind11_enum_member,
     _type_repr,
     Argument,
     Node,
@@ -625,6 +626,10 @@ class CodeGen:
                 cls = arg.__class__
                 clsname = add_global(cls.__name__, cls)
                 return f"{clsname}.{arg.name}"
+            elif _is_pybind11_enum_member(arg):
+                cls = arg.__class__
+                clsname = add_global(cls.__name__, cls)
+                return f"{clsname}.{arg.name}"  # pyrefly: ignore[missing-attribute]
             elif isinstance(arg, complex):
                 if (
                     arg.real == 0.0

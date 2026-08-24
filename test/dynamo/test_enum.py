@@ -693,6 +693,89 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
 
 
+    def test_pybind11_enum_swizzle_type_as_tensor_subclass_arg(self):
+        """Test pybind11 enum passed as arg to tensor subclass constructor under torch.compile."""
+        from torch.nn.functional import SwizzleType
+
+        class EnumSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, enum_val):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls, data.shape, dtype=data.dtype, device=data.device
+                )
+
+            def __init__(self, data, enum_val):
+                self._data = data
+                self._enum_val = enum_val
+
+            def __tensor_flatten__(self):
+                return ["_data"], {"enum_val": self._enum_val}
+
+            @classmethod
+            def __tensor_unflatten__(cls, tensor_dict, metadata, outer_size, outer_stride):
+                return cls(tensor_dict["_data"], metadata["enum_val"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                def unwrap(a):
+                    return a._data if isinstance(a, cls) else a
+                return func(
+                    *torch.utils._pytree.tree_map(unwrap, args),
+                    **torch.utils._pytree.tree_map(unwrap, kwargs or {}),
+                )
+
+        def fn(x):
+            return EnumSubclass(x * 2, SwizzleType.NO_SWIZZLE)
+
+        x = torch.randn(4, 4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        result = compiled(x)
+        self.assertIsInstance(result, EnumSubclass)
+        self.assertEqual(result._enum_val, SwizzleType.NO_SWIZZLE)
+        self.assertEqual(result._data, x * 2)
+
+    def test_pybind11_enum_scaling_type_as_tensor_subclass_arg(self):
+        """Test ScalingType pybind11 enum as tensor subclass constructor arg under torch.compile."""
+        from torch.nn.functional import ScalingType
+
+        class EnumSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, enum_val):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls, data.shape, dtype=data.dtype, device=data.device
+                )
+
+            def __init__(self, data, enum_val):
+                self._data = data
+                self._enum_val = enum_val
+
+            def __tensor_flatten__(self):
+                return ["_data"], {"enum_val": self._enum_val}
+
+            @classmethod
+            def __tensor_unflatten__(cls, tensor_dict, metadata, outer_size, outer_stride):
+                return cls(tensor_dict["_data"], metadata["enum_val"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                def unwrap(a):
+                    return a._data if isinstance(a, cls) else a
+                return func(
+                    *torch.utils._pytree.tree_map(unwrap, args),
+                    **torch.utils._pytree.tree_map(unwrap, kwargs or {}),
+                )
+
+        def fn(x):
+            return EnumSubclass(x * 2, ScalingType.TensorWise)
+
+        x = torch.randn(4, 4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        result = compiled(x)
+        self.assertIsInstance(result, EnumSubclass)
+        self.assertEqual(result._enum_val, ScalingType.TensorWise)
+        self.assertEqual(result._data, x * 2)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

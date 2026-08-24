@@ -1881,9 +1881,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().as_python_constant()
 
     def as_proxy(self) -> object:
+        from ..utils import is_pybind11_enum_member
+
         if isinstance(self.value, enum.Enum):
             if isinstance(self.value, int):
                 return int(self.value)
+            return self.value
+        if is_pybind11_enum_member(self.value):
             return self.value
         return super().as_proxy()
 

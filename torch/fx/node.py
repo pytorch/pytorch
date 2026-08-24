@@ -47,6 +47,17 @@ BaseArgumentTypes = Union[  # noqa: UP007
 ]
 base_types = typing.get_args(BaseArgumentTypes)
 
+
+def _is_pybind11_enum_member(value: object) -> bool:
+    """Check if value is a pybind11 enum member (not a Python enum.Enum)."""
+    t = type(value)
+    members = getattr(t, "__members__", None)
+    if members is None:
+        return False
+    name = getattr(value, "name", None)
+    return name is not None and name in members
+
+
 Target: TypeAlias = Callable[..., Any] | str
 
 Argument = Optional[  # noqa: UP045

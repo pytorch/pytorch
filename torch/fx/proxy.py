@@ -25,7 +25,7 @@ from torch.utils._traceback import CapturedTraceback
 from ._compatibility import compatibility
 from .graph import Graph, magic_methods, reflectable_magic_methods
 from .immutable_collections import immutable_dict, immutable_list
-from .node import Argument, base_types, Node, Target
+from .node import Argument, base_types, Node, Target, _is_pybind11_enum_member
 from .operator_schemas import check_for_mutable_operation
 
 
@@ -478,6 +478,9 @@ class TracerBase:
             return self.create_node("call_function", a.__class__, (), kwargs)
 
         elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
+            return a  # pyrefly: ignore[bad-return]
+
+        elif _is_pybind11_enum_member(a):
             return a  # pyrefly: ignore[bad-return]
 
         raise NotImplementedError(f"argument of type: {type(a)}")
