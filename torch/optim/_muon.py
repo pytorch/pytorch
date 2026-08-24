@@ -31,11 +31,9 @@ DEFAULT_NS_STEPS = 5
 def _ndim_supported(ndim: int, allow_batched_matrices: bool) -> bool:
     """Muon is a matrix optimizer; batches of matrices are opt-in.
 
-    Any rank above 2 is accepted rather than exactly 3, because Newton-Schulz
-    flattens every leading dimension into a single batch, so the batch rank does
-    not change the math. Transformers produce both: a grouped MoE expert weight
-    is 3D, [num_experts, hidden_dim, dim], and that same weight stacked across
-    layers is 4D, [n_layers, num_experts, hidden_dim, dim].
+    Newton-Schulz flattens all leading dimensions into one batch, so any rank
+    above 2 works: grouped MoE experts are 3D, [num_experts, hidden_dim, dim],
+    and the same weight stacked across layers is 4D.
     """
     return ndim == 2 or (allow_batched_matrices and ndim > 2)
 
@@ -64,10 +62,7 @@ def _zeropower_via_newtonschulz(
     if len(ns_coefficients) != 3:
         raise ValueError("Coefficients must be a tuple of exactly 3 values")
     a, b, c = ns_coefficients
-    # Fixes a latent bug: grad.bfloat16() returns grad itself when grad is
-    # already bf16, and the div_ below is in place. With nesterov=False the
-    # caller passes the momentum buffer directly, so the optimizer state was
-    # normalized on every step. copy=True never aliases, whatever the dtype.
+    # NS normalizes in place, so never alias the momentum buffer.
     ortho_grad = grad.to(dtype=torch.bfloat16, copy=True)
     transposed = grad.size(-2) > grad.size(-1)
     if transposed:
@@ -327,8 +322,7 @@ Muon.__doc__ = (
         allow_batched_matrices (bool, optional): opt in to parameters shaped :math:`[..., M, N]`. The last two dimensions
             are the matrix dimensions and any leading dimensions are treated as a batch of independent matrices,
             each orthogonalized on its own. This is useful for per-head or per-expert Muon, where a fused
-            parameter stores many logical matrices. When ``False``, only 2D parameters are accepted, so that a
-            future >2D Muon formulation is free to interpret the leading dimensions differently. (default: False)
+            parameter stores many logical matrices. When ``False``, only 2D parameters are accepted. (default: False)
 
     Example:
         >>> # xdoctest: +SKIP

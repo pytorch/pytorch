@@ -2701,7 +2701,24 @@ class TestOptimRenewed(TestCase):
         self.assertEqual(counter, 6)
 
 
-class TestMuonBatchedMatrices(TestCase):
+class TestMuon(TestCase):
+    def test_muon_does_not_alias_momentum_buffer(self, device):
+        # With nesterov=False the momentum buffer is handed straight to
+        # Newton-Schulz, which normalizes in place, so a bf16 param must not
+        # end up aliasing it.
+        momentum = 0.9
+        param = Parameter(torch.randn(4, 6, device=device, dtype=torch.bfloat16))
+        grad = torch.randn(4, 6, device=device, dtype=torch.bfloat16)
+        param.grad = grad.clone()
+        optimizer = torch.optim.Muon([param], momentum=momentum, nesterov=False)
+
+        optimizer.step()
+
+        self.assertEqual(
+            optimizer.state[param]["momentum_buffer"],
+            torch.zeros_like(grad).lerp_(grad, 1 - momentum),
+        )
+
     @parametrize("matrix_shape", [(2, 5), (5, 2)])
     def test_muon_batched_matrices(self, device, matrix_shape):
         torch.manual_seed(2)
@@ -2766,7 +2783,7 @@ class TestMuonBatchedMatrices(TestCase):
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
-instantiate_device_type_tests(TestMuonBatchedMatrices, globals())
+instantiate_device_type_tests(TestMuon, globals())
 
 
 if __name__ == "__main__":
