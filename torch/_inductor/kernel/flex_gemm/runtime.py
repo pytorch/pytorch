@@ -219,7 +219,12 @@ def normalize_c(
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmRuntimeLocalReducePlan:
-    """Runtime plan for one local reduction and its output/feed-main consumers."""
+    """FlexGEMM runtime binding for the shared reduction geometry.
+
+    The backend-neutral lowering contract is ``GemmReductionPlan``. FlexGEMM
+    binds its output tensor and physical callbacks only at runtime, so this
+    provider object deliberately carries runtime values instead of IR names.
+    """
 
     geometry: FlexGemmLocalReduceGeometry
     out: torch.Tensor | None = None
