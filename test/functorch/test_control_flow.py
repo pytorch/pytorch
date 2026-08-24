@@ -33,11 +33,9 @@ from torch._subclasses.functional_tensor import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import (
-    Capability,
     expectedFailureCUDA,
     instantiate_device_type_tests,
     onlyAccelerator,
-    requires_capabilities,
 )
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
@@ -56,6 +54,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import requires_triton
 
 
 @contextlib.contextmanager
@@ -5416,7 +5415,7 @@ class TestControlFlowAccelerator(_TestControlFlowBase, TestCase):
         return self._test_while_loop_gpu(device=device)
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     @skipIfTorchDynamo("don't test compile on compile")
     @parametrize("compile_mode", ["compile_dynamic_shape"])
     @parametrize("scalar", [False])
@@ -5433,7 +5432,7 @@ class TestControlFlowAccelerator(_TestControlFlowBase, TestCase):
         )
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     def test_scan_associative_scan(self, device):
         return self._test_scan_associative_scan(device=device)
 
@@ -7257,7 +7256,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7297,7 +7296,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7329,7 +7328,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7360,7 +7359,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7420,7 +7419,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7456,7 +7455,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7493,7 +7492,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7530,7 +7529,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7642,7 +7641,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7689,7 +7688,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7723,7 +7722,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7757,7 +7756,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7805,7 +7804,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7840,7 +7839,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7872,7 +7871,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7902,7 +7901,7 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         [
             subtest(
                 "pointwise",
-                decorators=[requires_capabilities(Capability.lib.triton)],
+                decorators=[requires_triton()],
             ),
             "generic",
         ],
@@ -7931,51 +7930,49 @@ class AssociativeScanTestsAccelerator(_AssociativeScanTestBase, TestCase):
         )
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     @expectedFailureCUDA
     def test_associative_scan_dim_shape_failure(self, device):
         return self._test_associative_scan_dim_shape_failure(device=device)
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     @unittest.expectedFailure
     def test_associative_scan_nested(self, device):
         return self._test_associative_scan_nested(device=device)
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     @unittest.expectedFailure
     def test_associative_scan_loop_in_combine_fn_failure(self, device):
         return self._test_associative_scan_loop_in_combine_fn_failure(device=device)
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     @unittest.expectedFailure
     def test_associative_scan_map_in_combine_fn(self, device):
         return self._test_associative_scan_map_in_combine_fn(device=device)
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     def test_associative_scan_different_input_size_wrong_dim(self, device):
         return self._test_associative_scan_different_input_size_wrong_dim(device=device)
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     def test_associative_scan_non_pointwise(self, device):
         return self._test_associative_scan_non_pointwise(device=device)
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
     def test_associative_scan_input_mutation(self, device):
         return self._test_associative_scan_input_mutation(device=device)
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
     def test_associative_scan_input_output_alias(self, device):
         return self._test_associative_scan_input_output_alias(device=device)
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     def test_associative_scan_output_output_alias(self, device):
         return self._test_associative_scan_output_output_alias(device=device)
 
@@ -12980,7 +12977,6 @@ class TestControlFlowTracedAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
     def test_cond_input_mutation(self, device):
         _test_cond_input_mutation(self, device)
 
@@ -14024,7 +14020,7 @@ class TestAutoFunctionalizeControlFlowAccelerator(
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_input_mutation(self, device, dynamic):
         return self._test_cond_auto_functionalize_input_mutation(
@@ -14033,7 +14029,7 @@ class TestAutoFunctionalizeControlFlowAccelerator(
         )
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_buffer_mutation(self, device, dynamic):
         return self._test_cond_auto_functionalize_buffer_mutation(
@@ -14042,7 +14038,7 @@ class TestAutoFunctionalizeControlFlowAccelerator(
         )
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/181947")
     @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_union_input_mutation(self, device, dynamic):
@@ -14052,7 +14048,7 @@ class TestAutoFunctionalizeControlFlowAccelerator(
         )
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     @parametrize("dynamic", [True, False])
     def test_while_loop_auto_functionalize_buffer_mutation(self, device, dynamic):
         return self._test_while_loop_auto_functionalize_buffer_mutation(
@@ -14061,7 +14057,7 @@ class TestAutoFunctionalizeControlFlowAccelerator(
         )
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     @parametrize("dynamic", [True, False])
     def test_while_loop_auto_functionalize_multiple_buffer_mutation(
         self, device, dynamic
@@ -14072,7 +14068,7 @@ class TestAutoFunctionalizeControlFlowAccelerator(
         )
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     @parametrize("dynamic", [True, False])
     def test_while_loop_auto_functionalize_buffer_in_cond(self, device, dynamic):
         return self._test_while_loop_auto_functionalize_buffer_in_cond(
@@ -14081,7 +14077,7 @@ class TestAutoFunctionalizeControlFlowAccelerator(
         )
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @requires_triton()
     @parametrize("dynamic", [True, False])
     def test_while_loop_auto_functionalize_captured_tensor_mutation(
         self, device, dynamic
