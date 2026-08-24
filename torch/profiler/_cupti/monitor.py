@@ -342,7 +342,7 @@ class CuptiMonitor:
         self._subscriber: int | None = None
         self._latency_enabled = False
         self._device_ts_enabled = False
-        # Layout state -- a function of registration, recomputed only when the
+        # Layout state -- a function of registration.
         # The fields enabled per kind on the subscriber (a function of the observer
         # field union, recomputed only on register/deregister, never per buffer). The
         # record byte layout is NOT tracked here -- each completed buffer carries
@@ -1496,6 +1496,16 @@ def configure(
         if use_approx_timestamps is not None:
             CuptiMonitor._use_approx_timestamps = use_approx_timestamps
         CuptiMonitor._configured = True
+
+
+def has_live_subscription() -> bool:
+    """True when the singleton exists and holds a CUPTI subscription.
+
+    Deliberately does not construct the monitor: taking a subscription makes kineto's
+    one-shot CUPTI init fail permanently, so probing must not be what does it.
+    """
+    instance = CuptiMonitor._instance
+    return instance is not None and instance._subscriber is not None
 
 
 def get_config() -> dict[str, Any]:

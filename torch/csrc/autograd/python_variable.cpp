@@ -2794,6 +2794,15 @@ static int THPVariable_set_data(
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
+static std::optional<at::ScalarType> get_effective_grad_dtype(
+    const Variable& var) {
+  const auto& grad_fn = var.grad_fn();
+  if (grad_fn) {
+    return grad_fn->input_metadata(var.output_nr()).grad_dtype();
+  }
+  return var.grad_dtype();
+}
+
 static int THPVariable_set_grad(
     THPVariable* self,
     PyObject* py_grad,
@@ -2816,13 +2825,14 @@ static int THPVariable_set_grad(
       self != (THPVariable*)py_grad, "can't assign Variable as its own grad");
 
   const auto& grad = THPVariable_Unpack(py_grad);
-  if (var.grad_dtype().has_value()) {
+  const auto grad_dtype = get_effective_grad_dtype(var);
+  if (grad_dtype.has_value()) {
     TORCH_CHECK(
-        grad.dtype() == var.grad_dtype().value(),
+        grad.dtype() == grad_dtype.value(),
         "attempting to assign a gradient with dtype '",
         grad.dtype(),
         "' to a tensor with grad_dtype '",
-        var.grad_dtype().value(),
+        grad_dtype.value(),
         "'. The gradient must match the tensor's grad_dtype (defaults to the tensor's "
         "dtype). You can set the tensor's grad_dtype attribute with a specific dtype, or "
         "None to allow any dtype. Set grad_dtype with caution. Diverging the dtypes of "
@@ -2837,8 +2847,7 @@ static int THPVariable_set_grad(
       "'. Please ensure that the gradient and the tensor are on the same device");
   if (grad.layout() != kSparse) {
     auto expected_options = var.options().dtype(
-        var.grad_dtype().has_value() ? var.grad_dtype().value()
-                                     : grad.scalar_type());
+        grad_dtype.has_value() ? grad_dtype.value() : grad.scalar_type());
     TORCH_CHECK(
         grad.options().type_equal(expected_options),
         "attempting to assign a gradient to a tensor that has data of a different type");
@@ -2870,8 +2879,7 @@ static PyObject* THPVariable_get_volatile(THPVariable* self, void* unused) {
   }
   const char* msg = "volatile was removed (Variable.volatile is always False)";
   auto r = PyErr_WarnEx(PyExc_UserWarning, msg, 1);
-  if (r != 0)
-    throw python_error();
+  TORCH_CHECK_PYTHON(r == 0);
   Py_RETURN_FALSE;
   END_HANDLE_TH_ERRORS
 }
@@ -2885,8 +2893,7 @@ static int THPVariable_set_volatile(
     return handle_torch_function_setter(self, "volatile", obj);
   }
   auto r = PyErr_WarnEx(PyExc_UserWarning, VOLATILE_WARNING, 1);
-  if (r != 0)
-    throw python_error();
+  TORCH_CHECK_PYTHON(r == 0);
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
@@ -3291,12 +3298,11 @@ static PyObject* THPVariable_get_grad_dtype(THPVariable* self, void* unused) {
     return handle_torch_function_getter(self, "grad_dtype");
   }
   const auto& var = THPVariable_Unpack(self);
-  TORCH_CHECK(
-      !var.grad_fn(), "grad_dtype can only be accessed on leaf tensors.");
-  if (!var.grad_dtype().has_value()) {
+  const auto grad_dtype = get_effective_grad_dtype(var);
+  if (!grad_dtype.has_value()) {
     Py_RETURN_NONE;
   } else {
-    return torch::autograd::utils::wrap(var.grad_dtype().value());
+    return torch::autograd::utils::wrap(grad_dtype.value());
   }
   END_HANDLE_TH_ERRORS
 }

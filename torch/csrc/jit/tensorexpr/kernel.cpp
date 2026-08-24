@@ -1272,7 +1272,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   // [0] [3] [1] [4] [2] [5]
   // When we are doing the re-ordering of values into the output tensor,
   // we are iterating per-element of the input, and we are fixed
-  // in indexing in to the output tensor at [i, j] = val
+  // in indexing into the output tensor at [i, j] = val
   // `val` we want here is equal to the indices for the output
   // tensor that would have given the same position as the output
   // The position is equal to the sum of stride[i] * index[i],

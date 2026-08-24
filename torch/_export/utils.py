@@ -1361,7 +1361,7 @@ def _special_op_to_preserve_cia(*args: Any, **kwargs: Any) -> Any:
     return NotImplemented
 
 
-# Our strategy for deciding if we can preserve a op is following:
+# Our strategy for deciding if we can preserve an op is following:
 # 1. The op should be known statically that it is functional
 # 2. If it is maybe aliasing, we decompose because we must know if an op
 #    is mutating or aliasing.

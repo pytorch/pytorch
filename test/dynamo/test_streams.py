@@ -8,6 +8,11 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.device_interface import (
+    device_interfaces,
+    DeviceInterface,
+    register_interface_for_device,
+)
 from torch._dynamo.graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
     index_to_external_object_weakref,
@@ -15,6 +20,7 @@ from torch._dynamo.graph_bytecode_inputs import (
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
+from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_MACOS,
@@ -51,6 +57,44 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
+
+    def test_registered_device_stream_event_in_graph_classes(self):
+        class TestStream(torch.Stream):
+            pass
+
+        class TestEvent(torch.Event):
+            pass
+
+        class TestInterface(DeviceInterface):
+            Stream = TestStream
+            Event = TestEvent
+
+        class PlaceholderInterface(DeviceInterface):
+            pass
+
+        UserDefinedClassVariable._in_graph_classes.cache_clear()
+        self.addCleanup(UserDefinedClassVariable._in_graph_classes.cache_clear)
+        self.assertNotIn(TestStream, UserDefinedClassVariable._in_graph_classes())
+
+        with patch.dict(device_interfaces):
+            register_interface_for_device("test", TestInterface)
+            register_interface_for_device("placeholder", PlaceholderInterface)
+            in_graph_classes = UserDefinedClassVariable._in_graph_classes()
+
+            for device in ("cuda", "xpu"):
+                device_interface = device_interfaces[device]
+                for base, cls in (
+                    (torch.Stream, device_interface.Stream),
+                    (torch.Event, device_interface.Event),
+                ):
+                    if isinstance(cls, type) and issubclass(cls, base):
+                        self.assertIn(cls, in_graph_classes)
+                    else:
+                        self.assertNotIn(cls, in_graph_classes)
+            self.assertIn(TestStream, in_graph_classes)
+            self.assertIn(TestEvent, in_graph_classes)
+            self.assertNotIn(DeviceInterface.Stream, in_graph_classes)
+            self.assertNotIn(DeviceInterface.Event, in_graph_classes)
 
     @requires_cuda
     def test_stream_weakref(self):

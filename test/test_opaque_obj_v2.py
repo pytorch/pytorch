@@ -3,8 +3,13 @@
 import contextlib
 import enum
 import gc
+import os
 import random
 import re
+import subprocess
+import sys
+import tempfile
+import textwrap
 import unittest
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -51,7 +56,9 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     IS_LINUX,
+    IS_SANDCASTLE,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import (
@@ -1512,10 +1519,10 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(getitem_7, 0)
     ge_1 = sym_size_int_1 >= 0
     _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
-    eq_2 = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
-    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq_2 = _assert_scalar_2 = None
-    add_4 = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
-    return (getitem_6, add_4)""",
+    eq = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq = _assert_scalar_2 = None
+    add = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
+    return (getitem_6, add)""",
         )
 
     def test_compile_global(self):
@@ -1767,8 +1774,8 @@ def forward(self, primals, tangents):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(primals_2);  primals_2 = None
     _opaque_obj0 = self._opaque_obj0
     module_mul = torch.ops._TestOpaqueObject.module_mul.default(_opaque_obj0, primals_1, _local_scalar_dense);  _opaque_obj0 = primals_1 = None
-    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, _local_scalar_dense);  tangents_1 = _local_scalar_dense = None
-    return pytree.tree_unflatten([module_mul, mul_1, None], self._out_spec)""",
+    mul = torch.ops.aten.mul.Tensor(tangents_1, _local_scalar_dense);  tangents_1 = _local_scalar_dense = None
+    return pytree.tree_unflatten([module_mul, mul, None], self._out_spec)""",
                 )
                 compiled_fn = aot_compile_joint_with_descriptors(joint)
 
@@ -2528,6 +2535,134 @@ class GraphModule(torch.nn.Module):
         self.assertIsNotNone(x.grad)
         expected_grad = torch.ones_like(x) * 2.5
         self.assertTrue(torch.allclose(x.grad, expected_grad))
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_opaque_constant_output_with_subclass_output(self, backend):
+        """Constant-type opaque created inside a compiled region must not be
+        corrupted when the same graph also produces a tensor-subclass output.
+        """
+        a = torch.randn(3, 3, requires_grad=True)
+        b = torch.randn(3, 3, requires_grad=True)
+        counter = Counter(start=1, end=5)
+        size = SizeStore(3)
+        x = TensorWithCounter(a, b, counter, size)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(3, 3))
+
+            def forward(self, x):
+                cfg = ValueConfig("square")
+                return x * self.w, cfg
+
+        m = M()
+        opt_m = torch.compile(m, backend=backend, fullgraph=True)
+        result, cfg = opt_m(x)
+
+        # Without the fix: type(cfg) is FakeScriptObject
+        self.assertIs(type(cfg), ValueConfig)
+        self.assertIsInstance(result, TensorWithCounter)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_opaque_constant_output_with_subclass_output_cache_hit(self):
+        """Cross-process FX graph cache hit must not lose opaque constants
+        when the graph also produces a tensor-subclass output.
+        """
+        script = textwrap.dedent(
+            """
+            import torch
+            from torch._library.opaque_object import register_custom_class
+            from torch._inductor import config
+            from torch._dynamo.utils import counters
+
+            config.fx_graph_cache = True
+            config.fx_graph_remote_cache = False
+
+            class Q:
+                def __init__(self, scale):
+                    self.scale = scale
+                def __eq__(self, other):
+                    return type(other) is Q and other.scale == self.scale
+                def __hash__(self):
+                    return hash(self.scale)
+                def __fx_repr__(self):
+                    return (f"Q({self.scale!r})", {"Q": Q})
+
+            register_custom_class(Q, typ="constant")
+
+            class WS(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, q):
+                    return torch.Tensor._make_wrapper_subclass(
+                        cls, data.shape, dtype=data.dtype, device=data.device
+                    )
+                def __init__(self, data, q):
+                    self._data, self._q = data, q
+                def __tensor_flatten__(self):
+                    return ["_data"], {"q": self._q}
+                @staticmethod
+                def __tensor_unflatten__(inner, ctx, size, stride):
+                    return WS(inner["_data"], ctx["q"])
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs=None):
+                    from torch.utils._pytree import tree_map
+                    def unwrap(t):
+                        return t._data if isinstance(t, WS) else t
+                    return func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {}))
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.qs = []
+                    self.ws = None
+                    self.w = torch.nn.Parameter(torch.randn(8, 8))
+                def forward(self, x):
+                    if not self.qs:
+                        q = Q(0.5)
+                        self.qs.append(q)
+                    else:
+                        q = self.qs[0]
+                    out = x @ self.w
+                    self.ws = WS(out, q)
+                    return out
+
+            m = M()
+            c = torch.compile(m, fullgraph=True)
+            with torch.no_grad():
+                c(torch.randn(4, 8))
+            hit = counters["inductor"]["fxgraph_cache_hit"]
+            miss = counters["inductor"]["fxgraph_cache_miss"]
+            cfg_type = type(m.qs[0]).__name__ if m.qs else "empty"
+            print(f"RESULT hit={hit} miss={miss} cfg_type={cfg_type}")
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = os.environ.copy()
+            env["TORCHINDUCTOR_CACHE_DIR"] = tmpdir
+            env["PYTHONPATH"] = os.pathsep.join(
+                x for x in (os.getcwd(), env.get("PYTHONPATH", "")) if x
+            )
+
+            def run_and_parse():
+                out = subprocess.check_output(
+                    [sys.executable, "-c", script],
+                    env=env,
+                    stderr=subprocess.STDOUT,
+                ).decode()
+                for line in out.splitlines():
+                    if line.startswith("RESULT "):
+                        return line
+                self.fail(f"No RESULT line in subprocess output:\n{out}")
+
+            # Run 1: populate cache (cold compile)
+            line1 = run_and_parse()
+            self.assertEqual(line1, "RESULT hit=0 miss=1 cfg_type=Q")
+
+            # Run 2: cache hit in a fresh process, opaque must survive
+            line2 = run_and_parse()
+            self.assertEqual(line2, "RESULT hit=1 miss=0 cfg_type=Q")
 
     def test_tensor_subclass_opaque_backward_compiled_autograd(self):
         """Test opaque objects work with compiled autograd backward."""
