@@ -634,6 +634,9 @@ class TestFlyDSLTemplate(TestCase):
     def test_flydsl_grouped_gemm_layout_validation(self, config_args, n, expected):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
 
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
         gemm_config = asdict(flydsl_heuristics.FlyDSLGemmConfig(*config_args))
         with mock.patch.object(
             flydsl_heuristics,
@@ -677,6 +680,9 @@ class TestFlyDSLTemplate(TestCase):
         device_overrides,
         expected,
     ):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
         from torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_gemm_gfx950 import (
             get_grouped_gemm_persistent_grid_size,
         )
