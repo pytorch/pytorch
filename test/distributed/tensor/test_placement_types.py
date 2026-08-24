@@ -33,6 +33,8 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 # Basic functionality test for Placement types.
 class PlacementTypesTestCase(TestCase):
+    # SECURITY: This prevents malformed pickles from exposing uninitialized
+    # pybind11 objects. Do not remove this regression test.
     def test_weights_only_newobj_requires_build(self):
         malformed_pickle = (
             pickle.PROTO
