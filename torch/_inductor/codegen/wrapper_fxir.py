@@ -372,18 +372,36 @@ class FxConverter:
         name = buffer.get_name()
         del self.buffer_to_node[name]
 
-    def _lookup_args(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
+    def _lookup_args(
+        self, args: tuple[Any, ...], raw_args: Sequence[Any] | None
+    ) -> tuple[Any, ...]:
         """
-        Maps call args back to FX nodes.
+        Maps call args back to FX nodes. raw_args positionally pairs with args and
+        holds the IR node behind each; it is None for scheduler-generated kernels.
         """
-        return tuple(
-            self.buffer_to_node[arg]
-            if isinstance(arg, str)
-            else arg.inner_expr
-            if isinstance(arg, SymbolicCallArg)
-            else arg
-            for arg in args
-        )
+
+        def lookup(arg: Any, raw_arg: Any) -> Any:
+            if isinstance(arg, SymbolicCallArg):
+                return arg.inner_expr
+            if not isinstance(arg, str):
+                return arg
+            if arg in self.buffer_to_node:
+                return self.buffer_to_node[arg]
+            # If the buffer name cannot be resolved, try to unwrap `raw_args`.
+            # For example, the view `reinterpret_tensor(...)` will have a
+            # corresponding ir.ReinterpretView in raw_args.
+            if not isinstance(raw_arg, ir.IRNode):
+                raise AssertionError(f"Unrecognized arg type: {type(raw_arg)}")
+            return self._generate_buffer(raw_arg)
+
+        if raw_args is None:
+            raw_args = [None] * len(args)
+        elif len(raw_args) != len(args):
+            raise AssertionError(
+                f"call_args and raw_args do not match: {len(args)} vs {len(raw_args)}"
+            )
+
+        return tuple(lookup(arg, raw_arg) for arg, raw_arg in zip(args, raw_args))
 
     def _get_buffer(self, node: ir.IRNode) -> CodegenBuffer:
         """
@@ -1087,7 +1105,7 @@ class FxConverter:
             raise AssertionError(f"expected KernelCallLine, got {type(line)}")
 
         # Collect all kwargs, including autotuned block sizes.
-        call_args = self._lookup_args(line.call_args)
+        call_args = self._lookup_args(line.call_args, line.raw_args)
         kernel = self.kernels[line.kernel_name]
         tuner = kernel.tuner
 
