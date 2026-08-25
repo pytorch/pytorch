@@ -884,6 +884,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
+    @requires_capabilities(Capability.lib.triton)
     def test_nn_module(self, device):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -915,6 +916,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
 instantiate_device_type_tests(
     TestPackageAccelerator,
     globals(),
+    except_for=["cpu"],
     allow_xpu=True,
     allow_mps=True,
 )
