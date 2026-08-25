@@ -27,7 +27,7 @@ if [[ "${DOCKER_TAG_PREFIX}" == cuda* ]]; then
 elif [[ "${DOCKER_TAG_PREFIX}" == rocm* ]]; then
     # extract rocm version from image name and tag.  e.g. manylinux2_28-builder:rocm6.2.4 returns 6.2.4
     ROCM_VERSION=$(echo "${DOCKER_TAG_PREFIX}" | awk -F'rocm' '{print $2}')
-    EXTRA_BUILD_ARGS="--build-arg ROCM_IMAGE=rocm/dev-almalinux-8:${ROCM_VERSION}-complete"
+    EXTRA_BUILD_ARGS="--build-arg ROCM_VERSION=${ROCM_VERSION}"
 fi
 
 case ${DOCKER_TAG_PREFIX} in
