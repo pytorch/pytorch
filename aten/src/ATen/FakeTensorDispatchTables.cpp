@@ -13,6 +13,8 @@ struct FakeDispatchTables {
   std::unordered_set<c10::OperatorName> meta;
   std::unordered_set<c10::OperatorName> op_impl;
   std::unordered_set<c10::OperatorName> prim_meta;
+  std::unordered_set<c10::OperatorName> python_cia;
+  std::unordered_set<c10::OperatorName> custom_op_impl;
 };
 
 c10::LeftRight<FakeDispatchTables>& fakeDispatchTables() {
@@ -32,6 +34,10 @@ std::unordered_set<c10::OperatorName>& setForCategory(
       return t.op_impl;
     case FakeDispatchCategory::PrimMeta:
       return t.prim_meta;
+    case FakeDispatchCategory::PythonCIA:
+      return t.python_cia;
+    case FakeDispatchCategory::CustomOpImpl:
+      return t.custom_op_impl;
   }
   TORCH_INTERNAL_ASSERT(false, "unknown FakeDispatchCategory");
 }

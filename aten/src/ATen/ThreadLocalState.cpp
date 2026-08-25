@@ -8,11 +8,14 @@
 #include <ATen/SavedTensorHooks.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/DTensorState.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 
 namespace at {
 
 ThreadLocalState::ThreadLocalState()
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
+      fake_tensor_mode_state_(c10::impl::FakeTensorModeTLS::get_state()),
+      fake_in_kernel_invocation_state_(c10::impl::in_kernel_invocation()),
       debug_info_(c10::ThreadLocalDebugInfo::current()),
       rf_tls_(at::get_record_function_tls_()), functorch_tls_(functorch::getCopyOfFuncTorchTLS()),
       autograd_tls_(c10::AutogradState::get_tls_state()),
@@ -56,6 +59,10 @@ void ThreadLocalState::setThreadLocalState(
   at::impl::NodeCreationHooks::set_tls_state(state.node_creation_hooks_state_);
 
   c10::impl::PythonDispatcherTLS::set_state(state.python_dispatcher_state_);
+
+  c10::impl::FakeTensorModeTLS::create_state(state.fake_tensor_mode_state_);
+  c10::impl::set_in_kernel_invocation(
+      state.fake_in_kernel_invocation_state_);
 
   at::set_dtensor_allow_implicit_replication(state.dtensor_allow_implicit_replication_);
 

@@ -59,6 +59,7 @@ from torch._subclasses.fake_tensor import (
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
+    track_fake_tensor_for_export,
     unset_fake_temporarily,
 )
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -745,6 +746,13 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
         return {k: extract_val(v) for k, v in val.items()}
     elif isinstance(val, Tensor):
         if not val.is_sparse:
+            if torch._C._dispatch_tls_is_dispatch_key_included(
+                torch._C.DispatchKey.Fake
+            ):
+                return torch.empty_strided(  # revisit this
+                    val.shape, val.stride(), device=val.device, dtype=val.dtype
+                )
+
             # NB: Kinda hacky, but we should try to get val as the metadata
             # everywhere
             # TODO: This doesn't properly track storages.  A more robust
@@ -1456,6 +1464,7 @@ def proxy_call(
 
     with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
+    pytree.tree_map_only(Tensor, track_fake_tensor_for_export, out)
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
@@ -3545,6 +3554,11 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
         "FakeTensorMode | None",
         torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
     )
+    if fake_mode is None:
+        # The cpp mode currently dispatching (detect_fake_mode is intentionally
+        # avoided here, see above; `out` may be a bare SymInt that carries no
+        # mode, so recover from the active scope rather than the output).
+        fake_mode = torch._C._current_cpp_fake_tensor_mode()
     if fake_mode and fake_mode.shape_env:
         if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
             # `symbol_to_path` is keyed by the fresh unbacked symbol; each path

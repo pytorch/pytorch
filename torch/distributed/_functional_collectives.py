@@ -1423,7 +1423,10 @@ def _are_we_tracing() -> bool:
     if is_torchdynamo_compiling():
         return True
     # If fake mode is turned on, we are almost definitely compiling/tracing.
+    # The C++ mode is not on the Python dispatch mode stack, so it needs its own check.
     if torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is not None:
+        return True
+    if torch._C._current_cpp_fake_tensor_mode() is not None:
         return True
     # See Note [enable_python_dispatcher in dynamo]
     if torch._C._dispatch_tls_is_dispatch_key_included(

@@ -3,6 +3,7 @@
 #include <ATen/Context.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 
 #include <algorithm>
 #include <array>
@@ -686,7 +687,7 @@ CuBLASReductionOption Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
 
-CuBLASReductionOption inline get_reduction_option(bool allow_reduced_precision, bool allow_splitk) {
+static CuBLASReductionOption inline get_reduction_option(bool allow_reduced_precision, bool allow_splitk) {
   TORCH_CHECK(
       !(allow_reduced_precision && !allow_splitk),
       "allow_splitk=False is not supported when reduced precision reductions are enabled");
@@ -985,4 +986,38 @@ void Context::setAllowFP16ReductionCPU(bool b) {
   }
   allow_fp16_reduction_cpu = b;
 }
+
+namespace {
+
+// for an indexed device type with no index, use the backend's current device if
+// the backend is already initialized, else index 0, matches python faketensor
+// normalize device behaviour
+DeviceIndex normalizeFakeDevice(DeviceType type) {
+  // python's _is_indexed_device_type
+  if (type != kCUDA && type != kHIP && type != kXPU && type != kMPS &&
+      type != kMTIA && type != kPrivateUse1) {
+    return 0;
+  }
+  const auto& hooks = globalContext().getAcceleratorHooksInterface(type);
+  if ((type == kCUDA || type == kXPU) && hooks.isAvailable()) {
+    hooks.init();
+  }
+  // mps has no current-device notion in python's check
+  if (type == kMPS || !hooks.isBuilt()) {
+    return 0;
+  }
+  for (DeviceIndex i = 0; i < hooks.deviceCount(); i++) {
+    if (hooks.hasPrimaryContext(i)) {
+      return hooks.getCurrentDevice();
+    }
+  }
+  return 0;
+}
+
+const bool registerNormalizeFakeDeviceFn = []() {
+  c10::impl::setNormalizeFakeDeviceFn(&normalizeFakeDevice);
+  return true;
+}();
+
+} // namespace
 } // namespace at
