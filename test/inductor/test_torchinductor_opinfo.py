@@ -23,10 +23,13 @@ from torch._subclasses.fake_tensor import (
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
+    onlyNativeDeviceTypes,
     OpDTypes,
     ops,
+    skipCPUIf,
+    skipCUDAIf,
     skipOps,
+    skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
@@ -48,6 +51,9 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
+    HAS_CPU,
+    HAS_CUDA_AND_TRITON,
+    HAS_XPU_AND_TRITON,
     has_triton,
     maybe_skip_size_asserts,
 )
@@ -1297,12 +1303,17 @@ class TestInductorOpInfo(TestCase):
     check_model = check_model
     check_model_gpu = check_model_gpu
 
-    @onlyAccelerator
+    @onlyNativeDeviceTypes
     @suppress_warnings
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
-    @unittest.skipUnless(has_triton(), "Skipped! Triton not found")
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
+    @skipXPUIf(
+        not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
+    )
+    @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipCPUIf(IS_MACOS, "Skipped under macOS")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
@@ -1583,9 +1594,7 @@ class TestInductorOpInfo(TestCase):
         #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
 
 
-instantiate_device_type_tests(
-    TestInductorOpInfo, globals(), allow_xpu=True, except_for="cpu"
-)
+instantiate_device_type_tests(TestInductorOpInfo, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
