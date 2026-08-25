@@ -272,16 +272,7 @@ def _varlen_attn_fake(
     """
     window_size = _normalize_window_size(window_size)
 
-    if backend == _CUDNN_ATTENTION_BACKEND:
-        # The cuDNN varlen forward always allocates a contiguous output
-        # (aten/src/ATen/native/cudnn/MHA.cpp), regardless of query layout.
-        output = torch.empty(
-            (*query.shape[:-1], value.size(-1)),
-            dtype=query.dtype,
-            device=query.device,
-        )
-    else:
-        output = _empty_with_matching_layout(query, (*query.shape[:-1], value.size(-1)))
+    output = _empty_with_matching_layout(query, (*query.shape[:-1], value.size(-1)))
 
     # For varlen path: logsumexp shape is (num_heads, total_q)
     total_q = query.size(0)

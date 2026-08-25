@@ -1127,6 +1127,8 @@ class TestVarlenAttention(NNTestCase):
         with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
             eager = fn(q, k, v)
             compiled = torch.compile(fn, fullgraph=True)(q, k, v)
+        # The real output matches the query's layout, like Flash and the fake.
+        self.assertEqual(eager.stride(), q.stride())
         self.assertEqual(compiled, eager)
 
     @skipIfRocm
