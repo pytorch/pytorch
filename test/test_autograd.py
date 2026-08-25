@@ -9094,6 +9094,23 @@ for shape in [(1,), ()]:
         self.assertEqual(ret["outer"], 1)
         self.assertEqual(ret["inner"], 1)
 
+    @skipIfTorchDynamo(
+        "callbacks don't fire when backward runs under compiled autograd"
+    )
+    def test_graph_queue_callback(self):
+        # The public API matches Variable._execution_engine.queue_callback.
+        counter = [0]
+        t = torch.rand(3, requires_grad=True)
+        t.register_hook(
+            lambda _: torch.autograd.graph.queue_callback(
+                lambda: counter.__setitem__(0, counter[0] + 1)
+            )
+        )
+        t.sum().backward()
+        self.assertEqual(counter[0], 1)
+        with self.assertRaisesRegex(RuntimeError, "during backward"):
+            torch.autograd.graph.queue_callback(lambda: None)
+
     def test_reentrant_with_leaf_variable_hook(self):
         handle = None
         param = torch.rand(10, requires_grad=True)
