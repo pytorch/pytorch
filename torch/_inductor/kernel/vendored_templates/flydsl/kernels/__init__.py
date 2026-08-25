@@ -5,9 +5,14 @@ from typing import Any
 
 
 _MODULE_BY_NAME = {
+    "GEMM_DTYPE_BF16": "gemm_gfx950",
+    "GEMM_DTYPE_FP16": "gemm_gfx950",
     "MXFPFormat": "gemm_mxfp_gfx950",
     "MXFPGemmDerived": "gemm_mxfp_gfx950",
     "MXFPGemmParams": "gemm_mxfp_gfx950",
+    "infer_has_k_tail": "gemm_gfx950",
+    "make_gemm_gfx950_param": "gemm_gfx950",
+    "make_gemm_param_and_validate": "gemm_gfx950",
     "make_mxfp_param_and_validate": "gemm_mxfp_gfx950",
     "make_mxfp_scaled_mm_gfx950": "gemm_mxfp_gfx950",
     "mxfp_gemm_derived": "gemm_mxfp_gfx950",
