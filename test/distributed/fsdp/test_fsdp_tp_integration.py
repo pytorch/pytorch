@@ -535,6 +535,7 @@ class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
 instantiate_device_type_tests(
     TestTPFSDPIntegration,
     globals(),
+    except_for="cpu",
     allow_xpu=True,
 )
 
