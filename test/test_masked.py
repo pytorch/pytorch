@@ -430,6 +430,102 @@ class TestMasked(TestCase):
         dense = torch.where(outmask.to_dense(), sparse.to_dense(), torch.full(sparse.shape, F))
         self.assertEqual(dense, expected)
 
+    @onlyNativeDeviceTypes
+    def test_median_integer_valid(self, device):
+        # https://github.com/pytorch/pytorch/issues/194766
+        inp = torch.tensor([1, 9, 3], device=device)
+        mask = torch.tensor([True, False, True], device=device)
+        self.assertEqual(
+            torch.masked.median(inp, dim=0, mask=mask),
+            torch.tensor(1, device=device),
+        )
+        self.assertEqual(
+            torch.masked.median(inp.to(torch.int32), dim=0, mask=mask),
+            torch.tensor(1, dtype=torch.int32, device=device),
+        )
+        self.assertEqual(
+            torch.masked.median(inp, dim=0),
+            torch.tensor(3, device=device),
+        )
+
+        inp2 = torch.tensor([[1, 9, 3], [4, 5, 6]], device=device)
+        mask2 = torch.tensor(
+            [[True, False, True], [True, True, False]], device=device
+        )
+        self.assertEqual(
+            torch.masked.median(inp2, dim=1, mask=mask2),
+            torch.tensor([1, 4], device=device),
+        )
+        self.assertEqual(
+            torch.masked.median(inp2, dim=1, keepdim=True, mask=mask2),
+            torch.tensor([[1], [4]], device=device),
+        )
+
+    @onlyNativeDeviceTypes
+    def test_median_integer_fully_masked_raises(self, device):
+        inp = torch.tensor([1, 9, 3], device=device)
+        mask = torch.zeros(3, dtype=torch.bool, device=device)
+        with self.assertRaisesRegex(ValueError, "fully masked out rows"):
+            torch.masked.median(inp, dim=0, mask=mask)
+
+        inp2 = torch.tensor([[1, 2], [3, 4]], device=device)
+        mask2 = torch.tensor([[True, True], [False, False]], device=device)
+        with self.assertRaisesRegex(ValueError, "fully masked out rows"):
+            torch.masked.median(inp2, dim=1, mask=mask2)
+
+    @onlyNativeDeviceTypes
+    def test_median_float_fully_masked_is_nan(self, device):
+        inp = torch.tensor([1.0, 9.0, 3.0], device=device)
+        mask = torch.zeros(3, dtype=torch.bool, device=device)
+        out = torch.masked.median(inp, dim=0, mask=mask)
+        self.assertTrue(out.isnan())
+
+    @skipIfTorchDynamo("exercises torch.compile itself")
+    @onlyNativeDeviceTypes
+    def test_median_integer_compile_fullgraph(self, device):
+        # https://github.com/pytorch/pytorch/issues/194766
+        def fn(x, m):
+            return torch.masked.median(x, dim=0, mask=m)
+
+        inp = torch.tensor([1, 9, 3], device=device)
+        mask = torch.tensor([True, False, True], device=device)
+        expected = fn(inp, mask)
+        float_inp = inp.to(dtype=torch.float)
+        bad_mask = torch.zeros(3, dtype=torch.bool, device=device)
+
+        for backend in ("eager", "aot_eager"):
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, backend=backend, fullgraph=True)
+            self.assertEqual(compiled(inp, mask), expected)
+            self.assertEqual(compiled(float_inp, mask), fn(float_inp, mask))
+            self.assertTrue(compiled(float_inp, bad_mask).isnan())
+            # Device-side _assert_async may not raise in-process on CUDA/MPS.
+            if self.device_type == "cpu":
+                with self.assertRaisesRegex(
+                    (ValueError, RuntimeError), "fully masked out rows"
+                ):
+                    compiled(inp, bad_mask)
+
+        torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounter()
+        torch.compile(fn, backend=cnt, fullgraph=True)(inp, mask)
+        self.assertGreaterEqual(cnt.frame_count, 1)
+
+        def fn2(x, m):
+            return torch.masked.median(x, dim=1, mask=m)
+
+        inp2 = torch.tensor([[1, 9, 3], [4, 5, 6]], device=device)
+        mask2 = torch.tensor(
+            [[True, False, True], [True, True, False]], device=device
+        )
+        torch._dynamo.reset()
+        compiled2 = torch.compile(fn2, backend="eager", fullgraph=True)
+        self.assertEqual(compiled2(inp2, mask2), fn2(inp2, mask2))
+
+        torch._dynamo.reset()
+        compiled_dyn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(compiled_dyn(inp, mask), expected)
+
 
 instantiate_device_type_tests(TestMasked, globals(), except_for='meta')
 

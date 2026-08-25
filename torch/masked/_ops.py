@@ -1480,12 +1480,14 @@ elements, have ``nan`` values.
         output = torch.nanmedian(mask_input, dim_, keepdim).values
         if is_float:
             return output
-        elif not is_float and not torch.isnan(output).any():
-            return output.to(dtype=dtype)
-        else:
-            raise ValueError(
-                "masked median expects no fully masked out rows if dtype is not floating point"
-            )
+        # A Python branch on isnan(output) is not fullgraph-capturable.
+        valid = torch.logical_not(torch.isnan(output)).all()
+        msg = "masked median expects no fully masked out rows if dtype is not floating point"
+        if torch.compiler.is_compiling():
+            torch._assert_async(valid, msg)
+        elif not valid.item():
+            raise ValueError(msg)
+        return output.to(dtype=dtype)
     else:
         raise ValueError(
             f"masked median expects strided tensor (got {mask_input.layout} tensor)"
