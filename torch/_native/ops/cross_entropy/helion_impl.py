@@ -38,9 +38,9 @@ _B200_PRETUNED_SHAPES: frozenset[tuple[int, int]] = frozenset(
     }
 )
 
-# The validation and launch overhead makes the smallest pretuned shape slower
-# than ATen on B200; every other pretuned shape wins end-to-end.
-_B200_SHAPES = _B200_PRETUNED_SHAPES - {(2048, 32000)}
+# These shapes are not reliable end-to-end wins over ATen because of validation
+# and launch overhead.
+_B200_SHAPES = _B200_PRETUNED_SHAPES - {(2048, 32000), (4096, 32000)}
 _REQUIRED_ALIGNMENT = 16
 
 _autograd_lib: torch.library.Library | None = None

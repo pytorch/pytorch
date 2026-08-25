@@ -7058,7 +7058,7 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 def sample_inputs_helion_cross_entropy(
     op_info, device, dtype, requires_grad, **kwargs
 ):
-    n, v = 4096, 32000
+    n, v = 8192, 32000
     target = torch.arange(n, device=device, dtype=torch.int64) % v
     logits = torch.zeros((n, v), device=device, dtype=dtype)
     logits[torch.arange(n, device=device), target] = 5

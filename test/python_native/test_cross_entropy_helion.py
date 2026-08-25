@@ -15,7 +15,7 @@ from torch._native.ops.cross_entropy.helion_impl import (
     _B200_PRETUNED_SHAPES,
     _cross_entropy_cond,
 )
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import IS_SM100, TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -65,7 +65,7 @@ _AOT_RUNTIME_SHAPES = (
     (4096, 129280),
     (32768, 128000),
     (2048, 128256),
-    (4096, 32000),
+    (8192, 32000),
     (2048, 152064),
     (4096, 128256),
     (2048, 256000),
@@ -325,23 +325,18 @@ class TestHelionCrossEntropyRegistration(TestCase):
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
+@unittest.skipUnless(IS_SM100, "B200/GB200 sm100 required")
 @skipIfNoHelionDSL
 class TestHelionCrossEntropy(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        if torch.cuda.get_device_capability() != (10, 0):
-            raise unittest.SkipTest("B200/GB200 sm100 required")
-
     def _inputs(self, device, requires_grad=False):
         logits = torch.randn(
-            4096,
+            8192,
             32000,
             device=device,
             dtype=torch.bfloat16,
             requires_grad=requires_grad,
         )
-        labels = torch.randint(32000, (4096,), device=device, dtype=torch.int64)
+        labels = torch.randint(32000, (8192,), device=device, dtype=torch.int64)
         return logits, labels
 
     def test_condition_accepts_pretuned_contract(self, device):
@@ -367,7 +362,7 @@ class TestHelionCrossEntropy(TestCase):
         self.assertEqual(bound._config.config, autotune_cross_entropy(logits))
 
     def test_target_gather_numerical_stability(self, device):
-        n, v = 4096, 32000
+        n, v = 8192, 32000
         labels = torch.arange(n, device=device, dtype=torch.int64) % v
         logits = torch.full((n, v), 1000, device=device, dtype=torch.bfloat16)
         logits[torch.arange(n, device=device), labels] = 1016
@@ -409,8 +404,8 @@ class TestHelionCrossEntropy(TestCase):
         old_device = torch.cuda.current_device()
         try:
             torch.cuda.set_device(0)
-            logits = torch.randn(4096, 32000, device="cuda:1", dtype=torch.bfloat16)
-            labels = torch.randint(32000, (4096,), device="cuda:1")
+            logits = torch.randn(8192, 32000, device="cuda:1", dtype=torch.bfloat16)
+            labels = torch.randint(32000, (8192,), device="cuda:1")
             with patch(
                 "torch.cuda.is_current_stream_capturing",
                 side_effect=lambda: torch.cuda.current_device() == 1,
@@ -471,8 +466,8 @@ class TestHelionCrossEntropy(TestCase):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         with FakeTensorMode():
-            logits = torch.empty(4096, 32000, device=device, dtype=torch.bfloat16)
-            labels = torch.empty(4096, device=device, dtype=torch.int64)
+            logits = torch.empty(8192, 32000, device=device, dtype=torch.bfloat16)
+            labels = torch.empty(8192, device=device, dtype=torch.int64)
             self.assertFalse(_cross_entropy_cond(logits, labels))
 
     def test_export_falls_through(self, device):
@@ -740,22 +735,26 @@ class TestHelionCrossEntropy(TestCase):
         with self.subTest("target_dtype"):
             self.assertFalse(_cross_entropy_cond(logits, labels.to(torch.int32)))
         with self.subTest("target_layout"):
-            labels_storage = torch.empty(8192, device=device, dtype=torch.int64)
+            labels_storage = torch.empty(
+                labels.numel() * 2, device=device, dtype=torch.int64
+            )
             self.assertFalse(_cross_entropy_cond(logits, labels_storage[::2]))
         with self.subTest("shape"):
             small_logits = torch.randn(32, 128, device=device, dtype=torch.bfloat16)
             small_labels = torch.randint(128, (32,), device=device)
             self.assertFalse(_cross_entropy_cond(small_logits, small_labels))
-        with self.subTest("performance_gate"):
-            gated_logits = torch.randn(2048, 32000, device=device, dtype=torch.bfloat16)
-            gated_labels = torch.randint(32000, (2048,), device=device)
-            self.assertFalse(_cross_entropy_cond(gated_logits, gated_labels))
         with self.subTest("architecture"):
             with patch(
                 "torch._native.ops.cross_entropy.helion_impl._is_sm100",
                 return_value=False,
             ):
                 self.assertFalse(_cross_entropy_cond(logits, labels))
+
+    @parametrize("shape", ((2048, 32000), (4096, 32000)))
+    def test_condition_rejects_performance_gated_shape(self, device, shape):
+        logits = torch.randn(shape, device=device, dtype=torch.bfloat16)
+        labels = torch.randint(shape[1], (shape[0],), device=device)
+        self.assertFalse(_cross_entropy_cond(logits, labels))
 
     def test_misaligned_contiguous_inputs_fall_through(self, device):
         logits, labels = self._inputs(device)
@@ -872,8 +871,8 @@ class TestHelionCrossEntropy(TestCase):
 
             device = torch.device("cuda", int(sys.argv[1]))
             torch.cuda.set_device(device)
-            logits = torch.randn(4096, 32000, device=device, dtype=torch.bfloat16)
-            labels = torch.zeros(4096, device=device, dtype=torch.int64)
+            logits = torch.randn(8192, 32000, device=device, dtype=torch.bfloat16)
+            labels = torch.zeros(8192, device=device, dtype=torch.int64)
             labels[0] = int(sys.argv[2])
             F.cross_entropy(logits, labels)
             torch.cuda.synchronize()
