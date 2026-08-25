@@ -17,7 +17,7 @@ class Sharder(abc.ABC):
     @abc.abstractmethod
     def shard(self, module: nn.Module) -> nn.Module:
         """
-        Shard a module base on the implementation of this method, and
+        Shard a module based on the implementation of this method, and
         return the sharded version of the module.
 
         Args:

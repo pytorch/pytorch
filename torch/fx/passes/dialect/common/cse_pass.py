@@ -58,7 +58,7 @@ class CSEPass(PassBase):
         For functional dialects, user would only need to specify the random ops in ban list.
 
         Warning: CSE Pass cannot be safely applied on a FX graph in non-functional dialects.
-        If your dialect contains stateful operators, please customized the banned_ops.
+        If your dialect contains stateful operators, please customize the banned_ops.
 
         """
         if banned_ops is None:

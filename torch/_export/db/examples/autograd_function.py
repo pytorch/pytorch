@@ -14,8 +14,8 @@ class MyAutogradFunction(torch.autograd.Function):
 
 class AutogradFunction(torch.nn.Module):
     """
-    TorchDynamo does not keep track of backward() on autograd functions. We recommend to
-    use `allow_in_graph` to mitigate this problem.
+    TorchDynamo does not keep track of backward() on autograd functions. We recommend
+    using `allow_in_graph` to mitigate this problem.
     """
 
     def forward(self, x):

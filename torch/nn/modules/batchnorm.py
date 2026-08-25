@@ -648,7 +648,7 @@ class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
 
 
 class SyncBatchNorm(_BatchNorm):
-    r"""Applies Batch Normalization over a N-Dimensional input.
+    r"""Applies Batch Normalization over an N-Dimensional input.
 
     The N-D input is a mini-batch of [N-2]D inputs with additional channel dimension as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing
