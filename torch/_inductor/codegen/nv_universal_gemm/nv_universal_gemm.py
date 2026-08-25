@@ -166,8 +166,8 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
 
         output_scale = None
         if self.has_output_scale:
-            *input_tensors, output_scale = input_tensors
-            input_tensors = tuple(input_tensors)
+            output_scale = input_tensors[-1]
+            input_tensors = input_tensors[:-1]
 
         # swap_ab: transpose operands and write into a transposed view of `out`
         # (zero-copy). See _nvgemm_run for the full explanation.
