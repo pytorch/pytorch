@@ -5355,6 +5355,35 @@ class AOTInductorTestsTemplate:
         example_args = (torch.tensor([True, False, True], device=self.device),)
         self.check_model(M(), example_args, options={"fallback_by_default": True})
 
+    def test_proxy_executor_empty_int_list_arg(self):
+        # An EMPTY (Sym)IntList argument on an op dispatched through the AOT
+        # ProxyExecutor -- e.g. the size/stride of a 0-d aten.empty_strided([], []).
+        # An empty list contributes no runtime ints, so the host's dynamic-arg loop
+        # skipped the slot entirely and the argument reached the op as None, where
+        # toIntList() aborts with "Expected SymIntList or IntList but got None".
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::sum_to_shape",
+                "(Tensor a, SymInt[] shape) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "mylib::sum_to_shape", "CompositeExplicitAutograd", lib=lib
+            )
+            @torch.library.register_fake("mylib::sum_to_shape", lib=lib)
+            def sum_to_shape_impl(a: torch.Tensor, shape: list[int]) -> torch.Tensor:
+                return a.sum().expand(shape).clone()
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    # An empty shape: reduce all the way down to a 0-d tensor.
+                    return torch.ops.mylib.sum_to_shape(x, []) + 1
+
+            example_args = (torch.randn(8, device=self.device),)
+            self.check_model(M(), example_args, options={"fallback_by_default": True})
+
     def test_proxy_executor_error_message_preserved(self):
         @torch.library.custom_op("aoti_test::validate_input", mutates_args=())
         def validate_input(x: torch.Tensor) -> torch.Tensor:
