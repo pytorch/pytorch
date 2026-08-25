@@ -1297,18 +1297,13 @@ class DistributedTestBase(MultiProcessTestCase):
         else:
             return "gloo"
 
-    def create_pg(self, device, world_size=None):
+    def create_pg(self, device, world_size=None, backend=None):
         if world_size is None:
             world_size = self.world_size
+        backend = backend or self.backend(device)
         num_visible_devices = torch.get_device_module(device).device_count()
         store = torch.distributed.FileStore(self.file_name, num_visible_devices)
-        torch.distributed.init_process_group(
-            backend=self.backend(device),
-            world_size=world_size,
-            rank=self.rank,
-            store=store,
-        )
-        if "nccl" in self.backend(device) or "xccl" in self.backend(device):
+        if "nccl" in backend or "xccl" in backend:
             accelerator = torch.accelerator.current_accelerator()
             if accelerator:
                 device_type = accelerator.type
@@ -1317,9 +1312,15 @@ class DistributedTestBase(MultiProcessTestCase):
                 torch.accelerator.set_device_index(device)
             else:
                 raise RuntimeError(
-                    f"Expected to find an accelerator when initializing process group"
-                    f" with {self.backend(device)} backend, but got None"
+                    "Expected to find an accelerator when initializing process group"
+                    f" with {backend} backend, but got None"
                 )
+        torch.distributed.init_process_group(
+            backend=backend,
+            world_size=world_size,
+            rank=self.rank,
+            store=store,
+        )
         return torch.distributed.distributed_c10d._get_default_group()
 
     def rank_to_device(self, device):
@@ -2082,18 +2083,11 @@ class MultiProcContinuousTest(TestCase):
         # Get world_size (handles both class variable and property)
         cls.world_size = cls._get_world_size(device_type)
 
-        # Check if the specified backend is available before spawning processes
+        # Check if the specified backend is available before spawning processes.
+        # is_backend_available covers OOT/third-party backends too.
         backend = cls.backend_str() if callable(cls.backend_str) else cls.backend_str
-        if backend is not None:
-            backend_checks = {
-                "nccl": c10d.is_nccl_available,
-                "gloo": c10d.is_gloo_available,
-                "mpi": c10d.is_mpi_available,
-                "xccl": c10d.is_xccl_available,
-            }
-            check_fn = backend_checks.get(backend)
-            if check_fn is not None and not check_fn():
-                raise unittest.SkipTest(f"Backend '{backend}' is not available")
+        if backend is not None and not c10d.is_backend_available(backend):
+            raise unittest.SkipTest(f"Backend '{backend}' is not available")
 
         logger.info(
             f"Testing class {cls.__name__} on {cls.world_size} {device_type}"  # noqa: G004
