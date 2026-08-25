@@ -430,6 +430,13 @@ class SubclassCreationMeta:
                 creation_meta.make_runtime_safe()
 
     def __post_init__(self) -> None:
+        # Serialized runtime metadata has already discarded the fake tensor.
+        if self.original_subclass is None:
+            if self.original_subclass_type is None:
+                raise AssertionError(
+                    "runtime-safe subclass metadata must retain its subclass type"
+                )
+            return
         # sanity assert to make sure we don't leak memory
         if not is_fake(self.original_subclass):
             raise AssertionError(
@@ -1457,6 +1464,21 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
 
     # Metadata about subclass inputs/outputs in the graph trace.
     maybe_subclass_meta: Any
+
+    # Inputs needed to retrace a backward after runtime reveals which forward
+    # output tangents are undefined. This remains compile-time-only state and is
+    # deliberately excluded from AOTAutograd cache entries.
+    autograd_trace_info: AOTAutogradTraceInfo | None = None
+
+
+@dataclass
+class AOTAutogradTraceInfo:
+    flat_fn: TraceFn
+    flat_args: list[FxValue]
+    flat_args_descs: list[AOTInput]
+    fw_metadata: ViewAndMutationMeta
+    partition_fn: Callable[..., Any] | None = None
+    original_fw_module: torch.fx.GraphModule | None = None
 
 
 FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])
