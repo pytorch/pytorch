@@ -1323,6 +1323,47 @@ class Scatter(Pointwise):
         )
 
 
+@ir_dataclass
+class PaddedScatter(Scatter):
+    dynamic_padding_numel: Expr | None = None
+    dynamic_padding_mask: Callable[[Expr], Sequence[Expr]] | None = None
+    padding_value: bool | float | int = 0
+
+    def constant_to_device(self, device: torch.device) -> IRNode:
+        loader = self.make_loader()
+        loader = patch.object(ConstantBuffer, "override_device", device)(loader)
+        return PaddedScatter(
+            device=device,
+            dtype=self.dtype,
+            inner_fn=loader,
+            ranges=self.ranges,
+            output_indexer=self.output_indexer,
+            scatter_mode=self.scatter_mode,
+            dynamic_padding_numel=self.dynamic_padding_numel,
+            dynamic_padding_mask=self.dynamic_padding_mask,
+            padding_value=self.padding_value,
+        )
+
+    def get_auxiliary_writes(
+        self,
+        indexer: Callable[[Sequence[Expr]], Expr],
+    ) -> tuple[AuxiliaryWriteRegion, ...]:
+        if self.dynamic_padding_numel is None:
+            return ()
+        if self.dynamic_padding_mask is None:
+            raise AssertionError("dynamic padding mask is required")
+        auxiliary_index = Symbol("auxiliary_index", integer=True, nonnegative=True)
+        return (
+            AuxiliaryWriteRegion(
+                numel=self.dynamic_padding_numel,
+                index_var=auxiliary_index,
+                output_index=indexer([auxiliary_index]),
+                predicate=sympy.Or(*self.dynamic_padding_mask(auxiliary_index)),
+                value=self.padding_value,
+            ),
+        )
+
+
 REDUCTION_COMBINE_FN: dict[str, Callable[..., OpsValue]] = {
     "any": ops_wrapper("logical_or"),
     "max": ops_wrapper("maximum"),
