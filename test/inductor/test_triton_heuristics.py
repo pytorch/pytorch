@@ -831,6 +831,84 @@ class TestArgumentCloneAndRestore(TestCase):
             out = out[:, 1:]
         return out
 
+    def test_benchmark_mutation_policy_is_stable_and_snapshots_are_fresh(self):
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.optimize_mem = False
+        policy = frozenset({"in_ptr0"})
+        snapshots = [{"in_ptr0": object()}, {"in_ptr0": object()}]
+        autotuner._get_args_to_copy_to_cpu = MagicMock(return_value=policy)
+        autotuner._copy_args_to_cpu = MagicMock(side_effect=snapshots)
+        arg = object()
+
+        with autotuner._mutation_benchmarking():
+            first = autotuner.copy_args_to_cpu_if_needed(arg)
+            second = autotuner.copy_args_to_cpu_if_needed(arg)
+
+        autotuner._get_args_to_copy_to_cpu.assert_called_once_with(arg)
+        self.assertEqual(autotuner._copy_args_to_cpu.call_count, 2)
+        for call in autotuner._copy_args_to_cpu.call_args_list:
+            self.assertIs(call.args[0], policy)
+        self.assertIs(first, snapshots[0])
+        self.assertIs(second, snapshots[1])
+
+    def test_run_reuses_mutation_policy_across_tuning_phases(self):
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner._cached_launcher = None
+        autotuner._cache_eligible = False
+        autotuner._plugins = []
+        autotuner.compile_id = None
+        autotuner.is_backward = False
+        autotuner.optimize_mem = False
+        autotuner.triton_interpret = False
+        autotuner.triton_meta = {}
+        autotuner.inductor_meta = {
+            "combo_tuning_groups": [object()],
+            "coordinate_descent_tuning": True,
+        }
+
+        winner = MagicMock(store_cubin=False)
+        winner.cache_hash = "winner"
+        winner.config = types.SimpleNamespace()
+        winner.return_value = "result"
+        autotuner.launchers = [MagicMock(), MagicMock()]
+
+        policy = frozenset({"in_ptr0"})
+        autotuner._get_args_to_copy_to_cpu = MagicMock(return_value=policy)
+        autotuner._copy_args_to_cpu = MagicMock(return_value={})
+
+        def autotune_to_one_config(*args, **kwargs):
+            autotuner.copy_args_to_cpu_if_needed(*args, **kwargs)
+            autotuner.launchers = [winner]
+
+        def tune_combo(launcher, *args, **kwargs):
+            autotuner.copy_args_to_cpu_if_needed(*args, **kwargs)
+            return launcher
+
+        def coordinate_descent(launcher, *args, **kwargs):
+            autotuner.copy_args_to_cpu_if_needed(*args, **kwargs)
+            return launcher
+
+        autotuner.autotune_to_one_config = MagicMock(side_effect=autotune_to_one_config)
+        autotuner._combo_sequential_autotune = MagicMock(side_effect=tune_combo)
+        autotuner.coordinate_descent_tuning = MagicMock(side_effect=coordinate_descent)
+        autotuner._pre_launch = MagicMock()
+        autotuner._post_launch = MagicMock()
+        arg = object()
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.TritonBundler.put_winner"
+        ):
+            result = autotuner.run(arg, stream=0)
+
+        self.assertEqual(result, "result")
+        autotuner.autotune_to_one_config.assert_called_once_with(arg)
+        autotuner._combo_sequential_autotune.assert_called_once_with(winner, arg)
+        autotuner.coordinate_descent_tuning.assert_called_once_with(winner, arg)
+        autotuner._get_args_to_copy_to_cpu.assert_called_once_with(arg)
+        self.assertEqual(autotuner._copy_args_to_cpu.call_count, 3)
+        for call in autotuner._copy_args_to_cpu.call_args_list:
+            self.assertIs(call.args[0], policy)
+
     def _do_test(self, gpu_tensor):
         torch.get_device_module(GPU_TYPE).reset_peak_memory_stats()
         autotuner = self._create_caching_autotuner()
