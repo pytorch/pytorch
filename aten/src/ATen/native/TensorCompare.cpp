@@ -349,7 +349,9 @@ static std::optional<Scalar> prepare_clamp_bound(
   if (!isIntegralType(dtype, /*includeBool=*/false)) {
     return scalar;
   }
-  const auto [below, above] = AT_DISPATCH_V2(
+  // This dispatch only reads dtype metadata, so it must not become a
+  // selective-build kernel tag.
+  const auto [below, above] = THO_DISPATCH_V2(
       dtype,
       "prepare_clamp_bound",
       AT_WRAP([&] { return clamp_bound_range<scalar_t>(scalar); }),
