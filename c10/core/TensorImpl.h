@@ -1449,6 +1449,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // use when the device might lack an index ("cuda" vs "cuda:0").
   void set_and_normalize_fake_device(c10::Device fake_device);
 
+  // the fake device recorded for this tensor, or nullopt if none
   std::optional<c10::Device> fake_device() const {
     if (!extra_meta_) {
       return std::nullopt;
