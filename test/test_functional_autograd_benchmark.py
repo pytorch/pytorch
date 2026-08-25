@@ -26,11 +26,9 @@ class TestFunctionalAutogradBenchmark(TestCase):
         # not to run this on windows and keep the code here simple.
         with TemporaryFileName() as out_file:
             cmd = [
-                "python3",
+                sys.executable,
                 "../benchmarks/functional_autograd_benchmark/functional_autograd_benchmark.py",
             ]
-            if IS_WINDOWS:
-                cmd[0] = sys.executable
             # Only run the warmup
             cmd += ["--num-iters", "0"]
             # Only run the vjp task (fastest one)
