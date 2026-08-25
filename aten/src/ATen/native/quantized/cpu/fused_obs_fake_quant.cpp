@@ -57,8 +57,11 @@ void calculate_moving_average(
   return;
 }
 
-std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
-    const at::Tensor& x,
+// Compute the quantization parameters from the running min/max and write them
+// into `scale` and `zero_point` in place. This is kept separate from the
+// fake quantize below so that the qparams can be refreshed even when fake
+// quant is disabled.
+void choose_qparams(
     const at::Tensor& inp_running_min,
     const at::Tensor& inp_running_max,
     at::Tensor& scale,
@@ -66,10 +69,7 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
     bool per_row_fake_quant,
     bool symmetric_quant,
     int qmin,
-    int qmax,
-    int ch_axis) {
-  std::tuple<at::Tensor, at::Tensor> fake_quant_out;
-  at::Tensor x_min, x_max;
+    int qmax) {
   if (per_row_fake_quant) {
     const float* x_min_data = inp_running_min.const_data_ptr<float>();
     const float* x_max_data = inp_running_max.const_data_ptr<float>();
@@ -98,8 +98,6 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
       zero_point[i] = x_qparams.zero_point;
 #endif
     }
-    fake_quant_out = at::fake_quantize_per_channel_affine_cachemask(
-        x, scale, zero_point, ch_axis, qmin, qmax);
   } else {
 #ifdef USE_FBGEMM
     fbgemm::TensorQuantizationParams x_qparams{};
@@ -129,12 +127,25 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
     scale[0] = x_qparams.scale;
     zero_point[0] = x_qparams.zero_point;
 #endif
-    auto fake_quant_enabled = at::ones(1, x.options().dtype(at::kLong));
-    fake_quant_out =
-        at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
-            x, scale, zero_point, fake_quant_enabled, qmin, qmax);
   }
-  return fake_quant_out;
+}
+
+// Fake quantize `x` using the qparams already computed by `choose_qparams`.
+std::tuple<at::Tensor, at::Tensor> fake_quant_with_qparams(
+    const at::Tensor& x,
+    at::Tensor& scale,
+    at::Tensor& zero_point,
+    bool per_row_fake_quant,
+    int qmin,
+    int qmax,
+    int ch_axis) {
+  if (per_row_fake_quant) {
+    return at::fake_quantize_per_channel_affine_cachemask(
+        x, scale, zero_point, ch_axis, qmin, qmax);
+  }
+  auto fake_quant_enabled = at::ones(1, x.options().dtype(at::kLong));
+  return at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+      x, scale, zero_point, fake_quant_enabled, qmin, qmax);
 }
 } // namespace
 
@@ -199,17 +210,27 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
           ch_axis);
     }
   }
-  // Calculate qparams and fake_quantize
+  // Refresh the qparams if the observer ran this step, so that `scale` and
+  // `zero_point` track the running min/max even when fake quant is disabled.
+  // Keep computing them when fake quant is on to preserve existing behavior.
   auto fake_quant = fake_quant_on.item().toInt();
-  if (fake_quant) {
-    return choose_qparams_fake_quant(
-        self,
+  if (observe || fake_quant) {
+    choose_qparams(
         running_min,
         running_max,
         scale,
         zero_point,
         per_row_fake_quant,
         symmetric_quant,
+        quant_min,
+        quant_max);
+  }
+  if (fake_quant) {
+    return fake_quant_with_qparams(
+        self,
+        scale,
+        zero_point,
+        per_row_fake_quant,
         quant_min,
         quant_max,
         ch_axis);

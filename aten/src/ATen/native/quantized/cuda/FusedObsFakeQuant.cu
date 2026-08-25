@@ -25,6 +25,7 @@ namespace at::native {
 namespace {
 template <typename T>
 __global__ void ChooseQuantizationParamsKernelImpl(
+    const int64_t* observer_on,
     const int64_t* fake_quant_on,
     const T* x_min,
     const T* x_max,
@@ -35,7 +36,10 @@ __global__ void ChooseQuantizationParamsKernelImpl(
     float* scale,
     int32_t* zero_point) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < size && *fake_quant_on == 1) {
+  // Recompute the qparams whenever we observed this step, so that scale and
+  // zero_point stay in sync with the running min/max even if fake quant is
+  // disabled.
+  if (i < size && (*observer_on == 1 || *fake_quant_on == 1)) {
     float min_val = x_min[i];
     float max_val = x_max[i];
 
@@ -209,6 +213,7 @@ void _calculate_moving_average(
 
 void _calc_moving_avg_qparams_helper(
     const at::Tensor& x,
+    const at::Tensor observer_on,
     const at::Tensor fake_quant_on,
     at::Tensor& running_min,
     at::Tensor& running_max,
@@ -223,6 +228,7 @@ void _calc_moving_avg_qparams_helper(
   device_guard.set_index(x.get_device());
 
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
+  int64_t* observer_on_data = observer_on.data_ptr<int64_t>();
   int64_t* fake_quant_on_data = fake_quant_on.data_ptr<int64_t>();
   if (per_row_fq) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -236,6 +242,7 @@ void _calc_moving_avg_qparams_helper(
               num_threads,
               0,
               cuda_stream>>>(
+              observer_on_data,
               fake_quant_on_data,
               running_min_data,
               running_max_data,
@@ -253,6 +260,7 @@ void _calc_moving_avg_qparams_helper(
           scalar_t* running_min_data = running_min.data_ptr<scalar_t>();
           scalar_t* running_max_data = running_max.data_ptr<scalar_t>();
           ChooseQuantizationParamsKernelImpl<<<1, 1, 0, cuda_stream>>>(
+              observer_on_data,
               fake_quant_on_data,
               running_min_data,
               running_max_data,
@@ -285,6 +293,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     bool symmetric_quant) {
   TORCH_CHECK(ch_axis < x.dim(), "Error in fused_moving_avg_obs_fake_quant_cpu: ch_axis must be < self.dim()");
   const auto x_contig = x.contiguous();
+  const auto observer_on_long = observer_on.to(at::kLong);
   // Calculate the size of the dimension we need to quantize over,
   // For per-channel quant we default to axis 0, since it is only for
   // weight quantization currently.
@@ -310,7 +319,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     }
     _calculate_moving_average(
         y,
-        observer_on.to(at::kLong),
+        observer_on_long,
         running_min,
         running_max,
         averaging_const,
@@ -319,7 +328,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
   } else {
     _calculate_moving_average(
         x_contig,
-        observer_on.to(at::kLong),
+        observer_on_long,
         running_min,
         running_max,
         averaging_const,
@@ -332,6 +341,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
 
   _calc_moving_avg_qparams_helper(
       x_contig,
+      observer_on_long,
       fake_quant_on.to(at::kLong),
       running_min,
       running_max,
