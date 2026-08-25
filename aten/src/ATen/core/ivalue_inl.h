@@ -1686,9 +1686,16 @@ namespace detail {
 struct _guarded_unsigned_long_unique_dummy final {
   _guarded_unsigned_long_unique_dummy(int64_t /*unused*/){}
 };
-using _guarded_unsigned_long = std::conditional_t<
+// The comparisons are hoisted out of the alias-declaration below on purpose.
+// CUDA 13.3's cudafe++ re-prints a namespace-scope alias-declaration from its
+// own AST, and for size_t-canonical types it may pick a spelling that is not
+// in scope (e.g. one naming a function-local visitor class), emitting host
+// code that does not compile.
+inline constexpr bool _guarded_unsigned_long_is_duplicate =
     std::is_same_v<unsigned long, uint32_t> ||
-        std::is_same_v<unsigned long, uint64_t>,
+    std::is_same_v<unsigned long, uint64_t>;
+using _guarded_unsigned_long = std::conditional_t<
+    _guarded_unsigned_long_is_duplicate,
     _guarded_unsigned_long_unique_dummy,
     unsigned long>;
 

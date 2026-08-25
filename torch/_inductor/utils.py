@@ -984,11 +984,6 @@ def get_fused_kernel_name(
     return name
 
 
-@functools.lru_cache(maxsize=2048)
-def _overloadpacket_str(op: torch._ops.OpOverload) -> str:
-    return str(op._overloadpacket)
-
-
 def get_kernel_metadata(
     node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     wrapper: PythonWrapperCodegen,
@@ -1034,8 +1029,7 @@ def get_kernel_metadata(
             original_aten = node.meta["original_aten"]
             key = None
             if isinstance(original_aten, torch._ops.OpOverload):
-                # Same op, once per node per kernel; ops are singletons.
-                key = _overloadpacket_str(original_aten)
+                key = str(original_aten._overloadpacket)
             elif isinstance(original_aten, torch._ops.HigherOrderOperator):
                 key = str(original_aten.name())
             if key:
@@ -1143,24 +1137,15 @@ def get_kernel_metadata(
 
                         all_writes.append("%" + output_name)
 
-        # Every kernel's comment re-formats its origin nodes, and the same node
-        # is an origin of many kernels, so on a large graph this is the same
-        # handful of strings rebuilt over and over: 258k format_node calls for
-        # 1266 kernels on one model. The graph is already built by the time we
-        # are emitting code, so a node's formatting cannot change; cache it on
-        # the graph, as the topological index map above already does.
-        line_cache = single_graph.__dict__.setdefault(
-            "_inductor_kernel_metadata_node_lines", {}
-        )
         for node in inductor_nodes:
-            lines = line_cache.get(node)
-            if lines is None:
-                # Asm strings can contain newlines, which propagate into
-                # format_node() output.  Split so every line gets the comment
-                # prefix; otherwise bare newlines break the wrapper.
-                lines = str(node.format_node(include_tensor_metadata=True)).splitlines()
-                line_cache[node] = lines
-            detailed_metadata.extend(f"{wrapper.comment}   {line}" for line in lines)
+            formatted_node = node.format_node(include_tensor_metadata=True)
+            # Asm strings can contain newlines, which propagate into
+            # format_node() output.  Split so every line gets the comment
+            # prefix; otherwise bare newlines break the wrapper.
+            detailed_metadata.extend(
+                f"{wrapper.comment}   {line}"
+                for line in str(formatted_node).splitlines()
+            )
 
         detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
@@ -2257,6 +2242,32 @@ def ensure_nvmatmul_heuristics_available() -> bool:
         return importlib.util.find_spec("nvMatmulHeuristics") is not None
     except ImportError:
         return False
+
+
+def use_flydsl_gemm_template(layout: Layout) -> bool:
+    if not _use_autotune_backend("FLYDSL"):
+        return False
+    if not torch.version.hip:
+        return False
+    if not (config.max_autotune or config.max_autotune_gemm):
+        return False
+    if not _use_template_for_gpu(layout, [torch.float16, torch.bfloat16]):
+        return False
+
+    from .codegen.flydsl import flydsl_utils
+
+    if not flydsl_utils.runtime_available():
+        return False
+
+    from .codegen.flydsl.flydsl_scheduling import _get_flydsl_device_arch
+
+    # The vendored FlyDSL GEMM kernel targets the gfx950 (MI350) layout; its LDS
+    # capacity and MFMA assumptions do not hold on other archs, so gate strictly
+    # on gfx950 to avoid emitting kernels that fail to compile or run there.
+    device_index = layout.device.index if layout.device.index is not None else 0
+    if _get_flydsl_device_arch(device_index) != "gfx950":
+        return False
+    return True
 
 
 def use_blackwell_cutedsl_grouped_mm(
