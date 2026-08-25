@@ -131,6 +131,13 @@ on:
         type: string
         default: ""
         description: CUDA version to use for the OSDC build.
+      ref:
+        required: false
+        type: string
+        default: ""
+        description: |
+          Git SHA to build instead of the ref the workflow was triggered on.
+          Used by td-holdout to rebuild a historical commit.
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -222,6 +229,26 @@ jobs:
           # The max duration enforced by the server side
           role-duration-seconds: 18000
 
+      # Deliberately last: everything above is CI harness that must reflect the
+      # current fleet and tooling, not the commit under test. map_ec2_to_arc.py
+      # in particular runs from the working tree, so swapping the ref earlier
+      # would route runners using a months-old label map. Only build.sh below,
+      # and the sources it compiles, should come from the target commit.
+      - name: Check out target ref
+        if: inputs.ref != ''
+        shell: bash
+        env:
+          TARGET_REF: ${{ inputs.ref }}
+        run: |
+          set -eux
+          git fetch --no-tags --force origin "${TARGET_REF}"
+          git checkout --force --detach "${TARGET_REF}"
+          # Pins move constantly (~55 bumps/60d), so C++ builds need these
+          # resynced to the target or they compile against the wrong headers.
+          git submodule sync --recursive
+          git submodule update --init --recursive --force
+          git rev-parse HEAD
+
       - name: Build
         if: (steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == '') && steps.use-old-whl.outputs.reuse != 'true'
         id: build
@@ -229,7 +256,7 @@ jobs:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.setup-linux.outputs.branch }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          SHA1: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1
           SCCACHE_S3_NO_CREDENTIALS: ${{ steps.aws-creds.outcome != 'success' && 'true' || 'false' }}
