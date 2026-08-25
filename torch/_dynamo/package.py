@@ -256,6 +256,7 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
+    bypass_reason: str | None = None
 
 
 def _resume_global_renames(
@@ -862,10 +863,11 @@ class CompilePackage:
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
         self._device_type = _graph_device_type(graph)
 
-    def bypass_current_entry(self) -> None:
+    def bypass_current_entry(self, reason: str = "") -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
+        self._current_entry.bypass_reason = reason or None
 
     def add_resume_function(
         self,
