@@ -63,6 +63,28 @@ class ReassociateMatmulTest(TestCase):
         torch._dynamo.mark_dynamic(a, 0)
         self._check(fn, (a, randn(256, 256), randn(256, 4)), 0, dynamic=True)
 
+    def test_attention_output_projection_is_not_reassociated_yet(self):
+        # The motivating case from #194473: attn @ V @ W_o with a narrowing W_o.
+        # After decomposition the chain is bmm -> reshape -> mm (single head) or
+        # sdpa -> permute/clone/reshape -> mm (multi head); the pass only
+        # matches directly adjacent mm/bmm nodes, so it does not fire here.
+        # This pins the gap rather than the wish: flip to 1 once the matcher
+        # can see through the head-merge views.
+        B, T, D, H, OUT = 2, 16, 64, 4, 8
+
+        def single_head(attn, x, w_v, w_o):
+            return (attn @ (x @ w_v)) @ w_o
+
+        def multi_head(x, w_qkv, w_o):
+            q, k, v = (x @ w_qkv).chunk(3, -1)
+            q, k, v = (t.view(B, T, H, D // H).transpose(1, 2) for t in (q, k, v))
+            a = torch.softmax(q @ k.transpose(-1, -2) / (D // H) ** 0.5, -1) @ v
+            return a.transpose(1, 2).reshape(B, T, D) @ w_o
+
+        attn = torch.softmax(randn(B, T, T), -1)
+        self._check(single_head, (attn, randn(B, T, D), randn(D, D), randn(D, OUT)), 0)
+        self._check(multi_head, (randn(B, T, D), randn(D, 3 * D), randn(D, OUT)), 0)
+
 
 if __name__ == "__main__":
     run_tests()
