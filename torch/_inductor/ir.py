@@ -6804,9 +6804,10 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         return render_kernel, render
 
     def gemm_inputs(self) -> Sequence[IRNode]:
+        inputs = cast(Sequence[IRNode], self.inputs)
         if self.output_scale_node is not None:
-            return self.inputs[:-1]
-        return self.inputs
+            return inputs[:-1]
+        return inputs
 
 
 def is_node_sequence(

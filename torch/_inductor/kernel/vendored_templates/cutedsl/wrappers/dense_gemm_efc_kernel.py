@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+import cutlass.cute as cute
 from cutlass.operators.arch import TargetSm  # noqa: TC002
 from cutlass.operators.arguments import GemmArguments
 from cutlass.operators.artifact import CompiledArtifact  # noqa: TC002
@@ -25,10 +26,7 @@ from cutlass.operators.status import Status
 from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
     DENSE_GEMM_REDUCTION_CAPABILITIES,
 )
-from torch._inductor.kernel.gemm_epilogue import (
-    GEMM_REDUCTION_FRAGMENT_WIDTH,
-    GemmReductionDescriptor,
-)
+from torch._inductor.kernel.gemm_epilogue import GEMM_REDUCTION_FRAGMENT_WIDTH
 from torch._inductor.kernel.gemm_epilogue_codegen import (
     GemmReductionCompileConfig,
     get_cutedsl_epilogue_schema,
@@ -52,7 +50,12 @@ class _EfcCuteNamespace:
         self.math = self
 
     def __getattr__(self, name):
-        return getattr(self.efc_config, name)
+        if name == "ReductionOp":
+            return cute.ReductionOp
+        try:
+            return getattr(self.efc_config, name)
+        except AttributeError:
+            return getattr(cute, name)
 
 
 def _direct_cutedsl_epilogue(metadata):
@@ -123,7 +126,15 @@ def _direct_cutedsl_epilogue(metadata):
             epilogue_source, op_scope, mlir_math=op_scope
         )
         results = call_fn(*values)
-        if len(outputs) == 1:
+        if schema.returns_local_reduce:
+            if not isinstance(results, tuple) or len(results) != len(outputs) + 1:
+                raise AssertionError(
+                    "expected generated epilogue outputs followed by local reduction"
+                )
+            result_values = results[:-1]
+            if efc_config.phase == common_efc.EFC.Phase.ThreadOperation:
+                efc_config.epilogue_context.local_reduce = results[-1]
+        elif len(outputs) == 1:
             result_values = (results,)
         else:
             if not isinstance(results, tuple):
@@ -191,6 +202,17 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
         reduction = args.local_reduce
         if not reduction.enabled:
             return status
+        schema = (
+            None
+            if epilogue is None
+            else get_cutedsl_epilogue_schema(epilogue.epilogue_fn)
+        )
+        if reduction.tensor_epilogue_returns_local_reduce != (
+            schema is not None and schema.returns_local_reduce
+        ):
+            return Status.fail(
+                "Dense EFC local reduction contract must match the tensor epilogue return"
+            )
         axis = reduction.axis
         if axis not in (0, 1):
             return Status.fail("Dense EFC local reductions require an M or N axis")
@@ -198,13 +220,6 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
         max_group = self.cta_tile_m if axis == 0 else self.cta_tile_n
         if group <= 1 or group > max_group:
             return Status.fail("Dense EFC local reduction group exceeds its tile")
-        descriptor = GemmReductionDescriptor.parse(reduction.reduction_type)
-        if (
-            axis == 1
-            and group > GEMM_REDUCTION_FRAGMENT_WIDTH
-            and descriptor.kind == "mean"
-        ):
-            return Status.fail("Dense EFC cross-fragment mean is unsupported")
         if (
             reduction.feeds_main
             and axis == 0
