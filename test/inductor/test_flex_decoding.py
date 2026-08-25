@@ -23,10 +23,7 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_BF16,
-    with_tf32_off,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, with_tf32_off
 from torch.testing._internal.common_device_type import (
     Capability,
     E4M3_MAX_POS,
@@ -108,9 +105,6 @@ device_configs = {
         dtypes_fast=[torch.float16],
     ),
 }
-
-if torch.xpu.is_available():
-    torch._C._set_onednn_allow_tf32(True)
 
 torch_config_string = torch.__config__.show()
 LONG_COMPILATION_ON_CPU = False
@@ -355,6 +349,12 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
 
 class TestFlexDecoding(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        if cls.device_type == "xpu":
+            torch._C._set_onednn_allow_tf32(True)
 
     def setUp(self):
         super().setUp()
@@ -1801,23 +1801,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             out_mixed.backward()
 
     @requires_capabilities(Capability.attention.flex_attention)
-    @skipCUDAIf(True, "Not supported on CUDA")
-    @skipXPUIf(True, "Not supported on XPU")
-    @parametrize_device_dtype("dtypes")
-    @common_utils.parametrize("partition_size", [64, 128, 256, 1024])
-    def test_flash_decoding_partition_size(self, device, dtype, partition_size):
-        def score_mod(score, b, h, m, n):
-            return score * 2
-
-        self.run_test_with_paged_attention(
-            score_mod,
-            dtype,
-            KV_S=64,
-            device=device,
-            kernel_options={"PARTITION_SIZE": partition_size},
-        )
-
-    @requires_capabilities(Capability.attention.flex_attention)
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune(self, device):
         def score_mod(score, b, h, m, n):
@@ -2225,9 +2208,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = flex_attention_compiled(q, k, v, block_mask=mask_2)
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
+    @requires_capabilities(Capability.attention.flex_attention)
     @parametrize_device_dtype("dtypes_fast")
     @common_utils.parametrize("score_mod", test_score_mods)
-    @requires_capabilities(Capability.attention.flex_attention)
     def test_decode_at_different_input_position(
         self, device, dtype: torch.dtype, score_mod: Callable
     ):
@@ -2415,8 +2398,28 @@ class TestFlexDecodingLargeKV(InductorTestCase):
         torch.testing.assert_close(out, ref, rtol=2e-2, atol=2e-2)
 
 
+class TestFlexDecodingCpuPartition(TestFlexDecoding):
+    hw_classification = HardwareClassification.CPU
+
+    @requires_capabilities(Capability.attention.flex_attention)
+    @parametrize_device_dtype("dtypes")
+    @common_utils.parametrize("partition_size", [64, 128, 256, 1024])
+    def test_flash_decoding_partition_size(self, device, dtype, partition_size):
+        def score_mod(score, b, h, m, n):
+            return score * 2
+
+        self.run_test_with_paged_attention(
+            score_mod,
+            dtype,
+            KV_S=64,
+            device=device,
+            kernel_options={"PARTITION_SIZE": partition_size},
+        )
+
+
 instantiate_device_type_tests(TestFlexDecoding, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFlexDecodingLargeKV, globals(), only_for="cuda")
+instantiate_device_type_tests(TestFlexDecodingCpuPartition, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
