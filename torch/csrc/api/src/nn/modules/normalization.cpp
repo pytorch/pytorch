@@ -2,6 +2,8 @@
 
 #include <torch/nn/init.h>
 
+#include <fmt/ostream.h>
+
 #include <ostream>
 #include <utility>
 
@@ -71,8 +73,6 @@ void RMSNormImpl::reset_parameters() {
 }
 
 void RMSNormImpl::pretty_print(std::ostream& stream) const {
-  // Format the bool explicitly rather than setting std::boolalpha, which would
-  // persist in the caller's stream.
   stream << "torch::nn::RMSNorm("
          << torch::IntArrayRef(options.normalized_shape()) << ", eps=";
   if (options.eps().has_value()) {
@@ -80,8 +80,7 @@ void RMSNormImpl::pretty_print(std::ostream& stream) const {
   } else {
     stream << "None";
   }
-  stream << ", elementwise_affine="
-         << (options.elementwise_affine() ? "true" : "false") << ')';
+  fmt::print(stream, ", elementwise_affine={})", options.elementwise_affine());
 }
 
 torch::Tensor RMSNormImpl::forward(const Tensor& input) {
