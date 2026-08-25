@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -967,10 +967,9 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
 
 class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
-    backward_cudagraphs_annotation_override: bool | None
-    # None uses the shared BoxedBool; True/False forces a graph-local decision
-    # that CompiledFxGraph.post_compile preserves across cache loads.
-    cudagraphs_post_compile_override: bool | None
+    # False preserves a backward-only opt-out across cache loads; None uses the
+    # shared forward-derived BoxedBool.
+    cudagraphs_post_compile_override: Literal[False] | None
     # Restrict graph partitioning to explicitly annotated regions.
     cudagraph_partition_only_regions: bool
     static_input_idxs: Sequence[int]
@@ -2710,7 +2709,7 @@ class CompilerConfigExtra:
     graph_id: int
     forward_device: BoxedDeviceIndex
     forward_is_partitioned: BoxedBool
-    cudagraphs_bwd_override: bool | None = None
+    cudagraphs_post_compile_override: Literal[False] | None = None
 
 
 def create_compiler_config_extra(
@@ -2724,11 +2723,11 @@ def create_compiler_config_extra(
     # the final determination if cudagraphs actually can be used or not.
     cudagraphs = BoxedBool(config.triton.cudagraphs)
 
-    cudagraphs_bwd_override: bool | None = None
+    cudagraphs_post_compile_override: Literal[False] | None = None
 
     # Override cudagraphs BoxedBool based on override_cudagraphs annotation.
     # Disabling fwd disables bwd (copying activations isn't profitable),
-    # so cudagraphs_bwd_override is only needed for fwd=True / bwd=False.
+    # so cudagraphs_post_compile_override is only needed for fwd=True / bwd=False.
     if (
         gm_meta is not None
         and (annotation := gm_meta.get("cudagraph_annotation")) is not None
@@ -2747,7 +2746,7 @@ def create_compiler_config_extra(
         # bwd override only matters when fwd enables cudagraphs but bwd
         # explicitly disables them.
         if cudagraphs.value and annotation.bwd is not None and not annotation.bwd:
-            cudagraphs_bwd_override = annotation.bwd
+            cudagraphs_post_compile_override = annotation.bwd
             log_cudagraph_skip_and_bump_counter(
                 "disabling cudagraphs for backward due to override_cudagraphs annotation"
             )
@@ -2770,7 +2769,7 @@ def create_compiler_config_extra(
         cudagraphs=cudagraphs,
         graph_id=graph_id,
         forward_device=forward_device,
-        cudagraphs_bwd_override=cudagraphs_bwd_override,
+        cudagraphs_post_compile_override=cudagraphs_post_compile_override,
         forward_is_partitioned=forward_is_partitioned,
     )
 
@@ -2961,8 +2960,10 @@ def compile_fx_backward(
 
         # Check if cudagraphs should be overridden for backward via annotation
         cudagraphs = compiler_config_extra.cudagraphs
-        if compiler_config_extra.cudagraphs_bwd_override is not None:
-            cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
+        if compiler_config_extra.cudagraphs_post_compile_override is not None:
+            cudagraphs = BoxedBool(
+                compiler_config_extra.cudagraphs_post_compile_override
+            )
 
         # Static backward inputs (see Note: [static_input_idxs semantics])
         # are the saved tensors, minus two over-approximations of the
@@ -2999,7 +3000,7 @@ def compile_fx_backward(
                 static_input_idxs=static_input_idxs,
                 cudagraphs=cudagraphs,
                 cudagraphs_post_compile_override=(
-                    compiler_config_extra.cudagraphs_bwd_override
+                    compiler_config_extra.cudagraphs_post_compile_override
                 ),
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,

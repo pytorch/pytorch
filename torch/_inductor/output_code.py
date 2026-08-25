@@ -856,10 +856,7 @@ class CompiledFxGraph(OutputCode):
         This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
         The results of this function are *not* saved in the cache itself.
         """
-        if (
-            self.partition_maps is not None
-            and _unstable_customized_partition_wrapper.wrapper
-        ):
+        if config.graph_partition and _unstable_customized_partition_wrapper.wrapper:
             # Mechanically apply user-specified cudagraph wrappers without modification
             if self.recursively_apply_fns is None:
                 raise AssertionError("self.recursively_apply_fns must not be None")
@@ -879,22 +876,24 @@ class CompiledFxGraph(OutputCode):
             return
 
         set_tracing_context_output_strides(example_inputs, self)
-        if graph_kwargs["cudagraphs"] is None:
-            raise AssertionError("graph_kwargs['cudagraphs'] must not be None")
         if graph_kwargs["is_backward"] is None:
             raise AssertionError("graph_kwargs['is_backward'] must not be None")
         is_backward = graph_kwargs["is_backward"]
-        # A direction-specific annotation can override the forward-derived
-        # shared BoxedBool. The override is serialized with this FX graph so
-        # AOTAutograd cache hits make the same decision.
+        # A backward-only opt-out is serialized with this FX graph so
+        # AOTAutograd cache hits do not reuse the forward-derived decision.
         cudagraphs_post_compile_override = self.fx_kwargs.get(
             "cudagraphs_post_compile_override"
         )
-        graph_cudagraphs = (
-            BoxedBool(cudagraphs_post_compile_override)
-            if cudagraphs_post_compile_override is not None
-            else graph_kwargs["cudagraphs"]
-        )
+        if cudagraphs_post_compile_override is not None:
+            if cudagraphs_post_compile_override:
+                raise AssertionError(
+                    "cudagraphs_post_compile_override only supports False"
+                )
+            graph_cudagraphs = BoxedBool(False)
+        else:
+            if graph_kwargs["cudagraphs"] is None:
+                raise AssertionError("graph_kwargs['cudagraphs'] must not be None")
+            graph_cudagraphs = graph_kwargs["cudagraphs"]
 
         # When a CUDAGraphPolicy is set and it says not to wrap this
         # inner CompiledFxGraph (e.g. because wrapping happens at the
@@ -934,12 +933,12 @@ class CompiledFxGraph(OutputCode):
                         "boxed_forward_device_index", None
                     )
 
-                if self.partition_maps is not None and policy is None:
-                    # Partition codegen skips some whole-graph cudagraph checks,
-                    # so use the partition post-compile path even when loading
-                    # under a different ambient config. When a CUDAGraphPolicy
-                    # is active, use cudagraph_post_compile so the policy
-                    # controls wrapping via policy.cudagraphify().
+                if config.graph_partition and policy is None:
+                    # With graph_partition=True, we skip some cudagraph checks
+                    # if it's supported with partition, so we use
+                    # cudagraph_partition_post_compile. When a CUDAGraphPolicy
+                    # is active, use cudagraph_post_compile instead so the
+                    # policy controls wrapping via policy.cudagraphify().
                     cudagraph_partition_post_compile(
                         example_inputs,
                         self,
