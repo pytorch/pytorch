@@ -3854,9 +3854,9 @@ def set_tracing_context_output_strides(
                 def map_expr(e: Any) -> float | int | SymInt | SymFloat | SymBool:
                     if shape_env is None:
                         return int(e)
-                    # Keep the stride symbolic. evaluate_symexpr would collapse it
-                    # to the current hint, which then gets frozen into the backward
-                    # graph's saved-activation placeholder.
+                    # Keep the stride symbolic. Collapsing it to the current
+                    # hint would freeze that hint into the backward graph's
+                    # saved-activation placeholder.
                     return shape_env.deserialize_symexpr(e)
 
                 context.output_strides.append(

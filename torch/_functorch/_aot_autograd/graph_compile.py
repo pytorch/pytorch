@@ -49,7 +49,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.types import py_sym_types
+from torch.types import IntLikeType, py_sym_types
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torchgen.utils import dataclass_repr
 
@@ -2291,7 +2291,7 @@ def _aot_stage2b_fw_compile(
     # pyrefly: ignore [implicit-any]
     fw_compiler: Callable,
     # pyrefly: ignore [implicit-any]
-) -> tuple[list[tuple[int, ...] | None] | None, Callable]:
+) -> tuple[list[tuple[IntLikeType, ...] | None] | None, Callable]:
     return _aot_stage2b_compile_forward_or_inference(
         fw_module,
         adjusted_flat_args,
@@ -2308,7 +2308,7 @@ def _aot_stage2b_bw_compile(
     bw_module: torch.fx.GraphModule,
     maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
-    fwd_output_strides: list[tuple[int, ...] | None] | None,
+    fwd_output_strides: list[tuple[IntLikeType, ...] | None] | None,
     num_symints_saved_for_bw: int,
     aot_config: AOTConfig,
     # pyrefly: ignore [implicit-any]
@@ -2358,12 +2358,12 @@ def _aot_stage2b_bw_compile(
                 # than the backward graph's placeholder has. This comparison must
                 # not specialize ph_arg's dynamic dims, which is why it is
                 # proof-only: statically_known_true consults the shape env's
-                # replacements and value ranges but never the hints, so it
-                # installs no guard, and an incidental match at the current sizes
-                # is not mistaken for equality. A stride inductor genuinely
-                # specialized still compares equal, while s1 vs align(s1)
-                # correctly does not. inductor_stride may be symbolic, see
-                # set_tracing_context_output_strides.
+                # replacements and value ranges, and uses hints only to
+                # disprove, so it installs no guard and an incidental match at
+                # the current sizes is not mistaken for equality. A stride
+                # inductor genuinely specialized still compares equal, while
+                # s1 vs align(s1) correctly does not. inductor_stride may be
+                # symbolic, see set_tracing_context_output_strides.
                 stride_different = any(
                     not statically_known_true(ph_stride == inductor_stride[k])
                     for k, ph_stride in enumerate(ph_arg.stride())
@@ -2742,7 +2742,7 @@ def _aot_stage2b_compile_forward_or_inference(
     is_inference: bool,
     num_fw_outs_saved_for_bw: int | None = None,
     # pyrefly: ignore [implicit-any]
-) -> tuple[list[tuple[int, ...] | None] | None, Callable]:
+) -> tuple[list[tuple[IntLikeType, ...] | None] | None, Callable]:
     """
     Compile the forward or inference graph. Returns:
     - the output strides of the forward graph

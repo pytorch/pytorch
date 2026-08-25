@@ -3702,6 +3702,7 @@ class TestGuardsExpressions(TestCase):
         f0 = make_symbol(SymT.FLOAT, 0)
         shape_env.var_to_range[f0] = ValueRanges(-sympy.oo, sympy.oo)
         shape_env.backed_var_to_val[f0] = sympy.Float(1.5)
+        shape_env.name_to_symbol[f0.name] = f0  # create_symbol does this
         out = shape_env.deserialize_symexpr(str(f0))
         self.assertIsInstance(out, torch.SymFloat)
         self.assertEqual(out.node.hint, 1.5)
@@ -3713,6 +3714,7 @@ class TestGuardsExpressions(TestCase):
         shape_env = ShapeEnv()
         s0 = make_symbol(SymT.SIZE, 0, positive=True, integer=True)
         shape_env.backed_var_to_val[s0] = SingletonInt(1, coeff=1)
+        shape_env.name_to_symbol[s0.name] = s0  # create_symbol does this
         self.assertNotIn(s0, shape_env.var_to_range)
         out = shape_env.deserialize_symexpr(str(s0))
         self.assertIsInstance(out, torch.SymInt)
@@ -3732,6 +3734,29 @@ class TestGuardsExpressions(TestCase):
         # Lazy locals must fall through to SYMPY_INTERP for non-symbol names.
         shape_env = ShapeEnv()
         self.assertEqual(shape_env.deserialize_symexpr("math.trunc(3.7)"), 3)
+
+    def test_deserialize_symexpr_max_min_installs_no_guard(self):
+        # SymExprPrinter must not render Max/Min as builtin max()/min(): those
+        # pick a branch by evaluating `a > b`, which guards and collapses the
+        # expression to whichever operand won. The 3-arg case covers sympy's
+        # n-ary Max, which binary torch.sym_max cannot be handed directly.
+        from torch.fx.experimental.symbolic_shapes import SymExprPrinter
+        from torch.utils._sympy.functions import Max, Min
+
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 24).node.expr
+        b = create_symint(shape_env, 36).node.expr
+        printer = SymExprPrinter()
+        num_guards = len(shape_env.guards)
+
+        # Arg order is sympy's canonical one, so only assert the callee.
+        self.assertIn("torch.sym_max", printer.doprint(Max(a, b)))
+        self.assertIn("torch.sym_min", printer.doprint(Min(a, b)))
+
+        for expr in (Max(a, b), Min(a, b), Max(a, b, 128)):
+            out = shape_env.deserialize_symexpr(printer.doprint(expr))
+            self.assertEqual(out.node.expr, expr)
+            self.assertEqual(len(shape_env.guards), num_guards)
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
