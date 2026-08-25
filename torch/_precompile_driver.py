@@ -388,6 +388,7 @@ def _build_dynamo_forward():
     import types
 
     import torch
+    import torch.utils._pytree as _pytree
     from torch._dynamo.package import (
         load_guard_manager,
         load_guards_state,
@@ -403,6 +404,75 @@ def _build_dynamo_forward():
 
     state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
     namespace = dict(globals())
+
+    def check_input_contract(args):
+        contract = state.get("input_contract")
+        if contract is None:
+            return
+        leaves, spec = _pytree.tree_flatten(args)
+        if _pytree.treespec_dumps(spec) != contract["spec"]:
+            from torch._precompile import PrecompileError
+
+            raise PrecompileError(
+                "precompile: runtime inputs have a different structure from the "
+                "captured Dynamo examples."
+            )
+        for index, (value, expected) in enumerate(
+            zip(leaves, contract["leaves"], strict=True)
+        ):
+            if expected is None:
+                continue
+            if not isinstance(value, torch.Tensor):
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    f"precompile: runtime input leaf {index} is not a tensor."
+                )
+            actual_type = (type(value).__module__, type(value).__qualname__)
+            checks = (
+                ("type", actual_type),
+                ("dtype", str(value.dtype)),
+                ("device", str(value.device)),
+                ("requires_grad", value.requires_grad),
+            )
+            for name, actual in checks:
+                wanted = expected[name]
+                if wanted is not None and actual != wanted:
+                    from torch._precompile import PrecompileError
+
+                    raise PrecompileError(
+                        f"precompile: runtime input leaf {index} has {name} "
+                        f"{actual!r}, expected {wanted!r}."
+                    )
+            shape = expected["shape"]
+            stride = expected["stride"]
+            if shape is not None and len(value.shape) != len(shape):
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    f"precompile: runtime input leaf {index} has rank "
+                    f"{value.dim()}, expected {len(shape)}."
+                )
+            if shape is not None:
+                for dim, wanted in enumerate(shape):
+                    if wanted is not None and value.shape[dim] != wanted:
+                        from torch._precompile import PrecompileError
+
+                        raise PrecompileError(
+                            f"precompile: runtime input leaf {index} has shape "
+                            f"{tuple(value.shape)}, expected dim {dim} to be {wanted}."
+                        )
+            if stride is not None:
+                for dim, wanted in enumerate(stride):
+                    if wanted is not None and value.stride(dim) != wanted:
+                        from torch._precompile import PrecompileError
+
+                        raise PrecompileError(
+                            f"precompile: runtime input leaf {index} has stride "
+                            f"{tuple(value.stride())}, expected dim {dim} to be "
+                            f"{wanted}."
+                        )
+
     for code_state in state["codes"]:
         module = sys.modules.get(code_state["python_module"])
         if module is None:
@@ -517,4 +587,10 @@ def _build_dynamo_forward():
     target, bind = prepare_code(main_state)
     if target.co_freevars:
         raise AssertionError("main Dynamo frame must not have free variables")
-    return bind()
+    entry = bind()
+
+    def forward(*args):
+        check_input_contract(args)
+        return entry(*args)
+
+    return forward

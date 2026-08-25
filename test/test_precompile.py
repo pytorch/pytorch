@@ -1242,15 +1242,14 @@ class TestPrecompile(TestCase):
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True
     )
-    def test_tracer_dynamo_keeps_tensor_metadata_guards(self):
-        examples = [(torch.randn(size, 4),) for size in (2, 3)]
+    def test_tracer_dynamo_dynamic_graph_keeps_tensor_contract(self):
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_dynamic,
-            example_inputs=examples,
+            example_inputs=[(torch.randn(2, 4),), (torch.randn(3, 4),)],
             tracer="dynamo",
         )
         loaded = torch.compiler.precompile.load(code, cache)
-        with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
+        with self.assertRaisesRegex(PrecompileError, "dtype"):
             loaded(torch.randn(7, 4, dtype=torch.float64))
 
     def test_tracer_dynamo_capture_preserves_existing_compile_entries(self):
@@ -1297,6 +1296,17 @@ class TestPrecompile(TestCase):
             _precompile_dynamo_dynamic(x),
         )
         self.assertEqual(counter.frame_count, 1)
+
+    def test_tracer_dynamo_executes_each_example_once(self):
+        examples = [(torch.zeros(4),), (torch.zeros(8),)]
+        torch.compiler.precompile(
+            lambda x: x.add_(1),
+            example_inputs=examples,
+            tracer="dynamo",
+            backend="eager",
+        )
+        for (example,) in examples:
+            self.assertEqual(example, torch.ones_like(example))
 
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True
@@ -1423,6 +1433,28 @@ class TestPrecompile(TestCase):
             )
         finally:
             os.unlink(artifact_path)
+
+    def test_tracer_dynamo_training_across_disabled_graph_break(self):
+        x = torch.randn(4, requires_grad=True)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_with_disabled,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            training=True,
+        )
+
+        self.assertEqual(
+            code.count("class _CompiledFunction(torch.autograd.Function):"), 2
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
+            actual_input = torch.randn(4, requires_grad=True)
+            ref_input = actual_input.detach().clone().requires_grad_()
+            expected = _precompile_dynamo_with_disabled(ref_input)
+            expected.sum().backward()
+            actual = loaded(actual_input)
+            actual.sum().backward()
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual_input.grad, ref_input.grad)
 
     def test_tracer_dynamo_rebinds_imported_graph_break_alias(self):
         x = torch.randn(4)
@@ -1555,28 +1587,6 @@ class TestPrecompile(TestCase):
             )
         finally:
             os.unlink(artifact_path)
-
-    def test_tracer_dynamo_training_across_disabled_graph_break(self):
-        x = torch.randn(4, requires_grad=True)
-        code, cache = torch.compiler.precompile(
-            _precompile_dynamo_with_disabled,
-            example_inputs=[(x,)],
-            tracer="dynamo",
-            training=True,
-        )
-
-        self.assertEqual(
-            code.count("class _CompiledFunction(torch.autograd.Function):"), 2
-        )
-        for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
-            actual_input = torch.randn(4, requires_grad=True)
-            ref_input = actual_input.detach().clone().requires_grad_()
-            expected = _precompile_dynamo_with_disabled(ref_input)
-            expected.sum().backward()
-            actual = loaded(actual_input)
-            actual.sum().backward()
-            self.assertEqual(actual, expected)
-            self.assertEqual(actual_input.grad, ref_input.grad)
 
     def test_tracer_dynamo_isolates_disabled_function_globals(self):
         x = torch.randn(4)
