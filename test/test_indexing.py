@@ -1341,6 +1341,8 @@ class TestIndexing(TestCase):
         torch.long,
         torch.bool,
         torch.bfloat16,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
     )
     @dtypesIfMPS(torch.float, torch.float16, torch.long, torch.bool)
     def test_index_put_src_datatype(self, device, dtype):
@@ -2258,7 +2260,7 @@ class TestIndexing(TestCase):
             torch.uint64,
         )
     )
-    @dtypesIfXPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfXPU(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_select(self, device, dtype):
         num_src, num_out = 3, 5
@@ -2335,6 +2337,26 @@ class TestIndexing(TestCase):
         for source, idx in scalars:
             out = source.index_select(0, idx)
             self.assertEqual(out.item(), source.item())
+
+    def test_index_add_empty_index_1d(self, device):
+        dst = torch.arange(5, dtype=torch.float, device=device)
+        index = torch.empty((0,), dtype=torch.int64, device=device)
+        source = torch.empty((0,), dtype=torch.float, device=device)
+
+        out = dst.clone()
+        out.index_add_(0, index, source, alpha=2.0)
+
+        self.assertEqual(out, dst)
+
+    def test_index_add_empty_index_2d(self, device):
+        dst = torch.arange(12, dtype=torch.float, device=device).reshape(3, 4)
+        index = torch.empty((0,), dtype=torch.int64, device=device)
+        source = torch.empty((0, 4), dtype=torch.float, device=device)
+
+        out = dst.clone()
+        out.index_add_(0, index, source, alpha=2.0)
+
+        self.assertEqual(out, dst)
 
 
 # The tests below are from NumPy test_indexing.py with some modifications to
