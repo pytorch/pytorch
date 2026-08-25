@@ -8,6 +8,274 @@
 
 namespace c10d {
 
+namespace {
+
+void checkNcclCollConfigSupport(uintptr_t config) {
+#ifndef NCCL_HAS_COLL_CONFIG
+  TORCH_CHECK(
+      config == 0,
+      "Per-collective NCCL configuration requires NCCL 2.31 or later");
+#else
+  static_cast<void>(config);
+#endif
+}
+
+#ifdef NCCL_HAS_COLL_CONFIG
+const ncclCollConfig_t* getNcclCollConfig(uintptr_t config) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  return reinterpret_cast<const ncclCollConfig_t*>(config);
+}
+#endif
+
+} // namespace
+
+ncclResult_t ncclBroadcastWithConfig(
+    const void* sendbuff,
+    void* recvbuff,
+    size_t count,
+    ncclDataType_t datatype,
+    int root,
+    ncclComm_t comm,
+    cudaStream_t stream,
+    uintptr_t config) {
+  if (config == 0) {
+    return ncclBroadcast(
+        sendbuff, recvbuff, count, datatype, root, comm, stream);
+  }
+  checkNcclCollConfigSupport(config);
+#ifdef NCCL_HAS_COLL_CONFIG
+  return ncclBroadcastConfig(
+      sendbuff,
+      recvbuff,
+      count,
+      datatype,
+      root,
+      comm,
+      stream,
+      getNcclCollConfig(config));
+#else
+  return ncclInvalidUsage;
+#endif
+}
+
+ncclResult_t ncclBcastWithConfig(
+    void* buff,
+    size_t count,
+    ncclDataType_t datatype,
+    int root,
+    ncclComm_t comm,
+    cudaStream_t stream,
+    uintptr_t config) {
+  if (config == 0) {
+    return ncclBcast(buff, count, datatype, root, comm, stream);
+  }
+  checkNcclCollConfigSupport(config);
+#ifdef NCCL_HAS_COLL_CONFIG
+  return ncclBroadcastConfig(
+      buff,
+      buff,
+      count,
+      datatype,
+      root,
+      comm,
+      stream,
+      getNcclCollConfig(config));
+#else
+  return ncclInvalidUsage;
+#endif
+}
+
+ncclResult_t ncclAllReduceWithConfig(
+    const void* sendbuff,
+    void* recvbuff,
+    size_t count,
+    ncclDataType_t datatype,
+    ncclRedOp_t op,
+    ncclComm_t comm,
+    cudaStream_t stream,
+    uintptr_t config) {
+  if (config == 0) {
+    return ncclAllReduce(sendbuff, recvbuff, count, datatype, op, comm, stream);
+  }
+  checkNcclCollConfigSupport(config);
+#ifdef NCCL_HAS_COLL_CONFIG
+  return ncclAllReduceConfig(
+      sendbuff,
+      recvbuff,
+      count,
+      datatype,
+      op,
+      comm,
+      stream,
+      getNcclCollConfig(config));
+#else
+  return ncclInvalidUsage;
+#endif
+}
+
+ncclResult_t ncclReduceWithConfig(
+    const void* sendbuff,
+    void* recvbuff,
+    size_t count,
+    ncclDataType_t datatype,
+    ncclRedOp_t op,
+    int root,
+    ncclComm_t comm,
+    cudaStream_t stream,
+    uintptr_t config) {
+  if (config == 0) {
+    return ncclReduce(
+        sendbuff, recvbuff, count, datatype, op, root, comm, stream);
+  }
+  checkNcclCollConfigSupport(config);
+#ifdef NCCL_HAS_COLL_CONFIG
+  return ncclReduceConfig(
+      sendbuff,
+      recvbuff,
+      count,
+      datatype,
+      op,
+      root,
+      comm,
+      stream,
+      getNcclCollConfig(config));
+#else
+  return ncclInvalidUsage;
+#endif
+}
+
+ncclResult_t ncclAllGatherWithConfig(
+    const void* sendbuff,
+    void* recvbuff,
+    size_t sendcount,
+    ncclDataType_t datatype,
+    ncclComm_t comm,
+    cudaStream_t stream,
+    uintptr_t config) {
+  if (config == 0) {
+    return ncclAllGather(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+  }
+  checkNcclCollConfigSupport(config);
+#ifdef NCCL_HAS_COLL_CONFIG
+  return ncclAllGatherConfig(
+      sendbuff,
+      recvbuff,
+      sendcount,
+      datatype,
+      comm,
+      stream,
+      getNcclCollConfig(config));
+#else
+  return ncclInvalidUsage;
+#endif
+}
+
+ncclResult_t ncclReduceScatterWithConfig(
+    const void* sendbuff,
+    void* recvbuff,
+    size_t recvcount,
+    ncclDataType_t datatype,
+    ncclRedOp_t op,
+    ncclComm_t comm,
+    cudaStream_t stream,
+    uintptr_t config) {
+  if (config == 0) {
+    return ncclReduceScatter(
+        sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+  }
+  checkNcclCollConfigSupport(config);
+#ifdef NCCL_HAS_COLL_CONFIG
+  return ncclReduceScatterConfig(
+      sendbuff,
+      recvbuff,
+      recvcount,
+      datatype,
+      op,
+      comm,
+      stream,
+      getNcclCollConfig(config));
+#else
+  return ncclInvalidUsage;
+#endif
+}
+
+ncclResult_t ncclAllToAllWithConfig(
+    const void* sendbuff,
+    void* recvbuff,
+    size_t count,
+    ncclDataType_t datatype,
+    ncclComm_t comm,
+    cudaStream_t stream,
+    uintptr_t config) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+  if (config == 0) {
+    return ncclAlltoAll(sendbuff, recvbuff, count, datatype, comm, stream);
+  }
+  checkNcclCollConfigSupport(config);
+#ifdef NCCL_HAS_COLL_CONFIG
+  return ncclAlltoAllConfig(
+      sendbuff,
+      recvbuff,
+      count,
+      datatype,
+      comm,
+      stream,
+      getNcclCollConfig(config));
+#else
+  return ncclInvalidUsage;
+#endif
+#else
+  static_cast<void>(sendbuff);
+  static_cast<void>(recvbuff);
+  static_cast<void>(count);
+  static_cast<void>(datatype);
+  static_cast<void>(comm);
+  static_cast<void>(stream);
+  checkNcclCollConfigSupport(config);
+  return ncclInvalidUsage;
+#endif
+}
+
+ncclResult_t ncclGatherWithConfig(
+    const void* sendbuff,
+    void* recvbuff,
+    size_t count,
+    ncclDataType_t datatype,
+    int root,
+    ncclComm_t comm,
+    cudaStream_t stream,
+    uintptr_t config) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3) && !defined(USE_ROCM)
+  if (config == 0) {
+    return ncclGather(sendbuff, recvbuff, count, datatype, root, comm, stream);
+  }
+  checkNcclCollConfigSupport(config);
+#ifdef NCCL_HAS_COLL_CONFIG
+  return ncclGatherConfig(
+      sendbuff,
+      recvbuff,
+      count,
+      datatype,
+      root,
+      comm,
+      stream,
+      getNcclCollConfig(config));
+#else
+  return ncclInvalidUsage;
+#endif
+#else
+  static_cast<void>(sendbuff);
+  static_cast<void>(recvbuff);
+  static_cast<void>(count);
+  static_cast<void>(datatype);
+  static_cast<void>(root);
+  static_cast<void>(comm);
+  static_cast<void>(stream);
+  checkNcclCollConfigSupport(config);
+  return ncclInvalidUsage;
+#endif
+}
+
 NCCLComm::NCCLComm(ncclComm_t ncclComm) : ncclComm_(ncclComm) {}
 
 NCCLComm::~NCCLComm() noexcept {

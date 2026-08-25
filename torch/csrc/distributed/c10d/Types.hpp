@@ -130,6 +130,7 @@ struct BroadcastOptions {
   int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  uintptr_t config = 0;
 };
 
 struct AllreduceOptions {
@@ -137,6 +138,7 @@ struct AllreduceOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
   std::optional<at::Tensor> sparseIndices = std::nullopt;
+  uintptr_t config = 0;
 };
 
 struct AllreduceCoalescedOptions : AllreduceOptions {};
@@ -147,17 +149,20 @@ struct ReduceOptions {
   int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  uintptr_t config = 0;
 };
 
 struct AllgatherOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  uintptr_t config = 0;
 };
 
 struct GatherOptions {
   int64_t rootRank = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  uintptr_t config = 0;
 };
 
 struct ScatterOptions {
@@ -170,11 +175,13 @@ struct ReduceScatterOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  uintptr_t config = 0;
 };
 
 struct AllToAllOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  uintptr_t config = 0;
 };
 
 struct BarrierOptions {

@@ -4481,6 +4481,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
+  TORCH_CHECK(
+      opts.config == 0,
+      "Per-collective NCCL configuration is not supported for sparse all_reduce");
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
   TORCH_CHECK(
@@ -4566,14 +4569,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-        return ncclAllReduce(
+        return ncclAllReduceWithConfig(
             input.data_ptr(),
             output.data_ptr(),
             input.numel(),
             ncclDataType,
             ncclReduceOp,
             comm,
-            stream.stream());
+            stream.stream(),
+            opts.config);
       },
       OpType::ALLREDUCE,
       opts.asyncOp,
@@ -4595,7 +4599,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
   }
   check_gpu_single_tensor(tensor);
 
-  if (opts.reduceOp == ReduceOp::SUM) {
+  if (opts.config == 0 && opts.reduceOp == ReduceOp::SUM) {
     using namespace intra_node_comm;
     if (intraNodeComm_ == nullptr && IntraNodeComm::isEnabled()) {
       intraNodeComm_ = initIntraNodeComm();
@@ -4674,14 +4678,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-        return ncclAllReduce(
+        return ncclAllReduceWithConfig(
             input.data_ptr(),
             output.data_ptr(),
             input.numel(),
             ncclDataType,
             ncclReduceOp,
             comm,
-            stream.stream());
+            stream.stream(),
+            opts.config);
       },
       OpType::COALESCED,
       opts.asyncOp,
@@ -4728,13 +4733,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        return ncclBcast(
+        return ncclBcastWithConfig(
             input.data_ptr(),
             input.numel(),
             getNcclDataType(input.scalar_type()),
             static_cast<int>(root),
             comm,
-            stream.stream());
+            stream.stream(),
+            opts.config);
       },
       OpType::BROADCAST,
       opts.asyncOp,
@@ -4767,14 +4773,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        return ncclBroadcast(
+        return ncclBroadcastWithConfig(
             input.data_ptr(),
             output.data_ptr(),
             input.numel(),
             getNcclDataType(input.scalar_type()),
             static_cast<int>(root),
             comm,
-            stream.stream());
+            stream.stream(),
+            opts.config);
       },
       OpType::BROADCAST,
       opts.asyncOp,
@@ -4827,7 +4834,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-        return ncclReduce(
+        return ncclReduceWithConfig(
             input.data_ptr(),
             output.data_ptr(),
             input.numel(),
@@ -4835,7 +4842,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
             ncclReduceOp,
             static_cast<int>(root),
             comm,
-            stream.stream());
+            stream.stream(),
+            opts.config);
       },
       OpType::REDUCE,
       opts.asyncOp,
@@ -4869,15 +4877,16 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_oop(
         const auto ncclDataType = getNcclDataType(input.scalar_type());
         const auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-        return ncclReduce(
+        return ncclReduceWithConfig(
             input.data_ptr(),
             output.data_ptr(),
             input.numel(),
             ncclDataType,
             ncclReduceOp,
-            (int)root,
+            static_cast<int>(root),
             comm,
-            stream.stream());
+            stream.stream(),
+            opts.config);
       },
       OpType::REDUCE,
       opts.asyncOp,
@@ -4929,13 +4938,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
           // See [We actually don't need to stash anything here].
-          return ncclAllGather(
+          return ncclAllGatherWithConfig(
               input.data_ptr(),
               output.data_ptr(),
               input.numel(),
               getNcclDataType(input.scalar_type()),
               comm,
-              stream.stream());
+              stream.stream(),
+              opts.config);
         },
         [](at::cuda::CUDAStream& ncclStream,
            c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
@@ -4972,8 +4982,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
     for (const int64_t i : c10::irange(static_cast<int64_t>(num_reduces))) {
       auto& output = outputTensors_[i];
       auto& input = (i == rank_) ? inputTensor : output;
-      auto broadcastOpts =
-          BroadcastOptions{i, int64_t(0), opts.timeout, opts.asyncOp};
+      auto broadcastOpts = BroadcastOptions{
+          i, int64_t(0), opts.timeout, opts.asyncOp, opts.config};
       _broadcast_oop(output, input, broadcastOpts);
     }
     auto work = endCoalescing(OpType::ALLGATHER);
@@ -5021,13 +5031,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_gather_single_coalesced(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        return ncclAllGather(
+        return ncclAllGatherWithConfig(
             input.data_ptr(),
             output.data_ptr(),
             input.numel(),
             getNcclDataType(input.scalar_type()),
             comm,
-            stream.stream());
+            stream.stream(),
+            opts.config);
       },
       OpType::COALESCED,
       opts.asyncOp,
@@ -5089,14 +5100,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
           const auto ncclDataType = getNcclDataType(input.scalar_type());
           const auto ncclReduceOp =
               getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-          return ncclReduceScatter(
+          return ncclReduceScatterWithConfig(
               input.data_ptr(),
               output.data_ptr(),
               output.numel(),
               ncclDataType,
               ncclReduceOp,
               comm,
-              stream.stream());
+              stream.stream(),
+              opts.config);
         },
         [&](at::cuda::CUDAStream& ncclStream,
             c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
@@ -5132,7 +5144,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
           static_cast<int64_t>(i),
           static_cast<int64_t>(0),
           opts.timeout,
-          opts.asyncOp};
+          opts.asyncOp,
+          opts.config};
       _reduce_oop(output, input, reduceOpts);
     }
     auto work = endCoalescing(OpType::REDUCE_SCATTER);
@@ -5206,14 +5219,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single(
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-        return ncclReduceScatter(
+        return ncclReduceScatterWithConfig(
             input.data_ptr(),
             output.data_ptr(),
             output.numel(),
             ncclDataType,
             ncclReduceOp,
             comm,
-            stream.stream());
+            stream.stream(),
+            opts.config);
       },
       OpType::_REDUCE_SCATTER_BASE,
       opts.asyncOp,
@@ -5266,14 +5280,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single_coalesced(
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-        return ncclReduceScatter(
+        return ncclReduceScatterWithConfig(
             input.data_ptr(),
             output.data_ptr(),
             output.numel(),
             ncclDataType,
             ncclReduceOp,
             comm,
-            stream.stream());
+            stream.stream(),
+            opts.config);
       },
       OpType::COALESCED,
       opts.asyncOp,
@@ -5416,6 +5431,17 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
+          const auto dataType = getNcclDataType(input.scalar_type());
+          if (opts.config != 0) {
+            return ncclAllToAllWithConfig(
+                input.data_ptr(),
+                output.data_ptr(),
+                input.numel() / this->getSize(),
+                dataType,
+                comm,
+                stream.stream(),
+                opts.config);
+          }
           torch::cuda::nccl::all2all_single_equal_split(
               input, output, this->getSize(), comm, stream);
           return ncclSuccess;
@@ -5424,6 +5450,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
         opts.asyncOp,
         "nccl:all_to_all");
   } else {
+    TORCH_CHECK(
+        opts.config == 0,
+        "Per-collective NCCL configuration requires equal all_to_all split sizes");
     RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
         std::make_tuple(
             static_cast<int64_t>(seqCollective_) + 1,
@@ -5484,6 +5513,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& opts) {
+  TORCH_CHECK(
+      opts.config == 0,
+      "Per-collective NCCL configuration is not supported for list all_to_all");
   int64_t input_total_numel = 0;
   int64_t output_total_numel = 0;
   // considering uneven all2all bw calculation
@@ -5665,6 +5697,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
+  TORCH_CHECK(
+      opts.config == 0,
+      "Per-collective NCCL configuration is only supported by gather_single");
   static auto invalidArgument = [](const std::string& msg) {
     C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::gather: " + msg);
   };
@@ -5793,15 +5828,19 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather_single(
         // directly into the flat output buffer on the root, so no per-rank
         // copy is needed.
         void* recvbuff = isRoot ? output.data_ptr() : nullptr;
-        return ncclGather(
+        return ncclGatherWithConfig(
             input.data_ptr(),
             recvbuff,
             count,
             getNcclDataType(input.scalar_type()),
             root,
             comm,
-            stream.stream());
+            stream.stream(),
+            opts.config);
 #else
+        TORCH_CHECK(
+            opts.config == 0,
+            "Per-collective NCCL configuration requires NCCL 2.31 or later");
         // Fallback for NCCL < 2.28.3 (e.g. RCCL, which lacks ncclGather):
         // reuse the shared send/recv gather helper, pointing its per-rank
         // outputs at contiguous slices of the flat output buffer so there is
@@ -5966,13 +6005,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_gather_single(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        return ncclAllGather(
+        return ncclAllGatherWithConfig(
             input.data_ptr(),
             output.data_ptr(),
             input.numel(),
             getNcclDataType(input.scalar_type()),
             comm,
-            stream.stream());
+            stream.stream(),
+            opts.config);
       },
       OpType::_ALLGATHER_BASE,
       opts.asyncOp,
