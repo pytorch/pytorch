@@ -83,7 +83,9 @@ from .base import (
     Member,
     Method,
     NO_SUCH_SUBOBJ,
+    readonly_setter,
     Setter,
+    unmodeled_setter,
     VariableTracker,
 )
 from .constant import ConstantVariable
@@ -461,10 +463,14 @@ class FrameSummaryVariable(VariableTracker):
     # traceback.FrameSummary is pure-Python with __slots__ (Lib/traceback.py);
     # each slot is exposed as a read-only member_descriptor.
     tp_members = {
-        "lineno": Member(getset_build(lambda s: s.frame_summary.lineno), None),
-        "filename": Member(getset_build(lambda s: s.frame_summary.filename), None),
-        "name": Member(getset_build(lambda s: s.frame_summary.name), None),
-        "line": Member(getset_build(lambda s: s.frame_summary.line), None),
+        "lineno": Member(
+            getset_build(lambda s: s.frame_summary.lineno), readonly_setter
+        ),
+        "filename": Member(
+            getset_build(lambda s: s.frame_summary.filename), readonly_setter
+        ),
+        "name": Member(getset_build(lambda s: s.frame_summary.name), readonly_setter),
+        "line": Member(getset_build(lambda s: s.frame_summary.line), readonly_setter),
     }
 
 
@@ -525,7 +531,7 @@ class TracebackVariable(VariableTracker):
     ) -> VariableTracker:
         name = name_var.as_python_constant()
         getset = self.lookup_tp_getset_member(name)
-        if getset is not None and getset.setter is not None:
+        if getset is not None:
             getset.setter(self, tx, val)
         return variables.ConstantVariable.create(None)
 
@@ -567,14 +573,14 @@ class TracebackVariable(VariableTracker):
     # (not a real CPython traceback attribute).
     tp_getset = {
         "tb_next": GetSet(_get_tb_next, _set_tb_next),
-        "tb_lineno": GetSet(_get_tb_lineno, None),
-        "frame_summary": GetSet(lambda s, _: s.frame_summary, None),
+        "tb_lineno": GetSet(_get_tb_lineno, readonly_setter),
+        "frame_summary": GetSet(lambda s, _: s.frame_summary, readonly_setter),
     }
 
     # ref: CPython Objects/traceback.c tb_memberlist, where tb_lasti is
     # READONLY. Dynamo graph breaks on read rather than modelling the value.
     tp_members = {
-        "tb_lasti": Member(_get_tb_lasti, None),
+        "tb_lasti": Member(_get_tb_lasti, readonly_setter),
     }
 
     def tp_richcompare_impl(
@@ -683,7 +689,7 @@ class ExceptionVariable(VariableTracker):
             # Writable attributes route through their tp_getset/tp_members
             # setter. Anything else becomes a custom instance-dict attribute.
             getset = self.lookup_tp_getset_member(attr)
-            if getset is not None and getset.setter is not None:
+            if getset is not None:
                 getset.setter(self, tx, args[1])
             else:
                 # Arbitrary user attribute -> store in the instance __dict__
@@ -840,7 +846,7 @@ class ExceptionVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
     tp_getset = {
-        "__class__": GetSet(getset_build(lambda s: s.exc_type), None),
+        "__class__": GetSet(getset_build(lambda s: s.exc_type), unmodeled_setter),
         "__context__": GetSet(lambda s, _: s.__context__, _set_context),
         "__cause__": GetSet(lambda s, _: s.__cause__, _set_cause),
         "__traceback__": GetSet(lambda s, _: s.__traceback__, _set_traceback),
@@ -2885,7 +2891,9 @@ class ContextVarVariable(VariableTracker):
             raise_observed_exception(LookupError, tx, args=[f"{self.cv_obj!r}"])
 
     # contextvars.ContextVar.name is a read-only member.
-    tp_members = {"name": Member(getset_build(lambda s: s.cv_obj.name), None)}
+    tp_members = {
+        "name": Member(getset_build(lambda s: s.cv_obj.name), readonly_setter)
+    }
 
 
 class RandomClassVariable(VariableTracker):
