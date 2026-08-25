@@ -194,6 +194,9 @@ def reset() -> None:
 
             reset_cudagraph_trees()
 
+        if hasattr(torch._C, "_exit_fake_tensor_mode"):
+            torch._C._exit_fake_tensor_mode()
+
 
 def reset_code_caches() -> None:
     """

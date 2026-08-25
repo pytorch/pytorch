@@ -380,6 +380,21 @@ class RegisterDispatchKey:
     def gen_structured(self, g: NativeFunctionsGroup) -> list[str]:
         metadata = self.backend_index.get_kernel(g)
         if self.backend_index.dispatch_key == DispatchKey.Meta:
+            if not g.out.structured_generate_meta:
+                missing_kernels = [
+                    str(f.func.name)
+                    for f in g.functions()
+                    if f.func.kind() is not SchemaKind.inplace
+                    and not self.backend_index.has_kernel(f)
+                ]
+                if missing_kernels:
+                    raise AssertionError(
+                        "structured_generate_meta=False requires explicit Meta "
+                        f"kernels for {missing_kernels}"
+                    )
+                return list(
+                    mapMaybe(lambda f: self.gen_unstructured(f, g), g.functions())
+                )
             if self.backend_index.has_kernel(g.out):
                 raise AssertionError(
                     "Do not explicitly specify Meta dispatch key on structured "

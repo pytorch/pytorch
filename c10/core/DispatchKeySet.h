@@ -922,6 +922,11 @@ C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 // checks; if at all possible, refactor the code to stop using DispatchKey in
 // those cases.
 inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
+  // Legacy APIs were written before tensors had dispatch key sets, when each
+  // tensor had a single type ID (e.g. CPU). Fake is removed like Python: a C++
+  // FakeTensor carries its fake device's backend key (e.g. CPU), which those
+  // APIs expect to get back. This only reports type identity; kernels for fake
+  // tensors are still selected by the Fake key.
   // NB: If you add any extra keys that can be stored in TensorImpl on
   // top of existing "backend" keys like CPU/CUDA, you need to add it
   // here.  At the moment, autograd keys and ADInplaceOrView key need this
@@ -934,7 +939,8 @@ inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
                DispatchKey::FuncTorchGradWrapper,
                DispatchKey::FuncTorchVmapMode,
                DispatchKey::FuncTorchBatched,
-               DispatchKey::Python}))
+               DispatchKey::Python,
+               DispatchKey::Fake}))
       .highestPriorityTypeId();
 }
 

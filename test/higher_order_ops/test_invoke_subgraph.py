@@ -49,6 +49,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    skipIfCppFakeTensor,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TestCase,
@@ -1414,6 +1415,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(exp_out, out)
         self.assertEqual(x_clone, x)
 
+    @skipIfCppFakeTensor("exercises the Python FakeTensor dispatch cache")
     def test_input_mutation_mutiple_times_fake_tensor_cache_hit(self):
         @nested_compile_region
         def gn(x, y):
@@ -2796,6 +2798,7 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @skipIfCppFakeTensor("C++ FakeTensor has different FX node names")
     def test_different_strides_in_backward(self):
         @nested_compile_region
         def gn(x):
