@@ -881,14 +881,20 @@ def _format_frame_summary(frame: FrameSummary) -> str:
             end_colno,
             function_name=frame.name,
         )
-        # format_source_range() counts tabs as source characters while terminals
-        # expand them to tab stops. Fall back to traceback rather than emitting a
-        # misleading marker for tabbed source.
-        if source_range and "\t" not in source_range:
+        if source_range:
             header = f'  File "{frame.filename}", line {lineno}, in {frame.name}\n'
             source_range = textwrap.dedent(source_range).rstrip("\n")
             return header + textwrap.indent(source_range, "    ") + "\n"
 
+    if line_count is not None and line_count > _MAX_USER_STACK_SOURCE_LINES:
+        # Keep the fallback bounded and avoid markers that bypass our display-width
+        # handling.
+        frame = FrameSummary(
+            frame.filename,
+            frame.lineno,
+            frame.name,
+            line=frame.line,
+        )
     return "".join(format_list([frame]))
 
 

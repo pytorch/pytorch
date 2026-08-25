@@ -608,7 +608,7 @@ Failed Source Expressions:
     @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
     def test_user_stack_tabbed_source_caret_alignment(self):
         filename = f"{__file__}.tabbed"
-        source = "\treturn gn()\n"
+        source = "return\tgn()\n"
         linecache.cache[filename] = (
             len(source),
             None,
@@ -622,14 +622,76 @@ Failed Source Expressions:
             "fn",
             lookup_line=False,
             end_lineno=1,
-            colno=8,
-            end_colno=12,
+            colno=7,
+            end_colno=11,
+        )
+
+        result = format_user_stack([frame])
+        source_line, marker_line = result.splitlines()[1:]
+
+        self.assertNotIn("\t", result)
+        self.assertEqual(
+            len(marker_line) - len(marker_line.lstrip()), source_line.index("gn()")
+        )
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_wide_unicode_source_caret_alignment(self):
+        filename = f"{__file__}.wide"
+        source = '    return "\U0001f600" + gn()\n'
+        linecache.cache[filename] = (
+            len(source),
+            None,
+            source.splitlines(True),
+            filename,
+        )
+        self.addCleanup(linecache.cache.pop, filename, None)
+        start = len(source[: source.index("gn()")].encode())
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=1,
+            colno=start,
+            end_colno=start + len("gn()"),
+        )
+
+        result = format_user_stack([frame])
+        source_line, marker_line = result.splitlines()[1:]
+
+        self.assertEqual(
+            len(marker_line) - len(marker_line.lstrip()),
+            source_line.index("gn()") + 1,
+        )
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_multiline_variable_width_source(self):
+        filename = f"{__file__}.multiline"
+        source_lines = [
+            "    value = (\n",
+            '        "\U0001f600"\n',
+            "        +\tgn()\n",
+            "    )\n",
+        ]
+        source = "".join(source_lines)
+        linecache.cache[filename] = (len(source), None, source_lines, filename)
+        self.addCleanup(linecache.cache.pop, filename, None)
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=len(source_lines),
+            colno=len("    value = "),
+            end_colno=len("    )"),
         )
 
         result = format_user_stack([frame])
 
-        self.assertEqual(result, "".join(traceback.format_list([frame])))
+        self.assertIn('"\U0001f600"', result)
+        self.assertIn("gn()", result)
         self.assertNotIn("\t", result)
+        self.assertGreater(result.count("^"), 0)
 
     @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
     def test_user_stack_long_multiline_range_is_bounded(self):
@@ -659,6 +721,28 @@ Failed Source Expressions:
 
         self.assertNotIn("sentinel_15", result)
         self.assertLessEqual(len(result.splitlines()), 10)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_long_tabbed_range_omits_misaligned_marker(self):
+        filename = f"{__file__}.long_tabbed"
+        source_lines = ["value\t= (\n"] + ["    0,\n"] * 5 + [")\n"]
+        source = "".join(source_lines)
+        linecache.cache[filename] = (len(source), None, source_lines, filename)
+        self.addCleanup(linecache.cache.pop, filename, None)
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=len(source_lines),
+            colno=len("value\t"),
+            end_colno=1,
+        )
+
+        result = format_user_stack([frame])
+
+        self.assertNotIn("^", result)
+        self.assertNotIn("~", result)
 
     def test_vt_source_location_set_during_tracing(self):
         _source_location_capture.clear()
