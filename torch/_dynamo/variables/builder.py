@@ -145,6 +145,7 @@ from ..source import (
     GetItemSource,
     GradSource,
     is_constant_source,
+    is_from_attr_proxy_source,
     is_from_closure_source,
     is_from_global_source,
     is_from_nonlocal_source,
@@ -161,6 +162,7 @@ from ..source import (
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
+    TypeMROSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
@@ -331,6 +333,7 @@ from .user_defined import (
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
+    SimpleNamespaceVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
@@ -832,24 +835,8 @@ class VariableBuilder:
 
     def _call_impl(self, value: object) -> VariableTracker:
         self.tx.output.current_tracer.traced_sources.add(self.source)
-        if value in self.tx.output.side_effects:
-            side_effect_result = self.tx.output.side_effects[value]
-            dup_guard = make_dupe_guard(self.source, side_effect_result.source)
-            if dup_guard:
-                self.install_guards(dup_guard)
-
-            if isinstance(value, torch.nn.Module) and isinstance(
-                side_effect_result, UnspecializedNNModuleVariable
-            ):
-                # This means that two nn module instances with different sources
-                # have the same id. NN modules are somewhat special objects,
-                # because we have to track their nn_module_stack for ease of
-                # use. But if we don't do anything, we will just return the
-                # older variable tracker with the older nn_module_stack. So,
-                # lets return the old variable tracker but update its
-                # nn_module_stack
-                side_effect_result.set_nn_module_stack_source(self.source)
-            return side_effect_result
+        if (result := self._reuse_tracked_variable(value)) is not None:
+            return result
 
         cached_vt = self.tx.output.variable_tracker_cache.get(self.source)
         if cached_vt:
@@ -893,6 +880,49 @@ class VariableBuilder:
         if "JVP_NESTING" not in self.source.name:
             self.tx.output.variable_tracker_cache[self.source] = vt
         return vt
+
+    def _reuse_tracked_variable(
+        self,
+        value: object,
+    ) -> VariableTracker | None:
+        if value not in self.tx.output.side_effects:
+            return None
+
+        result = self.tx.output.side_effects[value]
+        if self.source != result.source:
+            dup_guard = make_dupe_guard(self.source, result.source)
+            if dup_guard is not None:
+                self.install_guards(dup_guard)
+            elif is_from_attr_proxy_source(self.source) or (
+                result.source is not None and is_from_attr_proxy_source(result.source)
+            ):
+                if result.source is None:
+                    raise AssertionError("Tracked AttrProxy module must have a source")
+                # make_dupe_guard cannot relate local and global sources. Reusing
+                # the tracker still requires both sources to resolve to the same
+                # base module, so pin each source to its compile-time object.
+                install_guard(
+                    self.source.make_guard(GuardBuilder.ID_MATCH),
+                    result.source.make_guard(GuardBuilder.ID_MATCH),
+                )
+
+        if (
+            isinstance(value, torch.nn.Module)
+            and isinstance(result, UnspecializedNNModuleVariable)
+            # WeakKeyDictionary internals are an implementation detail, not a
+            # useful module path. Keep the existing source until a user-facing
+            # source is observed.
+            and not self.source.is_dict_key()
+        ):
+            # This means that two nn module instances with different sources
+            # have the same id. NN modules are somewhat special objects,
+            # because we have to track their nn_module_stack for ease of
+            # use. But if we don't do anything, we will just return the
+            # older variable tracker with the older nn_module_stack. So,
+            # lets return the old variable tracker but update its
+            # nn_module_stack
+            result.set_nn_module_stack_source(self.source)
+        return result
 
     def _can_lift_attrs_to_inputs(self, vt: VariableTracker) -> bool:
         return type(vt) in {
@@ -2378,6 +2408,8 @@ class VariableBuilder:
             # reconstructed from a source across a graph break, so a `with` on
             # the reconstructed object can still be entered.
             result = GenericContextWrappingVariable(value, source=self.source)
+        elif SimpleNamespaceVariable.is_matching_cls(type(value)):
+            result = SimpleNamespaceVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
@@ -2407,10 +2439,31 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return TupleVariable([ConstantVariable.create(item) for item in value])
 
+        list_source = self.get_source()
+        first_item_source = None
+        if (
+            config.assume_dunder_attributes_remain_unchanged
+            and isinstance(list_source, TypeMROSource)
+            and isinstance(value, tuple)
+            and value
+        ):
+            first_item = value[0]
+            if (
+                isinstance(first_item, type)
+                and type.__getattribute__(first_item, "__mro__") is value
+            ):
+                first_item_source = list_source.base
         output = [
             LazyVariableTracker.create(
                 item,
-                source=GetItemSource(self.get_source(), i),
+                # Reuse the type source when this really is the type's own
+                # first MRO entry. A custom metaclass may return an MRO whose
+                # first item is a different type.
+                source=(
+                    first_item_source
+                    if i == 0 and first_item_source is not None
+                    else GetItemSource(list_source, i)
+                ),
                 tx=self.tx,
             )
             for i, item in enumerate(value)
@@ -2670,6 +2723,10 @@ class VariableBuilder:
                 # type: ignore[attr-defined]
                 value = value.get_base()
                 self.source = AttrProxySource(self.source)
+                # _call_impl checked the AttrProxy identity, while side effects
+                # track the unwrapped module. Check again after normalization.
+                if (result := self._reuse_tracked_variable(value)) is not None:
+                    return result
 
             freezing = is_parameter_freezing()
 
@@ -3632,9 +3689,18 @@ class VariableBuilder:
         )
 
         # Directly do item to bypass capture_scalar_outputs
+        #
+        # Must use root_tracer, not output.create_proxy (current tracer):
+        # this VariableTracker (and the proxy it wraps) gets reused across
+        # every later reference to the same source, via
+        # output.variable_tracker_cache. If it's first built while tracing a
+        # HOP body (e.g. torch.utils.checkpoint), a sibling HOP subgraph
+        # reusing the same source later gets the cached proxy back verbatim
+        # but can't reach it via its own tracer's parent chain.
+        # See https://github.com/pytorch/pytorch/issues/193194.
         r = wrap_fx_proxy(
             self.tx,
-            self.tx.output.create_proxy(
+            self.tx.output.root_tracer.create_proxy(
                 "call_method",
                 "item",
                 *proxy_args_kwargs([unspec_var], {}),
