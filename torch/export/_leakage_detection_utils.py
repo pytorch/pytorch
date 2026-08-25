@@ -1,7 +1,7 @@
 import gc
 import types
 import typing
-import weakref
+from collections.abc import Iterable
 from typing_extensions import TypeIs
 
 from torch.fx.experimental.symbolic_shapes import TrackedFake
@@ -62,8 +62,10 @@ def _dict_is_attr_of_tracked_fake(d: dict) -> bool:
     return False
 
 
-def find_legit_leaks_from_referrers(active_fakes: weakref.WeakSet) -> weakref.WeakSet:
-    legit_leak: weakref.WeakSet = weakref.WeakSet()
+def find_legit_leaks_from_referrers(active_fakes: Iterable[object]) -> list[object]:
+    # For C++ fake tensors, WeakSet comparisons invoke Tensor equality and
+    # return a Tensor, whose truth value is ambiguous for multi-element tensors.
+    legit_leak: list[object] = []
 
     # This is so that we don't falsely flag generator to be holding fake tensor
     fake_list = list(active_fakes)
@@ -108,6 +110,6 @@ def find_legit_leaks_from_referrers(active_fakes: weakref.WeakSet) -> weakref.We
             break
 
         if flagged:
-            legit_leak.add(act)
+            legit_leak.append(act)
 
     return legit_leak

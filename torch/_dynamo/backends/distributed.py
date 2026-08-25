@@ -28,7 +28,10 @@ from torch._dynamo.backends.registry import CompiledFn, CompilerFn
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch._logging import trace_structured
-from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_inputs_temporarily,
+    is_fake_tensor,
+)
 from torch.fx.node import Node
 
 
@@ -372,7 +375,11 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                     out = compiled_submod_real(*new_args, **kwargs)
                     # output should be fake or subclass
                     if not all(
-                        (not isinstance(t, torch.Tensor) or type(t) is not torch.Tensor)
+                        (
+                            not isinstance(t, torch.Tensor)
+                            or is_fake_tensor(t)
+                            or type(t) is not torch.Tensor
+                        )
                         for t in (out if isinstance(out, (list, tuple)) else [out])
                     ):
                         raise AssertionError(

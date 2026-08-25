@@ -3676,9 +3676,7 @@ class GuardBuilder(GuardBuilderBase):
                 if value.dispatch_keys is not None:
                     dispatch_keys = value.dispatch_keys
             elif torch._subclasses.fake_tensor.is_fake_tensor(value):
-                pytype = torch.Tensor
-            elif isinstance(value, torch.nn.Parameter):
-                pytype = torch.nn.Parameter
+                pytype = type(self.get(guard))
 
             if not isinstance(value, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
@@ -4328,8 +4326,6 @@ class GuardsStatePickler(pickle.Pickler):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
             elif torch._subclasses.fake_tensor.is_fake_tensor(obj):
                 pytype = torch.Tensor
-            elif isinstance(obj, torch.nn.Parameter):
-                pytype = torch.nn.Parameter
 
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),

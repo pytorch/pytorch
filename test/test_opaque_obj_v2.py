@@ -50,6 +50,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
@@ -1447,7 +1448,6 @@ def forward(self, L_nested_counter_c_0_ : {fx_class}, L_nested_counter_c_1_ : {f
     return (add_1,)""",
         )
 
-    @skipIfCppFakeTensor("C++ FakeTensor has different FX node names")
     def test_nested_reference_trace(self):
         def foo(nested_queue, x):
             q1 = nested_queue.q
@@ -1494,7 +1494,8 @@ def forward(self, L_nested_queue_q : {fx_class}, L_x_ : torch.Tensor):
         # inputs: (token, nested_queue.q, x)
         self.assertExpectedInline(
             backend.fw_graphs[0].code.strip(),
-            """\
+            expectedIfCppFakeTensor(
+                """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     tan = torch.ops.aten.tan.default(arg2_1)
     with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, tan);  arg0_1 = tan = None
@@ -1517,9 +1518,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     eq_2 = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
     _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq_2 = _assert_scalar_2 = None
     add_4 = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
-    return (getitem_6, add_4)"""
-            if torch._dynamo.config.use_cpp_fake_tensor
-            else """\
+    return (getitem_6, add_4)""",
+                """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     tan = torch.ops.aten.tan.default(arg2_1)
     with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, tan);  arg0_1 = tan = None
@@ -1543,6 +1543,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq = _assert_scalar_2 = None
     add = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
     return (getitem_6, add)""",
+            ),
         )
 
     def test_compile_global(self):

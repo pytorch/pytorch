@@ -37,12 +37,12 @@ from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     decorateIf,
+    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
     requires_cuda,
     run_tests,
-    skipIfCppFakeTensor,
     skipIfCrossRef,
     skipIfRocm,
     skipIfTorchDynamo,
@@ -10949,7 +10949,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(compiled_out[1].size(0), 3)
         self.assertEqual(compiled_out, mod(x))
 
-    @skipIfCppFakeTensor("C++ FakeTensor has different FX node names")
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_autograd_simple(self):
         backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
@@ -11048,7 +11047,8 @@ class GraphModule(torch.nn.Module):
 
             self.assertExpectedInline(
                 normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
-                """\
+                expectedIfCppFakeTensor(
+                    """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
         clone: "f32[3, 3]" = torch.ops.aten.clone.default(tangents_1, memory_format = torch.contiguous_format);  tangents_1 = None
@@ -11095,9 +11095,8 @@ class GraphModule(torch.nn.Module):
             add_9: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
             add_10: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
             return (add_8, add_7, add_9, add_10)
-"""
-                if torch._dynamo.config.use_cpp_fake_tensor
-                else """\
+""",
+                    """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
         clone: "f32[3, 3]" = torch.ops.aten.clone.default(tangents_1, memory_format = torch.contiguous_format);  tangents_1 = None
@@ -11145,6 +11144,7 @@ class GraphModule(torch.nn.Module):
             add_11: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
             return (add_9, add_8, add_10, add_11)
 """,
+                ),
             )
 
     def test_input_output_alias(self):
