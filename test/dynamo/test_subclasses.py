@@ -27,6 +27,7 @@ from torch.nested._internal.nested_tensor import (
     nested_view_from_values_offsets,
 )
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     make_dynamo_test,
     NestedTensorTestCase,
@@ -3030,10 +3031,6 @@ class TestTwoTensorSubclass(
 ):
     """Tests for TwoTensor wrapper subclass tracing under dynamo."""
 
-    @skipIfCppFakeTensor(
-        "cpp faketensor produces a semantically equivalent but not exactly "
-        "matching graph",
-    )
     def test_tensor_subclass_TwoTensor_simple(self):
         def f(tt):
             return tt * tt.size()[0]
@@ -3046,7 +3043,8 @@ class TestTwoTensorSubclass(
 
         self.assertExpectedInline(
             normalize_gm(fw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3081,9 +3079,8 @@ class GraphModule(torch.nn.Module):
             primals_12,  # SavedForBackwardsAOTOutput(idx=0)
             primals_13,  # SavedForBackwardsAOTOutput(idx=1)
         )
-"""
-            if torch._dynamo.config.use_cpp_fake_tensor
-            else """\
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3119,11 +3116,13 @@ class GraphModule(torch.nn.Module):
             primals_13,  # SavedForBackwardsAOTOutput(idx=1)
         )
 """,
+            ),
         )
 
         self.assertExpectedInline(
             normalize_gm(bw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3149,9 +3148,8 @@ class GraphModule(torch.nn.Module):
             None,  # None
             None,  # None
         )
-"""
-            if torch._dynamo.config.use_cpp_fake_tensor
-            else """\
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3178,6 +3176,7 @@ class GraphModule(torch.nn.Module):
             None,  # None
         )
 """,
+            ),
         )
 
     def test_tensor_subclass_TwoTensor_clone_view(self):
@@ -3265,11 +3264,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.skipIf(
-        torch._dynamo.config.use_cpp_fake_tensor,
-        "cpp faketensor produces a semantically equivalent but not exactly "
-        "matching graph",
-    )
     def test_tensor_subclass_TwoTensor_mul(self):
         def f(tt, a, b):
             s0, s1 = a.size()
@@ -3285,7 +3279,8 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(fw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3328,9 +3323,8 @@ class GraphModule(torch.nn.Module):
             primals_11,  # SavedForBackwardsAOTOutput(idx=2)
             primals_13,  # SavedForBackwardsAOTOutput(idx=3)
         )
-"""
-            if torch._dynamo.config.use_cpp_fake_tensor
-            else """\
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3374,11 +3368,13 @@ class GraphModule(torch.nn.Module):
             primals_13,  # SavedForBackwardsAOTOutput(idx=3)
         )
 """,
+            ),
         )
 
         self.assertExpectedInline(
             normalize_gm(bw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3412,9 +3408,8 @@ class GraphModule(torch.nn.Module):
             primals_13,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=1)
             primals_13,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=0)
         )
-"""
-            if torch._dynamo.config.use_cpp_fake_tensor
-            else """\
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3449,6 +3444,7 @@ class GraphModule(torch.nn.Module):
             primals_13,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=0)
         )
 """,
+            ),
         )
 
     def test_tensor_subclass_TwoTensor_view(self):
@@ -3536,11 +3532,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.skipIf(
-        torch._dynamo.config.use_cpp_fake_tensor,
-        "cpp faketensor produces a semantically equivalent but not exactly "
-        "matching graph",
-    )
     def test_tensor_subclass_TwoTensor_view_mul(self):
         def f(tt):
             y = tt.clone()
@@ -3554,7 +3545,8 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(fw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3587,9 +3579,8 @@ class GraphModule(torch.nn.Module):
             primals_12,  # SavedForBackwardsAOTOutput(idx=0)
             primals_13,  # SavedForBackwardsAOTOutput(idx=1)
         )
-"""
-            if torch._dynamo.config.use_cpp_fake_tensor
-            else """\
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3623,6 +3614,7 @@ class GraphModule(torch.nn.Module):
             primals_13,  # SavedForBackwardsAOTOutput(idx=1)
         )
 """,
+            ),
         )
 
         self.assertExpectedInline(
@@ -3656,11 +3648,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.skipIf(
-        torch._dynamo.config.use_cpp_fake_tensor,
-        "cpp faketensor produces a semantically equivalent but not exactly "
-        "matching graph",
-    )
     def test_tensor_subclass_TwoTensor_return_tensor_and_subclass(self):
         def f(tt):
             y = tt.clone()
@@ -3674,7 +3661,8 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(fw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3708,9 +3696,8 @@ class GraphModule(torch.nn.Module):
             primals_12,  # SavedForBackwardsAOTOutput(idx=0)
             primals_13,  # SavedForBackwardsAOTOutput(idx=1)
         )
-"""
-            if torch._dynamo.config.use_cpp_fake_tensor
-            else """\
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3745,6 +3732,7 @@ class GraphModule(torch.nn.Module):
             primals_13,  # SavedForBackwardsAOTOutput(idx=1)
         )
 """,
+            ),
         )
 
         self.assertExpectedInline(
@@ -3817,11 +3805,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.skipIf(
-        torch._dynamo.config.use_cpp_fake_tensor,
-        "cpp faketensor produces a semantically equivalent but not exactly "
-        "matching graph",
-    )
     def test_tensor_subclass_TwoTensor_automatic_dynamic_shapes(self):
         def f(tt):
             y = tt.clone()
@@ -3864,7 +3847,8 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(fw[1].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3896,9 +3880,8 @@ class GraphModule(torch.nn.Module):
             primals_9,  # SavedForBackwardsAOTOutput(idx=0)
             primals_2,  # SavedForBackwardsAOTOutput(idx=1)
         )
-"""
-            if torch._dynamo.config.use_cpp_fake_tensor
-            else """\
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3931,6 +3914,7 @@ class GraphModule(torch.nn.Module):
             primals_2,  # SavedForBackwardsAOTOutput(idx=1)
         )
 """,
+            ),
         )
 
         self.assertExpectedInline(
@@ -3978,11 +3962,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.skipIf(
-        torch._dynamo.config.use_cpp_fake_tensor,
-        "cpp faketensor produces a semantically equivalent but not exactly "
-        "matching graph",
-    )
     def test_tensor_subclass_TwoTensor_mark_dynamic_shapes(self):
         def f(tt):
             y = tt.clone()
@@ -4004,7 +3983,8 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(fw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -4036,9 +4016,8 @@ class GraphModule(torch.nn.Module):
             primals_9,  # SavedForBackwardsAOTOutput(idx=0)
             primals_2,  # SavedForBackwardsAOTOutput(idx=1)
         )
-"""
-            if torch._dynamo.config.use_cpp_fake_tensor
-            else """\
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -4071,6 +4050,7 @@ class GraphModule(torch.nn.Module):
             primals_2,  # SavedForBackwardsAOTOutput(idx=1)
         )
 """,
+            ),
         )
 
         self.assertExpectedInline(
