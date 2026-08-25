@@ -764,6 +764,7 @@ __all__ += ["grouped_mm"]
 class SwizzleType(Enum):
     NO_SWIZZLE = 0
     SWIZZLE_32_4_4 = 1
+    SWIZZLE_32_8 = 2
 
 __all__ += ["SwizzleType"]
 
@@ -774,7 +775,6 @@ class ScalingType(Enum):
     BlockWise1x32 = 3
     BlockWise1x128 = 4
     BlockWise128x128 = 5
-    BlockWiseBlk32Ue8m0_32_8_EXT = 6
 
 __all__ += ["ScalingType"]
 

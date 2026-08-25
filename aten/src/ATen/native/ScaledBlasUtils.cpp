@@ -188,10 +188,7 @@ bool check_deepseek_recipe(
 
 /**
  * Both inputs must be fp8
- * A, B must have 1 scale each with float8_e8m0fnu scales:
- * - CUDA: BlockWise1x32 (cuBLAS-style swizzled block scales)
- * - ROCm 7.14.0+: BlockWiseBlk32Ue8m0_32_8_EXT (hipBLASLt gfx950 EXT layout)
- * - ROCm below 7.14.0 at build time: BlockWise1x32 (legacy ROCm MXFP8)
+ * A, B must have 1 scale each, {Blockwise_1x32, e8m0}
  */
 bool check_mxfp8_recipe(
     c10::ScalarType type_a,
@@ -210,26 +207,18 @@ bool check_mxfp8_recipe(
     return false;
   }
 
-  if (scales_a[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
-  if (scales_b[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
-
-#if defined(USE_ROCM) && ROCM_VERSION >= 71400
-  if (recipe_a[0] != ScalingType::BlockWiseBlk32Ue8m0_32_8_EXT) return false;
-  if (recipe_b[0] != ScalingType::BlockWiseBlk32Ue8m0_32_8_EXT) return false;
-#else
+  // Need {Blockwise_1x32, e8m0} for A & B
   if (recipe_a[0] != ScalingType::BlockWise1x32) return false;
+  if (scales_a[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
   if (recipe_b[0] != ScalingType::BlockWise1x32) return false;
-#endif
+  if (scales_b[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
 
   return true;
 }
 
 /**
  * Both inputs must be fp4
- * A, B must have 1 scale each with float8_e8m0fnu scales:
- * - CUDA: BlockWise1x32 (cuBLAS-style swizzled block scales)
- * - ROCm 7.13.0+: BlockWiseBlk32Ue8m0_32_8_EXT (hipBLASLt gfx950 EXT layout)
- * - ROCm below 7.13.0 at build time: BlockWise1x32 (legacy ROCm MXFP4)
+ * A, B must have 1 scale each, {Blockwise_1x32, e8m0}
  */
 bool check_mxfp4_recipe(
     c10::ScalarType type_a,
@@ -248,16 +237,11 @@ bool check_mxfp4_recipe(
     return false;
   }
 
-  if (scales_a[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
-  if (scales_b[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
-
-#if defined(USE_ROCM) && ROCM_VERSION >= 71300
-  if (recipe_a[0] != ScalingType::BlockWiseBlk32Ue8m0_32_8_EXT) return false;
-  if (recipe_b[0] != ScalingType::BlockWiseBlk32Ue8m0_32_8_EXT) return false;
-#else
+  // Need {Blockwise_1x32, e8m0} for A & B
   if (recipe_a[0] != ScalingType::BlockWise1x32) return false;
+  if (scales_a[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
   if (recipe_b[0] != ScalingType::BlockWise1x32) return false;
-#endif
+  if (scales_b[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
 
   return true;
 }
@@ -362,11 +346,9 @@ void validate_scaled_mm_v2_inputs(
       recipe_a, recipe_b, ScalingType::RowWise, ScalingType::RowWise);
   const bool is_mx_1x32 = is_single_recipe(
       recipe_a, recipe_b, ScalingType::BlockWise1x32, ScalingType::BlockWise1x32);
-  const bool is_mx_ext = is_single_recipe(
-      recipe_a,
-      recipe_b,
-      ScalingType::BlockWiseBlk32Ue8m0_32_8_EXT,
-      ScalingType::BlockWiseBlk32Ue8m0_32_8_EXT);
+  // The 32x8-tiled layout pads differently, so it has its own element count.
+  const bool is_mx_32_8 = is_mx_1x32 && at::globalContext().hasROCM() &&
+      !swizzle_a.empty() && swizzle_a[0] == SwizzleType::SWIZZLE_32_8;
   const bool is_nv_1x16 = is_single_recipe(
       recipe_a, recipe_b, ScalingType::BlockWise1x16, ScalingType::BlockWise1x16);
   const bool is_nv_2lvl = is_two_level_nvfp4(recipe_a, recipe_b);
@@ -409,7 +391,13 @@ void validate_scaled_mm_v2_inputs(
     // ROCm and NVIDIA use different blockwise scale shapes; detect at runtime
     // to keep aten-cpu free of GPU-conditional compilation. Formulas mirror
     // _scaled_mxfp8_mxfp8 and _scaled_mxfp4_mxfp4 in cuda/ScaledBlas.cpp.
-    if (is_xpu) {
+    if (is_mx_32_8) {
+      // 32x8-tiled scale layout (hipBLASLt BLK32_UE8M0_32_8).
+      expected_a_elems = sym_round_up(M, 32) *
+          sym_round_up(sym_ceil_div(K_unpacked, 32), 8);
+      expected_b_elems = sym_round_up(N, 32) *
+          sym_round_up(sym_ceil_div(K_unpacked, 32), 8);
+    } else if (is_xpu) {
       // XPU: unpadded [M, ceil_div(K, 32)] / [N, ceil_div(K, 32)], NO_SWIZZLE.
       expected_a_elems = M * sym_ceil_div(K_unpacked, 32);
       expected_b_elems = N * sym_ceil_div(K_unpacked, 32);
@@ -438,27 +426,6 @@ void validate_scaled_mm_v2_inputs(
             scale_b[0].scalar_type() == ScalarType::Float8_e8m0fnu,
         "For Blockwise scaling scale_b should have ", expected_b_elems,
         " elements, got: ", scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
-  } else if (is_mx_ext) {
-    // ROCm gfx950 hipBLASLt BLK32_UE8M0_32_8_EXT layout. Formulas mirror
-    // _scaled_mxfp8_mxfp8 / _scaled_mxfp4_mxfp4 in cuda/ScaledBlas.cpp.
-    const auto expected_a_elems = sym_round_up(M, 32) *
-        sym_round_up(sym_ceil_div(K_unpacked, 32), 8);
-    const auto expected_b_elems = sym_round_up(N, 32) *
-        sym_round_up(sym_ceil_div(K_unpacked, 32), 8);
-    TORCH_CHECK_VALUE(
-        scale_a.size() == 1 && scale_a[0].sym_numel() == expected_a_elems &&
-            scale_a[0].scalar_type() == ScalarType::Float8_e8m0fnu,
-        "For BlockWiseBlk32Ue8m0_32_8_EXT scaling scale_a should have ",
-        expected_a_elems,
-        " elements, got: ",
-        scale_a.empty() ? c10::SymInt(0) : scale_a[0].sym_numel());
-    TORCH_CHECK_VALUE(
-        scale_b.size() == 1 && scale_b[0].sym_numel() == expected_b_elems &&
-            scale_b[0].scalar_type() == ScalarType::Float8_e8m0fnu,
-        "For BlockWiseBlk32Ue8m0_32_8_EXT scaling scale_b should have ",
-        expected_b_elems,
-        " elements, got: ",
-        scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
   } else if (is_nv_1x16) {
     const auto expected_a_elems = nvfp4_scale_elems(M);
     const auto expected_b_elems = nvfp4_scale_elems(N);
@@ -511,7 +478,7 @@ void validate_scaled_mm_v2_inputs(
   // `check_swizzle_lengths` and the per-impl `swizzle_a == ...` asserts in
   // aten/src/ATen/native/cuda/ScaledBlas.cpp. Only MX/NVFP recipes consult
   // swizzle; tensorwise/rowwise/deepseek paths don't.
-  const bool is_mx_or_nvfp = is_mx_1x32 || is_mx_ext || is_nv_1x16 || is_nv_2lvl;
+  const bool is_mx_or_nvfp = is_mx_1x32 || is_nv_1x16 || is_nv_2lvl;
   if (is_mx_or_nvfp) {
     // Blockwise scales must be contiguous (checked once for all MX/NVFP4
     // recipes). scale_a[0]/scale_b[0] are the blockwise scales and were
@@ -545,23 +512,6 @@ void validate_scaled_mm_v2_inputs(
             s == SwizzleType::NO_SWIZZLE,
             "For XPU MX/NVFP4 gemm, scale_b swizzle entries must all be NO_SWIZZLE");
       }
-    } else if (is_mx_ext) {
-      TORCH_CHECK_VALUE(
-          swizzle_a.size() == num_args_a,
-          "swizzle_a must have ", num_args_a, " value",
-          num_args_a == 1 ? "" : "s",
-          ", got ", swizzle_a.size());
-      TORCH_CHECK_VALUE(
-          swizzle_b.size() == num_args_b,
-          "swizzle_b must have ", num_args_b, " value",
-          num_args_b == 1 ? "" : "s",
-          ", got ", swizzle_b.size());
-      TORCH_CHECK_VALUE(
-          swizzle_a[0] == SwizzleType::SWIZZLE_32_4_4,
-          "scale_a must use SWIZZLE_32_4_4 for BlockWiseBlk32Ue8m0_32_8_EXT block scales");
-      TORCH_CHECK_VALUE(
-          swizzle_b[0] == SwizzleType::SWIZZLE_32_4_4,
-          "scale_b must use SWIZZLE_32_4_4 for BlockWiseBlk32Ue8m0_32_8_EXT block scales");
     } else if (!is_rocm) {
       TORCH_CHECK_VALUE(
           swizzle_a.size() == num_args_a,
@@ -583,15 +533,15 @@ void validate_scaled_mm_v2_inputs(
           swizzle_b[0] == SwizzleType::SWIZZLE_32_4_4,
           "scale_b must be swizzled to SWIZZLE_32_4_4 format");
     } else if (is_mx_1x32) {
-      // ROCm only supports the MX path (no NVFP4) and requires NO_SWIZZLE.
+      // ROCm only supports the MX path (no NVFP4).
       TORCH_CHECK_VALUE(
           swizzle_a.size() == 1 && swizzle_b.size() == 1,
           "For ROCM MX gemm, swizzle_a and swizzle_b must each have 1 value, got ",
           swizzle_a.size(), " and ", swizzle_b.size());
       TORCH_CHECK_VALUE(
-          swizzle_a[0] == SwizzleType::NO_SWIZZLE &&
-              swizzle_b[0] == SwizzleType::NO_SWIZZLE,
-          "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE");
+          (swizzle_a[0] == SwizzleType::NO_SWIZZLE || swizzle_a[0] == SwizzleType::SWIZZLE_32_8) &&
+              swizzle_a[0] == swizzle_b[0],
+          "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE or both be SWIZZLE_32_8");
     }
   }
 }

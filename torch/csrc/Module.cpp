@@ -3104,11 +3104,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "BlockWise128x128",
           at::blas::ScalingType::BlockWise128x128,
-          "Scale per 128x128 tile")
-      .value(
-          "BlockWiseBlk32Ue8m0_32_8_EXT",
-          at::blas::ScalingType::BlockWiseBlk32Ue8m0_32_8_EXT,
-          "ROCm gfx950 pre-swizzled Block_32_UE8M0_32_8_EXT scale layout");
+          "Scale per 128x128 tile");
 
   py::enum_<at::blas::SwizzleType>(
       py_module, "_SwizzleType", "Supported scale swizzle types")
@@ -3116,7 +3112,11 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "SWIZZLE_32_4_4",
           at::blas::SwizzleType::SWIZZLE_32_4_4,
-          "Blackwell-style 32x4x4 swizzle");
+          "Blackwell-style 32x4x4 swizzle")
+      .value(
+          "SWIZZLE_32_8",
+          at::blas::SwizzleType::SWIZZLE_32_8,
+          "gfx950-style 32x8 swizzle (hipBLASLt BLK32_UE8M0_32_8)");
 
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)

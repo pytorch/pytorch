@@ -7322,7 +7322,15 @@ def _check_scaled_mm_sizes(
                     block_size_mn * ceil_div(n, block_size_mn) * padded_num_k_blocks
                 )
 
-            if (
+            # Which of the two layouts ROCm takes depends on the arch, which meta
+            # cannot query, so accept the 32x8-tiled sizes as well.
+            alt_a_size = alt_b_size = None
+            if torch.version.hip and scale_a.dtype == torch.float8_e8m0fnu:
+                padded_k_blocks_32_8 = ceil_div(num_k_blocks, 8) * 8
+                alt_a_size = ceil_div(m, 32) * 32 * padded_k_blocks_32_8
+                alt_b_size = ceil_div(n, 32) * 32 * padded_k_blocks_32_8
+
+            if (scale_a.numel() == alt_a_size and scale_b.numel() == alt_b_size) or (
                 scale_a.numel() == expected_a_size
                 and scale_b.numel() == expected_b_size
             ):

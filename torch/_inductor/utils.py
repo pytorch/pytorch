@@ -5170,6 +5170,21 @@ def _round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
 
 
+@functools.lru_cache
+def _prefers_swizzle_32_8(mat_dtype: torch.dtype) -> bool:
+    """
+    gfx950 hipBLASLt takes 1x32 block scales in the 32x8-tiled layout: MX FP4
+    from ROCm 7.13, MX FP8 from 7.14. Every other arch uses the default layout.
+    """
+    if not torch.version.hip or not torch.cuda.is_available():
+        return False
+    hip_version = tuple(int(x) for x in torch.version.hip.split("-")[0].split("."))
+    min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
+    return hip_version >= min_version and _rocm_native_device_arch_name(
+        "cuda"
+    ).startswith("gfx950")
+
+
 def _infer_scale_swizzle_impl(
     mat_size: tuple[Any, Any],
     scale_size: tuple[Any, ...],
@@ -5250,34 +5265,20 @@ def _infer_scale_swizzle_impl(
                 scale_numel, expected_numel_b
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
+        elif _prefers_swizzle_32_8(mat_dtype):
+            # AMD gfx950: 32x8-tiled scales
+            expected_numel_a = _round_up(mat_size[0], 32) * _round_up(
+                ceildiv(K_multiplier * mat_size[1], 32), 8
+            )
+            expected_numel_b = _round_up(mat_size[1], 32) * _round_up(
+                ceildiv(K_multiplier * mat_size[0], 32), 8
+            )
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_8
         else:
-            # AMD: MXFP8 uses plain BlockWise1x32 below 7.14. MXFP4 EXT at runtime ROCm >= 7.13.0;
-            # MXFP8 EXT at runtime ROCm >= 7.14.0. XPU uses plain BlockWise1x32 with no swizzle.
-            from torch.testing._internal.common_cuda import _get_torch_rocm_version
-
-            rocm_version = _get_torch_rocm_version()
-            if mat_dtype == torch.float4_e2m1fn_x2 and rocm_version >= (7, 13):
-                k_blocks_a = ceildiv(K_multiplier * mat_size[1], 32)
-                ext_numel_a = _round_up(mat_size[0], 32) * _round_up(k_blocks_a, 8)
-                k_blocks_b = ceildiv(K_multiplier * mat_size[0], 32)
-                ext_numel_b = _round_up(mat_size[1], 32) * _round_up(k_blocks_b, 8)
-                if eq_fn(scale_numel, ext_numel_a) or eq_fn(scale_numel, ext_numel_b):
-                    return (
-                        ScalingType.BlockWiseBlk32Ue8m0_32_8_EXT,
-                        SwizzleType.SWIZZLE_32_4_4,
-                    )
-
-            if mat_dtype == torch.float8_e4m3fn and rocm_version >= (7, 14):
-                k_blocks_a = ceildiv(K_multiplier * mat_size[1], 32)
-                ext_numel_a = _round_up(mat_size[0], 32) * _round_up(k_blocks_a, 8)
-                k_blocks_b = ceildiv(K_multiplier * mat_size[0], 32)
-                ext_numel_b = _round_up(mat_size[1], 32) * _round_up(k_blocks_b, 8)
-                if eq_fn(scale_numel, ext_numel_a) or eq_fn(scale_numel, ext_numel_b):
-                    return (
-                        ScalingType.BlockWiseBlk32Ue8m0_32_8_EXT,
-                        SwizzleType.SWIZZLE_32_4_4,
-                    )
-
+            # AMD/XPU: no swizzle
             expected_numel_a = ceildiv(mat_size[0], 32) * K_multiplier * mat_size[1]
             expected_numel_b = ceildiv(K_multiplier * mat_size[1], 32) * mat_size[0]
             if eq_fn(scale_numel, expected_numel_a) or eq_fn(

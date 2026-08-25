@@ -171,11 +171,22 @@ inline cublasOperation_t cublasOpFromChar(char op) {
 
 inline int cublasLtMatmulScaleMode(
     at::blas::ScalingType scaling_type,
+    at::blas::SwizzleType swizzle_type,
     ScalarType scale_dtype,
     bool use_fast_accum) {
   switch (scaling_type) {
     case at::blas::ScalingType::BlockWise1x32:
       TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
+      if (swizzle_type == at::blas::SwizzleType::SWIZZLE_32_8) {
+#if defined(USE_ROCM) && ROCM_VERSION >= 71300
+        return CUBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+#else
+        TORCH_CHECK(
+            false,
+            "scaled_gemm with SWIZZLE_32_8 block scales requires ROCm 7.13 "
+            "or above");
+#endif
+      }
 #if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && ROCM_VERSION >= 70000)
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
 #else
@@ -183,11 +194,6 @@ inline int cublasLtMatmulScaleMode(
           false,
           "scaled_gemm with `torch.float8_e8m0fnu` scales of 1x32 blocks "
           "is only supported for CUDA 12.8 and above");
-#endif
-#if defined(USE_ROCM) && ROCM_VERSION >= 71300
-    case at::blas::ScalingType::BlockWiseBlk32Ue8m0_32_8_EXT:
-      TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
-      return CUBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
 #endif
     case at::blas::ScalingType::BlockWise1x16:
       TORCH_CHECK(scale_dtype == kFloat8_e4m3fn);

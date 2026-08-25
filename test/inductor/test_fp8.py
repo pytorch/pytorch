@@ -1852,8 +1852,8 @@ class TestFP8Lowering(TestCase):
             (N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
         )
         if "cuda" in device:
-            A_scale = to_blocked(A_scale)
-            B_scale = to_blocked(B_scale)
+            A_scale = to_blocked(A_scale, A.dtype)
+            B_scale = to_blocked(B_scale, B.dtype)
         elif "xpu" in device:
             B_scale = B_scale.t()
 
