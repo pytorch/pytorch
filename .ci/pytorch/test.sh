@@ -1955,7 +1955,7 @@ test_distributed() {
     install_flydsl
   fi
   # shellcheck disable=SC2086
-  time python test/run_test.py --distributed-tests "${filter_arg[@]}" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose -- -s
+  time python test/run_test.py --distributed-tests "${filter_arg[@]}" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
 
   # The C++ / mpiexec distributed tests below require multiple GPUs.
