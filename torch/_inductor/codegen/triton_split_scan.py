@@ -88,21 +88,31 @@ class TritonSplitScanKernel(TritonKernel):
     def scan(self, dtypes, combine_fn, values):
         """
         Perform an associative scan on 'values'.
+
+        Supports one or two carried states.
+        *) single lane: value+flag in one <=32-bit word, or 3 u64 slots for 64-bit)
+        *) two lanes: 5-u64-slot layout ([flag, bv0, bv1, ip0, ip1])
         """
         import triton.language as tl
 
-        (dtype,) = dtypes
-        (value,) = values
+        num_lanes = len(values)
+        if num_lanes not in (1, 2):
+            raise AssertionError(
+                f"TritonSplitScanKernel supports 1 or 2 lanes, got {num_lanes}"
+            )
 
-        dtype = upcast_compute_type(dtype)
-        compute_type = triton_compute_type(dtype)
-        compute_type_triton = getattr(tl, compute_type[3:])
+        dtypes = tuple(upcast_compute_type(dtype) for dtype in dtypes)
+        compute_types = [triton_compute_type(dtype) for dtype in dtypes]
+        element_nbits = [getattr(tl, ct[3:]).primitive_bitwidth for ct in compute_types]
 
-        element_nbits = compute_type_triton.primitive_bitwidth
-
-        scratch_type = "tl.uint32" if element_nbits <= 16 else "tl.uint64"
+        if num_lanes == 1:
+            nbits = element_nbits[0]
+            scratch_type = "tl.uint32" if nbits <= 16 else "tl.uint64"
+            scratch_elems_per_block = 3 if nbits == 64 else 1
+        else:
+            scratch_type = "tl.uint64"
+            scratch_elems_per_block = 5
         scratch_type_triton = getattr(tl, scratch_type[3:])
-        scratch_elems_per_block = 3 if element_nbits == 64 else 1
         scratch_nbytes_per_block = scratch_elems_per_block * (
             scratch_type_triton.primitive_bitwidth // 8
         )
@@ -139,62 +149,98 @@ class TritonSplitScanKernel(TritonKernel):
         if self._load_mask:
             raise AssertionError("ops.scan not supported inside ops.masked")
 
-        value = cse_compute(
-            f"{value}.to({compute_type})",
-            dtype=dtype,
-            shape=value.shape,
-        )
-        value = cse_compute(
-            f"tl.broadcast_to({value}, {self.dense_size_str()})",
-            dtype=dtype,
-            shape=self.dense_size_list(),
-        )
+        broadcast_values = []
+        for value, dtype, compute_type in zip(values, dtypes, compute_types):
+            value = cse_compute(
+                f"{value}.to({compute_type})",
+                dtype=dtype,
+                shape=value.shape,
+            )
+            value = cse_compute(
+                f"tl.broadcast_to({value}, {self.dense_size_str()})",
+                dtype=dtype,
+                shape=self.dense_size_list(),
+            )
+            broadcast_values.append(value)
 
-        combine_helper_fn = self._lift_helper(combine_fn, (value,), (dtype,))
+        combine_helper_fn = self._lift_helper(
+            combine_fn, tuple(broadcast_values), dtypes
+        )
         dim = self.triton_tensor_ndim() - 1
         if dim != 0:
             raise AssertionError(f"expected scan dim == 0, got {dim}")
-        scan_shape = value.shape
+        scan_shape = broadcast_values[0].shape
         if scan_shape is None:
             raise AssertionError("expected value.shape to be set")
         reduced_shape = list(scan_shape)
         del reduced_shape[dim]
 
-        block_sum = cse_compute(
-            f"tl.reduce({value}, {dim}, {combine_helper_fn})",
-            dtype=dtype,
-            shape=reduced_shape,
+        def newvars(shape):
+            return [self.cse.newvar(dtype=dtype, shape=shape) for dtype in dtypes]
+
+        def csv(vars_):
+            # trailing-comma form so a single lane still reads as a 1-tuple
+            return "".join(f"{v}, " for v in vars_)
+
+        # block_scan is the in-order inclusive scan of this block; its last
+        # element is the block reduction. Deriving the block sum from it (via
+        # select_one, as the non-split scan does) preserves operand order, which
+        # is required for non-commutative combines -- tl.reduce may reorder
+        # operands across lanes.
+        block_scan = newvars(scan_shape)
+        self.compute.writeline(
+            f"{csv(block_scan)}= tl.associative_scan("
+            f"({csv(broadcast_values)}), {dim}, {combine_helper_fn})"
         )
-        exclusive_prefix = self.cse.newvar(
-            dtype=dtype,
-            shape=reduced_shape,
-        )
-        if element_nbits == 64:
+        block_sum = [
+            cse_compute(
+                f"triton_helpers.select_one({bscan}, "
+                f"tl.arange(0, RBLOCK) == RBLOCK - 1, {dim}, keep_dims=False)",
+                dtype=dtype,
+                shape=reduced_shape,
+            )
+            for dtype, bscan in zip(dtypes, block_scan)
+        ]
+
+        exclusive_prefix = newvars(reduced_shape)
+        pid = self.iteration_ranges_get_pid(self.range_trees[-1])
+        if num_lanes == 2:
             self.compute.splice(
                 f"""
-                {exclusive_prefix} = triton_helpers.exclusive_scan_decoupled_lookback_64(
+                {exclusive_prefix[0]}, {exclusive_prefix[1]} = triton_helpers.exclusive_scan_decoupled_lookback_2(
                     {scratch_base},
-                    {block_sum},
-                    {self.iteration_ranges_get_pid(self.range_trees[-1])},
+                    {block_sum[0]},
+                    {block_sum[1]},
+                    {pid},
                     {combine_helper_fn},
                 )
                 """,
                 strip=True,
             )
-
-        else:
-            if element_nbits > 32:
-                raise AssertionError(
-                    f"expected element_nbits <= 32, got {element_nbits}"
-                )
-            value_as_uint_dtype = f"tl.uint{element_nbits}"
-
+        elif element_nbits[0] == 64:
             self.compute.splice(
                 f"""
-                {exclusive_prefix} = triton_helpers.exclusive_scan_decoupled_lookback(
+                {exclusive_prefix[0]} = triton_helpers.exclusive_scan_decoupled_lookback_64(
                     {scratch_base},
-                    {block_sum},
-                    {self.iteration_ranges_get_pid(self.range_trees[-1])},
+                    {block_sum[0]},
+                    {pid},
+                    {combine_helper_fn},
+                )
+                """,
+                strip=True,
+            )
+        else:
+            if element_nbits[0] > 32:
+                raise AssertionError(
+                    f"expected element_nbits <= 32, got {element_nbits[0]}"
+                )
+            value_as_uint_dtype = f"tl.uint{element_nbits[0]}"
+            self.compute.splice(
+                f"""
+                {exclusive_prefix[0]} = triton_helpers.exclusive_scan_decoupled_lookback(
+                    {scratch_base},
+                    {block_sum[0]},
+                    {pid},
                     {combine_helper_fn},
                     DTYPE_VALUE_AS_UINT={value_as_uint_dtype},
                     DTYPE_PACK={scratch_type},
@@ -202,23 +248,20 @@ class TritonSplitScanKernel(TritonKernel):
                 """,
                 strip=True,
             )
-        # Compute final cumsum
-        block_scan = cse_compute(
-            f"tl.associative_scan({value}, {dim}, {combine_helper_fn})",
-            dtype=dtype,
-            shape=scan_shape,
-        )
-        combined_result = cse_compute(
-            f"{combine_helper_fn}({exclusive_prefix}, {block_scan})",
-            dtype=dtype,
-            shape=scan_shape,
-        )
-        return (
+
+        # combine_helper_fn returns a bare scalar for one lane and a tuple for
+        # two, so the assignment target matches num_lanes.
+        combined = newvars(scan_shape)
+        combine_lhs = ", ".join(str(v) for v in combined)
+        combine_args = ", ".join(str(v) for v in (*exclusive_prefix, *block_scan))
+        self.compute.writeline(f"{combine_lhs} = {combine_helper_fn}({combine_args})")
+        return tuple(
             cse_compute(
-                f"tl.where(roffset == 0, {block_scan}, {combined_result})",
+                f"tl.where(roffset == 0, {bscan}, {comb})",
                 dtype=dtype,
                 shape=scan_shape,
-            ),
+            )
+            for dtype, bscan, comb in zip(dtypes, block_scan, combined)
         )
 
     def _get_heuristic(self):

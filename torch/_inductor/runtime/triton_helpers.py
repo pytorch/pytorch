@@ -791,6 +791,99 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
 
 
 @triton.jit
+def exclusive_scan_decoupled_lookback_2(
+    scratch_base, block_value0, block_value1, index, combine_fn
+):
+    """Two-lane variant of exclusive_scan_decoupled_lookback_64.
+
+    Computes the exclusive scan of a 2-tuple carried value between blocks.
+    Uses the separate-slot scheme of the 64-bit variant (value stored apart
+    from the flag, ordered by debug_barrier + release/acquire) generalized to
+    two lanes, so it is width-uniform: each lane is bitcast to a same-width
+    unsigned int and zero-extended into its own u64 slot, regardless of the
+    lane's element width.
+
+    scratch_base: Pointer to scratch space in global memory (tl.uint64)
+    block_value0, block_value1: This block's block-sum for each lane
+    index: Scalar index of this block relative to the current scan
+    combine_fn: Function ``(v0, v1, v0, v1) -> (v0, v1)`` scanned over
+
+    Slot layout per block (5 x u64): [flag, bv0, bv1, ip0, ip1]
+    """
+    dtype0 = block_value0.dtype
+    dtype1 = block_value1.dtype
+    uint0 = tl.core.get_int_dtype(dtype0.primitive_bitwidth, signed=False)
+    uint1 = tl.core.get_int_dtype(dtype1.primitive_bitwidth, signed=False)
+
+    # Publish block sums so subsequent blocks don't get stuck waiting for us
+    if index > 0:
+        tl.store(
+            scratch_base + 5 * index + 1,
+            block_value0.to(uint0, bitcast=True).to(tl.uint64),
+        )
+        tl.store(
+            scratch_base + 5 * index + 2,
+            block_value1.to(uint1, bitcast=True).to(tl.uint64),
+        )
+        tl.debug_barrier()
+        flag_one = tl.full([], 1, tl.uint64)
+        tl.atomic_xchg(scratch_base + 5 * index + 0, flag_one, sem="release")
+
+    # Calculate exclusive prefix scan
+    exclusive_prefix0 = tl.zeros([], dtype0)
+    exclusive_prefix1 = tl.zeros([], dtype1)
+    prefix_valid = False
+    test_target = index - 1
+    while test_target >= 0:
+        flag = tl.full([], 0, tl.uint64)
+        while flag == 0:
+            flag = tl.atomic_add(scratch_base + 5 * test_target + 0, 0, sem="acquire")
+
+        # flag == 1 -> block sums at slots (1, 2); flag == 2 -> inclusive prefixes
+        # at slots (3, 4). Offsets are (2 * flag - 1) and (2 * flag).
+        base = scratch_base + 5 * test_target
+        raw0 = tl.load(base + (2 * flag - 1).to(tl.int32))
+        raw1 = tl.load(base + (2 * flag).to(tl.int32))
+        value0 = raw0.to(uint0).to(dtype0, bitcast=True)
+        value1 = raw1.to(uint1).to(dtype1, bitcast=True)
+        if prefix_valid:
+            exclusive_prefix0, exclusive_prefix1 = combine_fn(
+                value0, value1, exclusive_prefix0, exclusive_prefix1
+            )
+        else:
+            exclusive_prefix0 = value0
+            exclusive_prefix1 = value1
+            prefix_valid = True
+
+        if flag == 2:
+            test_target = tl.full([], -1, index.dtype)  # Match the original type
+        else:
+            test_target = test_target - 1
+
+    # Make inclusive block sums visible to other blocks
+    if prefix_valid:
+        inclusive_prefix0, inclusive_prefix1 = combine_fn(
+            exclusive_prefix0, exclusive_prefix1, block_value0, block_value1
+        )
+    else:
+        inclusive_prefix0 = block_value0
+        inclusive_prefix1 = block_value1
+    tl.store(
+        scratch_base + 5 * index + 3,
+        inclusive_prefix0.to(uint0, bitcast=True).to(tl.uint64),
+    )
+    tl.store(
+        scratch_base + 5 * index + 4,
+        inclusive_prefix1.to(uint1, bitcast=True).to(tl.uint64),
+    )
+    tl.debug_barrier()
+    flag_two = tl.full([], 2, tl.uint64)
+    tl.atomic_xchg(scratch_base + 5 * index + 0, flag_two, sem="release")
+
+    return exclusive_prefix0, exclusive_prefix1
+
+
+@triton.jit
 def frexp(x):
     # TODO(isuruf): use inline_asm_elementwise here
     zero = x == 0
