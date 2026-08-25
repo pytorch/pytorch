@@ -1,6 +1,7 @@
 # Owner(s): ["module: tests"]
 # ruff: noqa: F841
 
+from torch.testing._internal.common_device_type import onlyCPU
 import itertools
 import math
 import operator
@@ -1060,6 +1061,13 @@ class TestBinaryUfuncsDevice(TestCase):
             self.assertIsInstance(tr, torch.Tensor)
             self.assertEqual(tq, torch.tensor(q, dtype=dtype, device=device))
             self.assertEqual(tr, torch.tensor(r, dtype=dtype, device=device))
+
+    @onlyCPU
+    @dtypes(*integral_types())
+    def test_divmod_zero(self, device, dtype):
+        a = torch.tensor([0, 1], dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+            torch.divmod(a, a)
 
     def test_add_broadcast_empty(self, device):
         # empty + empty
