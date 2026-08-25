@@ -2662,7 +2662,10 @@ class TestPrecompile(TestCase):
         automatic_dynamic_shapes=True, assume_static_by_default=True
     )
     def test_tracer_dynamo_training_recompiles_to_dynamic_graph(self):
-        examples = [(torch.randn(size, 4, requires_grad=True),) for size in (2, 3, 5)]
+        examples = [
+            (torch.randn(rows, cols, requires_grad=True),)
+            for rows, cols in ((2, 3), (3, 5), (5, 7))
+        ]
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_dynamic,
             example_inputs=examples,
@@ -2676,7 +2679,7 @@ class TestPrecompile(TestCase):
         self.assertIn("_inner_call_fw", code)
         self.assertIn("_inner_call_bw", code)
         for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
-            x = torch.randn(7, 4, requires_grad=True)
+            x = torch.randn(7, 9, requires_grad=True)
             ref = x.detach().clone().requires_grad_()
             expected = _precompile_dynamo_dynamic(ref)
             expected.sum().backward()
@@ -2685,6 +2688,50 @@ class TestPrecompile(TestCase):
             actual.sum().backward()
             self.assertEqual(actual, expected)
             self.assertEqual(x.grad, ref.grad)
+
+    def test_tracer_dynamo_training_passthrough_backward(self):
+        x = torch.randn(4, requires_grad=True)
+        code, cache = torch.compiler.precompile(
+            _precompile_add_one,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            training=True,
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
+            actual_x = x.detach().clone().requires_grad_()
+            expected_x = x.detach().clone().requires_grad_()
+            actual = loaded(actual_x)
+            expected = _precompile_add_one(expected_x)
+            actual.sum().backward()
+            expected.sum().backward()
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual_x.grad, expected_x.grad)
+
+    def test_tracer_dynamo_varargs_dispatch(self):
+        x = torch.randn(4)
+        y = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_varargs,
+            example_inputs=[(x, y)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x, y), _precompile_dynamo_varargs(x, y))
+
+    def test_tracer_dynamo_varkw_dispatch(self):
+        x = torch.randn(4)
+        kwarg_x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_varkw,
+            example_inputs=[
+                torch.compiler.ExampleInput(args=(x,), kwargs={"x": kwarg_x})
+            ],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x, x=kwarg_x), _precompile_dynamo_varkw(x, x=kwarg_x))
 
     @parametrize("backend", ("eager", "inductor"))
     def test_tracer_dynamo_training_later_backward(self, backend):
