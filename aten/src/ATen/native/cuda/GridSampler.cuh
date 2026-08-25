@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/GridSamplerUtils.h>
 
 namespace at::native {
@@ -317,5 +318,37 @@ void get_cubic_coefficients_grad(
   coeffs[3] = (3 * A * x - 10 * A) * x + 8 * A;
 }
 
+
+// The device twin of resolve_cubic_taps in ATen/native/GridSampler.cpp.
+template<typename scalar_t, typename index_t>
+__forceinline__ __device__
+void resolve_cubic_taps(
+    scalar_t coord,
+    index_t size,
+    GridSamplerPadding padding_mode,
+    bool align_corners,
+    scalar_t coeffs[4],
+    scalar_t* coeffs_grad,
+    index_t indices[4]) {
+  const scalar_t base = ::floor(coord);
+  get_cubic_upsampling_coefficients<scalar_t>(coeffs, coord - base);
+  if (coeffs_grad != nullptr) {
+    get_cubic_coefficients_grad<scalar_t>(coeffs_grad, coord - base);
+  }
+  #pragma unroll
+  for (int i = 0; i < 4; ++i) {
+    const scalar_t tap = compute_coordinates(base - 1 + i, static_cast<int>(size), padding_mode, align_corners);
+    const index_t index = static_cast<index_t>(tap);
+    if (index >= 0 && index < size) {
+      indices[i] = index;
+    } else {
+      coeffs[i] = static_cast<scalar_t>(0);
+      if (coeffs_grad != nullptr) {
+        coeffs_grad[i] = static_cast<scalar_t>(0);
+      }
+      indices[i] = static_cast<index_t>(0);
+    }
+  }
+}
 
 }  // namespace at::native

@@ -4326,9 +4326,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, "expected input to have non-empty spatial dimensions"):
             F.grid_sample(torch.empty(1, 1, 0, 2), grid, align_corners=False)
 
-        with self.assertRaisesRegex(RuntimeError, "bicubic interpolation only supports 4D input"):
-            F.grid_sample(torch.empty(1, 1, 2, 2, 2), torch.empty(1, 1, 1, 1, 3), mode='bicubic')
-
         if TEST_CUDA:
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 F.grid_sample(input.cuda(), grid, align_corners=False)
@@ -4900,7 +4897,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             W = random.randint(3, IW + 2)
             test_shape(0, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
 
-        for mode in ('bilinear', 'nearest'):
+        for mode in ('bilinear', 'nearest', 'bicubic'):
             for padding_mode in ('zeros', 'border', 'reflection'):
                 for align_corners in (True, False):
                     # do gradcheck
@@ -4923,6 +4920,24 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
                     for input_requires_grad in [False, True]:
                         test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad)
+
+    def test_grid_sample_3d_bicubic_matches_2d(self):
+        # A volume that does not vary along z is sampled by the same separable kernel the 4-D
+        # sampler applies, since the four cubic weights of the z axis sum to one.
+        for device in ['cpu'] + (['cuda'] if TEST_CUDA else []):
+            image = torch.randn(2, 3, 7, 8, device=device, dtype=torch.double)
+            volume = image.unsqueeze(2).expand(2, 3, 5, 7, 8).contiguous()
+            grid_2d = torch.randn(2, 4, 6, 2, device=device, dtype=torch.double).clamp(-1.2, 1.2)
+            # a z away from a voxel centre gives the four z taps a real weight each, and one
+            # that far inside a 5-deep axis keeps every tap in bounds, so no padding drops one
+            grid_3d = torch.cat([grid_2d, torch.full_like(grid_2d[..., :1], 0.1)], dim=-1).unsqueeze(1)
+            for padding_mode in ('zeros', 'border', 'reflection'):
+                for align_corners in (True, False):
+                    out_2d = F.grid_sample(image, grid_2d, mode='bicubic',
+                                           padding_mode=padding_mode, align_corners=align_corners)
+                    out_3d = F.grid_sample(volume, grid_3d, mode='bicubic',
+                                           padding_mode=padding_mode, align_corners=align_corners)
+                    self.assertEqual(out_3d.squeeze(2), out_2d)
 
     def test_grid_sample_nearest_neighbor_rounding_mode_consistency(self):
 

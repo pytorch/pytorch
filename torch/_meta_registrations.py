@@ -5904,7 +5904,7 @@ def check_grid_sampler_2d(input: Tensor, grid: Tensor):
     )
 
 
-def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
+def check_grid_sampler_3d(input: Tensor, grid: Tensor):
     torch._check(
         input.ndim == 5 and input.ndim == grid.ndim,
         lambda: (
@@ -5912,13 +5912,6 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
             f"dimensions, but got input with sizes {input.shape}"
             f" and grid with sizes {grid.shape}"
         ),
-    )
-    torch._check(
-        not (
-            input.ndim == 5
-            and interpolation_mode == GridSamplerInterpolation.BICUBIC.value
-        ),
-        lambda: "grid_sampler(): bicubic interpolation only supports 4D input",
     )
 
 
@@ -5992,7 +5985,7 @@ def grid_sampler_3d(
     align_corners,
 ):
     check_grid_sampler_common(input, grid)
-    check_grid_sampler_3d(input, grid, interpolation_mode)
+    check_grid_sampler_3d(input, grid)
     N = input.shape[0]
     C = input.shape[1]
     out_D = grid.shape[1]
@@ -6013,7 +6006,7 @@ def grid_sampler_3d_backward(
     output_mask,
 ):
     check_grid_sampler_common(input, grid)
-    check_grid_sampler_3d(input, grid, interpolation_mode)
+    check_grid_sampler_3d(input, grid)
     input_requires_grad = output_mask[0]
     if input_requires_grad:
         grad_input = torch.zeros_like(
