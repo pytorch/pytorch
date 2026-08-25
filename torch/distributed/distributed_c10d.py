@@ -7564,6 +7564,14 @@ def shrink_group(
     Notes:
         - Only non-excluded ranks should call this function; excluded ranks
           must not participate in the shrink operation.
+        - With ``SHRINK_ABORT``, the parent group is aborted rather than
+          destroyed for the surviving ranks: destroying a NCCL communicator is
+          a collective that every rank of the communicator must join, and the
+          excluded ranks abort it instead. For the same reason, excluded ranks
+          must abort the parent group on their side (e.g. via
+          ``_abort_process_group``) and must never call
+          ``destroy_process_group`` on it; mixing abort and destroy on the
+          same communicator can hang with NCCL >= 2.31.2.
         - Shrinking the default group destroys all other process groups since
           rank reassignment makes them inconsistent.
     """
@@ -7590,7 +7598,9 @@ def shrink_group(
 
     # Step 6: Handle cleanup and creation of new process group
     target_group_info["pg_options_override"] = pg_options
-    return _finalize_shrunk_group(target_group_info, excluded_ranks_set, new_backend)
+    return _finalize_shrunk_group(
+        target_group_info, excluded_ranks_set, new_backend, shrink_flags
+    )
 
 
 def _validate_shrink_inputs(ranks_to_exclude: list[int], shrink_flags: int) -> None:
@@ -7736,6 +7746,7 @@ def _finalize_shrunk_group(
     group_info: _ShrinkGroupInfo,
     excluded_ranks_set: set[int],
     new_backend: C10DBackend,
+    shrink_flags: int,
 ) -> ProcessGroup:
     """Clean up old group and create new shrunk process group."""
     target_pg = group_info["process_group"]
@@ -7754,8 +7765,13 @@ def _finalize_shrunk_group(
         rank for rank in original_ranks if rank not in excluded_ranks_set
     ]
 
-    # Clean up the original group
-    _cleanup_original_group(target_pg, is_default_group)
+    # Clean up the original group. With SHRINK_ABORT the excluded ranks abort
+    # the parent comm instead of destroying it, so survivors must abort too:
+    # NCCL forbids mixing abort and destroy on the same communicator, and
+    # destroy is an intra-node collective (hangs on NCCL >= 2.31.2 otherwise).
+    _cleanup_original_group(
+        target_pg, is_default_group, use_abort=bool(shrink_flags & SHRINK_ABORT)
+    )
 
     # Create and configure the new process group
     new_pg = _create_shrunk_process_group(
@@ -7808,17 +7824,23 @@ def _extract_group_metadata(target_pg: ProcessGroup) -> _GroupMetadata:
     }
 
 
-def _cleanup_original_group(target_pg: ProcessGroup, is_default_group: bool) -> None:
+def _cleanup_original_group(
+    target_pg: ProcessGroup, is_default_group: bool, use_abort: bool
+) -> None:
     """Clean up the original process group safely."""
     try:
-        destroy_process_group(target_pg)
+        if use_abort:
+            _abort_process_group(target_pg)
+        else:
+            destroy_process_group(target_pg)
     except Exception:
+        action = "abort" if use_abort else "destroy"
         group_type = "default" if is_default_group else "non-default"
         logger.warning(
-            "Failed to destroy %s group during shrinking", group_type, exc_info=True
+            "Failed to %s %s group during shrinking", action, group_type, exc_info=True
         )
 
-    # Ensure global state cleanup even if destroy_process_group fails
+    # Ensure global state cleanup even if the destroy/abort above fails
     _cleanup_process_group_global_state(target_pg)
 
 
