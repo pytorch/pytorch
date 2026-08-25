@@ -906,6 +906,66 @@ class TestAOTInductorPackage(TestCase):
             )
 
     @skipif(
+        lambda device, package_cpp_only: device != "cpu" or package_cpp_only,
+        "CPU non-cpp package regression test",
+    )
+    def test_buffer_mutations_persist_across_package_calls(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.register_buffer("assign_one", torch.ones(1, device=device))
+                self.register_buffer("add_one", torch.ones(1, device=device))
+                self.register_buffer("slice_one", torch.ones(1, device=device))
+                self.register_buffer("add_two", torch.ones(2, device=device))
+                self.register_buffer("index_two", torch.ones(2, device=device))
+
+            def forward(self):
+                self.assign_one = self.assign_one + 1.0
+                self.add_one.add_(1.0)
+                self.slice_one[:] = self.slice_one[:] + 1.0
+                self.add_two.add_(1.0)
+                self.index_two[0] = self.index_two[0] + 1.0
+                return (
+                    self.assign_one,
+                    self.add_one,
+                    self.slice_one,
+                    self.add_two,
+                    self.index_two,
+                )
+
+        for always_keep_tensor_constants in (True, False):
+            model = Model(self.device)
+            ep = torch.export.export(model, tuple())
+            inductor_configs = {
+                "always_keep_tensor_constants": always_keep_tensor_constants,
+                "aot_inductor.package_cpp_only": self.package_cpp_only,
+            }
+            with WritableTempFile(suffix=".pt2") as f:
+                package_path = torch._inductor.aoti_compile_and_package(
+                    ep,
+                    package_path=f.name,
+                    inductor_configs=inductor_configs,
+                )
+                loaded = load_package(package_path)
+
+            actual = [tuple(out.clone() for out in loaded()) for _ in range(3)]
+            expected = []
+            for call_idx in range(3):
+                expected_one = torch.full((1,), call_idx + 2.0, device=self.device)
+                expected_two = torch.full((2,), call_idx + 2.0, device=self.device)
+                expected_index = torch.tensor([call_idx + 2.0, 1.0], device=self.device)
+                expected.append(
+                    (
+                        expected_one,
+                        expected_one,
+                        expected_one,
+                        expected_two,
+                        expected_index,
+                    )
+                )
+            self.assertEqual(actual, expected)
+
+    @skipif(
         lambda device, package_cpp_only: package_cpp_only,
         "No support for cpp only",
     )
