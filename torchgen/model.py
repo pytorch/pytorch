@@ -120,6 +120,7 @@ class DispatchKey(Enum):
     PreDispatch = auto()
     PythonDispatcher = auto()
     Python = auto()
+    Fake = auto()
     FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
     Conjugate = auto()
@@ -592,6 +593,14 @@ class NativeFunction:
     # in this member, if applicable.
     precomputed: Precompute | None
 
+    # For a structured op, whether to auto-generate the Meta dispatch-key
+    # kernel. Defaults to True. Set to False to instead provide an explicit
+    # Meta: entry in the dispatch table, e.g. to express SymInt output sizes
+    # that the int-only structured set_output path cannot. The structured meta
+    # class is still generated for the device backends; this only affects the
+    # Meta key.
+    structured_generate_meta: bool
+
     # Argument names whose default  should be excluded from the C++ interface.
     # Intended for resolving overload ambiguities between signatures.
     cpp_no_default_args: set[str]
@@ -745,6 +754,15 @@ class NativeFunction:
                 f"precomputed requires structured=True, got structured={structured}"
             )
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
+
+        structured_generate_meta = e.pop("structured_generate_meta", True)
+        if not isinstance(structured_generate_meta, bool):
+            raise AssertionError(f"not a bool: {structured_generate_meta}")
+        if not structured_generate_meta and not structured:
+            raise AssertionError(
+                "structured_generate_meta=False requires structured=True, "
+                f"got structured={structured}"
+            )
 
         tags_inp = e.pop("tags", [])
         if isinstance(tags_inp, str):
@@ -1010,6 +1028,7 @@ class NativeFunction:
                 structured_delegate=structured_delegate,
                 structured_inherits=structured_inherits,
                 precomputed=precomputed,
+                structured_generate_meta=structured_generate_meta,
                 autogen=autogen,
                 ufunc_inner_loop=ufunc_inner_loop,
                 manual_kernel_registration=manual_kernel_registration,

@@ -2319,6 +2319,8 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         # Different tensor with same dispatch keys should match
         dks2 = torch._C._dispatch_keys(torch.randn(5))
         self.assertTrue(handler.eval_fn(dks2, expected))
+        fake_dks = dks | torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
+        self.assertFalse(handler.eval_fn(fake_dks, expected))
 
     def test_tuple_iterator_len(self):
         from torch._dynamo.guards import GuardBuilder

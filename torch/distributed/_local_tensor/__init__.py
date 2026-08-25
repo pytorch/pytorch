@@ -67,7 +67,7 @@ from torch import Size, SymBool, SymInt, Tensor
 from torch._C import DispatchKey, DispatchKeySet, ScriptObject
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch._ops import OpOverload
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.distributed import DeviceMesh, ProcessGroup
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.distributed_c10d import _get_default_group
@@ -76,7 +76,6 @@ from torch.nested._internal.nested_int import NestedIntNode
 from torch.utils import _pytree as pytree
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
-    _get_current_dispatch_mode_stack,
     return_and_correct_aliasing,
     TorchDispatchMode,
 )
@@ -93,9 +92,8 @@ from . import _c10d
 
 
 def _is_in_fake_tensor_mode() -> bool:
-    return any(
-        isinstance(mode, FakeTensorMode) for mode in _get_current_dispatch_mode_stack()
-    )
+    mode_key = torch._C._TorchDispatchModeKey.FAKE
+    return torch._C._get_dispatch_mode(mode_key) is not None
 
 
 def _reduce_multidim_lists(

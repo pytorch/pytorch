@@ -24,7 +24,12 @@ from torch._dynamo.exc import (
 )
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import IS_FBCODE, IS_S390X, munge_exc
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_S390X,
+    munge_exc,
+    skipIfCppFakeTensor,
+)
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -1017,6 +1022,7 @@ User code traceback:
 """,
         )
 
+    @skipIfCppFakeTensor("C++ FakeTensor has a different repr")
     def test_faketensor_nyi(self):
         op_name = "mylib::error_messages_faketensor"
 
@@ -1050,6 +1056,7 @@ from user code:
     return torch.ops.mylib.error_messages_faketensor(x)""",
         )
 
+    @skipIfCppFakeTensor("C++ FakeTensor has a different repr")
     def test_fx_node_error_bad_user_code(self):
         def fn(x, y):
             return x + y
@@ -1074,6 +1081,7 @@ from user code:
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @skipIfCppFakeTensor("C++ FakeTensor has different device mismatch formatting")
     def test_fx_node_error_cross_device(self):
         linear = torch.nn.Linear(10, 20, device="cuda").eval()
 
@@ -2231,6 +2239,7 @@ from user code:
                 post_munge=post_munge,
             )
 
+    @skipIfCppFakeTensor("C++ FakeTensor has a different repr")
     def test_runtime_error_readable_shape_mismatch(self):
         def fn(x, y):
             return x + y
