@@ -36,8 +36,9 @@ The requirements for each `hw_classification` are summarized below:
       allow_xpu=True
 
 The scan covers module-level statements and statements recursively nested within
-``if``, ``try``, and ``with`` bodies, so conditionally defined test classes and
-instantiation calls are linted as well.
+``if``, ``try`` (including ``except`` handlers), ``with``, ``for``, and ``while``
+bodies, so conditionally defined test classes and instantiation calls are linted
+as well.
 """
 
 from __future__ import annotations
@@ -142,14 +143,16 @@ def _is_test_file(filename: str) -> bool:
 
 
 def _is_test_class(node: ast.ClassDef) -> bool:
-    # Identify test classes by the presence of test_* methods rather than
+    # Identify test classes by the presence of test methods rather than
     # inheritance. Resolving TestCase inheritance through AST is incomplete
     # because subclasses can be defined indirectly (e.g. NNTestCase, JitTestCase)
     # and across different files. Therefore, intermediate base classes and
-    # concrete test classes are treated uniformly: any class defining test_*
+    # concrete test classes are treated uniformly: any class defining test
     # methods must declare hw_classification.
     for stmt in node.body:
-        if isinstance(stmt, ast.FunctionDef) and stmt.name.startswith("test_"):
+        if isinstance(
+            stmt, (ast.FunctionDef, ast.AsyncFunctionDef)
+        ) and stmt.name.startswith("test"):
             return True
     return False
 
@@ -211,8 +214,8 @@ def _get_hw_classification(
 
 
 class _ScannedStatementCollector(ast.NodeVisitor):
-    """Collect statements from the module and nested ``if``/``try``/``with``
-    bodies, so conditionally defined test classes and
+    """Collect statements from the module and nested ``if``/``try``/``with``/
+    ``for``/``while`` bodies, so conditionally defined test classes and
     ``instantiate_device_type_tests`` calls are linted too.
     """
 
@@ -234,9 +237,20 @@ class _ScannedStatementCollector(ast.NodeVisitor):
     def visit_Try(self, node: ast.Try) -> None:
         for stmt in node.body + node.orelse + node.finalbody:
             self.visit(stmt)
+        for handler in node.handlers:
+            for stmt in handler.body:
+                self.visit(stmt)
 
     def visit_With(self, node: ast.With) -> None:
         for stmt in node.body:
+            self.visit(stmt)
+
+    def visit_For(self, node: ast.For) -> None:
+        for stmt in node.body + node.orelse:
+            self.visit(stmt)
+
+    def visit_While(self, node: ast.While) -> None:
+        for stmt in node.body + node.orelse:
             self.visit(stmt)
 
 
@@ -254,26 +268,67 @@ class ClassEntry:
     instantiation: ast.Call | None = None
 
 
-def _collect_test_classes(tree: ast.Module) -> dict[str, ClassEntry]:
-    """Map each test class name to its definition and instantiation call, if any."""
+def _is_instantiate_call(call: ast.Call) -> bool:
+    """True for direct ``instantiate_device_type_tests(...)`` and attribute-form
+    ``common_device_type.instantiate_device_type_tests(...)`` calls."""
+    if isinstance(call.func, ast.Name):
+        return call.func.id == INSTANTIATE_FN_NAME
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr == INSTANTIATE_FN_NAME
+    return False
+
+
+def _collect_test_classes(
+    tree: ast.Module, filename: str
+) -> tuple[dict[str, ClassEntry], list[LintMessage]]:
+    """Map each test class name to its definition and instantiation call, if any.
+
+    Also report duplicate class definitions and repeated instantiate calls, so
+    that silent shadowing (only the last definition/call is linted) does not go
+    unnoticed.
+    """
     class_defs: dict[str, ast.ClassDef] = {}
     instantiations: dict[str, ast.Call] = {}
+    duplicate_messages: list[LintMessage] = []
     for stmt in _scanned_statements(tree):
         if isinstance(stmt, ast.ClassDef) and _is_test_class(stmt):
+            if stmt.name in class_defs:
+                duplicate_messages.append(
+                    error_msg(
+                        name="[duplicate_class]",
+                        path=filename,
+                        line=stmt.lineno,
+                        description=f"Test class '{stmt.name}' is defined more than once; "
+                        f"only the last definition is linted.",
+                    )
+                )
             class_defs[stmt.name] = stmt
         elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
             call = stmt.value
             if (
-                isinstance(call.func, ast.Name)
-                and call.func.id == INSTANTIATE_FN_NAME
+                _is_instantiate_call(call)
                 and call.args
                 and isinstance(call.args[0], ast.Name)
             ):
+                if call.args[0].id in instantiations:
+                    duplicate_messages.append(
+                        error_msg(
+                            name="[duplicate_instantiation]",
+                            path=filename,
+                            line=call.lineno,
+                            description=f"Class '{call.args[0].id}' is passed to "
+                            f"{INSTANTIATE_FN_NAME} more than once; "
+                            f"only the last call is linted.",
+                        )
+                    )
                 instantiations[call.args[0].id] = call
-    return {
-        name: ClassEntry(class_defs[name], instantiations.get(name))
-        for name in class_defs
-    }
+    return (
+        {
+            name: ClassEntry(class_defs[name], instantiations.get(name))
+            for name in class_defs
+        },
+        duplicate_messages,
+    )
 
 
 def _get_string_list_kwarg(
@@ -315,11 +370,11 @@ def _get_string_list_kwarg(
     return None
 
 
-def _get_bool_kwarg(call: ast.Call, param_name: str) -> bool:
+def _get_bool_kwarg(call: ast.Call, param_name: str) -> bool | _UnknownKwarg:
     """Return the bool value of a keyword argument.
 
-    Defaults to False when the keyword argument is absent or cannot be
-    statically resolved.
+    Returns _KWARG_UNKNOWN when the argument is present but is not a literal, so
+    callers can skip a rule instead of defaulting to False.
     """
     for kw_item in call.keywords:
         if kw_item.arg != param_name:
@@ -327,7 +382,7 @@ def _get_bool_kwarg(call: ast.Call, param_name: str) -> bool:
         node = kw_item.value
         if isinstance(node, ast.Constant) and isinstance(node.value, bool):
             return node.value
-        return False
+        return _KWARG_UNKNOWN
 
     return False
 
@@ -339,8 +394,8 @@ class InstantiationContext:
     call: ast.Call
     only_for: list[str] | None | _UnknownKwarg
     except_for: list[str] | None | _UnknownKwarg
-    allow_mps: bool
-    allow_xpu: bool
+    allow_mps: bool | _UnknownKwarg
+    allow_xpu: bool | _UnknownKwarg
 
     @classmethod
     def from_call(cls, call: ast.Call) -> InstantiationContext:
@@ -360,7 +415,9 @@ class RuleContext:
     filename: str
     class_node: ast.ClassDef
     classification: HardwareClassification
-    test_methods: list[ast.FunctionDef] = field(default_factory=list)
+    test_methods: list[ast.FunctionDef | ast.AsyncFunctionDef] = field(
+        default_factory=list
+    )
     instantiation: InstantiationContext | None = None
 
     @classmethod
@@ -374,7 +431,8 @@ class RuleContext:
         test_methods = [
             stmt
             for stmt in class_node.body
-            if isinstance(stmt, ast.FunctionDef) and stmt.name.startswith("test_")
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and stmt.name.startswith("test")
         ]
 
         inst = (
@@ -585,7 +643,12 @@ def _check_no_except_for(ctx: RuleContext) -> list[LintMessage]:
 # a class targeting either device would silently generate zero tests.
 @_register(HardwareClassification.MPS)
 def _check_mps_requires_allow_mps(ctx: RuleContext) -> list[LintMessage]:
-    if ctx.instantiation is None or ctx.instantiation.allow_mps:
+    if ctx.instantiation is None:
+        return []
+    # A non-literal allow_mps (e.g. `allow_mps=MACOS_VERSION >= 15.0`) cannot be
+    # resolved statically; assuming False would only cause a false positive, so
+    # skip the check instead.
+    if ctx.instantiation.allow_mps is _KWARG_UNKNOWN or ctx.instantiation.allow_mps:
         return []
     return [
         error_msg(
@@ -601,7 +664,11 @@ def _check_mps_requires_allow_mps(ctx: RuleContext) -> list[LintMessage]:
 
 @_register(HardwareClassification.XPU)
 def _check_xpu_requires_allow_xpu(ctx: RuleContext) -> list[LintMessage]:
-    if ctx.instantiation is None or ctx.instantiation.allow_xpu:
+    if ctx.instantiation is None:
+        return []
+    # A non-literal allow_xpu cannot be resolved statically; assuming False would
+    # only cause a false positive, so skip the check instead.
+    if ctx.instantiation.allow_xpu is _KWARG_UNKNOWN or ctx.instantiation.allow_xpu:
         return []
     return [
         error_msg(
@@ -623,10 +690,7 @@ def _check_only_for_matches_device(ctx: RuleContext) -> list[LintMessage]:
         return []
     expected = ctx.classification.value.lower()
 
-    if (
-        ctx.instantiation.only_for is None
-        or ctx.instantiation.only_for is _KWARG_UNKNOWN
-    ):
+    if ctx.instantiation.only_for is None:
         return [
             error_msg(
                 name="[only_for]",
@@ -635,6 +699,18 @@ def _check_only_for_matches_device(ctx: RuleContext) -> list[LintMessage]:
                 description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
                 f"must use only_for='{expected}' "
                 f"in instantiate_device_type_tests.",
+            )
+        ]
+    if ctx.instantiation.only_for is _KWARG_UNKNOWN:
+        return [
+            error_msg(
+                name="[only_for]",
+                path=ctx.filename,
+                line=ctx.instantiation.call.lineno,
+                description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
+                f"has a non-literal only_for in instantiate_device_type_tests "
+                f"that could not be resolved statically; "
+                f"use a literal only_for='{expected}'.",
             )
         ]
     if ctx.instantiation.only_for != [expected]:
@@ -675,9 +751,9 @@ def check_file(filename: str) -> list[LintMessage]:
             )
         ]
 
-    test_classes = _collect_test_classes(tree)
+    test_classes, duplicate_messages = _collect_test_classes(tree, filename)
 
-    messages: list[LintMessage] = []
+    messages: list[LintMessage] = list(duplicate_messages)
     for entry in test_classes.values():
         node = entry.class_def
         classification = _get_hw_classification(node)
