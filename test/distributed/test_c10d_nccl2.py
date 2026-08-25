@@ -855,9 +855,13 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
         pool = torch.cuda.MemPool()
         tensor = self._pool_tensor(pool)
         # register_mem_pool validates provenance before touching any state, so a
-        # rejected pool is never recorded -- nothing to deregister afterwards.
+        # rejected pool is never recorded.
         with self.assertRaisesRegex(RuntimeError, "mem_allocator|ncclMemAlloc"):
             backend.register_mem_pool(pool, symm=True)
+        # Guard the no-leftover-state contract: a revert to insert-then-throw
+        # would leave the pool registered and this deregister would succeed.
+        with self.assertRaisesRegex(RuntimeError, "not previously registered"):
+            backend.deregister_mem_pool(pool)
         del tensor
 
     @requires_nccl()
