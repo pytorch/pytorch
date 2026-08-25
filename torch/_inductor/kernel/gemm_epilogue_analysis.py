@@ -28,9 +28,11 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     tensor_meta_shape,
 )
 from torch._inductor.kernel.gemm_epilogue import (
+    GEMM_REDUCTION_IDENTITY_SOURCE,
     GemmEpilogueGraph,
     GemmReductionGeometry,
     GemmReductionPlan,
+    GemmReductionType,
     iter_fx_node_inputs,
     NormalizedGetItem,
     NormalizedPrepareSoftmax,
@@ -192,14 +194,13 @@ class GemmLocalReduceMatch:
     Attributes:
         value_node: FX node that produces the matched local-reduction value.
         geometry: Group size and GEMM output axis reduced by the value.
-        reduction_type: Concrete reduction kind, or ``generated`` when generated
-            epilogue code defines a composed reduction.
+        reduction_type: Primitive reduction represented by the generated epilogue.
     """
 
     value_node: torch.fx.Node
     geometry: GemmReductionGeometry
     reduction_node: torch.fx.Node | None = None
-    reduction_type: str = "generated"
+    reduction_type: GemmReductionType = "sum"
 
     def __post_init__(self) -> None:
         if not isinstance(self.value_node, torch.fx.Node):
@@ -322,7 +323,7 @@ class GemmOutputPlan:
             group=match.geometry.group,
             axis=match.geometry.axis,
             reduction_type=match.reduction_type,
-            source_type="identity",
+            source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
             primary_output=self.output.name,
             feeds_main=local_reduce.feeds_main,
             feed_output=self.output.name if local_reduce.feeds_main else None,
@@ -429,7 +430,7 @@ class GemmLocalReduceAnalysis:
         dim: Any,
         dtype: Any = None,
         *,
-        reduction_type: str = "generated",
+        reduction_type: GemmReductionType = "sum",
         raise_invalid_dims: bool = True,
     ) -> bool:
         """Match and record a reduction over a grouped TensorSSA layout."""
@@ -496,9 +497,7 @@ class GemmLocalReduceAnalysis:
         )
         if match is None:
             return False
-        self.matches[node] = dataclasses.replace(
-            match, value_node=node, reduction_type="generated"
-        )
+        self.matches[node] = dataclasses.replace(match, value_node=node)
         return True
 
     def match_feed_value(

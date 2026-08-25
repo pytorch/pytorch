@@ -626,6 +626,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         self: Self,
         _callable: Callable[[], Any],
         grad_to_none: list[torch.Tensor] | None = None,
+        cudagraph_unroll: int | None = None,
         **kwargs: Any,
     ) -> float:
         # Prevent benchmark_gpu from re-entering this method
@@ -633,7 +634,10 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         self._in_cudagraph_benchmark = True
         try:
             result = super().benchmark_gpu_with_cuda_graph(
-                _callable, grad_to_none=grad_to_none, **kwargs
+                _callable,
+                grad_to_none=grad_to_none,
+                cudagraph_unroll=cudagraph_unroll,
+                **kwargs,
             )
         finally:
             self._in_cudagraph_benchmark = False
