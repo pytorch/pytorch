@@ -73,11 +73,13 @@ from torch._library.opaque_object import (
 )
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     FakeTensor,
     FakeTensorMode,
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
+    maybe_get_item_memo,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
@@ -2896,7 +2898,7 @@ class VariableBuilder:
         return LazyConstantVariable.create(value, source=self.source)
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor) -> None:
-        if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
+        if maybe_get_fake_mode(value) is self.tx.fake_mode:
             raise InternalTorchDynamoError(
                 "Cannot wrap a Tensor that has already been",
                 "wrapped by this instance of Dynamo",
@@ -3604,10 +3606,13 @@ class VariableBuilder:
 
         fake_tensor_value = example_value
         # type: ignore[attr-defined]
-        if fake_tensor_value.fake_mode is not self.tx.fake_mode:
+        if (
+            is_fake_tensor(fake_tensor_value)
+            and maybe_get_fake_mode(fake_tensor_value) is not self.tx.fake_mode
+        ):
             raise AssertionError(
-                f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
-                "({self.tx.fake_mode}) from InstructionTranslator"
+                f"fake mode ({maybe_get_fake_mode(fake_tensor_value)}) from fake tensor metadata doesn't match mode"
+                f"({self.tx.fake_mode}) from InstructionTranslator"
             )
 
         # There's something a bit incoherent about pass_arg_as_tensor,
@@ -3698,10 +3703,13 @@ class VariableBuilder:
 
             fake_tensor_value = example_value
             # type: ignore[attr-defined]
-            if fake_tensor_value.fake_mode is not self.tx.fake_mode:
+            if (
+                is_fake_tensor(fake_tensor_value)
+                and maybe_get_fake_mode(fake_tensor_value) is not self.tx.fake_mode
+            ):
                 raise AssertionError(
-                    f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
-                    "({self.tx.fake_mode}) from InstructionTranslator"
+                    f"fake mode ({maybe_get_fake_mode(fake_tensor_value)}) from fake tensor metadata doesn't match mode"
+                    f"({self.tx.fake_mode}) from InstructionTranslator"
                 )
 
             proxy.node.meta["grapharg"] = GraphArg(
@@ -3741,7 +3749,9 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
     return TupleVariable(items)
 
 
-def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
+def _clone_input(
+    value: Any, fake_mode: FakeTensorMode | CppFakeTensorMode | None
+) -> Any:
     if isinstance(value, torch.Tensor):
         # tensor subclasses will not be converted to FakeTensors and need to be cloned
         if not (
@@ -3753,8 +3763,12 @@ def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
             )
             or value.is_nested
         ):
-            # NB: ensure strides are preserved
-            value = clone_input(value)
+            # NB: ensure strides are preserved.
+            # we need to manually disable C++ faketensormode here
+            from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+            with unset_fake_temporarily():
+                value = clone_input(value)
 
     return value
 
@@ -5048,8 +5062,10 @@ def _wrap_to_fake_tensor_and_record_impl(
             _wire_tensor_spec_dims(tensor_spec, fake_e)
         if (
             source is not None
-            and isinstance(fake_e, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-            and (sym_val := fake_e.item_memo) is not None
+            and is_fake_tensor(fake_e)
+            and isinstance(
+                sym_val := maybe_get_item_memo(fake_e), (torch.SymInt, torch.SymFloat)
+            )
         ):
             # Match the peephole in FakeTensorConverter.from_real_tensor that
             # strips FloatTensorSource before calling create_symbol.  Without

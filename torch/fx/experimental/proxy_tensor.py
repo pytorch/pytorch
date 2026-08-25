@@ -53,12 +53,14 @@ from torch._logging import trace_structured
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     FakeTensor,
     FakeTensorMode,
     get_plain_tensors,
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
+    track_fake_tensor_for_export,
     unset_fake_temporarily,
 )
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -745,6 +747,13 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
         return {k: extract_val(v) for k, v in val.items()}
     elif isinstance(val, Tensor):
         if not val.is_sparse:
+            if torch._C._dispatch_tls_is_dispatch_key_included(
+                torch._C.DispatchKey.Fake
+            ):
+                return torch.empty_strided(  # revisit this
+                    val.shape, val.stride(), device=val.device, dtype=val.dtype
+                )
+
             # NB: Kinda hacky, but we should try to get val as the metadata
             # everywhere
             # TODO: This doesn't properly track storages.  A more robust
@@ -1456,6 +1465,7 @@ def proxy_call(
 
     with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
+    pytree.tree_map_only(Tensor, track_fake_tensor_for_export, out)
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
@@ -3542,7 +3552,7 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     # will fail.  Very strange, it probably isn't right for them to be using
     # two fake modes there...
     fake_mode = typing.cast(
-        "FakeTensorMode | None",
+        "FakeTensorMode | CppFakeTensorMode | None",
         torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
     )
     if fake_mode and fake_mode.shape_env:

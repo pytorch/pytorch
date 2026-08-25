@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_cuda,
     run_tests,
+    skipIfCppFakeTensor,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -227,6 +228,7 @@ class TestDTensorDebugMode(TestCase):
         )
         self.device_type = "cuda"
 
+    @skipIfCppFakeTensor("C++ FakeTensor has different DebugMode output")
     def test_debug_mode_mm(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
@@ -451,6 +453,7 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue("x = self.l2(x)" in op_calls[2].stack_trace)
         self.assertTrue("x = x.relu()" in op_calls[12].stack_trace)
 
+    @skipIfCppFakeTensor("C++ FakeTensor has different DebugMode output")
     def test_debug_mode_densor_redistribution_trace(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
 
@@ -516,6 +519,7 @@ class TestDTensorDebugMode(TestCase):
     aten::view(t: f32[8, 8], [8, 8])  ->  t: f32[8, 8]""",
         )
 
+    @skipIfCppFakeTensor("C++ FakeTensor has different DebugMode output")
     def test_output_placements(self):
         """Test that output placements are recorded for multi-output DTensor ops."""
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -544,6 +548,7 @@ class TestDTensorDebugMode(TestCase):
     aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",
         )
 
+    @skipIfCppFakeTensor("C++ FakeTensor has different DebugMode output")
     def test_debug_mode_einsum(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
 
