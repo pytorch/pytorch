@@ -282,6 +282,61 @@ def add(x, y):
         self.assertEqual(reloaded, source)
 
 
+class _tempTensorSamplerForQualName:
+    def __init__(self, val, mask, prob):
+        self.val = val
+        self.mask = mask
+        self.prob = prob
+
+    @classmethod
+    def class_method_that_is_used(cls, x):
+        prob = torch.sigmoid(x)
+        thresh = torch.rand(1, device=x.device)
+        mask = (prob > thresh).to(torch.bool)
+        return cls(x, mask, prob)
+
+    @classmethod
+    def class_method_that_is_not_used(cls, x):
+        prob = torch.sigmoid(x)
+        thresh = torch.rand(1, device=x.device)
+        mask = (prob > thresh).to(torch.bool)
+        return cls(x, mask, prob)
+
+    def instance_method_that_is_used(self, x):
+        return x / 2
+
+
+class _tempNetForQualName(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def instance_method_without_args(self):
+        shape = [1, 2, 3, 4]
+        x = torch.randn(shape)
+        return x
+
+    def instance_method_with_args(self, x):
+        return x + 1
+
+    def forward(self, x):
+        x *= x
+        with torch.device(x.device):
+            y = self.instance_method_without_args()
+        # test classmethod called from class
+        sampler = _tempTensorSamplerForQualName.class_method_that_is_used(x)
+        x = torch.where(torch.rand_like(x) < sampler.prob, sampler.val, x) + y.sum()
+        # test instance method called from instance
+        x = sampler.instance_method_that_is_used(x)
+        # test classmethod called from instance
+        another_sampler = sampler.class_method_that_is_not_used(x)
+        # test instance method called from instance
+        x = another_sampler.instance_method_that_is_used(x)
+        # test classmethod called from instance
+        x += y.sum()
+        x = self.instance_method_with_args(x)
+        return x
+
+
 class TestPackageAccelerator(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -844,66 +899,11 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         x = torch.randn(10, 10, device=device)
         compiled_fn(x)
 
-    class _tempTensorSamplerForQualName:
-        def __init__(self, val, mask, prob):
-            self.val = val
-            self.mask = mask
-            self.prob = prob
-
-        @classmethod
-        def class_method_that_is_used(cls, x):
-            prob = torch.sigmoid(x)
-            thresh = torch.rand(1, device=x.device)
-            mask = (prob > thresh).to(torch.bool)
-            return cls(x, mask, prob)
-
-        @classmethod
-        def class_method_that_is_not_used(cls, x):
-            prob = torch.sigmoid(x)
-            thresh = torch.rand(1, device=x.device)
-            mask = (prob > thresh).to(torch.bool)
-            return cls(x, mask, prob)
-
-        def instance_method_that_is_used(self, x):
-            return x / 2
-
-    class _tempNetForQualName(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-
-        def instance_method_without_args(self):
-            shape = [1, 2, 3, 4]
-            x = torch.randn(shape)
-            return x
-
-        def instance_method_with_args(self, x):
-            return x + 1
-
-        def forward(self, x):
-            x *= x
-            with torch.device(x.device):
-                y = self.instance_method_without_args()
-            # test classmethod called from class
-            sampler = TestPackageAccelerator._tempTensorSamplerForQualName.class_method_that_is_used(
-                x
-            )
-            x = torch.where(torch.rand_like(x) < sampler.prob, sampler.val, x) + y.sum()
-            # test instance method called from instance
-            x = sampler.instance_method_that_is_used(x)
-            # test classmethod called from instance
-            another_sampler = sampler.class_method_that_is_not_used(x)
-            # test instance method called from instance
-            x = another_sampler.instance_method_that_is_used(x)
-            # test classmethod called from instance
-            x += y.sum()
-            x = self.instance_method_with_args(x)
-            return x
-
     @requires_capabilities(Capability.lib.triton)
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_classmethod_qualname(self, device):
         x = torch.rand(10, device=device)
-        model = TestPackageAccelerator._tempNetForQualName()
+        model = _tempNetForQualName()
         model.forward(x)
         compiled_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
             model.forward,
@@ -915,7 +915,6 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
 instantiate_device_type_tests(
     TestPackageAccelerator,
     globals(),
-    except_for=["cpu"],
     allow_xpu=True,
     allow_mps=True,
 )
