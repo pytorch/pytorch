@@ -246,6 +246,12 @@ class SuperVariable(VariableTracker):
         # about here (e.g., note the staticmethod, classmethod cases).
         if inner_fn is object.__init__:
             return LambdaVariable(identity)
+        elif inner_fn is types.SimpleNamespace.__init__ and isinstance(
+            self.objvar, variables.SimpleNamespaceVariable
+        ):
+            # namespace_init is a tp_init slot wrapper, so none of the function
+            # or descriptor branches below match it.
+            return self.objvar.tp_init_impl(tx, args, kwargs)
         elif inner_fn is torch.nn.Module.__init__:
             objvar = self.objvar
             from ..side_effects import AttributeMutationNew

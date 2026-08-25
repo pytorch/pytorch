@@ -849,7 +849,7 @@ Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
 }
 
 Tensor masked_fill_inplace_if_safe(
-    Tensor tensor,
+    const Tensor& tensor,
     const Tensor& mask,
     const Scalar& value) {
   return areAnyTensorSubclassLike({tensor, mask})
