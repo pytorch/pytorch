@@ -3832,6 +3832,37 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(bias_mod, dtype=torch.float32, device=device)
 
     @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # uses Triton max_autotune
+    @common_utils.parametrize("backend", ["TRITON", "TRITON_DECODE"])
+    def test_max_autotune_with_gathered_captured_buffer(self, device, backend):
+        B, H, N, D = 2, 2, 49, 32
+        query, key, value = (torch.randn(B, H, N, D, device=device) for _ in range(3))
+        table = torch.randn(2 * N, H, device=device)
+        indices = torch.randint(0, 2 * N, (N, N), device=device)
+
+        def attention(query, key, value):
+            bias = table[indices.flatten()].view(N, N, H).permute(2, 0, 1).contiguous()
+
+            def score_mod(score, batch, head, query_idx, kv_idx):
+                return score + bias[head, query_idx, kv_idx]
+
+            return flex_attention(
+                query,
+                key,
+                value,
+                score_mod=score_mod,
+                kernel_options={"BACKEND": backend},
+            )
+
+        expected = attention(query, key, value)
+        actual = torch.compile(
+            attention, fullgraph=True, mode="max-autotune-no-cudagraphs"
+        )(query, key, value)
+
+        self.assertEqual(actual, expected, atol=5e-3, rtol=0)
+
+    @supported_platform
     @common_utils.parametrize("score_mod", test_score_mods)
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
