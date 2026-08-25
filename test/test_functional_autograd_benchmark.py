@@ -1,6 +1,7 @@
 # Owner(s): ["module: autograd"]
 
 import os
+import sys
 
 import subprocess
 import unittest
@@ -29,7 +30,7 @@ class TestFunctionalAutogradBenchmark(TestCase):
                 "../benchmarks/functional_autograd_benchmark/functional_autograd_benchmark.py",
             ]
             if IS_WINDOWS:
-                cmd[0] = "python"
+                cmd[0] = sys.executable
             # Only run the warmup
             cmd += ["--num-iters", "0"]
             # Only run the vjp task (fastest one)
