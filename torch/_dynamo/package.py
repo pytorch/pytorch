@@ -685,7 +685,7 @@ class CompilePackage:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
         self._observed_scopes: dict[types.CodeType, list[dict[str, object]]] = {}
-        self._live_guard_leaves: dict[int, list[frozenset[tuple[str, str]]]] = {}
+        self._live_guard_leaves: dict[int, list[frozenset[tuple[str, str, str]]]] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[_InstalledGlobal]] = {}
@@ -836,14 +836,14 @@ class CompilePackage:
 
     def live_guard_leaves(
         self, entry: _DynamoCodeCacheEntry
-    ) -> Sequence[frozenset[tuple[str, str]]]:
+    ) -> Sequence[frozenset[tuple[str, str, str]]]:
         return self._live_guard_leaves.get(id(entry), ())
 
     def add_guarded_code(
         self,
         guards_state: bytes,
         dynamo_code: types.CodeType,
-        live_guard_leaves: frozenset[tuple[str, str]] = frozenset(),
+        live_guard_leaves: frozenset[tuple[str, str, str]] = frozenset(),
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_guarded_code")

@@ -49,7 +49,7 @@ class GuardFilterEntry:
     orig_guard: Guard
     # Capture-only provenance used by precompile's environment contract.
     source_root_id: int | None = None
-    source_root_is_module: bool = False
+    source_root_is_import: bool = False
     source_has_unsupported_value: bool = False
     # Snapshot this when the inspection builder creates the entry. Rebuilding
     # guards appends to Guard.code_list, so reading it later duplicates text.
