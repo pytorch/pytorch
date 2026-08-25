@@ -44,7 +44,7 @@ import itertools
 import re
 import threading
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 from .codegen import capture_generated_sources, GeneratedSource
 from .source_emit import _REBUILD_HELPER, emit_value
@@ -1633,7 +1633,7 @@ def _restride_backward_placeholders(
         if not (0 <= offset < len(saved)) or not saved[offset]:
             continue
         real = tuple(
-            shape_env.deserialize_symexpr(s)
+            cast("int | torch.SymInt", shape_env.deserialize_symexpr(s))
             if shape_env is not None and isinstance(s, str)
             else int(s)
             for s in saved[offset]
@@ -1681,6 +1681,7 @@ def _compile_to_python_with_state(
     import copy
 
     import torch
+    from torch._functorch import config as functorch_config
     from torch._higher_order_ops.effects import _get_effect
     from torch._inductor import compile_to_python as _inductor_compile_to_python
     from torch._inductor.compile_fx import compile_fx
@@ -1785,6 +1786,10 @@ def _compile_to_python_with_state(
         with (
             torch.enable_grad() if grad_enabled else torch.no_grad(),
             _standalone_context(gm, shapes_mode, aot=False),
+            functorch_config.patch(
+                enable_autograd_cache=False,
+                enable_remote_autograd_cache=False,
+            ),
             capture_generated_sources(captured),
             _rw.capture_aot_dispatch_autograd_specs(specs),
         ):
