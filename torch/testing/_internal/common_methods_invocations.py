@@ -22465,7 +22465,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=[torch.uint8, torch.float16, torch.complex64]),
             # FIXME: ValueError: The data in MaskedTensor a and Tensor b do not match
-            DecorateInfo(unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorsDevice', 'test_reduction_all',
                          dtypes=[torch.float16]),
             # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
             DecorateInfo(
@@ -22502,7 +22502,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorsDevice', 'test_reduction_all',
                          dtypes=[torch.float32]),
             # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
             DecorateInfo(
@@ -26364,7 +26364,7 @@ python_ref_db = [
                 'test_ref_duplicate_values',
                 dtypes=[torch.float16]),
             DecorateInfo(
-                unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
+                unittest.skip("Skipped!"), 'TestOperatorsDevice', 'test_reduction_all',
                 dtypes=[torch.float32]),
             # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
             DecorateInfo(
