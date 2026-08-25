@@ -40,7 +40,7 @@ invoke_quant_tracer = InvokeQuant()
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeQuant(TestCase):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     backend = ""
 
@@ -132,19 +132,19 @@ class TestInvokeQuant(TestCase):
 
 
 class TestInvokeQuantEager(TestInvokeQuant):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     backend = "eager"
 
 
 class TestInvokeQuantAotEager(TestInvokeQuant):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     backend = "aot_eager"
 
 
 class TestInvokeQuantInductor(TestInvokeQuant):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     backend = "inductor"
 
