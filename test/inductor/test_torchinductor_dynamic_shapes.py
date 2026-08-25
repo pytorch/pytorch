@@ -22,10 +22,8 @@ from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_device_type import (
-    Capability,
     instantiate_device_type_tests,
     onlyAccelerator,
-    requires_capabilities,
     skipIf,
 )
 from torch.testing._internal.common_utils import (
@@ -47,6 +45,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_MPS,
     patch_inductor_backend,
 )
+from torch.utils._triton import has_triton
 
 
 # Make the helper files in test/ importable
@@ -160,6 +159,7 @@ class DynamicShapesOpTests:
 if HAS_CPU:
 
     class DynamicShapesCpuTests(DynamicShapesOpTests, TestCase):
+        hw_classification = HardwareClassification.CPU
         common = check_model
         device = "cpu"
 
@@ -215,6 +215,7 @@ if HAS_CPU:
 if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
 
     class DynamicShapesGPUTests(DynamicShapesOpTests, DynamicShapesTestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
         common = check_model_gpu
         device = GPU_TYPE
 
@@ -244,6 +245,7 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
 
 
 class TestInductorDynamic(DynamicShapesTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     compile_fn = partial(torch.compile, dynamic=True)
 
     def setUp(self):
@@ -1362,7 +1364,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(cnt.frame_count, 2)
 
     @onlyAccelerator
-    @requires_capabilities(Capability.lib.triton)
+    @skipIf(not has_triton(), "Requires Triton")
     def test_dynamic_rblock_bounds(self, device):
         class ForcePersistent(InductorChoices):
             @staticmethod
@@ -1453,7 +1455,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
     @skipIfRocm(msg="sort kernel exceeds the inductor compile-worker timeout")
     def test_sort_dynamic_shape_with_check(self, device):
-        if not self.has_capabilities(Capability.lib.triton):
+        if not has_triton():
 
             def check_count(n):
                 self.assertEqual(metrics.generated_kernel_count, 0)
