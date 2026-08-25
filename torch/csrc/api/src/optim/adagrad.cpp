@@ -59,6 +59,16 @@ void AdagradParamState::serialize(torch::serialize::InputArchive& archive) {
 
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
+std::unique_ptr<AdagradParamState> Adagrad::make_param_state(
+    const Tensor& param,
+    double initial_accumulator_value) {
+  auto state = std::make_unique<AdagradParamState>();
+  state->step(0);
+  state->sum(torch::full_like(
+      param, initial_accumulator_value, MemoryFormat::Preserve));
+  return state;
+}
+
 Tensor Adagrad::step(LossClosure closure) {
   NoGradGuard no_grad;
   Tensor loss = {};
@@ -72,17 +82,13 @@ Tensor Adagrad::step(LossClosure closure) {
         continue;
       }
       auto grad = p.grad();
-      // A parameter added to the optimizer after construction has no state
-      // yet; create it here exactly as the constructor does.
-      if (state_.find(p.unsafeGetTensorImpl()) == state_.end()) {
-        auto& defaults = static_cast<AdagradOptions&>(*defaults_);
-        auto state = std::make_unique<AdagradParamState>();
-        state->step(0);
-        state->sum(torch::full_like(
-            p.data(),
-            defaults.initial_accumulator_value(),
-            at::MemoryFormat::Preserve));
-        state_[p.unsafeGetTensorImpl()] = std::move(state);
+      auto param_state = state_.find(p.unsafeGetTensorImpl());
+      auto& defaults = static_cast<AdagradOptions&>(*defaults_);
+
+      // State initialization
+      if (param_state == state_.end()) {
+        state_[p.unsafeGetTensorImpl()] =
+            make_param_state(p, defaults.initial_accumulator_value());
       }
       auto& state =
           static_cast<AdagradParamState&>(*state_[p.unsafeGetTensorImpl()]);

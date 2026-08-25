@@ -504,11 +504,18 @@ TEST(OptimTest, AddParameter_Adagrad) {
   ASSERT_TRUE(parameter.allclose(appended));
   ASSERT_TRUE(parameter.allclose(in_new_group));
 
-  auto& state = static_cast<AdagradParamState&>(
-      *optimizer.state()[appended.unsafeGetTensorImpl()]);
-  ASSERT_EQ(state.step(), 1);
-  // sum starts at initial_accumulator_value and accumulates grad * grad.
-  ASSERT_TRUE(state.sum().allclose(torch::full_like(appended, 1.5)));
+  // Both late arrivals are seeded from the optimizer defaults rather than from
+  // the group's initial_accumulator_value, matching the constructor and
+  // torch/optim/adagrad.py, which reads self.defaults in _init_group. This
+  // pins the current semantics; it is not a claim that they are the desirable
+  // ones.
+  for (const auto& late : {appended, in_new_group}) {
+    auto& state = static_cast<AdagradParamState&>(
+        *optimizer.state()[late.unsafeGetTensorImpl()]);
+    ASSERT_EQ(state.step(), 1);
+    // sum starts at initial_accumulator_value and accumulates grad * grad.
+    ASSERT_TRUE(state.sum().allclose(torch::full_like(late, 1.5)));
+  }
 }
 
 // Check whether the learning rate of the parameter groups in the optimizer are
