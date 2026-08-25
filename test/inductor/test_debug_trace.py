@@ -12,10 +12,7 @@ import torch
 from torch._inductor import config, test_operators
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    skipIfWindows,
-)
+from torch.testing._internal.common_utils import HardwareClassification, skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 
