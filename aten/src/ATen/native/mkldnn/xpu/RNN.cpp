@@ -7,7 +7,6 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/stack.h>
 #include <ATen/ops/zeros.h>
-#include <c10/core/Scalar.h>
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_sycl.hpp>
 
