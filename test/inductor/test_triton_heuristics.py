@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
     runOnRocm,
@@ -505,12 +504,12 @@ class TestTritonHeuristicsRuntime(TestCase):
 
 
 @requires_triton()
-@instantiate_parametrized_tests
 class TestTritonHeuristicsBackendConfig(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @onlyAccelerator
     @parametrize("do_pruning", [False, True])
-    def test_prune_configs_over_shared_memory_limit(self, do_pruning):
+    def test_prune_configs_over_shared_memory_limit(self, device, do_pruning):
         from torch._inductor.heuristics.template.triton import (
             CUDAConfigHeuristic,
             GemmConfig,
@@ -528,7 +527,7 @@ class TestTritonHeuristicsBackendConfig(TestCase):
         with config.patch(
             {"max_autotune_prune_choices_based_on_shared_mem": do_pruning}
         ):
-            if GPU_TYPE == "xpu":
+            if torch.device(device).type == "xpu":
                 config_heuristic = XPUConfigHeuristic()
             elif torch.version.hip:
                 config_heuristic = ROCmConfigHeuristic()
@@ -808,32 +807,33 @@ class TestArgumentCloneAndRestore(TestCase):
     # will fail.
     MEM_TOLERANCE = int(256 * 1e6)
 
-    def _create_caching_autotuner(self):
-        args = _get_cos_kernel_caching_autotuner_args(GPU_TYPE)
+    def _create_caching_autotuner(self, device):
+        args = _get_cos_kernel_caching_autotuner_args(device)
         args["optimize_mem"] = True
         args["mutated_arg_names"] = ["in_ptr0"]
         autotuner = CachingAutotuner(**args)
         return autotuner
 
-    def _create_tensor(self, pad=1, with_offset=False):
+    def _create_tensor(self, device, pad=1, with_offset=False):
         """
         Create a GPU tensor of about 1GB size.
         """
         M = 2
         N = 2**29 // 4
-        out = rand_strided((M, N), (N + pad, 1), device=GPU_TYPE)
+        out = rand_strided((M, N), (N + pad, 1), device=device)
         if with_offset:
             out = out[:, 1:]
         return out
 
-    def _do_test(self, gpu_tensor):
-        torch.get_device_module(GPU_TYPE).reset_peak_memory_stats()
-        autotuner = self._create_caching_autotuner()
+    def _do_test(self, device, gpu_tensor):
+        device_module = torch.get_device_module(device)
+        device_module.reset_peak_memory_stats()
+        autotuner = self._create_caching_autotuner(device)
 
         old_storage_offset = gpu_tensor.storage_offset()
         gpu_tensor_clone = clone_preserve_strides(gpu_tensor)
 
-        peak_mem_before = torch.get_device_module(GPU_TYPE).max_memory_allocated()
+        peak_mem_before = device_module.max_memory_allocated()
         cpu_copies = autotuner.copy_args_to_cpu_if_needed(gpu_tensor)
         self.assertTrue(len(cpu_copies) == 1)
 
@@ -849,7 +849,7 @@ class TestArgumentCloneAndRestore(TestCase):
 
         # Note: torch.allclose somehow allocates large amount of extra memory.
         # Record peak memory before that.
-        peak_mem_after = torch.get_device_module(GPU_TYPE).max_memory_allocated()
+        peak_mem_after = device_module.max_memory_allocated()
 
         self.assertTrue(torch.allclose(gpu_tensor, gpu_tensor_clone))
         self.assertTrue(
@@ -860,27 +860,30 @@ class TestArgumentCloneAndRestore(TestCase):
         # Avoid OOM in CI
         self.assertTrue(peak_mem_after < 1e10)
 
+    @onlyAccelerator
     @requires_gpu_with_enough_memory(1e10)
-    def test_clone_contiguous_args(self):
-        arg = self._create_tensor(pad=0)
+    def test_clone_contiguous_args(self, device):
+        arg = self._create_tensor(device, pad=0)
         self.assertTrue(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() == 0)
-        self._do_test(arg)
+        self._do_test(device, arg)
 
+    @onlyAccelerator
     @requires_gpu_with_enough_memory(1e10)
-    def test_clone_non_contiguous_args(self):
-        arg = self._create_tensor(pad=1)
+    def test_clone_non_contiguous_args(self, device):
+        arg = self._create_tensor(device, pad=1)
         self.assertFalse(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() == 0)
-        self._do_test(arg)
+        self._do_test(device, arg)
 
+    @onlyAccelerator
     @requires_gpu_with_enough_memory(1e10)
-    def test_clone_args_with_non_zero_offset(self):
-        arg = self._create_tensor(pad=1, with_offset=True)
+    def test_clone_args_with_non_zero_offset(self, device):
+        arg = self._create_tensor(device, pad=1, with_offset=True)
         self.assertFalse(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() > 0)
 
-        self._do_test(arg)
+        self._do_test(device, arg)
 
 
 @requires_triton()
@@ -1762,6 +1765,18 @@ instantiate_device_type_tests(
     TestTritonHeuristicsRuntime,
     globals(),
     except_for=("hpu",),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestTritonHeuristicsBackendConfig,
+    globals(),
+    only_for=(GPU_TYPE,),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestArgumentCloneAndRestore,
+    globals(),
+    only_for=(GPU_TYPE,),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
