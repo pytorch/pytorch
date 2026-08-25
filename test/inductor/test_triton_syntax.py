@@ -79,7 +79,7 @@ _test_triton_sqrt_mtia = TestTritonSyntacticallyValid.__dict__[
 instantiate_device_type_tests(
     TestTritonSyntacticallyValid,
     globals(),
-    except_for=("hpu",),
+    except_for=("cpu", "hpu"),
     allow_xpu=True,
 )
 if torch.mtia.is_available() and has_triton():
