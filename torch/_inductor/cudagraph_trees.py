@@ -1495,6 +1495,7 @@ class CUDAGraphNode:
         # via AnnotatedKernelCallLine; enable_annotations tells the CUDA graph capture
         # to process those mark_kernels calls as they execute.
         should_annotate = config.triton.cudagraph_kernel_annotations
+        print(f"[fqn_debug] cudagraph_trees: capturing graph, should_annotate={should_annotate}")
 
         with (
             preserve_rng_state(),

@@ -3692,6 +3692,7 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
                 if prefix:
                     anchor_prefixes.add(prefix)
                 break
+    print(f"[fqn_debug] get_fused_kernel_module_fqn: anchor_prefixes={list(anchor_prefixes)}, fqn_map_size={len(fqn_map)}")
     if not anchor_prefixes:
         return None
 
