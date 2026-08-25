@@ -54,7 +54,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *, example_inputs, backend="inductor", tracer="make_fx", decompositions=None, training=False, recompile_limit=256, dynamic=None, guard_filter_fn=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False)
+.. py:function:: precompile(fn, *example_args, example_inputs=None, backend="inductor", tracer="make_fx", decompositions=None, training=False, recompile_limit=256, dynamic=None, guard_filter_fn=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False)
 
    Ahead-of-time precompile ``fn`` against example inputs, returning a runnable Python
    source string plus an acceleration cache as ``(python_code, cache)``.
@@ -78,21 +78,30 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       model] in ``torch/_precompile.py``. ``torch.compiler.precompile`` is distinct from
       ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` caching mode).
 
+      For compatibility, positional arguments after ``fn`` describe one example call.
+      Do not combine positional examples with ``example_inputs``.
+
       With ``tracer="dynamo"``, every tuple or ``ExampleInput`` in ``example_inputs``
       is executed exactly once during capture. Recompilations become guarded variants
       in the artifact, including automatically dynamic graphs produced when dimensions
-      vary across examples. The
-      artifact drops a serialized guard record only when doing so preserves how every
-      example matches the captured variants, or when it only checks process-local state
-      outside the explicit inputs. Globals, context-manager state, and the rest of the
-      Python environment must be semantically unchanged between capture and runtime;
-      guards that only enforce that promise may therefore be omitted. Input-derived
-      guards remain responsible for dispatch. This filtering is at guard-record
-      granularity, so a retained composite record can still contain invariant leaf
-      checks. Breaking an unchecked environment assumption can silently miscompute. A
-      standalone artifact raises when a call fails every retained guard set. An
-      installed artifact may compile an uncovered call with its selected backend.
-      Graph breaks are captured as Dynamo resume frames.
+      vary across examples. Its contract requires that (1) globals, context-manager
+      state, and the rest of the Python environment are semantically identical at
+      capture and runtime, and (2) only explicit inputs vary in ways that would cause a
+      recompile. Guards that only enforce the first promise are omitted. By default,
+      every portable input-derived guard is retained, including invariant guards needed
+      to reject an unseen input variation.
+
+      Each retained guard is rebuilt independently from its frozen capture snapshot.
+      An environment-only guard that cannot be rebuilt is omitted with its dependent
+      attribute checks; an input-derived or unknown-provenance guard instead raises a
+      ``PrecompileError``. Rebuilt guard facts and leaf predicates are compared with the
+      live capture so a changed input predicate cannot silently ship. This filtering is
+      at guard-record granularity, so a retained composite record can still contain
+      invariant leaf checks. Breaking an unchecked environment assumption can silently
+      miscompute. A standalone artifact raises when a call fails every retained guard
+      set. An installed artifact may compile an uncovered call with its selected
+      backend; it logs a warning and increments ``serve_time_compiles()`` when that
+      happens. Graph breaks are captured as Dynamo resume frames.
       Closure-free Python functions wrapped with ``torch._dynamo.disable`` are embedded
       and execute eagerly between compiled graph segments. Global names left in
       standalone transformed bytecode must resolve to recursive literal values or
@@ -100,18 +109,22 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       their defining modules. Disabled functions cannot assign globals or use
       ``globals()``, ``eval()``, or ``exec()``; their importable module globals are
       rebound at load, while recursive literal globals and defaults are captured by
-      value. Compiled graphs and kernels remain Python source; guard
-      trees, transformed Dynamo entry/resume bytecode, and embedded disabled-function
-      bytecode are stored as opaque inline data because they have no Python-source
-      representation. The top-level function cannot have closure cells or nested
-      functions that capture its locals. ``nn.Module`` arguments are supported and are
-      checked at runtime for type, training mode, parameter/buffer names, aliasing,
-      shapes, strides, dtypes, devices, and ``requires_grad`` state.
+      value. Compiled graph bodies and kernels remain Python source. The eager backend
+      supports higher-order graphs such as ``torch.cond``, ``torch.while_loop``,
+      non-reentrant activation checkpointing, ``vmap``, autocast, and grad-mode regions.
+      Their nested graph bodies are rendered as Python too, while the FX ``Graph``
+      structure required by eager higher-order-op interpreters is stored as opaque
+      inline data. Guard trees, transformed Dynamo entry/resume bytecode, and embedded
+      disabled-function bytecode are also opaque. The top-level function cannot have
+      closure cells or nested functions that capture its locals. ``nn.Module`` arguments
+      are supported and are checked at runtime for type, training mode, parameter/buffer
+      names, aliasing, shapes, strides, dtypes, devices, and ``requires_grad`` state.
 
       Entry and graph-break resume frames are dispatched directly from the generated
       source. If capture also compiles a nested frame reachable only through an ordinary
       Python call, the artifact uses an isolated installed mode so that frame is served
-      too instead of silently running eager. Installation happens on first call (or
+      too instead of silently running eager. Loading prepares the backends and guard
+      trees without installing them. Installation happens on first call (or
       context-manager entry), and ``unload()`` removes only that artifact's entries.
       Installed artifacts require the defining Python modules to be importable. Pass the
       live callable as ``fn=`` to ``load`` when the entry itself must be rebound.
@@ -135,6 +148,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
        as positional arguments.
+   :param example_args: Positional arguments for one example call, retained for
+       compatibility with the original API. Do not combine them with ``example_inputs``.
    :param example_inputs: A sequence of positional-argument tuples or
        ``torch.compiler.ExampleInput`` values for ``fn``. ``ExampleInput`` carries an
        ``args`` tuple and ``kwargs`` dict. The
@@ -145,7 +160,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        runtime inputs.
    :param backend: ``"inductor"`` (default) lowers through AOTAutograd + Inductor;
        ``"eager"`` keeps the captured ATen graph (layout-flexible, no kernels; shapes
-       are still specialized to the example).
+       are still specialized to the example). With the Dynamo tracer, eager preserves
+       nested higher-order-op graphs without symbolic retracing at load.
    :param tracer: capture front-end. ``"make_fx"`` (default) is a non-strict make_fx
        trace. ``"dynamo"`` captures guarded specializations and recompilations from a
        Python function, including graph-break resume frames; it does not yet support
@@ -162,9 +178,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        ``torch.compile``. ``None`` enables automatic promotion when example shapes vary.
    :param guard_filter_fn: Optional callable returning one boolean per candidate Dynamo
        guard. It may narrow the portable default set but cannot restore unserializable
-       guards. Final minimization preserves the complete dispatch result for every
-       supplied example while omitting guards covered by the invariant-environment
-       contract.
+       guards. Removing an input guard is considered risky and requires
+       ``require_no_risky_drops=False``. Finalization omits guards covered by the
+       invariant-environment contract and verifies that the frozen captured variants
+       remain distinguishable.
    :param invariants: Optional path for a text report classifying captured guards as
        invariant, varying, or undetermined for each frame.
    :param require_complete: Reject bypassed, truncated, uncovered, or failed captures.
