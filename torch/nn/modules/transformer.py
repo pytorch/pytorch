@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
+import functools
 import warnings
 from collections.abc import Callable
 from typing import Any
@@ -24,6 +25,29 @@ __all__ = [
     "TransformerEncoderLayer",
     "TransformerDecoderLayer",
 ]
+
+
+@functools.lru_cache
+def _kernel_registered(op_name: str, device_type: str) -> bool:
+    return torch._C._dispatch_has_kernel_for_dispatch_key(
+        op_name, torch._C._dispatch_key_for_device(device_type)
+    )
+
+
+def _nested_tensor_fastpath_supported(device_type: str) -> bool:
+    # The encoder fastpath calls both of these; they are registered separately,
+    # so neither one licenses the other.
+    if torch.jit.is_scripting():
+        return False
+    return _kernel_registered(
+        "aten::_nested_tensor_from_mask", device_type
+    ) and _kernel_registered("aten::_nested_tensor_from_mask_left_aligned", device_type)
+
+
+def _encoder_layer_fastpath_supported(device_type: str) -> bool:
+    if torch.jit.is_scripting():
+        return False
+    return _kernel_registered("aten::_transformer_encoder_layer_fwd", device_type)
 
 
 def _generate_square_subsequent_mask(
@@ -475,6 +499,11 @@ class TransformerEncoder(Module):
             )
         elif src_key_padding_mask is None:
             why_not_sparsity_fast_path = "src_key_padding_mask was None"
+        elif not _nested_tensor_fastpath_supported(src.device.type):
+            why_not_sparsity_fast_path = (
+                f"{src.device.type} has no aten::_nested_tensor_from_mask and "
+                "aten::_nested_tensor_from_mask_left_aligned kernels registered"
+            )
         # This check avoids a call to torch._nested_tensor_from_mask_left_aligned() that
         # breaks in torch.compile.
         elif do_mask_check and torch.compiler.is_compiling():
@@ -510,18 +539,8 @@ class TransformerEncoder(Module):
                 first_layer.linear2.weight,
                 first_layer.linear2.bias,
             )
-            _supported_device_type = [
-                "cpu",
-                "cuda",
-                "xpu",
-                torch.utils.backend_registration._privateuse1_backend_name,
-            ]
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
-            elif src.device.type not in _supported_device_type:
-                why_not_sparsity_fast_path = (
-                    f"src device is neither one of {_supported_device_type}"
-                )
             elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
                 why_not_sparsity_fast_path = (
                     "grad is enabled and at least one of query or the "
@@ -893,20 +912,14 @@ class TransformerEncoderLayer(Module):
 
             # We have to use list comprehensions below because TorchScript does not support
             # generator expressions.
-            _supported_device_type = [
-                "cpu",
-                "cuda",
-                "xpu",
-                torch.utils.backend_registration._privateuse1_backend_name,
-            ]
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
             elif not all(
-                (x.device.type in _supported_device_type) for x in tensor_args
+                _encoder_layer_fastpath_supported(x.device.type) for x in tensor_args
             ):
                 why_not_sparsity_fast_path = (
-                    "some Tensor argument's device is neither one of "
-                    f"{_supported_device_type}"
+                    "some Tensor argument's device has no "
+                    "aten::_transformer_encoder_layer_fwd kernel registered"
                 )
             elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
                 why_not_sparsity_fast_path = (

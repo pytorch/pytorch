@@ -1123,6 +1123,38 @@ class TestTransformers(NNTestCase):
 
 
 
+    def test_fastpath_device_gate_follows_dispatcher(self, device):
+        # The gates query the dispatcher rather than matching a hardcoded list of
+        # device-type strings, so a backend is admitted exactly when it has
+        # registered the kernel the fastpath is about to call.
+        from torch.nn.modules.transformer import (
+            _encoder_layer_fastpath_supported,
+            _nested_tensor_fastpath_supported,
+        )
+
+        self.assertTrue(_nested_tensor_fastpath_supported("cpu"))
+        self.assertTrue(_encoder_layer_fastpath_supported("cpu"))
+        # Vulkan registers none of the ops; it must be rejected by the gate
+        # rather than reaching the call and raising NotImplementedError.
+        self.assertFalse(_nested_tensor_fastpath_supported("vulkan"))
+        self.assertFalse(_encoder_layer_fastpath_supported("vulkan"))
+        # The two gates cover different ops and do diverge: meta has
+        # _transformer_encoder_layer_fwd but neither nested-tensor-from-mask op.
+        self.assertTrue(_encoder_layer_fastpath_supported("meta"))
+        self.assertFalse(_nested_tensor_fastpath_supported("meta"))
+
+        src = torch.rand(2, 4, 8, device="meta")
+        key_padding_mask = torch.zeros(2, 4, dtype=torch.bool, device="meta")
+        model = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=8, nhead=4, dim_feedforward=32, batch_first=True
+            ),
+            num_layers=2,
+        ).to("meta").eval()
+        with torch.no_grad():
+            out = model(src, src_key_padding_mask=key_padding_mask)
+        self.assertEqual(out.shape, src.shape)
+
     def test_script_encoder_subclass(self, device):
         class MyCustomLayer(nn.TransformerEncoderLayer):
             pass
@@ -1134,6 +1166,8 @@ class TestTransformers(NNTestCase):
 
     # brazenly adapted from test_transformerencoderlayer_src_mask to test execution of
     # torchscripted transformerencoderlayer subclass
+    # In eval mode eager takes the fused fastpath while the scripted copy falls
+    # back to the slowpath, so this compares the two implementations.
     def test_transformerencoderlayer_subclass(self, device):
         class MyCustomLayer(nn.TransformerEncoderLayer):
             pass
@@ -1168,7 +1202,8 @@ class TestTransformers(NNTestCase):
             scripted_result = script_model(src, src_mask=src_mask)
             self.assertEqual(result, scripted_result)
 
-
+    # In eval mode eager takes the fused fastpath while the scripted copy falls
+    # back to the slowpath, so this compares the two implementations.
     def test_transformerencoderlayer_subclass_model(self, device):
         class MyCustomLayer(nn.TransformerEncoderLayer):
             pass
