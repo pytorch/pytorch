@@ -3026,10 +3026,7 @@ class _ShapeGuardCppPrinter(_ShapeGuardPrinter, CppPrinter):
 class _SymExprLocals(dict):  # type: ignore[type-arg]
     """eval() locals for a printed sympy expression.
 
-    Resolves symbols on demand, so a constant stride does no work and a stride
-    naming two symbols does not touch every symbol in the ShapeEnv. Names that are
-    not symbols raise KeyError, which LOAD_NAME turns into a globals lookup,
-    leaving SYMPY_INTERP entries like `math` and `torch` resolvable.
+    Builds a SymNode only for the symbols an expression actually names.
     """
 
     def __init__(self, shape_env: ShapeEnv) -> None:
@@ -3044,10 +3041,8 @@ class _SymExprLocals(dict):  # type: ignore[type-arg]
         is_float = symbol_is_type(symbol, (SymT.FLOAT, SymT.UNBACKED_FLOAT))
         pytype: type = float if is_float else int
         val = shape_env.backed_var_to_val.get(symbol)
-        # _NO_HINT, not None: None asks SymNode to derive a hint via
-        # _maybe_evaluate_static, which for a nested-tensor symbol substitutes its
-        # SingletonInt and then fails expanding it. Unbacked symbols have no hint
-        # either, so both say so explicitly.
+        # _NO_HINT rather than None: None means "derive the hint for me", which for a
+        # nested-tensor symbol substitutes its SingletonInt and then fails to expand.
         hint = (
             pytype(val) if isinstance(val, (sympy.Integer, sympy.Float)) else _NO_HINT
         )
@@ -4065,13 +4060,7 @@ class ShapeEnv:
         # hints). The override is also recorded in var_to_hint_override
         # so it can be included in the FxGraphCache key.
         self.backed_var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
-        # Every symbol this ShapeEnv has minted, by name. Neither var_to_range nor
-        # backed_var_to_val is the full set on its own: nested-tensor SingletonInt
-        # symbols deliberately get no range, and add_backed_var_to_val only writes
-        # backed_var_to_val. Lets a printed expression be resolved back to the
-        # exact symbol object -- reconstructing it from the name cannot work, since
-        # sympy symbol identity includes assumptions like positive= that the name
-        # does not carry.
+        # Every symbol this ShapeEnv minted, keyed by name.
         self.name_to_symbol: dict[str, sympy.Symbol] = {}
         # Only set when propagate_real_tensors is on.
         # Used as last resort to avoid GuardOnDataDependent error in draft export.
@@ -4386,8 +4375,7 @@ class ShapeEnv:
             "counter",
             "log",
             "var_to_stack",
-            # derived: a name index over symbols already compared via var_to_range
-            # and backed_var_to_val
+            # a name lookup index, not part of the guard state
             "name_to_symbol",
             "fx_node_cache",
             "graph",

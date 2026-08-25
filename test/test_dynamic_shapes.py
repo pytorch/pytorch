@@ -3689,6 +3689,15 @@ class TestGuardsExpressions(TestCase):
         self.assertIsInstance(expr, torch.SymInt)
         self.assertEqual(str(expr.node.expr), f"128*{s0.node.expr}")
 
+    def test_deserialize_symexpr_unbacked_int_symbol(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        out = shape_env.deserialize_symexpr(str(u0.node.expr))
+        self.assertIsInstance(out, torch.SymInt)
+        self.assertIs(out.node.pytype, int)
+        # No backed_var_to_val entry, so it binds hintless.
+        self.assertIsNone(out.node.hint)
+
     def test_deserialize_symexpr_float_symbol(self):
         shape_env = ShapeEnv()
         f0 = shape_env.create_unbacked_symfloat()
