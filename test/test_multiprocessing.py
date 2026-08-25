@@ -577,6 +577,60 @@ class TestMultiprocessingDeviceType(_MultiprocessingTestMixin, TestCase):
         t = torch.randn(5, 5, device=device)
         self.assertTrue(t.is_shared())
 
+    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_cuda_bad_call(self):
+        # Initialize CUDA
+        t = torch.zeros(5, 5).cuda().cpu()
+        inq = mp.Queue()
+        outq = mp.Queue()
+        p = mp.Process(target=queue_get_exception, args=(inq, outq))
+        p.start()
+        inq.put(t)
+        p.join()
+        self.assertIsInstance(outq.get(), RuntimeError)
+
+    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_wrong_cuda_fork(self):
+        stderr = TestCase.runWithPytorchAPIUsageStderr(
+            """\
+import torch
+from torch.multiprocessing import Process
+def run(rank):
+    torch.cuda.set_device(rank)
+if __name__ == "__main__":
+    size = 2
+    processes = []
+    for rank in range(size):
+        # it would work fine without the line below
+        x = torch.rand(20, 2).cuda()
+        p = Process(target=run, args=(rank,))
+        p.start()
+        processes.append(p)
+    for p in processes:
+        p.join()
+"""
+        )
+        self.assertRegex(stderr, "Cannot re-initialize CUDA in forked subprocess.")
+
+    @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
+    def test_autograd_errors(self):
+        ctx = mp.get_context("fork")
+        simple_autograd_function()
+        # Autograd only uses thread when GPUs are involved
+        if (
+            torch.cuda.is_available()
+            or torch.backends.mps.is_available()
+            or torch.xpu.is_available()
+        ):
+            with self.assertRaisesRegex(RuntimeError, r"Unable to handle autograd"):
+                with ctx.Pool(3) as pool:
+                    pool.map(simple_autograd_function, [1, 2, 3])
+        else:
+            with ctx.Pool(3) as pool:
+                pool.map(simple_autograd_function, [1, 2, 3])
+
 
 instantiate_device_type_tests(TestMultiprocessingDeviceType, globals())
 
@@ -700,28 +754,56 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         else:
             self.assertEqual(t, torch.ones(5, 5) * 3, atol=0, rtol=0)
 
-    @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
-    def test_autograd_errors(self):
-        ctx = mp.get_context("fork")
-        simple_autograd_function()
-        # Autograd only uses thread when GPUs are involved
-        if (
-            torch.cuda.is_available()
-            or torch.backends.mps.is_available()
-            or torch.xpu.is_available()
-        ):
-            with self.assertRaisesRegex(RuntimeError, r"Unable to handle autograd"):
-                with ctx.Pool(3) as pool:
-                    pool.map(simple_autograd_function, [1, 2, 3])
-        else:
-            with ctx.Pool(3) as pool:
-                pool.map(simple_autograd_function, [1, 2, 3])
-
     def test_autograd_fine_with_spawn(self):
         ctx = mp.get_context("spawn")
         simple_autograd_function()
         with ctx.Pool(3) as pool:
             pool.map(simple_autograd_function, [1, 2, 3])
+
+    def test_empty_tensor_sharing_meta(self):
+        self._test_empty_tensor_sharing(torch.float32, torch.device("meta"))
+        self._test_empty_tensor_sharing(torch.int64, torch.device("meta"))
+
+    def test_tensor_sharing_meta(self):
+        dtype = torch.float32
+        device = torch.device("meta")
+        q = mp.Queue()
+        empty = torch.tensor([1], dtype=dtype, device=device)
+        q.put(empty)
+        out = q.get(timeout=1)
+        self.assertEqual(out, empty)
+
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/167522"
+    )
+    def test_meta_simple(self):
+        self._test_sharing(mp.get_context("spawn"), "meta", torch.float)
+
+    def test_empty_shared(self):
+        t = torch.tensor([])
+        t.share_memory_()
+
+    def _test_is_shared(self):
+        t = torch.randn(5, 5)
+        self.assertFalse(t.is_shared())
+        t.share_memory_()
+        self.assertTrue(t.is_shared())
+
+    @unittest.skipIf(
+        platform == "darwin", "file descriptor strategy is not supported on macOS"
+    )
+    def test_is_shared(self):
+        self._test_is_shared()
+
+    def test_fs_is_shared(self):
+        with fs_sharing():
+            self._test_is_shared()
+
+    @unittest.skipIf(sys.platform != "linux", "Only runs on Linux; requires prctl(2)")
+    def test_set_thread_name(self):
+        name = "test name"
+        mp._set_thread_name(name)
+        self.assertEqual(mp._get_thread_name(), name)
 
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_cuda_memory_allocation(self):
@@ -849,43 +931,6 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         # We need to collect, as CUDA MP implementation holds one shared
         # memory 'file' for performance reason
         torch.cuda.ipc_collect()
-
-    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_cuda_bad_call(self):
-        # Initialize CUDA
-        t = torch.zeros(5, 5).cuda().cpu()
-        inq = mp.Queue()
-        outq = mp.Queue()
-        p = mp.Process(target=queue_get_exception, args=(inq, outq))
-        p.start()
-        inq.put(t)
-        p.join()
-        self.assertIsInstance(outq.get(), RuntimeError)
-
-    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_wrong_cuda_fork(self):
-        stderr = TestCase.runWithPytorchAPIUsageStderr(
-            """\
-import torch
-from torch.multiprocessing import Process
-def run(rank):
-    torch.cuda.set_device(rank)
-if __name__ == "__main__":
-    size = 2
-    processes = []
-    for rank in range(size):
-        # it would work fine without the line below
-        x = torch.rand(20, 2).cuda()
-        p = Process(target=run, args=(rank,))
-        p.start()
-        processes.append(p)
-    for p in processes:
-        p.join()
-"""
-        )
-        self.assertRegex(stderr, "Cannot re-initialize CUDA in forked subprocess.")
 
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_rebuild_cuda_tensor(self):
@@ -1024,25 +1069,6 @@ if __name__ == "__main__":
         p2c.put(0)
         p.join()
 
-    def test_empty_tensor_sharing_meta(self):
-        self._test_empty_tensor_sharing(torch.float32, torch.device("meta"))
-        self._test_empty_tensor_sharing(torch.int64, torch.device("meta"))
-
-    def test_tensor_sharing_meta(self):
-        dtype = torch.float32
-        device = torch.device("meta")
-        q = mp.Queue()
-        empty = torch.tensor([1], dtype=dtype, device=device)
-        q.put(empty)
-        out = q.get(timeout=1)
-        self.assertEqual(out, empty)
-
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/167522"
-    )
-    def test_meta_simple(self):
-        self._test_sharing(mp.get_context("spawn"), "meta", torch.float)
-
     # Check sharing a cudaMalloc allocation with different types of storage.
     # (Issue #11422)
     def _test_mixed_types_cuda_sharing(self, ctx=mp):
@@ -1069,32 +1095,6 @@ if __name__ == "__main__":
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_mixed_types_cuda_sharing(self):
         self._test_mixed_types_cuda_sharing(mp.get_context("spawn"))
-
-    def test_empty_shared(self):
-        t = torch.tensor([])
-        t.share_memory_()
-
-    def _test_is_shared(self):
-        t = torch.randn(5, 5)
-        self.assertFalse(t.is_shared())
-        t.share_memory_()
-        self.assertTrue(t.is_shared())
-
-    @unittest.skipIf(
-        platform == "darwin", "file descriptor strategy is not supported on macOS"
-    )
-    def test_is_shared(self):
-        self._test_is_shared()
-
-    def test_fs_is_shared(self):
-        with fs_sharing():
-            self._test_is_shared()
-
-    @unittest.skipIf(sys.platform != "linux", "Only runs on Linux; requires prctl(2)")
-    def test_set_thread_name(self):
-        name = "test name"
-        mp._set_thread_name(name)
-        self.assertEqual(mp._get_thread_name(), name)
 
 
 if __name__ == "__main__":
