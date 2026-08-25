@@ -2711,6 +2711,12 @@ class cuda(cutlass):
     # Whether to keep intermediate files dring compilation.
     enable_ptxas_info = False
 
+    # When True, inductor autotune pushes a per-op dynamic-dims mask for
+    # symbolic GEMM dims so TunableOp persists wildcard kernel-map entries that
+    # runtime concrete-miss lookups can reuse. False stops producing new
+    # wildcard entries; existing rows in a loaded file still satisfy lookups.
+    autotune_tunableop_dynamic_dims_wildcard: bool = False
+
 
 @inherit_fields_from(cutlass)
 class xpu(cutlass):
