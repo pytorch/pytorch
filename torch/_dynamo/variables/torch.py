@@ -78,6 +78,8 @@ from ..source import (
     GlobalStateSource,
     ImportSource,
     SyntheticLocalSource,
+    TensorProperty,
+    TensorPropertySource,
 )
 from ..utils import (
     _is_tensorify_enabled,
@@ -1998,23 +2000,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             def normalize_size(size: SizeVariable) -> SizeVariable:
                 items: list[VariableTracker] = []
+
+                def normalize_concrete_item(value: Any) -> VariableTracker:
+                    try:
+                        normalized = torch._C._infer_size(
+                            torch.Size([value]), torch.Size([1])
+                        )[0]
+                    except (TypeError, ValueError) as exc:
+                        raise_observed_exception(
+                            type(exc),
+                            tx,
+                            args=list(exc.args),
+                        )
+                    return ConstantVariable.create(normalized)
+
                 for item in size.items:
                     if item.is_python_constant():
                         # Mixed symbolic/concrete sizes cannot be materialized
                         # below, so validate each concrete item through the C
                         # binding before taking the symbolic fallback.
-                        try:
-                            normalized = torch._C._infer_size(
-                                torch.Size([item.as_python_constant()]),
-                                torch.Size([1]),
-                            )[0]
-                        except (TypeError, ValueError) as exc:
-                            raise_observed_exception(
-                                type(exc),
-                                tx,
-                                args=list(exc.args),
-                            )
-                        items.append(ConstantVariable.create(normalized))
+                        items.append(normalize_concrete_item(item.as_python_constant()))
                     elif isinstance(item, TensorVariable):
                         if (
                             item.dtype is None
@@ -2033,6 +2038,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                                     f"(item {len(items)} is 'Tensor')"
                                 ],
                             )
+                        if item.dtype is torch.uint64:
+                            unimplemented(
+                                gb_type="Data-dependent uint64 torch.Size element in torch._C._infer_size",
+                                context="torch.uint64 tensor-backed size",
+                                explanation="Dynamo cannot safely validate that a data-dependent "
+                                "torch.uint64 value fits in torch.Size's signed int64 range.",
+                                hints=[*graph_break_hints.SUPPORTABLE],
+                            )
                         if item.dtype is torch.bool:
                             item = item.call_method(
                                 tx,
@@ -2041,6 +2054,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                                 {},
                             )
                         items.append(item.nb_index_impl(tx))
+                    elif isinstance(item, SymNodeVariable):
+                        node = item.sym_num.node
+                        expr = node.expr
+                        # Bare tensor dimensions already fit in signed int64;
+                        # preserve them symbolically instead of specializing.
+                        is_tensor_size = expr.is_Symbol and any(
+                            isinstance(source, TensorPropertySource)
+                            and source.prop is TensorProperty.SIZE
+                            for source in node.shape_env.var_to_sources.get(expr, ())
+                        )
+                        if is_tensor_size:
+                            items.append(item)
+                        elif torch.fx.experimental.symbolic_shapes.has_guarding_hint(
+                            item.sym_num
+                        ):
+                            items.append(
+                                normalize_concrete_item(
+                                    item.nb_index_impl(tx).as_python_constant()
+                                )
+                            )
+                        else:
+                            unimplemented(
+                                gb_type="Unhinted data-dependent torch.Size element in torch._C._infer_size",
+                                context=f"symbolic size: {item.sym_num}",
+                                explanation="Dynamo cannot safely validate that a data-dependent "
+                                "torch.Size element fits in the signed int64 range.",
+                                hints=[*graph_break_hints.SUPPORTABLE],
+                            )
                     else:
                         items.append(item)
                 return SizeVariable(items)

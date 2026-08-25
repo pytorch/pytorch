@@ -950,11 +950,16 @@ partial_fn = functools.partial(fn, scale=2)
         y = torch.randn(4, 3)
 
         expected = fn(x, y)
-        actual = torch.compile(fn, backend="eager", fullgraph=True, dynamic=dynamic)(
-            x, y
-        )
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=dynamic)
+        actual = compiled_fn(x, y)
         self.assertIsInstance(actual[0], torch.Size)
         self.assertEqual(actual, expected)
+        if dynamic:
+            x = torch.randn(5, 1, 3)
+            y = torch.randn(7, 3)
+            self.assertEqual(compiled_fn(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_infer_size_with_negative_one_dynamic_size(self):
         def fn(y):
@@ -1050,6 +1055,51 @@ partial_fn = functools.partial(fn, scale=2)
             torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(x),
             expected,
         )
+
+    @parametrize("value", (2**63 - 1, 2**63, 2**64 - 1))
+    def test_infer_size_with_uint64_tensor_backed_size(self, value):
+        def fn(x):
+            try:
+                torch._C._infer_size(torch.Size([x]), torch.Size([1]))
+            except TypeError as exc:
+                return torch.ones(()), str(exc)
+            return torch.zeros(()), ""
+
+        x = torch.tensor(value, dtype=torch.uint64)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(actual, expected)
+
+    def test_infer_size_with_symbolic_size_overflow(self):
+        def fn(x):
+            try:
+                torch._C._infer_size(torch.Size([x.item() * 2]), torch.Size([1]))
+            except ValueError as exc:
+                return torch.ones(()), str(exc)
+            return torch.zeros(()), ""
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for value in (2, 2**62, -(2**62) - 1):
+            with self.subTest(value=value):
+                x = torch.tensor(value, dtype=torch.int64)
+                self.assertEqual(compiled_fn(x), fn(x))
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_infer_size_with_unhinted_size(self):
+        def fn(x):
+            shape = torch._C._infer_size(
+                torch.Size([x.nonzero().shape[0]]), torch.Size([1])
+            )
+            return shape, torch.ones(shape)
+
+        x = torch.tensor([0, 1, 0, 2])
+        with self.assertRaisesRegex(
+            Unsupported, "Unhinted data-dependent torch.Size element"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
     def test_infer_size_symbolic_error(self):
         def fn(x, y):
