@@ -82,9 +82,9 @@ inline void check_grid_sampler_3d(
     " and grid with sizes ", grid.sizes());
 }
 
-// The overload a backend whose 5D sampler has bilinear and nearest only calls.
-// torch-xpu-ops calls it at the commit third_party/xpu.txt pins; drop it once
-// that call site moves to the two argument form.
+// TODO: drop this overload once torch-xpu-ops stops calling it. In-tree backends
+// call the one above and refuse bicubic themselves; torch-xpu-ops still passes
+// the mode here, at the commit third_party/xpu.txt pins.
 // See NOTE [ grid_sampler Native Functions ].
 inline void check_grid_sampler_3d(
   const TensorBase& input,
@@ -140,16 +140,6 @@ inline void check_grid_sampler_3d_backward(
   check_grid_sampler_backward(input, grid, grad_output);
 }
 
-// See NOTE [ grid_sampler Native Functions ].
-inline void check_grid_sampler_3d_backward(
-  const TensorBase& input,
-  const TensorBase& grid,
-  const TensorBase& grad_output,
-  int64_t interpolation_mode
-) {
-  check_grid_sampler_3d_backward(input, grid, grad_output);
-  check_grid_sampler_3d(input, grid, interpolation_mode);
-}
 
 // See NOTE [ grid_sampler Native Functions ].
 // cudnn does not support inputs larger than 1024.
