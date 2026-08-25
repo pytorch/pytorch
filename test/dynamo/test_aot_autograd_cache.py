@@ -25,7 +25,6 @@ import torch._functorch._aot_autograd.autograd_cache as autograd_cache
 import torch._functorch.aot_autograd as aot_autograd
 import torch._inductor.compile_fx as compile_fx
 from torch._dynamo import config as dynamo_config
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import (
@@ -4144,9 +4143,9 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         xnumel = 256
         inp = torch.randn(xnumel, device=GPU_TYPE)
         out = torch.empty_like(inp)
-        device_interface = get_interface_for_device(GPU_TYPE)
-        stream = device_interface.get_raw_stream(device_interface.current_device())
-        autotuner.run(inp, out, xnumel, stream=stream)
+        autotuner.run(
+            inp, out, xnumel, stream=torch.accelerator.current_stream().native_handle
+        )
         self.assertEqual(out, inp + 1.0)
 
         # Inject a launcher key into benchmark_failure_reasons — this is how
