@@ -141,7 +141,7 @@ void test_aoti(const std::string& device, bool use_runtime_constant_folding) {
         model_so_path);
 #endif
   } else {
-    testing::AssertionFailure() << "unsupported device: " << device;
+    FAIL() << "unsupported device: " << device;
   }
   auto actual_output_tensors =
       runner->run(data_loader.attr(inputs_attr.c_str()).toTensorList().vec());
@@ -287,7 +287,7 @@ void test_aoti_constants_update(
         model_so_path);
 #endif
   } else {
-    testing::AssertionFailure() << "unsupported device: " << device;
+    FAIL() << "unsupported device: " << device;
   }
   // By default, buffer #1 get loaded with burned in weights. Correct results.
   auto actual_output_tensors = runner->run(input_tensors);
@@ -384,7 +384,7 @@ void test_aoti_extract_constants_map(const std::string& device) {
         model_so_path);
 #endif
   } else {
-    testing::AssertionFailure() << "unsupported device: " << device;
+    FAIL() << "unsupported device: " << device;
   }
 
   // By default, buffer #1 get loaded with burned in weights. Correct results.
@@ -465,7 +465,7 @@ void test_aoti_double_buffering(
         model_so_path);
 #endif
   } else {
-    testing::AssertionFailure() << "unsupported device: " << device;
+    FAIL() << "unsupported device: " << device;
   }
   // By default, buffer #1 get loaded with burned in weights. Correct results.
   auto actual_output_tensors = runner->run(input_tensors);
