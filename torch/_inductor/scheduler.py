@@ -4255,6 +4255,54 @@ class Scheduler:
     def count_kernel_nodes(nodes: Sequence[BaseSchedulerNode]) -> int:
         return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
 
+    def _count_subgraph_kernel_nodes(self, subgraph: ir.Subgraph | None) -> int:
+        if subgraph is None or subgraph.graph is None:
+            return 0
+
+        graph = subgraph.graph
+        if graph.scheduler is None:
+            with (
+                config.patch(subgraph.inductor_config_patches or {}),
+                config.patch("graph_partition", False),
+                V.set_graph_handler(graph),
+            ):
+                graph._init_wrapper_and_scheduler()
+
+        count = 0
+        for node in graph.scheduler.nodes:
+            direct_kernel = False
+            nested_subgraphs: list[ir.Subgraph] = []
+            for scheduled_node in node.get_nodes():
+                op = scheduled_node.node
+                if not isinstance(op, ir.IRNode):
+                    continue
+                op_subgraphs = op.get_subgraphs()
+                if op_subgraphs:
+                    nested_subgraphs.extend(op_subgraphs)
+                elif not isinstance(op, ir.MultiOutput):
+                    direct_kernel = True
+            if direct_kernel and not isinstance(node, NopKernelSchedulerNode):
+                count += 1
+            count += sum(
+                self._count_subgraph_kernel_nodes(nested) for nested in nested_subgraphs
+            )
+        return count
+
+    def _count_partition_kernel_nodes(self, nodes: Sequence[BaseSchedulerNode]) -> int:
+        """Count emitted kernels, including kernels hidden in region bodies."""
+        count = 0
+        counted_regions: OrderedSet[str] = OrderedSet()
+        for node in nodes:
+            region = self._get_invoke_subgraph_region(node)
+            if region is None:
+                count += not isinstance(node, NopKernelSchedulerNode)
+                continue
+            region_name = region.get_name()
+            if region_name not in counted_regions:
+                count += self._count_subgraph_kernel_nodes(region.subgraph)
+                counted_regions.add(region_name)
+        return count
+
     def _init(self, nodes: list[ir.Operation]) -> None:
         self._tiling_memory_cache: dict[tuple[Any, ...], Any] = {}
         super().__init__()
@@ -4262,6 +4310,7 @@ class Scheduler:
         self.backends: dict[torch.device, BaseScheduling] = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self._graph_partition_counter = itertools.count()
+        self._invoke_subgraph_cudagraph_skip_reason_cache: dict[str, str | None] = {}
         self.completed_operations: OrderedSet[str] = OrderedSet()
         self.available_buffer_names = OrderedSet(
             [
@@ -9356,6 +9405,15 @@ class Scheduler:
         None. Shared by should_partition's per-node path and the invoke_subgraph
         body check (which sees the body's IR operations, not scheduler nodes).
         """
+        if isinstance(ir_node, ir.FallbackKernel) and (op := ir_node.op_overload):
+            op_packet_name, op_name = get_op_names(op)
+            if (
+                op_packet_name in config.custom_should_partition_ops
+                or op_name in config.custom_should_partition_ops
+            ):
+                if not isinstance(op, torch._ops.OpOverload):
+                    raise AssertionError("expected op to be a torch._ops.OpOverload")
+                return f"custom partition op: {op_name}"
         if isinstance(ir_node, ir.DeviceCopy):
             return "DeviceCopy ops"
         if isinstance(ir_node, ir.Switch):
@@ -9375,11 +9433,16 @@ class Scheduler:
         cudagraph-safety checks should_partition would apply are run here over the
         body's IR operations, including operations in nested control-flow graphs.
         """
+        region_name = invoke_subgraph.get_name()
+        if region_name in self._invoke_subgraph_cudagraph_skip_reason_cache:
+            return self._invoke_subgraph_cudagraph_skip_reason_cache[region_name]
         subgraph = invoke_subgraph.subgraph
         unsafe_symints = self._get_cudagraph_unsafe_unbacked_symints_from_ir_nodes(
             self._iter_subgraph_operations(subgraph)
         )
-        return self._subgraph_cudagraph_skip_reason(subgraph, unsafe_symints)
+        reason = self._subgraph_cudagraph_skip_reason(subgraph, unsafe_symints)
+        self._invoke_subgraph_cudagraph_skip_reason_cache[region_name] = reason
+        return reason
 
     @staticmethod
     def _iter_subgraph_operations(
@@ -9503,21 +9566,6 @@ class Scheduler:
         or None if the node is cudagraphable.
         """
 
-        # Allow users to manually specify if a node should be partitioned
-        # Can only do this for FallbackKernels
-        ir_node = node.node
-        if isinstance(ir_node, torch._inductor.ir.FallbackKernel) and (
-            op := ir_node.op_overload
-        ):
-            op_overload_packet_name, op_overload_name = get_op_names(op)
-            if (
-                op_overload_packet_name in config.custom_should_partition_ops
-                or op_overload_name in config.custom_should_partition_ops
-            ):
-                if not isinstance(op, torch._ops.OpOverload):
-                    raise AssertionError("expected op to be a torch._ops.OpOverload")
-                return f"custom partition op: {op_overload_name}"
-
         # A region's explicit cudagraph setting overrides the enclosing setting;
         # an unannotated region inherits it. Any capture-eligible region must
         # check its body, whose operations are otherwise hidden from the parent
@@ -9535,11 +9583,14 @@ class Scheduler:
                 not V.graph.cudagraph_partition_only_regions
                 and config.triton.cudagraphs
             ):
-                skip_reason = self._invoke_subgraph_body_cudagraph_skip_reason(region)
-                if skip_reason is None:
-                    return self._invoke_subgraph_family_cudagraph_skip_reason(
-                        node, region
+                with config.patch(patches or {}):
+                    skip_reason = self._invoke_subgraph_body_cudagraph_skip_reason(
+                        region
                     )
+                    if skip_reason is None:
+                        return self._invoke_subgraph_family_cudagraph_skip_reason(
+                            node, region
+                        )
                 if isinstance(node.node, ir.InvokeSubgraph):
                     cudagraphs_log.debug(
                         "skipping cudagraphs for invoke_subgraph region: %s",
@@ -10090,13 +10141,24 @@ class Scheduler:
                 return global_min_size
             return patches.get("triton.cudagraph_min_partition_size", global_min_size)
 
+        def get_region_partition_key(node: BaseSchedulerNode) -> str | None:
+            region = self._get_invoke_subgraph_region(node)
+            if region is None:
+                return None
+            patches = self._get_invoke_subgraph_config_patches(region)
+            if patches is None or not (
+                "triton.cudagraphs" in patches
+                or "triton.cudagraph_min_partition_size" in patches
+            ):
+                return None
+            return region.get_name()
+
         for node in self.nodes:
             node_should_partition = self.should_partition(node) is not None
             node_min_size = get_min_partition_size(node)
-            region = self._get_invoke_subgraph_region(node)
-            # A region and its MultiOutputs use the region name as their key,
-            # while adjacent regions remain separate cudagraph runtime units.
-            node_region_name = region.get_name() if region is not None else None
+            # Explicitly configured regions are separate runtime units. An
+            # unannotated region inherits and remains in the enclosing partition.
+            node_region_name = get_region_partition_key(node)
             if cur_partition and (
                 skip_cudagraph != node_should_partition
                 or (
@@ -10128,7 +10190,7 @@ class Scheduler:
             zip(partitions, skip_cudagraphs, partition_min_sizes)
         ):
             if not skip and min_size > 0:
-                kernel_count = self.count_kernel_nodes(partition)
+                kernel_count = self._count_partition_kernel_nodes(partition)
                 if kernel_count < min_size:
                     skip_cudagraphs[i] = True
                     cudagraphs_log.debug(
