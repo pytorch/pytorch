@@ -20,15 +20,22 @@ from torch._inductor.sizevars import (
     SizeVarAllocator,
     stride_at_vec_range,
 )
+from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.utils import run_and_get_kernels, run_and_get_triton_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing import FileCheck
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_CUDA_AND_TRITON,
+    HAS_GPU,
+)
 from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
@@ -1249,6 +1256,43 @@ class TestOptimizationHintIdentityExpansion(InductorTestCase):
         expr = -u0 * (-Identity(sympy.Integer(1)) + Identity(sympy.Integer(0)))
         hint = sizevars.optimization_hint(expr, fallback=42)
         self.assertEqual(hint, 42)
+
+
+class TestLoopLocalLoadCSELifetime(InductorTestCase):
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "triton.persistent_reductions": False,
+        }
+    )
+    def test_loop_epilogue_indirect_load_scope(self):
+        def fn(x, source, index):
+            index = index.unsqueeze(-1)
+            selected = torch.gather(source, -2, index)
+            updated = selected + x.mean(dim=-1, keepdim=True)
+            return x / updated, source.scatter(-2, index, updated)
+
+        x = torch.ones(2, 2, 8, device=GPU_TYPE)
+        source = torch.arange(1, 17, device=GPU_TYPE, dtype=torch.float32).reshape(
+            2, 8, 1
+        )
+        index = torch.arange(2, device=GPU_TYPE).repeat(2, 1)
+        actual, kernels = run_and_get_kernels(
+            torch.compile(fn, fullgraph=True, dynamic=True),
+            x,
+            source,
+            index,
+            remove_quote=True,
+        )
+
+        self.assertEqual(fn(x, source, index), actual)
+        reduction_kernels = [kernel for kernel in kernels if "tl.sum(" in kernel]
+        self.assertEqual(1, len(reduction_kernels))
+        indirect_load = r"tl\.load\([^\n]*\+ \(tmp\d+"
+        FileCheck().check("for r0_offset in tl.range").check_regex(indirect_load).check(
+            "tl.store"
+        ).check_regex(indirect_load).run(reduction_kernels[0])
 
 
 if __name__ == "__main__":
