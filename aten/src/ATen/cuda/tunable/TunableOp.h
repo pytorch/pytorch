@@ -128,7 +128,24 @@ class TunableOp {
         op = GetOp(result.GetKey());
       }
       TORCH_CHECK(op != nullptr);
-      return op->Call(params);
+      // For a wildcard-served shape this is where the backend re-checks that
+      // the reused solution is valid for the new concrete dims.
+      //
+      // Every non-OK status a Callable can return is decided before the kernel
+      // is enqueued -- the TF32 guard returns early, hipBLASLt rejects via
+      // matmulIsAlgoSupported, and rocBLAS rejects via Tensile's
+      // ContractionSolution::canSolve, which runs before launchKernels and
+      // yields rocblas_status_invalid_value. Callers rely on that: they
+      // re-dispatch the non-tunable kernel on false, which would double-apply
+      // beta if C had already been touched.
+      auto status = op->Call(params);
+      if (status != OK) {
+        TORCH_WARN(
+            "TunableOp kernel returned status ",
+            status,
+            "; falling back to the non-tunable kernel");
+      }
+      return status;
     }
 
     virtual std::string Signature() {
