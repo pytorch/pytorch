@@ -399,6 +399,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
             return (h @ w).sum()
 
         cfn = self.compile_fn(fn)
+        metrics.reset()
         for n in (56, 96):
             x = torch.randn(2, 2 * n, 98, device=device, requires_grad=True)
             w = torch.randn(2, 2 * n, 128, device=device, requires_grad=True)
@@ -410,6 +411,12 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
             self.assertEqual(x.grad, x_ref.grad)
             self.assertEqual(w.grad, w_ref.grad)
+
+        # The scenario only exercises the restride if padding moved inductor's
+        # layout off the contiguous stride the backward placeholder assumes.
+        # Assert it fired, so this cannot keep passing while silently no longer
+        # covering the fix.
+        self.assertGreater(metrics.num_comprehensive_padding, 0)
 
     def test_arange_dynamic(self, device):
         def fn(a):
