@@ -1681,26 +1681,6 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
 
 #undef TORCH_FORALL_TAGS
 
-namespace detail {
-
-struct _guarded_unsigned_long_unique_dummy final {
-  _guarded_unsigned_long_unique_dummy(int64_t /*unused*/){}
-};
-// The comparisons are hoisted out of the alias-declaration below on purpose.
-// CUDA 13.3's cudafe++ re-prints a namespace-scope alias-declaration from its
-// own AST, and for size_t-canonical types it may pick a spelling that is not
-// in scope (e.g. one naming a function-local visitor class), emitting host
-// code that does not compile.
-inline constexpr bool _guarded_unsigned_long_is_duplicate =
-    std::is_same_v<unsigned long, uint32_t> ||
-    std::is_same_v<unsigned long, uint64_t>;
-using _guarded_unsigned_long = std::conditional_t<
-    _guarded_unsigned_long_is_duplicate,
-    _guarded_unsigned_long_unique_dummy,
-    unsigned long>;
-
-} // namespace detail
-
 inline ivalue::Object& IValue::toObjectRef() const {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(), "Attempted to create null reference");
@@ -1922,7 +1902,7 @@ std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args.
   _(int, toInt)                                                                \
   _(uint32_t, toInt)                                                           \
   _(uint64_t, toInt)                                                           \
-  _(detail::_guarded_unsigned_long, toInt)                                     \
+  _(unsigned long, toInt)                                                      \
   _(int64_t, toInt)                                                            \
   _(bool, toBool)                                                              \
   _(c10::intrusive_ptr<caffe2::Blob>, toBlob)                                  \
