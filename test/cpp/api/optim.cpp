@@ -510,8 +510,11 @@ TEST(OptimTest, AddParameter_Adagrad) {
   // pins the current semantics; it is not a claim that they are the desirable
   // ones.
   for (const auto& late : {appended, in_new_group}) {
+    // at() rather than operator[]: a missing key means the lazy init
+    // regressed, and operator[] would default-insert null and segfault here
+    // instead of reporting a failure.
     auto& state = static_cast<AdagradParamState&>(
-        *optimizer.state()[late.unsafeGetTensorImpl()]);
+        *optimizer.state().at(late.unsafeGetTensorImpl()));
     ASSERT_EQ(state.step(), 1);
     // sum starts at initial_accumulator_value and accumulates grad * grad.
     ASSERT_TRUE(state.sum().allclose(torch::full_like(late, 1.5)));
