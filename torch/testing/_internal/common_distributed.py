@@ -1913,6 +1913,13 @@ class MultiProcContinuousTest(TestCase):
     poison_pill: bool = False
     # Flag for lazy process spawning (to support instantiate_device_type_tests)
     _processes_spawned: bool = False
+    # How long tearDownClass waits for all workers to exit after their shutdown
+    # sentinels before escalating to terminate()/kill(). Shared by every rank, not
+    # per rank. Teardown is a queue sentinel plus process exit, so only a wedged
+    # worker should reach this.
+    TEARDOWN_JOIN_TIMEOUT: int = 120
+    # Grace period after each escalation signal, again shared by every rank.
+    TEARDOWN_KILL_GRACE: int = 10
 
     @classmethod
     def backend_str(cls) -> str | None:
@@ -2196,9 +2203,36 @@ class MultiProcContinuousTest(TestCase):
         for task_queue in cls.task_queues:
             task_queue.put(None)
 
-        # Wait for all workers to exit
+        # Wait for all workers to exit, but do not wait forever. A worker wedged
+        # inside a collective (or otherwise stuck) never consumes its sentinel and
+        # never exits, and an unbounded join() here turns that into a hang of the
+        # whole test process rather than a reported failure. A collective wedges
+        # every rank at once, so the timeout is one deadline shared by all workers.
+        sentinel_sent = time.time()
+        deadline = sentinel_sent + cls.TEARDOWN_JOIN_TIMEOUT
         for process in cls.processes:
-            process.join()
+            process.join(max(0, deadline - time.time()))
+
+        for escalate, signal_name in (
+            (lambda p: p.terminate(), "SIGTERM"),
+            (lambda p: p.kill(), "SIGKILL"),
+        ):
+            survivors = [
+                (rank, p) for rank, p in enumerate(cls.processes) if p.is_alive()
+            ]
+            if not survivors:
+                break
+            logger.warning(
+                "Ranks %s still alive %ss after the shutdown sentinel; sending %s",
+                [rank for rank, _ in survivors],
+                int(time.time() - sentinel_sent),
+                signal_name,
+            )
+            for _, process in survivors:
+                escalate(process)
+            grace_deadline = time.time() + cls.TEARDOWN_KILL_GRACE
+            for _, process in survivors:
+                process.join(max(0, grace_deadline - time.time()))
 
         # Clear up the rendezvous file
         try:
