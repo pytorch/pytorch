@@ -317,11 +317,16 @@ namespace {
           for (int k = 0; k < 4; ++k) {
             #pragma unroll
             for (int j = 0; j < 4; ++j) {
-              auto row = inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH;
+              const bool plane_reads = z_taps[k] >= 0 && y_taps[j] >= 0;
+              auto row = plane_reads ? inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH
+                                     : inp_ptr_NC;
               const opmath_t weight_zy = z_coeffs[k] * y_coeffs[j];
               #pragma unroll
               for (int i = 0; i < 4; ++i) {
-                value += static_cast<opmath_t>(row[x_taps[i] * inp_sW]) * weight_zy * x_coeffs[i];
+                const opmath_t sample = plane_reads && x_taps[i] >= 0
+                    ? static_cast<opmath_t>(row[x_taps[i] * inp_sW])
+                    : static_cast<opmath_t>(0);
+                value += sample * weight_zy * x_coeffs[i];
               }
             }
           }
@@ -800,19 +805,26 @@ namespace {
           for (int k = 0; k < 4; ++k) {
             #pragma unroll
             for (int j = 0; j < 4; ++j) {
-              auto row = inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH;
+              const bool plane_reads = z_taps[k] >= 0 && y_taps[j] >= 0;
+              auto row = plane_reads ? inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH
+                                     : inp_ptr_NC;
               // the grad_input strides are int64_t whatever index_t is, so the offset is narrowed
               // back to index_t, which is what fastAtomicAdd measures its span in
-              const index_t grad_row = NC_offset + static_cast<index_t>(z_taps[k] * gInp_sD + y_taps[j] * gInp_sH);
+              const index_t grad_row = plane_reads
+                  ? NC_offset + static_cast<index_t>(z_taps[k] * gInp_sD + y_taps[j] * gInp_sH)
+                  : NC_offset;
               #pragma unroll
               for (int i = 0; i < 4; ++i) {
-                if (input_requires_grad) {
+                const bool reads = plane_reads && x_taps[i] >= 0;
+                if (input_requires_grad && reads) {
                   // See Note [Passing pointer and offset to fastAtomicAdd].
                   fastAtomicAdd(grad_input.data, grad_row + static_cast<index_t>(x_taps[i] * gInp_sW),
                                 grad_input_memory_span,
                                 static_cast<scalar_t>(gOut * x_coeffs[i] * y_coeffs[j] * z_coeffs[k]), true);
                 }
-                const opmath_t value = static_cast<opmath_t>(row[x_taps[i] * inp_sW]);
+                const opmath_t value = reads
+                    ? static_cast<opmath_t>(row[x_taps[i] * inp_sW])
+                    : static_cast<opmath_t>(0);
                 gix -= value * x_coeffs_grad[i] * y_coeffs[j] * z_coeffs[k] * gOut;
                 giy -= value * x_coeffs[i] * y_coeffs_grad[j] * z_coeffs[k] * gOut;
                 giz -= value * x_coeffs[i] * y_coeffs[j] * z_coeffs_grad[k] * gOut;
