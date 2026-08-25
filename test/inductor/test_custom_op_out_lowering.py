@@ -11,9 +11,7 @@ from torch._inductor import config
 from torch._inductor.codegen import common
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import HAS_TRITON
 
