@@ -8708,89 +8708,104 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
            -((((3 * (A + 2)) * t2) - (2 * (A + 3))) * t2),
            (((-3 * A) * t3) + (10 * A)) * t3 - (8 * A)},
           -1);
-      auto d2c = at::stack(
+      return std::make_pair(c, dc);
+    };
+    // only the ggGrid half needs the second derivative, so it is built there
+    auto second = [](const Tensor& t) {
+      auto t1 = t + 1.0, t2 = 1.0 - t, t3 = 2.0 - t;
+      return at::stack(
           {((6 * A) * t1) - (10 * A),
            ((6 * (A + 2)) * t) - (2 * (A + 3)),
            ((6 * (A + 2)) * t2) - (2 * (A + 3)),
            ((6 * A) * t3) - (10 * A)},
           -1);
-      return std::make_tuple(c, dc, d2c);
     };
-    auto [cx, dcx, d2cx] = coeffs(fx);
-    auto [cy, dcy, d2cy] = coeffs(fy);
-    auto [cz, dcz, d2cz] = coeffs(fz);
+    auto [cx, dcx] = coeffs(fx);
+    auto [cy, dcy] = coeffs(fy);
+    auto [cz, dcz] = coeffs(fz);
 
-    // The 64 taps, flattened as k = kz * 16 + jy * 4 + ix, which is the order
-    // the outer product below builds its weights in.
+    // Walk the 64 taps four at a time, one (z, y) pair per step. Materialising
+    // them together would hold three [N, Do, Ho, Wo, 64] index tensors and a
+    // gather of the same width times the channels, which is gigabytes at a
+    // realistic volume size.
     auto offs = at::arange(-1, 3, x0.options());
-    auto shape = std::vector<int64_t>(
-        {x0.size(0), x0.size(1), x0.size(2), x0.size(3), 64});
-    auto taps = [&](const Tensor& base, int64_t axis) {
-      // the axis owns one of the three tap dimensions and broadcasts over the
-      // other two, so that flattening them gives k = kz * 16 + jy * 4 + ix
-      auto dims = std::vector<int64_t>(
-          {x0.size(0), x0.size(1), x0.size(2), x0.size(3), 1, 1, 1});
-      dims[4 + axis] = 4;
-      return (base.unsqueeze(-1) + offs)
-          .reshape(dims)
-          .expand({-1, -1, -1, -1, 4, 4, 4})
-          .reshape(shape);
-    };
-    auto z_idx = taps(z0, 0), y_idx = taps(y0, 1), x_idx = taps(x0, 2);
+    auto x_idx = x0.unsqueeze(-1) + offs;
 
-    auto I_all = gs_gather3d_bc_multi(
-        input, z_idx, y_idx, x_idx, padding_mode_enum, align_corners);
-
-    // The weight of tap k in d output / d coordinate, one tensor per axis.
-    auto outer3 = [](const Tensor& a, const Tensor& b, const Tensor& c) {
-      return gs_outer_last(gs_outer_last(a, b), c);
-    };
-    Tensor B_dx, B_dy, B_dz;
-    if (output_mask[0] || output_mask[1]) {
-      B_dx = outer3(dcx, cy, cz);
-      B_dy = outer3(cx, dcy, cz);
-      B_dz = outer3(cx, cy, dcz);
-    }
-
-    if (output_mask[0]) {
-      auto contrib = gs_accum_sumprod_k(I_all, B_dx) * ggG_x.unsqueeze(1);
-      contrib.addcmul_(gs_accum_sumprod_k(I_all, B_dy), ggG_y.unsqueeze(1));
-      contrib.addcmul_(gs_accum_sumprod_k(I_all, B_dz), ggG_z.unsqueeze(1));
-      d_grad_output = d_grad_output.defined() ? d_grad_output + contrib
-                                              : std::move(contrib);
-    }
-
-    if (output_mask[1]) {
-      auto w_in = ggG_x.unsqueeze(-1) * B_dx;
-      w_in.addcmul_(ggG_y.unsqueeze(-1), B_dy);
-      w_in.addcmul_(ggG_z.unsqueeze(-1), B_dz);
-      d_input = gs_scatter3d_bc_multi(
-          grad_output,
-          w_in,
-          z_idx,
-          y_idx,
-          x_idx,
-          D,
-          H,
-          W,
-          padding_mode_enum,
-          align_corners);
-    }
-
-    // ggGrid -> d_grid: the second derivatives of the sampled value in the
-    // coordinate, which for a separable cubic is the symmetric 3x3 of the
-    // taps weighted by two derivative factors.
+    Tensor d2cx, d2cy, d2cz, dx2, dy2, dz2, dxdy, dxdz, dydz;
     if (output_mask[2]) {
-      auto tap_dot = (grad_output.unsqueeze(-1) * I_all).sum(1);
-      auto dot = [&](const Tensor& a, const Tensor& b, const Tensor& c) {
-        return (tap_dot * outer3(a, b, c)).sum(-1);
-      };
-      auto dx2 = dot(d2cx, cy, cz);
-      auto dy2 = dot(cx, d2cy, cz);
-      auto dz2 = dot(cx, cy, d2cz);
-      auto dxdy = dot(dcx, dcy, cz);
-      auto dxdz = dot(dcx, cy, dcz);
-      auto dydz = dot(cx, dcy, dcz);
+      d2cx = second(fx);
+      d2cy = second(fy);
+      d2cz = second(fz);
+    }
+
+    for (const auto kz : c10::irange(4)) {
+      for (const auto jy : c10::irange(4)) {
+        auto y_idx = (y0 + (jy - 1)).unsqueeze(-1).expand_as(x_idx);
+        auto z_idx = (z0 + (kz - 1)).unsqueeze(-1).expand_as(x_idx);
+        auto taps = gs_gather3d_bc_multi(
+            input, z_idx, y_idx, x_idx, padding_mode_enum, align_corners);
+
+        auto cy_j = cy.select(-1, jy), dcy_j = dcy.select(-1, jy);
+        auto cz_k = cz.select(-1, kz), dcz_k = dcz.select(-1, kz);
+        auto weight = [](const Tensor& along_x, const Tensor& other) {
+          return along_x * other.unsqueeze(-1);
+        };
+
+        Tensor B_dx, B_dy, B_dz;
+        if (output_mask[0] || output_mask[1]) {
+          B_dx = weight(dcx, cy_j * cz_k);
+          B_dy = weight(cx, dcy_j * cz_k);
+          B_dz = weight(cx, cy_j * dcz_k);
+        }
+
+        if (output_mask[0]) {
+          auto contrib = gs_accum_sumprod_k(taps, B_dx) * ggG_x.unsqueeze(1);
+          contrib.addcmul_(gs_accum_sumprod_k(taps, B_dy), ggG_y.unsqueeze(1));
+          contrib.addcmul_(gs_accum_sumprod_k(taps, B_dz), ggG_z.unsqueeze(1));
+          d_grad_output = d_grad_output.defined() ? d_grad_output + contrib
+                                                  : std::move(contrib);
+        }
+
+        if (output_mask[1]) {
+          auto w_in = ggG_x.unsqueeze(-1) * B_dx;
+          w_in.addcmul_(ggG_y.unsqueeze(-1), B_dy);
+          w_in.addcmul_(ggG_z.unsqueeze(-1), B_dz);
+          auto contrib = gs_scatter3d_bc_multi(
+              grad_output,
+              w_in,
+              z_idx,
+              y_idx,
+              x_idx,
+              D,
+              H,
+              W,
+              padding_mode_enum,
+              align_corners);
+          d_input = d_input.defined() ? d_input + contrib : std::move(contrib);
+        }
+
+        // The second derivatives of the sampled value in the coordinate, which
+        // for a separable cubic is the symmetric 3x3 of the taps weighted by
+        // two derivative factors.
+        if (output_mask[2]) {
+          auto tap_dot = (grad_output.unsqueeze(-1) * taps).sum(1);
+          auto dot = [&](const Tensor& along_x, const Tensor& other) {
+            return (tap_dot * weight(along_x, other)).sum(-1);
+          };
+          auto accumulate = [](Tensor& total, Tensor part) {
+            total = total.defined() ? total + part : std::move(part);
+          };
+          accumulate(dx2, dot(d2cx, cy_j * cz_k));
+          accumulate(dy2, dot(cx, d2cy.select(-1, jy) * cz_k));
+          accumulate(dz2, dot(cx, cy_j * d2cz.select(-1, kz)));
+          accumulate(dxdy, dot(dcx, dcy_j * cz_k));
+          accumulate(dxdz, dot(dcx, cy_j * dcz_k));
+          accumulate(dydz, dot(cx, dcy_j * dcz_k));
+        }
+      }
+    }
+
+    if (output_mask[2]) {
       auto row = [&](const Tensor& to_x,
                      const Tensor& to_y,
                      const Tensor& to_z,
@@ -8808,6 +8823,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
       d_grid =
           d_grid.defined() ? d_grid + ggrid_d_grid : std::move(ggrid_d_grid);
     }
+
     return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
   }
 
