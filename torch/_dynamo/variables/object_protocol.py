@@ -401,9 +401,7 @@ def generic_is_true(
             raise_observed_exception(type(e), tx, args=[str(e)])
 
     if obj.tp_as_number.nb_bool:
-        result = obj.nb_bool_impl(tx)
-        if result is not None:
-            return result
+        return obj.nb_bool_impl(tx)
 
     try:
         length = generic_size(tx, obj)
@@ -442,7 +440,9 @@ def generic_repr(
         obj_id = id(obj)
         if obj_id in _repr_running:
             sentinel = {list: "[...]", dict: "{...}", collections.deque: "[...]"}
-            return ConstantVariable.create(sentinel.get(obj_type, "..."))
+            if obj_type in sentinel:
+                return ConstantVariable.create(sentinel[obj_type])
+            return ConstantVariable.create(obj.repr_recursive_sentinel())
         _repr_running.add(obj_id)
         try:
             result = obj.tp_repr_impl(tx)
