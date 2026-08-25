@@ -163,6 +163,7 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     clone_preserve_strides_offset,
     GPU_TYPE,
     HAS_CPU,
+    HAS_GPU,
     HAS_MPS,
     HAS_MULTIGPU,
     HAS_TPU,
@@ -3765,7 +3766,12 @@ class CommonTemplate:
     def test_linspace4(self):
         def fn(x):
             return torch.linspace(
-                0, 2, 0, device=f"{accelerator_device(self.device)}:1"
+                0,
+                2,
+                0,
+                device=torch.device(
+                    torch.device(accelerator_device(self.device)).type, 1
+                ),
             )
 
         self.common(fn, (torch.Tensor([]),))
@@ -12997,8 +13003,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         a0 = test_like_rands_on_different_device("cpu", accelerator_device(self.device))
         a1 = test_like_rands_on_different_device(accelerator_device(self.device), "cpu")
-        self.assertTrue(a0.device.type == accelerator_device(self.device))
-        self.assertTrue(a1.device.type == "cpu")
+        self.assertEqual(
+            a0.device.type, torch.device(accelerator_device(self.device)).type
+        )
+        self.assertEqual(a1.device.type, "cpu")
         self.assertEqual(a0.shape, a1.shape)
         self.assertEqual(a0.stride(), a1.stride())
 
@@ -14968,7 +14976,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if self.device == "cpu":
             raise unittest.SkipTest(f"requires {accelerator_device(self.device)}")
 
-        DEVICE = torch.device(f"{accelerator_device(self.device)}:0")
+        DEVICE = torch.device(torch.device(accelerator_device(self.device)).type, 0)
         DTYPE = torch.float16
         B = 3
         H = 8
@@ -18684,7 +18692,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             activities=[
                 getattr(
                     torch.profiler.ProfilerActivity,
-                    accelerator_device(self.device).upper(),
+                    torch.device(accelerator_device(self.device)).type.upper(),
                 ),
             ],
         ) as p:
