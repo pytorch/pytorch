@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: pt2"]
 import ast
 import unittest
+from unittest import mock
 
 import torch
 import torch._functorch.config as functorch_config
@@ -17,6 +18,7 @@ from torch._functorch._aot_autograd.to_standalone_python import (
 from torch._functorch.aot_autograd import compile_to_python, load_from_python
 from torch._higher_order_ops.effects import _get_effect, hop_print
 from torch._inductor.utils import fresh_cache
+from torch.compiler._cache import CacheArtifactManager
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.testing._internal.common_utils import (
@@ -219,7 +221,13 @@ class TestAOTCompileToPython(TestCase):
 
         gm = _capture(m, x)
         with torch.enable_grad():
-            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+            src, cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        if cache is None:
+            raise AssertionError("expected forward and backward cache artifacts")
+        artifacts = CacheArtifactManager.deserialize(cache)
+        if artifacts is None:
+            raise AssertionError("expected a readable cache bundle")
+        self.assertGreaterEqual(len(artifacts.get("inductor", [])), 2)
         # Both inductor modules and the backward wrappers are inlined as source.
         self.assertIn("_inner_call_fw", src)
         self.assertIn("_inner_call_bw", src)
@@ -260,19 +268,31 @@ class TestAOTCompileToPython(TestCase):
 
         x = torch.randn(4, requires_grad=True)
         y = torch.randn(4, requires_grad=True)
-        with torch.enable_grad():
-            gm = make_fx(flat_fn)([x, y])
-            capture_source, cache, state = _compile_to_python_with_state(
-                gm, [x, y], grad_enabled=True
-            )
-        if state is None:
-            raise AssertionError("expected a training compile state")
+        with mock.patch.object(
+            torch._inductor,
+            "compile_to_python",
+            wraps=torch._inductor.compile_to_python,
+        ) as inner_compile:
+            with torch.enable_grad():
+                gm = make_fx(flat_fn)([x, y])
+                capture_source, cache, state = _compile_to_python_with_state(
+                    gm, [x, y], grad_enabled=True
+                )
+            if state is None:
+                raise AssertionError("expected a training compile state")
 
-        capture_call = load_from_python(capture_source, cache)
-        state.install_capture(capture_call.__globals__)
-        capture_x = x.detach().clone().requires_grad_()
-        capture_y = y.detach().clone().requires_grad_()
-        capture_call([capture_x, capture_y])[0].sum().backward()
+            capture_call = load_from_python(capture_source, cache)
+            state.install_capture(capture_call.__globals__)
+            capture_x = x.detach().clone().requires_grad_()
+            capture_y = y.detach().clone().requires_grad_()
+            capture_call([capture_x, capture_y])[0].sum().backward()
+        backward_flags = [
+            call.kwargs.get("is_backward", False)
+            for call in inner_compile.call_args_list
+        ]
+        self.assertGreaterEqual(len(backward_flags), 3)
+        self.assertFalse(backward_flags[0])
+        self.assertTrue(all(backward_flags[1:]))
         masks = capture_call.__globals__["_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS"]
         self.assertEqual(masks, {0b10})
         self.assertIn(0b10, state._observed_variants)
@@ -336,6 +356,56 @@ class TestAOTCompileToPython(TestCase):
         self.assertEqual(actual_leaf.grad, expected_leaf.grad)
         self.assertIsNone(actual_inputs[2].grad)
         self.assertIsNone(expected_inputs[2].grad)
+
+    def test_training_dedup_mutated_duplicate_input(self):
+        def flat_fn(a, b, c, d):
+            d.mul_(2)
+            return [a.sin() + d.cos()]
+
+        def make_inputs(x, y):
+            x_leaf = x.detach().clone().requires_grad_()
+            y_leaf = y.detach().clone().requires_grad_()
+            x_input = x_leaf + 0
+            y_input = y_leaf + 0
+            return x_leaf, y_leaf, [x_input, x_input, y_input, y_input]
+
+        x = torch.randn(4)
+        y = torch.randn(4)
+        _, _, example = make_inputs(x, y)
+        gm = make_fx(flat_fn)(*example)
+        _, _, compile_inputs = make_inputs(x, y)
+        source, cache = compile_to_python(gm, compile_inputs, grad_enabled=True)
+        self.assertIn("deduped_args", source)
+        self.assertIn("_autograd_orchestration_entry", source)
+
+        actual_x, actual_y, actual_inputs = make_inputs(x, y)
+        actual = load_from_python(source, cache)(actual_inputs)[0]
+        actual.sum().backward()
+        expected_x, expected_y, expected_inputs = make_inputs(x, y)
+        expected = flat_fn(*expected_inputs)[0]
+        expected.sum().backward()
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_inputs[3], expected_inputs[3])
+        self.assertEqual(actual_x.grad, expected_x.grad)
+        self.assertEqual(actual_y.grad, expected_y.grad)
+
+    def test_training_output_alias_regen(self):
+        def flat_fn(flat):
+            return [flat[0].view(-1)]
+
+        x = torch.randn(2, 3, requires_grad=True)
+        gm = make_fx(flat_fn)([x])
+        source, cache = compile_to_python(gm, [x], grad_enabled=True)
+        self.assertIn("gen_alias_from_base", source)
+
+        actual_x = x.detach().clone().requires_grad_()
+        actual = load_from_python(source, cache)([actual_x])[0]
+        self.assertEqual(
+            actual.untyped_storage().data_ptr(),
+            actual_x.untyped_storage().data_ptr(),
+        )
+        actual.sum().backward()
+        self.assertEqual(actual_x.grad, torch.ones_like(actual_x))
 
     def test_training_forward_and_backward_do_not_share_names(self):
         # The two inductor modules are spliced into ONE namespace and both define
@@ -700,6 +770,30 @@ class TestAOTCompileToPython(TestCase):
         with torch.no_grad():
             eager = m(x)
         self.assertEqual(out, eager)
+
+    @unittest.skipIf(
+        not torch.cuda.is_available(),
+        "functionalize_rng_ops requires CUDA RNG state",
+    )
+    def test_training_functionalized_rng_runs_like_eager(self):
+        def flat_fn(flat):
+            return [torch.nn.functional.dropout(flat[0], p=0.5, training=True)]
+
+        x = torch.randn(64, requires_grad=True)
+        with functorch_config.patch(functionalize_rng_ops=True):
+            gm = make_fx(flat_fn, tracing_mode="real")([x])
+            src, cache = compile_to_python(gm, [x], grad_enabled=True)
+
+        actual_x = x.detach().clone().requires_grad_()
+        expected_x = x.detach().clone().requires_grad_()
+        torch.manual_seed(123)
+        actual = load_from_python(src, cache)([actual_x])[0]
+        actual.sum().backward()
+        torch.manual_seed(123)
+        expected = flat_fn([expected_x])[0]
+        expected.sum().backward()
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x.grad, expected_x.grad)
 
     def test_helpers_imported_from_standalone_runtime_surface(self):
         # End-to-end lock for the stability contract: a graph closing over a runtime helper
