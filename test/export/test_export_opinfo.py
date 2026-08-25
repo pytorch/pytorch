@@ -228,7 +228,11 @@ for op in ops:
     def test_preserve_original_behavior(self):
         test_script = f"""\
 import torch
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    FakeTensor,
+    FakeTensorMode,
+    maybe_set_fake_device,
+)
 
 def cuda_calls_behavior_unchanged():
     exception_count = 0
@@ -268,7 +272,7 @@ cuda_calls_behavior_unchanged()
 cpu_x = torch.randn(2)
 with FakeTensorMode(allow_non_fake_inputs=True) as mode:
     cuda_x = mode.from_tensor(cpu_x)
-    cuda_x.fake_device = torch.device("cuda")
+    maybe_set_fake_device(cuda_x, torch.device("cuda"))
     cuda_y = cuda_x + cuda_x
     assert cuda_y.device.type == "cuda"
 

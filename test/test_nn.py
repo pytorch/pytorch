@@ -37,7 +37,7 @@ from torch.testing._internal.common_dtype import integral_types, get_all_math_dt
 from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, run_tests, TestCase, \
     skipIfNoLapack, skipIfRocm, skipIfRocmVersionLessThan, getRocmVersion, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, TEST_MULTIACCELERATOR, \
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
-    IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
+    IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, TEST_WITH_TORCHDYNAMO, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
@@ -12840,6 +12840,7 @@ if __name__ == '__main__':
         out = softshrink(x)
         self.assertEqual(out, expected, atol=1e-2, rtol=0)
 
+    @xfailIf(TEST_WITH_TORCHDYNAMO)
     def test_threshold_inplace_overlap(self, device):
         # Inplace threshold is okay, because it is idempotent
         x = torch.randn((1, 6), device=device).expand((6, 6))

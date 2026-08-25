@@ -515,6 +515,14 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
         final_key = resolve_key(self, dispatch_key)
 
+        if final_key not in self.py_kernels and final_key == DispatchKey.Fake:
+            cpp_fake_mode = torch._C._current_cpp_fake_tensor_mode()
+            fake_handler = self.python_key_table.get(
+                torch._subclasses.fake_tensor.FakeTensorMode
+            )
+            if cpp_fake_mode is not None and fake_handler is not None:
+                return fake_handler(cpp_fake_mode, *args, **kwargs)
+
         # This can current fail due to backend fallbacks.  You just have to
         # register them by hand for HigherOrderOperator.
         if final_key not in self.py_kernels:
@@ -942,6 +950,22 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
             self.name(), ks
         ) or super().has_kernel_for_any_dispatch_key(ks)
 
+    def py_impl(
+        self,
+        k: type[TorchDispatchMode] | type[torch.Tensor] | TransformType | DispatchKey,
+    ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+        register = super().py_impl(k)
+
+        def inner(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+            result = register(fn)
+            if k == DispatchKey.CompositeImplicitAutograd:
+                torch._C._fake_dispatch_register_python_cia(
+                    self._schema.name, self._schema.overload_name
+                )
+            return result
+
+        return inner
+
     @property
     def namespace(self) -> str:
         return self._namespace
@@ -1082,6 +1106,20 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
         # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
         cache_result = key != DispatchKey.PreDispatch
 
+        if final_key == DispatchKey.Fake and final_key not in self.py_kernels:
+            fake_handler = self.python_key_table.get(
+                torch._subclasses.fake_tensor.FakeTensorMode
+            )
+            if fake_handler is not None:
+
+                def handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+                    cpp_fake_mode = torch._C._current_cpp_fake_tensor_mode()
+                    if cpp_fake_mode is None:
+                        raise AssertionError("C++ FakeTensorMode must be active")
+                    return fake_handler(cpp_fake_mode, *args, **kwargs)
+
+                return handler
+
         # TODO: We could potentially have lots of debugging wrappers against
         # dispatch keys; design some general registration mechanism instead of
         # having if statement for each of them
@@ -1124,6 +1162,26 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 # TorchBindOpOverload will skip C++ dispatcher and purely dispatched in python
 # when its inputs contain FakeScriptObject in a similar way as higher order ops.
 class TorchBindOpOverload(OpOverload[_P, _T]):
+    def _get_dispatch(self, key: DispatchKey) -> DispatchKey | Callable[_P, _T]:
+        if key == DispatchKey.Fake and key not in self.py_kernels:
+            fake_impl = torch._library.simple_registry.singleton.find(
+                self.name()
+            ).fake_impl
+            if fake_impl.kernel is not None:
+
+                def run_fake_impl(*args, **kwargs):
+                    fake_mode = torch._guards.detect_fake_mode((args, kwargs))
+                    if fake_mode is None:
+                        raise AssertionError("expected an active fake mode")
+                    return torch._library.fake_impl.run_fake_impl(
+                        fake_mode, self, *args, **kwargs
+                    )
+
+                return run_fake_impl
+            if DispatchKey.Meta in self.py_kernels:
+                return self.py_kernels[DispatchKey.Meta]
+        return super()._get_dispatch(key)
+
     def _fallthrough_keys(self) -> list[DispatchKey]:
         # TODO: we should be calling the fallback for these, but a fallthrough is almost close
         # enough to the fallback in most cases that we care about.
@@ -1184,7 +1242,9 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
         if isinstance(handler, DispatchKey):
             # fallthrough keys can be registered at runtime via torch.library.impl
             # so need to add it to fallthrough_keys and re-dispatch.
-            if torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(
+            if torch._C._dispatch_has_kernel_for_dispatch_key(
+                self.name(), dispatch_key
+            ) and torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(
                 self.name(), dispatch_key
             ):
                 return self._dispatch_in_python(

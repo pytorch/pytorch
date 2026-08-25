@@ -54,6 +54,7 @@ from torch._higher_order_ops.while_loop import while_loop
 from torch._inductor.compile_fx import split_const_gm
 from torch._library.opaque_object import _OPAQUE_TYPES_BY_NAME
 from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
 from torch.export import default_decompositions, Dim, export, unflatten
 from torch.export._patches import register_lstm_while_loop_decomposition
 from torch.export._trace import (
@@ -6145,9 +6146,7 @@ def forward(self, x):
         foo = Foo()
         ref = ReferenceControl(foo)
         ref(torch.randn(4, 4), torch.randn(4, 4))
-        self.assertTrue(
-            isinstance(ref.bank[0], torch._subclasses.fake_tensor.FakeTensor)
-        )
+        self.assertTrue(is_fake_tensor(ref.bank[0]))
 
         with (
             torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True),
@@ -6214,9 +6213,7 @@ def forward(self, x):
 
         foo = Foo()
         ep = export(foo, (torch.randn(4, 4), torch.randn(4, 4)), strict=False)
-        self.assertTrue(
-            isinstance(global_list[0], torch._subclasses.fake_tensor.FakeTensor)
-        )
+        self.assertTrue(is_fake_tensor(global_list[0]))
 
         with torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True):
             warn_re = re.compile(
@@ -11984,7 +11981,10 @@ graph():
             self.assertTrue(export_res.size() == exp_res.size())
             self.assertTrue(all(val.device == x.device for val in all_meta_val))
             self.assertTrue(
-                all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val)
+                all(
+                    maybe_get_fake_mode(val) is maybe_get_fake_mode(all_meta_val[0])
+                    for val in all_meta_val
+                )
             )
             decomposed_ep = exported_program.run_decompositions()
             export_res = decomposed_ep.module()(x)
@@ -12031,7 +12031,10 @@ graph():
             self.assertTrue(export_res.size() == exp_res.size())
             self.assertTrue(all(val.device == x.device for val in all_meta_val))
             self.assertTrue(
-                all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val)
+                all(
+                    maybe_get_fake_mode(val) is maybe_get_fake_mode(all_meta_val[0])
+                    for val in all_meta_val
+                )
             )
 
         check_device_and_fake_mode()

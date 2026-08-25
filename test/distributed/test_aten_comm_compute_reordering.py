@@ -1022,7 +1022,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
     @torch._inductor.config.patch(get_bucket_patches())
     def test_custom_estimation_with_fake_tensor_mode(self):
         """Test that custom estimation can use FakeTensorMode for analysis."""
-        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 
         estimation_calls = 0
 
@@ -1030,7 +1030,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             with FakeTensorMode():
                 nonlocal estimation_calls
                 estimation_calls += 1
-                if not isinstance(torch.rand([20]), torch._subclasses.FakeTensor):
+                if not is_fake_tensor(torch.rand([20])):
                     raise AssertionError("Expected FakeTensor")
 
             return 1.0

@@ -27,7 +27,7 @@ from typing import Any, TYPE_CHECKING, TypeVar
 
 import torch._logging
 import torch.fx
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten
 
@@ -96,13 +96,19 @@ class InputPickler(pickle.Pickler):
         self.dispatch_table = copyreg.dispatch_table.copy()
         self.dispatch_table.update(
             {
-                FakeTensor: _extract_tensor_metadata_for_node_hash,
                 torch.SymInt: lambda x: (_ident, (str(x),)),
                 torch.SymBool: lambda x: (_ident, (str(x),)),
                 torch.SymFloat: lambda x: (_ident, (str(x),)),
             }
         )
         self.fast = True
+
+    # cannot rely on python faketensor type for c++ fakes
+    # pyrefly: ignore [bad-override]
+    def reducer_override(self, obj: Any) -> Any:
+        if is_fake_tensor(obj):
+            return _extract_tensor_metadata_for_node_hash(obj)
+        return NotImplemented
 
     def dumps(self, obj: Any) -> bytes:
         """

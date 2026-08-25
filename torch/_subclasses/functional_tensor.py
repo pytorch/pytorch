@@ -143,8 +143,12 @@ class FunctionalTensor(torch.Tensor):
     # to the wrapper, excluding functorch and python dispatch keys.
     # Here I'm trying to reuse the keyset the functorch wrapper subclasses copy,
     # except that they don't include ZeroTensor so I'm manually adding it in.
-    _extra_dispatch_keys = torch._C._additional_keys_to_prop_for_wrapper_tensors.add(
-        torch._C.DispatchKey.ZeroTensor
+    _extra_dispatch_keys = (
+        torch._C._additional_keys_to_prop_for_wrapper_tensors.remove(
+            torch._C.DispatchKey.Sparse
+        )
+        .remove(torch._C.DispatchKey.SparseCsr)
+        .add(torch._C.DispatchKey.ZeroTensor)
     )
 
     # These are all aten ops that correspond to metadata queries.
@@ -215,7 +219,7 @@ class FunctionalTensor(torch.Tensor):
             ),  # storage_offset
             None,  # memory_format
             elem.dtype,  # dtype
-            elem.layout,  # layout
+            torch.strided,  # layout
             elem.device,  # device
             False,  # pin_memory
             elem.requires_grad,  # requires_grad

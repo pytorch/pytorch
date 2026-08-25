@@ -47,7 +47,7 @@ from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_item_memo
 from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -1052,6 +1052,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 if torch._subclasses.fake_tensor.is_fake_tensor(example_value):
                     dks = (
                         dks
+                        - torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
                         - torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
                         - torch._C.DispatchKeySet(
                             torch._C.DispatchKey.PythonTLSSnapshot
@@ -1884,9 +1885,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 or example_value.dim() != 0
                 or example_value.device.type != "cpu"
                 or example_value.dtype != torch.int64
-                or (item_memo := example_value.item_memo) is None
             ):
                 return None
+
+            if (item_memo := maybe_get_item_memo(example_value)) is None:
+                return None
+            item_memo = cast(int | torch.SymInt, item_memo)
 
             sections = torch.fx.experimental.symbolic_shapes.guard_scalar(item_memo)
             if not isinstance(sections, int):

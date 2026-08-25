@@ -4784,23 +4784,27 @@ class TestSparseMeta(TestCase):
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
     def test_fake(self, dtype, layout):
-        from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
+        from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
         fake_mode = FakeTensorMode()
         index_dtype = torch.int64
         device = 'cpu'
         for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
-            f = FakeTensor.from_tensor(t, fake_mode)
-            self.assertIsInstance(f, FakeTensor)
+            f = fake_mode.from_tensor(t)
+            self.assertTrue(is_fake_tensor(f))
             self.assertEqualMeta(f, t, 0)
 
             d = f.detach()
-            self.assertIsInstance(d, FakeTensor)
+            self.assertTrue(is_fake_tensor(d))
             self.assertEqualMeta(d, t, 0)
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
     def test_zeros_like_fake(self, dtype, layout):
-        from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
+        from torch._subclasses.fake_tensor import (
+            FakeTensor,
+            FakeTensorMode,
+            maybe_get_fake_device,
+        )
         from torch.utils._mode_utils import no_dispatch
         fake_mode = FakeTensorMode()
         index_dtype = torch.int64
@@ -4809,7 +4813,7 @@ class TestSparseMeta(TestCase):
             f = FakeTensor.from_tensor(t, fake_mode)
             expected = torch.zeros_like(t)
             with no_dispatch():
-                result = torch.zeros_like(f, device=f.fake_device)
+                result = torch.zeros_like(f, device=maybe_get_fake_device(f))
             self.assertEqual(result, expected)
             self.assertEqualMeta(result, expected, 0)
 

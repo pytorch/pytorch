@@ -35,6 +35,8 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
   // to participate in the functorch transforms.
   key_set_ = key_set_ - c10::functorch_transforms_ks - c10::python_ks;
+  // Functionalize must unwrap before redispatching to the underlying fake tensor.
+  key_set_ = key_set_ - c10::DispatchKeySet(c10::DispatchKey::Fake);
   // We override a bunch of _custom(), so make sure they get called
   // TODO: metadata copying may not actually be necessary then
   set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);

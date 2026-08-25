@@ -29,7 +29,7 @@ import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
 from torch._library.opaque_object import get_opaque_type_name, is_custom_class_obj
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.traceback import NodeSource
@@ -376,7 +376,7 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
 _CURRENT_DESERIALIZER: Optional["GraphModuleDeserializer"] = None
 
 
-def _reduce_fake_tensor(fake_tensor: FakeTensor):
+def _reduce_fake_tensor(fake_tensor: torch.Tensor):
     is_parameter = isinstance(fake_tensor, torch.nn.Parameter)
     tensor_meta = serialize_tensor_meta(fake_tensor)
     tensor_meta_bytes = json.dumps(
@@ -409,8 +409,17 @@ def serialize_torch_artifact(
 
     if FakeTensor in copyreg.dispatch_table:
         raise AssertionError("Refusing to stomp on existing FakeTensor reducer")
+    if torch.Tensor in copyreg.dispatch_table:
+        raise AssertionError("Refusing to stomp on existing Tensor reducer")
+
+    def reduce_tensor(t: torch.Tensor):
+        if is_fake_tensor(t):
+            return _reduce_fake_tensor(t)
+        return t.__reduce_ex__(pickle_protocol)
+
     try:
         copyreg.pickle(FakeTensor, _reduce_fake_tensor)
+        copyreg.pickle(torch.Tensor, reduce_tensor)
         buffer = io.BytesIO()
         # This is a workaround for backend's tensor deserialization problem:
         # unpickleTensor() always create a tensor on the device where it was originally saved
@@ -422,6 +431,7 @@ def serialize_torch_artifact(
         return buffer.getvalue()
     finally:
         del copyreg.dispatch_table[FakeTensor]
+        del copyreg.dispatch_table[torch.Tensor]
 
 
 def deserialize_torch_artifact(

@@ -21,9 +21,20 @@ namespace at::impl {
 //               op_impls are matched separately in fakeFallback and are not
 //               mirrored here.)
 //   - PrimMeta: prims ops that define a prim_meta_impl, via torch._prims
+//   - PythonCIA: Python CompositeImplicitAutograd overrides, via
+//                OpOverload.py_impl
 //
 // This does not store the Python callables and is backed by c10::LeftRight
-enum class FakeDispatchCategory { Decomp, Meta, OpImpl, PrimMeta };
+enum class FakeDispatchCategory {
+  Decomp,
+  Meta,
+  OpImpl,
+  PrimMeta,
+  PythonCIA,
+  // for custom op handling registered through
+  // torch.library.custom_op(...).register_fake
+  CustomOpImpl
+};
 
 // Record/erase that `name` belongs to `category`. Called from the Python
 // registration hooks listed above.

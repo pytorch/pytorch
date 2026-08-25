@@ -312,8 +312,12 @@ def _make_prim(
             return meta(*args, **kwargs)
         if any(isinstance(x, torch.device) and x.type == "meta" for x in args):
             return meta(*args, **kwargs)
-        else:
-            return _prim_impl(*args, **kwargs)
+        from torch._subclasses.fake_tensor import reenter_cpp_fake_mode
+
+        with reenter_cpp_fake_mode() as reentered:
+            if reentered:
+                return meta(*args, **kwargs)
+        return _prim_impl(*args, **kwargs)
 
     name = schema.split("(", maxsplit=1)[0]
     schema = schema[len(name) :]
@@ -325,6 +329,9 @@ def _make_prim(
         prim_impl.impl(name, _prim_impl)
         prim_autograd_impl.impl(name, _autograd_impl)
         prim_meta_impl.impl(name, meta)
+        if return_type == RETURN_TYPE.VIEW or register_conj_neg_fallthrough:
+            prim.impl(name, torch.library.fallthrough_kernel, "Conjugate")
+            prim.impl(name, torch.library.fallthrough_kernel, "Negative")
     else:
         mutates_args = [
             arg.name

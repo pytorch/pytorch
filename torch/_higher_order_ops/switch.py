@@ -371,6 +371,31 @@ def switch_fake_tensor_mode(mode, index, branches, operands):
     return pytree.tree_unflatten(merged_outs, branch_out_spec[0])
 
 
+@switch_op.py_impl(DispatchKey.Fake)
+def switch_cpp_fake_tensor_mode(index, branches, operands):
+    from torch._higher_order_ops.utils import _find_or_create_fake_mode
+
+    mode = _find_or_create_fake_mode()
+    ignore_fresh_unbacked = contextlib.nullcontext()
+    if mode.shape_env:
+        ignore_fresh_unbacked = mode.shape_env.ignore_fresh_unbacked_symbols()
+    with ignore_fresh_unbacked:
+        flat_branch_outs, branch_out_spec = zip(
+            *[pytree.tree_flatten(branch(*operands)) for branch in branches]
+        )
+    for i, spec in enumerate(branch_out_spec):
+        if branch_out_spec[0] != spec:
+            raise RuntimeError(
+                "Unmatched output spec from torch.switch branches: "
+                f"branch0 tree_spec {branch_out_spec[0]} vs branch{i} tree_spec {spec}"
+            )
+
+    merged_outs = []
+    for branches_out in zip(*flat_branch_outs):
+        merged_outs.append(_merge_output(branches_out, mode))
+    return pytree.tree_unflatten(merged_outs, branch_out_spec[0])
+
+
 def _merge_output(xs: tuple[torch.Tensor | int | None, ...], mode: FakeTensorMode):
     from torch._higher_order_ops.cond import (
         _merge_ints_to_symint,

@@ -25,6 +25,7 @@ from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.switch import switch
 from torch._higher_order_ops.while_loop import while_loop
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
     FunctionalTensor,
@@ -41,6 +42,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_cuda,
     run_tests,
+    skipIfCppFakeTensor,
     skipIfCrossRef,
     skipIfRocm,
     skipIfTorchDynamo,
@@ -8147,11 +8149,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                     val = node.meta.get("val")
                     if isinstance(val, tuple):
                         for v in val:
-                            yield v.fake_mode.shape_env
+                            yield maybe_get_fake_mode(v).shape_env
                     elif isinstance(val, torch.SymInt):
                         yield val.node.shape_env
                     else:
-                        yield val.fake_mode.shape_env
+                        yield maybe_get_fake_mode(val).shape_env
 
         for shape_env in _node_shape_env_iter(symbolic_traced_graph):
             self.assertTrue(shape_env is graph_shape_env)
@@ -10947,6 +10949,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(compiled_out[1].size(0), 3)
         self.assertEqual(compiled_out, mod(x))
 
+    @skipIfCppFakeTensor("C++ FakeTensor has different FX node names")
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_autograd_simple(self):
         backend = torch._dynamo.testing.AotEagerAndRecordGraphs()

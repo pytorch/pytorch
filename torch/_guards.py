@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from torch._dynamo.output_graph import CodeOptions
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 
 
 """
@@ -1105,7 +1105,7 @@ class TracingContext:
             "TracingContext.get() must be called within an ongoing trace."
         )
 
-    def __init__(self, fake_mode: FakeTensorMode | None) -> None:
+    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode | None) -> None:
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
@@ -1113,7 +1113,7 @@ class TracingContext:
         self.previously_cleaned_instructions: dict[Any, Any] = dict()
         # Combined cache for inlined code data (instructions, indexof, code_options)
         self.inlined_code_cache: dict[Any, InlinedCodeCache] = dict()
-        self.fake_mode: FakeTensorMode | None = fake_mode
+        self.fake_mode: FakeTensorMode | CppFakeTensorMode | None = fake_mode
         self.frame_summary_stack: list[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
         # for clarity.  As we process a frame, this variable gets updated
@@ -1526,19 +1526,21 @@ class ChainedSource(Source):
         return result
 
 
-def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
+def detect_fake_mode(
+    inputs: Any = None,
+) -> FakeTensorMode | CppFakeTensorMode | None:
     """
     Attempts to "detect" what the current fake mode is.  If there is one ambiently
     available from TracingContext, we preferentially use that.  Otherwise, we
     heuristically detect the fake mode via the following sources, in order of
     priority:
 
+        - Active C++ FakeTensorMode (DispatchKey::Fake)
         - Currently active fake mode on stack
         - Fake mode associated with passed in tensors (inputs does not
           have to be flattened)
     """
     from torch._subclasses.fake_tensor import (
-        FakeTensor,
         FakeTensorMode,
         get_plain_tensors,
         is_fake_tensor,
@@ -1555,6 +1557,16 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
 
     fake_modes = []
 
+    fake_key = torch._C.DispatchKey.Fake
+    cpp_mode = torch._C._current_cpp_fake_tensor_mode()
+    if (
+        cpp_mode is not None
+        and not torch._C._in_kernel_invocation()
+        and torch._C._dispatch_tls_is_dispatch_key_included(fake_key)
+        and not torch._C._dispatch_tls_is_dispatch_key_excluded(fake_key)
+    ):
+        fake_modes.append((cpp_mode, "active C++ fake mode", 0))
+
     from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
     for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
@@ -1568,11 +1580,7 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
             get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
-            fake_tensors: list[FakeTensor] = [
-                x
-                for x in out
-                if isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-            ]
+            fake_tensors = [x for x in out if is_fake_tensor(x)]
             fake_modes.extend(
                 [
                     (maybe_get_fake_mode(tensor), f"subclass input {i}", ix)
@@ -1595,7 +1603,7 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         return None
 
 
-def active_fake_mode() -> FakeTensorMode | None:
+def active_fake_mode() -> FakeTensorMode | CppFakeTensorMode | None:
     """
     Inspects the dispatch mode stack for an active fake mode and returns it.
     Returns None if no fake mode is active.
@@ -1606,5 +1614,16 @@ def active_fake_mode() -> FakeTensorMode | None:
     for _, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
         if isinstance(m, FakeTensorMode):
             return m
+
+    # The C++ fake mode lives in the Fake-key TLS, not the dispatch-mode stack.
+    fake_key = torch._C.DispatchKey.Fake
+    cpp_mode = torch._C._current_cpp_fake_tensor_mode()
+    if (
+        cpp_mode is not None
+        and not torch._C._in_kernel_invocation()
+        and torch._C._dispatch_tls_is_dispatch_key_included(fake_key)
+        and not torch._C._dispatch_tls_is_dispatch_key_excluded(fake_key)
+    ):
+        return cpp_mode
 
     return None
