@@ -375,8 +375,8 @@ void ValueCache::store<CallType::PyCall>(
   if (C10_UNLIKELY(locations.find(key) == locations.end())) {
     locations[key] = {
         key.line_number_,
-        at::StringView(key.filename_),
-        at::StringView(key.name_)};
+        at::StringView(std::string(key.filename_)),
+        at::StringView(std::string(key.name_))};
   }
 }
 
@@ -802,7 +802,7 @@ static PyObject* c_call_callback(
     PyObject* const* args,
     size_t nargsf,
     PyObject* kwnames) {
-  // The logic of this function is based on sys_defile_call_or_return defined
+  // The logic of this function is based on sys_profile_call_or_return defined
   // in https://github.com/python/cpython/blob/v3.12.5/Python/legacy_tracing.c
 
   PyThreadState* tstate = PyThreadState_GET();
@@ -1496,6 +1496,7 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
   std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
     return a->start_time_ns_ < b->start_time_ns_;
   });
+  python_tracer::clampOverrunningPythonEvents(out);
 
   PythonIDVisitor id_visitor;
   for (auto& i : out) {

@@ -39,9 +39,10 @@ RUN if [ -n "$CLANG_VERSION" ]; then \
 ARG CUDA_VERSION
 RUN if [ -n "$CUDA_VERSION" ]; then \
     CUDA_REPO_VERSION=$(echo ${CUDA_VERSION} | sed 's/\./\-/g'); \
-    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb && \
-    dpkg -i cuda-keyring_1.0-1_all.deb && \
-    apt-get install --no-install-recommends -y cuda-toolkit-${CUDA_VERSION} && \
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    apt-get update -y && \
+    apt-get install --no-install-recommends -y cuda-toolkit-${CUDA_REPO_VERSION} && \
     apt-get clean -y; \
     fi
 

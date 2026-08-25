@@ -1,7 +1,7 @@
 #pragma once
 
-#if !defined(_MSC_VER) && __cplusplus < 201703L
-#error C++17 or later compatible compiler is required to use ATen.
+#if !defined(_MSC_VER) && __cplusplus < 202002L
+#error C++20 or later compatible compiler is required to use ATen.
 #endif
 
 #include <ATen/Context.h>
@@ -11,7 +11,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Formatting.h>
 #include <ATen/Functions.h>
-#include <ATen/NamedTensor.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorGeometry.h>

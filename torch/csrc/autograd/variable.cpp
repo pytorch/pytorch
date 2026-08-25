@@ -209,7 +209,9 @@ static void update_tensor_hooks_on_new_gradfn(
   }
 }
 
-void rebase_history(const Variable& self, Edge gradient_edge) {
+c10::intrusive_ptr<Node> rebase_history(
+    const Variable& self,
+    Edge gradient_edge) {
   TORCH_INTERNAL_ASSERT(gradient_edge.function != nullptr);
   const auto& meta = impl::get_autograd_meta(self);
   auto old_fn = meta != nullptr ? meta->grad_fn_ : nullptr;
@@ -237,15 +239,17 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
       torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
           view_info.base_, view_info.base_.grad_fn(), copy_slices);
     }
-    set_gradient_edge(view_info.base_, {std::move(copy_slices), 0});
+    set_gradient_edge(view_info.base_, {copy_slices, 0});
     self.grad_fn(); // trigger an update to the view's grad_fn
-    return;
+    return copy_slices;
   }
 
+  auto fn = gradient_edge.function;
   set_gradient_edge(self, std::move(gradient_edge));
   // Pass both self and its grad_fn to avoid calling into grad_fn reentrantly
   torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
       self, old_fn, self.grad_fn());
+  return fn;
 }
 
 void create_cpp_hook(const at::TensorBase& self, bool is_retains_grad_hook) {
@@ -289,26 +293,36 @@ c10::intrusive_ptr<Node> grad_accumulator(const Variable& self) {
   if (!autograd_meta) {
     return nullptr;
   }
-  if (autograd_meta->grad_fn_) {
-    throw std::logic_error(
-        "grad_accumulator() should be only called on leaf Variables");
-  }
+  TORCH_CHECK(
+      !autograd_meta->grad_fn_,
+      "grad_accumulator() should be only called on leaf Variables");
   if (!autograd_meta->requires_grad_) {
     return nullptr;
   }
 
-  std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
+  c10::intrusive_ptr<Node> result;
+  {
+    std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
 
-  auto result = autograd_meta->grad_accumulator_.lock();
-  if (result)
-    return result;
+    result = autograd_meta->grad_accumulator_.lock();
+    if (result)
+      return result;
 
-  c10::raw::intrusive_ptr::incref(self.unsafeGetTensorImpl());
-  auto intrusive_from_this =
-      c10::intrusive_ptr<at::TensorImpl>::reclaim(self.unsafeGetTensorImpl());
-  result = c10::make_intrusive<AccumulateGrad>(
-      Variable(std::move(intrusive_from_this)));
-  autograd_meta->grad_accumulator_ = c10::weak_intrusive_ptr<Node>(result);
+    c10::raw::intrusive_ptr::incref(self.unsafeGetTensorImpl());
+    auto intrusive_from_this =
+        c10::intrusive_ptr<at::TensorImpl>::reclaim(self.unsafeGetTensorImpl());
+    result = c10::make_intrusive<AccumulateGrad>(
+        Variable(std::move(intrusive_from_this)));
+    autograd_meta->grad_accumulator_ = c10::weak_intrusive_ptr<Node>(result);
+  }
+  // Fire only when the node is actually created. The result is cached as a
+  // weak ref on the leaf, so an AccumulateGrad already alive from a prior use
+  // of this parameter is returned above without firing again. Well-behaved
+  // code frees the old autograd graph (and thus the acc grad node) between
+  // iterations, so the hook fires consistently on each parameter's first use.
+  // Fired outside the lock: the hook takes the GIL, and elsewhere the GIL is
+  // acquired before this mutex, so firing under it could deadlock.
+  fire_node_creation_hooks(result);
   return result;
 }
 
@@ -717,6 +731,7 @@ const c10::intrusive_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
             self.unsafeGetTensorImpl()->is_python_dispatch(),
             self.is_nested(),
             self.grad_dtype());
+        torch::autograd::fire_node_creation_hooks(fn);
         diff_view_meta->grad_fn_ = std::move(fn);
       }
       diff_view_meta->set_attr_version(current_version);

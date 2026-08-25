@@ -538,7 +538,7 @@ std::tuple<PackedSequence, Tensor> RNNImpl::forward_with_packed_input(
   auto output_packed =
       PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices);
   return std::make_tuple(
-      output_packed, this->permute_hidden(hidden, unsorted_indices));
+      std::move(output_packed), this->permute_hidden(hidden, unsorted_indices));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -690,7 +690,7 @@ std::tuple<PackedSequence, std::tuple<Tensor, Tensor>> LSTMImpl::
   auto output_packed =
       PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices);
   return std::make_tuple(
-      output_packed, this->permute_hidden(hidden, unsorted_indices));
+      std::move(output_packed), this->permute_hidden(hidden, unsorted_indices));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -783,7 +783,7 @@ std::tuple<PackedSequence, Tensor> GRUImpl::forward_with_packed_input(
   auto output_packed =
       PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices);
   return std::make_tuple(
-      output_packed, this->permute_hidden(hidden, unsorted_indices));
+      std::move(output_packed), this->permute_hidden(hidden, unsorted_indices));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNNCellImplBase

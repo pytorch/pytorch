@@ -1,0 +1,56 @@
+diff --git a/test/cpython/v3_13/test_named_expressions.py b/test/cpython/v3_13/test_named_expressions.py
+index cf44080670d..f95dbae0d57 100644
+--- a/test/cpython/v3_13/test_named_expressions.py
++++ b/test/cpython/v3_13/test_named_expressions.py
+@@ -1,8 +1,26 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_named_expressions.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ import unittest
+ 
+ GLOBAL_VAR = None
+ 
+-class NamedExpressionInvalidTest(unittest.TestCase):
++class NamedExpressionInvalidTest(CPythonTestCase):
+ 
+     def test_named_expression_invalid_01(self):
+         code = """x := 0"""
+@@ -375,7 +393,7 @@ class NamedExpressionInvalidTest(unittest.TestCase):
+             exec(code, {}, {})
+ 
+ 
+-class NamedExpressionAssignmentTest(unittest.TestCase):
++class NamedExpressionAssignmentTest(CPythonTestCase):
+ 
+     def test_named_expression_assignment_01(self):
+         (a := 10)
+@@ -500,7 +518,7 @@ class NamedExpressionAssignmentTest(unittest.TestCase):
+ 
+ 
+ 
+-class NamedExpressionScopeTest(unittest.TestCase):
++class NamedExpressionScopeTest(CPythonTestCase):
+ 
+     def test_named_expression_scope_01(self):
+         code = """def spam():
+@@ -764,4 +782,4 @@ spam()"""
+         self.assertEqual(_Foo__x1, 2)
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
