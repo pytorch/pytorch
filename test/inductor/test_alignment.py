@@ -148,9 +148,7 @@ class CommonTemplate:
 
         expected_error = (
             "Expect the tensor to be 16 bytes aligned. "
-            r"(?:Fail due to storage_offset=1 itemsize=4|"
-            r"Data pointer is misaligned by [1-9][0-9]* bytes "
-            r"\(storage_offset=1, itemsize=4\))"
+            "Fail due to storage_offset=1 itemsize=4"
         )
         with self.assertRaisesRegex((AssertionError, RuntimeError), expected_error):
             self.common(fn, (x,), check_lowp=False)

@@ -7,7 +7,6 @@ import dataclasses
 import types
 from collections.abc import Callable, Collection, Sequence
 from typing import Any, NoReturn
-from typing_extensions import deprecated
 
 import torch
 
@@ -64,7 +63,7 @@ def _unwrap_dtensor_for_comparison(actual, expected):
 
 
 class ErrorMeta(Exception):
-    """Internal testing exception that makes that carries error metadata."""
+    """Internal testing exception that carries error metadata."""
 
     def __init__(
         self, type: type[Exception], msg: str, *, id: tuple[Any, ...] = ()
@@ -146,7 +145,7 @@ def get_tolerances(
     atol: float | None,
     id: tuple[Any, ...] = (),
 ) -> tuple[float, float]:
-    """Gets absolute and relative to be used for numeric comparisons.
+    """Gets absolute and relative tolerances to be used for numeric comparisons.
 
     If both ``rtol`` and ``atol`` are specified, this is a no-op. If both are not specified, the return value of
     :func:`default_tolerances` is used.
@@ -158,7 +157,7 @@ def get_tolerances(
         (Tuple[float, float]): Valid absolute and relative tolerances.
     """
     if (rtol is None) ^ (atol is None):
-        # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
+        # We require both tolerances to be omitted or specified, because specifying only one might lead to surprising
         # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
         raise ErrorMeta(
             ValueError,
@@ -852,7 +851,7 @@ class TensorLikePair(Pair):
 
         If ``actual`` and ``expected`` are ...
 
-        - ... not on the same :attr:`~torch.Tensor.device`, they are moved CPU memory.
+        - ... not on the same :attr:`~torch.Tensor.device`, they are moved to CPU memory.
         - ... not of the same ``dtype``, they are promoted  to a common ``dtype`` (according to
             :func:`torch.promote_types`).
         - ... not of the same ``layout``, they are converted to strided tensors.
@@ -1687,53 +1686,3 @@ def assert_close(
     if error_metas:
         # TODO: compose all metas into one AssertionError
         raise error_metas[0].to_error(msg)
-
-
-@deprecated(
-    "`torch.testing.assert_allclose()` is deprecated since 1.12 and will be removed in a future release. "
-    "Please use `torch.testing.assert_close()` instead. "
-    "You can find detailed upgrade instructions in https://github.com/pytorch/pytorch/issues/61844.",
-    category=FutureWarning,
-)
-def assert_allclose(
-    actual: Any,
-    expected: Any,
-    rtol: float | None = None,
-    atol: float | None = None,
-    equal_nan: bool = True,
-    msg: str = "",
-) -> None:
-    """
-    .. warning::
-
-       :func:`torch.testing.assert_allclose` is deprecated since ``1.12`` and will be removed in a future release.
-       Please use :func:`torch.testing.assert_close` instead. You can find detailed upgrade instructions
-       `here <https://github.com/pytorch/pytorch/issues/61844>`_.
-    """
-    if not isinstance(actual, torch.Tensor):
-        actual = torch.tensor(actual)
-    if not isinstance(expected, torch.Tensor):
-        expected = torch.tensor(expected, dtype=actual.dtype)
-
-    if rtol is None and atol is None:
-        rtol, atol = default_tolerances(
-            actual,
-            expected,
-            dtype_precisions={
-                torch.float16: (1e-3, 1e-3),
-                torch.float32: (1e-4, 1e-5),
-                torch.float64: (1e-5, 1e-8),
-            },
-        )
-
-    torch.testing.assert_close(
-        actual,
-        expected,
-        rtol=rtol,
-        atol=atol,
-        equal_nan=equal_nan,
-        check_device=True,
-        check_dtype=False,
-        check_stride=False,
-        msg=msg or None,
-    )
