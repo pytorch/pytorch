@@ -87,6 +87,16 @@ def _module_scoped_hash_target(x):
     return x + 1
 
 
+# Mutable state deliberately hidden from the FX graph: allow_in_graph means
+# dynamo records only this function's qualified name, never its body.
+_OPAQUE_SCALE = [2.0]
+
+
+@torch._dynamo.allow_in_graph
+def _opaque_scaled(x):
+    return x * _OPAQUE_SCALE[0]
+
+
 @torch._dynamo.allow_in_graph
 def _opaque_unsupported_function(grad):
     return grad * 2
@@ -5102,6 +5112,37 @@ class HOPCacheTests(CacheKeyEquivalenceMixin, torch._dynamo.test_case.TestCase):
 
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+    # NB: no strict_autograd_cache here. The fix makes the first call bypass,
+    # and strict mode turns a bypass into a hard error.
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_checkpoint_body_opaque_callable_not_stale(self):
+        """A cached checkpoint body must not outlive state its key cannot see.
+
+        _OPAQUE_SCALE is invisible to the dynamo graph, so the cache key is
+        unchanged when it moves. Asserts the gradient, not the counters: any
+        outcome that avoids the stale result is acceptable.
+        """
+
+        def grad_of_compiled():
+            torch._dynamo.reset()
+            x = torch.ones(4, requires_grad=True)
+            compiled = torch.compile(
+                lambda x: checkpoint(_opaque_scaled, x, use_reentrant=False),
+                backend="inductor",
+                fullgraph=True,
+            )
+            return torch.autograd.grad(compiled(x).sum(), x)[0]
+
+        try:
+            with fresh_cache():
+                self.assertEqual(grad_of_compiled(), torch.full((4,), 2.0))
+                _OPAQUE_SCALE[0] = 3.0
+                self.assertEqual(grad_of_compiled(), torch.full((4,), 3.0))
+        finally:
+            _OPAQUE_SCALE[0] = 2.0
 
 
 @instantiate_parametrized_tests
