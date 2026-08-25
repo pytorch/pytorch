@@ -11,7 +11,7 @@ import sympy
 
 import torch
 import torch._inductor.config as inductor_config
-from torch._inductor import ir
+from torch._inductor import dependencies, ir
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen import triton_utils
 from torch._inductor.codegen.common import ArgName, CSEVariable, SizeArg, TensorArg
@@ -31,6 +31,7 @@ from torch._inductor.codegen.triton import (
 from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wrapper
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
+from torch._inductor.loop_body import LoopBody
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
@@ -38,7 +39,7 @@ from torch._inductor.utils import (
     run_and_get_code,
     run_and_get_kernels,
 )
-from torch._inductor.virtualized import V
+from torch._inductor.virtualized import ops, V
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -152,6 +153,184 @@ class TestCodegenTriton(InductorTestCase):
                 )
             finally:
                 kernel.range_trees = saved_range_trees
+
+    def test_auxiliary_write_region(self):
+        auxiliary_index = sympy.Symbol(
+            "auxiliary_index", integer=True, nonnegative=True
+        )
+        write = ir.AuxiliaryWriteRegion(
+            numel=sympy.Integer(1024),
+            index_var=auxiliary_index,
+            output_index=2 * auxiliary_index,
+            predicate=sympy.And(auxiliary_index >= 512, auxiliary_index < 768),
+            value=127,
+        )
+        or_write = ir.AuxiliaryWriteRegion(
+            numel=sympy.Integer(1024),
+            index_var=auxiliary_index,
+            output_index=2 * auxiliary_index + 1,
+            predicate=sympy.Or(auxiliary_index < 128, auxiliary_index >= 896),
+            value=0,
+        )
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            [sympy.Integer(4)], [], prefix="d"
+        )
+        body = LoopBody(
+            lambda index: None,
+            (iter_vars,),
+            var_ranges,
+            iter_vars,
+            reduce_vars,
+            auxiliary_writes=(("buf0", write),),
+        )
+        copied_body = LoopBody(
+            body,
+            (iter_vars, reduce_vars),
+            var_ranges,
+            iter_vars,
+            reduce_vars,
+            allow_same_symbol_in_index=True,
+        )
+        self.assertEqual(copied_body.auxiliary_writes, (("buf0", write),))
+
+        with V.set_kernel_handler(SimpleNamespace()):
+            with self.assertRaisesRegex(
+                AssertionError,
+                "backend does not support auxiliary write regions",
+            ):
+                body([sympy.Integer(0)])
+
+        calls = []
+        kernel_handler = SimpleNamespace(
+            codegen_auxiliary_write=lambda output_name, region: calls.append(
+                (output_name, region)
+            )
+        )
+        with (
+            inductor_config.patch("triton.enable_fuse_auxiliary_writes", False),
+            V.set_kernel_handler(kernel_handler),
+        ):
+            body([sympy.Integer(0)])
+        self.assertEqual(calls, [("buf0", write)])
+
+        kernel = TritonKernel(
+            {"x": sympy.Integer(4)},
+            features=SIMDKernelFeatures([], sympy.Integer(4), sympy.Integer(1)),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+        self.assertFalse(hasattr(kernel, "auxiliary_store"))
+        with patch.object(
+            kernel.args,
+            "output",
+            side_effect=lambda name: {
+                "buf0": "out_ptr0",
+                "buf1": "out_ptr1",
+            }[name],
+        ):
+            kernel.codegen_auxiliary_write("buf0", write)
+            kernel.codegen_auxiliary_write("buf0", write)
+            kernel.codegen_auxiliary_write("buf1", or_write)
+
+        code = kernel.auxiliary_store.getvalue()
+        self.assertEqual(code.count("for auxiliary_offset_"), 2)
+        self.assertEqual(code.count("tl.store(out_ptr0"), 1)
+        self.assertEqual(code.count("tl.store(out_ptr1"), 1)
+        self.assertIn(" & ", code)
+        self.assertIn(" | ", code)
+        for line in code.splitlines():
+            if "tl.store" in line:
+                self.assertNotIn(" and ", line)
+                self.assertNotIn(" or ", line)
+        self.assertIn("127", code)
+
+    @inductor_config.patch("triton.enable_fuse_auxiliary_writes", True)
+    def test_auxiliary_write_dependencies(self):
+        auxiliary_numel = make_symbol(SymT.UNBACKED_INT, 0)
+        auxiliary_offset = make_symbol(SymT.UNBACKED_INT, 1)
+        auxiliary_limit = make_symbol(SymT.UNBACKED_INT, 2)
+        auxiliary_index = sympy.Symbol(
+            "auxiliary_index", integer=True, nonnegative=True
+        )
+
+        class AuxiliaryPointwise(ir.Pointwise):
+            def get_auxiliary_writes(self, indexer):
+                logical_index = sympy.Mod(auxiliary_index + auxiliary_offset, 4)
+                return (
+                    ir.AuxiliaryWriteRegion(
+                        numel=auxiliary_numel,
+                        index_var=auxiliary_index,
+                        output_index=indexer([logical_index]),
+                        predicate=sympy.And(
+                            auxiliary_index < 4,
+                            auxiliary_index < auxiliary_limit,
+                        ),
+                        value=127,
+                    ),
+                )
+
+        pointwise = AuxiliaryPointwise(
+            device=torch.device(GPU_TYPE),
+            dtype=torch.float32,
+            inner_fn=lambda index: ops.constant(0, torch.float32),
+            ranges=[sympy.Integer(4)],
+        )
+        buffer = ir.ComputedBuffer(
+            name="buf0",
+            layout=ir.FixedLayout(
+                torch.device(GPU_TYPE),
+                torch.float32,
+                [sympy.Integer(4)],
+                [sympy.Integer(1)],
+            ),
+            data=pointwise,
+        )
+
+        self.assertIn(dependencies.StarDep("buf0"), buffer.get_read_writes().writes)
+        symbol_uses = buffer.get_free_symbol_uses(unbacked_only=True)
+        self.assertTrue(
+            {auxiliary_numel, auxiliary_offset, auxiliary_limit}.issubset(symbol_uses)
+        )
+        self.assertNotIn(auxiliary_index, buffer.get_free_symbol_uses())
+
+    @inductor_config.patch("triton.enable_fuse_auxiliary_writes", True)
+    def test_auxiliary_write_rejects_empty_primary_domain(self):
+        class AuxiliaryPointwise(ir.Pointwise):
+            def get_auxiliary_writes(self, indexer):
+                auxiliary_index = sympy.Symbol(
+                    "auxiliary_index", integer=True, nonnegative=True
+                )
+                return (
+                    ir.AuxiliaryWriteRegion(
+                        numel=sympy.Integer(4),
+                        index_var=auxiliary_index,
+                        output_index=indexer([auxiliary_index]),
+                        predicate=sympy.true,
+                        value=127,
+                    ),
+                )
+
+        pointwise = AuxiliaryPointwise(
+            device=torch.device(GPU_TYPE),
+            dtype=torch.float32,
+            inner_fn=lambda index: ops.constant(0, torch.float32),
+            ranges=[sympy.Integer(0)],
+        )
+        buffer = ir.ComputedBuffer(
+            name="buf0",
+            layout=ir.FixedLayout(
+                torch.device(GPU_TYPE),
+                torch.float32,
+                [sympy.Integer(0)],
+                [sympy.Integer(1)],
+            ),
+            data=pointwise,
+        )
+
+        with self.assertRaisesRegex(
+            AssertionError, "statically nonempty primary domain"
+        ):
+            buffer.get_read_writes()
 
     def test_escape_triton_kernel_source_for_wrapper(self):
         source = """\
