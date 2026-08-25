@@ -43,6 +43,26 @@ class DeviceInterface:
     backends to be integrated with Inductor in a device-agnostic semantic.
     """
 
+    @staticmethod
+    def get_cpp_device_options(
+        aot_mode: bool, compile_only: bool
+    ) -> tuple[
+        list[str],
+        list[str],
+        list[str],
+        list[str],
+        list[str],
+        list[str],
+        list[str],
+    ] | None:
+        """Return device-specific C++ build options, if the backend provides them.
+
+        Out-of-tree backends may override this to return
+        ``(definitions, include_dirs, cflags, ldflags, library_dirs,
+        libraries, passthrough_args)`` for Inductor C++ compilation.
+        """
+        return None
+
     class device:
         def __new__(cls, device: torch.types.Device) -> Any:
             raise NotImplementedError
