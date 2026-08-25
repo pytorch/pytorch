@@ -408,6 +408,7 @@ def _build_dynamo_forward():
     import pickle
     import sys
     import types
+    from typing import cast
 
     import torch
     import torch.utils._pytree as _pytree
@@ -448,7 +449,7 @@ def _build_dynamo_forward():
         if not state.mutates_input_grads:
             return function(*args, **kwargs)
 
-        tensors = {}
+        tensors: dict[int, torch.Tensor] = {}
         leaves, _ = _pytree.tree_flatten((args, kwargs))
         for value in leaves:
             if isinstance(value, torch.nn.Module):
@@ -456,7 +457,9 @@ def _build_dynamo_forward():
                     tensors[id(parameter)] = parameter
             elif isinstance(value, torch.Tensor) and value.is_leaf:
                 tensors[id(value)] = value
-        saved = [(tensor, tensor.grad) for tensor in tensors.values()]
+        saved: list[tuple[torch.Tensor, torch.Tensor | None]] = [
+            (tensor, tensor.grad) for tensor in tensors.values()
+        ]
         with torch.no_grad():
             for tensor, _ in saved:
                 tensor.grad = None
@@ -468,6 +471,7 @@ def _build_dynamo_forward():
                     current = tensor.grad
                     if previous is None:
                         continue
+                    previous = cast(torch.Tensor, previous)
                     if current is None:
                         tensor.grad = previous
                     elif previous.is_sparse and not current.is_sparse:
@@ -793,7 +797,7 @@ def _build_dynamo_forward():
                         serialization_guard_filter_fn=keep_serializable_guards,
                     )
                     try:
-                        package.prepare(backends)
+                        package.prepare(backends)  # type: ignore[arg-type]
                     except Exception as error:
                         from torch._precompile import PrecompileError
 
@@ -825,7 +829,7 @@ def _build_dynamo_forward():
                         isolate_recompiles=True,
                     )
                     compiled = context(fn)
-                    region = context._isolate_recompiles_id
+                    region = context._isolate_recompiles_id  # type: ignore[attr-defined]
                     try:
                         package.install(backends, isolate_recompiles_id=region)
                     except BaseException:
@@ -845,7 +849,10 @@ def _build_dynamo_forward():
                 with self.state:
                     if self.compiled is None or self.unloading:
                         raise RuntimeError("precompile artifact has been unloaded")
-                    if self.package.installed_entries_dropped():
+                    package = self.package
+                    if package is None:
+                        raise AssertionError("installed artifact was not prepared")
+                    if package.installed_entries_dropped():
                         from torch._precompile import PrecompileError
 
                         raise PrecompileError(
@@ -983,6 +990,6 @@ def _build_dynamo_forward():
         with torch.set_grad_enabled(TRAINING):
             return run_entry(entry, args, kwargs)
 
-    forward.capture_summary = state.summary
+    forward.capture_summary = state.summary  # type: ignore[attr-defined]
 
     return forward
