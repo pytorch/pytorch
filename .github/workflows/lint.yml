@@ -132,6 +132,9 @@ jobs:
         # Ensure ciflow tags mentioned in config
         python3 .github/scripts/collect_ciflow_labels.py --validate-tags
 
+        # Ensure upload-test-stats.yml names workflows that exist
+        python3 .github/scripts/validate_upload_test_stats_workflows.py
+
         # C++ docs check
         pushd docs/cpp/source
         ./check-doxygen.sh

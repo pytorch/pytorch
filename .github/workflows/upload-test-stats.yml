@@ -24,13 +24,19 @@ on:
       - rocm-preview
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86
-      - inductor-cu124
       - inductor-rocm-mi200
       - inductor-rocm-mi300
       - inductor-rocm-mi350
       - inductor-perf-nightly-rocm-mi300
       - inductor-perf-nightly-rocm-mi350
-      - mac-mps
+      - Mac MPS
+      - Limited CI on H100
+      - B200 Smoke Tests
+      - Limited CI for distributed tests on H100
+      - CI for distributed tests on B200
+      - Limited CI for symmetric memory tests on H100
+      - Limited CI for symmetric memory tests on B200
+      - Limited CI for CUTLASS backend on H100
     types:
       - completed
 
