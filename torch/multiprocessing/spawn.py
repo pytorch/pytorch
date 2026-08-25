@@ -95,7 +95,7 @@ def _wrap(fn, i, args, error_file):
 
             with open(error_file, "wb") as fh:
                 pickle.dump(traceback.format_exc(), fh)
-            sys.exit(1)
+            sys.exit(128 + signal.SIGINT)
     except Exception:
         # Propagate exception to parent process, keeping original traceback
         import traceback
