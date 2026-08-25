@@ -205,7 +205,18 @@ class Event(torch._C._CudaEventBase):
         """
         if stream is None:
             stream = torch.cuda.current_stream()
-        # pyrefly: ignore [bad-argument-type]
+        # If we are inside an fx proxy tracer (e.g. compiled forward),
+        # mirror the call as a streams.record_event FX node so the
+        # cross-stream sync is preserved in the captured graph.  See
+        # ``torch._dynamo.variables.streams.maybe_emit_streams_op_proxy``.
+        from torch._dynamo.variables.streams import maybe_emit_streams_op_proxy
+
+        maybe_emit_streams_op_proxy(
+            torch.ops.streams.record_event.default,
+            # pyrefly: ignore [bad-argument-type]
+            self,
+            stream,
+        )
         super().record(stream)
 
     def wait(self, stream: Stream | torch.Stream | None = None) -> None:
@@ -219,7 +230,14 @@ class Event(torch._C._CudaEventBase):
         """
         if stream is None:
             stream = torch.cuda.current_stream()
+        # If we are inside an fx proxy tracer (e.g. compiled forward),
+        # mirror the call as a streams.wait_event FX node so the
+        # cross-stream sync is preserved in the captured graph.  See
+        # ``torch._dynamo.variables.streams.maybe_emit_streams_op_proxy``.
+        from torch._dynamo.variables.streams import maybe_emit_streams_op_proxy
+
         # pyrefly: ignore [bad-argument-type]
+        maybe_emit_streams_op_proxy(torch.ops.streams.wait_event.default, self, stream)
         super().wait(stream)
 
     def query(self):
