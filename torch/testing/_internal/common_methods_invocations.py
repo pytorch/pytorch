@@ -796,7 +796,10 @@ def sample_inputs_nextafter(op, device, dtype, requires_grad, **kwargs):
     bits = torch.tensor([1, 2, 3, 7, -32767, -32766, 0, -32768], dtype=torch.int16)
     lhs = bits.view(torch.bfloat16).to(device)
     for to in (1.0, -1.0, 0.0):
-        yield SampleInput(lhs.clone(), args=(torch.full_like(lhs, to),))
+        yield SampleInput(
+            lhs.clone().requires_grad_(requires_grad),
+            args=(torch.full_like(lhs, to),),
+        )
 
 
 def sample_inputs_ldexp(op_info, device, dtype, requires_grad, **kwargs):
