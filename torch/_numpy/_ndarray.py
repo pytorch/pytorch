@@ -543,7 +543,7 @@ class ndarray:
 
     @normalizer
     def fill(self, value: ArrayLike) -> None:
-        # Both Pytorch and NumPy accept 0D arrays/tensors and scalars, and
+        # Both PyTorch and NumPy accept 0D arrays/tensors and scalars, and
         # error out on D > 0 arrays
         self.tensor.fill_(value)
 

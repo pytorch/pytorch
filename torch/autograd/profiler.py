@@ -1192,7 +1192,7 @@ class emit_nvtx:
 
 
 def load_nvprof(path):
-    """Open an nvprof trace file and parses autograd annotations.
+    """Open an nvprof trace file and parse autograd annotations.
 
     Args:
         path (str): path to nvprof trace
