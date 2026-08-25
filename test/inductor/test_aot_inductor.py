@@ -104,6 +104,7 @@ from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_
 from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils import _pytree as pytree
 from torch.utils._triton import (
+    has_triton,
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
 )
@@ -252,6 +253,8 @@ def _skip_unless_bmm_shared_a_runnable(test):
     # offered under max-autotune.
     if test.device != GPU_TYPE:
         raise unittest.SkipTest("requires an accelerator")
+    if not has_triton():
+        raise unittest.SkipTest("requires Triton")
     if not is_big_gpu():
         raise unittest.SkipTest("requires modern GPU to run max-autotune")
 
