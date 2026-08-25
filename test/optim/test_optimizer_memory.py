@@ -2,10 +2,10 @@
 
 """Tests for eager for-loop optimizer memory usage and numerical correctness.
 
-Covers:
+Covers the in-place rewrites in adam.py, nadam.py, and rprop.py:
 - Peak memory budget: O(param + grad + state + 1 intermediate)
-- Numerical equivalence of in-place rewrites (NAdam, RAdam, Adam, Rprop)
-- Differentiable path correctness (backward + gradcheck for Adam/RAdam/NAdam/Rprop)
+- Numerical equivalence of in-place rewrites (NAdam, Adam, Rprop)
+- Differentiable path correctness (backward + gradcheck for Adam/NAdam/Rprop)
 - CUDA graph capture + replay verification for capturable paths
 - dtype coverage (fp16, bf16, fp32, fp64) on both CPU and CUDA
 - Orthogonality: weight_decay + maximize combinations
@@ -57,107 +57,6 @@ def _diff_fn(p, grad, opt_state, opt_cls, kwargs, *ignored):
 
 
 # ---------------------------------------------------------------------------
-# Pre-patch RAdam oracle (verbatim from perf/radam-memory-update~1)
-# ---------------------------------------------------------------------------
-
-
-def _radam_reference_pre_patch(
-    params,
-    grads,
-    exp_avgs,
-    exp_avg_sqs,
-    state_steps,
-    *,
-    beta1,
-    beta2,
-    lr,
-    weight_decay,
-    eps,
-    decoupled_weight_decay,
-    differentiable,
-    maximize,
-    capturable,
-    has_complex,
-):
-    """Verbatim copy of _single_tensor_radam from before the in-place rewrite.
-
-    Pulled from: git show perf/radam-memory-update~1:torch/optim/radam.py
-    Serves as an independent oracle for testing the shipped diff.
-    """
-    if not torch.jit.is_scripting():
-        if isinstance(lr, torch.Tensor) and lr.numel() == 1:
-            lr = lr.item()
-
-    for i, param in enumerate(params):
-        grad = grads[i] if not maximize else -grads[i]
-        exp_avg = exp_avgs[i]
-        exp_avg_sq = exp_avg_sqs[i]
-        step_t = state_steps[i]
-
-        if torch.is_complex(param):
-            param = torch.view_as_real(param)
-            grad = torch.view_as_real(grad)
-            exp_avg = torch.view_as_real(exp_avg)
-            exp_avg_sq = torch.view_as_real(exp_avg_sq)
-
-        step_t += 1
-        step = (
-            step_t
-            if capturable
-            else (step_t.item() if isinstance(step_t, torch.Tensor) else step_t)
-        )
-
-        if weight_decay != 0:
-            if decoupled_weight_decay:
-                param.mul_(1 - lr * weight_decay)
-            else:
-                grad = grad.add(param, alpha=weight_decay)
-
-        exp_avg.lerp_(grad, 1 - beta1)
-        exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-
-        bias_correction1 = 1 - beta1**step
-        bias_correction2 = 1 - beta2**step
-        bias_corrected_exp_avg = exp_avg / bias_correction1
-
-        rho_inf = 2 / (1 - beta2) - 1
-        rho_t = rho_inf - 2 * step * (beta2**step) / bias_correction2
-
-        def _compute_rect():
-            return (
-                (rho_t - 4)
-                * (rho_t - 2)
-                * rho_inf
-                / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
-            ) ** 0.5
-
-        def _compute_adaptive_lr():
-            exp_avg_sq_sqrt = exp_avg_sq.sqrt()
-            if differentiable:
-                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
-            else:
-                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
-            return (bias_correction2**0.5) / exp_avg_sq_sqrt
-
-        if capturable:
-            update = torch.where(
-                rho_t > 5.0, _compute_rect() * _compute_adaptive_lr(), 1.0
-            )
-            param.add_(bias_corrected_exp_avg * lr * update, alpha=-1.0)
-        else:
-            if rho_t > 5.0:
-                param.add_(
-                    bias_corrected_exp_avg
-                    * lr
-                    * _compute_adaptive_lr()
-                    * _compute_rect(),
-                    alpha=-1.0,
-                )
-            else:
-                param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
-
-
-# ---------------------------------------------------------------------------
 # NAdam denom
 # ---------------------------------------------------------------------------
 
@@ -177,187 +76,6 @@ class TestNAdamNumerical(TestCase):
         correct = x.div(0.25).sqrt()  # sqrt(4/0.25) = 4
         wrong = x.sqrt().div_(0.25)  # sqrt(4)/0.25 = 8
         self.assertNotEqual(correct, wrong)
-
-
-# ---------------------------------------------------------------------------
-# RAdam
-# ---------------------------------------------------------------------------
-
-
-class TestRAdamNumerical(TestCase):
-    def _rect(self, rho_t, rho_inf):
-        return (
-            (rho_t - 4)
-            * (rho_t - 2)
-            * rho_inf
-            / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
-        ) ** 0.5
-
-    def _alr_old(self, x, bc2, eps, diff):
-        s = x.sqrt()
-        s = s.add(eps) if diff else s.add_(eps)
-        return (bc2**0.5) / s
-
-    def _alr_new(self, x, bc2, eps, diff):
-        s = x.sqrt()
-        if diff:
-            s = s.add(eps).reciprocal().mul(bc2**0.5)
-        else:
-            s.add_(eps).reciprocal_().mul_(bc2**0.5)
-        return s
-
-    def test_adaptive_lr_forward_fp32(self):
-        self._check_alr(False, torch.float32)
-
-    def test_adaptive_lr_forward_fp64(self):
-        self._check_alr(False, torch.float64)
-
-    def test_adaptive_lr_forward_diff_fp32(self):
-        self._check_alr(True, torch.float32)
-
-    def test_adaptive_lr_forward_diff_fp64(self):
-        self._check_alr(True, torch.float64)
-
-    def _check_alr(self, diff, dtype):
-        torch.manual_seed(42)
-        for shape in [(128,), (64, 32)]:
-            x = torch.rand(shape, dtype=dtype)
-            old = self._alr_old(x.clone(), 0.95, 1e-8, diff)
-            new = self._alr_new(x.clone(), 0.95, 1e-8, diff)
-            self.assertEqual(old, new, atol=1e-6, rtol=1e-6)
-
-    def test_backward_fp32(self):
-        self._check_backward(torch.float32)
-
-    def test_backward_fp64(self):
-        self._check_backward(torch.float64)
-
-    def _check_backward(self, dtype):
-        data = torch.rand((64,), dtype=dtype)
-        p1 = data.clone().requires_grad_(True)
-        self._alr_old(p1, 0.95, 1e-8, True).sum().backward()
-        p2 = data.clone().requires_grad_(True)
-        self._alr_new(p2, 0.95, 1e-8, True).sum().backward()
-        self.assertEqual(p1.grad, p2.grad, atol=1e-6, rtol=1e-6)
-
-    def test_update_chain_fp32(self):
-        self._check_chain(False, torch.float32)
-
-    def test_update_chain_fp64(self):
-        self._check_chain(False, torch.float64)
-
-    def test_update_chain_diff_fp32(self):
-        self._check_chain(True, torch.float32)
-
-    def test_update_chain_diff_fp64(self):
-        self._check_chain(True, torch.float64)
-
-    def _check_chain(self, diff, dtype):
-        torch.manual_seed(42)
-        eps, lr, b1, b2 = 1e-8, 0.001, 0.9, 0.999
-        esq = torch.rand((128,), dtype=dtype)
-        ea = torch.rand((128,), dtype=dtype)
-        p_old = torch.rand((128,), dtype=dtype)
-        p_new = p_old.clone()
-
-        step = 10
-        bc1, bc2 = 1 - b1**step, 1 - b2**step
-        ri = 2 / (1 - b2) - 1
-        rt = ri - 2 * step * (b2**step) / bc2
-        rect = self._rect(rt, ri)
-        bcea = ea / bc1
-
-        alr = self._alr_old(esq.clone(), bc2, eps, diff)
-        p_old.add_(bcea * lr * alr * rect, alpha=-1.0)
-
-        alr = self._alr_new(esq.clone(), bc2, eps, diff)
-        if diff:
-            update = bcea * alr * lr * rect
-        else:
-            update = bcea.mul(alr)
-            update.mul_(lr)
-            update.mul_(rect)
-        p_new.add_(update, alpha=-1.0)
-
-        self.assertEqual(p_old, p_new, atol=1e-5, rtol=1e-5)
-
-    def test_single_tensor_radam_matches_reference(self):
-        """Verify the shipped _single_tensor_radam against a pre-patch oracle.
-
-        The oracle is a verbatim copy of _single_tensor_radam from before
-        the perf/radam-memory-update patch (git show perf/radam-memory-update~1).
-        This catches regressions introduced by the in-place rewrite.
-        """
-        from torch.optim.radam import _single_tensor_radam
-
-        for dtype in [torch.float32, torch.float64]:
-            for differentiable in [False, True]:
-                torch.manual_seed(42)
-                shape = (128,)
-                grad = torch.rand(shape, dtype=dtype)
-                beta1, beta2, lr_val, eps = 0.9, 0.999, 0.001, 1e-8
-                step_before = 9
-
-                p_orig = torch.rand(shape, dtype=dtype)
-
-                # Oracle: pre-patch _single_tensor_radam (verbatim)
-                p_oracle = p_orig.clone()
-                ea_o = torch.zeros_like(p_oracle)
-                esq_o = torch.zeros_like(p_oracle)
-                step_o = torch.tensor(float(step_before), dtype=dtype)
-                _radam_reference_pre_patch(
-                    [p_oracle],
-                    [grad.clone()],
-                    [ea_o],
-                    [esq_o],
-                    [step_o],
-                    beta1=beta1,
-                    beta2=beta2,
-                    lr=lr_val,
-                    weight_decay=0,
-                    eps=eps,
-                    decoupled_weight_decay=False,
-                    differentiable=differentiable,
-                    maximize=False,
-                    capturable=False,
-                    has_complex=False,
-                )
-
-                # Shipped: _single_tensor_radam from torch.optim.radam
-                p_shipped = p_orig.clone()
-                ea_s = torch.zeros_like(p_shipped)
-                esq_s = torch.zeros_like(p_shipped)
-                step_s = torch.tensor(float(step_before), dtype=dtype)
-                _single_tensor_radam(
-                    [p_shipped],
-                    [grad.clone()],
-                    [ea_s],
-                    [esq_s],
-                    [step_s],
-                    beta1=beta1,
-                    beta2=beta2,
-                    lr=lr_val,
-                    weight_decay=0,
-                    eps=eps,
-                    decoupled_weight_decay=False,
-                    differentiable=differentiable,
-                    maximize=False,
-                    capturable=False,
-                    has_complex=False,
-                )
-
-                self.assertEqual(
-                    p_shipped,
-                    p_oracle,
-                    atol=1e-5,
-                    rtol=1e-5,
-                    msg=f"dtype={dtype}, differentiable={differentiable}",
-                )
-
-
-# ---------------------------------------------------------------------------
-# Adam denom chain
-# ---------------------------------------------------------------------------
 
 
 class TestAdamDenomChain(TestCase):
@@ -429,7 +147,7 @@ class TestRpropSignChain(TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Gradcheck: differentiable paths for Adam, RAdam, NAdam, Rprop
+# Gradcheck: differentiable paths for Adam, NAdam, Rprop
 # ---------------------------------------------------------------------------
 
 
@@ -454,18 +172,6 @@ class TestDiffGradcheck(TestCase):
             optim.Adam,
             state,
             {"lr": 0.9, "differentiable": True, "amsgrad": True, "foreach": False},
-        )
-
-    def test_radam_diff(self):
-        state = {
-            "step": torch.tensor(10.0, requires_grad=False, dtype=torch.float64),
-            "exp_avg": torch.rand(10, requires_grad=True, dtype=torch.float64),
-            "exp_avg_sq": torch.rand(10, requires_grad=True, dtype=torch.float64),
-        }
-        self._run_gradcheck(
-            optim.RAdam,
-            state,
-            {"lr": 0.9, "differentiable": True, "foreach": False},
         )
 
     def test_nadam_diff(self):
@@ -561,9 +267,6 @@ class TestOrthogonality(TestCase):
     def test_nadam_wd_max(self):
         self._check(optim.NAdam, {"lr": 1e-3})
 
-    def test_radam_wd_max(self):
-        self._check(optim.RAdam, {"lr": 1e-3})
-
     def test_rprop_max(self):
         self._check(optim.Rprop, {"lr": 1e-2}, use_wd=False)
 
@@ -587,7 +290,6 @@ class TestOptimizerMemoryBudgetCUDA(TestCase):
             (optim.Adadelta, {"lr": 1.0}),
             (optim.Adamax, {"lr": 2e-3}),
             (optim.NAdam, {"lr": 1e-3}),
-            (optim.RAdam, {"lr": 1e-3}),
             (optim.RMSprop, {"lr": 1e-2}),
             (optim.Rprop, {"lr": 1e-2}),
             (optim.ASGD, {"lr": 0.1}),
@@ -631,7 +333,6 @@ class TestCUDAGraphCapture(TestCase):
             (optim.Adam, {"lr": 1e-3, "capturable": True}),
             (optim.Adam, {"lr": 1e-3, "capturable": True, "amsgrad": True}),
             (optim.Rprop, {"lr": 1e-2, "capturable": True}),
-            (optim.RAdam, {"lr": 1e-3, "capturable": True}),
         ]
         n_steps = 5
         shape = (64,)
@@ -665,7 +366,10 @@ class TestCUDAGraphCapture(TestCase):
                 torch.cuda.synchronize()
 
             self.assertEqual(
-                p_eager, p_graph, atol=1e-5, rtol=1e-5,
+                p_eager,
+                p_graph,
+                atol=1e-5,
+                rtol=1e-5,
                 msg=f"Graph replay diverged for {opt_cls.__name__}",
             )
             self.assertFalse(torch.isnan(p_graph).any())
