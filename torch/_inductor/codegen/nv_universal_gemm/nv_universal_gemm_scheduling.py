@@ -381,13 +381,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if group <= 1 or group > 4:
             return None
         store = GemmEpilogueIRAnalysis.store_from_buffer(node)
-        if (
-            store is None
-            or centered_mean_consumer_type_unrolled_ir(
-                store, gemm_node.get_name(), group
-            )
-            != "mean_linear:1:-1:0"
-        ):
+        if store is None or centered_mean_consumer_type_unrolled_ir(
+            store, gemm_node.get_name(), group
+        ) != (1.0, -1.0, 0.0):
             return None
         if any(read.name != gemm_node.get_name() for read in reads):
             return None
@@ -782,6 +778,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         reduction_type=reduction.reduction_type,
                         source_type=reduction.source_type,
                         primary_output=original_buffer_name,
+                        reduction_algorithm=reduction.reduction_algorithm,
+                        finalizer_fn=reduction.finalizer_fn,
                     )
                 feed_main = plan.feed_main
                 if feed_main is not None:
@@ -798,6 +796,8 @@ class NVUniversalGemmScheduling(BaseScheduling):
                         reduction_type=feed_main.reduction_type,
                         source_type=feed_main.source_type,
                         primary_output=feed_main.output_name,
+                        reduction_algorithm=feed_main.reduction_algorithm,
+                        finalizer_fn=feed_main.finalizer_fn,
                         feeds_main=True,
                         consumer_fn=LoopIRCuteDSLCodegen.consumer_from_buffer(
                             original_buffer_name,
