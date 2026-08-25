@@ -87,11 +87,12 @@ Tensor Adagrad::step(LossClosure closure) {
 
       // State initialization
       if (param_state == state_.end()) {
-        state_[p.unsafeGetTensorImpl()] =
+        auto new_state =
             make_param_state(p, defaults.initial_accumulator_value());
+        param_state =
+            state_.emplace(p.unsafeGetTensorImpl(), std::move(new_state)).first;
       }
-      auto& state =
-          static_cast<AdagradParamState&>(*state_[p.unsafeGetTensorImpl()]);
+      auto& state = static_cast<AdagradParamState&>(*param_state->second);
       auto& options = static_cast<AdagradOptions&>(group.options());
 
       state.step(state.step() + 1);
