@@ -27,11 +27,10 @@ struct TORCH_API MAIAHooksInterface : AcceleratorHooksInterface {
   }
 };
 
-// NB: dummy argument to suppress "ISO C++11 requires at least one argument
-// for the "..." in a variadic macro"
+// Deprecated: no longer used internally, kept for ABI compatibility.
 struct TORCH_API MAIAHooksArgs {};
 
-TORCH_DECLARE_REGISTRY(MAIAHooksRegistry, MAIAHooksInterface, MAIAHooksArgs);
+TORCH_DECLARE_REGISTRY(MAIAHooksRegistry, MAIAHooksInterface);
 #define REGISTER_MAIA_HOOKS(clsname) \
   C10_REGISTER_CLASS(MAIAHooksRegistry, clsname, clsname)
 

@@ -361,37 +361,52 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
 /*
  * Note [Synchronize Streams on Device]
  *
- * There are two stream pools per device to manage our reserved SYCL queues.
- * When syncStreamsOnDevice is called, all reserved SYCL queues in the pools of
- * the specified device will be blocked, and wait for their synchronizations. We
- * realize the semantics via a loop through the stream pools of the specified
- * device and make each command queue synchronization sequentially.
- *
- * There is a semantic gap with device synchronization because only the SYCL
- * queues we have reserved (in our pools) will be synchronized, rather than
- * synchronizing all SYCL queues on the specified device.
+ * syncStreamsOnDevice waits for all work previously submitted to the SYCL
+ * queues we manage on `device`. Two paths exist:
+ *  1. Fast path (SYCL >= 2026.1 and device exposes `ext_oneapi_device_wait`):
+ *     delegate to `device_synchronize`, which issues a single
+ *     `ext_oneapi_wait_and_throw()` -- a true device-wide wait. SYCL < 2026.1
+ *     is excluded because earlier runtimes could crash (release an invalid
+ *     queue) when a device-wide wait interleaves with XPUGraph capture; see
+ *     https://github.com/pytorch/pytorch/issues/187277.
+ *  2. Legacy path (otherwise): walk every reserved queue in each priority
+ *     pool and `wait()` on it. This only drains queues we own; SYCL queues
+ *     outside our pools are unaffected.
  */
 
-// Note: The stream pools will be initialized if needed, at the first invocation
-// to this function.
+// Note: The stream pools are lazily initialized on the legacy path; the fast
+// path bypasses our pools entirely.
 void syncStreamsOnDevice(DeviceIndex device) {
-  initXPUStreamsOnce();
   if (device == -1) {
     device = c10::xpu::current_device();
   }
   check_device_index(device);
-  // Initializes the stream pools (once)
-  initDeviceStreamOnce(device);
 
-  // For each device, we have kStreamsPerPool (32) reserved queues per priority.
-  for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
-    for (const auto i : c10::irange(kStreamsPerPool)) {
-      streams[device][p][i]->wait();
+// TODO: drop the legacy fallback below once a driver supporting
+// `ext_oneapi_device_wait` is widely deployed across all supported platforms.
+#if SYCL_COMPILER_VERSION >= 20260100
+  const bool use_device_wide_wait = c10::xpu::get_raw_device(device).has(
+      sycl::aspect::ext_oneapi_device_wait);
+#else
+  constexpr bool use_device_wide_wait = false;
+#endif
+
+  if (use_device_wide_wait) {
+    c10::xpu::device_synchronize(device);
+  } else {
+    initXPUStreamsOnce();
+    // Initializes the stream pools (once)
+    initDeviceStreamOnce(device);
+    // kStreamsPerPool (32) reserved queues per priority for each device.
+    for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
+      for (const auto i : c10::irange(kStreamsPerPool)) {
+        streams[device][p][i]->wait();
+      }
     }
-  }
-  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_device_synchronization(c10::kXPU);
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_device_synchronization(c10::kXPU);
+    }
   }
 }
 

@@ -18,6 +18,7 @@ import dataclasses
 import dis
 import functools
 import itertools
+import re
 import sys
 import types
 import uuid
@@ -531,6 +532,53 @@ def create_swap(n: int) -> list[Instruction]:
     ]
 
 
+def get_call_callable_depth(opname: str, arg: int) -> int:
+    """Return the depth of the callable from TOS for a call instruction.
+
+    Depth is 1-indexed: TOS = 1, below-TOS = 2, etc.  This encodes the
+    per-version stack layouts for every call instruction variant.
+
+    Note: on 3.11-3.12, CPython's CALL can have either NULL or self at the
+    bottom depending on function vs method call.  Dynamo's LOAD_METHOD
+    normalizes method calls to NULL + bound_method, so the bottom is always
+    NULL and the callable is always at depth arg + 1.
+
+    Stack layouts (bottom-to-top within the call's frame):
+      CALL (3.13+):            callable  NULL  arg0 ... argN-1
+      CALL (3.11-3.12):        NULL  callable  arg0 ... argN-1
+      CALL_KW (3.13+):         callable  NULL  arg0 ... argN-1  kw_names
+      CALL_FUNCTION (3.10):    callable  arg0 ... argN-1
+      CALL_FUNCTION_KW (3.10): callable  arg0 ... argN-1  kw_names
+      CALL_FUNCTION_EX:
+        3.14+:                 callable  NULL  args_tuple  kwargs_or_null
+        3.13:                  callable  NULL  args_tuple [kwargs_dict]
+        3.11-3.12:             NULL  callable  args_tuple [kwargs_dict]
+        3.10:                  callable  args_tuple [kwargs_dict]
+    """
+    if opname in ("CALL", "CALL_KW"):
+        kw_extra = 1 if opname == "CALL_KW" else 0
+        if sys.version_info >= (3, 13):
+            return arg + 2 + kw_extra
+        else:
+            # 3.11-3.12: NULL is always at bottom (Dynamo normalizes
+            # LOAD_METHOD to NULL + bound_method)
+            return arg + 1 + kw_extra
+    elif opname in ("CALL_FUNCTION", "CALL_FUNCTION_KW"):
+        kw_extra = 1 if opname == "CALL_FUNCTION_KW" else 0
+        return arg + 1 + kw_extra
+    elif opname == "CALL_FUNCTION_EX":
+        if sys.version_info >= (3, 14):
+            return 4
+        elif sys.version_info >= (3, 13):
+            return 3 + (arg & 1)
+        elif sys.version_info >= (3, 11):
+            return 2 + (arg & 1)
+        else:
+            return 2 + (arg & 1)
+    else:
+        raise ValueError(f"not a call instruction: {opname}")
+
+
 def create_binary_slice(
     start: int | None, end: int | None, store: bool = False
 ) -> list[Instruction]:
@@ -619,7 +667,7 @@ def linetable_writer(
 ) -> tuple[list[int], Callable[[int, int], None], Callable[[int], None]]:
     """
     Used to create typing.CodeType.co_linetable
-    See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
+    See https://github.com/python/cpython/blob/3.10/Objects/lnotab_notes.txt
     This is the internal format of the line number table for Python 3.10
     """
     if sys.version_info[:2] != (3, 10):
@@ -1247,7 +1295,7 @@ def strip_extended_args(instructions: list[Instruction]) -> None:
 def overwrite_instruction(
     old_inst: Instruction, new_insts: list[Instruction]
 ) -> list[Instruction]:
-    # update old_inst.exnt_tab_entry.end if necessary
+    # update old_inst.exn_tab_entry.end if necessary
     if (
         old_inst.exn_tab_entry
         and old_inst.exn_tab_entry.end is old_inst
@@ -1332,6 +1380,27 @@ def remove_binary_store_slice(instructions: list[Instruction]) -> None:
             inst.arg = 2
             inst.argval = 2
             new_insts.append(subscr_inst)
+    instructions[:] = new_insts
+
+
+def remove_load_attr_method_variant(instructions: list[Instruction]) -> None:
+    """On 3.12+, LOAD_ATTR with arg%2==1 is the method variant that pushes 2
+    values (NULL/self + method).  Normalize it to a non-method LOAD_ATTR
+    (1 value) followed by PUSH_NULL (+ SWAP on 3.12 where NULL goes below
+    the callable).  This lets break_graph_if_unsupported handle LOAD_ATTR
+    uniformly as a single-output instruction."""
+    new_insts: list[Instruction] = []
+    for inst in instructions:
+        if inst.opname == "LOAD_ATTR" and inst.arg is not None and inst.arg % 2:
+            replace_insts = [
+                create_instruction("LOAD_ATTR", arg=inst.arg & ~1, argval=inst.argval),
+                create_instruction("PUSH_NULL"),
+            ]
+            if sys.version_info < (3, 13):
+                replace_insts.append(create_instruction("SWAP", arg=2))
+            new_insts.extend(overwrite_instruction(inst, replace_insts))
+        else:
+            new_insts.append(inst)
     instructions[:] = new_insts
 
 
@@ -1673,7 +1742,15 @@ def fix_vars(
                     instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             if should_compute_arg():
-                instructions[i].arg = get_name_index(instructions[i].argval)
+                arg = get_name_index(instructions[i].argval)
+                if (
+                    sys.version_info >= (3, 15)
+                    and instructions[i].opname == "IMPORT_NAME"
+                ):
+                    arg <<= 2
+                    # Set the second bit to ensure eager imports, since lazy imports are only valid at module scope
+                    arg |= 0x02
+                instructions[i].arg = arg
         elif instructions[i].opcode in HAS_FREE:
             if should_compute_arg():
                 instructions[i].arg = freenames[instructions[i].argval]
@@ -1886,6 +1963,7 @@ def _cached_cleaned_instructions(
             remove_jump_if_none(instructions)
             if sys.version_info >= (3, 12):
                 remove_binary_store_slice(instructions)
+                remove_load_attr_method_variant(instructions)
             if sys.version_info >= (3, 13):
                 remove_fused_load_store(instructions)
         if config.debug_force_graph_break_on_leaf_return:
@@ -1904,6 +1982,21 @@ def unique_id(name: str, with_uuid: bool = False) -> str:
     if with_uuid:
         ret += f"_{uuid.uuid4()}".replace("-", "_")
     return ret
+
+
+COMPILED_FN_PREFIX = "__compiled_fn"
+_COMPILED_FN_NAME_RE = re.compile(
+    rf"^{COMPILED_FN_PREFIX}_\d+_"
+    r"[0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12}$"
+)
+
+
+def make_compiled_fn_name() -> str:
+    return unique_id(COMPILED_FN_PREFIX, with_uuid=True)
+
+
+def is_compiled_fn_name(name: str) -> bool:
+    return _COMPILED_FN_NAME_RE.fullmatch(name) is not None
 
 
 def is_generator(code: types.CodeType) -> bool:

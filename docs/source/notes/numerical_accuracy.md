@@ -141,10 +141,16 @@ unexpected results (e.g., `inf` values when the final result should be represent
 half-precision).
 If reduced-precision reductions are problematic, they can be turned off with
 `torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False`.
+This sets `allow_splitk` to `True`. To disable both reduced-precision reductions
+and split-k reductions, use
+`torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (False, False)`.
 
 A similar flag exists for BF16 GEMM operations and is turned on by default. If BF16
 reduced-precision reductions are problematic, they can be turned off with
 `torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False`.
+This sets `allow_splitk` to `True`. To disable both reduced-precision reductions
+and split-k reductions, use
+`torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (False, False)`.
 
 For more information see {ref}`allow_fp16_reduced_precision_reduction <fp16reducedprecision>`
 and {ref}`allow_bf16_reduced_precision_reduction <bf16reducedprecision>`.

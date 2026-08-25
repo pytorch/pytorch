@@ -37,43 +37,20 @@ def move_to_device_pass(
         else:
             return str(location)
 
-    def _move_tensor(tensor: torch.Tensor) -> torch.Tensor:
-        return tensor.to(_get_new_device(tensor.device, location))
-
-    def _move_parameter(param: torch.nn.Parameter) -> torch.nn.Parameter:
-        with torch.no_grad():
-            param_applied = _move_tensor(param)
-        if torch._has_compatible_shallow_copy_type(param, param_applied):
-            param.data = param_applied
-            out_param = param
-        else:
-            out_param = torch.nn.Parameter(param_applied, param.requires_grad)
-
-        if param.grad is not None:
-            with torch.no_grad():
-                grad_applied = _move_tensor(param.grad)
-            if torch._has_compatible_shallow_copy_type(param.grad, grad_applied):
-                param.grad.data = grad_applied
-                out_param.grad = param.grad
-            else:
-                out_param.grad = grad_applied.requires_grad_(param.grad.requires_grad)
-        return out_param
-
     # move all the state_dict
-    moved_parameters: dict[int, torch.nn.Parameter] = {}
     for k, v in ep.state_dict.items():
         if isinstance(v, torch.nn.Parameter):
-            param_id = id(v)
-            if param_id not in moved_parameters:
-                moved_parameters[param_id] = _move_parameter(v)
-            ep._state_dict[k] = moved_parameters[param_id]
+            ep._state_dict[k] = torch.nn.Parameter(
+                v.to(_get_new_device(v.device, location)),
+                v.requires_grad,
+            )
         else:
-            ep._state_dict[k] = _move_tensor(v)
+            ep._state_dict[k] = v.to(_get_new_device(v.device, location))
 
     # move all the constants
     for k, v in ep.constants.items():
         if isinstance(v, torch.Tensor):
-            ep._constants[k] = _move_tensor(v)
+            ep._constants[k] = v.to(_get_new_device(v.device, location))
 
     # move example_inputs if they exist
     if ep.example_inputs is not None:
@@ -115,7 +92,12 @@ def move_to_device_pass(
                     else v,
                     node.meta.get("val"),
                 )
-            m.recompile()
+            try:
+                m.recompile()
+            except SyntaxError:
+                # Some exported graphs with in-memory custom objects are
+                # intentionally executable only through torch.fx.Interpreter.
+                pass
 
     ep.validate()
     return ep

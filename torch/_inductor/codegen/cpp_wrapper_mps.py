@@ -6,6 +6,7 @@ import torch
 from torch.utils._ordered_set import OrderedSet
 
 from ..ir import GraphPartitionSignature
+from ..runtime.hints import TritonMeta
 from ..virtualized import V
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .cpp_wrapper_gpu import CppWrapperGpu
@@ -41,7 +42,7 @@ class CppWrapperMps(CppWrapperGpu):
         arg_types: tuple[Any, ...] | None = None,
         raw_keys: tuple[Any, ...] | None = None,
         raw_args: tuple[Any, ...] | None = None,
-        triton_meta: dict[str, Any] | None = None,
+        triton_meta: TritonMeta | None = None,
         inductor_meta: dict[str, Any] | None = None,
         graph_name: str = "",
         original_fxnode_name: str | None = None,
@@ -78,9 +79,11 @@ class CppWrapperMps(CppWrapperGpu):
                 inductor_meta=inductor_meta,
             )
 
-        assert device.type == "mps"
+        if device.type != "mps":
+            raise AssertionError(f"expected device.type == 'mps', got {device.type}")
 
-        assert arg_types is not None
+        if arg_types is None:
+            raise AssertionError("expected arg_types to not be None")
 
         new_args = []
         for idx, (arg, arg_type) in enumerate(zip(call_args[:-2], arg_types[:-2])):
@@ -98,7 +101,7 @@ class CppWrapperMps(CppWrapperGpu):
             raise NotImplementedError("No threads or group_size provided")
 
         # Check if threads is a single value or an array-like structure
-        threads_str = str(threads)
+        threads_str = threads
         is_single_value = (
             threads_str.startswith("{")
             and threads_str.endswith("}")
@@ -118,7 +121,7 @@ class CppWrapperMps(CppWrapperGpu):
                 )
             else:
                 # Extract group size value if it's also in braces
-                group_size_str = str(group_size)
+                group_size_str = group_size
                 if group_size_str.startswith("{") and group_size_str.endswith("}"):
                     group_size_value = group_size_str[1:-1].strip()
                 else:
@@ -165,7 +168,7 @@ class CppWrapperMps(CppWrapperGpu):
                 )
                 new_args.append("}")
             else:
-                group_size_str = str(group_size)
+                group_size_str = group_size
                 group_size_size = get_array_size(group_size_str)
                 new_args.append("{")
                 new_args.append(f"    uint64_t {threads_var}[] = {threads};")

@@ -54,6 +54,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils import _pytree as pytree
 
 
@@ -1378,46 +1379,118 @@ def forward(self, arg0_1):
         (out,) = ep.graph_module(torch.ones(4, dtype=torch.float32, device="cuda:0"))
         self.assertEqual(out.device, torch.device("cuda:0"))
 
-    def test_move_to_device_pass_parameter_to_meta(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.weight = torch.nn.Parameter(torch.ones(3))
-
-            def forward(self, x):
-                return x + self.weight
-
-        ep = torch.export.export(M(), (torch.zeros(3),))
-        param = ep.state_dict["weight"]
-        ep = move_to_device_pass(ep, "meta")
-
-        self.assertIsNot(ep.state_dict["weight"], param)
-        self.assertEqual(ep.state_dict["weight"].device, torch.device("meta"))
-
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_move_to_device_pass_preserves_parameter_identity(self):
+    def test_move_to_device_pass_does_not_mutate_source_module(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.ones(3))
+                self.register_buffer("bias", torch.ones(3))
 
             def forward(self, x):
-                return x + self.weight
+                return x * self.weight + self.bias
 
-        ep = torch.export.export(M(), (torch.zeros(3),))
+        m = M()
+        ep = torch.export.export(m, (torch.zeros(3),))
         param = ep.state_dict["weight"]
-        param.grad = torch.ones_like(param)
-        optim = torch.optim.SGD([param], lr=0.1)
+        buffer = ep.state_dict["bias"]
 
         ep = move_to_device_pass(ep, "cuda:0")
 
-        self.assertIs(ep.state_dict["weight"], param)
-        self.assertIs(optim.param_groups[0]["params"][0], param)
-        self.assertEqual(param.device, torch.device("cuda:0"))
-        self.assertEqual(param.grad.device, torch.device("cuda:0"))
+        self.assertIsNot(ep.state_dict["weight"], param)
+        self.assertIsNot(ep.state_dict["bias"], buffer)
+        self.assertIs(m.weight, param)
+        self.assertIs(m.bias, buffer)
+        self.assertEqual(m.weight.device, torch.device("cpu"))
+        self.assertEqual(m.bias.device, torch.device("cpu"))
+        self.assertEqual(ep.state_dict["weight"].device, torch.device("cuda:0"))
+        self.assertEqual(ep.state_dict["bias"].device, torch.device("cuda:0"))
 
-        out = ep.module()(torch.ones(3, device="cuda:0"))
-        self.assertEqual(out.device, torch.device("cuda:0"))
+        self.assertEqual(m(torch.ones(3)).device, torch.device("cpu"))
+        self.assertEqual(
+            ep.module()(torch.ones(3, device="cuda:0")).device,
+            torch.device("cuda:0"),
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass_wrapper_subclass_parameter(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    TwoTensor(torch.ones(3), torch.ones(3))
+                )
+                self.register_buffer("bias", torch.ones(3))
+
+            def forward(self, x):
+                return x + self.weight + self.bias
+
+        m = M()
+        ep = torch.export.export(m, (torch.zeros(3),))
+        param = ep.state_dict["weight"]
+
+        ep = move_to_device_pass(ep, "cuda:0")
+
+        self.assertIsNot(ep.state_dict["weight"], param)
+        self.assertIs(m.weight, param)
+        self.assertEqual(param.device, torch.device("cpu"))
+        self.assertEqual(param.a.device, torch.device("cpu"))
+        self.assertEqual(param.b.device, torch.device("cpu"))
+        self.assertEqual(m.bias.device, torch.device("cpu"))
+
+        moved_param = ep.state_dict["weight"]
+        self.assertEqual(moved_param.device, torch.device("cuda:0"))
+        self.assertEqual(moved_param.a.device, torch.device("cuda:0"))
+        self.assertEqual(moved_param.b.device, torch.device("cuda:0"))
+        self.assertEqual(ep.state_dict["bias"].device, torch.device("cuda:0"))
+
+        inp = torch.ones(3, device="cuda:0")
+        self.assertEqual(ep.module()(inp).device, torch.device("cuda:0"))
+        self.assertEqual(m(torch.ones(3)).device, torch.device("cpu"))
+
+    def test_move_to_device_pass_interpreter_only_graph(self):
+        with _scoped_library("test_move_to_device_pass", "DEF") as lib:
+            lib.define("identity_with_obj(Any obj, Tensor x) -> Tensor")
+
+            @impl(lib, "identity_with_obj", "CompositeExplicitAutograd")
+            def identity_with_obj(obj, x):
+                return x
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ones(3, device=x.device) + x
+
+            ep = torch.export.export(M(), (torch.zeros(3),))
+            custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
+            add = next(
+                node
+                for node in ep.graph.nodes
+                if node.op == "call_function"
+                and node.target == torch.ops.aten.add.Tensor
+            )
+            inp = add.args[0]
+            with ep.graph.inserting_before(add):
+                with_obj = ep.graph.call_function(
+                    torch.ops.test_move_to_device_pass.identity_with_obj.default,
+                    (custom_obj, inp),
+                )
+                with_obj.meta = add.meta.copy()
+            add.replace_input_with(inp, with_obj)
+
+            with self.assertWarnsRegex(
+                UserWarning, "graph module will no longer be directly callable"
+            ):
+                ep = ep._update(ep.graph_module, ep.graph_signature)
+
+            self.assertEqual(
+                torch.fx.Interpreter(ep.graph_module).run(torch.ones(3)),
+                (torch.full((3,), 2.0),),
+            )
+            ep = move_to_device_pass(ep, "meta")
+            (out,) = torch.fx.Interpreter(ep.graph_module).run(
+                torch.ones(3, device="meta")
+            )
+            self.assertEqual(out.device, torch.device("meta"))
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_move_to_device_pass(self):
