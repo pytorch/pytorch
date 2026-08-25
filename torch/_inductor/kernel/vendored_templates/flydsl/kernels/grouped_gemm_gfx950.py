@@ -351,7 +351,6 @@ def _grouped_tile_store(ctx, thr_gC):
     fx.gpu.barrier()
 
 
-@flyc.jit
 def _grouped_compute_stage_from_lds(ctx, read_stage, k_tile, k):
     param = ctx.param
     block_m = param.block_m
