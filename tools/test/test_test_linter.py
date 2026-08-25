@@ -242,6 +242,104 @@ class TestHwClassificationLinter(unittest.TestCase):
         self.assertEqual(self._run(src), [])
 
     # ==================================================================
+    # Test method shape: camelCase / async / except-handler scanning
+    # ==================================================================
+
+    def test_camel_case_only_class_missing_classification(self) -> None:
+        """A class whose tests are all camelCase (testFoo) is still a test class."""
+        src = """\
+            from torch.testing._internal.common_utils import TestCase
+            class TestFoo(TestCase):
+                def testBar(self): pass
+        """
+        msgs = self._run(src)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(
+            msgs[0],
+            error_msg(
+                name="[hw_classification]",
+                path=msgs[0].path,
+                line=2,
+                description="Test class 'TestFoo' is missing or has an invalid "
+                "hw_classification. Only the exact forms below are accepted "
+                "(aliased imports are not recognized):\n"
+                "    hw_classification = HardwareClassification.<MEMBER>\n"
+                "    hw_classification: HardwareClassification = HardwareClassification.<MEMBER>",
+            ),
+        )
+
+    def test_mixed_snake_camel_methods_device_param_checked(self) -> None:
+        """camelCase test methods in a mixed class are still checked per-method."""
+        src = """\
+            from torch.testing._internal.common_utils import HardwareClassification, TestCase
+            class TestFoo(TestCase):
+                hw_classification = HardwareClassification.GENERIC
+                def test_snake(self): pass
+                def testCamel(self, device): pass
+        """
+        msgs = self._run(src)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(
+            msgs[0],
+            error_msg(
+                name="[device_param]",
+                path=msgs[0].path,
+                line=5,
+                description=f"{HC.GENERIC.value} test method 'TestFoo.testCamel' "
+                f"must not accept a 'device' or 'devices' parameter.",
+            ),
+        )
+
+    def test_class_under_except_handler_scanned(self) -> None:
+        """Test classes inside an except handler are still scanned."""
+        src = """\
+            from torch.testing._internal.common_utils import TestCase
+            try:
+                import missing_module
+            except ImportError:
+                class TestFoo(TestCase):
+                    def test_x(self): pass
+        """
+        msgs = self._run(src)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(
+            msgs[0],
+            error_msg(
+                name="[hw_classification]",
+                path=msgs[0].path,
+                line=5,
+                description="Test class 'TestFoo' is missing or has an invalid "
+                "hw_classification. Only the exact forms below are accepted "
+                "(aliased imports are not recognized):\n"
+                "    hw_classification = HardwareClassification.<MEMBER>\n"
+                "    hw_classification: HardwareClassification = HardwareClassification.<MEMBER>",
+            ),
+        )
+
+    def test_async_test_method_classified(self) -> None:
+        """async def test_* methods make a class a test class."""
+        src = """\
+            from torch.testing._internal.common_utils import TestCase
+            class TestFoo(TestCase):
+                async def test_x(self): pass
+        """
+        msgs = self._run(src)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(
+            msgs[0],
+            error_msg(
+                name="[hw_classification]",
+                path=msgs[0].path,
+                line=2,
+                description="Test class 'TestFoo' is missing or has an invalid "
+                "hw_classification. Only the exact forms below are accepted "
+                "(aliased imports are not recognized):\n"
+                "    hw_classification = HardwareClassification.<MEMBER>\n"
+                "    hw_classification: HardwareClassification = HardwareClassification.<MEMBER>",
+            ),
+        )
+
+    # ==================================================================
     # GENERIC
     # ==================================================================
 
@@ -415,6 +513,20 @@ class TestHwClassificationLinter(unittest.TestCase):
                 ),
             )
 
+    def test_device_specific_instantiation_attribute_form(self) -> None:
+        """Attribute-form instantiate_device_type_tests (module.func) is recognized."""
+        for cls in DEVICE_SPECIFIC_CLASSIFICATIONS:
+            allow = _allow_kwarg(cls)
+            src = f"""\
+                from torch.testing._internal import common_device_type
+                from torch.testing._internal.common_utils import HardwareClassification, TestCase
+                class TestFoo(TestCase):
+                    hw_classification = HardwareClassification.{cls.name}
+                    def test_x(self, device): pass
+                common_device_type.instantiate_device_type_tests(TestFoo, globals(), only_for='{cls.value.lower()}'{allow})
+            """
+            self.assertEqual(self._run(src), [], f"failed for {cls}")
+
     def test_device_specific_instantiation_under_if_guard(self) -> None:
         """Guarded instantiation calls are found, so no false 'must be instantiated'."""
         for cls in DEVICE_SPECIFIC_CLASSIFICATIONS:
@@ -560,7 +672,8 @@ class TestHwClassificationLinter(unittest.TestCase):
             )
 
     def test_device_specific_non_literal_only_for(self) -> None:
-        """only_for with a non-literal value triggers _KWARG_UNKNOWN / missing-only_for error."""
+        """only_for with a non-literal value reports a static-resolution error,
+        not a misleading 'must use only_for=' message."""
         for cls in DEVICE_SPECIFIC_CLASSIFICATIONS:
             allow = _allow_kwarg(cls)
             src = f"""\
@@ -574,7 +687,18 @@ class TestHwClassificationLinter(unittest.TestCase):
             """
             msgs = self._run(src)
             self.assertEqual(len(msgs), 1, f"failed for {cls}")
-            self.assertEqual(msgs[0].name, "[only_for]")
+            self.assertEqual(
+                msgs[0],
+                error_msg(
+                    name="[only_for]",
+                    path=msgs[0].path,
+                    line=7,
+                    description=f"{cls.value} class 'TestFoo' "
+                    f"has a non-literal only_for in instantiate_device_type_tests "
+                    f"that could not be resolved statically; "
+                    f"use a literal only_for='{cls.value.lower()}'.",
+                ),
+            )
 
     def test_device_specific_only_for_none(self) -> None:
         """only_for=None is treated as absent and triggers missing-only_for error."""
@@ -665,6 +789,19 @@ class TestHwClassificationLinter(unittest.TestCase):
                 f"otherwise no tests are generated.",
             ),
         )
+
+    def test_mps_non_literal_allow_mps_skipped(self) -> None:
+        """A non-literal allow_mps= must not produce a spurious [allow_mps] error."""
+        src = """\
+            from torch.testing._internal.common_device_type import instantiate_device_type_tests
+            from torch.testing._internal.common_utils import HardwareClassification, TestCase
+            ALLOW = True
+            class TestFoo(TestCase):
+                hw_classification = HardwareClassification.MPS
+                def test_x(self, device): pass
+            instantiate_device_type_tests(TestFoo, globals(), only_for='mps', allow_mps=ALLOW)
+        """
+        self.assertEqual(self._run(src), [])
 
     def test_mps_with_allow_mps(self) -> None:
         src = """\
@@ -896,6 +1033,20 @@ class TestHwClassificationLinter(unittest.TestCase):
                 ),
             )
 
+    def test_accelerator_allowed_non_device_decorators(self) -> None:
+        """Non-device decorators (dtypes, skipIfTorchDynamo) survive the deny-set check."""
+        src = """\
+            from torch.testing._internal.common_device_type import instantiate_device_type_tests
+            from torch.testing._internal.common_utils import HardwareClassification, TestCase, dtypes, skipIfTorchDynamo
+            class TestFoo(TestCase):
+                hw_classification = HardwareClassification.ACCELERATOR
+                @dtypes(torch.float32, torch.float64)
+                @skipIfTorchDynamo
+                def test_x(self, device): pass
+            instantiate_device_type_tests(TestFoo, globals())
+        """
+        self.assertEqual(self._run(src), [])
+
     def test_accelerator_uses_only_for(self) -> None:
         src = """\
             from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -916,6 +1067,61 @@ class TestHwClassificationLinter(unittest.TestCase):
                 description=f"{HC.ACCELERATOR.value} class 'TestFoo' "
                 f"must not use only_for in instantiate_device_type_tests. "
                 f"Use except_for instead (blacklist approach).",
+            ),
+        )
+
+    # --- duplicate class / instantiation detection ---
+
+    def test_duplicate_class_definition(self) -> None:
+        """Defining the same test class twice (under different guards) reports
+        [duplicate_class]."""
+        src = """\
+            from torch.testing._internal.common_utils import HardwareClassification, TestCase
+            if USE_FAST_PATH:
+                class TestFoo(TestCase):
+                    hw_classification = HardwareClassification.GENERIC
+                    def test_x(self): pass
+            if USE_SLOW_PATH:
+                class TestFoo(TestCase):
+                    hw_classification = HardwareClassification.GENERIC
+                    def test_y(self): pass
+        """
+        msgs = self._run(src)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(
+            msgs[0],
+            error_msg(
+                name="[duplicate_class]",
+                path=msgs[0].path,
+                line=7,
+                description="Test class 'TestFoo' is defined more than once; "
+                "only the last definition is linted.",
+            ),
+        )
+
+    def test_duplicate_instantiation(self) -> None:
+        """Calling instantiate_device_type_tests twice for one class reports
+        [duplicate_instantiation]."""
+        src = """\
+            from torch.testing._internal.common_device_type import instantiate_device_type_tests
+            from torch.testing._internal.common_utils import HardwareClassification, TestCase
+            class TestFoo(TestCase):
+                hw_classification = HardwareClassification.CUDA
+                def test_x(self, device): pass
+            instantiate_device_type_tests(TestFoo, globals(), only_for='cuda')
+            instantiate_device_type_tests(TestFoo, globals(), only_for='cuda')
+        """
+        msgs = self._run(src)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(
+            msgs[0],
+            error_msg(
+                name="[duplicate_instantiation]",
+                path=msgs[0].path,
+                line=7,
+                description="Class 'TestFoo' is passed to "
+                "instantiate_device_type_tests more than once; "
+                "only the last call is linted.",
             ),
         )
 
