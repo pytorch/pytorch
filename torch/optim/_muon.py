@@ -315,10 +315,9 @@ Muon.__doc__ = (
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
         adjust_lr_fn (str, optional): function to adjust learning rate. One of "original", "match_rms_adamw", and "spectral_unclamped".
             If not specified, we will default to use "original". (default: None)
-        allow_batched_matrices (bool, optional): opt in to parameters shaped :math:`[..., M, N]`. The last two dimensions
-            are the matrix dimensions and any leading dimensions are treated as a batch of independent matrices,
-            each orthogonalized on its own. This is useful for per-head or per-expert Muon, where a fused
-            parameter stores many logical matrices. When ``False``, only 2D parameters are accepted. (default: False)
+        allow_batched_matrices (bool, optional): opt in to parameters shaped :math:`[..., M, N]`, where the
+            last two dimensions are the matrix dimensions and any leading dimensions are a batch of
+            independently orthogonalized matrices. When ``False``, only 2D parameters are accepted. (default: False)
 
     Example:
         >>> # xdoctest: +SKIP
@@ -343,10 +342,7 @@ Muon.__doc__ = (
         >>> optim_muon.step()
         >>> optim_adamw.step()
 
-        >>> # xdoctest: +SKIP
-        >>> # Opt in to a batch of matrices, e.g. per-expert Muon over a
-        >>> # grouped expert weight of shape [num_experts, hidden_dim, dim].
-        >>> # Newton-Schulz runs independently on each expert matrix.
+        >>> # Per-expert Muon over a grouped weight [num_experts, hidden_dim, dim]
         >>> optim_muon = torch.optim.Muon(
         ...     [grouped_expert_weight], lr=0.02, allow_batched_matrices=True
         ... )
