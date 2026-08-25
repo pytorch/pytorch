@@ -113,14 +113,14 @@ class TORCH_API FlightRecorderHook
   };
 
   // A recorded op whose collective the hook is still waiting on. work_key is
-  // null between the pre-hook and the post-hook, and stays null if the backend
-  // threw in between -- such an entry is never retired, which is the honest
-  // report: it was issued and never seen to finish.
+  // empty between the pre-hook and the post-hook, and stays empty if the
+  // backend threw in between -- such an entry is never retired, which is the
+  // honest report: it was issued and never seen to finish.
   struct InflightOp {
     FlightRecorder<c10::Event>::TraceIdentifier trace_id;
     FlightRecorder<c10::Event>* recorder = nullptr;
     HookOpName name = HookOpName::UNKNOWN;
-    const void* work_key = nullptr;
+    std::optional<uint64_t> work_key;
   };
 
   FlightRecorderHook(
@@ -141,7 +141,7 @@ class TORCH_API FlightRecorderHook
   // already retired: the entry is claimed out of inflight_ under mutex_, so
   // the backend's completion hook and the post-hook's own check retire it
   // exactly once between them however they race.
-  void retireCompleted(const Work* work, std::optional<float> duration);
+  void retireCompleted(uint64_t completion_key, std::optional<float> duration);
   // The backend's own measurement, or nullopt if it cannot time collectives.
   std::optional<float> workDuration(const Work& work);
   // Dumps the trace to disk, at most once per process. Deliberately takes no
@@ -188,10 +188,9 @@ class TORCH_API FlightRecorderHook
   // Ordered by op_id, which is monotonic per process group, so the front is the
   // oldest op still awaited and eviction is in issue order.
   std::map<int64_t, InflightOp> inflight_;
-  // The reverse index a completion needs. A caller-facing Work and the
-  // backend's tensor-free tracking copy share this opaque key, so correlating
-  // them does not extend tensor lifetimes.
-  std::unordered_map<const void*, int64_t> work_ids_;
+  // The reverse index a completion needs. Numeric keys do not extend Work
+  // lifetimes and are never reused by a backend.
+  std::unordered_map<uint64_t, int64_t> work_ids_;
 };
 
 } // namespace c10d

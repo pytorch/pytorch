@@ -43,7 +43,6 @@ class WorkNCCL : public c10d::Work {
     TIMEDOUT,
     ERROR,
   };
-  struct TrackingTag {};
 
   WorkNCCL(
       ProcessGroupNCCL* comm,
@@ -55,7 +54,6 @@ class WorkNCCL : public c10d::Work {
       cudaStream_t stream,
       std::chrono::milliseconds timeout_ms,
       at::Tensor inputTensor);
-  WorkNCCL(TrackingTag, WorkNCCL& work, bool retain_input_tensors);
   ~WorkNCCL() override;
 
   WorkNCCL(const WorkNCCL&) = delete;
@@ -74,7 +72,7 @@ class WorkNCCL : public c10d::Work {
   c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
   float getDuration() const override;
   uint64_t getSequencenumber() const override;
-  const void* getCompletionKey() const override;
+  uint64_t getCompletionKey() const override;
 
   std::chrono::milliseconds getTimeout() const override;
   WorkStatus status() const;
@@ -102,22 +100,51 @@ class WorkNCCL : public c10d::Work {
   struct Events;
   struct InputTensorShelf {
     explicit InputTensorShelf(std::vector<at::Tensor> tensors);
-    std::vector<at::Tensor> copy() const;
+    void append(InputTensorShelf& other);
     void clear();
 
-    mutable std::mutex mutex;
+    std::mutex mutex;
     std::vector<at::Tensor> tensors;
   };
-  struct State;
+  struct State {
+    State(
+        ProcessGroupNCCL* comm,
+        cudaStream_t stream,
+        std::chrono::milliseconds timeout);
 
-  c10::intrusive_ptr<WorkNCCL> createTrackingWork(
-      bool retain_input_tensors = true);
-  std::shared_ptr<InputTensorShelf> inputTensors() const;
-  bool setTerminalStatus(WorkStatus status);
-  // Push successful completion out to the backend's completion hooks, with the
-  // device duration if this work was timed. Called by WorkNCCLQueue for each
-  // work it retires as COMPLETED, which is once per work.
-  void notifyCompletion();
+    WorkStatus status() const;
+    std::exception_ptr exception() const;
+    bool setTerminalStatus(WorkStatus status);
+    WorkStatus checkStatus(
+        std::optional<std::chrono::milliseconds> timeout = std::nullopt);
+    void notifyCompletion();
+    float getDuration();
+
+    ProcessGroupNCCL* comm;
+    int64_t reconfigure_uuid;
+    bool blocking_wait;
+    at::cuda::CUDAStream stream;
+    std::chrono::steady_clock::time_point work_start_time;
+    std::chrono::milliseconds timeout;
+    uint64_t completion_key;
+    std::chrono::milliseconds owned_ephemeral_timeout{0};
+    std::atomic<bool> ephemeral_timeout_released{false};
+    bool timing_enabled;
+    uint64_t seq{0};
+    std::shared_ptr<Events> events;
+    std::mutex duration_mutex;
+    std::shared_ptr<Events> duration_start_events;
+    mutable std::mutex terminal_status_mutex;
+    std::atomic<WorkStatus> work_status{WorkStatus::NOT_STARTED};
+    std::exception_ptr work_exception;
+    c10::intrusive_ptr<c10::ivalue::Future> future_work_result;
+    bool host_blocking{false};
+  };
+  struct TrackedWork {
+    std::shared_ptr<State> state;
+    std::shared_ptr<InputTensorShelf> input_tensors;
+  };
+
   // Poll the CUDA events and advance status; used by the GC queue + watchdog.
   WorkStatus checkStatus(
       std::optional<std::chrono::milliseconds> timeout = std::nullopt);
@@ -146,11 +173,11 @@ class WorkNCCLQueue {
       cudaStream_t stream);
 
  private:
-  // completed collects the works retired as COMPLETED, so the caller can push
+  // completed collects the states retired as COMPLETED, so the caller can push
   // their completion out after dropping work_queues_mutex_.
   WorkNCCL::WorkStatus garbageCollectLocked(
-      std::vector<c10::intrusive_ptr<WorkNCCL>>& completed);
-  std::unordered_map<cudaStream_t, std::queue<c10::intrusive_ptr<WorkNCCL>>>
+      std::vector<std::shared_ptr<WorkNCCL::State>>& completed);
+  std::unordered_map<cudaStream_t, std::queue<WorkNCCL::TrackedWork>>
       stream_work_queues_;
   std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>>
       completed_input_tensors_;
