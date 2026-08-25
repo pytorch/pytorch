@@ -72,7 +72,7 @@ def graph_capture(model, inputs, with_export):
 
 
 class TestAOTJointWithDescriptors(TestCase):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     def test_simple_linear_module(self):
         """Test basic linear module with aot_export_joint_with_descriptors"""
