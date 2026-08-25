@@ -68,9 +68,7 @@ Tensor my_from_blob_with_cuda_lambda_deleter(
 
   void* data = nullptr;
   cudaError_t err = cudaMalloc(&data, size_bytes);
-  if (err != cudaSuccess) {
-    throw std::runtime_error("cudaMalloc failed");
-  }
+  STD_TORCH_CHECK(err == cudaSuccess, "cudaMalloc failed");
 
   // Zero the memory
   cudaMemset(data, 0, size_bytes);
