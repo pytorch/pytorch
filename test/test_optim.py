@@ -2726,7 +2726,7 @@ class TestMuon(TestCase):
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
-instantiate_device_type_tests(TestMuon, globals())
+instantiate_device_type_tests(TestMuon, globals(), allow_mps=True)
 
 
 if __name__ == "__main__":
