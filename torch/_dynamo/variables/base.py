@@ -1020,6 +1020,7 @@ class SlotDef:
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         """Call the impl via the wrapper, passing self, tx, and args."""
+        vt = vt.realize()
         func = getattr(type(vt), self.impl)
         return self.wrapper(vt, tx, func, args, kwargs)
 
@@ -1603,7 +1604,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     tp_methods: dict[str, Method] = {}
     # Declarative attribute tables, split to match CPython: tp_getset holds the
     # PyGetSetDef attributes, tp_members the PyMemberDef ones.
-    tp_getset: dict[str, GetSet] = {}
+    tp_getset: dict[str, GetSet] = {
+        "__class__": GetSet(
+            getter=lambda self, tx: VariableTracker.build(
+                tx,
+                self.python_type(),
+                AttrSource(self.source, "__class__") if self.source else None,
+            )
+        ),
+    }
     tp_members: dict[str, Member] = {}
 
     def _lookup_tp_table(self, name: str, *table_attrs: str) -> Any:
@@ -1628,6 +1637,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def lookup_tp_method(self, name: str) -> Method | None:
         return self._lookup_tp_table(name, "tp_methods")
+
+    def lookup_slotdefs(self, name: str) -> SlotDef | None:
+        return self._slotdefs.get(name)
 
     def method_flags_type(self) -> type:
         """Type whose CPython ml_flags define this VT's tp_methods arities
@@ -1813,13 +1825,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
-    def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker | None:
+    def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         # Mirrors CPython's tp_as_number->nb_bool slot.
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
-        #
-        # Returns None when the type has no nb_bool, causing generic_is_true to
-        # fall through to length check, then truthy default.
-        return None
+        unimplemented(
+            gb_type="Missing nb_bool_impl override",
+            context=f"nb_bool_impl {self}",
+            explanation=f"{type(self).__name__} does not implement nb_bool_impl. Add a nb_bool_impl override to {type(self).__name__}.",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
 
     def is_hashable(self) -> bool:
         """Whether the underlying Python object is hashable.
@@ -1986,10 +2000,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             result = getset.getter(self, tx)
             if result is not None:
                 return result
-
-        # object.__class__: one shared getset on `object` rather than per-VT.
-        if name == "__class__":
-            return VariableTracker.build(tx, self.python_type())
 
         try:
             py_type = self.python_type()
@@ -2654,6 +2664,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             "the corresponding VariableTracker doesn't implement tp_repr_impl.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
+
+    def repr_recursive_sentinel(self) -> str:
+        """What repr() emits for this object when it contains itself.
+
+        Mirrors what a tp_repr writes after Py_ReprEnter reports a cycle.
+        """
+        return "..."
 
     def tp_str_impl(
         self,

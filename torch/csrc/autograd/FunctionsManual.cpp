@@ -849,7 +849,7 @@ Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
 }
 
 Tensor masked_fill_inplace_if_safe(
-    Tensor tensor,
+    const Tensor& tensor,
     const Tensor& mask,
     const Scalar& value) {
   return areAnyTensorSubclassLike({tensor, mask})
@@ -6324,50 +6324,103 @@ Tensor i1_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result) {
-  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "i1_backward", [&]() {
-    // For x = 0, the correct gradient is 0.5,
-    // however due to floating point computation we get NaN.
-    // So we manually update gradient for x=0
-    auto eps = std::numeric_limits<scalar_t>::epsilon();
-    auto self_is_not_tiny = self.abs() > eps;
+  return AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      self.scalar_type(),
+      "i1_backward",
+      [&]() {
+        // For x = 0, the correct gradient is 0.5,
+        // however due to floating point computation we get NaN.
+        // So we manually update gradient for x=0.
+        constexpr auto eps = std::numeric_limits<scalar_t>::epsilon();
+        auto self_is_tiny = self.abs() <= eps;
 
-    // Following `where` is needed as `where` computes gradients,
-    // even for the part which didn't affect the output.
-    // Look at https://github.com/pytorch/pytorch/issues/52248
-    // Update if and when this is fixed.
-    auto safe_self = at::where(
-        self_is_not_tiny, self, at::scalar_tensor(eps, self.options()));
-    auto gradx = (safe_self.i0() - (result * safe_self.reciprocal()));
-    return grad *
-        at::where(
-               self_is_not_tiny, gradx, at::scalar_tensor(0.5, self.options()));
-  });
+        // Following `where` is needed as `where` computes gradients,
+        // even for the part which didn't affect the output.
+        // Look at https://github.com/pytorch/pytorch/issues/52248
+        // Update if and when this is fixed.
+        auto safe_self = at::where(
+            self_is_tiny, at::scalar_tensor(eps, self.options()), self);
+        auto gradx = (safe_self.i0() - (result * safe_self.reciprocal()));
+        return grad *
+            at::where(
+                   self_is_tiny, at::scalar_tensor(0.5, self.options()), gradx);
+      });
+}
+
+Tensor bessel_j1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result) {
+  return AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      self.scalar_type(),
+      "bessel_j1_backward",
+      [&]() {
+        // J1'(x) = J0(x) - J1(x) / x. At x = 0 this is 0/0, but the analytic
+        // limit is 0.5. Replace the singular points with a safe input so the
+        // reciprocal stays finite, then select the 0.5 limit there.
+        constexpr auto eps = std::numeric_limits<scalar_t>::epsilon();
+        auto self_is_tiny = self.abs() <= eps;
+
+        // Following `where` is needed as `where` computes gradients.
+        auto safe_self = at::where(
+            self_is_tiny, at::scalar_tensor(eps, self.options()), self);
+        auto gradx =
+            (at::special_bessel_j0(safe_self) -
+             (result * safe_self.reciprocal()));
+        return grad *
+            at::where(
+                   self_is_tiny, at::scalar_tensor(0.5, self.options()), gradx);
+      });
+}
+
+Tensor bessel_y1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result) {
+  // Y1'(x) = Y0(x) - Y1(x) / x. At x = 0 both terms are -inf, so the
+  // expression evaluates to (-inf) - (-inf) = NaN while the one-sided limit
+  // is +inf. Select the limit there, matching how the y0/k0/k1 derivatives
+  // already report an infinite gradient at the origin.
+  auto gradx = at::special_bessel_y0(self) - result * self.reciprocal();
+  auto inf = at::scalar_tensor(
+      std::numeric_limits<double>::infinity(), self.options());
+  return grad * at::where(self == 0, inf, gradx);
 }
 
 Tensor i1e_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result) {
-  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "i1e_backward", [&]() {
-    // For x = 0, the correct gradient is 0.5,
-    // however due to floating point computation we get NaN.
-    // So we manually update gradient for x=0
-    auto eps = std::numeric_limits<scalar_t>::epsilon();
-    auto self_is_not_tiny = self.abs() > eps;
+  return AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      self.scalar_type(),
+      "i1e_backward",
+      [&]() {
+        // For x = 0, the correct gradient is 0.5,
+        // however due to floating point computation we get NaN.
+        // So we manually update gradient for x=0.
+        // The mask tests `<= eps` rather than `> eps` so that a NaN input takes
+        // the general branch and keeps propagating NaN instead of being given
+        // the 0.5 limit.
+        constexpr auto eps = std::numeric_limits<scalar_t>::epsilon();
+        auto self_is_tiny = self.abs() <= eps;
 
-    // Following `where` is needed as `where` computes gradients,
-    // even for the part which didn't affect the output.
-    // Look at https://github.com/pytorch/pytorch/issues/52248
-    // Update if and when this is fixed.
-    auto safe_self = at::where(
-        self_is_not_tiny, self, at::scalar_tensor(eps, self.options()));
-    auto gradx =
-        (at::special_i0e(safe_self) -
-         result * (safe_self.sgn() + safe_self.reciprocal()));
-    return grad *
-        at::where(
-               self_is_not_tiny, gradx, at::scalar_tensor(0.5, self.options()));
-  });
+        // Following `where` is needed as `where` computes gradients,
+        // even for the part which didn't affect the output.
+        auto safe_self = at::where(
+            self_is_tiny, at::scalar_tensor(eps, self.options()), self);
+        auto gradx =
+            (at::special_i0e(safe_self) -
+             result * (safe_self.sgn() + safe_self.reciprocal()));
+        return grad *
+            at::where(
+                   self_is_tiny, at::scalar_tensor(0.5, self.options()), gradx);
+      });
 }
 
 // lu_solve is a map (LU, P, B) -> (PLU)^{-1} B,
