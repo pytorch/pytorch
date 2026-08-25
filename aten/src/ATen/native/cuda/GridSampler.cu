@@ -801,12 +801,15 @@ namespace {
             #pragma unroll
             for (int j = 0; j < 4; ++j) {
               auto row = inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH;
-              const index_t grad_row = NC_offset + z_taps[k] * gInp_sD + y_taps[j] * gInp_sH;
+              // the grad_input strides are int64_t whatever index_t is, so the offset is narrowed
+              // back to index_t, which is what fastAtomicAdd measures its span in
+              const index_t grad_row = NC_offset + static_cast<index_t>(z_taps[k] * gInp_sD + y_taps[j] * gInp_sH);
               #pragma unroll
               for (int i = 0; i < 4; ++i) {
                 if (input_requires_grad) {
                   // See Note [Passing pointer and offset to fastAtomicAdd].
-                  fastAtomicAdd(grad_input.data, grad_row + x_taps[i] * gInp_sW, grad_input_memory_span,
+                  fastAtomicAdd(grad_input.data, grad_row + static_cast<index_t>(x_taps[i] * gInp_sW),
+                                grad_input_memory_span,
                                 static_cast<scalar_t>(gOut * x_coeffs[i] * y_coeffs[j] * z_coeffs[k]), true);
                 }
                 const opmath_t value = static_cast<opmath_t>(row[x_taps[i] * inp_sW]);
