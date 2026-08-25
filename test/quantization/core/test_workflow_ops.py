@@ -1269,6 +1269,81 @@ class TestFusedObsFakeQuant(TestCase):
                 self.assertEqual(in_running_max_ref, in_running_max_op)
                 torch.testing.assert_close(out, x_in)
 
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           symmetric_quant=st.booleans())
+    @settings(deadline=None)
+    def test_fused_obs_fake_quant_qparams_without_fake_quant(self, device, symmetric_quant) -> None:
+        """
+        Tests that scale and zero_point are updated whenever the observer is
+        enabled, even if fake quant is disabled, and that they are left alone
+        once the observer is disabled too.
+        """
+        in_running_min_ref = torch.tensor(float("inf"))
+        in_running_max_ref = torch.tensor(float("-inf"))
+        in_running_min_op = torch.tensor(float("inf"), device=device)
+        in_running_max_op = torch.tensor(float("-inf"), device=device)
+        avg_const = 0.01
+        scale = torch.tensor([1.0], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
+
+        pt_op = torch.fused_moving_avg_obs_fake_quant
+
+        # Observer on, fake quant off: qparams track the running min/max
+        for _ in range(5):
+            x = torch.randn(5, 5, device=device)
+            out = pt_op(
+                x,
+                torch.tensor(1, device=device),  # observer on
+                torch.tensor(0, device=device),  # fake quant off
+                in_running_min_op,
+                in_running_max_op,
+                scale,
+                zero_point,
+                avg_const,
+                0,
+                255,
+                0,
+                False,
+                symmetric_quant,
+            )
+            in_running_min_ref, in_running_max_ref = _get_tensor_min_max(
+                x,
+                running_min=in_running_min_ref,
+                running_max=in_running_max_ref,
+                averaging_const=avg_const,
+            )
+            x_scale, x_zero_point = _get_scale_zp(
+                in_running_min_ref,
+                in_running_max_ref,
+                torch.quint8,
+                preserve_sparsity=symmetric_quant,
+            )
+            self.assertEqual(scale, x_scale)
+            self.assertEqual(zero_point, x_zero_point)
+            # the output is not fake quantized
+            torch.testing.assert_close(out, x)
+
+        # Observer off, fake quant off: qparams are left alone
+        prev_scale = scale.clone()
+        prev_zero_point = zero_point.clone()
+        pt_op(
+            torch.randn(5, 5, device=device) * 100,
+            torch.tensor(0, device=device),  # observer off
+            torch.tensor(0, device=device),  # fake quant off
+            in_running_min_op,
+            in_running_max_op,
+            scale,
+            zero_point,
+            avg_const,
+            0,
+            255,
+            0,
+            False,
+            symmetric_quant,
+        )
+        self.assertEqual(scale, prev_scale)
+        self.assertEqual(zero_point, prev_zero_point)
+
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),)
     @settings(deadline=None)
     def test_fused_obs_fake_quant_backward_op(self, device) -> None:
