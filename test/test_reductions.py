@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     parametrize, serialTest,
     gradcheck, gradgradcheck,
     skipIfMPS,
+    skipIfXpu,
     skipIfTorchDynamo, HardwareClassification,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
@@ -1803,6 +1804,7 @@ class TestReductionsDevice(TestCase):
 
     @dtypes(torch.int32, torch.int64)
     @skipIfMPS
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5092")
     def test_nansum_int_out_dtype_matches_inductor(self, device, dtype):
         # Eager/inductor parity for #183318.
         out_dtype = dtype
