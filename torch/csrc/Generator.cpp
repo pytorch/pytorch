@@ -121,7 +121,7 @@ static uint64_t unpack_uint64(PyObject* pyobj) {
       unsigned_obj = *(reinterpret_cast<uint64_t*>(&obj));
     } else {
       // If any other type of exception happened, rethrow it
-      throw; // @allow-raw-throw
+      throw;
     }
   }
   return unsigned_obj;
