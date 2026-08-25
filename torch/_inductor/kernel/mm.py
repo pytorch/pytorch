@@ -4,6 +4,8 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
+import sympy
+
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -1040,6 +1042,25 @@ def _is_blockwise128x128_scaling(
     ) and V.graph.sizevars.statically_known_equals(sz[1], ceildiv(tensor_sz[1], 128))
 
 
+def _is_cuda_blockwise_v2_scaling(
+    sz: Any, tensor_sz: Any, scaling_type: ScalingType, is_rhs: bool
+) -> bool:
+    if len(sz) != 2:
+        return False
+
+    outer_dim, k_dim = (1, 0) if is_rhs else (0, 1)
+    outer_size = tensor_sz[outer_dim]
+    k_blocks = ceildiv(tensor_sz[k_dim], 128)
+    if scaling_type == ScalingType.BlockWise1x128:
+        expected_size = (outer_size, k_blocks)
+    else:
+        expected_size = (ceildiv(k_blocks, 4) * 4, ceildiv(outer_size, 128))
+    return all(
+        V.graph.sizevars.guard_or_false(sympy.Eq(actual, expected))
+        for actual, expected in zip(sz, expected_size)
+    )
+
+
 def is_desired_scaling(
     t: IRNode,
     scale_size: Sequence[_IntLike],
@@ -1059,18 +1080,6 @@ def is_desired_scaling(
             return _is_blockwise128x128_scaling(scale_size, t.get_size())
         case _:
             raise AssertionError(f"Unsupported scaling type {scaling_type}")
-
-
-def get_tile_size(scale_option: ScalingType) -> int:
-    match scale_option:
-        case ScalingType.BlockWise128x128:
-            return 128
-        case ScalingType.BlockWise1x128:
-            return 128
-        case _:
-            raise AssertionError(
-                f"Unsupported scaling type {scale_option} in get_tile_size"
-            )
 
 
 def get_scaling_options(
@@ -1231,6 +1240,27 @@ def tuned_scaled_mm_v2(
             ScalingType(recipe_b[0]),
         )
 
+        is_epilogue_scaling = use_triton_scaling_template(
+            scale_option_a, scale_option_b, epilogue_scaling_types
+        )
+        is_main_loop_scaling = use_triton_scaling_template(
+            scale_option_a, scale_option_b, main_loop_scaling_types
+        )
+        if (
+            is_main_loop_scaling
+            and layout.device.type == "cuda"
+            and torch.version.hip is None
+        ):
+            torch._check(
+                _is_cuda_blockwise_v2_scaling(
+                    scale_a_real.get_size(), mat_a.get_size(), scale_option_a, False
+                )
+                and _is_cuda_blockwise_v2_scaling(
+                    scale_b_real.get_size(), mat_b.get_size(), scale_option_b, True
+                ),
+                lambda: "_scaled_mm_v2 blockwise scale shapes do not match their recipes",
+            )
+
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
         if (
@@ -1240,18 +1270,18 @@ def tuned_scaled_mm_v2(
             overriders["SCALE_RECIPE_A"] = scale_option_a.value
             overriders["SCALE_RECIPE_B"] = scale_option_b.value
 
-            if use_triton_scaling_template(
-                scale_option_a, scale_option_b, epilogue_scaling_types
-            ):
+            if is_epilogue_scaling:
                 templates_to_use.append(scaled_mm_device_tma_epilogue_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_epilogue_scaling_template.uid] = (
                     overriders
                 )
-            elif use_triton_scaling_template(
-                scale_option_a, scale_option_b, main_loop_scaling_types
-            ):
-                overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
-                overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
+            elif is_main_loop_scaling:
+                overriders["SCALE_A_OUTER_DIM"] = (
+                    0 if scale_option_a == ScalingType.BlockWise1x128 else 1
+                )
+                overriders["SCALE_B_OUTER_DIM"] = (
+                    0 if scale_option_b == ScalingType.BlockWise1x128 else 1
+                )
 
                 templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
@@ -1268,15 +1298,14 @@ def tuned_scaled_mm_v2(
                 mat_a, mat_b, output_layout=layout, add_guards=True
             )
             and not bias
+            and is_epilogue_scaling
         ):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
             kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
                 overriders
             )
 
-        if use_triton_scaling_template(
-            scale_option_a, scale_option_b, epilogue_scaling_types
-        ):
+        if is_epilogue_scaling:
             templates_to_use.append(mm_template)
             kwarg_overrides[mm_template.uid] = overriders
 
@@ -1408,6 +1437,13 @@ def tuned_scaled_mm(
             mat_a, mat_b, scale_a_size, scale_b_size
         )
 
+        is_epilogue_scaling = use_triton_scaling_template(
+            scale_option_a, scale_option_b, epilogue_scaling_types
+        )
+        is_main_loop_scaling = use_triton_scaling_template(
+            scale_option_a, scale_option_b, main_loop_scaling_types
+        )
+
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
         if (
@@ -1417,18 +1453,14 @@ def tuned_scaled_mm(
             overriders["SCALE_RECIPE_A"] = scale_option_a.value
             overriders["SCALE_RECIPE_B"] = scale_option_b.value
 
-            if use_triton_scaling_template(
-                scale_option_a, scale_option_b, epilogue_scaling_types
-            ):
+            if is_epilogue_scaling:
                 templates_to_use.append(scaled_mm_device_tma_epilogue_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_epilogue_scaling_template.uid] = (
                     overriders
                 )
-            elif use_triton_scaling_template(
-                scale_option_a, scale_option_b, main_loop_scaling_types
-            ):
-                overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
-                overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
+            elif is_main_loop_scaling:
+                overriders["SCALE_A_OUTER_DIM"] = 0
+                overriders["SCALE_B_OUTER_DIM"] = 1
 
                 templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
@@ -1445,15 +1477,14 @@ def tuned_scaled_mm(
                 mat_a, mat_b, output_layout=layout, add_guards=True
             )
             and not bias
+            and is_epilogue_scaling
         ):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
             kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
                 overriders
             )
 
-        if use_triton_scaling_template(
-            scale_option_a, scale_option_b, epilogue_scaling_types
-        ):
+        if is_epilogue_scaling:
             templates_to_use.append(mm_template)
             kwarg_overrides[mm_template.uid] = overriders
 

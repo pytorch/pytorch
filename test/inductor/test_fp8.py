@@ -17,8 +17,6 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code, sympy_index_symbol_with_prefix
 from torch.nn.functional import scaled_mm, ScalingType  # type: ignore[attr-defined]
 from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
-    IS_SM90,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
 )
@@ -33,7 +31,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     skipIfRocm,
-    xfailIf,
 )
 from torch.testing._internal.inductor_utils import (
     _quantize_blockwise,
@@ -46,7 +43,10 @@ from torch.testing._internal.inductor_utils import (
     is_big_gpu,
 )
 from torch.utils._sympy.symbol import SymT
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import (
+    has_datacenter_blackwell_tma_device,
+    has_triton_tma_device,
+)
 
 
 _PRIOR_FP32_MATMUL_PRECISION: str | None = None
@@ -66,6 +66,41 @@ def tearDownModule():
 
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
+
+_BLOCKWISE_SM100_MAIN_LOOP_NAME_REGEX = (
+    r"^triton_scaled_mm_device_tma_main_loop_scaling_"
+)
+_BLOCKWISE_SM100_BK128_DESC_REGEX = (
+    r"BLOCK_K=128.*BLOCK_M=128.*BLOCK_N=128"
+    r".*num_stages=3.*num_warps=4(?:,|$)"
+)
+_BLOCKWISE_SM100_TEST_CASES = {
+    "issue_bk256": (
+        (512, 1024, 2048),
+        None,
+        r"BLOCK_K=256.*BLOCK_M=64.*BLOCK_N=(32|128)",
+    ),
+    "padded_k3_bk64": (
+        (256, 256, 384),
+        _BLOCKWISE_SM100_MAIN_LOOP_NAME_REGEX,
+        r"BLOCK_K=64.*BLOCK_M=128.*BLOCK_N=128",
+    ),
+    "padded_k10_bk128": (
+        (384, 128, 1280),
+        _BLOCKWISE_SM100_MAIN_LOOP_NAME_REGEX,
+        _BLOCKWISE_SM100_BK128_DESC_REGEX,
+    ),
+    "padded_k2_bk128": (
+        (256, 128, 256),
+        _BLOCKWISE_SM100_MAIN_LOOP_NAME_REGEX,
+        _BLOCKWISE_SM100_BK128_DESC_REGEX,
+    ),
+    "padded_k1_bk128": (
+        (256, 256, 128),
+        _BLOCKWISE_SM100_MAIN_LOOP_NAME_REGEX,
+        _BLOCKWISE_SM100_BK128_DESC_REGEX,
+    ),
+}
 
 
 def _is_cuda_device(device) -> bool:
@@ -107,17 +142,12 @@ def _prepare_blockwise_scale(
     inverse_scale: torch.Tensor,
     block_outer: int,
     block_inner: int,
-    transposed: bool,
 ) -> torch.Tensor:
     # The cuBLAS blockwise kernels expect outer-dim-major scales for 1x128 blocks
     # and shape (round_up(K/128, 4), {M,N}/128) for 128x128 blocks (inner dim
-    # padded to a multiple of 4 before the transpose). `transposed` indicates
-    # whether the corresponding data tensor was transposed (e.g. weight passed
-    # as w.t()): if so we apply one additional transpose to keep the scale
-    # aligned with the data layout.
+    # padded to a multiple of 4 before the transpose).
     if (block_outer, block_inner) == (1, 128):
-        out = inverse_scale.t().contiguous().t()
-        return out.t() if transposed else out
+        return inverse_scale.t().contiguous().t()
     pad_amount = (-inverse_scale.shape[-1]) % 4
     if pad_amount:
         inverse_scale = torch.nn.functional.pad(
@@ -1139,18 +1169,434 @@ class TestFP8Lowering(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
-    )
-    @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 9),
-        "cuBLAS blockwise scaling added in CUDA 12.9",
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
     )
     @onlyCUDA
-    @xfailIf(
-        torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0)
-    )  # cuBLAS 128-element blockwise scaling is only supported for CC 9.0
-    @parametrize("shape", ((16, 256, 256), (1024, 512, 1024), (32768, 4096, 4096)))
-    @parametrize("use_fast_accum", (False, True))
+    @parametrize("case", tuple(_BLOCKWISE_SM100_TEST_CASES))
+    def test_deepseek_blockwise_scaling_sm100(
+        self,
+        case: str,
+        device,
+    ):
+        shape, choice_name_regex, choice_desc_regex = _BLOCKWISE_SM100_TEST_CASES[case]
+        M, N, K = shape
+        tile_size = 128
+        k_blocks = ceil_div(K, tile_size)
+        padded_k_blocks = ceil_div(k_blocks, 4) * 4
+        n_blocks = ceil_div(N, tile_size)
+
+        torch.manual_seed(0)
+        a = torch.randint(-8, 9, (M, K), device=device).to(torch.float8_e4m3fn)
+        b = torch.randint(-8, 9, (N, K), device=device).to(torch.float8_e4m3fn)
+        b = b.t()
+
+        scale_a = (
+            (torch.arange(k_blocks * M, device=device).reshape(k_blocks, M) % 13)
+            .add(1)
+            .float()
+            .div(128)
+            .t()
+        )
+        scale_b_storage = torch.zeros(
+            n_blocks, padded_k_blocks, dtype=torch.float32, device=device
+        )
+        scale_b_storage[:, :k_blocks] = (
+            torch.arange(n_blocks * k_blocks, device=device)
+            .reshape(n_blocks, k_blocks)
+            .remainder(7)
+            .add(1)
+            .float()
+            .div(128)
+        )
+        scale_b = scale_b_storage.t()
+
+        self.assertEqual(scale_a.shape, (M, k_blocks))
+        self.assertEqual(scale_a.stride(), (1, M))
+        self.assertEqual(scale_b.shape, (padded_k_blocks, n_blocks))
+        self.assertEqual(scale_b.stride(), (1, padded_k_blocks))
+
+        scale_a_full = scale_a.repeat_interleave(tile_size, dim=1)[:, :K]
+        scale_b_full = scale_b[:k_blocks].repeat_interleave(tile_size, dim=0)
+        scale_b_full = scale_b_full.repeat_interleave(tile_size, dim=1)[:K, :N]
+        expected = ((a.float() * scale_a_full) @ (b.float() * scale_b_full)).to(
+            torch.bfloat16
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                ScalingType.BlockWise1x128,
+                scale_b,
+                ScalingType.BlockWise128x128,
+                output_dtype=torch.bfloat16,
+                use_fast_accum=False,
+            )
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "test_configs.autotune_choice_name_regex": choice_name_regex,
+                "test_configs.autotune_choice_desc_regex": choice_desc_regex,
+            }
+        ):
+            actual, code = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True),
+                a,
+                b,
+                scale_a,
+                scale_b,
+            )
+
+        self.assertEqual(actual, expected, rtol=5e-2, atol=5e-2)
+        FileCheck().check(
+            f"SCALE_RECIPE_A : tl.constexpr = {ScalingType.BlockWise1x128.value}"
+        ).run(code[0])
+        FileCheck().check(
+            f"SCALE_RECIPE_B : tl.constexpr = {ScalingType.BlockWise128x128.value}"
+        ).run(code[0])
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @onlyCUDA
+    @parametrize("api", ("v1", "v2"))
+    @parametrize("recipe_case", ("a1_b128", "a1_b1", "a128_b1"))
+    def test_deepseek_blockwise_scale_layouts(self, api: str, recipe_case: str, device):
+        from torch._inductor.select_algorithm import (
+            add_preprocessing_fn,
+            clear_preprocessing_fns,
+        )
+
+        M = N = 256
+        K = 384
+        tile_size = 128
+        k_blocks = ceil_div(K, tile_size)
+        padded_k_blocks = ceil_div(k_blocks, 4) * 4
+        recipe_a, recipe_b = {
+            "a1_b128": (
+                ScalingType.BlockWise1x128,
+                ScalingType.BlockWise128x128,
+            ),
+            "a1_b1": (
+                ScalingType.BlockWise1x128,
+                ScalingType.BlockWise1x128,
+            ),
+            "a128_b1": (
+                ScalingType.BlockWise128x128,
+                ScalingType.BlockWise1x128,
+            ),
+        }[recipe_case]
+
+        def make_scale(recipe: ScalingType, outer_size: int, is_rhs: bool):
+            block_outer = 1 if recipe == ScalingType.BlockWise1x128 else tile_size
+            outer_blocks = ceil_div(outer_size, block_outer)
+            stored_k_blocks = (
+                padded_k_blocks
+                if api == "v2" and recipe == ScalingType.BlockWise128x128
+                else k_blocks
+            )
+            values = (
+                torch.arange(outer_blocks * stored_k_blocks, device=device)
+                .reshape(outer_blocks, stored_k_blocks)
+                .remainder(7 if is_rhs else 13)
+                .add(1)
+                .float()
+                .div(128)
+            )
+
+            if api == "v2":
+                scale = _prepare_blockwise_scale(values, block_outer, tile_size)
+            elif is_rhs:
+                scale = (
+                    values.t().contiguous()
+                    if recipe == ScalingType.BlockWise1x128
+                    else values.t()
+                )
+            else:
+                scale = (
+                    values.t().contiguous().t()
+                    if recipe == ScalingType.BlockWise1x128
+                    else values
+                )
+
+            if recipe == ScalingType.BlockWise1x128:
+                if api == "v1" and is_rhs:
+                    expected_shape = (k_blocks, outer_size)
+                    expected_stride = (outer_size, 1)
+                else:
+                    expected_shape = (outer_size, k_blocks)
+                    expected_stride = (1, outer_size)
+            elif api == "v2":
+                expected_shape = (padded_k_blocks, outer_blocks)
+                expected_stride = (1, padded_k_blocks)
+            elif is_rhs:
+                expected_shape = (k_blocks, outer_blocks)
+                expected_stride = (1, k_blocks)
+            else:
+                expected_shape = (outer_blocks, k_blocks)
+                expected_stride = (k_blocks, 1)
+            self.assertEqual(scale.shape, expected_shape)
+            self.assertEqual(scale.stride(), expected_stride)
+
+            expanded = values[:, :k_blocks].repeat_interleave(block_outer, dim=0)
+            expanded = expanded.repeat_interleave(tile_size, dim=1)
+            expanded = expanded[:outer_size, :K]
+            return scale, expanded.t() if is_rhs else expanded
+
+        torch.manual_seed(0)
+        a = torch.randint(-8, 9, (M, K), device=device).to(torch.float8_e4m3fn)
+        b = torch.randint(-8, 9, (N, K), device=device).to(torch.float8_e4m3fn)
+        b = b.t()
+        scale_a, scale_a_full = make_scale(recipe_a, M, False)
+        scale_b, scale_b_full = make_scale(recipe_b, N, True)
+        expected = ((a.float() * scale_a_full) @ (b.float() * scale_b_full)).to(
+            torch.bfloat16
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            if api == "v1":
+                return torch._scaled_mm(
+                    a,
+                    b,
+                    scale_a,
+                    scale_b,
+                    out_dtype=torch.bfloat16,
+                    use_fast_accum=False,
+                )
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                recipe_a,
+                scale_b,
+                recipe_b,
+                output_dtype=torch.bfloat16,
+                use_fast_accum=False,
+            )
+
+        choice_names = []
+
+        def record_and_keep_main_loop(choices):
+            choice_names.extend(choice.name for choice in choices)
+            return [
+                choice
+                for choice in choices
+                if "scaled_mm_device_tma_main_loop_scaling" in choice.name
+            ][:1]
+
+        torch._dynamo.reset()
+        add_preprocessing_fn(record_and_keep_main_loop)
+        try:
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": True,
+                    "test_configs.autotune_choice_name_regex": None,
+                    "test_configs.autotune_choice_desc_regex": None,
+                }
+            ):
+                actual = torch.compile(fn, backend="inductor", fullgraph=True)(
+                    a, b, scale_a, scale_b
+                )
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        self.assertEqual(actual, expected, rtol=5e-2, atol=5e-2)
+        self.assertTrue(
+            any("main_loop_scaling" in name for name in choice_names), choice_names
+        )
+        self.assertFalse(
+            any("blackwell_ws_persistent_device_tma" in name for name in choice_names),
+            choice_names,
+        )
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @onlyCUDA
+    def test_deepseek_blockwise_v2_dynamic_shapes(self, device):
+        from torch._inductor.select_algorithm import (
+            add_preprocessing_fn,
+            clear_preprocessing_fns,
+        )
+
+        M = N = 256
+        K = 384
+        tile_size = 128
+        k_blocks = ceil_div(K, tile_size)
+        padded_k_blocks = ceil_div(k_blocks, 4) * 4
+        n_blocks = ceil_div(N, tile_size)
+
+        torch.manual_seed(0)
+        a = torch.randint(-8, 9, (M, K), device=device).to(torch.float8_e4m3fn)
+        b = torch.randint(-8, 9, (N, K), device=device).to(torch.float8_e4m3fn).t()
+        scale_a_values = (
+            torch.arange(M * k_blocks, device=device)
+            .reshape(M, k_blocks)
+            .remainder(13)
+            .add(1)
+            .float()
+            .div(128)
+        )
+        scale_b_values = (
+            torch.arange(n_blocks * padded_k_blocks, device=device)
+            .reshape(n_blocks, padded_k_blocks)
+            .remainder(7)
+            .add(1)
+            .float()
+            .div(128)
+        )
+        scale_a = scale_a_values.t().contiguous().t()
+        scale_b = scale_b_values.t()
+
+        self.assertEqual(scale_a.shape, (M, k_blocks))
+        self.assertEqual(scale_a.stride(), (1, M))
+        self.assertEqual(scale_b.shape, (padded_k_blocks, n_blocks))
+        self.assertEqual(scale_b.stride(), (1, padded_k_blocks))
+
+        scale_a_full = scale_a_values.repeat_interleave(tile_size, dim=1)[:, :K]
+        scale_b_full = scale_b_values[:, :k_blocks].repeat_interleave(tile_size, dim=0)[
+            :N
+        ]
+        scale_b_full = scale_b_full.repeat_interleave(tile_size, dim=1)[:, :K].t()
+        expected = ((a.float() * scale_a_full) @ (b.float() * scale_b_full)).to(
+            torch.bfloat16
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                ScalingType.BlockWise1x128,
+                scale_b,
+                ScalingType.BlockWise128x128,
+                output_dtype=torch.bfloat16,
+                use_fast_accum=False,
+            )
+
+        choice_names = []
+
+        def keep_main_loop(choices):
+            choice_names.extend(choice.name for choice in choices)
+            return [
+                choice
+                for choice in choices
+                if "scaled_mm_device_tma_main_loop_scaling" in choice.name
+            ][:1]
+
+        torch._dynamo.reset()
+        add_preprocessing_fn(keep_main_loop)
+        try:
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": True,
+                    "test_configs.autotune_choice_name_regex": None,
+                    "test_configs.autotune_choice_desc_regex": None,
+                }
+            ):
+                actual = torch.compile(
+                    fn,
+                    backend="inductor",
+                    fullgraph=True,
+                    dynamic=True,
+                )(a, b, scale_a, scale_b)
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        self.assertEqual(actual, expected, rtol=5e-2, atol=5e-2)
+        self.assertTrue(
+            any("main_loop_scaling" in name for name in choice_names), choice_names
+        )
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize("legacy_layout", ("a128", "b1"))
+    def test_deepseek_blockwise_v2_rejects_v1_layout_sm100(
+        self, legacy_layout: str, device
+    ):
+        from torch._inductor.exc import InductorError
+
+        M = N = 256
+        K = 384
+        k_blocks = ceil_div(K, 128)
+
+        a = torch.ones((M, K), device=device, dtype=torch.float8_e4m3fn)
+        b = torch.ones((N, K), device=device, dtype=torch.float8_e4m3fn).t()
+        if legacy_layout == "a128":
+            recipe_a = ScalingType.BlockWise128x128
+            scale_a = torch.ones(
+                (ceil_div(M, 128), k_blocks), device=device, dtype=torch.float32
+            )
+            recipe_b = ScalingType.BlockWise1x128
+            scale_b = torch.ones((k_blocks, N), device=device, dtype=torch.float32).t()
+        else:
+            recipe_a = ScalingType.BlockWise1x128
+            scale_a = torch.ones((k_blocks, M), device=device, dtype=torch.float32).t()
+            recipe_b = ScalingType.BlockWise1x128
+            scale_b = torch.ones((k_blocks, N), device=device, dtype=torch.float32)
+
+        if legacy_layout == "a128":
+            self.assertEqual(scale_a.shape, (ceil_div(M, 128), k_blocks))
+            self.assertEqual(scale_a.stride(), (k_blocks, 1))
+            self.assertEqual(scale_b.shape, (N, k_blocks))
+            self.assertEqual(scale_b.stride(), (1, N))
+        else:
+            self.assertEqual(scale_a.shape, (M, k_blocks))
+            self.assertEqual(scale_a.stride(), (1, M))
+            self.assertEqual(scale_b.shape, (k_blocks, N))
+            self.assertEqual(scale_b.stride(), (N, 1))
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                recipe_a,
+                scale_b,
+                recipe_b,
+                output_dtype=torch.bfloat16,
+            )
+
+        torch._dynamo.reset()
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+            }
+        ):
+            with self.assertRaisesRegex(
+                InductorError,
+                "_scaled_mm_v2 blockwise scale shapes do not match their recipes",
+            ):
+                torch.compile(fn, backend="inductor", fullgraph=True)(
+                    a, b, scale_a, scale_b
+                )
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @onlyCUDA
+    @parametrize(
+        "shape",
+        ((16, 256, 256), (256, 256, 384), (1024, 512, 1024), (32768, 4096, 4096)),
+    )
     @parametrize(
         "scaling_block_sizes",
         ((1, 128, 128, 128), (1, 128, 1, 128), (128, 128, 1, 128)),
@@ -1158,60 +1604,67 @@ class TestFP8Lowering(TestCase):
     def test_main_loop_scaling(
         self,
         shape: tuple[int, int, int],
-        use_fast_accum: bool,
         scaling_block_sizes: tuple[int, int, int, int],
         device,
     ):
-        # (shape, use_fast_accum, scaling_block_sizes) combos disabled due to CI
-        # failures; other combos still run. See the referenced issues.
-        _disabled_combos = {
-            ((16, 256, 256), False, (1, 128, 128, 128)),
-            ((16, 256, 256), False, (1, 128, 1, 128)),
-            ((16, 256, 256), False, (128, 128, 1, 128)),
-            ((16, 256, 256), True, (1, 128, 128, 128)),
-            ((16, 256, 256), True, (1, 128, 1, 128)),
-            ((16, 256, 256), True, (128, 128, 1, 128)),
-            ((1024, 512, 1024), False, (1, 128, 1, 128)),
-            ((1024, 512, 1024), False, (128, 128, 1, 128)),
-            ((1024, 512, 1024), True, (1, 128, 1, 128)),
-            ((1024, 512, 1024), True, (128, 128, 1, 128)),
-            ((32768, 4096, 4096), False, (1, 128, 1, 128)),
-            ((32768, 4096, 4096), False, (128, 128, 1, 128)),
-            ((32768, 4096, 4096), True, (1, 128, 1, 128)),
-            ((32768, 4096, 4096), True, (128, 128, 1, 128)),
-        }
-        if (shape, use_fast_accum, scaling_block_sizes) in _disabled_combos:
-            self.skipTest("disabled due to CI failures; see #190236")
-        if "xpu" in device and use_fast_accum:
-            self.skipTest("XPU does not support use_fast_accum=True for now")
+        # `use_fast_accum` is deliberately not parametrized: the main-loop template
+        # never references USE_FAST_ACCUM (it is emitted as an unused constexpr), so
+        # both values produce an identical kernel and doubling the matrix only costs
+        # compile time.
+        use_fast_accum = False
         # Only bf16 output type is supported for non-tensorwise scaling, not fp32
         dtype: torch.dtype = torch.bfloat16
         dtype_float8 = torch.float8_e4m3fn
-        dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
 
         M, N, K = shape  # Matmul Y = X [M, K] x W [N, K]
-        x = torch.randn(M, K, dtype=dtype, device=device)
-        w = torch.randn(N, K, dtype=dtype, device=device)
         bias = None
 
         am, ak, bn, bk = scaling_block_sizes
 
-        # quantize weight (prior to inference)
-        w_fp8, w_inverse_scale = _quantize_blockwise(
-            w, dtype_float8, block_outer=bn, block_inner=bk
-        )
-        w_t_fp8 = w_fp8.t()
-        w_inverse_scale = _prepare_blockwise_scale(
-            w_inverse_scale, bn, bk, transposed=True
-        )
+        torch.manual_seed(0)
 
-        # quantize input x
-        x_fp8, x_inverse_scale = _quantize_blockwise(
-            x, dtype_float8, block_outer=am, block_inner=ak
-        )
-        x_inverse_scale = _prepare_blockwise_scale(
-            x_inverse_scale, am, ak, transposed=False
-        )
+        def make_operand(outer_size, block_outer, block_inner, modulus):
+            # Real `randn` data quantized by `_quantize_blockwise`, so fp8 rounding
+            # behaviour is exercised. The per-block magnitude is deliberately spread
+            # over `modulus`x: quantizing uniform-magnitude data yields near-uniform
+            # scales (measured max/min of 1.12 for 128x128 blocks), and a kernel that
+            # indexes the scale array with the wrong stride would then still land
+            # inside rtol -- i.e. the test would stop detecting stride faults.
+            min_outer = min(block_outer, outer_size)
+            min_inner = min(block_inner, K)
+            magnitudes = (
+                torch.arange(
+                    (outer_size // min_outer) * (K // min_inner), device=device
+                )
+                .reshape(outer_size // min_outer, K // min_inner)
+                .remainder(modulus)
+                .add(1)
+                .float()
+                .repeat_interleave(min_outer, dim=0)
+                .repeat_interleave(min_inner, dim=1)
+            )
+            t = (torch.randn(outer_size, K, device=device) * magnitudes).to(dtype)
+            t_fp8, inverse_scale = _quantize_blockwise(
+                t, dtype_float8, block_outer=block_outer, block_inner=block_inner
+            )
+            # Expand the *raw* quantizer output, not the prepared scale, so that a
+            # layout bug in `_prepare_blockwise_scale` fails this comparison instead
+            # of cancelling out on both sides of it.
+            expanded = inverse_scale.repeat_interleave(
+                min_outer, dim=0
+            ).repeat_interleave(min_inner, dim=1)
+            scale = _prepare_blockwise_scale(inverse_scale, block_outer, block_inner)
+            return t_fp8, scale, expanded[:outer_size, :K]
+
+        x_fp8, x_inverse_scale, x_scale_full = make_operand(M, am, ak, 13)
+        w_fp8, w_inverse_scale, w_scale_full = make_operand(N, bn, bk, 7)
+        w_t_fp8 = w_fp8.t()
+
+        # cuBLAS 128-element blockwise scaling is SM90-only, so the reference is
+        # computed in software and therefore runs identically on every architecture.
+        expected = (
+            (x_fp8.float() * x_scale_full) @ (w_fp8.float() * w_scale_full).t()
+        ).to(dtype)
 
         recipe_x = (
             ScalingType.BlockWise1x128
@@ -1237,28 +1690,6 @@ class TestFP8Lowering(TestCase):
                 use_fast_accum=use_fast_accum,
             )
             return y
-
-        # BlockWise1x128 and BlockWise128x128 scaling modes are not compatible with fast_accum
-        # Only take this branch on SM90 because other versions xfail everything
-        if use_fast_accum and IS_SM90:
-            with self.assertRaisesRegex(
-                RuntimeError, "scaled_gemm doesn't support fast accum"
-            ):
-                y_eager = linear(
-                    x_fp8,
-                    x_inverse_scale,
-                    w_t_fp8,
-                    w_inverse_scale,
-                    bias,
-                )
-        else:
-            y_eager = linear(
-                x_fp8,
-                x_inverse_scale,
-                w_t_fp8,
-                w_inverse_scale,
-                bias,
-            )
 
         with config.patch(
             {
@@ -1300,9 +1731,13 @@ class TestFP8Lowering(TestCase):
         ).run(code[0])
 
         self.assertEqual(y_compiled.dtype, dtype)
-        if not use_fast_accum:
-            self.assertEqual(y_eager.dtype, dtype)
-            torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+        # `atol` is scaled to the magnitude of the reference rather than fixed. The
+        # scales handed to the kernel are `_quantize_blockwise`'s inverse scales and
+        # the reference multiplies by them, so the reference is self-consistent but
+        # denormalized; a fixed atol of 5e-2 is larger than the entire output range
+        # for some shapes and would pass a kernel with a 28%-wrong scale index.
+        atol = 5e-2 * expected.abs().max().item()
+        self.assertEqual(expected, y_compiled, rtol=5e-2, atol=atol)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @onlyOn(["cuda", "xpu", "cpu"])
