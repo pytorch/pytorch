@@ -1091,9 +1091,30 @@ void FakeTensorMode::set_constant(
   // a registered fake tensor always has ExtraMeta (set by set_fake_device)
   auto* extra_meta = fake_impl->maybe_get_extra_meta();
   TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
+  clear_constant(fake_impl);
+  if (constant->has_storage()) {
+    const auto& storage = constant->storage();
+    auto* key = storage.unsafeGetStorageImpl();
+    auto it = constant_storage_mapping_.find(key);
+    if (it == constant_storage_mapping_.end()) {
+      it = constant_storage_mapping_
+               .try_emplace(key, ConstantAliases{storage.getWeakStorageImpl()})
+               .first;
+    }
+    it->second.tensors.emplace_back(fake_impl);
+  }
+  extra_meta->fake_constant_ = std::move(constant);
+}
+
+void FakeTensorMode::clear_constant(
+    const c10::intrusive_ptr<c10::TensorImpl>& fake_impl) {
+  auto* extra_meta = fake_impl->maybe_get_extra_meta();
+  if (extra_meta == nullptr || !extra_meta->fake_constant_) {
+    return;
+  }
   // Re-setting here must drop the old entry, otherwise mutating the old storage
   // would invalidate the new constant.
-  if (extra_meta->fake_constant_ && extra_meta->fake_constant_->has_storage()) {
+  if (extra_meta->fake_constant_->has_storage()) {
     auto* old_key =
         extra_meta->fake_constant_->storage().unsafeGetStorageImpl();
     auto old_it = constant_storage_mapping_.find(old_key);
@@ -1113,18 +1134,7 @@ void FakeTensorMode::set_constant(
       }
     }
   }
-  if (constant->has_storage()) {
-    const auto& storage = constant->storage();
-    auto* key = storage.unsafeGetStorageImpl();
-    auto it = constant_storage_mapping_.find(key);
-    if (it == constant_storage_mapping_.end()) {
-      it = constant_storage_mapping_
-               .try_emplace(key, ConstantAliases{storage.getWeakStorageImpl()})
-               .first;
-    }
-    it->second.tensors.emplace_back(fake_impl);
-  }
-  extra_meta->fake_constant_ = std::move(constant);
+  extra_meta->fake_constant_.reset();
 }
 
 c10::intrusive_ptr<c10::TensorImpl> FakeTensorMode::get_constant(

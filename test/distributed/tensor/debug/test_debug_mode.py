@@ -241,22 +241,27 @@ class TestDTensorDebugMode(TestCase):
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-  torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$7: f32[8, 32]| S(0)
+  torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$10: f32[8, 32]| S(0)
     aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
+      aten::empty_strided([8, 8], [8, 1], dtype=torch.float32, device=cuda, pin_memory=False)  ->  ft$2: f32[8, 8]
+      aten::empty_strided([8, 32], [32, 1], dtype=torch.float32, device=cuda, pin_memory=False)  ->  ft$3: f32[8, 32]
+      aten::mm(ft$2: f32[8, 8], ft$3: f32[8, 32])  ->  ft$4: f32[8, 32]
       -> output: S(0)
       redistribute_input [implicit] (1, S(0) -> R)
-        redistribute_input(t$2: f32[1, 32], trace: S(0)->R)
-          _c10d_functional::all_gather_into_tensor(t$2: f32[1, 32], 8, 0)  ->  t$3: f32[8, 32]
-          _c10d_functional::_wrap_tensor_autograd(t$3: f32[8, 32])  ->  t$4: f32[8, 32]
-          _c10d_functional::wait_tensor(t$3: f32[8, 32])  ->  t$3: f32[8, 32]
-      aten::mm(t$5: f32[1, 8], t$3: f32[8, 32])  ->  t$6: f32[1, 32]
-  <method 'sum' of 'torch._C.TensorBase' objects>(dt$7: f32[8, 32]| S(0))  ->  dt$9: f32[]| P(sum)
-    aten::sum(dt$7: f32[8, 32]| S(0))
-      aten::sum(t$6: f32[1, 32])  ->  t$8: f32[]""",
+        redistribute_input(t$5: f32[1, 32], trace: S(0)->R)
+          _c10d_functional::all_gather_into_tensor(t$5: f32[1, 32], 8, 0)  ->  t$6: f32[8, 32]
+          _c10d_functional::_wrap_tensor_autograd(t$6: f32[8, 32])  ->  t$7: f32[8, 32]
+          _c10d_functional::wait_tensor(t$6: f32[8, 32])  ->  t$6: f32[8, 32]
+      aten::mm(t$8: f32[1, 8], t$6: f32[8, 32])  ->  t$9: f32[1, 32]
+  <method 'sum' of 'torch._C.TensorBase' objects>(dt$10: f32[8, 32]| S(0))  ->  dt$14: f32[]| P(sum)
+    aten::sum(dt$10: f32[8, 32]| S(0))
+      aten::empty_strided([8, 32], [32, 1], dtype=torch.float32, device=cuda, pin_memory=False)  ->  ft$11: f32[8, 32]
+      aten::sum(ft$11: f32[8, 32])  ->  ft$12: f32[]
+      aten::sum(t$9: f32[1, 32])  ->  t$13: f32[]""",
         )
 
         self.assertTrue(isinstance(debug_mode.operators[0], _OpCall))
-        self.assertTrue(isinstance(debug_mode.operators[3], _RedistributeCall))
+        self.assertTrue(isinstance(debug_mode.operators[6], _RedistributeCall))
         self.assertEqual(next(iter(debug_mode.operators[1])), torch.ops.aten.mm.default)
 
         # check stringification
@@ -467,6 +472,9 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
   aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
+    aten::empty_strided([128, 8], [8, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+    aten::empty_strided([8, 128], [128, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+    aten::mm(ft: f32[128, 8], ft: f32[8, 128])
     redistribute_input [implicit] (1, S(1)[0]S(1)[1] -> RR)
       redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 16], 2, 3)
@@ -481,6 +489,8 @@ class TestDTensorDebugMode(TestCase):
         aten::cat(['t: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]'], 1)
     aten::mm(t: f32[16, 8], t: f32[8, 128])
   aten::sum(dt: f32[128, 128]| S(0)[0]S(0)[1])
+    aten::empty_strided([128, 128], [128, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+    aten::sum(ft: f32[128, 128])
     aten::sum(t: f32[16, 128])""",
         )
 
@@ -533,6 +543,8 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
   aten::topk(dt: f32[8, 16]| S(1), 4, 1)
+    aten::empty_strided([8, 16], [16, 1], dtype=torch.float32, device=cuda, pin_memory=False)  ->  ft: f32[8, 16]
+    aten::topk(ft: f32[8, 16], 4, 1)  ->  ('ft: f32[8, 4]', 'ft: i64[8, 4]')
     -> output: ('R', 'R')
     redistribute_input [implicit] (0, S(1) -> R)
       redistribute_input(t: f32[8, 2], trace: S(1)->R)
@@ -566,32 +578,61 @@ class TestDTensorDebugMode(TestCase):
             """\
   torch.functional.einsum(bld,dnh->blnh, dt: f32[16, 6, 8]| P(sum)R, dt: f32[8, 4, 4]| RP(sum))
     aten::unsqueeze(dt: f32[16, 6, 8]| P(sum)R, 3)
+      aten::empty_strided([16, 6, 8], [48, 8, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::unsqueeze(ft: f32[16, 6, 8], 3)
       aten::unsqueeze(t: f32[16, 6, 8], 3)
     aten::unsqueeze(dt: f32[16, 6, 8, 1]| P(sum)R, 4)
+      aten::empty_strided([16, 6, 8, 1], [48, 8, 1, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::unsqueeze(ft: f32[16, 6, 8, 1], 4)
       aten::unsqueeze(t: f32[16, 6, 8, 1], 4)
     aten::permute(dt: f32[16, 6, 8, 1, 1]| P(sum)R, [0, 1, 3, 4, 2])
+      aten::empty_strided([16, 6, 8, 1, 1], [48, 8, 1, 1, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::permute(ft: f32[16, 6, 8, 1, 1], [0, 1, 3, 4, 2])
       aten::permute(t: f32[16, 6, 8, 1, 1], [0, 1, 3, 4, 2])
     aten::unsqueeze(dt: f32[8, 4, 4]| RP(sum), 3)
+      aten::empty_strided([8, 4, 4], [16, 4, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::unsqueeze(ft: f32[8, 4, 4], 3)
       aten::unsqueeze(t: f32[8, 4, 4], 3)
     aten::unsqueeze(dt: f32[8, 4, 4, 1]| RP(sum), 4)
+      aten::empty_strided([8, 4, 4, 1], [16, 4, 1, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::unsqueeze(ft: f32[8, 4, 4, 1], 4)
       aten::unsqueeze(t: f32[8, 4, 4, 1], 4)
     aten::permute(dt: f32[8, 4, 4, 1, 1]| RP(sum), [3, 4, 1, 2, 0])
+      aten::empty_strided([8, 4, 4, 1, 1], [16, 4, 1, 1, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::permute(ft: f32[8, 4, 4, 1, 1], [3, 4, 1, 2, 0])
       aten::permute(t: f32[8, 4, 4, 1, 1], [3, 4, 1, 2, 0])
     aten::permute(dt: f32[16, 6, 1, 1, 8]| P(sum)R, [0, 1, 4, 2, 3])
+      aten::empty_strided([16, 6, 1, 1, 8], [48, 8, 1, 1, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::permute(ft: f32[16, 6, 1, 1, 8], [0, 1, 4, 2, 3])
       aten::permute(t: f32[16, 6, 1, 1, 8], [0, 1, 4, 2, 3])
     aten::view(dt: f32[16, 6, 8, 1, 1]| P(sum)R, [1, 96, 8])
+      aten::empty_strided([16, 6, 8, 1, 1], [48, 8, 1, 1, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::view(ft: f32[16, 6, 8, 1, 1], [1, 96, 8])
       aten::view(t: f32[16, 6, 8, 1, 1], [1, 96, 8])
     aten::permute(dt: f32[1, 1, 4, 4, 8]| RP(sum), [4, 2, 3, 0, 1])
+      aten::empty_strided([1, 1, 4, 4, 8], [1, 1, 4, 1, 16], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::permute(ft: f32[1, 1, 4, 4, 8], [4, 2, 3, 0, 1])
       aten::permute(t: f32[1, 1, 4, 4, 8], [4, 2, 3, 0, 1])
     aten::view(dt: f32[8, 4, 4, 1, 1]| RP(sum), [1, 8, 16])
+      aten::empty_strided([8, 4, 4, 1, 1], [16, 4, 1, 1, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::view(ft: f32[8, 4, 4, 1, 1], [1, 8, 16])
       aten::view(t: f32[8, 4, 4, 1, 1], [1, 8, 16])
     aten::bmm(dt: f32[1, 96, 8]| P(sum)R, dt: f32[1, 8, 16]| RP(sum))
+      aten::empty_strided([1, 96, 8], [768, 8, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::empty_strided([1, 8, 16], [128, 16, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::bmm(ft: f32[1, 96, 8], ft: f32[1, 8, 16])
       aten::bmm(t: f32[1, 96, 8], t: f32[1, 8, 16])
     aten::view(dt: f32[1, 96, 16]| P(sum)P(sum), [16, 6, 1, 4, 4])
+      aten::empty_strided([1, 96, 16], [1536, 16, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::view(ft: f32[1, 96, 16], [16, 6, 1, 4, 4])
       aten::view(t: f32[1, 96, 16], [16, 6, 1, 4, 4])
     aten::permute(dt: f32[16, 6, 1, 4, 4]| P(sum)P(sum), [0, 1, 3, 4, 2])
+      aten::empty_strided([16, 6, 1, 4, 4], [96, 16, 16, 4, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::permute(ft: f32[16, 6, 1, 4, 4], [0, 1, 3, 4, 2])
       aten::permute(t: f32[16, 6, 1, 4, 4], [0, 1, 3, 4, 2])
     aten::view(dt: f32[16, 6, 4, 4, 1]| P(sum)P(sum), [16, 6, 4, 4])
+      aten::empty_strided([16, 6, 4, 4, 1], [96, 16, 4, 1, 16], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::view(ft: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])
       aten::view(t: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])""",
         )
 
