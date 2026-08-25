@@ -9,6 +9,7 @@ from torch._inductor.heuristics.registry import register_template_heuristic
 from ...ir import get_free_symbols
 from ...kernel.mm import decompose_k_subgraph_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
+from ...runtime.hints import DeviceProperties
 from ...utils import get_k_splits
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
@@ -63,7 +64,18 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             return
 
         m, n, k = kernel_inputs.mnk_symbolic()
-        k_splits = get_k_splits(m, n, k)
+        device_properties = DeviceProperties.create(kernel_inputs.device())
+        if device_properties.type == "cuda" and device_properties.major == 10:
+            k_splits = get_k_splits(
+                m,
+                n,
+                k,
+                num_sms=device_properties.multi_processor_count,
+                ctas_per_tile=2,
+                max_workspace_bytes=128 * 1024 * 1024,
+            )
+        else:
+            k_splits = get_k_splits(m, n, k)
         for k_split in k_splits:
             if not V.graph.sizevars.statically_known_true(
                 sympy.Eq(sympy.Mod(k, k_split), 0)
