@@ -30,6 +30,7 @@ import re
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1572,7 +1573,9 @@ def run_tests(argv=None):
         if failed:
             raise AssertionError("Some test shards have failed")
     elif USE_PYTEST:
-        pytest_args = argv + ["--use-main-module"]
+        # xdist workers import the test file as a module, so they cannot collect
+        # tests from the coordinator's __main__ module.
+        pytest_args = argv if "-n" in argv else argv + ["--use-main-module"]
         if HW_CLASSIFICATION is not None:
             pytest_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
         test_report_path = ""
@@ -1941,6 +1944,7 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     torch.cuda.set_per_process_memory_fraction(round((gb_available - num_procs * .85) / gb_available / num_procs, 2))
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
+requires_xpu = unittest.skipUnless(TEST_XPU, "Requires XPU")
 
 
 def lazy_skip_if(condition_fn, reason):
@@ -1972,6 +1976,11 @@ def lazy_skip_if(condition_fn, reason):
             return fn(*args, **kwargs)
         return wrapper
     return decorator
+
+requires_accelerator = lazy_skip_if(
+    lambda: not torch.accelerator.is_available(),
+    "requires accelerator",
+)
 
 
 def skipIfCrossRef(fn):
@@ -2649,7 +2658,7 @@ def setBlasBackendsToDefaultFinally(fn):
             if torch.backends.cuda.is_built():
                 torch._C._cuda_resetCublasWorkspaceSize()
                 torch._C._cuda_resetCublasLtWorkspaceSize()
-                torch.cuda._clear_cublas_workspaces()
+                torch._C._cuda_clearCublasWorkspaces()
     return _fn
 
 def setSdpaBackendsToDefaultFinally(fn):
@@ -3089,7 +3098,7 @@ class CudaMemoryLeakCheck:
             #   because the driver will always have some bytes in use (context size?)
             if caching_allocator_mem_allocated > 0:
                 gc.collect()
-                torch.cuda._clear_cublas_workspaces()
+                torch._C._cuda_clearCublasWorkspaces()
                 torch.cuda.empty_cache()
                 break
 
@@ -3107,17 +3116,17 @@ class CudaMemoryLeakCheck:
 
         self.testcase.before_cuda_memory_leak_check()
         gc.collect()
-        num_devices = torch.cuda.device_count()
-        torch.cuda._clear_cublas_workspaces()
+        torch._C._cuda_clearCublasWorkspaces()
         torch.cuda.empty_cache()
 
         # Compares caching allocator before/after statistics
         # An increase in allocated memory is a discrepancy indicating a possible
         #   memory leak
         discrepancy_detected = False
-        # avoid counting cublasWorkspace allocations
-        torch.cuda._clear_cublas_workspaces()
+        num_devices = torch.cuda.device_count()
         for i in range(num_devices):
+            # avoid counting cublasWorkspace allocations
+            torch._C._cuda_clearCublasWorkspaces()
             caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
 
             if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
@@ -6468,6 +6477,16 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
         gc.set_debug(0)
 
 
+def _win_rmtree_onerror(func, path, exc_info):
+    # Retry after clearing the read-only attribute (WinError 5); ignore
+    # anything else so cleanup stays best-effort.
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except OSError:
+        pass
+
+
 def remove_cpp_extensions_build_root():
     """
     Removes the default root folder under which extensions are built.
@@ -6475,9 +6494,7 @@ def remove_cpp_extensions_build_root():
     default_build_root = cpp_extension.get_default_build_root()
     if os.path.exists(default_build_root):
         if IS_WINDOWS:
-            # rmtree returns permission error: [WinError 5] Access is denied
-            # on Windows, this is a workaround
-            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
+            shutil.rmtree(default_build_root, onerror=_win_rmtree_onerror)
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
 

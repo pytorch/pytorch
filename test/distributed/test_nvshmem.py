@@ -10,11 +10,12 @@ import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 from torch.distributed.device_mesh import init_device_mesh
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
+    MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
     skip_if_lt_x_gpu,
+    skip_if_rocm_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -54,18 +55,6 @@ def requires_nvls():
     return skip_but_pass_in_sandcastle_if(
         not has_nvls_support(),
         "Test requires NVLink SHARP support",
-    )
-
-
-def skip_if_cuda_13_2():
-    """Skip dispatch-combine tests that hang/fail on CUDA 13.2 (B200/sm100).
-
-    See https://github.com/pytorch/pytorch/issues/191201
-    """
-    return skip_but_pass_in_sandcastle_if(
-        _get_torch_cuda_version() == (13, 2),
-        "Dispatch-combine hangs/fails on CUDA 13.2, "
-        "see https://github.com/pytorch/pytorch/issues/191201",
     )
 
 
@@ -290,19 +279,55 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         dtype = torch.float
         numel = 1024
         tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
-        symm_mem.rendezvous(tensor, group=group_name)
+        hdl = symm_mem.rendezvous(tensor, group=group_name)
 
         if self.rank == 0:
             torch.ops.symm_mem.nvshmem_get(tensor, 1)
-            # TODO: remove after we have wait_signal
-            dist.barrier()
+            hdl.put_signal(dst_rank=1)
             torch.testing.assert_close(
                 tensor, torch.ones(numel, dtype=dtype, device=self.device)
             )
-        else:
-            # handle.wait_signal(src_rank=0)
-            # TODO: remove after we have wait_signal
-            dist.barrier()
+        elif self.rank == 1:
+            # wait for rank 0's signal that the get has completed before this
+            # rank may reuse its buffer.
+            hdl.wait_signal(src_rank=0)
+
+    def test_barrier(self) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+
+        numel = 64
+        tensor = symm_mem.empty(numel, dtype=torch.float32, device=self.device)
+        tensor.fill_(self.rank)
+        hdl = symm_mem.rendezvous(tensor, group=group_name)
+
+        hdl.barrier()
+        for peer in range(self.world_size):
+            buf = hdl.get_buffer(peer, (numel,), torch.float32)
+            self.assertTrue(buf.eq(peer).all())
+        hdl.barrier()
+
+    def test_put_wait_signal(self) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+
+        numel = 64
+        tensor = symm_mem.empty(numel, dtype=torch.float32, device=self.device)
+        tensor.fill_(-1)
+        hdl = symm_mem.rendezvous(tensor, group=group_name)
+
+        if self.rank == 0:
+            hdl.wait_signal(src_rank=1)
+            buf = hdl.get_buffer(0, (numel,), torch.float32)
+            self.assertTrue(buf.eq(42).all())
+        elif self.rank == 1:
+            # write into rank 0's buffer, then signal rank 0. put_signal has
+            # release and wait_signal acquire semantics, so the write is
+            # visible to rank 0 after its wait_signal returns.
+            peer_buf = hdl.get_buffer(0, (numel,), torch.float32)
+            peer_buf.fill_(42)
+            hdl.put_signal(dst_rank=0)
+        hdl.barrier()
 
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_ROCM, "nvshmem_get_out not yet implemented for ROCm"
@@ -379,6 +404,149 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
                 )
 
         dist.barrier()
+
+
+# Negative tests for barrier/put_signal/wait_signal. They use
+# MultiProcessTestCase rather than MultiProcContinuousTest: a device-side
+# timeout calls trap(), which poisons the CUDA context, so each test needs
+# fresh processes.
+@requires_nvshmem()
+@requires_cuda_p2p_access()
+class NVSHMEMSignalNegativeTest(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def _init_process(self) -> None:
+        torch.cuda.set_device(self.device)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        symm_mem.set_backend("NVSHMEM")
+
+    def _assert_rank0_times_out(self, rank0_body) -> None:
+        # Rank 1 must stay alive until rank 0 has observed the timeout;
+        # otherwise rank 1's teardown can destroy its symmetric allocation
+        # while rank 0's kernel is still accessing it, and the test would
+        # pass on a launch failure rather than the timeout. The handshake is
+        # host-side (FileStore) because rank 0's CUDA context is poisoned
+        # after the device-side trap, so a process-group barrier cannot be
+        # used.
+        sync_store = dist.FileStore(self.file_name + "_sync", self.world_size)
+        if self.rank == 0:
+            with self.assertRaises(RuntimeError):
+                rank0_body()
+                torch.cuda.synchronize()
+            sync_store.set("rank0_observed_failure", "1")
+        else:
+            torch.cuda.synchronize()
+            sync_store.wait(["rank0_observed_failure"])
+
+        # The device-side timeout triggers a trap that causes all subsequent
+        # host/device interactions to result in an "unspecified launch
+        # failure". Using os._exit(0) to abort the test, as it's impossible
+        # to terminate the process in this state.
+        os._exit(0)
+
+    # Skipped on ROCm because the device-side timeout calls trap(), which hip
+    # handles by collecting a gpu core dump; there isn't a nice way to test it.
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_wait_signal_timeout(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(1, device=self.device)
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        def body() -> None:
+            # No rank ever puts a signal, so this must time out.
+            hdl.wait_signal(src_rank=1, timeout_ms=1000)
+
+        self._assert_rank0_times_out(body)
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_barrier_timeout(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(1, device=self.device)
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        def body() -> None:
+            # Rank 1 never enters the barrier, so this must time out.
+            hdl.barrier(timeout_ms=1000)
+
+        self._assert_rank0_times_out(body)
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_put_signal_timeout(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(1, device=self.device)
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        def body() -> None:
+            # First, put a signal into rank 1's signal pad. Since rank 1
+            # never waits on it, the second put must time out.
+            hdl.put_signal(dst_rank=1)
+            hdl.put_signal(dst_rank=1, timeout_ms=1000)
+
+        self._assert_rank0_times_out(body)
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_channel_out_of_bounds(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(64, device=self.device)
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        num_slots = hdl.signal_pad_size // 4
+        max_channel = num_slots // self.world_size
+        peer = (self.rank + 1) % self.world_size
+
+        # channel == max_channel must be rejected (host-side check_channel)
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            hdl.barrier(channel=max_channel)
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            hdl.put_signal(dst_rank=peer, channel=max_channel)
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            hdl.wait_signal(src_rank=peer, channel=max_channel)
+        torch.cuda.synchronize()
+
+        # channel == max_channel - 1 must be accepted
+        if max_channel > 1:
+            hdl.barrier(channel=max_channel - 1)
+        torch.cuda.synchronize()
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_rank_out_of_bounds(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(64, device=self.device)
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        # Host-side TORCH_CHECKs, no kernel is launched.
+        for bad_rank in (-1, self.world_size):
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                hdl.put_signal(dst_rank=bad_rank)
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                hdl.wait_signal(src_rank=bad_rank)
+        torch.cuda.synchronize()
 
 
 @instantiate_parametrized_tests
@@ -796,7 +964,6 @@ class DispatchCombineTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skip_if_cuda_13_2()
     @parametrize("align", [1, 8, 16])  # `major_align` of output
     def test_dispatch_combine(self, align: int) -> None:
         """
@@ -821,7 +988,6 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skip_if_cuda_13_2()
     @skip_if_lt_x_gpu(4)
     def test_dispatch_combine_subgroup(self) -> None:
         """

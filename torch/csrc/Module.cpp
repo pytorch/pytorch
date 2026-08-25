@@ -244,8 +244,7 @@ static PyObject* THPModule_initExtension(
   libshm_init(path.c_str());
 
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
-  if (!module)
-    throw python_error(); // @allow-raw-throw
+  TORCH_CHECK_PYTHON(module);
 
   THPStorage_postInit(module);
   THPAutograd_initFunctions();
@@ -702,9 +701,7 @@ static PyObject* THPModule_torchDeviceToDLDevice(
   auto dl_device = at::torchDeviceToDLDevice(device);
 
   auto tuple = PyTuple_New(2);
-  if (!tuple) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(tuple);
 
   PyTuple_SET_ITEM(tuple, 0, THPUtils_packInt64(dl_device.device_type));
   PyTuple_SET_ITEM(tuple, 1, THPUtils_packInt64(dl_device.device_id));
@@ -1031,6 +1028,25 @@ static PyObject* THPModule_userEnabledFA3SDP(
   else
     Py_RETURN_FALSE;
 }
+static PyObject* THPModule_setSDPUseFA4(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_sdp_use_fa4 expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseFA4(Py_IsTrue(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+static PyObject* THPModule_userEnabledFA4SDP(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().userEnabledFA4SDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
 static PyObject* THPModule_setSDPUseMemEfficient(
     PyObject* _unused,
     PyObject* arg) {
@@ -1117,8 +1133,7 @@ static PyObject* THPModule_setSDPUseCuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
-      "set_sdp_use_cudnn expects a bool, "
-      "but got %s",
+      "set_sdp_use_cudnn expects a bool, but got ",
       THPUtils_typename(arg));
   at::globalContext().setSDPUseCuDNN(Py_IsTrue(arg));
   Py_RETURN_NONE;
@@ -1672,16 +1687,13 @@ static PyObject* THPModule_getAllDtypes(PyObject* _unused, PyObject* noargs) {
   };
 
   THPObjectPtr result(PyList_New(0));
-  if (!result)
-    throw python_error();
+  TORCH_CHECK_PYTHON(result);
   for (auto scalar_type : all_scalar_types) {
     if (c10::isQIntType(scalar_type) || is_subbyte_dummy(scalar_type)) {
       continue;
     }
     auto* dtype = reinterpret_cast<PyObject*>(torch::getTHPDtype(scalar_type));
-    if (PyList_Append(result.get(), dtype) < 0) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(PyList_Append(result.get(), dtype) >= 0);
   }
   return result.release();
   END_HANDLE_TH_ERRORS
@@ -1793,7 +1805,7 @@ static PyObject* THPModule_willEngineExecuteNode(
   }
   const auto nodes_in_graph =
       torch::autograd::get_current_graph_task_nodes_in_graph();
-  bool ret = nodes_in_graph->find(node) != nodes_in_graph->end();
+  bool ret = nodes_in_graph->contains(node);
   if (ret && !exec_info->empty()) {
     auto it = exec_info->find(node);
     if (it == exec_info->end() || !it->second.should_execute()) {
@@ -2092,6 +2104,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},
     {"_get_fa3_sdp_enabled", THPModule_userEnabledFA3SDP, METH_NOARGS, nullptr},
     {"_set_sdp_use_fa3", THPModule_setSDPUseFA3, METH_O, nullptr},
+    {"_get_fa4_sdp_enabled", THPModule_userEnabledFA4SDP, METH_NOARGS, nullptr},
+    {"_set_sdp_use_fa4", THPModule_setSDPUseFA4, METH_O, nullptr},
     {"_get_mem_efficient_sdp_enabled",
      userEnabledMemEfficientSDP,
      METH_NOARGS,
