@@ -43,6 +43,7 @@ project-excludes = [
   "*/.*",
   "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**",
   "torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py",
+  "torch/_inductor/kernel/vendored_templates/flydsl/kernels/**",
   "torch/_vendor/quack/**",
 ]
 ignore-missing-imports = [
@@ -475,6 +476,16 @@ unannotated-attribute = true
 
 [[sub-config]]
 matches = "torch/_numpy/_ufuncs.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_numpy/_ndarray.py"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true
