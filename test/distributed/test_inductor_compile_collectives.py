@@ -26,6 +26,8 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
+from torch.testing._internal.common_distributed import requires_gloo
+
 
 def _f(t):
     t = t.clone()
@@ -37,8 +39,9 @@ def _make_fx_with_allreduce():
     return make_fx(_f)(torch.ones(4))
 
 
+@requires_gloo()
 class TestInductorCompileCollectives(TestCase):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
