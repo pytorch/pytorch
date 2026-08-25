@@ -30,7 +30,11 @@ from ...ir import (
     Pointwise,
     Reduction,
 )
-from ...kernel.gemm_epilogue import GEMM_ACCUMULATOR_ARG_NAME, GemmEpiloguePlan
+from ...kernel.gemm_epilogue import (
+    GEMM_ACCUMULATOR_ARG_NAME,
+    GemmEpiloguePlan,
+    GemmReductionGeometry,
+)
 from ...kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
 from ...scheduler import (
     BaseSchedulerNode,
@@ -257,6 +261,8 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         gemm_name: str,
         nodes: Sequence[BaseSchedulerNode],
         removed_buffers: OrderedSet[str],
+        reduction_geometries: dict[str, GemmReductionGeometry] | None = None,
+        suppressed_outputs: OrderedSet[str] | None = None,
     ) -> GemmEpiloguePlan:
         buffers = [node.node for node in nodes if isinstance(node.node, ComputedBuffer)]
         if len(buffers) != len(nodes):
@@ -267,6 +273,8 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 buffers,
                 removed_buffers,
                 EPILOGUE_FN_NAME,
+                reduction_geometries,
+                suppressed_outputs,
             )
         except NotImplementedError:
             return CutlassEVTCodegen.ir_to_evt_python_code(
@@ -283,8 +291,6 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         existing_epilogue_nodes: list[BaseSchedulerNode],
         node_to_fuse: BaseSchedulerNode,
     ) -> NVGemmVerticalFusionDecision:
-        from .nv_universal_gemm import GemmVariant
-
         if not config.epilogue_fusion:
             return NVGemmVerticalFusionDecision.DEFER
 
@@ -350,19 +356,11 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             variant == GemmVariant.SCALED_GEMM for variant in variants
         )
         reduction_plan = epilogue_program.reduction_plan
-        direct_softmax = (
-            scaled_epilogue
-            and self._fragment_local_softmax_output(epilogue_program) is not None
-        )
         if reduction_plan is not None and self._uses_swap_ab(ir_node):
             log.debug("NVGEMM swap_ab does not support fused local reductions")
             return NVGemmVerticalFusionDecision.DEFER
-        if (
-            reduction_plan is not None
-            and not direct_softmax
-            and not all(
-                variant.supports_reduction(reduction_plan) for variant in variants
-            )
+        if reduction_plan is not None and not all(
+            variant.supports_reduction(reduction_plan) for variant in variants
         ):
             return NVGemmVerticalFusionDecision.DEFER
 
@@ -372,9 +370,20 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 log.debug("NVGEMM epilogue fusion: %s is not a ComputedBuffer", node)
                 return NVGemmVerticalFusionDecision.DEFER
 
+        generated_reduction_nodes = OrderedSet(
+            node
+            for region in epilogue_program.generated_reduction_regions
+            for node in region.nodes
+        )
+        generated_reduction_outputs = epilogue_program.generated_reduction_geometries
         if not feeds_main:
             for s_node in epilogue_program.pointwise_nodes:
                 node = cast(ComputedBuffer, s_node.node)
+                if (
+                    s_node in generated_reduction_nodes
+                    or node.get_name() in generated_reduction_outputs
+                ):
+                    continue
                 if not isinstance(node.data, Pointwise):
                     log.debug("NVGEMM epilogue fusion: %s is not a Pointwise op", node)
                     return NVGemmVerticalFusionDecision.DEFER
@@ -401,7 +410,9 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         gemm_size = ir_node.get_size()
         name_to_buf = V.graph.name_to_buffer | V.graph.graph_inputs
         internal_names = OrderedSet([ir_node.get_name()]) | OrderedSet(
-            [s_node.get_name() for s_node in all_scheduler_nodes]
+            node.node.get_name()
+            for node in all_scheduler_nodes
+            if isinstance(node.node, Buffer)
         )
         for s_node in epilogue_program.pointwise_nodes:
             for rd in s_node.read_writes.reads:
@@ -472,9 +483,33 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             trial_reads: tuple[str, ...] = ()
             epilogue_dtype = ir_node.get_dtype()
             pointwise_nodes = epilogue_program.pointwise_nodes
-            if pointwise_nodes:
+            codegen_nodes = pointwise_nodes
+            if (
+                reduction_plan is not None
+                and reduction_plan.tensor_epilogue_returns_local_reduce
+            ):
+                codegen_nodes = epilogue_program.capture.nodes
+                generated_nodes = OrderedSet(epilogue_program.reduction_partition.nodes)
+                trial_removed_buffers.update(
+                    node.node.get_name()
+                    for node in generated_nodes
+                    if isinstance(node.node, Buffer)
+                    and node.node.get_name() != reduction_plan.reduction_output
+                )
+            if codegen_nodes:
+                suppressed_outputs = OrderedSet()
+                if (
+                    reduction_plan is not None
+                    and reduction_plan.tensor_epilogue_returns_local_reduce
+                    and reduction_plan.reduction_output is not None
+                ):
+                    suppressed_outputs.add(reduction_plan.reduction_output)
                 lowered_epilogue = self._lower_pointwise_epilogue(
-                    ir_node.get_name(), pointwise_nodes, trial_removed_buffers
+                    ir_node.get_name(),
+                    codegen_nodes,
+                    trial_removed_buffers,
+                    epilogue_program.generated_reduction_geometries,
+                    suppressed_outputs,
                 )
                 trial_reads = lowered_epilogue.reads
                 epilogue_dtype = V.graph.get_dtype(lowered_epilogue.writes[0])
@@ -595,7 +630,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 capture = NVGemmEpilogueCapture.from_nodes(
                     producer_buffer, (node1, node2)
                 )
-                if self._feed_main_config(capture, allow_softmax=False):
+                if self._feed_main_config(capture):
                     return 0
                 combined_partition = self._partition_local_reductions(capture)
                 if combined_partition.owns(node2.get_nodes()):
@@ -634,7 +669,17 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         )
         candidate_nodes = node2.get_nodes()
         reduction_partition = combined_program.reduction_partition
-        if not (reduction_partition.intersects(candidate_nodes) or feed_main_ordered):
+        generated_reduction_outputs = combined_program.generated_reduction_geometries
+        generated_reduction = any(
+            isinstance(node.node, ComputedBuffer)
+            and node.node.get_name() in generated_reduction_outputs
+            for node in candidate_nodes
+        )
+        if not (
+            reduction_partition.intersects(candidate_nodes)
+            or feed_main_ordered
+            or generated_reduction
+        ):
             return False
         template_snode = next(
             node
@@ -647,26 +692,6 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             )
             is NVGemmVerticalFusionDecision.FUSE
         )
-
-    @staticmethod
-    def _fragment_local_softmax_output(
-        program: NVGemmEpilogueProgram,
-    ) -> str | None:
-        plan = program.reduction_plan
-        if (
-            plan is None
-            or plan.reduction_type != "online_softmax"
-            or not plan.feeds_main
-            or plan.axis != 1
-            or plan.group != 4
-            or plan.reduction_output is not None
-            or plan.feed_output is None
-            or plan.secondary_feed_output is not None
-            or plan.consumer_fn is not None
-            or program.pointwise_nodes
-        ):
-            return None
-        return plan.feed_output
 
     @staticmethod
     def _schedule_reduction_plan(
@@ -813,22 +838,16 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             scheduler = V.graph.scheduler
             try:
                 reduction_plan = self._schedule_reduction_plan(epilogue_program)
-                softmax_output = (
-                    self._fragment_local_softmax_output(epilogue_program)
-                    if ctb.variant == GemmVariant.SCALED_GEMM
-                    else None
+                generated_region_ids = OrderedSet(
+                    id(region)
+                    for region in epilogue_program.generated_reduction_regions
                 )
-                if softmax_output is not None:
-                    if reduction_plan is None:
-                        raise AssertionError("expected softmax reduction plan")
-                    lowered_epilogue = LoopIRCuteDSLCodegen.online_softmax(
-                        softmax_output,
-                        reduction_plan.group,
-                        EPILOGUE_FN_NAME,
-                    )
-                    reduction_plan = None
-                    feeds_main = False
-                finalizers = epilogue_program.reduction_partition.finalizers
+                finalizers = tuple(
+                    region.finalizer
+                    for region in epilogue_program.reduction_partition.regions
+                    if id(region) not in generated_region_ids
+                    and region.finalizer is not None
+                )
                 if finalizers:
                     if len(finalizers) != 1:
                         raise NotImplementedError(
@@ -872,11 +891,36 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 ):
                     removed_buffers_with_gemm.add(original_buffer_name)
 
-                if pointwise_nodes:
+                codegen_nodes = pointwise_nodes
+                if (
+                    reduction_plan is not None
+                    and reduction_plan.tensor_epilogue_returns_local_reduce
+                ):
+                    codegen_nodes = epilogue_program.capture.nodes
+                    generated_nodes = OrderedSet(
+                        epilogue_program.reduction_partition.nodes
+                    )
+                    removed_buffers_with_gemm.update(
+                        node.node.get_name()
+                        for node in generated_nodes
+                        if isinstance(node.node, Buffer)
+                        and node.node.get_name() != reduction_plan.reduction_output
+                    )
+
+                if codegen_nodes:
+                    suppressed_outputs = OrderedSet()
+                    if (
+                        reduction_plan is not None
+                        and reduction_plan.tensor_epilogue_returns_local_reduce
+                        and reduction_plan.reduction_output is not None
+                    ):
+                        suppressed_outputs.add(reduction_plan.reduction_output)
                     lowered_epilogue = self._lower_pointwise_epilogue(
                         original_buffer_name,
-                        pointwise_nodes,
+                        codegen_nodes,
                         removed_buffers_with_gemm,
+                        epilogue_program.generated_reduction_geometries,
+                        suppressed_outputs,
                     )
                     if feeds_main and reduction_plan is not None:
                         d_buf = lowered_epilogue.renames.get("D")
