@@ -793,10 +793,18 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
                 # nor serializable by the proxy executor). Gated on the graph actually
                 # containing one so a lite-mode graph without user Triton kernels -- the
                 # common case -- pays neither the pattern match nor the recompile.
+                #
+                # Reinplacing must run FIRST: the decomposition emits "clone(s) + the
+                # mutation node" and relies on it to mark which clones are unnecessary,
+                # so without it every user Triton kernel pays a device-to-device copy.
                 if gm.graph.find_nodes(
                     op="call_function",
                     target=torch.ops.higher_order.triton_kernel_wrapper_functional,
                 ):
+                    from .fx_passes.reinplace import reinplace_inplaceable_ops
+                    from .fx_utils import FakeTensorUpdater
+
+                    reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
                     decompose_triton_kernel_wrapper_functional(gm.graph)
                     gm.recompile()
                 return
