@@ -39,11 +39,12 @@ using at::native::detail::GridSamplerPadding;
 namespace {
 
   // Resolves the four cubic taps one axis contributes to a sample at `coord`: the Keys
-  // coefficients of its fractional part, the index each tap reads at, and, when `coeffs_grad` is
-  // given, the derivative of each coefficient, which the grid gradient needs. The taps sit around
-  // the UNCLIPPED index, since a clipped one would place them around the wrong voxel; a tap the
-  // padding drops gets a zero coefficient, a zero derivative and index 0, so summing over the taps
-  // needs no bounds test.
+  // coefficients of its fractional part, the index each tap reads at, whether it reads at all, and,
+  // when `coeffs_grad` is given, the derivative of each coefficient, which the grid gradient needs.
+  // The taps sit around the UNCLIPPED index, since a clipped one would place them around the wrong
+  // voxel. A tap the padding drops is marked with a negative index and contributes a zero value,
+  // which is what get_value_bounded does in 4-D: its coefficient still reaches the sum, so a
+  // coefficient that is not finite propagates the same way at both ranks.
   template <typename scalar_t, typename index_t>
   static inline void resolve_cubic_taps(
       scalar_t coord,
@@ -60,16 +61,11 @@ namespace {
     }
     for (const auto i : c10::irange(4)) {
       const scalar_t tap = compute_coordinates(base - 1 + i, size, padding_mode, align_corners);
-      const index_t index = static_cast<index_t>(tap);
-      if (index >= 0 && index < size) {
-        indices[i] = index;
-      } else {
-        coeffs[i] = static_cast<scalar_t>(0);
-        if (coeffs_grad != nullptr) {
-          coeffs_grad[i] = static_cast<scalar_t>(0);
-        }
-        indices[i] = static_cast<index_t>(0);
-      }
+      // the comparison decides, not the cast: a coordinate that is not finite fails both sides,
+      // where converting it to an integer is undefined
+      indices[i] = (tap >= 0 && tap < static_cast<scalar_t>(size))
+          ? static_cast<index_t>(tap)
+          : static_cast<index_t>(-1);
     }
   }
 
@@ -240,16 +236,39 @@ namespace {
                 resolve_cubic_taps(grid_sampler_unnormalize(static_cast<opmath_t>(z), inp_D, align_corners),
                                    inp_D, padding_mode, align_corners, z_coeffs, static_cast<opmath_t*>(nullptr), z_taps);
 
+                // Only zero padding drops a tap, and only near the rim, so the sum splits: the
+                // common case reads all 64 taps and the test would only stop the vectoriser. A
+                // negative index marks a dropped tap; the OR is negative when any of them is.
+                const bool every_tap_reads =
+                    (x_taps[0] | x_taps[1] | x_taps[2] | x_taps[3] |
+                     y_taps[0] | y_taps[1] | y_taps[2] | y_taps[3] |
+                     z_taps[0] | z_taps[1] | z_taps[2] | z_taps[3]) >= 0;
+
                 scalar_t *out_ptr_NCDHW = out_ptr + n * out_sN + d * out_sD + h * out_sH + w * out_sW;
                 const scalar_t *inp_ptr_NC = inp_ptr_N;
                 for (int64_t c = 0; c < C; ++c, out_ptr_NCDHW += out_sC, inp_ptr_NC += inp_sC) {
                   opmath_t value = static_cast<opmath_t>(0);
                   for (const auto k : c10::irange(4)) {
                     for (const auto j : c10::irange(4)) {
-                      const scalar_t *row = inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH;
                       const opmath_t weight_zy = z_coeffs[k] * y_coeffs[j];
-                      for (const auto i : c10::irange(4)) {
-                        value += static_cast<opmath_t>(row[x_taps[i] * inp_sW]) * weight_zy * x_coeffs[i];
+                      if (every_tap_reads) {
+                        const scalar_t *row = inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH;
+                        for (const auto i : c10::irange(4)) {
+                          value += static_cast<opmath_t>(row[x_taps[i] * inp_sW]) * weight_zy * x_coeffs[i];
+                        }
+                      } else {
+                        const bool plane_reads = z_taps[k] >= 0 && y_taps[j] >= 0;
+                        const scalar_t *row = plane_reads
+                            ? inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH
+                            : inp_ptr_NC;
+                        for (const auto i : c10::irange(4)) {
+                          // a dropped tap contributes a zero value and keeps its coefficient,
+                          // which is what get_value_bounded does in 4-D
+                          const opmath_t sample = plane_reads && x_taps[i] >= 0
+                              ? static_cast<opmath_t>(row[x_taps[i] * inp_sW])
+                              : static_cast<opmath_t>(0);
+                          value += sample * weight_zy * x_coeffs[i];
+                        }
                       }
                     }
                   }
@@ -523,14 +542,22 @@ namespace {
                   const opmath_t gOut = *gOut_ptr_NCDHW;
                   for (const auto k : c10::irange(4)) {
                     for (const auto j : c10::irange(4)) {
-                      const scalar_t *row = inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH;
-                      const int64_t grad_row = gInp_offset_NC + z_taps[k] * gInp_sD + y_taps[j] * gInp_sH;
+                      const bool plane_reads = z_taps[k] >= 0 && y_taps[j] >= 0;
+                      const scalar_t *row = plane_reads
+                          ? inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH
+                          : inp_ptr_NC;
+                      const int64_t grad_row = plane_reads
+                          ? gInp_offset_NC + z_taps[k] * gInp_sD + y_taps[j] * gInp_sH
+                          : gInp_offset_NC;
                       for (const auto i : c10::irange(4)) {
-                        if (input_requires_grad) {
+                        const bool reads = plane_reads && x_taps[i] >= 0;
+                        if (input_requires_grad && reads) {
                           gInp_ptr[grad_row + x_taps[i] * gInp_sW] += static_cast<scalar_t>(
                               gOut * x_coeffs[i] * y_coeffs[j] * z_coeffs[k]);
                         }
-                        const opmath_t value = static_cast<opmath_t>(row[x_taps[i] * inp_sW]);
+                        const opmath_t value = reads
+                            ? static_cast<opmath_t>(row[x_taps[i] * inp_sW])
+                            : static_cast<opmath_t>(0);
                         gix -= value * x_coeffs_grad[i] * y_coeffs[j] * z_coeffs[k] * gOut;
                         giy -= value * x_coeffs[i] * y_coeffs_grad[j] * z_coeffs[k] * gOut;
                         giz -= value * x_coeffs[i] * y_coeffs[j] * z_coeffs_grad[k] * gOut;

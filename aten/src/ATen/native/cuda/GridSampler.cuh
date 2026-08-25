@@ -338,16 +338,11 @@ void resolve_cubic_taps(
   #pragma unroll
   for (int i = 0; i < 4; ++i) {
     const scalar_t tap = compute_coordinates(base - 1 + i, static_cast<int>(size), padding_mode, align_corners);
-    const index_t index = static_cast<index_t>(tap);
-    if (index >= 0 && index < size) {
-      indices[i] = index;
-    } else {
-      coeffs[i] = static_cast<scalar_t>(0);
-      if (coeffs_grad != nullptr) {
-        coeffs_grad[i] = static_cast<scalar_t>(0);
-      }
-      indices[i] = static_cast<index_t>(0);
-    }
+    // the comparison decides, not the cast: a coordinate that is not finite fails both sides,
+    // where converting it to an integer is undefined
+    indices[i] = (tap >= 0 && tap < static_cast<scalar_t>(size))
+        ? static_cast<index_t>(tap)
+        : static_cast<index_t>(-1);
   }
 }
 
