@@ -2189,5 +2189,16 @@ if(MSVC)
     SET(tmp_path "../${tmp_path}")
     set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-Xcompiler /Zc:lambda")
   endforeach()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  # CUTLASS defines unused host helpers in generated kernels. Keep the warning,
+  # but do not promote this third-party diagnostic to an error.
+  foreach(tmp ${MEM_EFF_ATTENTION_CUDA_SOURCES})
+    if(tmp MATCHES "/mem_eff_attention/kernels/")
+      FILE(RELATIVE_PATH tmp_path "${PROJECT_SOURCE_DIR}" "${tmp}")
+      SET(tmp_path "../${tmp_path}")
+      set_source_files_properties(
+        ${tmp_path} PROPERTIES COMPILE_OPTIONS "-Xcompiler=-Wno-error=unused-function")
+    endif()
+  endforeach()
 endif()
 endif()
