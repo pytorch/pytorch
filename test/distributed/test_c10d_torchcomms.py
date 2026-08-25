@@ -258,11 +258,6 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
 
     def test_new_group_bare_default_backend_is_auto_qualified(self, device):
         backend = self.backend(torch.device(device).type)
-        if backend == "gloo":
-            # The bare-backend form is only meaningful for an accelerator
-            # comm backend; the CPU variant has no accelerator backend to
-            # auto-qualify.
-            return
         ranks = list(range(self.world_size))
         ng = dist.new_group(ranks=ranks, backend=backend)
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
@@ -271,10 +266,6 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
 
     def test_new_group_qualified_backend_passes_through(self, device):
         backend = self.backend(torch.device(device).type)
-        if backend == "gloo":
-            # The qualified-backend form is only meaningful for an accelerator
-            # comm backend; gloo has no device-qualified spelling.
-            return
         ranks = list(range(self.world_size))
         ng = dist.new_group(
             ranks=ranks, backend=f"{torch.device(device).type}:{backend}"
