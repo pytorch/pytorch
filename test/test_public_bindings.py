@@ -415,10 +415,11 @@ class TestPublicBindings(TestCase):
         errors = []
         for mod, exc in failures:
             # Prefixes for modules whose top-level imports pull in optional
-            # runtime deps (cutlass, cuda-python, triton, cupti-python) that
-            # aren't available in CPU-only CI. Registrations are no-ops when the
-            # runtime is missing, so it's safe to skip them here.
+            # runtime deps (cutlass, cuda-python, helion, triton, cupti-python) that
+            # aren't available in every CI environment. Registrations are no-ops
+            # when the runtime is missing, so it's safe to skip them here.
             cuda_dep_prefixes = (
+                "torch._native.ops.cross_entropy.helion_kernel",
                 "torch._native.ops.foreach_mm.",
                 "torch._native.ops.polar.",
                 "torch._native.ops.reductions.inner_tree_kernel",
