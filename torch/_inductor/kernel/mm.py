@@ -138,6 +138,14 @@ flydsl_mm_template = FlyDSLTemplate(
     source=load_kernel_template("flydsl_mm"),
 )
 
+blackwell_ws_persistent_device_tma_main_loop_scaling_template = TritonTemplate(
+    name="blackwell_ws_persistent_device_tma_main_loop_scaling",
+    grid=persistent_mm_grid,
+    source=load_kernel_template(
+        "triton_blackwell_ws_persistent_device_tma_main_loop_scaled_mm"
+    ),
+)
+
 blackwell_ws_persistent_device_tma_mm_template = TritonTemplate(
     name="blackwell_ws_persistent_device_tma",
     grid=persistent_mm_grid,
@@ -1298,12 +1306,33 @@ def tuned_scaled_mm_v2(
                 mat_a, mat_b, output_layout=layout, add_guards=True
             )
             and not bias
-            and is_epilogue_scaling
         ):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
-                overriders
-            )
+            if (
+                is_main_loop_scaling
+                and (scale_option_a, scale_option_b) in scaling_pairs
+            ):
+                blackwell_main_loop_overriders = {
+                    **overriders,
+                    "SCALE_RECIPE_A": scale_option_a.value,
+                    "SCALE_RECIPE_B": scale_option_b.value,
+                    "SCALE_A_OUTER_DIM": (
+                        0 if scale_option_a == ScalingType.BlockWise1x128 else 1
+                    ),
+                    "SCALE_B_OUTER_DIM": (
+                        0 if scale_option_b == ScalingType.BlockWise1x128 else 1
+                    ),
+                }
+                templates_to_use.append(
+                    blackwell_ws_persistent_device_tma_main_loop_scaling_template
+                )
+                kwarg_overrides[
+                    blackwell_ws_persistent_device_tma_main_loop_scaling_template.uid
+                ] = blackwell_main_loop_overriders
+            elif is_epilogue_scaling:
+                templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+                kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
+                    overriders
+                )
 
         if is_epilogue_scaling:
             templates_to_use.append(mm_template)
@@ -1477,12 +1506,29 @@ def tuned_scaled_mm(
                 mat_a, mat_b, output_layout=layout, add_guards=True
             )
             and not bias
-            and is_epilogue_scaling
         ):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
-                overriders
-            )
+            if (
+                is_main_loop_scaling
+                and (scale_option_a, scale_option_b) in scaling_pairs
+            ):
+                blackwell_main_loop_overriders = {
+                    **overriders,
+                    "SCALE_RECIPE_A": scale_option_a.value,
+                    "SCALE_RECIPE_B": scale_option_b.value,
+                    "SCALE_A_OUTER_DIM": 0,
+                    "SCALE_B_OUTER_DIM": 1,
+                }
+                templates_to_use.append(
+                    blackwell_ws_persistent_device_tma_main_loop_scaling_template
+                )
+                kwarg_overrides[
+                    blackwell_ws_persistent_device_tma_main_loop_scaling_template.uid
+                ] = blackwell_main_loop_overriders
+            elif is_epilogue_scaling:
+                templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+                kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
+                    overriders
+                )
 
         if is_epilogue_scaling:
             templates_to_use.append(mm_template)

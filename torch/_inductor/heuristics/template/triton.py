@@ -21,6 +21,7 @@ from ... import config
 from ...autows_utils import meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
+    blackwell_ws_persistent_device_tma_main_loop_scaling_template,
     blackwell_ws_persistent_device_tma_mm_template,
     mm_template,
     persistent_mm_template,
@@ -3085,6 +3086,48 @@ class ScaledBlackwellTMAConfigMixin(
         return super()._filter_configs(configs)
 
 
+class ScaledBlackwellTMAMainLoopScalingConfigMixin(
+    BlackwellTMATemplateConfigMixin, BaseScaledMMConfigMixin
+):
+    """Blackwell TMA configuration for K-dependent blockwise scaling."""
+
+    def _valid(self, kernel_inputs: KernelInputs) -> bool:
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Expect MMKernelInputs for blockwise scaled MM")
+        m, n, k = kernel_inputs.mnk_symbolic()
+        if (
+            V.graph.sizevars.guard_or_false(sympy.Lt(m, 64))
+            or V.graph.sizevars.guard_or_false(sympy.Lt(n, 128))
+            or V.graph.sizevars.guard_or_false(sympy.Lt(k, 128))
+        ):
+            return False
+        return True
+
+    # pyrefly: ignore [bad-override]
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        configs = [
+            c
+            for c in configs
+            if c.block_k == 128
+            and c.block_m >= 64
+            and (c.block_m <= 128 or c.block_m % 128 == 0)
+            and c.block_n % 128 == 0
+        ]
+        return super()._filter_configs(configs)
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            template_kwargs["MIN_BLOCK_TILE_AM"] = min(template_kwargs["BLOCK_M"], 128)
+            yield template_kwargs
+
+
 # Template-specific heuristic classes using multiple inheritance
 
 
@@ -3330,6 +3373,23 @@ class CUDAScaledBlackwellTMATemplateConfigHeuristic(
     def __init__(self) -> None:
         super().__init__()
         self.mm_configs = self.blackwell_scaled_persistent_mm_configs
+
+
+@register_template_heuristic(
+    blackwell_ws_persistent_device_tma_main_loop_scaling_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+    op_name="scaled_mm",
+)
+class CUDAScaledBlackwellTMAMainLoopScalingTemplateConfigHeuristic(
+    ScaledBlackwellTMAMainLoopScalingConfigMixin, CUDAConfigHeuristic
+):
+    """Blockwise-scaled Blackwell persistent TMA template heuristic."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mm_configs = self.blackwell_scaled_persistent_mm_configs
+        self.exhaustive_configs = self._generate_exhaustive_configs()
 
 
 @register_template_heuristic(

@@ -1267,14 +1267,19 @@ class TestFP8Lowering(TestCase):
     @onlyCUDA
     @parametrize("api", ("v1", "v2"))
     @parametrize("recipe_case", ("a1_b128", "a1_b1", "a128_b1"))
-    def test_deepseek_blockwise_scale_layouts(self, api: str, recipe_case: str, device):
+    @parametrize("template_family", ("generic", "blackwell"))
+    def test_deepseek_blockwise_scale_layouts(
+        self, api: str, recipe_case: str, template_family: str, device
+    ):
         from torch._inductor.select_algorithm import (
             add_preprocessing_fn,
             clear_preprocessing_fns,
         )
 
-        M = N = 256
-        K = 384
+        if template_family == "blackwell" and not has_datacenter_blackwell_tma_device():
+            self.skipTest("Blackwell template requires datacenter Blackwell")
+
+        M, N, K = 256, 320, 384
         tile_size = 128
         k_blocks = ceil_div(K, tile_size)
         padded_k_blocks = ceil_div(k_blocks, 4) * 4
@@ -1380,21 +1385,41 @@ class TestFP8Lowering(TestCase):
                 use_fast_accum=False,
             )
 
-        choice_names = []
+        generic_name = "triton_scaled_mm_device_tma_main_loop_scaling_"
+        blackwell_name = "triton_blackwell_ws_persistent_device_tma_main_loop_scaling_"
+        blackwell_base_name = "triton_blackwell_ws_persistent_device_tma_"
+        choice_records = []
 
-        def record_and_keep_main_loop(choices):
-            choice_names.extend(choice.name for choice in choices)
-            return [
+        def record_and_force_template(choices):
+            choice_records.extend(
+                (choice.name, choice.description) for choice in choices
+            )
+            generic_choices = [
+                choice for choice in choices if generic_name in choice.name
+            ]
+            self.assertTrue(generic_choices, choice_records)
+            if template_family == "generic":
+                return generic_choices[:1]
+
+            forced_choices = [
                 choice
                 for choice in choices
-                if "scaled_mm_device_tma_main_loop_scaling" in choice.name
-            ][:1]
+                if blackwell_name in choice.name
+                and "BLOCK_K=128" in choice.description
+                and "BLOCK_M=64" in choice.description
+                and "BLOCK_N=256" in choice.description
+                and "num_stages=4" in choice.description
+                and "num_warps=4" in choice.description
+            ]
+            self.assertEqual(len(forced_choices), 1, choice_records)
+            return forced_choices
 
         torch._dynamo.reset()
-        add_preprocessing_fn(record_and_keep_main_loop)
+        add_preprocessing_fn(record_and_force_template)
         try:
             with config.patch(
                 {
+                    "fx_graph_cache": False,
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "TRITON",
                     "triton.enable_persistent_tma_matmul": True,
@@ -1402,20 +1427,38 @@ class TestFP8Lowering(TestCase):
                     "test_configs.autotune_choice_desc_regex": None,
                 }
             ):
-                actual = torch.compile(fn, backend="inductor", fullgraph=True)(
-                    a, b, scale_a, scale_b
-                )
+                actual = torch.compile(
+                    fn,
+                    backend="inductor",
+                    fullgraph=True,
+                    dynamic=api == "v2" and template_family == "blackwell",
+                )(a, b, scale_a, scale_b)
         finally:
             clear_preprocessing_fns(clear_defaults=False)
 
         self.assertEqual(actual, expected, rtol=5e-2, atol=5e-2)
+        generic_choices = [
+            record for record in choice_records if generic_name in record[0]
+        ]
+        blackwell_choices = [
+            record for record in choice_records if blackwell_name in record[0]
+        ]
+        old_blackwell_choices = [
+            record
+            for record in choice_records
+            if blackwell_base_name in record[0] and blackwell_name not in record[0]
+        ]
+        self.assertTrue(generic_choices, choice_records)
+        self.assertEqual(
+            bool(blackwell_choices),
+            has_datacenter_blackwell_tma_device(),
+            choice_records,
+        )
         self.assertTrue(
-            any("main_loop_scaling" in name for name in choice_names), choice_names
+            all("BLOCK_K=128" in description for _, description in blackwell_choices),
+            choice_records,
         )
-        self.assertFalse(
-            any("blackwell_ws_persistent_device_tma" in name for name in choice_names),
-            choice_names,
-        )
+        self.assertFalse(old_blackwell_choices, choice_records)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
@@ -1518,6 +1561,143 @@ class TestFP8Lowering(TestCase):
         self.assertTrue(
             any("main_loop_scaling" in name for name in choice_names), choice_names
         )
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    def test_deepseek_blockwise_v2_blackwell_ws_main_loop(
+        self,
+        device,
+    ):
+        from torch._inductor.select_algorithm import (
+            add_preprocessing_fn,
+            clear_preprocessing_fns,
+        )
+
+        M, N, K = 256, 320, 384
+        tile_size = 128
+        k_blocks = ceil_div(K, tile_size)
+        padded_k_blocks = ceil_div(k_blocks, 4) * 4
+        n_blocks = ceil_div(N, tile_size)
+
+        torch.manual_seed(0)
+        a = torch.randint(-8, 9, (M, K), device=device).to(torch.float8_e4m3fn)
+        b = torch.randint(-8, 9, (N, K), device=device).to(torch.float8_e4m3fn).t()
+        scale_a_values = (
+            torch.arange(M * k_blocks, device=device)
+            .reshape(M, k_blocks)
+            .remainder(13)
+            .add(1)
+            .float()
+            .div(128)
+        )
+        scale_b_values = torch.zeros(
+            n_blocks, padded_k_blocks, device=device, dtype=torch.float32
+        )
+        scale_b_values[:, :k_blocks] = (
+            torch.arange(n_blocks * k_blocks, device=device)
+            .reshape(n_blocks, k_blocks)
+            .remainder(7)
+            .add(1)
+            .float()
+            .div(128)
+        )
+        scale_a = scale_a_values.t().contiguous().t()
+        scale_b = scale_b_values.t()
+
+        self.assertEqual(scale_a.shape, (M, k_blocks))
+        self.assertEqual(scale_a.stride(), (1, M))
+        self.assertEqual(scale_b.shape, (padded_k_blocks, n_blocks))
+        self.assertEqual(scale_b.stride(), (1, padded_k_blocks))
+
+        # Eager blockwise scaling is SM90-only, so build the reference per K block.
+        expected = torch.zeros((M, N), device=device, dtype=torch.float32)
+        for block in range(k_blocks):
+            k_start = block * tile_size
+            k_end = k_start + tile_size
+            partial = a[:, k_start:k_end].float() @ b[k_start:k_end].float()
+            scale_a_block = scale_a_values[:, block]
+            scale_b_block = scale_b_values[:, block].repeat_interleave(tile_size)
+            scale_b_block = scale_b_block[:N]
+            expected += partial * scale_a_block[:, None] * scale_b_block[None, :]
+        expected = expected.to(torch.bfloat16)
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                ScalingType.BlockWise1x128,
+                scale_b,
+                ScalingType.BlockWise128x128,
+                output_dtype=torch.bfloat16,
+                use_fast_accum=True,
+            )
+
+        generic_name = "triton_scaled_mm_device_tma_main_loop_scaling_"
+        ws_name = "triton_blackwell_ws_persistent_device_tma_main_loop_scaling_"
+        choice_records = []
+
+        def record_and_keep_ws_main_loop(choices):
+            choice_records.extend(
+                (choice.name, choice.description) for choice in choices
+            )
+            generic_choices = [
+                choice for choice in choices if generic_name in choice.name
+            ]
+            ws_choices = [choice for choice in choices if ws_name in choice.name]
+            self.assertTrue(generic_choices, choice_records)
+            self.assertTrue(ws_choices, choice_records)
+            for choice in ws_choices:
+                self.assertIn("BLOCK_K=128", choice.description)
+            forced_choices = [
+                choice
+                for choice in ws_choices
+                if "BLOCK_M=128" in choice.description
+                and "BLOCK_N=256" in choice.description
+            ]
+            self.assertEqual(len(forced_choices), 1, choice_records)
+            return forced_choices
+
+        config_values = {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.enable_persistent_tma_matmul": True,
+            "test_configs.autotune_choice_name_regex": None,
+            "test_configs.autotune_choice_desc_regex": None,
+        }
+        torch._dynamo.reset()
+        add_preprocessing_fn(record_and_keep_ws_main_loop)
+        try:
+            with config.patch(config_values):
+                actual, code = run_and_get_code(
+                    torch.compile(
+                        fn,
+                        backend="inductor",
+                        fullgraph=True,
+                        dynamic=True,
+                    ),
+                    a,
+                    b,
+                    scale_a,
+                    scale_b,
+                )
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        self.assertEqual(actual, expected, rtol=5e-2, atol=5e-2)
+        FileCheck().check("tl.static_assert(BLOCK_K == 128").check(
+            "partial = tl.dot("
+        ).check("a if A_ROW_MAJOR else a.T,").check("b if B_ROW_MAJOR else b.T,").check(
+            "scale_a = tl.load("
+        ).check("scale_b_blocks = tl.load(").check(
+            "accumulator += partial * scale_a[:, None] * scale_b[None, :]"
+        ).run(code[0])
+        self.assertNotIn("a_scaled", code[0])
+        self.assertNotIn("b_scaled", code[0])
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
