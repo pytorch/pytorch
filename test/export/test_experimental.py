@@ -29,7 +29,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
 )
-from torch.testing._internal.common_utils import TEST_CUDA
+from torch.testing._internal.common_utils import HardwareClassification, TEST_CUDA
 from torch.utils import _pytree as pytree
 
 
@@ -1118,6 +1118,8 @@ def forward(self, args_0):
 
 
 class TestExperimentCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def _assert_blockmask_partial_replays_bound_tensors(self, device, make_mask_mod):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch.nn.attention.flex_attention import BlockMask, create_block_mask
@@ -1169,8 +1171,7 @@ class TestExperimentCPU(TestCase):
         self.assertFalse(torch.equal(replayed_batch1, expected_batch0))
         self.assertTrue(torch.equal(replayed_batch1, expected_batch1))
 
-    def test_blockmask_partial_extraction_replays_bound_tensors(self):
-        device = "cpu"
+    def test_blockmask_partial_extraction_replays_bound_tensors(self, device):
         self._assert_blockmask_partial_replays_bound_tensors(
             device,
             lambda mask_rule, attn_regions, document_ids: functools.partial(
@@ -1180,8 +1181,7 @@ class TestExperimentCPU(TestCase):
             ),
         )
 
-    def test_blockmask_recursive_partial_extraction_replays_bound_tensors(self):
-        device = "cpu"
+    def test_blockmask_recursive_partial_extraction_replays_bound_tensors(self, device):
         self._assert_blockmask_partial_replays_bound_tensors(
             device,
             lambda mask_rule, attn_regions, document_ids: functools.partial(
@@ -1912,6 +1912,8 @@ def forward(self, arg0_1):
         restored = pytree.tree_unflatten(leaves, spec)
         self.assertTrue(callable(restored.mask_mod))
 
+
+instantiate_device_type_tests(TestExperimentCPU, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
