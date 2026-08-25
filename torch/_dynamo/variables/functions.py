@@ -100,7 +100,9 @@ from .base import (
     Member,
     Method,
     NO_SUCH_SUBOBJ,
+    readonly_setter,
     store_attr_mutation,
+    unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -561,8 +563,8 @@ class BaseUserFunctionVariable(VariableTracker):
         return ConstantVariable.create(self.get_name())
 
     tp_getset = {
-        "__defaults__": GetSet(_get_defaults, None),  # missing setter
-        "__kwdefaults__": GetSet(_get_kwdefaults, None),  # missing setter
+        "__defaults__": GetSet(_get_defaults, unmodeled_setter),
+        "__kwdefaults__": GetSet(_get_kwdefaults, unmodeled_setter),
         "__name__": GetSet(
             lambda s, tx: s._get_named_attr(tx, "__name__"),
             _set_name,
@@ -572,11 +574,11 @@ class BaseUserFunctionVariable(VariableTracker):
             _set_qualname,
         ),
         "__code__": GetSet(
-            lambda s, tx: s._get_named_attr(tx, "__code__"), None
-        ),  # we explicitly forbid setting __code__
+            lambda s, tx: s._get_named_attr(tx, "__code__"), unmodeled_setter
+        ),
         "__dict__": GetSet(
             lambda s, tx: s.get_dict_vt(tx),
-            None,  # missing setter(?)
+            unmodeled_setter,
         ),
         "__annotations__": GetSet(_get_annotations, _set_annotations),
         "__type_params__": GetSet(_get_type_params, _set_type_params),
@@ -590,7 +592,7 @@ class BaseUserFunctionVariable(VariableTracker):
             lambda s, tx: s._get_named_attr(tx, "__module__"),
             getset_set("__module__"),
         ),
-        "__closure__": Member(_get_closure, None),
+        "__closure__": Member(_get_closure, readonly_setter),
     }
 
     def lookup_instance_dict(
@@ -871,7 +873,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         )
 
     tp_getset = {
-        "__get__": GetSet(_get_dunder_get, None),
+        "__get__": GetSet(_get_dunder_get, readonly_setter),
     }
 
     def tp_descr_get_impl(
@@ -1895,8 +1897,8 @@ class UserMethodVariable(UserFunctionVariable):
     # __self__ / __func__ are read-only members on method objects.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/classobject.c#L20-L24
     tp_members = {
-        "__self__": Member(lambda s, _: s.obj, None),
-        "__func__": Member(_get_func, None),
+        "__self__": Member(lambda s, _: s.obj, readonly_setter),
+        "__func__": Member(_get_func, readonly_setter),
     }
 
     def get_real_python_backed_value(self) -> Any:
@@ -3329,9 +3331,9 @@ class FunctoolsPartialVariable(VariableTracker):
         return variables.ConstDictVariable(items, source=source)
 
     tp_members = {
-        "func": Member(_get_func, None),
-        "args": Member(_get_args, None),
-        "keywords": Member(_get_keywords, None),
+        "func": Member(_get_func, readonly_setter),
+        "args": Member(_get_args, readonly_setter),
+        "keywords": Member(_get_keywords, readonly_setter),
     }
 
     def tp_getattro_impl(
@@ -4267,8 +4269,12 @@ class DescriptorVariable(VariableTracker):
     """
 
     tp_members = {
-        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__), None),
-        "__name__": Member(getset_build(lambda s: s.descriptor.__name__), None),
+        "__objclass__": Member(
+            getset_build(lambda s: s.descriptor.__objclass__), readonly_setter
+        ),
+        "__name__": Member(
+            getset_build(lambda s: s.descriptor.__name__), readonly_setter
+        ),
     }
 
 
@@ -4397,14 +4403,16 @@ class MethodWrapperVariable(VariableTracker):
     # Every entry in CPython's wrapper_getsets has a NULL setter.
     tp_getset = {
         "__name__": GetSet(
-            lambda s, tx: ConstantVariable.create(s.descriptor.__name__), None
+            lambda s, tx: ConstantVariable.create(s.descriptor.__name__),
+            readonly_setter,
         ),
         "__qualname__": GetSet(
-            lambda s, tx: ConstantVariable.create(s.descriptor.__qualname__), None
+            lambda s, tx: ConstantVariable.create(s.descriptor.__qualname__),
+            readonly_setter,
         ),
     }
     tp_members = {
-        "__self__": Member(lambda s, tx: s.obj, None),
+        "__self__": Member(lambda s, tx: s.obj, readonly_setter),
     }
 
     def get_real_python_backed_value(self) -> types.MethodWrapperType:
@@ -4663,8 +4671,12 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         return self.descriptor
 
     tp_members = {
-        "__objclass__": Member(getset_build(lambda s: s.descriptor.__objclass__), None),
-        "__name__": Member(getset_build(lambda s: s.descriptor.__name__), None),
+        "__objclass__": Member(
+            getset_build(lambda s: s.descriptor.__objclass__), readonly_setter
+        ),
+        "__name__": Member(
+            getset_build(lambda s: s.descriptor.__name__), readonly_setter
+        ),
     }
 
     def tp_descr_get_impl(
@@ -4867,9 +4879,8 @@ class MemberDescriptorVariable(DescriptorVariable):
         name = self.descriptor.__name__
         entry = obj.lookup_tp_getset_member(name)
         if entry is not None:
-            if entry.setter is None:
-                # PyMember_SetOne rejects a READONLY PyMemberDef.
-                raise_attribute_error(tx, "readonly attribute")
+            # A READONLY PyMemberDef is modeled by readonly_setter, which raises
+            # what PyMember_SetOne raises.
             entry.setter(obj, tx, value)
             return ConstantVariable.create(None)
         # No model for this member. STORE_ATTR itself applies the descriptor, so
@@ -4918,7 +4929,7 @@ class GetSetDescriptorVariable(DescriptorVariable):
         return VariableTracker.build(tx, self.descriptor.__get__, source)
 
     tp_getset = {
-        "__get__": GetSet(_getset_descriptor_get, None),
+        "__get__": GetSet(_getset_descriptor_get, readonly_setter),
     }
 
     def is_python_constant(self) -> bool:
@@ -4954,7 +4965,9 @@ class GetSetDescriptorVariable(DescriptorVariable):
             else:
                 fn, args = setattr, [obj, name_vt, value]
             return VariableTracker.build(tx, fn).call_function(tx, args, {})
-        if entry.setter is None:
+        if entry.setter is readonly_setter:
+            # getset_set's message is more specific than readonly_setter's, and
+            # only this site knows the attribute name and its defining class.
             raise_attribute_error(
                 tx,
                 f"attribute '{name}' of "
@@ -5035,9 +5048,9 @@ class PropertyVariable(VariableTracker):
     }
 
     tp_members = {
-        "fget": Member(getset_build(lambda s: s.descriptor.fget), None),
-        "fset": Member(getset_build(lambda s: s.descriptor.fset), None),
-        "fdel": Member(getset_build(lambda s: s.descriptor.fdel), None),
+        "fget": Member(getset_build(lambda s: s.descriptor.fget), readonly_setter),
+        "fset": Member(getset_build(lambda s: s.descriptor.fset), readonly_setter),
+        "fdel": Member(getset_build(lambda s: s.descriptor.fdel), readonly_setter),
         "__doc__": Member(
             getset_load_or_build(lambda s: s.descriptor.__doc__, "__doc__"),
             getset_set("__doc__"),
@@ -5050,7 +5063,7 @@ class PropertyVariable(VariableTracker):
             getset_set("__name__"),
         ),
         "__isabstractmethod__": GetSet(
-            getset_build(lambda s: s.descriptor.__isabstractmethod__), None
+            getset_build(lambda s: s.descriptor.__isabstractmethod__), readonly_setter
         ),
     }
 

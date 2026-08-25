@@ -85,6 +85,8 @@ from .base import (
     AttributeMutationNew,
     GetSet,
     Method,
+    readonly_setter,
+    unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -3293,12 +3295,12 @@ class NumpyNdarrayVariable(TensorVariable):
     # numpy's array_getsetlist leaves T read-only; real/imag/flat do have setters,
     # but they write the array in place and the VT is a functional graph proxy.
     tp_getset = {
-        "ndim": GetSet(_get_ndim, None),
-        "itemsize": GetSet(_get_itemsize, None),
-        "T": GetSet(lambda s, tx: s._get_numpy_attr(tx, "T"), None),
-        "real": GetSet(lambda s, tx: s._get_numpy_attr(tx, "real"), None),
-        "imag": GetSet(lambda s, tx: s._get_numpy_attr(tx, "imag"), None),
-        "flat": GetSet(lambda s, tx: s._get_numpy_attr(tx, "flat"), None),
+        "ndim": GetSet(_get_ndim, readonly_setter),
+        "itemsize": GetSet(_get_itemsize, readonly_setter),
+        "T": GetSet(lambda s, tx: s._get_numpy_attr(tx, "T"), readonly_setter),
+        "real": GetSet(lambda s, tx: s._get_numpy_attr(tx, "real"), unmodeled_setter),
+        "imag": GetSet(lambda s, tx: s._get_numpy_attr(tx, "imag"), unmodeled_setter),
+        "flat": GetSet(lambda s, tx: s._get_numpy_attr(tx, "flat"), unmodeled_setter),
     }
 
     def tp_getattro_impl(
