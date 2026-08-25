@@ -772,7 +772,7 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
         op_schema.op, input_tuple_strategy
     )
 
-    # create op strategy base on the follow placements
+    # create op strategy based on the follow placements
     op_strategy = OpStrategy([])
 
     input_specs = tuple(

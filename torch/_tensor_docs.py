@@ -6618,7 +6618,7 @@ Is ``True`` if gradients need to be computed for this Tensor, ``False`` otherwis
 
 .. note::
 
-    The fact that gradients need to be computed for a Tensor do not mean that the :attr:`grad`
+    The fact that gradients need to be computed for a Tensor does not mean that the :attr:`grad`
     attribute will be populated, see :attr:`is_leaf` for more details.
 
 """,
