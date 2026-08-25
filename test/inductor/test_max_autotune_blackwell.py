@@ -13,18 +13,14 @@ from torch._inductor.heuristics.template.triton import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
-from torch.utils._triton import has_datacenter_blackwell_tma_device
+from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.utils._triton import has_datacenter_blackwell_tma_device, has_triton
 
 
 def has_tlx() -> bool:
@@ -56,7 +52,6 @@ def tearDownModule():
 class TestMaxAutotuneBlackwell(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -127,7 +122,6 @@ class TestMaxAutotuneBlackwell(TestCase):
 
     # NOTE: the current Inductor template verifies that the scaling mode is either per-tensor or per-row
     # TODO: support additional scaling modes for Blackwell
-    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -187,7 +181,6 @@ class TestMaxAutotuneBlackwell(TestCase):
             "triton.language.make_tensor_descriptor"
         ).check("tl.load_tensor_descriptor").check(write_api).run(code[0])
 
-    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -255,7 +248,6 @@ class TestMaxAutotuneBlackwell(TestCase):
             "triton.language.make_tensor_descriptor"
         ).check("tl.load_tensor_descriptor").check(write_api).run(code[0])
 
-    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -370,7 +362,6 @@ class TestBlackwellTMAStoreFusion(TestCase):
             flatten=False,
         )
 
-    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -428,7 +419,6 @@ class TestBlackwellTMAStoreFusion(TestCase):
             ".store"
         ).run(code[0])
 
-    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -506,7 +496,6 @@ class TestBlackwellTMALoadFusion(TestCase):
             flatten=False,
         )
 
-    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -563,7 +552,6 @@ class TestBlackwellTMALoadFusion(TestCase):
             ".load(["
         ).run(code[0])
 
-    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -621,7 +609,6 @@ class TestBlackwellTMALoadFusion(TestCase):
             ".load(["
         ).run(code[0])
 
-    @requires_capabilities(Capability.lib.triton)
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -767,6 +754,5 @@ instantiate_device_type_tests(TestBlackwellTMALoadFusion, globals(), only_for="c
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
-    # Set env to make it work in CI.
-    if HAS_GPU and HAS_CPU and is_big_gpu():
+    if has_triton() and HAS_CPU and is_big_gpu():
         run_tests()
