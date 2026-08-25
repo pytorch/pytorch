@@ -107,7 +107,6 @@ from torch.distributions.utils import (
     vec_to_tril_matrix,
 )
 from torch.nn.functional import softmax
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -115,7 +114,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMPS,
     instantiate_device_type_tests,
-    onlyAccelerator,
     skipMPS,
 )
 from torch.testing._internal.common_utils import (
@@ -127,7 +125,6 @@ from torch.testing._internal.common_utils import (
     set_default_dtype_if_supported,
     set_rng_seed,
     skipIfTorchDynamo,
-    TEST_XPU,
     TestCase,
 )
 
