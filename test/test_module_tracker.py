@@ -335,8 +335,50 @@ class TestModuleTracker(TestCase):
 
         self.assertEqual(seen, [({"Global"}, True), ({"Global"}, True)])
 
+    @skipIfTorchDynamo("test directly exercises Dynamo's DDP submodule compiler")
+    def test_dynamo_ddp_submodule_compiler_hierarchy(self):
+        from torch._dynamo.backends.distributed import SubmodCompiler
+
+        class Leaf(nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        input_mod = torch.fx.symbolic_trace(Leaf())
+        root = nn.Module()
+        root.submod_0 = input_mod
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.output(graph.call_module("submod_0", (x,)))
+        split_gm = torch.fx.GraphModule(root, graph)
+        fake_mode = torch._subclasses.FakeTensorMode()
+
+        def backend(gm, args, **kwargs):
+            gm(*args)
+            return gm.forward
+
+        compiler = SubmodCompiler(split_gm, backend, fake_mode)
+        seen = []
+        with ModuleTracker() as tracker:
+            handle = nn.modules.module.register_module_forward_pre_hook(
+                lambda module, args: seen.append(
+                    (
+                        copy(tracker.parents),
+                        torch._dynamo.utils.is_dynamo_runtime_module(module),
+                    )
+                )
+                if isinstance(module, torch.fx.GraphModule)
+                else None
+            )
+            try:
+                compiler.run(fake_mode.from_tensor(torch.randn(2, 2)))
+            finally:
+                handle.remove()
+
+        self.assertEqual(seen, [({"Global"}, True), ({"Global"}, True)])
+
     def test_dynamo_runtime_module_context_restores_nested_state(self):
         from torch._dynamo.utils import (
+            dynamo_compiler_modules,
             dynamo_runtime_modules,
             get_dynamo_runtime_module_refs,
             is_dynamo_runtime_module,
@@ -356,6 +398,14 @@ class TestModuleTracker(TestCase):
                         self.assertTrue(is_dynamo_runtime_module(outer))
                         self.assertTrue(is_dynamo_runtime_module(inner))
                         raise RuntimeError("test exception")
+                self.assertTrue(is_dynamo_runtime_module(outer))
+                self.assertFalse(is_dynamo_runtime_module(inner))
+
+                with self.assertRaisesRegex(RuntimeError, "compiler exception"):
+                    with dynamo_compiler_modules():
+                        self.assertTrue(is_dynamo_runtime_module(outer))
+                        self.assertTrue(is_dynamo_runtime_module(inner))
+                        raise RuntimeError("compiler exception")
                 self.assertTrue(is_dynamo_runtime_module(outer))
                 self.assertFalse(is_dynamo_runtime_module(inner))
 
@@ -419,6 +469,65 @@ class TestModuleTracker(TestCase):
                     handle.remove()
 
         self.assertEqual(seen, [({"Global", "Leaf"}, True)])
+
+    @skipIfTorchDynamo("test itself calls torch.compile with an AOT backend")
+    def test_aot_ts_runtime_module_hierarchy(self):
+        compiled = torch.compile(
+            lambda x: x.sin().cos(), backend="aot_ts", fullgraph=True
+        )
+        seen = []
+        with ModuleTracker() as tracker:
+            handle = nn.modules.module.register_module_forward_pre_hook(
+                lambda module, args: seen.append(
+                    (
+                        type(module).__name__,
+                        copy(tracker.parents),
+                        torch._dynamo.utils.is_dynamo_runtime_module(module),
+                    )
+                )
+                if "ScriptModule" in type(module).__name__
+                else None
+            )
+            try:
+                compiled(torch.randn(3, 3))
+                compiled(torch.randn(3, 3))
+            finally:
+                handle.remove()
+
+        self.assertTrue(seen)
+        for module_name, parents, is_dynamo_runtime in seen:
+            self.assertNotIn(module_name, parents)
+            self.assertTrue(is_dynamo_runtime)
+
+    @skipIfTorchDynamo("test itself calls torch.compile with an AOT backend")
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_invoke_subgraph_runtime_module_hierarchy(self):
+        compiled = torch.compile(
+            lambda x: x.sin().cos(), backend="invoke_subgraph", fullgraph=True
+        )
+        seen = []
+        with ModuleTracker() as tracker:
+            handle = nn.modules.module.register_module_forward_pre_hook(
+                lambda module, args: seen.append(
+                    (
+                        type(module).__name__,
+                        copy(tracker.parents),
+                        torch._dynamo.utils.is_dynamo_runtime_module(module),
+                    )
+                )
+                if isinstance(module, torch.fx.GraphModule)
+                else None
+            )
+            try:
+                compiled(torch.randn(3, 3))
+                compiled(torch.randn(3, 3))
+            finally:
+                handle.remove()
+
+        self.assertTrue(seen)
+        for module_name, parents, is_dynamo_runtime in seen:
+            self.assertNotIn(module_name, parents)
+            self.assertTrue(is_dynamo_runtime)
 
     @skipIfTorchDynamo("test itself enables compiled autograd")
     def test_compiled_autograd_runtime_graph_module_hierarchy(self):

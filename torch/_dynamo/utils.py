@@ -4755,6 +4755,7 @@ class _DynamoRuntimeModule(torch.nn.Module):
 class _DynamoRuntimeModuleTLS(threading.local):
     def __init__(self) -> None:
         self.refs: dict[int, DynamoRuntimeModuleRef] = {}
+        self.all_modules = False
 
 
 _dynamo_runtime_module_tls = _DynamoRuntimeModuleTLS()
@@ -4762,21 +4763,30 @@ _dynamo_runtime_module_null_context = contextlib.nullcontext()
 
 
 class _DynamoRuntimeModuleContext:
-    def __init__(self, refs: tuple[DynamoRuntimeModuleRef, ...]) -> None:
+    def __init__(
+        self, refs: tuple[DynamoRuntimeModuleRef, ...], *, all_modules: bool = False
+    ) -> None:
         self.refs = refs
+        self.all_modules = all_modules
         self.prior: dict[int, DynamoRuntimeModuleRef] = {}
+        self.prior_all_modules = False
 
     def __enter__(self) -> None:
         self.prior = _dynamo_runtime_module_tls.refs
+        self.prior_all_modules = _dynamo_runtime_module_tls.all_modules
         current = self.prior.copy()
         for ref in self.refs:
             module = ref()
             if module is not None:
                 current[id(module)] = ref
         _dynamo_runtime_module_tls.refs = current
+        _dynamo_runtime_module_tls.all_modules = (
+            self.prior_all_modules or self.all_modules
+        )
 
     def __exit__(self, *args: Any) -> None:
         _dynamo_runtime_module_tls.refs = self.prior
+        _dynamo_runtime_module_tls.all_modules = self.prior_all_modules
 
 
 def get_dynamo_runtime_module_refs(*values: Any) -> tuple[DynamoRuntimeModuleRef, ...]:
@@ -4847,7 +4857,16 @@ def dynamo_runtime_modules(
     return _DynamoRuntimeModuleContext(refs)
 
 
+def dynamo_compiler_modules() -> AbstractContextManager[None]:
+    """Treat every module invoked by a compiler as a runtime artifact."""
+    if not torch.nn.modules.module._has_any_global_hook():
+        return _dynamo_runtime_module_null_context
+    return _DynamoRuntimeModuleContext((), all_modules=True)
+
+
 def is_dynamo_runtime_module(module: torch.nn.Module) -> bool:
+    if _dynamo_runtime_module_tls.all_modules:
+        return True
     ref = _dynamo_runtime_module_tls.refs.get(id(module))
     return ref is not None and ref() is module
 
@@ -5175,6 +5194,9 @@ def is_compile_supported(device_type: DeviceLikeType) -> Any:
     else:
         compile_supported = False
     return compile_supported
+
+
+is_compile_supported._dynamo_marked_constant = True  # type: ignore[attr-defined]
 
 
 # The following 3.11 source code functions are adapted from

@@ -35,6 +35,7 @@ from functorch.compile import min_cut_rematerialization_partition
 from torch import _guards
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import (
+    dynamo_compiler_modules,
     dynamo_runtime_modules,
     DynamoRuntimeModuleRef,
     get_dynamo_runtime_module_refs,
@@ -191,7 +192,10 @@ def invoke_subgraph_inner_compiler(
 
     invoke_subgraph_wrapper._boxed_call = True  # type: ignore[attr-defined]
 
-    return invoke_subgraph_wrapper
+    return wrap_dynamo_runtime_module_call(
+        invoke_subgraph_wrapper,
+        get_dynamo_runtime_module_refs(subgraph),
+    )
 
 
 # I cannot say how many times I had to revert to this vibe coded version of
@@ -550,7 +554,19 @@ register_backend(
 # AOT Autograd with torchscript backend. Default partitioner.
 # aot_ts uses torchscript backend. We can use this with both nnc and nvfuser
 # by using the relevant fuser with torch.jit.fuser(...)
-aot_ts = aot_autograd(fw_compiler=ts_compile)
+def _aot_ts_compile(
+    gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor]
+) -> Callable[..., Any]:
+    with dynamo_compiler_modules():
+        compiled_fn = ts_compile(gm, fake_tensor_inputs)
+    return wrap_dynamo_runtime_module_call(
+        compiled_fn,
+        # make_boxed_compiler preserves the compiled ScriptModule here.
+        get_dynamo_runtime_module_refs(compiled_fn.__wrapped__),  # type: ignore[attr-defined]
+    )
+
+
+aot_ts = aot_autograd(fw_compiler=_aot_ts_compile)
 register_backend(name="aot_ts", compiler_fn=aot_ts)
 
 # These buggy backends are used for inducing bugs so that we can test

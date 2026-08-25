@@ -5,7 +5,28 @@
 #include <cpuinfo.h>
 #endif
 
+#if defined(__linux__)
+#include <sched.h>
+#endif
+
 namespace c10 {
+
+namespace {
+// Number of CPUs the current process is allowed to run on. On Linux this
+// respects the process' CPU affinity mask (i.e. a cpuset/taskset
+// restriction), which cpuinfo does not account for. Returns 0 if the limit
+// is unknown, in which case callers should ignore it.
+size_t get_cpuset_num_threads() {
+#if defined(__linux__)
+  cpu_set_t cpu_set;
+  CPU_ZERO(&cpu_set);
+  if (sched_getaffinity(0, sizeof(cpu_set), &cpu_set) == 0) {
+    return CPU_COUNT(&cpu_set);
+  }
+#endif
+  return 0;
+}
+} // namespace
 
 size_t TaskThreadPoolBase::defaultNumThreads() {
   size_t num_threads = 0;
@@ -16,14 +37,26 @@ size_t TaskThreadPoolBase::defaultNumThreads() {
     size_t num_cores = cpuinfo_get_cores_count();
     num_threads = cpuinfo_get_processors_count();
     if (num_cores > 0 && num_cores < num_threads) {
-      return num_cores;
+      num_threads = num_cores;
     }
     if (num_threads > 0) {
+      // cpuinfo reports the host topology and ignores any cpuset/affinity
+      // restriction on the current process, so clamp to the number of CPUs
+      // this process is actually allowed to run on.
+      size_t cpuset_threads = get_cpuset_num_threads();
+      if (cpuset_threads > 0 && cpuset_threads < num_threads) {
+        num_threads = cpuset_threads;
+      }
       return num_threads;
     }
   }
 #endif
   num_threads = std::thread::hardware_concurrency();
+  size_t cpuset_threads = get_cpuset_num_threads();
+  if (cpuset_threads > 0 &&
+      (num_threads == 0 || cpuset_threads < num_threads)) {
+    num_threads = cpuset_threads;
+  }
   if (num_threads == 0) {
     num_threads = 1;
   }
