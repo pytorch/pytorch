@@ -3223,7 +3223,11 @@ def _precompile_dynamo(
                 _DYNAMO_COMPILE_LOCK.release()
 
 
-class PrecompiledModule:
+class _PrecompileHandle:
+    """Marker for loaded artifact handles that guard serialization must prune."""
+
+
+class PrecompiledModule(_PrecompileHandle):
     """Internal holder for a precompiled computation / a loaded runnable."""
 
     def __init__(
@@ -3605,6 +3609,8 @@ class _PrecompileApi:
         ``example_inputs`` is a sequence of positional-argument tuples or
         :class:`torch.compiler.ExampleInput` values for ``fn``. ``ExampleInput`` adds
         keyword arguments for the Dynamo tracer.
+        For compatibility, positional arguments after ``fn`` describe one example call;
+        they cannot be combined with ``example_inputs``.
         The outer sequence supports capture front-ends that can specialize one artifact
         from multiple calls. The ``make_fx`` tracer accepts exactly one tuple because it
         records only one execution; ``dynamo`` executes every tuple and records the
@@ -3788,14 +3794,13 @@ class _PrecompileApi:
         the example's (invariant 6).
         """
         torch._C._log_api_usage_once("torch.compiler.precompile")
-        if example_args:
+        if example_inputs is None:
+            example_inputs = [tuple(example_args)]
+        elif example_args:
             raise TypeError(
-                "precompile takes no positional example arguments; pass one call as "
-                "example_inputs=[(arg0, arg1)]."
+                "precompile cannot take both positional examples and example_inputs."
             )
-        if example_inputs is None or (
-            isinstance(example_inputs, Sequence) and len(example_inputs) == 0
-        ):
+        if isinstance(example_inputs, Sequence) and len(example_inputs) == 0:
             raise ValueError(
                 "precompile requires example_inputs=[(...), ...]: one tuple or "
                 "torch.compiler.ExampleInput per call to capture."
