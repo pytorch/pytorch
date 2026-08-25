@@ -49,7 +49,11 @@ def _shape_to_offset(shape, device: torch.device):
 
     blocks_per_sm = device_property.max_threads_per_multi_processor // block_size
     max_grid = device_property.multi_processor_count * blocks_per_sm
-    grid_size = (nelem + block_size - 1) // block_size
+    # Mirrors calc_execution_policy: size the grid off
+    # ceil(nelem / (block_size * unroll)) rather than ceil(nelem / block_size),
+    # so this predicted offset matches what the kernel actually uses.
+    elems_per_block = block_size * unroll
+    grid_size = (nelem + elems_per_block - 1) // elems_per_block
     grid_size = -torch.sym_min(-grid_size, -1)
     grid_size = torch.sym_min(grid_size, max_grid)
 

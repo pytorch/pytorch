@@ -50,7 +50,12 @@ std::tuple<uint64_t, dim3, dim3> calc_execution_policy(const int64_t total_eleme
   const uint64_t numel = static_cast<uint64_t>(total_elements);
   const uint32_t block_size = block_size_bound;
   dim3 dim_block(block_size);
-  dim3 grid((numel + block_size - 1) / block_size);
+  // Size the grid off ceil(numel / (block_size * unroll_factor)) rather than
+  // ceil(numel / block_size), so block*grid*unroll_factor ~= numel and every
+  // vectorized draw's components map to real output elements instead of 3 of
+  // every 4 being computed and discarded.
+  const uint64_t elems_per_block = static_cast<uint64_t>(block_size) * unroll_factor;
+  dim3 grid(static_cast<uint32_t>((numel + elems_per_block - 1) / elems_per_block));
   uint32_t blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / block_size;
   grid.x = std::min(
       static_cast<uint32_t>(at::cuda::getCurrentDeviceProperties()->multiProcessorCount) * blocks_per_sm,
