@@ -6590,10 +6590,12 @@ def _restore_fp32_precision(snapshot):
 def recover_orig_fp32_precision(fn):
     @contextlib.contextmanager
     def recover():
+        old_matmul_precision = torch.get_float32_matmul_precision()
         snap = _snapshot_fp32_precision()
         try:
             yield
         finally:
+            torch.set_float32_matmul_precision(old_matmul_precision)
             _restore_fp32_precision(snap)
 
     return recover()(fn)

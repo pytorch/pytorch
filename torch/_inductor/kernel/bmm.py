@@ -111,7 +111,7 @@ def _bmm_shared_a_configs(dtype):
     BLOCK_M x BLOCK_N x BLOCK_Q floats; the bound below keeps that in registers.
     """
     acc = acc_type(dtype)
-    allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+    allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
 
     for block_m, block_n, block_k, block_q, warps, stages in itertools.product(
         (64, 128), (32, 64), (32, 64), (2, 4, 8), (4, 8), (1, 2, 3)

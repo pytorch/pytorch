@@ -23,7 +23,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_ROCM, decorateIf, skipIfXpu
+    TEST_WITH_ROCM, decorateIf, recover_orig_fp32_precision, skipIfXpu
 )
 from torch.testing._internal.common_cuda import has_device_side_assert
 from torch.testing._internal.common_device_type import \
@@ -40,6 +40,19 @@ import string
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
+    @onlyCPU
+    @recover_orig_fp32_precision
+    def test_recover_orig_fp32_precision_restores_legacy_state(self):
+        torch.set_float32_matmul_precision("highest")
+
+        @recover_orig_fp32_precision
+        def set_tf32():
+            torch.set_float32_matmul_precision("high")
+
+        set_tf32()
+        self.assertEqual(torch.get_float32_matmul_precision(), "highest")
+        self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+
     # Ensure that assertEqual handles numpy arrays properly
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half))
     def test_assertEqual_numpy(self, device, dtype):
