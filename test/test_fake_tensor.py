@@ -71,6 +71,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import all_types_complex_float8_and
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
@@ -406,10 +407,10 @@ class FakeTensorTest(TestCase):
                 return self.cos()
 
             x = torch.empty(2, 2, device="cpu")
-            if CPP_FAKETENSOR:
-                exc, msg = RuntimeError, "my_test_op::foo"
-            else:
-                exc, msg = UnsupportedOperatorException, "my_test_op.foo.default"
+            exc, msg = expectedIfCppFakeTensor(
+                (RuntimeError, "my_test_op::foo"),
+                (UnsupportedOperatorException, "my_test_op.foo.default"),
+            )
             with self.assertRaisesRegex(exc, msg):
                 with FakeTensorMode(allow_fallback_kernels=True) as mode:
                     x = mode.from_tensor(x)
@@ -686,7 +687,7 @@ class FakeTensorTest(TestCase):
             self.assertTrue(is_fake_tensor(out))
 
     def test_repr(self):
-        name = "tensor" if CPP_FAKETENSOR else "FakeTensor"
+        name = expectedIfCppFakeTensor("tensor", "FakeTensor")
         with FakeTensorMode():
             x = torch.empty(2, 2, device="cpu")
             self.assertEqual(repr(x), f"{name}(..., size=(2, 2))")
@@ -3384,8 +3385,8 @@ class FakeTensorPropTest(TestCase):
                 # must be meta). A C++ fake is a plain torch.Tensor already bound
                 # to a Tensor PyObject, so the mismatched mode instead trips
                 # _make_subclass with a RuntimeError; both signal the same reject.
-                refake_errors = (
-                    (AssertionError, RuntimeError) if CPP_FAKETENSOR else AssertionError
+                refake_errors = expectedIfCppFakeTensor(
+                    (AssertionError, RuntimeError), AssertionError
                 )
                 try:
                     FakeTensorProp(graph_model).propagate(value)

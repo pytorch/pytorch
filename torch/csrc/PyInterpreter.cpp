@@ -1110,7 +1110,8 @@ bool run_fake_python_callback(
     torch::jit::Stack* stack,
     const std::function<py::object(py::object, py::dict)>& call,
     const std::function<py::object(py::object)>& convert,
-    const char* label) {
+    const char* label,
+    bool clear_in_kernel = true) {
   const auto& schema = op.schema();
   auto arguments = torch::jit::pop(*stack, schema.arguments().size());
   // Restore the popped args unless we commit results below, so this either
@@ -1125,6 +1126,22 @@ bool run_fake_python_callback(
     }
   });
   auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
+  auto tls = c10::impl::tls_local_dispatch_key_set();
+  if (clear_in_kernel) {
+    tls.included_ = tls.included_.remove(c10::DispatchKey::Meta);
+  }
+  tls.excluded_ = tls.excluded_.remove(c10::DispatchKey::Fake);
+  c10::impl::ForceDispatchKeyGuard guard(tls);
+  const auto old_in_kernel = c10::impl::in_kernel_invocation();
+  if (clear_in_kernel) {
+    c10::impl::set_in_kernel_invocation(false);
+  }
+  auto restore_in_kernel = c10::make_scope_exit(
+      [old_in_kernel, clear_in_kernel]() {
+        if (clear_in_kernel) {
+          c10::impl::set_in_kernel_invocation(old_in_kernel);
+        }
+      });
   py::object result = call(args_kwargs.first, args_kwargs.second);
   if (result.is(py::handle(Py_NotImplemented))) {
     return false;
@@ -1164,45 +1181,57 @@ bool ConcretePyInterpreterVTable::fake_try_decomp(
   if (get_meta_table().contains(py_op)) {
     return false;
   }
+  py::object decomp_fn = py::none();
   py::handle decomp_table = get_decomposition_table();
-  if (!decomp_table.contains(py_op)) {
-    return false;
-  }
-  // Match Python FakeTensorMode: under static shapes, only torch._decomp
-  // decompositions run here and only for non-sparse inputs; other registered
-  // decompositions run exclusively under symbolic sizes.
-  if (!has_symbolic_sizes) {
-    if (!get_torch_decomp_decompositions()(py_op).cast<bool>()) {
-      return false;
-    }
-    auto is_sparse = [](const at::Tensor& t) {
-      switch (t.layout()) {
-        case c10::kSparse:
-        case c10::kSparseCsr:
-        case c10::kSparseCsc:
-        case c10::kSparseBsr:
-        case c10::kSparseBsc:
-          return true;
-        default:
-          return false;
-      }
-    };
-    auto args = torch::jit::last(*stack, op.schema().arguments().size());
-    for (const auto& arg : args) {
-      if (arg.isTensor()) {
-        if (arg.toTensor().defined() && is_sparse(arg.toTensor())) {
-          return false;
-        }
-      } else if (arg.isTensorList()) {
-        for (const at::Tensor& t : arg.toTensorList()) {
-          if (t.defined() && is_sparse(t)) {
+  if (decomp_table.contains(py_op)) {
+    bool use_decomp = has_symbolic_sizes;
+    // Match Python FakeTensorMode: under static shapes, only torch._decomp
+    // decompositions run here and only for non-sparse inputs; other registered
+    // decompositions run exclusively under symbolic sizes.
+    if (!use_decomp && get_torch_decomp_decompositions()(py_op).cast<bool>()) {
+      use_decomp = true;
+      auto is_sparse = [](const at::Tensor& t) {
+        switch (t.layout()) {
+          case c10::kSparse:
+          case c10::kSparseCsr:
+          case c10::kSparseCsc:
+          case c10::kSparseBsr:
+          case c10::kSparseBsc:
+            return true;
+          default:
             return false;
+        }
+      };
+      auto args = torch::jit::last(*stack, op.schema().arguments().size());
+      for (const auto& arg : args) {
+        if (arg.isTensor()) {
+          if (arg.toTensor().defined() && is_sparse(arg.toTensor())) {
+            use_decomp = false;
+            break;
+          }
+        } else if (arg.isTensorList()) {
+          for (const at::Tensor& t : arg.toTensorList()) {
+            if (t.defined() && is_sparse(t)) {
+              use_decomp = false;
+              break;
+            }
           }
         }
       }
     }
+    if (use_decomp) {
+      decomp_fn = decomp_table[py_op];
+    }
   }
-  py::object decomp_fn = decomp_table[py_op];
+
+  if (decomp_fn.is_none()) {
+    py::dict py_kernels = py_op.attr("py_kernels");
+    py::object cia_key = py::cast(c10::DispatchKey::CompositeImplicitAutograd);
+    if (!py_kernels.contains(cia_key)) {
+      return false;
+    }
+    decomp_fn = py_kernels[cia_key];
+  }
 
   return run_fake_python_callback(
       op,
@@ -1275,6 +1304,15 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
       c10::impl::ExcludeDispatchKeyGuard guard(
           c10::DispatchKeySet(c10::DispatchKey::Python) |
           c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
+      auto tls = c10::impl::tls_local_dispatch_key_set();
+      tls.included_ = tls.included_.remove(c10::DispatchKey::Meta);
+      tls.excluded_ = tls.excluded_.remove(c10::DispatchKey::Fake);
+      c10::impl::ForceDispatchKeyGuard fake_guard(tls);
+      const auto old_in_kernel = c10::impl::in_kernel_invocation();
+      c10::impl::set_in_kernel_invocation(false);
+      auto restore_in_kernel = c10::make_scope_exit([old_in_kernel]() {
+        c10::impl::set_in_kernel_invocation(old_in_kernel);
+      });
       result = op_impl(
           active.py_fake_mode, py_op, *args_kwargs.first, **args_kwargs.second);
     }
@@ -1337,7 +1375,8 @@ bool ConcretePyInterpreterVTable::fake_try_prim_meta(
         return prim_meta_impl(*args, **kwargs);
       },
       /*convert=*/{},
-      "prim_meta_impl");
+      "prim_meta_impl",
+      /*clear_in_kernel=*/false);
 }
 
 bool ConcretePyInterpreterVTable::fake_infer_from_real_tensors(
@@ -1490,8 +1529,8 @@ py::object getFakeModePyObj(const std::shared_ptr<c10::FakeTensorMode>& mode) {
       : py::none();
   py::object cls = py::module::import("torch._subclasses.fake_tensor")
                        .attr("CppFakeTensorMode");
-  py::object wrapper = cls.attr("_from_cpp_mode")(
-      py::cast(mode), converter, shape_env);
+  py::object wrapper =
+      cls.attr("_from_cpp_mode")(py::cast(mode), converter, shape_env);
   PyObject* weakref = PyWeakref_NewRef(wrapper.ptr(), nullptr);
   TORCH_CHECK(weakref != nullptr, "failed to weakref CppFakeTensorMode");
   mode->fake_mode_pyobj_ =
