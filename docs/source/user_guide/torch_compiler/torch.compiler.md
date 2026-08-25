@@ -41,6 +41,8 @@ the model(s) included in each tuple, e.g.
 a runnable Python source string plus an acceleration cache. Make-fx artifacts are
 self-contained. Dynamo artifacts may import modules referenced by transformed globals;
 installed artifacts also import the defining Python modules.
+For compatibility, positional arguments after the callable still describe one example
+call; they cannot be combined with `example_inputs`.
 Reload the artifact with `torch.compiler.precompile.load`; since no weights are baked in,
 you pass the model again at runtime. The optional `tracer="dynamo"` path accepts several
 example calls and retains the guarded recompilations they trigger, including
