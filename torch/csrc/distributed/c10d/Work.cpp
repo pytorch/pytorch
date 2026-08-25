@@ -197,8 +197,8 @@ std::chrono::milliseconds Work::getTimeout() const {
   TORCH_CHECK(false, "This Backend doesn't support getTimeout.");
 }
 
-const void* Work::getCompletionKey() const {
-  return this;
+uint64_t Work::getCompletionKey() const {
+  return reinterpret_cast<uintptr_t>(this);
 }
 
 class FutureWrappingWork : public Work {
