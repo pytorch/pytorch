@@ -377,6 +377,9 @@ class DeviceOpOverrides:
     def kernel_driver(self) -> str:
         raise NotImplementedError
 
+    def cpp_kernel_launch_supports_pdl(self) -> bool:
+        return False
+
     def cpp_stream_type(self) -> str:
         raise NotImplementedError
 
