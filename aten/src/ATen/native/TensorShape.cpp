@@ -1358,6 +1358,19 @@ static Tensor make_qtensor(
   return result;
 }
 
+static void copy_fake_tensor_metadata(
+    const Tensor& self,
+    TensorImpl* result_impl) {
+  if (!self.is_fake()) {
+    return;
+  }
+  if (auto fake_device = self.unsafeGetTensorImpl()->fake_device()) {
+    result_impl->set_and_normalize_fake_device(*fake_device);
+  }
+  result_impl->set_fake_tensor_mode(
+      self.unsafeGetTensorImpl()->fake_tensor_mode());
+}
+
 Tensor as_strided_tensorimpl(
     const Tensor& self,
     IntArrayRef size,
@@ -1370,6 +1383,7 @@ Tensor as_strided_tensorimpl(
       self.key_set(),
       self.dtype());
   setStrided(result, size, stride, storage_offset);
+  copy_fake_tensor_metadata(self, result.unsafeGetTensorImpl());
   return result;
 }
 
@@ -1404,6 +1418,7 @@ Tensor as_strided_tensorimpl_meta_symint(
   // bases / storage size.
   setStridedUnchecked(
       result, sym_size, sym_stride, std::move(sym_storage_offset));
+  copy_fake_tensor_metadata(self, result.unsafeGetTensorImpl());
   return result;
 }
 
@@ -1970,6 +1985,7 @@ static Tensor alias_with_sizes_and_strides(
   } else {
     self_tmp_->set_sizes_and_strides(sizes, strides, self.storage_offset());
   }
+  copy_fake_tensor_metadata(self, self_tmp_);
   return self_;
 }
 

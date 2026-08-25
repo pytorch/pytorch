@@ -45,7 +45,7 @@ Tensor _new_zeros_with_same_feature_meta(
     int64_t self_num_batch_dims) {
   auto other_sizes = other.sym_sizes();
   auto other_strides = other.sym_strides();
-  auto other_storage_offset = other.storage_offset();
+  auto other_storage_offset = other.sym_storage_offset();
   auto other_storage_numel = other.storage().sym_nbytes() / c10::SymInt(other.itemsize());
 
   if (self_num_batch_dims == 0) {
