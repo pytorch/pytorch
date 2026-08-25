@@ -1707,68 +1707,6 @@ inline ivalue::Object& IValue::toObjectRef() const {
   return *static_cast<c10::ivalue::Object*>(payload.u.as_intrusive_ptr);
 }
 
-// note: when adding a DEFINE_TO case here you should also add a
-// toX method to IValue. These named methods are much more discoverable
-// than the to templated function.
-
-#define DEFINE_TO(T, method_name)                          \
-  template <>                                              \
-  inline T IValue::to<T>()&& {                             \
-    return static_cast<T>(std::move(*this).method_name()); \
-  }                                                        \
-  template <>                                              \
-  inline c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to<T>() const& { \
-    typedef c10::detail::ivalue_to_const_ref_overload_return<T>::type return_type;          \
-    return static_cast<return_type>(this->method_name());                                   \
-  }
-
-DEFINE_TO(at::Tensor, toTensor)
-DEFINE_TO(at::Storage, toStorage)
-DEFINE_TO(c10::Stream, toStream)
-DEFINE_TO(float, toDouble)
-DEFINE_TO(double, toDouble)
-DEFINE_TO(c10::complex<double>, toComplexDouble)
-DEFINE_TO(unsigned char, toInt)
-DEFINE_TO(signed char, toInt)
-DEFINE_TO(unsigned short, toInt)
-DEFINE_TO(short, toInt)
-DEFINE_TO(int, toInt)
-DEFINE_TO(uint32_t, toInt)
-DEFINE_TO(uint64_t, toInt)
-DEFINE_TO(detail::_guarded_unsigned_long, toInt)
-DEFINE_TO(int64_t, toInt)
-DEFINE_TO(bool, toBool)
-DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob)
-DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
-DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
-DEFINE_TO(at::Scalar, toScalar)
-DEFINE_TO(c10::List<int64_t>, toIntList)
-DEFINE_TO(at::DimVector, toDimVector)
-DEFINE_TO(c10::List<c10::SymInt>, toSymIntList)
-DEFINE_TO(c10::List<double>, toDoubleList)
-DEFINE_TO(c10::List<c10::complex<double>>, toComplexDoubleList)
-DEFINE_TO(c10::List<bool>, toBoolList)
-DEFINE_TO(c10::List<at::Tensor>, toTensorList)
-DEFINE_TO(c10::impl::GenericList, toList)
-DEFINE_TO(c10::impl::GenericDict, toGenericDict)
-DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
-DEFINE_TO(std::string, toStringRef)
-DEFINE_TO(std::string_view, toStringView)
-DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
-DEFINE_TO(c10::intrusive_ptr<ivalue::Await>, toAwait)
-DEFINE_TO(c10::intrusive_ptr<c10::RRefInterface>, toRRef)
-DEFINE_TO(c10::intrusive_ptr<at::Quantizer>, toQuantizer)
-DEFINE_TO(IValue, toIValue)
-DEFINE_TO(c10::Device, toDevice)
-DEFINE_TO(at::ScalarType, toScalarType)
-DEFINE_TO(at::Layout, toLayout)
-DEFINE_TO(at::MemoryFormat, toMemoryFormat)
-DEFINE_TO(at::QScheme, toQScheme)
-DEFINE_TO(at::Generator, toGenerator)
-DEFINE_TO(c10::SymInt, toSymInt)
-DEFINE_TO(c10::SymFloat, toSymFloat)
-DEFINE_TO(c10::SymBool, toSymBool)
-
 template <class T>
 struct _fake_type {};
 
@@ -1966,23 +1904,91 @@ std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args.
   return detail::generic_to_tuple_impl<std::tuple<Args...>>(vals, Indices{});
 }
 
+// note: when adding a case here you should also add a
+// toX method to IValue. These named methods are much more discoverable
+// than the to templated function.
+
+#define TORCH_FORALL_CONVERSIONS(_)                                            \
+  _(at::Tensor, toTensor)                                                      \
+  _(at::Storage, toStorage)                                                    \
+  _(c10::Stream, toStream)                                                     \
+  _(float, toDouble)                                                           \
+  _(double, toDouble)                                                          \
+  _(c10::complex<double>, toComplexDouble)                                     \
+  _(unsigned char, toInt)                                                      \
+  _(signed char, toInt)                                                        \
+  _(unsigned short, toInt)                                                     \
+  _(short, toInt)                                                              \
+  _(int, toInt)                                                                \
+  _(uint32_t, toInt)                                                           \
+  _(uint64_t, toInt)                                                           \
+  _(detail::_guarded_unsigned_long, toInt)                                     \
+  _(int64_t, toInt)                                                            \
+  _(bool, toBool)                                                              \
+  _(c10::intrusive_ptr<caffe2::Blob>, toBlob)                                  \
+  _(c10::intrusive_ptr<ivalue::ConstantString>, toString)                      \
+  _(c10::intrusive_ptr<ivalue::Object>, toObject)                              \
+  _(at::Scalar, toScalar)                                                      \
+  _(c10::List<int64_t>, toIntList)                                             \
+  _(at::DimVector, toDimVector)                                                \
+  _(c10::List<c10::SymInt>, toSymIntList)                                      \
+  _(c10::List<double>, toDoubleList)                                           \
+  _(c10::List<c10::complex<double>>, toComplexDoubleList)                      \
+  _(c10::List<bool>, toBoolList)                                               \
+  _(c10::List<at::Tensor>, toTensorList)                                       \
+  _(c10::impl::GenericList, toList)                                            \
+  _(c10::impl::GenericDict, toGenericDict)                                     \
+  _(c10::intrusive_ptr<ivalue::Tuple>, toTuple)                                \
+  _(std::string, toStringRef)                                                  \
+  _(std::string_view, toStringView)                                            \
+  _(c10::intrusive_ptr<ivalue::Future>, toFuture)                              \
+  _(c10::intrusive_ptr<ivalue::Await>, toAwait)                                \
+  _(c10::intrusive_ptr<c10::RRefInterface>, toRRef)                            \
+  _(c10::intrusive_ptr<at::Quantizer>, toQuantizer)                            \
+  _(IValue, toIValue)                                                          \
+  _(c10::Device, toDevice)                                                     \
+  _(at::ScalarType, toScalarType)                                              \
+  _(at::Layout, toLayout)                                                      \
+  _(at::MemoryFormat, toMemoryFormat)                                          \
+  _(at::QScheme, toQScheme)                                                    \
+  _(at::Generator, toGenerator)                                                \
+  _(c10::SymInt, toSymInt)                                                     \
+  _(c10::SymFloat, toSymFloat)                                                 \
+  _(c10::SymBool, toSymBool)
+
 template <typename T>
 inline T IValue::to() && {
-  return generic_to(std::move(*this), _fake_type<T>{});
-}
-
-template <>
-inline std::optional<std::string_view> IValue::to() && {
-  // In the default implementation, the IValue is destroyed with std::move.
-  // But if the unboxed type is std::optional<string_view> we cannot destroy
-  // the IValue.
-  return generic_to(*this, _fake_type<std::optional<std::string_view>>{});
+#define DEFINE_BRANCH(type, converter)                                         \
+  if constexpr (std::is_same_v<T, type>) {                                     \
+    return static_cast<T>(std::move(*this).converter());                       \
+  } else
+  TORCH_FORALL_CONVERSIONS(DEFINE_BRANCH)
+  /* else */ if constexpr (std::is_same_v<T, std::optional<std::string_view>>) {
+    // In the default implementation, the IValue is destroyed with std::move.
+    // But if the unboxed type is std::optional<string_view> we cannot destroy
+    // the IValue.
+    return generic_to(*this, _fake_type<T>{});
+  } else {
+    return generic_to(std::move(*this), _fake_type<T>{});
+  }
+#undef DEFINE_BRANCH
 }
 
 template <typename T>
-inline typename c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to() const& {
-  return generic_to(*this, _fake_type<T>{});
+inline c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to() const& {
+  using return_type = c10::detail::ivalue_to_const_ref_overload_return<T>::type;
+#define DEFINE_BRANCH(type, converter)                                         \
+  if constexpr (std::is_same_v<T, type>) {                                     \
+    return static_cast<return_type>(this->converter());                        \
+  } else
+  TORCH_FORALL_CONVERSIONS(DEFINE_BRANCH)
+  /* else */ {
+    return generic_to(*this, _fake_type<T>{});
+  }
+#undef DEFINE_BRANCH
 }
+
+#undef TORCH_FORALL_CONVERSIONS
 
 inline c10::List<int64_t> IValue::toIntList() && {
   AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
