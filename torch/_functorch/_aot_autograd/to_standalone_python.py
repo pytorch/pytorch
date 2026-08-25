@@ -1114,7 +1114,11 @@ class _CompileToPythonState:
                 else:
                     graph, inputs, kept_arg_indices = result
                     python_code, cache = _inductor_compile_to_python(
-                        graph, inputs, options=self.options, is_inference=False
+                        graph,
+                        inputs,
+                        options=self.options,
+                        is_inference=False,
+                        is_backward=True,
                     )
                     compiled = _CompiledBackwardSpecialization(
                         python_code=python_code,
@@ -1410,6 +1414,11 @@ def _compose_training_module(
 
     glue = f"""
 _fw_metadata = {fw_metadata_src}
+# ViewAndMutationMeta.__post_init__ reads the ambient functionalize_rng_ops config.
+# Restore the values captured when this graph was traced.
+_fw_metadata.is_rng_op_functionalized = {spec.fw_metadata.is_rng_op_functionalized!r}
+_fw_metadata.num_outputs_rng_offset = {spec.fw_metadata.num_outputs_rng_offset!r}
+_fw_metadata.num_forward = {spec.fw_metadata.num_forward!r}
 _saved_state = _AutogradSavedState(metadata=_fw_metadata)
 _rng_state = {rng_src}
 _BACKWARD_OUTPUT_DEPENDENCIES = {backward_output_dependencies_src}
@@ -1581,7 +1590,7 @@ def call(flat_inputs):  # noqa: F811
 
 def _restride_backward_placeholders(
     bw_gm: GraphModule,
-    fwd_output_strides: Sequence[tuple[int, ...] | None],
+    fwd_output_strides: Sequence[tuple[str, ...] | None],
     spec: Any,
 ) -> None:
     """Restride the backward's saved-activation inputs to what the forward chose.
@@ -1599,6 +1608,8 @@ def _restride_backward_placeholders(
     silent no-op through that entry point.
     """
     import torch
+    from torch._inductor.utils import shape_env_from_inputs
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
 
     if not fwd_output_strides:
         return
@@ -1609,6 +1620,7 @@ def _restride_backward_placeholders(
     saved = list(fwd_output_strides[meta.tensors_saved_for_backwards_slice])
     num_symints = spec.num_symints_saved_for_bw
     placeholders = [n for n in bw_gm.graph.nodes if n.op == "placeholder"]
+    shape_env = shape_env_from_inputs([node.meta.get("val") for node in placeholders])
     for index, node in enumerate(placeholders):
         val = node.meta.get("val")
         if not isinstance(val, torch.Tensor):
@@ -1616,8 +1628,16 @@ def _restride_backward_placeholders(
         offset = index - num_symints
         if not (0 <= offset < len(saved)) or not saved[offset]:
             continue
-        real = tuple(int(s) for s in saved[offset])
-        if len(real) == val.dim() and tuple(val.stride()) != real:
+        real = tuple(
+            shape_env.deserialize_symexpr(s)
+            if shape_env is not None and isinstance(s, str)
+            else int(s)
+            for s in saved[offset]
+        )
+        if len(real) == val.dim() and not all(
+            statically_known_true(actual == expected)
+            for actual, expected in zip(val.stride(), real)
+        ):
             node.meta["val"] = val.as_strided(val.size(), real)
 
 
@@ -1790,7 +1810,7 @@ def _compile_to_python_with_state(
         # layout -- loudly on a conv net, silently if size asserts are off.
         has_joint = "bw" in dense
         differentiates = has_joint or _graph_differentiates(dense["gm"])
-        fwd_output_strides: list[tuple[int, ...] | None] = []
+        fwd_output_strides: list[tuple[str, ...] | None] = []
         inner_python, forward_cache = _inductor_compile_to_python(
             dense["gm"],
             example_inputs,
@@ -1813,7 +1833,11 @@ def _compile_to_python_with_state(
 
         _restride_backward_placeholders(dense["bw"], fwd_output_strides, spec)
         bw_python, backward_cache = _inductor_compile_to_python(
-            dense["bw"], [], options=options, is_inference=False
+            dense["bw"],
+            [],
+            options=options,
+            is_inference=False,
+            is_backward=True,
         )
         from torch.compiler._cache import CacheArtifactManager
 
