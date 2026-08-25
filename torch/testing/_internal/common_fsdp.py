@@ -1613,7 +1613,6 @@ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str:
-        print("BACKEND used", DISTRIBUTED_BACKEND)
         return DISTRIBUTED_BACKEND
 
     @classmethod
