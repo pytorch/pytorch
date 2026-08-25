@@ -94,6 +94,18 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     ~Options() override = default;
     Options(const Options&) = default;
 
+    // Returns an independent copy, preserving the concrete type.
+    // ProcessGroup::splitGroup()/mergeRemoteGroup() clone the options they
+    // hand to a child backend: getBackendOptions() returns the parent's live
+    // options_, and split()/merge() implementations mutate what they are given
+    // (group_name, timeout, global_ranks_in_group, split_color, ...), so
+    // sharing one object corrupts the parent. A subclass that adds fields must
+    // override this or it would be sliced; ProcessGroup detects a sliced clone
+    // and falls back to sharing rather than handing a backend the wrong type.
+    virtual c10::intrusive_ptr<Options> clone() const {
+      return c10::make_intrusive<Options>(*this);
+    }
+
     std::chrono::milliseconds timeout;
 
     // backend name
@@ -150,8 +162,25 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  // Experimental collective time-estimation API. Backends that return true
+  // must simulate collectives issued between startTimeEstimate() and
+  // endTimeEstimate(), which returns the estimated duration in microseconds.
   virtual bool supportsTimeEstimation() const {
     return false;
+  }
+
+  virtual void startTimeEstimate() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support time estimation"));
+  }
+
+  virtual float endTimeEstimate() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support time estimation"));
   }
 
   virtual bool supportsShrinking() const {
@@ -177,6 +206,15 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         getBackendName(),
         " does not support setting timeout; the new value is ignored");
   }
+
+  // Experimental. Adds `timeout` to the timeout assigned to work created after
+  // this call. Work already created retains its assigned timeout. The extension
+  // remains active for all later work until the first work created after this
+  // call completes. Multiple calls accumulate; each extension expires
+  // independently when its first subsequent work completes. Unsupported
+  // backends intentionally ignore temporary timeout extensions.
+  virtual void addEphemeralTimeout(
+      const std::chrono::milliseconds& /*timeout*/) {}
 
   // Fault Tolerance / Reconfigure API
   //
@@ -209,7 +247,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   //
   // Backends that support one-sided operations advertise it via supportsWindow
   // and return a concrete c10d::Window from new_window. The optional tensor, if
-  // provided, is registered with the new window.
+  // provided, is registered with the new window. new_window is collective: all
+  // ranks in the backend must call it in the same order.
   virtual bool supportsWindow() const {
     return false;
   }
@@ -225,7 +264,13 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   //
   // Abort hooks are invoked before the backend aborts on a timeout or error,
   // letting users capture debug information. Hooks are keyed by an opaque
-  // hook_id so they can be individually unregistered.
+  // hook_id so they can be individually unregistered. Backends that implement
+  // them must advertise it via supportsAbortHooks, so a caller can tell "this
+  // backend has no abort hooks" from a registration that genuinely failed.
+  virtual bool supportsAbortHooks() const {
+    return false;
+  }
+
   virtual void registerAbortHook(int64_t /* hook_id */, AbortHook /* hook */) {
     TORCH_CHECK(
         false,
@@ -242,6 +287,39 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ",
             getBackendName(),
             " does not support unregisterAbortHook"));
+  }
+
+  // Completion Hook API
+  //
+  // Completion hooks are invoked when the backend establishes that an operation
+  // has completed, which a backend with a watchdog already does to garbage
+  // collect its work queue. Same hook_id keying and same capability query as
+  // the abort hooks above; see Hooks.hpp for what is reported and the threading
+  // contract. A backend without them leaves its consumers to poll, so
+  // supportsCompletionHooks is what lets a caller choose a fallback rather than
+  // catch a throw.
+  virtual bool supportsCompletionHooks() const {
+    return false;
+  }
+
+  virtual void registerCompletionHook(
+      int64_t /* hook_id */,
+      CompletionHook /* hook */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support registerCompletionHook"));
+  }
+
+  virtual void unregisterCompletionHook(int64_t /* hook_id */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support unregisterCompletionHook"));
   }
 
   virtual void startCoalescing() {
@@ -654,7 +732,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   // See similar functions in ProcessGroup.hpp for context.
-  std::optional<at::Device> getBoundDeviceId() const {
+  virtual std::optional<at::Device> getBoundDeviceId() const {
     return bound_device_id_;
   }
 
@@ -665,7 +743,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // backends may perform
   }
 
-  void setBoundDeviceId(std::optional<at::Device> device) {
+  virtual void setBoundDeviceId(std::optional<at::Device> device) {
     if (device) {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
     }

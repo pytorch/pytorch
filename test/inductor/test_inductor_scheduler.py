@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 from unittest import skipIf
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import sympy
 
@@ -19,6 +19,7 @@ from torch._inductor.scheduler import (
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
+    FusedNestedReductions,
     NestedReduction,
     Scheduler,
 )
@@ -33,6 +34,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     parametrize,
     run_tests,
     TestCase,
@@ -166,6 +168,31 @@ class TestScheduler(TestCase):
         self.assertIn(node3, fused_nodes)
         self.assertNotIn(node1, fused_nodes)
         self.assertNotIn(node2, fused_nodes)
+
+    def test_nested_reduction_fuse_with_propagates_mempool(self):
+        scheduler = object.__new__(Scheduler)
+        node1 = self._mock_base_snode("node1")
+        node2 = self._mock_base_snode("node2")
+        other = self._mock_base_snode("other")
+        grouped_node = self._mock_base_snode("grouped_node")
+        stage = Mock()
+        scheduler.node_to_mempool = {node2: (7, 0)}
+
+        nested = object.__new__(FusedNestedReductions)
+        nested.scheduler = scheduler
+        nested.node1 = node1
+        nested.node2 = node2
+        with (
+            patch.object(
+                FusedNestedReductions,
+                "_plan_append",
+                return_value=(grouped_node, stage),
+            ),
+            patch.object(FusedNestedReductions, "__init__", return_value=None),
+        ):
+            FusedNestedReductions.fuse_with(nested, other)
+
+        self.assertEqual(scheduler.node_to_mempool[grouped_node], (7, 0))
 
     @inductor_config.patch(combo_kernel_max_num_nodes=16)
     def test_combo_kernel_grouping_respects_mempool(self):
@@ -365,6 +392,33 @@ class TestScheduler(TestCase):
                         allow_index_equivalence=True,
                     )
                 )
+
+    def test_nested_reduction_sub_parent_domain_preserves_group_axis(self):
+        grouped = Mock()
+        grouped.get_ranges.return_value = ([3, 6], [16])
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with V.set_graph_handler(graph):
+            context = NestedReduction.PointwiseDomainContext.create(
+                grouped,
+                grouped_numel=18,
+                grouped_rnumel=16,
+                grouped_axis=NestedReduction.GroupedAxis.R,
+                group_size=16,
+                parent_numel=3,
+                parent_rnumel=96,
+            )
+            x_grouped_context = NestedReduction.PointwiseDomainContext.create(
+                grouped,
+                grouped_numel=18,
+                grouped_rnumel=16,
+                grouped_axis=NestedReduction.GroupedAxis.X,
+                group_size=16,
+                parent_numel=3,
+                parent_rnumel=96,
+            )
+        self.assertEqual(context.sub_parent_domain, (3, 6, 8))
+        self.assertIsNone(x_grouped_context.sub_parent_domain)
 
     def test_nested_reduction_grouped_axis_from_ranges(self):
         grouped = Mock()
@@ -986,6 +1040,50 @@ class TestScheduler(TestCase):
 
         with inductor_config.patch(deterministic=True):
             check_realizes()
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    @parametrize("op", ["select_scatter", "index_put"])
+    # Both settings are pinned so the test can only pass via graph_fanout:
+    # deterministic mode makes expand realize src on its own, and the read
+    # threshold decides whether src counts as expensive at all.
+    @inductor_config.patch(deterministic=False, realize_reads_threshold=4)
+    def test_scatter_realizes_expensive_src(self, op):
+        def src(a, b, c, d, e):
+            return a[..., 1] * b[..., 0] + c[..., 1] * d[..., 0] + e[..., 2]
+
+        if op == "select_scatter":
+
+            def fn(base, *args):
+                return torch.select_scatter(base, src(*args), dim=2, index=1)
+        else:
+
+            def fn(base, *args):
+                index = torch.arange(base.shape[0], device=base.device)
+                base.index_put_((index,), src(*args))
+                return base
+
+        device = "cuda"
+        torch.manual_seed(0)
+        base_size = (32, 32, 26) if op == "select_scatter" else (26, 32, 32)
+        base = torch.rand(base_size, dtype=torch.float32, device=device)
+        args = [
+            torch.rand((32, 32, 26), dtype=torch.float32, device=device)
+            for _ in range(5)
+        ]
+        expected = fn(base.clone(), *args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with DeterministicGuard(False), fresh_inductor_cache():
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            actual = compiled(base.clone(), *args)
+
+        self.assertEqual(expected, actual)
+        # src must not be inlined into the scatter loop, which would recompute it
+        # once per element of the broadcast dim.
+        self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
+        self.assertEqual(metrics.generated_kernel_count, 2)
 
 
 class TestScoreFusionMemory(TestCase):

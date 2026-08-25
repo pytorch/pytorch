@@ -596,10 +596,11 @@ struct ConvParams {
     // These checks need to be expanded. Currently we have very limited set of
     // checks for MPS.
 #ifdef USE_MPS
-    if (needs_64bit_indexing_no_split(input, weight)) {
+    if (!input.is_mps()) {
       return false;
     }
-    if (!input.is_mps()) {
+    // conv3d forward handles 64-bit shapes (long-indexed Metal kernel variant)
+    if (needs_64bit_indexing_no_split(input, weight) && !(input.ndimension() == 5 && !transposed)) {
       return false;
     }
     return true;

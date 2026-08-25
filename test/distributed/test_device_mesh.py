@@ -185,7 +185,7 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(is_initialized())
         self.destroy_pg(self.rank)
 
-    @with_comms()
+    @with_comms(backend="nccl-legacy")
     def test_2d_mesh_non_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(self.device_type, mesh_shape)
@@ -1096,20 +1096,12 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         spmd_pg = mesh_2d["spmd"].get_group()
         self.assertEqual(spmd_pg._get_backend_name(), "nccl")
         w = spmd_pg.allreduce(torch.rand(10).cuda(self.rank))
-        self.assertTrue(
-            spmd_pg._get_backend(
-                torch.device(f"cuda:{self.rank}")
-            )._verify_work_timeout(w, timedelta(seconds=30))
-        )
+        self.assertEqual(w.timeout, timedelta(seconds=30))
         w.wait()
         tp_pg = mesh_4d["tp"].get_group()
         self.assertEqual(tp_pg._get_backend_name(), "nccl")
         w = tp_pg.allreduce(torch.rand(10).cuda(self.rank))
-        self.assertTrue(
-            tp_pg._get_backend(torch.device(f"cuda:{self.rank}"))._verify_work_timeout(
-                w, timedelta(seconds=60)
-            )
-        )
+        self.assertEqual(w.timeout, timedelta(seconds=60))
         w.wait()
 
     @with_comms

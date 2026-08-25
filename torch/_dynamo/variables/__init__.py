@@ -121,6 +121,7 @@ from .iter import (
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    DequeIteratorVariable,
     DequeVariable,
     ListIteratorVariable,
     ListVariable,
@@ -194,6 +195,7 @@ from .user_defined import (
     MutableMappingVariable,
     NamedTupleVariable,
     RemovableHandleVariable,
+    SimpleNamespaceVariable,
     StructSequenceVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
@@ -275,6 +277,7 @@ __all__ = [
     "RepeatIteratorVariable",
     "SDPAParamsVariable",
     "SetAttrBuiltinVariable",
+    "SimpleNamespaceVariable",
     "SkipFunctionVariable",
     "SliceVariable",
     "StopIterationVariable",

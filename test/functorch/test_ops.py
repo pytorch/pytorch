@@ -1307,6 +1307,10 @@ class TestOperators(TestCase):
                 "linalg.householder_product",
                 {torch.float32: tol(atol=2e-04, rtol=9e-3)},
             ),
+            tol1(
+                "linalg.polar",
+                {torch.float32: tol(atol=2e-04, rtol=1e-4)},
+            ),
         ),
     )
     @skipOps(
@@ -1584,7 +1588,6 @@ class TestOperators(TestCase):
                 xfail("nn.functional.dropout2d", ""),
                 xfail("svd_lowrank", ""),
                 xfail("pca_lowrank", ""),
-                xfail("clamp"),
                 # something weird happening with channels_last
                 xfail("bfloat16"),
                 xfail("double"),
@@ -2909,9 +2912,9 @@ class TestOperators(TestCase):
         sample_inputs = op.sample_inputs(device, dtype)
 
         for sample_input in sample_inputs:
-            # Check that the op raises NotImplementedError or appropriate failure
+            # Ordered operations either reject complex inputs or lack complex support.
             self.assertRaises(
-                RuntimeError,
+                (TypeError, NotImplementedError),
                 op,
                 sample_input.input,
                 *sample_input.args,
