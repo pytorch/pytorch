@@ -41,6 +41,8 @@ the model(s) included in each tuple, e.g.
 a runnable Python source string plus an acceleration cache. Make-fx artifacts are
 self-contained. Dynamo artifacts may import modules referenced by transformed globals;
 installed artifacts also import the defining Python modules.
+For compatibility, positional arguments after the callable still describe one example
+call; they cannot be combined with `example_inputs`.
 Reload the artifact with `torch.compiler.precompile.load`; since no weights are baked in,
 you pass the model again at runtime. The optional `tracer="dynamo"` path accepts several
 example calls and retains the guarded recompilations they trigger, including
@@ -60,13 +62,15 @@ nested functions that capture locals are not yet supported. The eager backend al
 preserves higher-order graphs such as `torch.cond`, `torch.while_loop`, non-reentrant
 checkpointing, `vmap`, autocast, and grad-mode regions without symbolically retracing
 them at load. Captured nested frames that cannot be reached by a source-only dispatcher
-use an isolated installed artifact; it installs lazily, can be scoped with `with`,
-exposes `unload()`, and may compile an uncovered call. A standalone artifact instead
-rejects calls outside its captured guard sets. With `training=True`, both eager and
-Inductor artifacts retain autograd history; Inductor graphs include readable compiled
-forward and backward code. This training mode works across captured recompilations and
-graph breaks. `PrecompileSummary` reports coverage and dropped guards, while the
-`require_*` options let callers reject incomplete or insufficiently guarded captures.
+use an isolated installed artifact. Loading prepares its backends and guards, its first
+call installs them, and `unload()` removes them; it can also be scoped with `with`.
+An uncovered call compiles with a warning and increments `serve_time_compiles()`. A
+standalone artifact instead rejects calls outside its captured guard sets. With
+`training=True`, both eager and Inductor artifacts retain autograd history; Inductor
+graphs include readable compiled forward and backward code. This training mode works
+across captured recompilations and graph breaks. `PrecompileSummary` reports coverage
+and dropped guards, while the `require_*` options let callers reject incomplete or
+insufficiently guarded captures.
 See the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}

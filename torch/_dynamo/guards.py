@@ -745,6 +745,11 @@ class GuardManagerWrapper:
                 else strip_local_scope(manager.get_source())
             )
             for guard in manager.get_leaf_guards():
+                # compile_check_fn derives relational guards from the complete
+                # tensor set, so a rebuild can place them on different managers
+                # without changing the serialized high-level guards.
+                if isinstance(guard, RelationalGuard):
+                    continue
                 found.update(
                     (source, type(guard).__name__, part) for part in payload(guard)
                 )
@@ -4124,6 +4129,12 @@ class GuardsState:
     local_state: Any | None = None
 
 
+def _is_precompile_handle(obj: Any) -> bool:
+    from torch._precompile import _PrecompileHandle
+
+    return isinstance(obj, _PrecompileHandle)
+
+
 class _Missing:
     def __init__(self, reason: str | None = None) -> None:
         self._reason = reason
@@ -4563,6 +4574,9 @@ class GuardsStatePickler(pickle.Pickler):
         self, obj: Any
     ) -> tuple[Callable[..., Any], tuple[Any, ...]] | Any:
         import sympy
+
+        if _is_precompile_handle(obj):
+            return _Missing, ("precompile handle",)
 
         if id(obj) in self.empty_values:
             return type(obj).__new__, (type(obj),)

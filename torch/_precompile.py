@@ -23,9 +23,10 @@ including guards through process-local values that cannot be reconstructed. By d
 every portable input-derived guard is retained, rebuilt from frozen capture state, and
 checked for predicate drift. A standalone artifact raises when no captured variant matches.
 Captured nested frames that are reachable only by an ordinary Python call use an isolated
-installed mode; it installs lazily, may compile an uncovered call with the selected
-backend, and can be removed with ``unload()``. Compiled graph bodies and kernels remain
-Python source. Eager higher-order ops retain opaque FX structure only where their runtime
+installed mode; loading prepares it, the first call installs it, and an uncovered call
+may compile with the selected backend. ``serve_time_compiles()`` reports those compiles,
+and ``unload()`` removes the installation. Compiled graph bodies and kernels remain Python
+source. Eager higher-order ops retain opaque FX structure only where their runtime
 interpreters require a real ``Graph``; guard trees and transformed/disabled bytecode are
 also stored as opaque inline data.
 
@@ -237,6 +238,7 @@ import dataclasses
 import dis
 import hashlib
 import io
+import itertools
 import logging
 import os
 import re
@@ -2205,7 +2207,9 @@ def _build_dynamo_python_source(
         [
             "# This artifact installs captured entries into an isolated Dynamo cache",
             "# region on first call because ordinary Python calls make some captured",
-            "# frames unreachable from a standalone bytecode dispatcher. unload()",
+            "# frames unreachable from a standalone bytecode dispatcher. Loading",
+            "# prepares its backends and guards without installing them. An uncovered",
+            "# call compiles, warns, and increments serve_time_compiles(); unload()",
             "# removes only this artifact's entries and installed globals.",
         ]
         if state.serving_mode == "installed"
@@ -2482,6 +2486,29 @@ def _dynamo_input_object_ids(
             except Exception:
                 pass
     return seen
+
+
+def _dynamo_example_grads(
+    fn: Callable[..., object], example_inputs: Sequence[ExampleInput]
+) -> dict[int, tuple[torch.Tensor, torch.Tensor | None]]:
+    tensors: dict[int, torch.Tensor] = {}
+
+    def visit(value: object) -> None:
+        if isinstance(value, torch.nn.Module):
+            for tensor in itertools.chain(value.parameters(), value.buffers()):
+                tensors[id(tensor)] = tensor
+        elif isinstance(value, torch.Tensor):
+            tensors[id(value)] = value
+
+    receiver = fn if isinstance(fn, torch.nn.Module) else getattr(fn, "__self__", None)
+    if receiver is not None:
+        visit(receiver)
+    for example in example_inputs:
+        for value in (*example.args, *example.kwargs.values()):
+            visit(value)
+        for value in pytree.tree_leaves((example.args, example.kwargs)):
+            visit(value)
+    return {key: (tensor, tensor.grad) for key, tensor in tensors.items()}
 
 
 def _precompile_dynamo(
@@ -2888,41 +2915,23 @@ def _precompile_dynamo(
         )
         region = context._isolate_recompiles_id
         compiled = context(fn)
-        for example in examples:
-            tensors: dict[int, torch.Tensor] = {}
-            if isinstance(fn, torch.nn.Module):
-                for parameter in fn.parameters():
-                    tensors[id(parameter)] = parameter
-            for value in pytree.tree_leaves((example.args, example.kwargs)):
-                if isinstance(value, torch.nn.Module):
-                    for parameter in value.parameters():
-                        tensors[id(parameter)] = parameter
-                elif isinstance(value, torch.Tensor):
-                    tensors[id(value)] = value
-            saved_grads = {
-                key: (
-                    tensor,
-                    tensor.grad,
-                    None if tensor.grad is None else tensor.grad.detach().clone(),
-                )
-                for key, tensor in tensors.items()
-            }
-            try:
-                compiled(*example.args, **example.kwargs)
-            except (FailOnRecompileLimitHit, RecompileError) as e:
-                truncated.add(target.__qualname__)
-                capture_errors.append(f"{type(e).__name__}: {e}")
-                if require_complete:
-                    raise
-            finally:
-                with torch.no_grad():
-                    for tensor, original, saved in saved_grads.values():
-                        if original is None:
-                            tensor.grad = None
-                        else:
-                            if tensor.grad is not original:
-                                tensor.grad = original
-                            original.copy_(saved)
+        saved_grads = _dynamo_example_grads(fn, examples)
+        try:
+            with torch.no_grad():
+                for tensor, _ in saved_grads.values():
+                    tensor.grad = None
+            for example in examples:
+                try:
+                    compiled(*example.args, **example.kwargs)
+                except (FailOnRecompileLimitHit, RecompileError) as e:
+                    truncated.add(target.__qualname__)
+                    capture_errors.append(f"{type(e).__name__}: {e}")
+                    if require_complete:
+                        raise
+        finally:
+            with torch.no_grad():
+                for tensor, grad in saved_grads.values():
+                    tensor.grad = grad
 
         cache_entry = package.cache_entry()
         code_entries = cache_entry.codes
@@ -3241,7 +3250,11 @@ def _precompile_dynamo(
                 _DYNAMO_COMPILE_LOCK.release()
 
 
-class PrecompiledModule:
+class _PrecompileHandle:
+    """Marker for loaded artifact handles that guard serialization must prune."""
+
+
+class PrecompiledModule(_PrecompileHandle):
     """Internal holder for a precompiled computation / a loaded runnable."""
 
     def __init__(
@@ -3458,6 +3471,13 @@ class PrecompiledModule:
             if unload is not None:
                 unload()
 
+    def serve_time_compiles(self) -> int:
+        """Return the number of graphs compiled after this artifact was loaded."""
+        if self._loaded_forward is None:
+            raise PrecompileError("precompile artifact has not been loaded")
+        count = getattr(self._loaded_forward, "serve_time_compiles", None)
+        return 0 if count is None else cast("int", count())
+
     @property
     def capture_summary(self) -> PrecompileSummary | None:
         if self._loaded_forward is None:
@@ -3616,6 +3636,8 @@ class _PrecompileApi:
         ``example_inputs`` is a sequence of positional-argument tuples or
         :class:`torch.compiler.ExampleInput` values for ``fn``. ``ExampleInput`` adds
         keyword arguments for the Dynamo tracer.
+        For compatibility, positional arguments after ``fn`` describe one example call;
+        they cannot be combined with ``example_inputs``.
         The outer sequence supports capture front-ends that can specialize one artifact
         from multiple calls. The ``make_fx`` tracer accepts exactly one tuple because it
         records only one execution; ``dynamo`` executes every tuple and records the
@@ -3682,8 +3704,10 @@ class _PrecompileApi:
           value. ``nn.Module`` arguments are accepted and checked against the captured
           module type, training mode, parameter/buffer structure, aliasing, and tensor
           metadata. Frames reachable only through ordinary Python calls use an isolated
-          installed artifact; loading remains side-effect free, the first call installs,
-          and ``unload()`` (or context-manager exit) removes the artifact's state.
+          installed artifact. Loading prepares its backends and guard trees without
+          installing them; the first call installs. An uncovered call logs a warning and
+          increments ``serve_time_compiles()``. ``unload()`` (or context-manager exit)
+          removes the artifact's state.
 
         ``decompositions`` is an optional decomposition table (a dict mapping each
         ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
@@ -3794,14 +3818,13 @@ class _PrecompileApi:
         the example's (invariant 6).
         """
         torch._C._log_api_usage_once("torch.compiler.precompile")
-        if example_args:
+        if example_inputs is None:
+            example_inputs = [tuple(example_args)]
+        elif example_args:
             raise TypeError(
-                "precompile takes no positional example arguments; pass one call as "
-                "example_inputs=[(arg0, arg1)]."
+                "precompile cannot take both positional examples and example_inputs."
             )
-        if example_inputs is None or (
-            isinstance(example_inputs, Sequence) and len(example_inputs) == 0
-        ):
+        if isinstance(example_inputs, Sequence) and len(example_inputs) == 0:
             raise ValueError(
                 "precompile requires example_inputs=[(...), ...]: one tuple or "
                 "torch.compiler.ExampleInput per call to capture."
@@ -3900,11 +3923,13 @@ class _PrecompileApi:
         param/buffer list from it (same interning/order as capture).
 
         A Dynamo artifact containing nested frames that a source dispatcher cannot
-        reach installs its package lazily on first use. Pass ``fn=`` to bind that
-        package to a live callable instead of reconstructing the entry function. Its
-        defining modules must still be importable. Such an artifact supports
-        ``unload()`` and the context-manager protocol; both remove only that artifact's
-        isolated entries.
+        reach prepares its package while loading, then installs it lazily on first use.
+        Pass ``fn=`` to bind that package to a live callable instead of reconstructing
+        the entry function. Its defining modules must still be importable. Such an
+        artifact supports ``unload()`` and the context-manager protocol; both remove
+        only that artifact's isolated entries. ``serve_time_compiles()`` reports any
+        uncovered graphs it compiled after loading; each such compile also logs a
+        warning.
 
         Raises ``PrecompileError`` if ``python_code`` is malformed or is not a
         ``torch.compiler.precompile`` artifact (it fails to parse, or is missing the
@@ -4016,6 +4041,9 @@ class _PrecompileApi:
             rebind = getattr(forward, "_rebind", None)
             if rebind is not None:
                 rebind(fn)
+        prepare = getattr(forward, "_prepare", None)
+        if prepare is not None:
+            prepare()
 
         return PrecompiledModule._from_loaded(forward, backend=backend)
 

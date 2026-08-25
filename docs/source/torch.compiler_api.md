@@ -54,7 +54,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *, example_inputs, backend="inductor", tracer="make_fx", decompositions=None, training=False, recompile_limit=256, dynamic=None, guard_filter_fn=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False)
+.. py:function:: precompile(fn, *example_args, example_inputs=None, backend="inductor", tracer="make_fx", decompositions=None, training=False, recompile_limit=256, dynamic=None, guard_filter_fn=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False)
 
    Ahead-of-time precompile ``fn`` against example inputs, returning a runnable Python
    source string plus an acceleration cache as ``(python_code, cache)``.
@@ -78,6 +78,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       model] in ``torch/_precompile.py``. ``torch.compiler.precompile`` is distinct from
       ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` caching mode).
 
+      For compatibility, positional arguments after ``fn`` describe one example call.
+      Do not combine positional examples with ``example_inputs``.
+
       With ``tracer="dynamo"``, every tuple or ``ExampleInput`` in ``example_inputs``
       is executed exactly once during capture. Recompilations become guarded variants
       in the artifact, including automatically dynamic graphs produced when dimensions
@@ -97,7 +100,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       invariant leaf checks. Breaking an unchecked environment assumption can silently
       miscompute. A standalone artifact raises when a call fails every retained guard
       set. An installed artifact may compile an uncovered call with its selected
-      backend. Graph breaks are captured as Dynamo resume frames.
+      backend; it logs a warning and increments ``serve_time_compiles()`` when that
+      happens. Graph breaks are captured as Dynamo resume frames.
       Closure-free Python functions wrapped with ``torch._dynamo.disable`` are embedded
       and execute eagerly between compiled graph segments. Global names left in
       standalone transformed bytecode must resolve to recursive literal values or
@@ -119,7 +123,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       Entry and graph-break resume frames are dispatched directly from the generated
       source. If capture also compiles a nested frame reachable only through an ordinary
       Python call, the artifact uses an isolated installed mode so that frame is served
-      too instead of silently running eager. Installation happens on first call (or
+      too instead of silently running eager. Loading prepares the backends and guard
+      trees without installing them. Installation happens on first call (or
       context-manager entry), and ``unload()`` removes only that artifact's entries.
       Installed artifacts require the defining Python modules to be importable. Pass the
       live callable as ``fn=`` to ``load`` when the entry itself must be rebound.
@@ -143,6 +148,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
        as positional arguments.
+   :param example_args: Positional arguments for one example call, retained for
+       compatibility with the original API. Do not combine them with ``example_inputs``.
    :param example_inputs: A sequence of positional-argument tuples or
        ``torch.compiler.ExampleInput`` values for ``fn``. ``ExampleInput`` carries an
        ``args`` tuple and ``kwargs`` dict. The
