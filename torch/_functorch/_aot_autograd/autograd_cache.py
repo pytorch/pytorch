@@ -373,30 +373,21 @@ def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list[str]:
     return hashes
 
 
-def _collect_wrapped_user_cache_hashes(gm: torch.fx.GraphModule) -> list[str]:
-    wrapped_user_cache_hashes = []
-    for node in gm.graph.nodes:
-        if node.meta and node.meta.get("is_wrapped", False):
-            wrapped_user_cache_hashes.append(node.meta["user_cache_hash"])
-    return wrapped_user_cache_hashes
-
-
-def _collect_saved_tensors_hooks_fx_wrap_cache_hashes(
+def _collect_wrapped_user_cache_hashes(
     gm: torch.fx.GraphModule,
-) -> tuple[list[str], list[str]]:
-    if not hasattr(gm, "saved_tensors_hooks_pack_0"):
-        return ([], [])
-
-    return (
-        _collect_wrapped_user_cache_hashes(
-            # pyrefly: ignore[bad-argument-type]
-            gm.saved_tensors_hooks_pack_0
-        ),
-        _collect_wrapped_user_cache_hashes(
-            # pyrefly: ignore[bad-argument-type]
-            gm.saved_tensors_hooks_unpack_0
-        ),
-    )
+) -> list[tuple[str, list[object]]]:
+    hashes_by_module = []
+    for module_name, module in _iter_named_graph_modules(gm):
+        hashes: list[object] = []
+        for node in module.graph.nodes:
+            # Keep user_cache_hash truthiness aligned with check_node_safe.
+            if node.meta.get("is_wrapped", False) and (
+                cache_hash := node.meta.get("user_cache_hash")
+            ):
+                hashes.append(cache_hash)
+        if hashes:
+            hashes_by_module.append((module_name, hashes))
+    return hashes_by_module
 
 
 def _get_custom_estimator_solver_uuids(
@@ -515,9 +506,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.aot_config = aot_config
         self.act_input_paths = tuple(act_input_paths)
         self._record_runtime_state(gm)
-        self.saved_tensors_hooks_fx_wrap_cache_hashes = (
-            _collect_saved_tensors_hooks_fx_wrap_cache_hashes(gm)
-        )
+        self.wrapped_user_cache_hashes = _collect_wrapped_user_cache_hashes(gm)
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
 
         # region_activation_memory_budget is graph-wide (the partitioner enforces
