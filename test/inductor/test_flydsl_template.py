@@ -686,7 +686,9 @@ class TestFlyDSLTemplate(TestCase):
         )
         self.assertEqual(grid_size, expected)
 
-    def test_grouped_mm_fp16_meta_shape_inference(self):
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    def test_grouped_mm_fp16_rocm_meta_shape_inference(self):
         from torch._meta_registrations import meta_grouped_mm
 
         mat_a = torch.empty(96, 128, device="meta", dtype=torch.float16)
@@ -698,25 +700,28 @@ class TestFlyDSLTemplate(TestCase):
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @parametrize("dtype", (torch.bfloat16, torch.float16))
     @torch._inductor.config.patch(
         max_autotune_gemm=True,
         max_autotune_gemm_backends="FLYDSL",
         flydsl_enable_autotuning=False,
     )
-    def test_flydsl_grouped_mm_e2e(self):
+    def test_flydsl_grouped_mm_grid_stride_e2e(self, dtype):
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
 
         group_sizes = torch.tensor(
-            [0, 1, 67, 0, 130, 3], device="cuda", dtype=torch.int32
+            [0, 1, 640, 0, 130, 3], device="cuda", dtype=torch.int32
         )
         offs = group_sizes.cumsum(0).to(torch.int32)
-        k = 128
-        n = 128
-        a = torch.randn(int(group_sizes.sum()), k, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(group_sizes.numel(), k, n, device="cuda", dtype=torch.bfloat16)
-        code = self._assert_compiled_grouped_mm(a, b, offs)
-        self.assertIn(".mark_layout_dynamic()", code)
+        a = torch.randn(int(group_sizes.sum()), 128, device="cuda", dtype=dtype)
+        b = torch.randn(group_sizes.numel(), 128, 128, device="cuda", dtype=dtype)
+        with mock.patch(
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.get_grouped_gemm_persistent_grid_size",
+            return_value=4,
+        ) as grid_size:
+            code = self._assert_compiled_grouped_mm(a, b, offs)
+        grid_size.assert_called_once()
         self.assertIn("FLYDSL_COMPILE_ONLY", code)
         self.assertIn("_precompile", code)
 
@@ -792,8 +797,8 @@ class TestFlyDSLTemplate(TestCase):
         )
         cases = (
             (
-                "block_swizzle",
-                1,
+                "block_swizzle_across_groups",
+                2,
                 4096,
                 1024,
                 128,
@@ -842,11 +847,12 @@ class TestFlyDSLTemplate(TestCase):
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @parametrize("dtype", (torch.bfloat16, torch.float16))
     @torch._inductor.config.patch(
         max_autotune_gemm=True,
         max_autotune_gemm_backends="ATEN,FLYDSL",
     )
-    def test_flydsl_grouped_mm_fallback_e2e(self):
+    def test_flydsl_grouped_mm_fallback_e2e(self, dtype):
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
 
@@ -854,22 +860,18 @@ class TestFlyDSLTemplate(TestCase):
         offs = group_sizes.cumsum(0).to(torch.int32)
         k = 128
         total_m = int(group_sizes.sum())
-        a = torch.randn(total_m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(2, k, 128, device="cuda", dtype=torch.bfloat16)
-        a_padded = torch.randn(total_m, k + 8, device="cuda", dtype=torch.bfloat16)[
-            :, :k
-        ]
-        b_padded = torch.randn(2, k, 136, device="cuda", dtype=torch.bfloat16)[
-            ..., :128
-        ]
+        a = torch.randn(total_m, k, device="cuda", dtype=dtype)
+        b = torch.randn(2, k, 128, device="cuda", dtype=dtype)
+        a_padded = torch.randn(total_m, k + 8, device="cuda", dtype=dtype)[:, :k]
+        b_padded = torch.randn(2, k, 136, device="cuda", dtype=dtype)[..., :128]
         a_aligned = torch.as_strided(
-            torch.randn(total_m * k + 8, device="cuda", dtype=torch.bfloat16),
+            torch.randn(total_m * k + 8, device="cuda", dtype=dtype),
             (total_m, k),
             (k, 1),
             storage_offset=8,
         )
         b_aligned = torch.as_strided(
-            torch.randn(2 * k * 128 + 8, device="cuda", dtype=torch.bfloat16),
+            torch.randn(2 * k * 128 + 8, device="cuda", dtype=dtype),
             (2, k, 128),
             (k * 128, 128, 1),
             storage_offset=8,
@@ -881,14 +883,12 @@ class TestFlyDSLTemplate(TestCase):
             (
                 "b_transposed",
                 a,
-                torch.randn(2, 256, k, device="cuda", dtype=torch.bfloat16).transpose(
-                    -1, -2
-                ),
+                torch.randn(2, 256, k, device="cuda", dtype=dtype).transpose(-1, -2),
             ),
             (
                 "n_not_tile_divisible",
                 a,
-                torch.randn(2, k, 96, device="cuda", dtype=torch.bfloat16),
+                torch.randn(2, k, 96, device="cuda", dtype=dtype),
             ),
             ("a_padded_stride", a_padded, b),
             ("b_padded_stride", a, b_padded),

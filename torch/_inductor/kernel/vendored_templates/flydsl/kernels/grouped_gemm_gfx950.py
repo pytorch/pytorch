@@ -29,35 +29,27 @@ def _grouped_swizzle_tile(param, num_pid_m, num_pid_n, local_tile, grid, tiles_b
         return bid_m, bid_n
 
     num_xcds = 8
-    swizzle_threshold = 256
-    num_workgroups = num_pid_m * num_pid_n
     # BlockSwizzle maps pid % NUM_XCDS to hardware XCD assignment. In the
     # persistent grouped loop local_tile = blockIdx.x + j * grid - tiles_before,
     # so local_tile % NUM_XCDS tracks blockIdx.x only when both grid and
     # tiles_before are NUM_XCDS-aligned. Otherwise fall back to M-major tile
     # order so concurrent CTAs share bid_n and reuse the same B tile.
-    use_block_swizzle = (
-        (num_workgroups >= swizzle_threshold)
-        & ((num_workgroups % num_xcds) == 0)
-        & ((grid % num_xcds) == 0)
-        & ((tiles_before % num_xcds) == 0)
-    )
-    if const_expr(isinstance(use_block_swizzle, bool)):
-        if not use_block_swizzle:
+    xcd_aligned = ((grid % num_xcds) == 0) & ((tiles_before % num_xcds) == 0)
+    if const_expr(isinstance(xcd_aligned, bool)):
+        if not xcd_aligned:
             return bid_m, bid_n
-        block_swizzle = BlockSwizzle(
-            NUM_XCDS=num_xcds,
-            NUM_PIDS_THRESHOLD=swizzle_threshold,
-            GROUP_M=param.group_m,
-        )
-        return block_swizzle.swizzle(num_pid_m, num_pid_n, local_tile)
     block_swizzle = BlockSwizzle(
-        NUM_XCDS=num_xcds, NUM_PIDS_THRESHOLD=swizzle_threshold, GROUP_M=param.group_m
+        NUM_XCDS=num_xcds,
+        NUM_PIDS_THRESHOLD=256,
+        GROUP_M=param.group_m,
+        M_MAJOR_FALLBACK=True,
     )
     swizzled_m, swizzled_n = block_swizzle.swizzle(num_pid_m, num_pid_n, local_tile)
+    if const_expr(isinstance(xcd_aligned, bool)):
+        return swizzled_m, swizzled_n
     return (
-        use_block_swizzle.select(swizzled_m, bid_m),
-        use_block_swizzle.select(swizzled_n, bid_n),
+        xcd_aligned.select(swizzled_m, bid_m),
+        xcd_aligned.select(swizzled_n, bid_n),
     )
 
 
