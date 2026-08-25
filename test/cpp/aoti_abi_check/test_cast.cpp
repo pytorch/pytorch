@@ -28,11 +28,17 @@ TEST(TestCast, TestCheckedConvert) {
   EXPECT_THROW(checked_convert<int8_t>(200, "int8_t"), std::runtime_error);
 }
 
+TEST(TestCast, TestConvertFloatToInt) {
+  using torch::headeronly::convert;
+  // Exercises unchecked_cast_to_int, which convert() routes through when
+  // going from a non-integral source to an integral destination.
+  EXPECT_EQ(convert<int32_t>(3.7), 3);
+  EXPECT_EQ(convert<uint8_t>(200.0), 200);
+}
+
 TEST(TestCast, TestUnsafeWrappingConvert) {
   using torch::headeronly::unsafe_wrapping_convert;
 
-  // Unlike checked_convert, unsafe_wrapping_convert permits two's-complement
-  // wraparound when converting a negative signed value to an unsigned type.
   EXPECT_EQ(unsafe_wrapping_convert<uint8_t>(-1, "uint8_t"), 255);
 }
 
