@@ -1187,7 +1187,7 @@ class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
-    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires at least 2 GPUs")
     def test_eager_init_with_per_rank_visible_device(self) -> None:
         child_env = os.environ.copy()
         visible_devices = child_env.get("CUDA_VISIBLE_DEVICES")
