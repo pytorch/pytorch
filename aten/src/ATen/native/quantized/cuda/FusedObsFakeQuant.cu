@@ -293,6 +293,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     bool symmetric_quant) {
   TORCH_CHECK(ch_axis < x.dim(), "Error in fused_moving_avg_obs_fake_quant_cpu: ch_axis must be < self.dim()");
   const auto x_contig = x.contiguous();
+  const auto observer_on_long = observer_on.to(at::kLong);
   // Calculate the size of the dimension we need to quantize over,
   // For per-channel quant we default to axis 0, since it is only for
   // weight quantization currently.
@@ -318,7 +319,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     }
     _calculate_moving_average(
         y,
-        observer_on.to(at::kLong),
+        observer_on_long,
         running_min,
         running_max,
         averaging_const,
@@ -327,7 +328,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
   } else {
     _calculate_moving_average(
         x_contig,
-        observer_on.to(at::kLong),
+        observer_on_long,
         running_min,
         running_max,
         averaging_const,
@@ -340,7 +341,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
 
   _calc_moving_avg_qparams_helper(
       x_contig,
-      observer_on.to(at::kLong),
+      observer_on_long,
       fake_quant_on.to(at::kLong),
       running_min,
       running_max,

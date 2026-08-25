@@ -210,10 +210,9 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
           ch_axis);
     }
   }
-  // Calculate qparams whenever the running min/max are valid, so that
-  // `scale` and `zero_point` stay in sync with them even if fake quant is
-  // disabled. Skip this if we never observed, since the running min/max are
-  // still +/-inf in that case.
+  // Refresh the qparams if the observer ran this step, so that `scale` and
+  // `zero_point` track the running min/max even when fake quant is disabled.
+  // Keep computing them when fake quant is on to preserve existing behavior.
   auto fake_quant = fake_quant_on.item().toInt();
   if (observe || fake_quant) {
     choose_qparams(
