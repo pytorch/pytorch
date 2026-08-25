@@ -42,13 +42,15 @@ a self-contained, runnable Python source string plus an acceleration cache. Relo
 artifact with `torch.compiler.precompile.load`; since no weights are baked in, you pass
 the model again at runtime. The optional `tracer="dynamo"` path accepts several example
 tuples and retains the guarded recompilations they trigger, including automatically
-dynamic graphs. It retains guards derived from explicit inputs and treats the Python
+dynamic graphs. It retains guards derived from runtime inputs and treats the Python
 environment as invariant between capture and runtime. Initial support is for Python
-functions with tensor/scalar arguments; graph breaks, closures, and `nn.Module` arguments
-are not supported yet. With `training=True` and the Inductor backend, Dynamo graphs
-include readable compiled forward and backward code, so served outputs retain a
-`grad_fn` and can be passed to `backward()`. This training mode works across captured
-recompilations. See the {ref}`API reference <torch.compiler_api>` for details.
+functions with tensor, scalar, and Python-container arguments. Graph breaks and
+closure-free `torch._dynamo.disable` functions are preserved; top-level closures,
+nested functions that capture locals, and `nn.Module` arguments are not supported yet.
+With `training=True` and the Inductor backend, Dynamo graphs include readable compiled
+forward and backward code, so served outputs retain a `grad_fn` and can be passed to
+`backward()`. This training mode works across captured recompilations and graph breaks.
+See the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}
 `torch.compile` may not support recently released major versions of Python.

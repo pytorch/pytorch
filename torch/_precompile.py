@@ -13,17 +13,19 @@ and the artifact faithfully reproduces ``fn``; step outside it and you get an ar
 that computes the wrong thing.
 
 With ``tracer="dynamo"``, precompile executes every tuple in ``example_inputs`` and
-captures the guarded specializations and recompilations Dynamo produces. Graph breaks
-are not supported yet. Guards derived from explicit inputs are retained for dispatch;
-guards covering the Python environment may be dropped because that environment is a
-caller-provided invariant. The artifact never compiles after loading; a call that fails
-every retained guard set raises. Compiled graphs and kernels remain Python source, while
-guard trees and transformed bytecode are stored as opaque inline data.
+captures the guarded specializations, recompilations, and graph-break resume frames
+Dynamo produces. Closure-free functions wrapped with ``torch._dynamo.disable`` are
+embedded for eager execution between compiled segments. Guards derived from runtime
+locals are retained for dispatch; guards covering the Python environment may be dropped
+because that environment is a caller-provided invariant. The artifact never compiles
+after loading; a call that fails every retained guard set raises. Compiled graphs and
+kernels remain Python source, while guard trees, transformed entry/resume bytecode, and
+disabled-function bytecode are stored as opaque inline data.
 
 With ``tracer="dynamo", training=True`` (inductor backend only), every compiled graph
 contains AOTAutograd's forward and backward as readable Inductor source. The served
 output retains its ``grad_fn`` and a later ``backward()`` executes those captured
-backward kernels across captured recompilations.
+backward kernels across captured recompilations and graph breaks.
 
 ``precompile`` returns a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
@@ -215,7 +217,7 @@ it.
 # non-strict trace. "dynamo" analyzes Python bytecode, captures one variant per
 # specialization/recompilation exercised by example_inputs, minimizes guard records
 # while preserving dispatch for those calls, and dispatches among the variants at
-# runtime. It currently requires one full graph (no graph breaks).
+# runtime. Graph breaks are reconstructed from their captured resume frames.
 
 from __future__ import annotations
 
@@ -223,7 +225,7 @@ import hashlib
 import io
 import logging
 import threading
-from types import MappingProxyType
+from types import CodeType, MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 
 import torch
@@ -1404,14 +1406,14 @@ def _dynamo_backend_compiler(
 
 
 def _filter_dynamo_guards(
-    target: Callable[..., object],
+    target_code: CodeType,
+    runtime_global_scope: dict[str, object],
     guarded_codes: Sequence[Any],
-    example_inputs: Sequence[tuple[object, ...]],
+    example_scopes: Sequence[dict[str, object]],
 ) -> list[bytes]:
-    """Drop environment guards while preserving every input-derived guard."""
+    """Drop environment guards while preserving every local-derived guard."""
     import dataclasses
     import functools
-    import inspect
 
     from torch._dynamo.guards import CheckFunctionManager, GuardBuilder
     from torch._dynamo.output_graph import OutputGraphCommon
@@ -1419,18 +1421,12 @@ def _filter_dynamo_guards(
     from torch._guards import GuardsSet
     from torch.utils._ordered_set import OrderedSet
 
-    signature = inspect.signature(target)
-    example_scopes: list[dict[str, object]] = []
-    for example in example_inputs:
-        bound = signature.bind(*example)
-        bound.apply_defaults()
-        example_scopes.append(dict(bound.arguments))
-    input_roots = {f"L[{name!r}]" for scope in example_scopes for name in scope}
+    local_roots = {f"L[{name!r}]" for scope in example_scopes for name in scope}
 
-    def is_input_source(source: str) -> bool:
+    def is_local_source(source: str) -> bool:
         return any(
             source == root or source.startswith((f"{root}.", f"{root}["))
-            for root in input_roots
+            for root in local_roots
         )
 
     def fresh_guard(guard: Any, *, final: bool = False) -> Any:
@@ -1454,7 +1450,7 @@ def _filter_dynamo_guards(
     def manager_for(state: Any, output_graph: Any | None = None) -> Any:
         if output_graph is not None:
             state = dataclasses.replace(state, output_graph=output_graph)
-        return load_guard_manager(state, target.__code__, target.__globals__)
+        return load_guard_manager(state, target_code, runtime_global_scope)
 
     def outcomes(
         state: Any,
@@ -1501,7 +1497,7 @@ def _filter_dynamo_guards(
             if records is kept_aot_guards or records is kept_key_order:
                 return False
             guard = records[index]
-            if not guard.name or is_input_source(guard.name):
+            if not guard.name or is_local_source(guard.name):
                 return False
             candidate = records[:index] + records[index + 1 :]
             trial_guards = candidate if records is kept_guards else kept_guards
@@ -1549,10 +1545,10 @@ def _filter_dynamo_guards(
             else None
         )
         check_fn = CheckFunctionManager(
-            target.__code__,
+            target_code,
             OutputGraphCommon(output_graph),
             shape_code_parts=shape_code_parts,
-            runtime_global_scope=target.__globals__,
+            runtime_global_scope=runtime_global_scope,
             save_guards=True,
             strict_error=True,
             guard_build_local_state=state.local_state,
@@ -1601,12 +1597,13 @@ def _build_dynamo_python_source(
         ) from e
 
     dynamic_count = sum(compiled.is_dynamic for compiled in compiled_backends)
+    variant_count = sum(len(code["variants"]) for code in state["codes"])
     parts = [
         '# Generated by torch.compiler.precompile (tracer="dynamo") -- do not edit.',
         "#",
         "# The compiled graphs and kernels below remain Python source. Dynamo's guard",
-        "# trees and transformed code objects have no source form, so section 2 stores",
-        "# only minimized dispatch guard state plus bytecode as base64-encoded pickle data.",
+        "# trees and required code objects have no source form, so section 2 stores",
+        "# minimized dispatch guards and bytecode as base64-encoded pickle data.",
         "",
         "# " + "=" * 70,
         "# 1. Capture metadata and compiled Python graph sources",
@@ -1614,7 +1611,8 @@ def _build_dynamo_python_source(
         f"BACKEND = {backend!r}",
         'TRACER = "dynamo"',
         f"TRAINING = {training!r}",
-        f"VARIANT_COUNT = {len(state['variants'])}",
+        f"FRAME_COUNT = {len(state['codes'])}",
+        f"VARIANT_COUNT = {variant_count}",
         f"GRAPH_COUNT = {len(compiled_backends)}",
         f"DYNAMIC_GRAPH_COUNT = {dynamic_count}",
         f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}",
@@ -1631,12 +1629,12 @@ def _build_dynamo_python_source(
             ")",
             "",
             "# " + "=" * 70,
-            "# 2. Guard trees and transformed Dynamo bytecode (opaque)",
+            "# 2. Guard trees and Dynamo/disabled-function bytecode (opaque)",
             "# " + "=" * 70,
             f"_DYNAMO_STATE = {encoded_state!r}",
             "",
             "# " + "=" * 70,
-            "# 3. Python runtime glue: rebuild guards and dispatch variants",
+            "# 3. Python runtime glue: rebuild guards/resume frames and dispatch",
             "# " + "=" * 70,
             inspect.getsource(driver._build_dynamo_forward),
             "",
@@ -1673,7 +1671,10 @@ def _precompile_dynamo(
     decompositions: dict | None,
     training: bool,
 ) -> tuple[str, bytes]:
+    import dis
+    import importlib
     import inspect
+    import sys
     import types
 
     if not example_inputs:
@@ -1698,7 +1699,8 @@ def _precompile_dynamo(
 
     from torch._dynamo.eval_frame import innermost_fn
     from torch._dynamo.exc import BackendCompilerFailed, PackageError, Unsupported
-    from torch._dynamo.package import CompilePackage
+    from torch._dynamo.guards import CheckFunctionManager
+    from torch._dynamo.package import CompilePackage, SerializedCode
 
     target = innermost_fn(fn)
     if not inspect.isfunction(target):
@@ -1710,6 +1712,11 @@ def _precompile_dynamo(
         raise NotImplementedError(
             "precompile tracer='dynamo' does not yet support functions with closure "
             "cells; pass captured values as explicit arguments."
+        )
+    if target.__code__.co_cellvars:
+        raise NotImplementedError(
+            "precompile tracer='dynamo' does not yet support nested functions that "
+            "capture local variables."
         )
 
     capture_target = types.FunctionType(
@@ -1723,41 +1730,263 @@ def _precompile_dynamo(
     capture_target.__module__ = target.__module__
     capture_target.__qualname__ = target.__qualname__
 
+    def is_literal(value: object) -> bool:
+        if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):
+            return True
+        if isinstance(value, tuple):
+            return all(is_literal(item) for item in value)
+        if isinstance(value, frozenset):
+            return all(is_literal(item) for item in value)
+        return False
+
+    def importable_global(value: object) -> tuple[str, tuple[str, ...]] | None:
+        if isinstance(value, types.ModuleType):
+            if value.__name__ == "__main__" or value.__spec__ is None:
+                return None
+            try:
+                imported = importlib.import_module(value.__name__)
+            except ImportError:
+                return None
+            return (value.__name__, ()) if imported is value else None
+        module_name = getattr(value, "__module__", None)
+        if not isinstance(module_name, str):
+            return None
+        names = [getattr(value, "__qualname__", None), getattr(value, "__name__", None)]
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            return None
+        for name in names:
+            if not isinstance(name, str) or "<locals>" in name:
+                continue
+            path = tuple(name.split("."))
+            resolved: object = module
+            try:
+                for attr in path:
+                    resolved = getattr(resolved, attr)
+            except AttributeError:
+                continue
+            if resolved is value:
+                return module_name, path
+        return None
+
+    def loaded_global_names(code: CodeType) -> set[str]:
+        names = {
+            instruction.argval
+            for instruction in dis.get_instructions(code)
+            if instruction.opname
+            in ("LOAD_GLOBAL", "LOAD_NAME", "LOAD_FROM_DICT_OR_GLOBALS")
+            and isinstance(instruction.argval, str)
+        }
+        for const in code.co_consts:
+            if isinstance(const, CodeType):
+                names.update(loaded_global_names(const))
+        return names
+
+    def mutates_globals(code: CodeType) -> bool:
+        if any(
+            instruction.opname in ("STORE_GLOBAL", "DELETE_GLOBAL")
+            for instruction in dis.get_instructions(code)
+        ):
+            return True
+        return any(
+            mutates_globals(const)
+            for const in code.co_consts
+            if isinstance(const, CodeType)
+        )
+
+    def disabled_function_state(
+        global_name: str, function: Callable[..., object]
+    ) -> dict[str, object]:
+        original = getattr(function, "_torchdynamo_orig_callable", function)
+        if not inspect.isfunction(original) or original.__closure__ is not None:
+            raise NotImplementedError(
+                "precompile tracer='dynamo' graph breaks currently require "
+                f"{global_name!r} to wrap a closure-free Python function."
+            )
+        dynamic_globals = loaded_global_names(original.__code__) & {
+            "eval",
+            "exec",
+            "globals",
+        }
+        if dynamic_globals:
+            names = ", ".join(sorted(dynamic_globals))
+            raise NotImplementedError(
+                "precompile tracer='dynamo' disabled functions cannot use dynamic "
+                f"global access through {names}."
+            )
+        if mutates_globals(original.__code__):
+            raise NotImplementedError(
+                "precompile tracer='dynamo' disabled functions cannot mutate globals."
+            )
+        module_globals: dict[str, str] = {}
+        value_globals: dict[str, object] = {}
+        for name in loaded_global_names(original.__code__):
+            if name not in original.__globals__:
+                continue
+            value = original.__globals__[name]
+            if isinstance(value, types.ModuleType):
+                binding = importable_global(value)
+                if binding is None:
+                    raise NotImplementedError(
+                        "precompile tracer='dynamo' cannot serialize non-importable "
+                        f"module global {name!r} used by disabled function "
+                        f"{global_name!r}."
+                    )
+                module_globals[name] = binding[0]
+            elif is_literal(value):
+                value_globals[name] = value
+            else:
+                raise NotImplementedError(
+                    "precompile tracer='dynamo' cannot serialize global "
+                    f"{name!r} used by disabled function {global_name!r}; only "
+                    "importable modules and recursive literal values are supported."
+                )
+        defaults = original.__defaults__
+        kwdefaults = original.__kwdefaults__
+        if not is_literal(defaults) or not is_literal(
+            tuple((kwdefaults or {}).values())
+        ):
+            raise NotImplementedError(
+                "precompile tracer='dynamo' disabled-function defaults must contain "
+                "only recursive literal values."
+            )
+        return {
+            "code": SerializedCode.from_code_object(original.__code__),
+            "name": original.__name__,
+            "defaults": defaults,
+            "kwdefaults": kwdefaults,
+            "module_globals": module_globals,
+            "value_globals": value_globals,
+        }
+
     _DYNAMO_COMPILE_LOCK.acquire()
     try:
         package = CompilePackage(capture_target)
+
+        unsupported_capture_guards: set[tuple[str, str]] = set()
+
+        def keep_portable_capture_guards(guards: Sequence[Any]) -> list[bool]:
+            unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            result = []
+            for guard in guards:
+                is_unsupported = guard.guard_type in unsupported or any(
+                    derived in unsupported for derived in guard.derived_guard_types
+                )
+                if not is_unsupported:
+                    result.append(True)
+                    continue
+                portable_global = guard.is_global
+                result.append(not portable_global)
+                if not portable_global:
+                    unsupported_capture_guards.add((guard.name, guard.guard_type))
+            return result
+
         compiled = torch._dynamo.optimize(
             backend=_dynamo_backend_compiler(backend, training),
-            nopython=True,
+            nopython=False,
+            guard_filter_fn=keep_portable_capture_guards,
             package=package,
             dynamic=None,
         )(capture_target)
-        if training:
-            with torch.enable_grad():
+        captured_scopes: list[tuple[Any, dict[str, object]]] = []
+        previous_profile = sys.getprofile()
+
+        def record_scope(frame: types.FrameType, event: str) -> None:
+            if (
+                event == "call"
+                and frame.f_code.co_filename == target.__code__.co_filename
+            ):
+                captured_scopes.append(
+                    (
+                        SerializedCode.from_code_object(frame.f_code),
+                        dict(frame.f_locals),
+                    )
+                )
+
+        use_profile = previous_profile is None or callable(previous_profile)
+        previous_trace = None
+        if use_profile:
+
+            def profile(frame: types.FrameType, event: str, arg: object) -> None:
+                if previous_profile is not None:
+                    previous_profile(frame, event, arg)
+                record_scope(frame, event)
+
+            sys.setprofile(profile)
+        else:
+            previous_trace = cast(
+                "Callable[[types.FrameType, str, Any], Any] | None", sys.gettrace()
+            )
+            trace_locals: dict[
+                types.FrameType, Callable[[types.FrameType, str, Any], Any]
+            ] = {}
+
+            def trace(frame: types.FrameType, event: str, arg: Any) -> Any:
+                previous = (
+                    previous_trace if event == "call" else trace_locals.get(frame)
+                )
+                if previous is not None:
+                    next_trace = previous(frame, event, arg)
+                    if next_trace is not None and event != "return":
+                        trace_locals[frame] = next_trace
+                    else:
+                        trace_locals.pop(frame, None)
+                record_scope(frame, event)
+                if event == "return":
+                    trace_locals.pop(frame, None)
+                    return None
+                return trace if frame in trace_locals else None
+
+            sys.settrace(trace)
+        try:
+            if training:
+                with torch.enable_grad():
+                    for example in example_inputs:
+                        compiled(*example)
+            else:
                 for example in example_inputs:
                     compiled(*example)
-        else:
-            for example in example_inputs:
-                compiled(*example)
+        finally:
+            if use_profile:
+                sys.setprofile(previous_profile)
+            else:
+                sys.settrace(previous_trace)
+
+        if unsupported_capture_guards:
+            details = ", ".join(
+                f"{name} ({guard_type})"
+                for name, guard_type in sorted(unsupported_capture_guards)
+            )
+            raise PrecompileError(
+                "precompile tracer='dynamo' cannot serialize identity-dependent "
+                f"example dispatch guards: {details}."
+            )
 
         cache_entry = package.cache_entry()
-        active_codes = [code for code in cache_entry.codes if not code.bypassed]
-        if len(active_codes) != 1:
-            raise PrecompileError(
-                "precompile tracer='dynamo' does not support graph breaks or separately "
-                "compiled nested frames yet."
-            )
-        code = active_codes[0]
-        if code.install_to_global or not code.guarded_codes:
+        code_entries = cache_entry.codes
+        if not code_entries:
             raise PrecompileError(
                 "precompile tracer='dynamo' did not capture a runnable entry frame."
             )
-        filtered_guard_states = _filter_dynamo_guards(
-            capture_target, code.guarded_codes, example_inputs
-        )
+        main_code = code_entries[0]
+        if main_code.install_to_global or not main_code.guarded_codes:
+            raise PrecompileError(
+                "precompile tracer='dynamo' did not capture a runnable entry frame."
+            )
+        if any(not code.install_to_global for code in code_entries[1:]):
+            raise PrecompileError(
+                "precompile tracer='dynamo' does not yet support separately compiled "
+                "nested user functions; graph-break resume frames are supported."
+            )
 
+        backend_ids = []
+        for code in code_entries:
+            for backend_id in code.backend_ids:
+                if backend_id not in backend_ids:
+                    backend_ids.append(backend_id)
         compiled_backends = []
-        for backend_id in code.backend_ids:
+        for backend_id in backend_ids:
             compiled_backend = package.cached_backends.get(backend_id)
             if not isinstance(compiled_backend, _DynamoPythonBackend):
                 raise PrecompileError(
@@ -1766,14 +1995,57 @@ def _precompile_dynamo(
                 )
             compiled_backends.append(compiled_backend)
 
-        state: dict[str, Any] = {
-            "code": code.python_code,
-            "python_module": code.python_module,
-            "import_sources": dict(code.import_sources),
-            "defaults": capture_target.__defaults__,
-            "kwdefaults": capture_target.__kwdefaults__,
-            "closure": None,
-            "variants": [
+        code_states = []
+        disabled_functions: dict[str, dict[str, object]] = {}
+        for index, code in enumerate(code_entries):
+            original_code = SerializedCode.to_code_object(code.python_code)
+            dynamo_codes = [guarded.dynamo_code for guarded in code.guarded_codes]
+            scopes = [
+                scope
+                for captured_code, scope in captured_scopes
+                if captured_code in dynamo_codes
+            ]
+            if code.guarded_codes and not scopes:
+                raise PrecompileError(
+                    "precompile tracer='dynamo' did not observe runtime locals for "
+                    f"captured frame {original_code.co_name!r}."
+                )
+            runtime_globals = sys.modules[code.python_module].__dict__
+            runtime_codes = [
+                SerializedCode.to_code_object(guarded.dynamo_code)
+                for guarded in code.guarded_codes
+            ]
+            if not runtime_codes:
+                runtime_codes.append(original_code)
+            global_bindings: dict[str, tuple[str, tuple[str, ...]]] = {}
+            value_globals: dict[str, object] = {}
+            for runtime_code in runtime_codes:
+                for name in loaded_global_names(runtime_code):
+                    if name.startswith(("__compiled_fn_", "__resume_at_")):
+                        continue
+                    if name not in runtime_globals:
+                        continue
+                    value = runtime_globals[name]
+                    if getattr(value, "_torchdynamo_disable", False):
+                        continue
+                    if is_literal(value):
+                        value_globals[name] = value
+                        continue
+                    binding = importable_global(value)
+                    if binding is None or binding[0] == code.python_module:
+                        raise PrecompileError(
+                            "precompile tracer='dynamo' cannot make transformed global "
+                            f"{name!r} portable; use an importable value or a closure-free "
+                            "torch._dynamo.disable function."
+                        )
+                    global_bindings[name] = binding
+            filtered_guard_states = _filter_dynamo_guards(
+                original_code,
+                runtime_globals,
+                code.guarded_codes,
+                scopes,
+            )
+            variants = [
                 {
                     "guards_state": guards_state,
                     "dynamo_code": guarded.dynamo_code,
@@ -1781,14 +2053,47 @@ def _precompile_dynamo(
                 for guarded, guards_state in zip(
                     code.guarded_codes, filtered_guard_states
                 )
-            ],
+            ]
+            for runtime_code in runtime_codes:
+                for name in loaded_global_names(runtime_code):
+                    if name.startswith("__compiled_fn_"):
+                        continue
+                    value = runtime_globals.get(name)
+                    if not getattr(value, "_torchdynamo_disable", False):
+                        continue
+                    function_state = disabled_function_state(
+                        name, cast("Callable[..., object]", value)
+                    )
+                    previous = disabled_functions.setdefault(name, function_state)
+                    if previous != function_state:
+                        raise PrecompileError(
+                            "precompile tracer='dynamo' found conflicting disabled "
+                            f"functions named {name!r}."
+                        )
+            code_states.append(
+                {
+                    "code": code.python_code,
+                    "python_module": code.python_module,
+                    "function_names": tuple(str(name) for name in code.function_names),
+                    "install_to_global": code.install_to_global,
+                    "global_bindings": global_bindings,
+                    "value_globals": value_globals,
+                    "import_sources": dict(code.import_sources),
+                    "defaults": capture_target.__defaults__ if index == 0 else None,
+                    "kwdefaults": capture_target.__kwdefaults__ if index == 0 else None,
+                    "variants": variants,
+                }
+            )
+
+        state: dict[str, Any] = {
+            "codes": code_states,
+            "disabled_functions": disabled_functions,
         }
-        backend_ids = [str(backend_id) for backend_id in code.backend_ids]
         python_code = _build_dynamo_python_source(
             backend=backend,
             training=training,
             state=state,
-            backend_ids=backend_ids,
+            backend_ids=[str(backend_id) for backend_id in backend_ids],
             compiled_backends=compiled_backends,
         )
         return python_code, _dynamo_cache_bytes(
@@ -1798,8 +2103,8 @@ def _precompile_dynamo(
         )
     except Unsupported as e:
         raise PrecompileError(
-            "precompile tracer='dynamo' does not support graph breaks yet; capture must "
-            f"produce one full graph. Dynamo reported: {e}"
+            "precompile tracer='dynamo' could not capture a resumable graph break. "
+            f"Dynamo reported: {e}"
         ) from e
     except BackendCompilerFailed as e:
         if isinstance(e.inner_exception, PrecompileError):
@@ -2160,7 +2465,7 @@ class _PrecompileApi:
         from multiple calls. The ``make_fx`` tracer accepts exactly one tuple because it
         records only one execution; ``dynamo`` executes every tuple and records the
         guarded recompilations they trigger. The Dynamo artifact retains serialized
-        input-derived guards and treats the Python environment as invariant.
+        local-derived guards and treats the Python environment as invariant.
 
         THREADING: the inductor lowering step drives process-global compiler state
         and is serialized by an internal lock, so concurrent ``backend="inductor"``
@@ -2192,12 +2497,19 @@ class _PrecompileApi:
           to the example (the source of the programming-model contract).
         - ``"dynamo"``: analyze a Python function's bytecode and capture every guarded
           specialization/recompilation exercised by ``example_inputs``. The emitted
-          artifact retains guards derived from explicit inputs. Guards covering the
+          artifact retains guards derived from runtime locals. Guards covering the
           Python environment may be removed because that environment is required to be
           unchanged between capture and runtime. A call that fails every retained guard
-          set raises instead of compiling at runtime. This initial path requires one full
-          graph (graph breaks are rejected), a function without closure cells, and
-          tensor/scalar arguments (``nn.Module`` arguments are not supported yet).
+          set raises instead of compiling at runtime. Graph breaks are preserved through
+          their Dynamo resume frames;
+          closure-free Python functions wrapped with ``torch._dynamo.disable`` are
+          embedded and execute eagerly between graph segments. The top-level function
+          must not have closure cells or nested functions that capture locals. Globals
+          left in transformed bytecode must be literal values or independently
+          importable objects. Disabled functions cannot assign globals or use
+          ``globals()``, ``eval()``, or ``exec()``; their importable module globals are
+          rebound at load, while recursive literal globals and defaults are captured by
+          value. ``nn.Module`` arguments are not supported yet.
 
         ``decompositions`` is an optional decomposition table (a dict mapping each
         ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
@@ -2206,16 +2518,16 @@ class _PrecompileApi:
         is not yet supported with ``tracer="dynamo"``.
 
         ``training=True`` is supported with ``tracer="dynamo"`` and
-        ``backend="inductor"``. Capture runs with grad enabled, and each compiled graph
-        carries a readable AOTAutograd forward and backward bridged by an emitted
+        ``backend="inductor"``. Capture runs with gradients enabled, and each compiled
+        graph carries a readable AOTAutograd forward and backward bridged by an emitted
         ``torch.autograd.Function``. A served output therefore retains its ``grad_fn``;
-        calling ``backward()`` executes the precompiled backward kernels. The input
-        tensors that require gradients must do so in every example and at runtime.
+        calling ``backward()`` executes the precompiled backward kernels. Training works
+        across captured recompilations and graph breaks.
 
         With ``tracer="dynamo"``, shape variation across ``example_inputs`` uses
         Dynamo's ordinary automatic dynamic-shape policy: for example, a static first
         graph can recompile into a symbolic graph when a later tuple changes a dimension.
-        The symbolic graphs and their input-derived dispatch guards are retained in the
+        The symbolic graphs and the minimized dispatch guard records are retained in the
         artifact.
 
         With ``tracer="make_fx"``, dynamic shapes are opt-in via
