@@ -882,6 +882,99 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
             match.erase_nodes()
 
 
+_IOTA_INDEX = CallFunction(
+    prims.iota.default,
+    KeywordArg("length"),
+    start=0,
+    step=1,
+    _users=MULTIPLE,
+)
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.index_put.default,
+        KeywordArg("base"),
+        KeywordArg("indices"),
+        KeywordArg("values"),
+        True,
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=patterns,
+)
+@register_graph_pattern(
+    CallFunction(
+        aten.index_add.default,
+        KeywordArg("base"),
+        KeywordArg("dim"),
+        KeywordArg("index"),
+        KeywordArg("values"),
+        alpha=1,
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=patterns,
+)
+def index_accumulate_iota_to_slice_scatter(
+    match: Match,
+    base: torch.fx.Node,
+    values: torch.fx.Node,
+    dim: int | None = None,
+    index: torch.fx.Node | None = None,
+    indices: Sequence[torch.fx.Node | None] | None = None,
+):
+    """Remove atomics from identity-index accumulation before partitioning."""
+    if indices is not None:
+        indexed_dims = [
+            (dim, index) for dim, index in enumerate(indices) if index is not None
+        ]
+        if len(indexed_dims) != 1:
+            return
+        dim, index = indexed_dims[0]
+
+    if index is None or not isinstance(dim, int):
+        return
+    iota_match = _IOTA_INDEX.match(index)
+    if not isinstance(iota_match, Match):
+        return
+    length = iota_match.kwargs["length"]
+    if not isinstance(length, int):
+        return
+
+    base_val = base.meta.get("val")
+    values_val = values.meta.get("val")
+    if not (
+        isinstance(base_val, torch.Tensor)
+        and isinstance(values_val, torch.Tensor)
+        and base_val.ndim == values_val.ndim
+    ):
+        return
+
+    if dim < 0:
+        dim += base_val.ndim
+    if not 0 <= dim < base_val.ndim:
+        return
+
+    if not (
+        statically_known_true(sym_eq(values_val.shape[dim], length))
+        and statically_known_true(length <= base_val.shape[dim])
+        and all(
+            statically_known_true(sym_eq(values_val.shape[i], base_val.shape[i]))
+            for i in range(base_val.ndim)
+            if i != dim
+        )
+    ):
+        return
+
+    def repl(base, values):
+        base_slice = aten.slice.Tensor(base, dim, 0, length, 1)
+        updated_slice = aten.add.Tensor(base_slice, values)
+        return aten.slice_scatter.default(base, updated_slice, dim, 0, length, 1)
+
+    # pyrefly: ignore [bad-argument-type]
+    match.replace_by_example(repl, [base, values])
+    counters["inductor"]["index_accumulate_iota_to_slice_scatter"] += 1
+
+
 @register_graph_pattern(
     CallFunction(
         torch.ops.prims.convert_element_type.default,
