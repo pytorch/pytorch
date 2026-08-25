@@ -2,6 +2,7 @@
 
 #include <torch/headeronly/util/overflows.h>
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 
