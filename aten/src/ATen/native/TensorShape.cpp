@@ -1358,6 +1358,9 @@ static Tensor make_qtensor(
   return result;
 }
 
+// as_strided creates a new TensorImpl but shares the storage so for faketensor
+// we need to copy over the metadata like the device and also the faketensormode
+// pointer
 static void copy_fake_tensor_metadata(const Tensor& self, TensorImpl* result) {
   if (!self.is_fake()) {
     return;
