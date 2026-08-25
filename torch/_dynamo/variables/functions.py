@@ -3657,7 +3657,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
             "launch_kwargs": launch_kwargs,
         }
         if analysis is not None:
-            hop_kwargs["mutated_arg_names"], hop_kwargs["can_fuse_epilogue"] = analysis
+            hop_kwargs["mutation_analysis"] = analysis
         tx.output.create_proxy(
             "call_function",
             triton_kernel_wrapper_mutation,

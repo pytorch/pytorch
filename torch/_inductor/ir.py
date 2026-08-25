@@ -8860,8 +8860,7 @@ class UserDefinedTritonKernel(ExternKernel):
         tma_descriptor_metadata: dict[str, Any],
         kernel_args: dict[str, Any],
         launch_kwargs: tuple[str, ...],
-        mutated_arg_names: tuple[str, ...] | None = None,
-        can_fuse_epilogue: bool | None = None,
+        mutation_analysis: tuple[tuple[str, ...], bool] | None = None,
     ) -> None:
         inputs: list[IRNode] = []
         kwargs: dict[str, IRNode] = {}
@@ -8921,16 +8920,17 @@ class UserDefinedTritonKernel(ExternKernel):
         # Names of formal arguments in the kernel's prototype. Normally recorded
         # on the node when it was created; derived here only for a graph that
         # carries neither - see Note [TTIR mutation analysis].
-        if mutated_arg_names is None or can_fuse_epilogue is None:
+        if mutation_analysis is None:
             accesses = identify_accessed_tensors(
                 kernel,
                 {**kernel_args, **autotuned_kwargs},
                 tma_descriptor_metadata,
             )
-            mutated_arg_names = tuple(dep.name for dep in accesses.read_writes.writes)
-            can_fuse_epilogue = accesses.can_fuse_epilogue
-        self.mutated_arg_names = mutated_arg_names
-        self.arg_can_fuse_epilogue = can_fuse_epilogue
+            mutation_analysis = (
+                tuple(dep.name for dep in accesses.read_writes.writes),
+                accesses.can_fuse_epilogue,
+            )
+        self.mutated_arg_names, self.arg_can_fuse_epilogue = mutation_analysis
 
         # Filter to only tensor args: with Triton 3.7+, ordered_arg_names
         # includes scalars, so writes may reference non-tensor args like SymInts.

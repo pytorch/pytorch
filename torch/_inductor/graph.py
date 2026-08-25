@@ -1843,7 +1843,7 @@ class GraphLowering(torch.fx.Interpreter):
                     for k, v in kwargs.items()
                 },
                 old_kwargs["tma_descriptor_metadata"],
-                old_kwargs.get("mutated_arg_names"),
+                old_kwargs.get("mutation_analysis"),
             )
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
@@ -2530,7 +2530,7 @@ class GraphLowering(torch.fx.Interpreter):
                     for k, v in kwargs.items()
                 },
                 node.kwargs["tma_descriptor_metadata"],
-                node.kwargs.get("mutated_arg_names"),
+                node.kwargs.get("mutation_analysis"),
             )
 
             new_kwargs: dict[str, int] = {}

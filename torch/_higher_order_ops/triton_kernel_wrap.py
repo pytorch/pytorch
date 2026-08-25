@@ -195,9 +195,6 @@ class KernelSideTable:
         self.id_to_kernel = {}
         self.kernel_to_id = {}
         self.constant_args = {}
-        # Keyed on kernel source, so a test that swaps kernels out from under
-        # us must not be served an answer worked out for the previous ones.
-        _ttir_mutation_analysis_cache.clear()
 
 
 kernel_side_table = KernelSideTable()
@@ -1205,7 +1202,10 @@ _TTIRMutationAnalysisKey = tuple[object, ...]
 #
 # Process-wide rather than per-compile: the key covers everything the answer
 # depends on, and none of it is compilation state, so an entry stays valid for
-# the life of the process and is worth sharing across compiles. Bounded anyway,
+# the life of the process and is worth sharing across compiles. In particular
+# kernel_side_table.reset_table() does not affect it - that resets index to
+# kernel maps, while this is keyed on the kernel's source and the constexprs, so
+# a kernel swapped in later gets a different key rather than a stale answer. Bounded anyway,
 # so a process generating many distinct kernel variants cannot grow it without
 # limit; entries hold only strings, no kernels or tensors.
 _TTIR_MUTATION_ANALYSIS_CACHE_MAXSIZE = 4096
@@ -1484,8 +1484,7 @@ class TritonKernelWrapperMutation(_TritonKernelWrapper):
         tma_descriptor_metadata: TMADescriptorMetadata,
         kwargs: dict[str, Any],
         launch_kwargs: tuple[str, ...] | None = None,
-        mutated_arg_names: tuple[str, ...] | None = None,
-        can_fuse_epilogue: bool | None = None,
+        mutation_analysis: tuple[tuple[str, ...], bool] | None = None,
     ) -> Any:
         hop_kwargs: dict[str, Any] = {
             "kernel_idx": kernel_idx,
@@ -1496,10 +1495,8 @@ class TritonKernelWrapperMutation(_TritonKernelWrapper):
         }
         if launch_kwargs:
             hop_kwargs["launch_kwargs"] = launch_kwargs
-        if mutated_arg_names is not None:
-            hop_kwargs["mutated_arg_names"] = mutated_arg_names
-        if can_fuse_epilogue is not None:
-            hop_kwargs["can_fuse_epilogue"] = can_fuse_epilogue
+        if mutation_analysis is not None:
+            hop_kwargs["mutation_analysis"] = mutation_analysis
 
         # pyrefly: ignore [missing-attribute]
         return super().__call__(**hop_kwargs)
@@ -1522,8 +1519,7 @@ class TritonKernelWrapperFunctional(_TritonKernelWrapper):
         kwargs: dict[str, Any],
         tensors_to_clone: list[str],
         launch_kwargs: tuple[str, ...] | None = None,
-        mutated_arg_names: tuple[str, ...] | None = None,
-        can_fuse_epilogue: bool | None = None,
+        mutation_analysis: tuple[tuple[str, ...], bool] | None = None,
     ) -> dict[str, Any]:
         hop_kwargs: dict[str, Any] = {
             "kernel_idx": kernel_idx,
@@ -1535,10 +1531,8 @@ class TritonKernelWrapperFunctional(_TritonKernelWrapper):
         }
         if launch_kwargs:
             hop_kwargs["launch_kwargs"] = launch_kwargs
-        if mutated_arg_names is not None:
-            hop_kwargs["mutated_arg_names"] = mutated_arg_names
-        if can_fuse_epilogue is not None:
-            hop_kwargs["can_fuse_epilogue"] = can_fuse_epilogue
+        if mutation_analysis is not None:
+            hop_kwargs["mutation_analysis"] = mutation_analysis
 
         # pyrefly: ignore [missing-attribute]
         return super().__call__(**hop_kwargs)
@@ -1560,8 +1554,7 @@ def triton_kernel_wrapper_mutation_dense(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     launch_kwargs: tuple[str, ...] | None = None,
-    mutated_arg_names: tuple[str, ...] | None = None,
-    can_fuse_epilogue: bool | None = None,
+    mutation_analysis: tuple[tuple[str, ...], bool] | None = None,
 ) -> None:
     from torch._inductor.codegen.wrapper import user_defined_kernel_grid_fn_code
 
@@ -1666,8 +1659,7 @@ def triton_kernel_wrapper_mutation_fake_tensor_mode(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     launch_kwargs: tuple[str, ...] | None = None,
-    mutated_arg_names: tuple[str, ...] | None = None,
-    can_fuse_epilogue: bool | None = None,
+    mutation_analysis: tuple[tuple[str, ...], bool] | None = None,
 ) -> None:
     return None
 
@@ -1681,8 +1673,7 @@ def _(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     launch_kwargs: tuple[str, ...] | None = None,
-    mutated_arg_names: tuple[str, ...] | None = None,
-    can_fuse_epilogue: bool | None = None,
+    mutation_analysis: tuple[tuple[str, ...], bool] | None = None,
 ) -> None:
     return None
 
@@ -1721,8 +1712,7 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     launch_kwargs: tuple[str, ...] | None = None,
-    mutated_arg_names: tuple[str, ...] | None = None,
-    can_fuse_epilogue: bool | None = None,
+    mutation_analysis: tuple[tuple[str, ...], bool] | None = None,
 ) -> None:
     node_args: dict[str, Any] = {
         "kernel_idx": kernel_idx,
@@ -1733,10 +1723,8 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     }
     if launch_kwargs:
         node_args["launch_kwargs"] = launch_kwargs
-    if mutated_arg_names is not None:
-        node_args["mutated_arg_names"] = mutated_arg_names
-    if can_fuse_epilogue is not None:
-        node_args["can_fuse_epilogue"] = can_fuse_epilogue
+    if mutation_analysis is not None:
+        node_args["mutation_analysis"] = mutation_analysis
 
     trace_triton_kernel_wrapper(
         mode,
@@ -1794,17 +1782,17 @@ def get_mutated_tensors(
     constant_args_idx: int,
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
-    mutated_arg_names: tuple[str, ...] | None = None,
-    can_fuse_epilogue: bool | None = None,
+    mutation_analysis: tuple[tuple[str, ...], bool] | None = None,
 ) -> list[str]:
     """Names of the tensor arguments this launch mutates.
 
-    mutated_arg_names is the answer Dynamo already worked out and recorded on
-    the node; see Note [TTIR analysis cache]. It is optional because a graph
+    mutation_analysis is the answer Dynamo already worked out and recorded on
+    the node; see Note [TTIR mutation analysis]. It is optional because a graph
     need not have come from Dynamo - one loaded from a cache predating the
     argument, or built by hand, carries nothing - and in that case we fall back
     to deriving it here.
     """
+    mutated_arg_names = mutation_analysis[0] if mutation_analysis else None
     if mutated_arg_names is None:
         kernel = kernel_side_table.get_kernel(kernel_idx)
         constant_args = kernel_side_table.get_constant_args(constant_args_idx)
@@ -1828,8 +1816,7 @@ def triton_kernel_wrapper_mutation_functionalize(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     launch_kwargs: tuple[str, ...] | None = None,
-    mutated_arg_names: tuple[str, ...] | None = None,
-    can_fuse_epilogue: bool | None = None,
+    mutation_analysis: tuple[tuple[str, ...], bool] | None = None,
 ) -> None:
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
@@ -1841,7 +1828,7 @@ def triton_kernel_wrapper_mutation_functionalize(
         constant_args_idx,
         unwrapped_kwargs,
         tma_descriptor_metadata,
-        mutated_arg_names,
+        mutation_analysis,
     )
     with ctx.redispatch_to_next():
         functional_kwargs: dict[str, Any] = {
@@ -1854,10 +1841,8 @@ def triton_kernel_wrapper_mutation_functionalize(
         }
         if launch_kwargs:
             functional_kwargs["launch_kwargs"] = launch_kwargs
-        if mutated_arg_names is not None:
-            functional_kwargs["mutated_arg_names"] = mutated_arg_names
-        if can_fuse_epilogue is not None:
-            functional_kwargs["can_fuse_epilogue"] = can_fuse_epilogue
+        if mutation_analysis is not None:
+            functional_kwargs["mutation_analysis"] = mutation_analysis
         unwrapped_outputs = triton_kernel_wrapper_functional(**functional_kwargs)
 
     if not set(unwrapped_outputs.keys()).issubset(set(kwargs.keys())):
@@ -1891,8 +1876,7 @@ def triton_kernel_wrapper_functional_dense(
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
     launch_kwargs: tuple[str, ...] | None = None,
-    mutated_arg_names: tuple[str, ...] | None = None,
-    can_fuse_epilogue: bool | None = None,
+    mutation_analysis: tuple[tuple[str, ...], bool] | None = None,
 ) -> dict[str, Any]:
     # TODO(oulgen): For performance reasons, we want to ensure that these
     # `clone_preserve_strides` calls are never executed at runtime
@@ -1911,10 +1895,8 @@ def triton_kernel_wrapper_functional_dense(
     }
     if launch_kwargs:
         mutation_kwargs["launch_kwargs"] = launch_kwargs
-    if mutated_arg_names is not None:
-        mutation_kwargs["mutated_arg_names"] = mutated_arg_names
-    if can_fuse_epilogue is not None:
-        mutation_kwargs["can_fuse_epilogue"] = can_fuse_epilogue
+    if mutation_analysis is not None:
+        mutation_kwargs["mutation_analysis"] = mutation_analysis
     triton_kernel_wrapper_mutation(**mutation_kwargs)
     return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
 
@@ -1929,8 +1911,7 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
     launch_kwargs: tuple[str, ...] | None = None,
-    mutated_arg_names: tuple[str, ...] | None = None,
-    can_fuse_epilogue: bool | None = None,
+    mutation_analysis: tuple[tuple[str, ...], bool] | None = None,
 ) -> dict[str, Any]:
     # TODO(oulgen): For performance reasons, we want to ensure that these
     # `clone_preserve_strides` calls are never executed at runtime
@@ -1954,8 +1935,7 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
     launch_kwargs: tuple[str, ...] | None = None,
-    mutated_arg_names: tuple[str, ...] | None = None,
-    can_fuse_epilogue: bool | None = None,
+    mutation_analysis: tuple[tuple[str, ...], bool] | None = None,
 ) -> dict[str, Any]:
     node_args: dict[str, Any] = {
         "kernel_idx": kernel_idx,
@@ -1967,10 +1947,8 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     }
     if launch_kwargs:
         node_args["launch_kwargs"] = launch_kwargs
-    if mutated_arg_names is not None:
-        node_args["mutated_arg_names"] = mutated_arg_names
-    if can_fuse_epilogue is not None:
-        node_args["can_fuse_epilogue"] = can_fuse_epilogue
+    if mutation_analysis is not None:
+        node_args["mutation_analysis"] = mutation_analysis
 
     ret = trace_triton_kernel_wrapper(
         mode,
@@ -1992,8 +1970,7 @@ def triton_kernel_wrapper_functional_functionalize(
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
     launch_kwargs: tuple[str, ...] | None = None,
-    mutated_arg_names: tuple[str, ...] | None = None,
-    can_fuse_epilogue: bool | None = None,
+    mutation_analysis: tuple[tuple[str, ...], bool] | None = None,
 ) -> dict[str, Any]:
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     with ctx.redispatch_to_next():
@@ -2851,7 +2828,7 @@ class TracingTritonHOPifier(TritonHOPifier):
         }
         analysis = ttir_mutation_analysis(variable.kernel, combined_args, {})
         if analysis is not None:
-            hop_kwargs["mutated_arg_names"], hop_kwargs["can_fuse_epilogue"] = analysis
+            hop_kwargs["mutation_analysis"] = analysis
         return triton_kernel_wrapper_mutation(**hop_kwargs)  # type: ignore[arg-type]
 
 
