@@ -736,12 +736,16 @@ class TestDraftExportDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @unittest.skipIf(
-        not torch.accelerator.is_available()
-        or torch.accelerator.get_memory_info()[1] < 2**28,
-        "Requires 16 MB accelerator memory to pass the test; setting it higher to catch violations",
+        not torch.accelerator.is_available(),
+        "Requires an accelerator",
     )
     def test_memory_usage(self, device):
         # This used to OOM
+        if torch.accelerator.get_memory_info(device)[1] < 2**28:
+            self.skipTest(
+                "Requires 16 MB accelerator memory to pass the test; setting it higher to catch violations"
+            )
+
         class Foo(torch.nn.Module):
             def forward(self, x):
                 for _ in range(100):
@@ -758,7 +762,9 @@ class TestDraftExportDevice(TestCase):
 
         # draft export peak memory usage
         draft_export(Foo(), (x,), strict=False)
-        peak_mem_usage = torch.accelerator.memory_stats()["allocated_bytes.all.peak"]
+        peak_mem_usage = torch.accelerator.memory_stats(device)[
+            "allocated_bytes.all.peak"
+        ]
 
         # right now it's actually exactly 4x;
         # I guess original tensor, 2 tensors per add op, 1 for clone stored in node.meta["val"]
