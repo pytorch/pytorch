@@ -3927,8 +3927,8 @@ class TestSyncDecisionCrossRanksCUDA(_SyncDecisionCrossRanksBase):
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
-class TestSyncDecisionCrossRanksCPU(_SyncDecisionCrossRanksBase):
-    hw_classification = HardwareClassification.CPU
+class TestSyncDecisionCrossRanksEstimatorFallback(_SyncDecisionCrossRanksBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
