@@ -849,6 +849,58 @@ class TestAOTCompileToPython(TestCase):
         with torch.no_grad():
             self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
 
+    def test_compile_to_python_ignores_warm_aot_autograd_cache(self):
+        import copy
+
+        from torch._dynamo.utils import counters
+        from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+        from torch._inductor.codecache import FxGraphCache
+        from torch._inductor.compile_fx import compile_fx
+        from torch._inductor.standalone_compile import _standalone_context
+
+        x = torch.randn(8)
+        gm = make_fx(lambda flat: [flat[0].sin()])([x])
+        with (
+            fresh_cache(),
+            functorch_config.patch(
+                enable_autograd_cache=True,
+                enable_remote_autograd_cache=True,
+                bundled_autograd_cache=False,
+                bypass_autograd_cache_key=False,
+            ),
+            torch._inductor.config.patch(
+                fx_graph_cache=True, fx_graph_remote_cache=False
+            ),
+        ):
+            try:
+                AOTAutogradCache.clear()
+                FxGraphCache.clear()
+                counters.clear()
+                with (
+                    mock.patch.object(
+                        AOTAutogradCache, "get_remote_cache", return_value=None
+                    ),
+                    torch.no_grad(),
+                    _standalone_context(gm, "from_example_inputs", aot=False),
+                ):
+                    compile_fx(copy.deepcopy(gm), [x], ignore_shape_env=True)
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+                with mock.patch.object(
+                    AOTAutogradCache,
+                    "try_load",
+                    wraps=AOTAutogradCache.try_load,
+                ) as try_load:
+                    src, cache = compile_to_python(gm, [x])
+                try_load.assert_not_called()
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+                self.assertTrue(functorch_config.enable_autograd_cache)
+                self.assertTrue(functorch_config.enable_remote_autograd_cache)
+                self.assertEqual(load_from_python(src, cache)([x])[0], x.sin())
+            finally:
+                AOTAutogradCache.clear()
+                FxGraphCache.clear()
+
     def test_concurrent_compile_to_python_smoke(self):
         # End-to-end concurrency smoke test: _COMPILE_LOCK serializes the entry point (the
         # underlying cache-state swap is process-global), so two threads compiling different
