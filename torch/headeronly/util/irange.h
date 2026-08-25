@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/TypeSafeSignMath.h>
 
 #include <algorithm>
@@ -48,7 +49,7 @@ struct integer_iterator {
   constexpr bool operator==(const integer_iterator& other) const {
     if constexpr (one_sided) {
       // Range-for loops' end test is `begin != end`, not `begin <
-      // end`. To handle `c10::irange(n)` where n < 0 (which should be
+      // end`. To handle `irange(n)` where n < 0 (which should be
       // empty), we just make `begin != end` fail whenever `end` is
       // negative.
       return is_negative(other.value) || value == other.value;

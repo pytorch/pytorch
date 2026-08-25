@@ -232,20 +232,20 @@ HeaderOnlyGenericPackedTensorAccessor
 # tested under test/.
 
 # torch/headeronly/util/MathConstants.h
-frac_1_sqrt_pi
-frac_1_pi
-frac_sqrt_3
-frac_sqrt_2
-golden_ratio
-log_10_e
-log_2_e
+e
 euler
+frac_1_pi
+frac_1_sqrt_pi
+frac_sqrt_2
+frac_sqrt_3
+golden_ratio
 ln_10
 ln_2
-sqrt_3
-sqrt_2
+log_10_e
+log_2_e
 pi
-e
+sqrt_2
+sqrt_3
 
 # torch/headeronly/util/copysign.h
 copysign

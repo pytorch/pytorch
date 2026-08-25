@@ -2,6 +2,8 @@
 
 #include <torch/headeronly/util/Load.h>
 
+#include <cstdint>
+
 namespace torch {
 namespace aot_inductor {
 

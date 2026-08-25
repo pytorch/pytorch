@@ -2,6 +2,8 @@
 
 #include <torch/headeronly/util/MathConstants.h>
 
+#include <cmath>
+
 namespace torch {
 namespace aot_inductor {
 
@@ -38,10 +40,13 @@ TEST(TestMathConstants, TestDoubleConstants) {
 }
 
 TEST(TestMathConstants, TestReducedPrecisionSpecializations) {
+  using torch::headeronly::BFloat16;
+  using torch::headeronly::Half;
   using torch::headeronly::pi;
 
-  EXPECT_NEAR(static_cast<float>(pi<torch::headeronly::BFloat16>), 3.14f, 0.1);
-  EXPECT_NEAR(static_cast<float>(pi<torch::headeronly::Half>), 3.14f, 0.01);
+  // Bit-exact specializations;
+  EXPECT_EQ((pi<BFloat16>).x, 0x4049);
+  EXPECT_EQ((pi<Half>).x, 0x4248);
 }
 
 } // namespace aot_inductor
