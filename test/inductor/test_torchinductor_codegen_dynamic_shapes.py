@@ -557,15 +557,13 @@ def _apply_test_failures(test_cls, test_failures):
     if cls_device_type is None:
         return
 
-    suffix = f"_{cls_device_type}"
     for name in dir(test_cls):
-        if not name.startswith("test_") or not name.endswith(suffix):
+        if not name.startswith("test_"):
             continue
         value = getattr(test_cls, name)
         if not callable(value):
             continue
-        base_name = name[: -len(suffix)]
-        tf = test_failures.get(base_name)
+        tf = test_failures.get(name)
         if not tf or cls_device_type not in tf.suffixes:
             continue
 
@@ -585,8 +583,9 @@ def _apply_test_failures(test_cls, test_failures):
 
 
 class DynamicShapesCodegenCpuTests(DynamicShapesCodegenTestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CPU
     maxDiff = None
+    device_type = "cpu"
 
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_assert_dynamic_dims_rejects_specialized_dim(self):
@@ -730,15 +729,7 @@ _copy_template_tests(
     DynamicShapesCodegenCommonTemplate, DynamicShapesCodegenCpuTests
 )
 
-instantiate_device_type_tests(
-    DynamicShapesCodegenCpuTests,
-    globals(),
-    only_for="cpu",
-)
-
-_apply_test_failures_to_subclasses(
-    "DynamicShapesCodegenCpuTests", globals(), test_failures
-)
+_apply_test_failures(DynamicShapesCodegenCpuTests, test_failures)
 
 
 if not TEST_WITH_ASAN:
