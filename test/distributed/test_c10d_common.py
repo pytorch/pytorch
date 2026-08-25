@@ -359,6 +359,12 @@ class BackendEntryPointTest(TestCase):
         self.assertIn("nccl", looked_up)
         self.assertEqual(str(backend_config), "cpu:gloo,cuda:nccl")
 
+    @parametrize("backend", ["nccl", "nccl-legacy", "nccl2", "nccl-lazy"])
+    def test_nccl_backend_default_timeout(self, backend):
+        timeout = timedelta(seconds=1)
+        with unittest.mock.patch.object(c10d, "default_pg_nccl_timeout", timeout):
+            self.assertEqual(c10d._get_default_timeout(backend), timeout)
+
     @parametrize("nccl2_override", [None, "0", "1"])
     def test_nccl_backend_registration(self, nccl2_override):
         with unittest.mock.patch.dict(os.environ):

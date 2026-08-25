@@ -5200,17 +5200,17 @@ class NcclProcessGroupWithDispatchedCollectivesTests(
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
     def test_collectives(self):
-        self._test_collectives(backend=NCCL_BACKEND)
+        self._test_collectives(backend="nccl")
 
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
     def test_allreduce_coalesced(self):
-        self._test_allreduce_coalesced(backend=NCCL_BACKEND)
+        self._test_allreduce_coalesced(backend="nccl")
 
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
     def test_all_to_all_single(self):
-        self._test_all_to_all_single(backend=NCCL_BACKEND)
+        self._test_all_to_all_single(backend="nccl")
 
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
@@ -6207,7 +6207,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
         pg = self._create_process_group_nccl()
         device = self.local_device
         a = torch.full((3, 4), float(self.rank), device=device)
-        f = pg.barrier()
+        opts = c10d.BarrierOptions()
+        opts.device_ids = [device.index]
+        f = pg._get_backend(device).barrier(opts)
         f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
