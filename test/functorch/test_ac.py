@@ -435,6 +435,8 @@ class MemoryBudgetBackendSpecificTest(TestCase):
 instantiate_device_type_tests(
     MemoryBudgetTest,
     globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     MemoryBudgetBackendSpecificTest,
