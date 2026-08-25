@@ -1069,13 +1069,13 @@ class TestIndexing(TestCase):
         values0d = torch.tensor(1.0)
         values1d = torch.tensor([1.0])
 
-        out_cuda = t_dev.index_put_(indices_dev, values0d.to(device), accumulate=True)
+        out_gpu = t_dev.index_put_(indices_dev, values0d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values0d, accumulate=True)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
-        out_cuda = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
+        out_gpu = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values1d, accumulate=True)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
         t = torch.zeros(4, 3, 2)
         t_dev = t.to(device)
@@ -1089,13 +1089,13 @@ class TestIndexing(TestCase):
         values1d = torch.tensor([-1.0, -2.0])
         values2d = torch.tensor([[-1.0, -2.0]])
 
-        out_cuda = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
+        out_gpu = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values1d, accumulate=True)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
-        out_cuda = t_dev.index_put_(indices_dev, values2d.to(device), accumulate=True)
+        out_gpu = t_dev.index_put_(indices_dev, values2d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values2d, accumulate=True)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
     @onlyAccelerator
     @skipMPS
@@ -1162,12 +1162,12 @@ class TestIndexing(TestCase):
         indices = [torch.tensor([0, 1])]
         indices_dev = [i.to(device) for i in indices]
         value = torch.randn(2, 2)
-        out_cuda = t1.index_put_(indices_dev, value.to(device), accumulate=True)
+        out_gpu = t1.index_put_(indices_dev, value.to(device), accumulate=True)
         out_cpu = t2.index_put_(indices, value, accumulate=True)
         self.assertTrue(not t1.is_contiguous())
         self.assertTrue(not t2.is_contiguous())
 
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
     @onlyAccelerator
     @skipMPS
@@ -1192,18 +1192,18 @@ class TestIndexing(TestCase):
         values2d = torch.randn(n, 1)
 
         for val in (value0d, value1d, values2d):
-            out_cuda = func(t_dev, indices_dev, val.to(device))
+            out_gpu = func(t_dev, indices_dev, val.to(device))
             out_cpu = func(t, indices, val)
-            self.assertEqual(out_cuda.cpu(), out_cpu)
+            self.assertEqual(out_gpu.cpu(), out_cpu)
 
         t = torch.zeros((5, 4))
         t_dev = t.to(device)
         indices = torch.tensor([1, 4, 3])
         indices_dev = indices.to(device)
         val = torch.randn(4)
-        out_cuda = func1(t_dev, indices_dev, val.to(device))
+        out_gpu = func1(t_dev, indices_dev, val.to(device))
         out_cpu = func1(t, indices, val)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
         t = torch.zeros(2, 3, 4)
         ind = torch.tensor([0, 1])
@@ -1215,9 +1215,9 @@ class TestIndexing(TestCase):
             func(t.to(device), ind.to(device), val.to(device))
 
         val = torch.randn(2, 3, 1)
-        out_cuda = func1(t.to(device), ind.to(device), val.to(device))
+        out_gpu = func1(t.to(device), ind.to(device), val.to(device))
         out_cpu = func1(t, ind, val)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
@@ -1801,7 +1801,7 @@ class TestIndexing(TestCase):
             torch.take_along_dim(t.cpu(), indices, dim=0)
 
     @onlyAccelerator
-    def test_cuda_broadcast_index_use_deterministic_algorithms(self, device):
+    def test_gpu_broadcast_index_use_deterministic_algorithms(self, device):
         with DeterministicGuard(True):
             idx1 = torch.tensor([0])
             idx2 = torch.tensor([2, 6])
