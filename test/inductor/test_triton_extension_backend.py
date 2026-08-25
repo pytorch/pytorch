@@ -273,11 +273,11 @@ class TritonExtensionBackendGenericTests(TritonExtensionBackendTestBase):
 class TritonExtensionBackendCPUTests(TritonExtensionBackendTestBase):
     hw_classification = HardwareClassification.CPU
 
-    def test_codegen_with_custom_heuristics_module(self):
-        self._test_codegen_with_custom_heuristics_module("cpu")
+    def test_codegen_with_custom_heuristics_module(self, device):
+        self._test_codegen_with_custom_heuristics_module(device)
 
-    def test_codegen_with_custom_heuristics_module_udtk(self):
-        self._test_codegen_with_custom_heuristics_module_udtk("cpu")
+    def test_codegen_with_custom_heuristics_module_udtk(self, device):
+        self._test_codegen_with_custom_heuristics_module_udtk(device)
 
 
 @unittest.skipUnless(has_triton_package(), "Requires Triton package.")
@@ -296,6 +296,11 @@ class TritonExtensionBackendAcceleratorTests(TritonExtensionBackendTestBase):
         self._test_codegen_with_custom_heuristics_module_udtk(device)
 
 
+instantiate_device_type_tests(
+    TritonExtensionBackendCPUTests,
+    globals(),
+    only_for=("cpu",),
+)
 instantiate_device_type_tests(
     TritonExtensionBackendAcceleratorTests,
     globals(),
