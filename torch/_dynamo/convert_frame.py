@@ -2002,7 +2002,11 @@ def _compile(
         if package is not None:
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
-            package.add_guarded_code(check_fn.guards_state, out_code)
+            package.add_guarded_code(
+                check_fn.guards_state,
+                out_code,
+                check_fn.guard_manager.leaf_fingerprint(),
+            )
             package.add_inlined_source(output.tracing_context.traced_code)
             package.update_device_type(output.current_tracer.graph)
 
