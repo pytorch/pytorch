@@ -10,6 +10,7 @@ import contextvars
 import functools
 import inspect
 import logging
+import math
 import operator
 import threading
 import typing
@@ -1608,8 +1609,8 @@ class PythonKeyTracer(Tracer):
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
 
-    def __init__(self) -> None:
-        super().__init__(autowrap_modules=())  # type: ignore[arg-type]
+    def __init__(self, *, autowrap_modules: tuple[types.ModuleType, ...] = ()) -> None:
+        super().__init__(autowrap_modules=autowrap_modules)  # type: ignore[arg-type]
         _init_proxy_trackers(self)
 
     # In general, we don't want to make modules leaves. In principle, users of
@@ -2561,8 +2562,13 @@ class _ModuleStackTracer(PythonKeyTracer):
     def _graph_module_deserialization_tracer(cls, root: Module) -> Tracer:
         return _ModuleStackTracerForGraphModuleDeserialization(root)
 
-    def __init__(self, scope_root: Module) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        scope_root: Module,
+        *,
+        autowrap_modules: tuple[types.ModuleType, ...] = (),
+    ) -> None:
+        super().__init__(autowrap_modules=autowrap_modules)
         self.record_stack_traces = not fx.config.do_not_emit_stack_traces
         self._record_forward_stack_traces_only = True
         self.scope_root = scope_root
@@ -2852,7 +2858,7 @@ class _ModuleStackTracerForGraphModuleDeserialization(_ModuleStackTracer):
     """Replay GraphModule code without running export-only tracer behavior."""
 
     def __init__(self, scope_root: Module) -> None:
-        super().__init__(scope_root)
+        super().__init__(scope_root, autowrap_modules=(math,))
         self.record_stack_traces = False
 
     def trace(
