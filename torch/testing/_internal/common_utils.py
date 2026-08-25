@@ -30,6 +30,7 @@ import re
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1943,6 +1944,7 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     torch.cuda.set_per_process_memory_fraction(round((gb_available - num_procs * .85) / gb_available / num_procs, 2))
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
+requires_xpu = unittest.skipUnless(TEST_XPU, "Requires XPU")
 
 
 def lazy_skip_if(condition_fn, reason):
@@ -1974,6 +1976,11 @@ def lazy_skip_if(condition_fn, reason):
             return fn(*args, **kwargs)
         return wrapper
     return decorator
+
+requires_accelerator = lazy_skip_if(
+    lambda: not torch.accelerator.is_available(),
+    "requires accelerator",
+)
 
 
 def skipIfCrossRef(fn):
@@ -6470,6 +6477,16 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
         gc.set_debug(0)
 
 
+def _win_rmtree_onerror(func, path, exc_info):
+    # Retry after clearing the read-only attribute (WinError 5); ignore
+    # anything else so cleanup stays best-effort.
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except OSError:
+        pass
+
+
 def remove_cpp_extensions_build_root():
     """
     Removes the default root folder under which extensions are built.
@@ -6477,9 +6494,7 @@ def remove_cpp_extensions_build_root():
     default_build_root = cpp_extension.get_default_build_root()
     if os.path.exists(default_build_root):
         if IS_WINDOWS:
-            # rmtree returns permission error: [WinError 5] Access is denied
-            # on Windows, this is a workaround
-            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
+            shutil.rmtree(default_build_root, onerror=_win_rmtree_onerror)
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
 
