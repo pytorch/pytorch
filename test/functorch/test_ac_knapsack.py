@@ -339,7 +339,7 @@ class TestKnapsackEvaluator(TestCase):
 
 
 class TestActivationCheckpointingKnapsack(TestCase):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
