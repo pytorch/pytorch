@@ -28,6 +28,7 @@ from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_utils import HardwareClassification, TEST_CUDA
 from torch.utils import _pytree as pytree
@@ -1347,6 +1348,8 @@ class TestExperimentCPU(TestCase):
 
 
 class TestExperimentDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_export_blockmask_with_mask_fn(self, device, make_mask_fn):
         from torch.nn.attention.flex_attention import create_block_mask
 
@@ -1378,10 +1381,7 @@ class TestExperimentDevice(TestCase):
             mask_compiled.mask_mod(1, 1, 64, 64),
         )
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask(self):
-        device = "cuda"
-
+    def test_export_blockmask(self, device):
         def make_mask_fn():
             res = 4
 
@@ -1392,10 +1392,7 @@ class TestExperimentDevice(TestCase):
 
         self._test_export_blockmask_with_mask_fn(device, make_mask_fn)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_mutated_closure(self):
-        device = "cuda"
-
+    def test_export_blockmask_mutated_closure(self, device):
         def make_mask_fn():
             res = 1
 
@@ -1407,10 +1404,7 @@ class TestExperimentDevice(TestCase):
 
         self._test_export_blockmask_with_mask_fn(device, make_mask_fn)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_with_containers(self):
-        device = "cuda"
-
+    def test_export_blockmask_closure_with_containers(self, device):
         def make_mask_fn():
             offsets = [1, 2, 3]
             config = {"base": 4, "nested": {"scale": 2}}
@@ -1422,10 +1416,7 @@ class TestExperimentDevice(TestCase):
 
         self._test_export_blockmask_with_mask_fn(device, make_mask_fn)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_triple_nested(self):
-        device = "cuda"
-
+    def test_export_blockmask_closure_triple_nested(self, device):
         def make_mask_fn():
             a = 1
 
@@ -1446,9 +1437,7 @@ class TestExperimentDevice(TestCase):
 
         self._test_export_blockmask_with_mask_fn(device, make_mask_fn)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_self_recursive(self):
-        device = "cuda"
+    def test_export_blockmask_closure_self_recursive(self, device):
         from torch.nn.attention.flex_attention import create_block_mask
 
         _register_blockmask_pytree()
@@ -1478,9 +1467,7 @@ class TestExperimentDevice(TestCase):
         ):
             _dynamo_graph_capture_for_export(module)(x)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_tensor(self):
-        device = "cuda"
+    def test_export_blockmask_closure_tensor(self, device):
         from torch.nn.attention.flex_attention import create_block_mask
 
         _register_blockmask_pytree()
@@ -1511,9 +1498,7 @@ class TestExperimentDevice(TestCase):
         ):
             _dynamo_graph_capture_for_export(module)(x)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_unsupported_class_instance(self):
-        device = "cuda"
+    def test_export_blockmask_closure_unsupported_class_instance(self, device):
         from torch.nn.attention.flex_attention import create_block_mask
 
         _register_blockmask_pytree()
@@ -1547,9 +1532,7 @@ class TestExperimentDevice(TestCase):
         ):
             _dynamo_graph_capture_for_export(module)(x)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_mutually_recursive(self):
-        device = "cuda"
+    def test_export_blockmask_closure_mutually_recursive(self, device):
         from torch.nn.attention.flex_attention import create_block_mask
 
         _register_blockmask_pytree()
@@ -1588,8 +1571,7 @@ class TestExperimentDevice(TestCase):
         IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
         "Requires CUDA with SM >= 8.0, and Triton",
     )
-    def test_aot_export_flex_attention_callable_mask_mod(self):
-        device = "cuda"
+    def test_aot_export_flex_attention_callable_mask_mod(self, device):
         """Test flex_attention AOT export with callable class as mask_mod.
 
         _MaskModWrapper must delegate __eq__ to callable objects for TreeSpec
@@ -1661,8 +1643,7 @@ class TestExperimentDevice(TestCase):
         IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
         "Requires CUDA with SM >= 8.0, and Triton",
     )
-    def test_aot_export_flex_attention_with_blockmask_placeholders(self):
-        device = "cuda"
+    def test_aot_export_flex_attention_with_blockmask_placeholders(self, device):
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
@@ -1718,10 +1699,7 @@ class TestExperimentDevice(TestCase):
 
         self.assertIsNotNone(joint_with_descriptors.graph_module)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self):
-        device = "cuda"
-
+    def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self, device):
         class DummyOp(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, scalar):
@@ -1783,9 +1761,7 @@ class TestExperimentDevice(TestCase):
         test_inputs = input_fn()
         self.assertEqual(gm(*test_inputs), model(*test_inputs))
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_aot_export_blockmask_with_new_closure(self):
-        device = "cuda"
+    def test_aot_export_blockmask_with_new_closure(self, device):
         import contextlib
 
         from torch._export.utils import _compiling_state_context
@@ -1922,9 +1898,7 @@ def forward(self, arg0_1):
             # Shouldn't crash
             self.assertIsNotNone(compiled_fn)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_aot_export_blockmask_closure_spec_mismatch(self):
-        device = "cuda"
+    def test_aot_export_blockmask_closure_spec_mismatch(self, device):
         """BlockMasks with same closure structure produce equal TreeSpecs.
 
         Closure values are extracted into pytree leaves, so two BlockMasks
@@ -1973,9 +1947,7 @@ def forward(self, arg0_1):
         _, spec_c = pytree.tree_flatten(mask_c)
         self.assertNotEqual(spec_a, spec_c)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_blockmask_and_masks_closure_extraction(self):
-        device = "cuda"
+    def test_blockmask_and_masks_closure_extraction(self, device):
         """and_masks closure tensors are recursively extracted into pytree leaves.
 
         and_masks(fn1, fn2) returns a closure capturing a tuple of functions.
@@ -2028,6 +2000,7 @@ def forward(self, arg0_1):
 
 
 instantiate_device_type_tests(TestExperimentCPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestExperimentDevice, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
