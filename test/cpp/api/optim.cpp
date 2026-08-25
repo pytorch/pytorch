@@ -470,6 +470,47 @@ TEST(OptimTest, AddParameter_LBFGS) {
   // REQUIRE this doesn't throw
 }
 
+TEST(OptimTest, AddParameter_Adagrad) {
+  torch::manual_seed(0);
+
+  // Adagrad used to create its state only in the constructor, so a parameter
+  // that reached the optimizer later - appended to an existing group, or in a
+  // group added afterwards - tripped an internal assert in step().
+  auto parameter = torch::randn({5, 5});
+  auto appended = parameter.clone();
+  auto in_new_group = parameter.clone();
+
+  // The group overrides initial_accumulator_value, so the test pins down which
+  // value the state created on first use is seeded from. Its lr is set
+  // explicitly so the comparison below does not depend on option inheritance.
+  std::vector<OptimizerParamGroup> param_groups;
+  param_groups.emplace_back(
+      std::vector<torch::Tensor>{parameter},
+      std::make_unique<AdagradOptions>(
+          AdagradOptions(1.0).initial_accumulator_value(0.9)));
+  Adagrad optimizer(
+      param_groups, AdagradOptions(1.0).initial_accumulator_value(0.5));
+
+  optimizer.param_groups()[0].params().push_back(appended);
+  optimizer.add_param_group(OptimizerParamGroup({in_new_group}));
+
+  parameter.mutable_grad() = torch::ones_like(parameter);
+  appended.mutable_grad() = torch::ones_like(appended);
+  in_new_group.mutable_grad() = torch::ones_like(in_new_group);
+
+  ASSERT_NO_THROW(optimizer.step());
+
+  // All three start equal and are seeded identically, so they stay equal.
+  ASSERT_TRUE(parameter.allclose(appended));
+  ASSERT_TRUE(parameter.allclose(in_new_group));
+
+  auto& state = static_cast<AdagradParamState&>(
+      *optimizer.state()[appended.unsafeGetTensorImpl()]);
+  ASSERT_EQ(state.step(), 1);
+  // sum starts at initial_accumulator_value and accumulates grad * grad.
+  ASSERT_TRUE(state.sum().allclose(torch::full_like(appended, 1.5)));
+}
+
 // Check whether the learning rate of the parameter groups in the optimizer are
 // the same as the expected learning rates given in the epoch:learning rate map
 static void check_lr_change(
