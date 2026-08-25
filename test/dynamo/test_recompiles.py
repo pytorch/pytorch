@@ -7,7 +7,51 @@ import torch._dynamo.testing
 from torch._dynamo import config as dc
 
 
+class _IdentityToken:
+    pass
+
+
+_IDENTITY_TOKEN = _IdentityToken()
+
+
+def _identity_branch(x, token):
+    return x.sin() if token is _IDENTITY_TOKEN else x.cos()
+
+
+_CONSTANT_IDENTITY_TENSOR = torch.tensor([2.0])
+
+
+@torch._dynamo.assume_constant_result
+def _get_constant_identity_tensor():
+    return _CONSTANT_IDENTITY_TENSOR
+
+
+def _constant_identity_branch(x):
+    y = _get_constant_identity_tensor()
+    return x + 1 if x is y else x - 1
+
+
 class RecompileTests(torch._dynamo.test_case.TestCase):
+    def test_input_global_identity_recompiles(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(_identity_branch, backend=cnt, fullgraph=True)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x, _IDENTITY_TOKEN), x.sin())
+        self.assertEqual(compiled(x, _IdentityToken()), x.cos())
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_input_constant_identity_recompiles(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(_constant_identity_branch, backend=cnt, fullgraph=True)
+
+        self.assertEqual(
+            compiled(_CONSTANT_IDENTITY_TENSOR), _CONSTANT_IDENTITY_TENSOR + 1
+        )
+        x = _CONSTANT_IDENTITY_TENSOR.clone()
+        self.assertEqual(compiled(x), x - 1)
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_automatic_dynamic_reduce_recompiles(self):
         # Test the counterfactual, lots of recompiles without this config
         def foo(x, y):
