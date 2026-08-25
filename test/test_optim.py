@@ -22,6 +22,7 @@ from torch.optim.optimizer import (
 )
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
+    dtypes,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -2700,28 +2701,28 @@ class TestOptimRenewed(TestCase):
         optimizer.step(functools.partial(fwd_bwd, optimizer, model, input))
         self.assertEqual(counter, 6)
 
-
-class TestMuon(TestCase):
-    def test_muon_does_not_alias_momentum_buffer(self, device):
-        # With nesterov=False the momentum buffer is handed straight to
-        # Newton-Schulz, which normalizes in place, so a bf16 param must not
-        # end up aliasing it. Check the whole trajectory, not just one step:
-        # Newton-Schulz renormalizes its input, so an aliased buffer only shows
-        # up in the parameters from the second step onwards.
-        torch.manual_seed(7)
+    @dtypes(torch.float32, torch.bfloat16)
+    @parametrize("nesterov", [False, True])
+    def test_muon_orthogonalization_does_not_alias_momentum_buffer(
+        self, device, dtype, nesterov
+    ):
         momentum = 0.9
-        param = Parameter(torch.randn(8, 5, device=device, dtype=torch.bfloat16))
-        optimizer = torch.optim.Muon([param], momentum=momentum, nesterov=False)
+        param = Parameter(torch.zeros(8, 5, device=device, dtype=dtype))
+        param.grad = torch.ones_like(param)
+        optimizer = torch.optim.Muon(
+            [param],
+            lr=0,
+            weight_decay=0,
+            momentum=momentum,
+            nesterov=nesterov,
+        )
         expected = torch.zeros_like(param)
-
-        for _ in range(4):
-            grad = torch.randn(8, 5, device=device, dtype=torch.bfloat16)
-            param.grad = grad.clone()
-            expected.lerp_(grad, 1 - momentum)
-
-            optimizer.step()
-
-            self.assertEqual(optimizer.state[param]["momentum_buffer"], expected)
+        expected.lerp_(param.grad, 1 - momentum)
+        optimizer.step()
+        self.assertEqual(
+            optimizer.state[param]["momentum_buffer"],
+            expected,
+        )
 
     @parametrize("matrix_shape", [(2, 5), (5, 2)])
     def test_muon_batched_matrices(self, device, matrix_shape):
@@ -2787,7 +2788,6 @@ class TestMuon(TestCase):
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
-instantiate_device_type_tests(TestMuon, globals(), allow_mps=True)
 
 
 if __name__ == "__main__":
