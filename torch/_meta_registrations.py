@@ -5903,7 +5903,7 @@ def check_grid_sampler_2d(input: Tensor, grid: Tensor):
     )
 
 
-def check_grid_sampler_3d(input: Tensor, grid: Tensor):
+def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
     torch._check(
         input.ndim == 5 and input.ndim == grid.ndim,
         lambda: (
@@ -5911,6 +5911,14 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor):
             f"dimensions, but got input with sizes {input.shape}"
             f" and grid with sizes {grid.shape}"
         ),
+    )
+    # CPU and CUDA sample 5D bicubic; the backends that do not reject it in eager, so the
+    # trace has to reject it too rather than succeed and fail at run time.
+    torch._check(
+        input.device.type not in ("mps", "xpu")
+        or interpolation_mode != GridSamplerInterpolation.BICUBIC.value,
+        lambda: "grid_sampler(): bicubic interpolation with 5D input is not supported "
+        f"on {input.device.type}",
     )
 
 
@@ -5984,7 +5992,7 @@ def grid_sampler_3d(
     align_corners,
 ):
     check_grid_sampler_common(input, grid)
-    check_grid_sampler_3d(input, grid)
+    check_grid_sampler_3d(input, grid, interpolation_mode)
     N = input.shape[0]
     C = input.shape[1]
     out_D = grid.shape[1]
@@ -6005,7 +6013,7 @@ def grid_sampler_3d_backward(
     output_mask,
 ):
     check_grid_sampler_common(input, grid)
-    check_grid_sampler_3d(input, grid)
+    check_grid_sampler_3d(input, grid, interpolation_mode)
     input_requires_grad = output_mask[0]
     if input_requires_grad:
         grad_input = torch.zeros_like(

@@ -8255,8 +8255,9 @@ static Tensor gs_scatter2d_bc_multi(
       .reshape({N, C, H, W});
 }
 
-// Multi-tap bounded gather for bicubic 3D: the padding maps every tap, as it
-// does in the kernel, instead of the caller having mapped the coordinate once.
+// Multi-tap bounded gather for bicubic 3D: d/h/w_idx [N, Do, Ho, Wo, K] -> [N,
+// C, Do, Ho, Wo, K]. The padding maps every tap, as it does in the kernel,
+// instead of the caller having mapped the coordinate once.
 static Tensor gs_gather3d_bc_multi(
     const Tensor& input,
     const Tensor& d_idx,
@@ -8286,7 +8287,7 @@ static Tensor gs_gather3d_bc_multi(
 }
 
 // Multi-tap bounded scatter for bicubic 3D: values [N,C,Do,Ho,Wo], weights
-// [N,Do,Ho,Wo,K] → [N,C,D,H,W]
+// [N,Do,Ho,Wo,K] -> [N,C,D,H,W]
 static Tensor gs_scatter3d_bc_multi(
     const Tensor& values,
     const Tensor& weights,
@@ -8708,7 +8709,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
            -((((3 * (A + 2)) * t2) - (2 * (A + 3))) * t2),
            (((-3 * A) * t3) + (10 * A)) * t3 - (8 * A)},
           -1);
-      return std::make_pair(c, dc);
+      return std::make_pair(std::move(c), std::move(dc));
     };
     // only the ggGrid half needs the second derivative, so it is built there
     auto second = [](const Tensor& t) {
@@ -8742,8 +8743,12 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
       for (const auto jy : c10::irange(4)) {
         auto y_idx = (y0 + (jy - 1)).unsqueeze(-1).expand_as(x_idx);
         auto z_idx = (z0 + (kz - 1)).unsqueeze(-1).expand_as(x_idx);
-        auto taps = gs_gather3d_bc_multi(
-            input, z_idx, y_idx, x_idx, padding_mode_enum, align_corners);
+        // d_input needs the weights and grad_output, not the input values
+        Tensor taps;
+        if (output_mask[0] || output_mask[2]) {
+          taps = gs_gather3d_bc_multi(
+              input, z_idx, y_idx, x_idx, padding_mode_enum, align_corners);
+        }
 
         auto cy_j = cy.select(-1, jy), dcy_j = dcy.select(-1, jy);
         auto cz_k = cz.select(-1, kz), dcz_k = dcz.select(-1, kz);
@@ -8762,6 +8767,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
           auto contrib = gs_accum_sumprod_k(taps, B_dx) * ggG_x.unsqueeze(1);
           contrib.addcmul_(gs_accum_sumprod_k(taps, B_dy), ggG_y.unsqueeze(1));
           contrib.addcmul_(gs_accum_sumprod_k(taps, B_dz), ggG_z.unsqueeze(1));
+          // out of place: vmap refuses an in-place accumulation whose
+          // destination is not batched while the chunk's contribution is
           d_grad_output = d_grad_output.defined() ? d_grad_output + contrib
                                                   : std::move(contrib);
         }

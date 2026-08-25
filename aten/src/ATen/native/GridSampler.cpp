@@ -38,13 +38,13 @@ using at::native::detail::GridSamplerPadding;
 
 namespace {
 
-  // Resolves the four cubic taps one axis contributes to a sample at `coord`: the Keys
-  // coefficients of its fractional part, the index each tap reads at, whether it reads at all, and,
-  // when `coeffs_grad` is given, the derivative of each coefficient, which the grid gradient needs.
-  // The taps sit around the UNCLIPPED index, since a clipped one would place them around the wrong
-  // voxel. A tap the padding drops is marked with a negative index and contributes a zero value,
-  // which is what get_value_bounded does in 4-D: its coefficient still reaches the sum, so a
-  // coefficient that is not finite propagates the same way at both ranks.
+  // The four cubic taps one axis contributes at `coord`: the Keys coefficients of its fractional
+  // part, the index each tap reads at, and, when `coeffs_grad` is given, the derivative the grid
+  // gradient needs. The taps sit around the UNCLIPPED index; a clipped one would place them around
+  // the wrong voxel. A tap the padding drops takes a negative index and contributes a zero value
+  // while keeping its coefficient, which is what get_value_bounded does in 4-D. The bounds are
+  // taken on the coordinate where 4-D takes them on the truncated index; the two agree because
+  // compute_coordinates sends an integer to an integer in every padding mode.
   template <typename scalar_t, typename index_t>
   static inline void resolve_cubic_taps(
       scalar_t coord,
@@ -61,8 +61,7 @@ namespace {
     }
     for (const auto i : c10::irange(4)) {
       const scalar_t tap = compute_coordinates(base - 1 + i, size, padding_mode, align_corners);
-      // the comparison decides, not the cast: a coordinate that is not finite fails both sides,
-      // where converting it to an integer is undefined
+      // the comparison, not the cast: a coordinate that is not finite fails both sides
       indices[i] = (tap >= 0 && tap < static_cast<scalar_t>(size))
           ? static_cast<index_t>(tap)
           : static_cast<index_t>(-1);
@@ -262,8 +261,6 @@ namespace {
                             ? inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH
                             : inp_ptr_NC;
                         for (const auto i : c10::irange(4)) {
-                          // a dropped tap contributes a zero value and keeps its coefficient,
-                          // which is what get_value_bounded does in 4-D
                           const opmath_t sample = plane_reads && x_taps[i] >= 0
                               ? static_cast<opmath_t>(row[x_taps[i] * inp_sW])
                               : static_cast<opmath_t>(0);
