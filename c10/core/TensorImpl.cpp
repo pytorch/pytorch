@@ -10,6 +10,7 @@
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/Logging.h>
 #include <c10/util/accumulate.h>
+#include <algorithm>
 #include <optional>
 
 #include <utility>
@@ -322,6 +323,9 @@ void TensorImpl::release_resources() {
   autograd_meta_.reset();
   if (storage_) {
     storage_ = {};
+  }
+  if (extra_meta_) {
+    extra_meta_->fake_constant_.reset();
   }
 }
 
@@ -1074,5 +1078,123 @@ AutogradMetaFactory* GetAutogradMetaFactory() {
 }
 
 } // namespace impl
+
+void FakeTensorMode::set_constant(
+    const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
+    c10::intrusive_ptr<c10::TensorImpl> constant) {
+  // a registered fake tensor always has ExtraMeta (set by set_fake_device)
+  auto* extra_meta = fake_impl->maybe_get_extra_meta();
+  TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
+  clear_constant(fake_impl);
+  if (constant->has_storage()) {
+    const auto& storage = constant->storage();
+    auto* key = storage.unsafeGetStorageImpl();
+    auto it = constant_storage_mapping_.find(key);
+    if (it == constant_storage_mapping_.end()) {
+      it = constant_storage_mapping_
+               .try_emplace(key, ConstantAliases{storage.getWeakStorageImpl()})
+               .first;
+    }
+    it->second.tensors.emplace_back(fake_impl);
+  }
+  extra_meta->fake_constant_ = std::move(constant);
+}
+
+void FakeTensorMode::clear_constant(
+    const c10::intrusive_ptr<c10::TensorImpl>& fake_impl) {
+  auto* extra_meta = fake_impl->maybe_get_extra_meta();
+  if (extra_meta == nullptr || !extra_meta->fake_constant_) {
+    return;
+  }
+  // Re-setting here must drop the old entry, otherwise mutating the old storage
+  // would invalidate the new constant.
+  if (extra_meta->fake_constant_->has_storage()) {
+    auto* old_key =
+        extra_meta->fake_constant_->storage().unsafeGetStorageImpl();
+    auto old_it = constant_storage_mapping_.find(old_key);
+    if (old_it != constant_storage_mapping_.end()) {
+      auto& tensors = old_it->second.tensors;
+      tensors.erase(
+          std::remove_if(
+              tensors.begin(),
+              tensors.end(),
+              [&](const c10::weak_intrusive_ptr<c10::TensorImpl>& weak_ref) {
+                auto impl = weak_ref.lock();
+                return impl && impl.get() == fake_impl.get();
+              }),
+          tensors.end());
+      if (tensors.empty()) {
+        constant_storage_mapping_.erase(old_it);
+      }
+    }
+  }
+  extra_meta->fake_constant_.reset();
+}
+
+c10::intrusive_ptr<c10::TensorImpl> FakeTensorMode::get_constant(
+    c10::TensorImpl* fake_impl) const {
+  auto* extra_meta = fake_impl->maybe_get_extra_meta();
+  if (extra_meta == nullptr) {
+    return nullptr;
+  }
+  return extra_meta->fake_constant_;
+}
+
+void FakeTensorMode::invalidate_constant_aliases(
+    c10::StorageImpl* storage_impl) {
+  auto it = constant_storage_mapping_.find(storage_impl);
+  if (it == constant_storage_mapping_.end()) {
+    return;
+  }
+  for (auto& weak_ref : it->second.tensors) {
+    auto impl = weak_ref.lock();
+    if (impl) {
+      if (auto* extra_meta = impl->maybe_get_extra_meta()) {
+        extra_meta->fake_constant_.reset();
+      }
+    }
+  }
+  constant_storage_mapping_.erase(it);
+}
+
+void FakeTensorMode::clear_non_cpu_constants() {
+  for (auto it = constant_storage_mapping_.begin();
+       it != constant_storage_mapping_.end();) {
+    std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>> live_tensors;
+    c10::intrusive_ptr<c10::TensorImpl> constant;
+    for (auto& weak_ref : it->second.tensors) {
+      auto impl = weak_ref.lock();
+      if (!impl) {
+        continue;
+      }
+      auto* extra_meta = impl->maybe_get_extra_meta();
+      if (extra_meta == nullptr || !extra_meta->fake_constant_) {
+        continue;
+      }
+      live_tensors.push_back(weak_ref);
+      if (!constant) {
+        constant = extra_meta->fake_constant_;
+      }
+    }
+
+    if (!constant) {
+      it = constant_storage_mapping_.erase(it);
+    } else if (constant->device().is_cpu()) {
+      it->second.tensors = std::move(live_tensors);
+      ++it;
+    } else {
+      for (auto& weak_ref : live_tensors) {
+        if (auto impl = weak_ref.lock()) {
+          if (auto* extra_meta = impl->maybe_get_extra_meta()) {
+            extra_meta->fake_constant_.reset();
+          }
+        }
+      }
+      it = constant_storage_mapping_.erase(it);
+    }
+  }
+}
+
+ExtraMeta::~ExtraMeta() = default;
 
 } // namespace c10
