@@ -563,7 +563,7 @@ void pushGlobalProfilingCallbacks(
           .scopes(scopes);
 
   // Arm the drain gate before the global callback and fire on any thread. If
-  // this a new profiling session, also bump the session generation.
+  // this is a new profiling session, also bump the session generation.
   // disableProfiler() relies on this to know it must drain in-flight callbacks.
   global_callback_session.activate(new_session);
 
@@ -1278,6 +1278,21 @@ extra_meta_t KinetoEvent::extraMeta() const {
       [&](const ExtraFields<EventType::Kineto>& e) { out = e.extra_meta_; },
       [](const auto&) {}));
   return out;
+}
+
+// Collective metadata is stored on TorchOp results, while native Kineto event
+// metadata is captured from the activity's typed visitor.
+const typed_metadata_t& KinetoEvent::typedMetadata() const {
+  const auto* metadata = result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& e) {
+        return &e.collective_meta_;
+      },
+      [](const ExtraFields<EventType::Kineto>& e) {
+        return &e.typed_metadata_;
+      },
+      [](const auto&) -> const typed_metadata_t* { return nullptr; }));
+  static const typed_metadata_t empty;
+  return metadata ? *metadata : empty;
 }
 
 TYPED_ATTR(TorchOp, fallbackStart, e.device_fallback_.device_event_start_)

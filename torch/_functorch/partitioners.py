@@ -1329,7 +1329,7 @@ def enable_activation_quantization(
                 continue
             node.meta["saved_for_quantization"] = True
             node.meta["dequant_type"] = node.meta["val"].dtype
-            # some of the fwd outputs and bwd inputs are not share the same object
+            # some of the fwd outputs and bwd inputs do not share the same object
             bwd_module_inputs[node.name].meta["saved_for_quantization"] = True
             bwd_module_inputs[node.name].meta["dequant_type"] = node.meta["val"].dtype
             should_perform_fp8_quant = True
@@ -1370,6 +1370,24 @@ def _extract_fwd_bwd_modules(
     )
     placeholders = joint_module.graph.find_nodes(op="placeholder")
     primal_inputs = [*filter(_is_primal, placeholders)]
+    # Stamp is_static_input on primal placeholders for the backward
+    # compiler; see Note: [static_input_idxs semantics] in
+    # torch/_inductor/compile_fx.py. This must happen here, while primals
+    # are still 1:1 with flat forward inputs, because staticness is tracked
+    # positionally (static_lifetime_input_nodes derives from
+    # fw_metadata.static_input_indices) and the backward graph's input
+    # ordering destroys that correspondence. The meta dict is shared by
+    # reference with the extracted fwd/bwd placeholder nodes
+    # (_extract_graph_with_inputs_outputs), so the stamp is visible on
+    # bw_module's placeholders regardless of how saving reorders them.
+    #
+    # TODO: staticness arguably belongs on the AOTInput descriptors
+    # (meta["desc"]); today those cannot express it (the dynamo frontend
+    # emits PlainAOTInput even for lifted params, and mark_static_address
+    # lives on the tensor object), so we use a dedicated meta key.
+    if static_lifetime_input_nodes is not None:
+        for node in primal_inputs:
+            node.meta["is_static_input"] = node in static_lifetime_input_nodes
     tangent_inputs = (
         [] if omit_aot_autograd_runtime else [*filter(_is_tangent, placeholders)]
     )
@@ -1406,7 +1424,11 @@ def _extract_fwd_bwd_modules(
         # then the collective will generally by followed by a wait_tensor() call.
         # we need to peek one node further to see if this wait_tensor is dead as well.
         elif distributed_enabled and all(
-            n.target is torch.ops._c10d_functional.wait_tensor.default
+            n.target
+            in (
+                torch.ops._c10d_functional.wait_tensor.default,
+                torch.ops._c10d_functional.wait_tensors.default,
+            )
             and len(n.users) == 0
             for n in node.users
         ):
@@ -1701,7 +1723,11 @@ def default_partition(
             )
             and (
                 not distributed_enabled
-                or node.target is not torch.ops._c10d_functional.wait_tensor.default
+                or node.target
+                not in (
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    torch.ops._c10d_functional.wait_tensors.default,
+                )
             )
         )
 
@@ -2312,13 +2338,23 @@ def force_save_collectives(joint_module: fx.GraphModule) -> None:
     unless they come from a user-annotated AC region.
     See Note [Recomputing collectives in the partitioner]
     """
+
+    def mark_leaf_tensor_outputs(node: fx.Node) -> None:
+        getitem_users = [user for user in node.users if user.target is operator.getitem]
+        if getitem_users:
+            for user in getitem_users:
+                mark_leaf_tensor_outputs(user)
+            return
+        if not isinstance(node.meta.get("val"), (tuple, list)):
+            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
     for node in joint_module.graph.nodes:
         if (
             isinstance(node.target, torch._ops.OpOverload)
             and node.target.namespace == "_c10d_functional"
             and not must_recompute(node)
         ):
-            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+            mark_leaf_tensor_outputs(node)
 
 
 def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
@@ -3388,12 +3424,10 @@ from torch.utils._mode_utils import no_dispatch
 
 # replace symbols in size and strides with their hints without guarding.
 def _remove_symbols_without_guarding(x: torch.Tensor, fallback: int) -> torch.Tensor:
-    shape = list(x.shape)
-
     def realize_symbol(d: torch.SymInt | int) -> int:
         return optimization_hint(d, fallback=fallback)
 
-    shape = [realize_symbol(s) for s in shape]
+    shape = [realize_symbol(s) for s in x.shape]
     stride = [realize_symbol(s) for s in x.stride()]
     return x.new_empty_strided(shape, stride=stride)
 
@@ -3708,6 +3742,24 @@ def choose_saved_values_set(
     )[0]
 
 
+def _stable_target_str(target: Any) -> str:
+    """Stringify a node target stably across processes.
+
+    ``str()`` on a plain Python-function target (e.g. ``torch.sym_not``) renders
+    its ``repr`` including the object's memory address (``<function sym_not at
+    0x...>``), which differs per process. That poisons cross-rank graph hashing.
+    Use FX's qualified name for callables so equal graphs hash equally.
+    """
+    from torch.fx.node import _get_qualified_name
+
+    if callable(target):
+        try:
+            return _get_qualified_name(target)
+        except Exception:
+            return str(target)
+    return str(target)
+
+
 def _cone_hashes(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
     """Compute a forward-looking structural hash for each node.
 
@@ -3737,7 +3789,7 @@ def _cone_hashes(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
         elif node.op == "output":
             self_key = ("output",)
         else:
-            self_key = (node.op, str(node.target))
+            self_key = (node.op, _stable_target_str(node.target))
 
         user_hashes = tuple(sorted(hashes[u] for u in node.users))
         hashes[node] = hashlib.sha256(
@@ -3787,7 +3839,7 @@ def _canonical_node_names(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
             return (3,)
         else:
             input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
-            return (2, str(node.target), input_indices)
+            return (2, _stable_target_str(node.target), input_indices)
 
     # Seed the heap with nodes that have no dependencies.
     # The counter ensures deterministic ordering when keys are equal.
@@ -3818,6 +3870,7 @@ def _sync_decision_cross_ranks(
     joint_graph: torch.fx.Graph, saved_values: list[torch.fx.Node]
 ) -> list[torch.fx.Node]:
     # use the same policy across different GPUs
+    from torch._dynamo.distributed import get_compile_sync_pg
     from torch._subclasses.fake_tensor import unset_fake_temporarily
 
     def has_collectives(joint_graph: torch.fx.Graph) -> bool:
@@ -3836,6 +3889,11 @@ def _sync_decision_cross_ranks(
     ):
         return saved_values
 
+    pg = get_compile_sync_pg()
+    if pg is None:
+        raise AssertionError("Compile sync process group must be available here")
+    coll_device = torch.distributed.distributed_c10d._get_object_coll_device(pg)
+
     canonical = _canonical_node_names(joint_graph)
     reverse_canonical = {v: k for k, v in canonical.items()}
 
@@ -3849,17 +3907,16 @@ def _sync_decision_cross_ranks(
             # ranks. Use only the canonical name and op for these.
             if n.op == "placeholder":
                 return f"{canonical[n]}:{n.op}"
-            return f"{canonical[n]}:{n.op}:{n.target}"
+            return f"{canonical[n]}:{n.op}:{_stable_target_str(n.target)}"
 
         node_str = "/".join(
             _node_hash_str(n)
             for n in sorted(joint_graph.nodes, key=lambda n: canonical[n])
         )
         inputs = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
-        all_inputs = [None for _ in range(torch.distributed.get_world_size())]
+        all_inputs = [None for _ in range(pg.size())]
         with no_dispatch(), unset_fake_temporarily():
-            # TODO: maybe use a different process group?
-            torch.distributed.all_gather_object(all_inputs, inputs)
+            torch.distributed.all_gather_object(all_inputs, inputs, group=pg)
             for rank, x in enumerate(all_inputs):
                 if all_inputs[0] != x:
                     log.debug(
@@ -3874,10 +3931,10 @@ def _sync_decision_cross_ranks(
             # Communicate saved values using canonical names so that
             # node names (which may differ across ranks) don't matter.
             objects = [[canonical[x] for x in saved_values]]
-            saved_ops_names_all_ranks: list[list[str]] = [
-                [] for _ in range(torch.distributed.get_world_size())
-            ]
-            torch.distributed.all_gather_object(saved_ops_names_all_ranks, objects[0])
+            saved_ops_names_all_ranks: list[list[str]] = [[] for _ in range(pg.size())]
+            torch.distributed.all_gather_object(
+                saved_ops_names_all_ranks, objects[0], group=pg
+            )
             saved_sizes: list[int] = []
             saved_ops_with_sizes: dict[str, int] = {}
 
@@ -3889,17 +3946,16 @@ def _sync_decision_cross_ranks(
                 for node in saved_nodes:
                     size_of_node = _size_of(node)
                     saved_size += size_of_node
-                    if idx == torch.distributed.get_rank():
+                    if idx == pg.rank():
                         saved_ops_with_sizes[node.name] = size_of_node
                 saved_ops_with_sizes["total size"] = saved_size
                 saved_sizes.append(saved_size)
 
-            saved_sizes_tensor = torch.tensor(
-                saved_sizes,
-                device=torch.distributed.distributed_c10d._get_object_coll_device(),
-            )
+            saved_sizes_tensor = torch.tensor(saved_sizes, device=coll_device)
             torch.distributed.all_reduce(
-                saved_sizes_tensor, op=torch.distributed.distributed_c10d.ReduceOp.MAX
+                saved_sizes_tensor,
+                op=torch.distributed.distributed_c10d.ReduceOp.MAX,
+                group=pg,
             )
 
             picked_rank_idx = int(torch.argmin(saved_sizes_tensor).item())
