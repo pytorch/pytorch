@@ -39,6 +39,7 @@ from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
 from ..exc import (
     ObservedAttributeError,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -398,21 +399,19 @@ Getter: TypeAlias = Callable[
     [Any, "InstructionTranslatorBase"], "VariableTracker | None"
 ]
 
-Setter: TypeAlias = (
-    Callable[
-        [Any, "InstructionTranslatorBase", "VariableTracker | None"],
-        "VariableTracker | None",
-    ]
-    | None
-)
+Setter: TypeAlias = Callable[
+    [Any, "InstructionTranslatorBase", "VariableTracker | None"],
+    "VariableTracker | None",
+]
 
 
 @dataclasses.dataclass(slots=True)
 class GetSet:
     """`tp_getset` entry, analogous to CPython's PyGetSetDef. `getter`
     `(self, tx) -> VT | None` (None declines); `setter`
-    `(self, tx, value) -> VT | None` (None declines), and a `setter` of None
-    means read-only."""
+    `(self, tx, value) -> VT | None` (None declines). An attribute whose
+    PyGetSetDef has a NULL setter uses `readonly_setter`; one CPython lets you
+    write but Dynamo does not model uses `unmodeled_setter`."""
 
     getter: Getter
     setter: Setter
@@ -421,10 +420,41 @@ class GetSet:
 @dataclasses.dataclass(slots=True)
 class Member:
     """`tp_members` entry, analogous to CPython's PyMemberDef. Same shape as
-    GetSet; a distinct type so members and getsets never share a class."""
+    GetSet; a distinct type so members and getsets never share a class. A
+    PyMemberDef flagged READONLY uses `readonly_setter`."""
 
     getter: Getter
     setter: Setter
+
+
+def readonly_setter(
+    self: Any, tx: InstructionTranslatorBase, value: VariableTracker | None
+) -> NoReturn:
+    """Setter for an attribute CPython declares read-only: a PyMemberDef flagged
+    READONLY, or a PyGetSetDef with a NULL setter.
+
+    Doubles as a marker. Dispatch sites that know the attribute name raise
+    CPython's more specific getset_set wording instead of calling this; the
+    message here is PyMember_SetOne's.
+    """
+    raise_attribute_error(tx, "readonly attribute")
+
+
+def unmodeled_setter(
+    self: Any, tx: InstructionTranslatorBase, value: VariableTracker | None
+) -> NoReturn:
+    """Setter for an attribute CPython lets you write but Dynamo does not model.
+
+    Eager accepts the write, so raising AttributeError would diverge; graph break
+    instead and let the write happen outside the graph.
+    """
+    unimplemented(
+        gb_type="Write to unmodeled getset/member attribute",
+        context=f"{self}",
+        explanation="Dynamo does not model writes to this attribute, which is "
+        "writable in eager.",
+        hints=[*graph_break_hints.SUPPORTABLE],
+    )
 
 
 def getset_build(
@@ -1629,13 +1659,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     # Declarative attribute tables, split to match CPython: tp_getset holds the
     # PyGetSetDef attributes, tp_members the PyMemberDef ones.
     tp_getset: dict[str, GetSet] = {
+        # object.__class__ has a non-NULL setter: it rejects non-heap types with
+        # TypeError rather than AttributeError, so this is unmodeled, not readonly.
         "__class__": GetSet(
             getter=lambda self, tx: VariableTracker.build(
                 tx,
                 self.python_type(),
                 AttrSource(self.source, "__class__") if self.source else None,
             ),
-            setter=None,
+            setter=unmodeled_setter,
         ),
     }
     tp_members: dict[str, Member] = {}

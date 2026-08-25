@@ -878,6 +878,16 @@
       ]
     }
   ],
+  "GB6404": [
+    {
+      "Gb_type": "Write to unmodeled getset/member attribute",
+      "Context": "{self}",
+      "Explanation": "Dynamo does not model writes to this attribute, which is writable in eager.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0058": [
     {
       "Gb_type": "Failed to set tensor attribute",
