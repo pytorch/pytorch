@@ -2288,6 +2288,44 @@ class TestMetaKernelConv(TestCase):
 
 class TestMetaKernelRegistrations(TestCase):
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_scatter_add_out_index_dtype_mismatch(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/194103.
+        self_tensor = torch.zeros(2, 3, device="meta")
+        index = torch.zeros(2, 3, dtype=torch.float32, device="meta")
+        src = torch.ones(2, 3, device="meta")
+        out = torch.empty_like(self_tensor)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected dtype int32/int64 for index"):
+            torch.ops.aten.scatter_add.out(self_tensor, 1, index, src, out=out)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_scatter_add_out_shape_mismatch(self):
+        self_tensor = torch.zeros(2, 3, device="meta")
+        index = torch.zeros(2, 4, dtype=torch.long, device="meta")
+        src = torch.ones(2, 4, device="meta")
+        out = torch.empty_like(self_tensor)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected index"):
+            torch.ops.aten.scatter_add.out(self_tensor, 0, index, src, out=out)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_scatter_add_out_shape_mismatch_symbolic_index(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            size = shape_env.create_unbacked_symint()
+            torch._check(size >= 1)
+            self_tensor = torch.zeros(2, 3)
+            index = torch.zeros(size, 4, dtype=torch.long)
+            src = torch.ones(size, 4)
+            out = torch.empty_like(self_tensor)
+
+            with self.assertRaisesRegex(RuntimeError, "Expected index"):
+                torch.ops.aten.scatter_add.out(self_tensor, 0, index, src, out=out)
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_aminmax_out_dtype_mismatch(self):
         inp = torch.rand(10, 10, device="meta")
         out_min = torch.empty(10, dtype=torch.float64, device="meta")
