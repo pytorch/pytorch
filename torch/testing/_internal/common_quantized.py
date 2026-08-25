@@ -7,7 +7,6 @@ import numpy as np
 import torch
 from torch import Tensor
 from contextlib import contextmanager
-from torch.testing._internal.common_cuda import _get_torch_rocm_version
 from torch.testing._internal.common_utils import TEST_WITH_TSAN, IS_PPC, IS_MACOS, IS_WINDOWS, IS_ARM64
 
 supported_qengines = list(torch.backends.quantized.supported_engines)
@@ -513,39 +512,40 @@ def from_blocked_format(x_mxfp8, scales_unswizzled, blocksize=32):
     x_f32 = x_mxfp8.to(torch.float) * scales.to(torch.float)
     return x_f32.to(torch.bfloat16)
 
-def to_blocked(input_matrix) -> torch.Tensor:
+def to_blocked(input_matrix, mat_dtype=None) -> torch.Tensor:
     """
-    Rearrange MX block scale factors for GEMM consumption (device-specific layout).
+    Rearrange a large matrix by breaking it into blocks and applying the rearrangement pattern.
 
-    On CUDA, uses the cuBLAS MX block scaling layout (128 by 4 tiles); see
-    https://docs.nvidia.com/cuda/cublas/index.html#d-block-scaling-factors-layout
+    See:
+        https://docs.nvidia.com/cuda/cublas/index.html#d-block-scaling-factors-layout
 
-    On ROCm 7.13.0 or newer (``torch.version.rocm``), uses the hipBLASLt GFX950 pre-swizzled E8M0 layout for
-    ``Block_32_UE8M0_32_8_EXT`` (MX FP4 from 7.13, MX FP8 from 7.14): pad to ``ceil(H,32)`` by ``ceil(W,8)``, view as
-    ``(H//32, 2, 16, W//8, 2, 4)``, then ``permute(0, 3, 5, 2, 4, 1)``. On older ROCm, returns the input unchanged (contiguous 1D).
+    gfx950 tiles 32x8 instead, the layout hipBLASLt calls BLK32_UE8M0_32_8, and
+    the result has 32*ceil_div(H,32) * 8*ceil_div(W,8) elements. MX FP4 takes it
+    from ROCm 7.13 and MX FP8 from 7.14, so callers on ROCm must pass mat_dtype,
+    the dtype of the data these scales belong to. It is ignored elsewhere.
 
     Args:
-        input_matrix: 2D tensor of shape (H, W)
+        input_matrix: Input tensor of shape (H, W)
+        mat_dtype: dtype of the matrix `input_matrix` holds the scales for
 
     Returns:
-        1D tensor of length ``ceil(H, tile_h) * ceil(W, tile_w)`` with device-specific tiling.
+        Rearranged tensor of shape (32*ceil_div(H,128), 16*ceil_div(W,4))
     """
+    from torch.testing._internal.common_cuda import rocm_mx_swizzle
+
     rows, cols = input_matrix.shape
 
-    if torch.version.hip:
-        if _get_torch_rocm_version() >= (7, 13):
-            padded_rows = ceil_div(rows, 32) * 32
-            padded_cols = ceil_div(cols, 8) * 8
+    if mat_dtype is not None and rocm_mx_swizzle(mat_dtype):
+        padded_rows = ceil_div(rows, 32) * 32
+        padded_cols = ceil_div(cols, 8) * 8
 
-            padded = input_matrix
-            if (rows, cols) != (padded_rows, padded_cols):
-                padded = torch.zeros((padded_rows, padded_cols), device=input_matrix.device, dtype=input_matrix.dtype)
-                padded[:rows, :cols] = input_matrix
+        padded = input_matrix
+        if (rows, cols) != (padded_rows, padded_cols):
+            padded = torch.zeros((padded_rows, padded_cols), device=input_matrix.device, dtype=input_matrix.dtype)
+            padded[:rows, :cols] = input_matrix
 
-            x = padded.view(padded_rows // 32, 2, 16, padded_cols // 8, 2, 4)
-            x = x.permute(0, 3, 5, 2, 4, 1).contiguous()
-            return x.flatten()
-        return input_matrix.contiguous().flatten()
+        blocks = padded.view(padded_rows // 32, 2, 16, padded_cols // 8, 2, 4)
+        return blocks.permute(0, 3, 5, 2, 4, 1).flatten()
 
     n_row_blocks = ceil_div(rows, 128)
     n_col_blocks = ceil_div(cols, 4)

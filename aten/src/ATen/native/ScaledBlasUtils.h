@@ -170,8 +170,8 @@ bool check_mxfp8_recipe(
     ArrayRef<Tensor>& scales_b);
 
 /**
- * Both inputs must be fp4 with float8_e8m0fnu scales: BlockWise1x32 (CUDA), or on ROCm
- * BlockWiseBlk32Ue8m0_32_8_EXT when built with ROCm 7.13.0+ (71300), else BlockWise1x32 (legacy).
+ * Both inputs must be fp4
+ * A, B must have 1 scale each, {Blockwise_1x32, e8m0}
  */
 TORCH_API
 bool check_mxfp4_recipe(
