@@ -2275,6 +2275,22 @@ class TestCompositeCompliance(TestCase):
 class TestMathBits(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @onlyCPU
+    def test_prims_as_strided_conjugate(self, device):
+        x = torch.randn(4, dtype=torch.cfloat, device=device).conj()
+        result = torch.ops.prims.as_strided(x, (2, 2), (2, 1), 0)
+
+        self.assertTrue(result.is_conj())
+        self.assertEqual(result, x.view(2, 2))
+
+    @onlyCPU
+    def test_prims_as_strided_negative(self, device):
+        x = torch._neg_view(torch.arange(4, dtype=torch.float, device=device))
+        result = torch.ops.prims.as_strided(x, (2, 2), (2, 1), 0)
+
+        self.assertTrue(result.is_neg())
+        self.assertEqual(result, x.view(2, 2))
+
     # Tests that
     # 1. The operator's output for physically conjugated/negated tensors and conjugate/negative view tensors
     # produces the same value
