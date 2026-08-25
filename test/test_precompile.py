@@ -4344,19 +4344,10 @@ class TestPrecompile(TestCase):
         self.assertEqual(torch.compiler.precompile.load(ecode, ecache)(run, x), run(x))
 
     def test_unbacked_equality_shared_vs_independent_shape_id(self):
-        # MAJOR1 (invariant 3 DANGER note): two mark_unbacked dims that the graph requires
-        # to be EQUAL behave differently depending on shape_id. (a) A SHARED shape_id binds
-        # them to ONE symbol, so they are equal by construction AND a runtime size mismatch
-        # is LOUDLY rejected. (b) Two INDEPENDENTLY marked dims (no shared shape_id)
-        # combined elementwise bake a SILENT equal-size assumption: unlike eager, a runtime
-        # mismatch is NOT loudly rejected -- NOT because the constraint is unrecoverable, but
-        # because precompile does not harvest it: the capture ShapeEnv DOES record the
-        # equality as a deferred runtime assert (Eq(u0, u1)), yet only the decorator's
-        # min/max feed USER_INPUT_BOUNDS, so the driver never enforces the relational assert.
-        # The artifact runs and returns the FIRST input's shape. This documents the "give
-        # equal-must-be-equal dims a shared shape_id" limitation (and would flip to a loud
-        # failure if that harvesting gap is later closed) rather than asserting silent-wrong
-        # is correct.
+        # A shared shape_id binds both dimensions to one symbol, so runtime mismatches are
+        # rejected. Independently marked dimensions would instead introduce a deferred
+        # equality constraint that the standalone driver cannot enforce, so capture must
+        # fail rather than bake the example relation.
         m = torch.nn.Linear(4, 4).eval()
         # (a) shared shape_id -> equality enforced.
         xs = torch.randn(8, 4)
@@ -4371,20 +4362,28 @@ class TestPrecompile(TestCase):
         self.assertEqual(f_s(m, xt, yt), m(xt) + yt)  # matched sizes work
         with self.assertRaisesRegex(PrecompileError, "shape or memory format"):
             f_s(m, torch.randn(8, 4), torch.randn(16, 4))  # mismatch rejected
-        # (b) independent marks -> the documented silent equal-size limitation. A matched
-        # call works; a mismatched call does NOT raise and returns the first input's shape.
+        # (b) independent marks -> fail closed on the unhandled equality constraint.
         xi = torch.randn(8, 4)
         yi = torch.randn(8, 4)
         mark_unbacked(xi, 0)
         mark_unbacked(yi, 0)
-        code_i, cache_i = torch.compiler.precompile(
-            lambda mm, a, b: mm(a) + b, example_inputs=[(m, xi, yi)]
-        )
-        f_i = torch.compiler.precompile.load(code_i, cache_i)
-        xm, ym = torch.randn(10, 4), torch.randn(10, 4)
-        self.assertEqual(f_i(m, xm, ym), m(xm) + ym)  # matched sizes work
-        out = f_i(m, torch.randn(10, 4), torch.randn(12, 4))  # mismatch NOT rejected
-        self.assertEqual(tuple(out.shape), (10, 4))  # broadcasts to the first input
+        with self.assertRaisesRegex(PrecompileError, "runtime shape constraints"):
+            torch.compiler.precompile(
+                lambda mm, a, b: mm(a) + b, example_inputs=[(m, xi, yi)]
+            )
+
+    def test_unbacked_derived_runtime_constraint_rejected(self):
+        def fn(x):
+            y = x.nonzero()
+            torch._check(y.shape[0] > 0)
+            return y
+
+        x = torch.ones(8)
+        mark_unbacked(x, 0)
+        with self.assertRaisesRegex(
+            PrecompileError, "deferred runtime shape constraints"
+        ):
+            torch.compiler.precompile(fn, example_inputs=[(x,)])
 
     def test_grad_identity_preserved_across_precompile(self):
         # Capture snapshots and restores the example model's .grad by the SAME object (no
