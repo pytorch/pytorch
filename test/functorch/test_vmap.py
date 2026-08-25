@@ -2314,46 +2314,103 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op), (torch.rand(B0, B1), torch.rand(B1, 2, 3, 5)), in_dims=(0, None))
         test(vmap(vmap(op)), (torch.rand(B0, B1, B2), torch.rand(B0, B1, B2, 2, 3, 5)))
 
-    def test_index_select_batched_scalar_index(self):
-        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+    @parametrize("dim", [1, -1])
+    def test_index_copy(self, dim):
+        test = self._vmap_test
 
-        def select(dim):
-            return lambda x, index: torch.index_select(x, dim, index)
+        def copy(x, index, source):
+            return torch.index_copy(x, dim, index, source)
+
+        B0 = 5
+        x = torch.randn(3, 4)
+        indices = torch.tensor([0, 3, 1, 2, 0])
+        source = torch.randn(3, 1)
+
+        # A mapped scalar index copies one source slice per batch element.
+        test(copy, (x, indices, source), in_dims=(None, 0, None))
+        test(
+            copy,
+            (
+                torch.randn(B0, 3, 4).movedim(0, 1),
+                indices,
+                torch.randn(B0, 3, 1).movedim(0, 1),
+            ),
+            in_dims=(1, 0, 1),
+            out_dims=1,
+        )
+
+        # Preserve vector-index behavior and cover nested vmap.
+        vector_indices = torch.tensor([[0, 2], [3, 1], [1, 0], [2, 3], [0, 1]])
+        test(
+            copy,
+            (x, vector_indices, torch.randn(B0, 3, 2)),
+            in_dims=(None, 0, 0),
+        )
+        nested_indices = torch.tensor([[0, 3, 1], [2, 0, 3]])
+        test(
+            vmap(copy, in_dims=(None, 0, 0)),
+            (x, nested_indices, torch.randn(2, 3, 3, 1)),
+            in_dims=(None, 0, 0),
+        )
+
+        # Empty indices are a no-op, while invalid indices still raise.
+        test(
+            copy,
+            (
+                x,
+                torch.empty(B0, 0, dtype=torch.long),
+                torch.randn(B0, 3, 0),
+            ),
+            in_dims=(None, 0, 0),
+        )
+        with self.assertRaisesRegex(RuntimeError, "out of bounds"):
+            vmap(copy, in_dims=(None, 0, None))(x, torch.tensor([0, 4]), source)
+
+    @parametrize("dim", [1, -1])
+    def test_index_select(self, dim):
+        test = self._vmap_test
+
+        def select(x, index):
+            return torch.index_select(x, dim, index)
+
+        B0 = 5
+        x = torch.randn(3, 4)
+        indices = torch.tensor([0, 3, 1, 2, 0])
 
         # A mapped scalar index must select one element, not expand across dim.
-        test(
-            select(0),
-            (torch.arange(3), torch.tensor([0, 2])),
-            in_dims=(None, 0),
-        )
-        x = torch.arange(12).reshape(3, 4)
-        indices = torch.tensor([0, 3, 1])
-        test(select(1), (x, indices), in_dims=(None, 0))
-        test(select(-1), (x, indices), in_dims=(None, 0))
+        test(select, (x, indices), in_dims=(None, 0))
+        test(select, (x, indices), in_dims=(None, 0), out_dims=1)
 
         # Exercise mapped inputs, including a nonzero input batch dimension.
-        batched_x = torch.arange(24).reshape(4, 2, 3)
-        batched_indices = torch.tensor([0, 2, 1, 0])
-        test(select(1), (batched_x, batched_indices), in_dims=(0, 0))
+        batched_x = torch.randn(B0, 3, 4)
+        test(select, (batched_x, indices), in_dims=(0, 0))
         test(
-            select(-1),
-            (batched_x.movedim(0, 1), batched_indices),
+            select,
+            (batched_x.movedim(0, 1), indices),
             in_dims=(1, 0),
         )
 
         # Preserve vector-index behavior and cover nested vmap.
-        vector_indices = torch.tensor([[0, 2], [3, 1]])
-        test(select(1), (x, vector_indices), in_dims=(None, 0))
+        vector_indices = torch.tensor([[0, 2], [3, 1], [1, 0], [2, 3], [0, 1]])
+        test(select, (x, vector_indices), in_dims=(None, 0))
         nested_indices = torch.tensor([[0, 3], [1, 2]])
-        nested_select = vmap(vmap(select(1), in_dims=(None, 0)), in_dims=(None, 0))
-        result = nested_select(x, nested_indices)
-        expected = torch.stack(
-            [
-                torch.stack([torch.index_select(x, 1, index) for index in indices])
-                for indices in nested_indices
-            ]
+        test(
+            vmap(select, in_dims=(None, 0)),
+            (x, nested_indices),
+            in_dims=(None, 0),
         )
-        self.assertEqual(result, expected)
+
+    def test_index_select_scalar_input(self):
+        test = self._vmap_test
+
+        def select(x, index):
+            return torch.index_select(x, 0, index)
+
+        test(
+            select,
+            (torch.randn(3), torch.zeros(3, dtype=torch.long)),
+            in_dims=(0, 0),
+        )
 
     def test_fill_and_zero_inplace(self):
         test = functools.partial(self._vmap_test, check_propagates_grad=False)
