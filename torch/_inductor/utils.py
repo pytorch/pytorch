@@ -5786,6 +5786,7 @@ def _infer_scale_swizzle_impl(
     scale_numel: Any,
     mat_dtype: torch.dtype,
     scale_dtype: torch.dtype,
+    device_type: str,
     eq_fn: Callable[[Any, Any], bool],
 ) -> tuple[Any | None, Any | None]:
     """
@@ -5848,7 +5849,7 @@ def _infer_scale_swizzle_impl(
 
     # MXFP8: BlockWise1x32 with float8_e8m0fnu scales
     if scale_dtype == torch.float8_e8m0fnu:
-        if not torch.version.hip and not torch.xpu._is_compiled():
+        if device_type == "cuda" and not torch.version.hip:
             # NVIDIA: uses swizzled 32x4x4 layout
             expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
                 ceildiv(K_multiplier * mat_size[1], 32), 4
@@ -5861,7 +5862,7 @@ def _infer_scale_swizzle_impl(
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
         else:
-            # AMD/XPU: no swizzle. Checked before the gfx950 32x8 layout below
+            # CPU/AMD/XPU: no swizzle. Checked before the gfx950 32x8 layout below
             # because the two counts are equal whenever the paddings coincide
             # (M % 32 == 0 and K % 256 == 0), and a tie has to resolve to the
             # layout existing callers already pass. Getting the 32x8 layout
@@ -5872,7 +5873,7 @@ def _infer_scale_swizzle_impl(
                 scale_numel, expected_numel_b
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
-            if _prefers_swizzle_32_8(mat_dtype):
+            if device_type == "cuda" and _prefers_swizzle_32_8(mat_dtype):
                 # AMD gfx950: 32x8-tiled scales
                 expected_numel_a = _round_up(mat_size[0], 32) * _round_up(
                     ceildiv(K_multiplier * mat_size[1], 32), 8
@@ -5898,7 +5899,7 @@ def infer_scale_swizzle(
     - TensorWise: Single scale for entire tensor
     - RowWise: One scale per row
     - BlockWise1x128/128x128: Block-scaled with float32 scales
-    - BlockWise1x32: MXFP8 with float8_e8m0fnu scales (swizzled on NVIDIA)
+    - BlockWise1x32: MXFP8 scales (swizzled on NVIDIA, unswizzled otherwise)
     - BlockWise1x16: NVFP4 with float8_e4m3fn scales (swizzled)
 
     Args:
@@ -5914,6 +5915,7 @@ def infer_scale_swizzle(
         scale_numel=scale.numel(),
         mat_dtype=mat.dtype,
         scale_dtype=scale.dtype,
+        device_type=mat.device.type,
         eq_fn=lambda a, b: a == b,
     )
 
@@ -5951,5 +5953,6 @@ def infer_scale_swizzle_ir(
         scale_numel=scale_numel,
         mat_dtype=mat.dtype,
         scale_dtype=scale.dtype,
+        device_type=mat.get_device_or_error().type,
         eq_fn=symbolic_eq,
     )

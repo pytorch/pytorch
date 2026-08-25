@@ -2013,6 +2013,7 @@ class TestScaleSwizzleInference(TestCase):
                 scale_numel=math.prod(scale_size),
                 mat_dtype=mat_dtype,
                 scale_dtype=torch.float8_e8m0fnu,
+                device_type="cuda",
                 eq_fn=lambda a, b: a == b,
             )
 
