@@ -1395,6 +1395,57 @@ class TestFusedObsFakeQuantModule(TestCase):
             torch.testing.assert_close(mod.state_dict()['activation_post_process.min_val'], running_min_op)
             torch.testing.assert_close(mod.state_dict()['activation_post_process.max_val'], running_max_op)
 
+    @given(
+        device=st.sampled_from(
+            ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+        )
+    )
+    @settings(deadline=None)
+    def test_fused_obs_fq_module_calculate_qparams(self, device):
+        """
+        Tests that calculate_qparams returns the qparams the fused op used,
+        and not the inner observer's, which computes symmetric qparams using
+        a different formula.
+        """
+        mod = FusedMovingAvgObsFakeQuantize(
+            observer=MovingAverageMinMaxObserver,
+            quant_min=-127,
+            quant_max=127,
+            dtype=torch.qint8,
+            qscheme=torch.per_tensor_symmetric,
+        )
+        mod.to(device)
+        x = torch.randn(5, 5, device=device)
+        mod(x)
+        scale, zero_point = mod.calculate_qparams()
+
+        # Run the operator directly to get the reference qparams, with the
+        # observer frozen so the running min/max are not updated again
+        obs = mod.activation_post_process
+        ref_scale = torch.ones_like(mod.scale)
+        ref_zero_point = torch.zeros_like(mod.zero_point)
+        torch.fused_moving_avg_obs_fake_quant(
+            x,
+            torch.zeros_like(mod.observer_enabled),
+            torch.ones_like(mod.fake_quant_enabled),
+            obs.min_val.clone(),
+            obs.max_val.clone(),
+            ref_scale,
+            ref_zero_point,
+            obs.averaging_constant,
+            obs.quant_min,
+            obs.quant_max,
+            mod.ch_axis,
+            mod.is_per_channel,
+            mod.is_symmetric_quant,
+        )
+        torch.testing.assert_close(scale, ref_scale, atol=0, rtol=0)
+        torch.testing.assert_close(zero_point, ref_zero_point, atol=0, rtol=0)
+
+        # The observer uses a different symmetric formula and should not match
+        obs_scale, _ = obs.calculate_qparams()
+        self.assertFalse(torch.equal(scale, obs_scale))
+
     def test_fused_mod_reduce_range(self):
         obs = FusedMovingAvgObsFakeQuantize(quant_min=0, quant_max=255, dtype=torch.quint8, reduce_range=True)
         self.assertEqual(obs.activation_post_process.quant_min, 0)

@@ -409,7 +409,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
 
     @torch.jit.export
     def calculate_qparams(self) -> tuple[torch.Tensor, torch.Tensor]:  # type: ignore[override]
-        return self.activation_post_process.calculate_qparams()
+        return self.scale, self.zero_point
 
     @torch.jit.export
     def extra_repr(self) -> str:
