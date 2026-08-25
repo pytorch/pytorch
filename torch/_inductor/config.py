@@ -364,12 +364,7 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
-pre_grad_fusion_options: dict[str, dict[str, Any]] = {
-    "batch_linear_lhs": {
-        "devices": ("xpu",),
-        "min_fuse_set_size": 2,
-    },
-}
+pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
@@ -640,11 +635,12 @@ multi_kernel_hints: list[int] = []
 
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CUTEDSL, NVGEMM, CK, CKTILE, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CUTEDSL, FLYDSL, NVGEMM, CK, CKTILE, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
+# FLYDSL: FlyDSL templates for ROCm GPUs (experimental).
 # NVGEMM: NVIDIA Universal GEMM via cutlass.operators (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
@@ -766,6 +762,8 @@ use_post_grad_passes: bool = True
 cutedsl_enable_autotuning: bool = (
     os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
 )
+
+flydsl_enable_autotuning: bool = os.environ.get("FLYDSL_ENABLE_AUTOTUNING", "0") == "1"
 
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
@@ -2818,6 +2816,7 @@ class rocm:
     #   - config.rocm.origami (this knob)
     #   - config.max_autotune_gemm_search_space == "DEFAULT"
     #   - rocm-origami is installed (else the import gate sets it inert)
+    #   - ROCm version < 10.0 (origami not supported on 10.0+)
     # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
     # one-time warning; the regular config generator runs instead.
     #
