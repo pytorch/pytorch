@@ -112,24 +112,45 @@ from torch.testing import make_tensor
 
 
 def _get_current_accelerator_type() -> str:
-    """Return the device type of the accelerator in use, or "" if there is none."""
-    acc = torch.accelerator.current_accelerator(check_available=True)
-    return "" if acc is None else acc.type
+    """Return the device type of the accelerator in use, or "" if there is none.
 
-
-def _get_device_name() -> str:
-    """Return the current accelerator device name for use as a Triton tuning cache key.
-
-    Backends expose ``torch.<device_type>.get_device_name``; one that does not is
-    treated as unnamed, which is how an absent accelerator has always been keyed.
+    ``torch.accelerator.current_accelerator(check_available=True)`` is not usable
+    here: its availability check goes through ``torch.get_device_module``, which
+    raises for a PrivateUse1 backend that has been renamed without registering a
+    ``torch.<name>`` module. Deriving a tuning cache key must never raise, so such
+    a backend is reported as absent instead. ``is_available()`` is still consulted,
+    because that is what the previous cuda/xpu chain used to reject a backend that
+    is built but has no usable device.
     """
-    device_type = _get_current_accelerator_type()
-    if not device_type:
+    acc = torch.accelerator.current_accelerator()
+    if acc is None:
         return ""
-    get_device_name = getattr(
-        torch.get_device_module(device_type), "get_device_name", None
+    is_available = getattr(getattr(torch, acc.type, None), "is_available", None)
+    return acc.type if is_available is not None and is_available() else ""
+
+
+def _get_device_name(device=None) -> str:
+    """Return the device name that keys the Triton tuning tables.
+
+    The key is persisted data: ``dump()`` writes it into this module's source
+    during an offline tuning run and a different process reads it back, so the same
+    hardware must always produce the same name and producing it must never raise --
+    a lookup miss is a designed outcome of :func:`get_meta`, a failure is not.
+
+    ``device`` names the device the parameters are tuned for or looked up for; when
+    it is unspecified the accelerator in use is used instead. A backend that
+    exposes no ``torch.<device_type>.get_device_name`` is unnamed, which is how an
+    absent accelerator has always been keyed.
+    """
+    if device == "":
+        # The tuning entry points pass "" when there is no accelerator in use.
+        device = None
+    device_type = (
+        _get_current_accelerator_type() if device is None else torch.device(device).type
     )
-    return "" if get_device_name is None else get_device_name()
+    module = getattr(torch, device_type, None) if device_type else None
+    get_device_name = getattr(module, "get_device_name", None)
+    return "" if get_device_name is None else get_device_name(device)
 
 
 def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=False):
@@ -508,7 +529,7 @@ def optimize_scatter_mm(
     key = (m, k, n, bm, bk)
 
     version = (0, dtype, sparsity)
-    device_name = _get_device_name()
+    device_name = _get_device_name(device)
 
     reference_meta = dict(
         GROUP_SIZE=1,
@@ -601,7 +622,6 @@ def optimize_scatter_mm(
     print(f"{meta=} {speedup=:.1f} % {timing=:.3f} ms")
     if speedup < 0:
         return
-    device_name = _get_device_name()
 
     update(
         "scatter_mm", device_name, version, key, tuple(meta[k] for k in sorted(meta))
@@ -692,13 +712,18 @@ def tune_bsr_dense_addmm(
         version_dtype = (dtype, out_dtype)
     version = (0, version_dtype, sparsity)
     key = (M, K, N, BM, BK, beta == 0, beta == 1, alpha == 1)
+    # Key on the device the inputs live on, not on the process accelerator: the
+    # lookup below and the update at the end of this function must agree.
+    device_name = _get_device_name(bsr.device)
 
     # For tuning, for an initial state, use parameters from the
     # database if available, otherwise, use the reference parameters.
-    initial_meta = get_meta(opname, key, version=version, exact=True)
+    initial_meta = get_meta(opname, key, device_name, version=version, exact=True)
     if initial_meta is None:
         may_skip_update = False
-        initial_meta = get_meta(opname, key, version=(0, dtype, 0.5), exact=True)
+        initial_meta = get_meta(
+            opname, key, device_name, version=(0, dtype, 0.5), exact=True
+        )
         if initial_meta is None:
             initial_meta = reference_meta
     elif not force:
@@ -763,7 +788,6 @@ def tune_bsr_dense_addmm(
     if store and not (
         may_skip_update and meta == initial_meta and initial_meta is not reference_meta
     ):
-        device_name = _get_device_name()
         update(
             opname,
             device_name,
@@ -828,6 +852,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True, device
     import itertools
 
     device = device or _get_current_accelerator_type()
+    device_name = _get_device_name(device)
 
     sizes_lst = [
         256,
@@ -924,7 +949,13 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True, device
                 dense = make_tensor(K, N, dtype=dtype, device=device)
                 meta_lst = []
                 for sparsity in sparsity_lst:
-                    meta = get_meta(op, key, version=(0, dtype, sparsity), exact=True)
+                    meta = get_meta(
+                        op,
+                        key,
+                        device_name,
+                        version=(0, dtype, sparsity),
+                        exact=True,
+                    )
                     if meta is None:
                         continue
 
@@ -974,9 +1005,12 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True, device
                 print(sparsity1, index, key, meta_lst, speeddiff)
 
                 if index > 0:
-                    device_name = _get_device_name()
                     meta = get_meta(
-                        op, key, version=(0, dtype, meta_lst[0][1]), exact=True
+                        op,
+                        key,
+                        device_name,
+                        version=(0, dtype, meta_lst[0][1]),
+                        exact=True,
                     )
                     update(
                         op,

@@ -6,7 +6,8 @@ import io
 import itertools
 import operator
 import random
-import types
+import subprocess
+import sys
 import unittest
 from contextlib import redirect_stderr
 
@@ -4268,7 +4269,8 @@ class TestSparseCompressedTritonKernels(TestCase):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_tune(self, op, device, dtype, out_dtype):
         from torch.sparse._triton_ops import bsr_dense_addmm, _int_bsr_dense_addmm
-        from torch.sparse._triton_ops_meta import (create_blocked_tensor, tune_bsr_dense_addmm, tune__int_bsr_dense_addmm, get_meta)
+        from torch.sparse._triton_ops_meta import (create_blocked_tensor, tune_bsr_dense_addmm,
+                                                   tune__int_bsr_dense_addmm, get_meta, _get_device_name)
 
         if out_dtype == "unspecified":
             out_dtype = None
@@ -4308,7 +4310,8 @@ class TestSparseCompressedTritonKernels(TestCase):
             def get_current_meta():
                 version = (0, version_dtype, sparsity)
                 meta_key = (M, K, N, *blocksize, False, True, True)
-                return get_meta(op, meta_key, version=version, exact=True)
+                # The tuner keys on the inputs' device; read it back the same way.
+                return get_meta(op, meta_key, _get_device_name(device), version=version, exact=True)
         else:
             raise NotImplementedError(op)
 
@@ -4325,6 +4328,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_bsr_dense_addmm_meta(self, device):
         from torch.sparse._triton_ops import bsr_dense_addmm_meta
+        from torch.sparse._triton_ops_meta import _get_device_name
         from torch.sparse._triton_ops_meta import update as update_bsr_dense_addmm_meta
 
         dtype = torch.float32
@@ -4334,11 +4338,11 @@ class TestSparseCompressedTritonKernels(TestCase):
 
         def get_meta(M, K, N, sparsity=None):
             return bsr_dense_addmm_meta(M, K, N, Ms, Ks, beta, alpha, dtype=dtype, sparsity=sparsity,
-                                        _version="test_triton_bsr_dense_addmm_meta")
+                                        _version="test_triton_bsr_dense_addmm_meta", device=device)
 
         def update_meta(M, K, N, value, sparsity=0.5):
             key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
-            update_bsr_dense_addmm_meta("bsr_dense_addmm", torch.cuda.get_device_name(),
+            update_bsr_dense_addmm_meta("bsr_dense_addmm", _get_device_name(device),
                                         ("test_triton_bsr_dense_addmm_meta", dtype, sparsity),
                                         key, value)
 
@@ -4391,77 +4395,103 @@ class TestSparseCompressedTritonKernels(TestCase):
                          dict(GROUP_SIZE_ROW=4, SPLIT_N=4, num_stages=1, num_warps=4))
 
 
-class TestSparseTritonMetaDeviceNameFallbacks(TestCase):
-    """The two cases real hardware cannot produce: a device module with no
-    get_device_name, and no accelerator at all. Both must key as unnamed."""
+# Renaming PrivateUse1 is process-global and one-shot, and it makes
+# torch.accelerator.current_accelerator() report a backend that has no
+# torch.<name> module, which torch.get_device_module() and
+# torch.accelerator.is_available() both raise for. Deriving a tuning cache key
+# must not: a miss is meant to fall back to the reference parameters below.
+_UNREGISTERED_BACKEND_SCRIPT = """\
+import torch
+from torch.sparse._triton_ops import bsr_dense_addmm_meta
+from torch.sparse._triton_ops_meta import _get_device_name
+
+torch.utils.rename_privateuse1_backend("tuningkeytestbackend")
+print(repr(_get_device_name()))
+print(bsr_dense_addmm_meta(256, 256, 256, 16, 16, 0, 1))
+"""
+
+
+class TestSparseTritonMetaDeviceName(TestCase):
+    """_get_device_name supplies the device component of the key under which
+    _operation_device_version_data stores tuned Triton parameters. It sits on the
+    miss path of an optimization lookup, so it must be total, and it must key on
+    the device the inputs are on rather than on whatever the process configured."""
 
     hw_classification = HardwareClassification.GENERIC
 
-    def _patched(self, device_type, module):
-        return unittest.mock.patch.multiple(
-            torch,
-            accelerator=unittest.mock.MagicMock(
-                current_accelerator=lambda check_available=False: (
-                    None if device_type is None else torch.device(device_type)
-                )
-            ),
-            get_device_module=lambda _: module,
-        )
-
-    def test_uses_the_device_module(self):
+    def test_device_module_without_get_device_name_is_unnamed(self):
+        # torch.cpu, torch.mps and torch.mtia are all in this position.
         from torch.sparse._triton_ops_meta import _get_device_name
 
-        module = types.SimpleNamespace(get_device_name=lambda: "Fake Accelerator")
-        with self._patched("privateuseone", module):
-            self.assertEqual(_get_device_name(), "Fake Accelerator")
-
-    def test_module_without_get_device_name_is_unnamed(self):
-        from torch.sparse._triton_ops_meta import _get_device_name
-
-        # MPS and MTIA register a device module but no get_device_name; that must
-        # key as unnamed rather than raising.
-        with self._patched("privateuseone", types.SimpleNamespace()):
-            self.assertEqual(_get_device_name(), "")
+        self.assertEqual(_get_device_name("cpu"), "")
 
     def test_no_accelerator_is_unnamed(self):
         from torch.sparse._triton_ops_meta import _get_device_name
 
-        with self._patched(None, types.SimpleNamespace()):
+        with unittest.mock.patch.object(
+            torch.accelerator, "current_accelerator", lambda check_available=False: None
+        ):
             self.assertEqual(_get_device_name(), "")
+            # What the tuning entry points pass when there is no accelerator.
+            self.assertEqual(_get_device_name(""), "")
 
-
-class TestSparseTritonMetaDeviceName(TestCase):
-    """_get_device_name supplies the device component of the Triton tuning cache
-    key, so an accelerator that keys as unnamed silently loses its tuned
-    parameters. Instantiated per device so every backend checks its own name."""
-
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    def test_device_name_is_the_accelerator_name(self, device):
+    def test_explicit_device_is_used_instead_of_the_accelerator(self):
         from torch.sparse._triton_ops_meta import _get_device_name
 
-        device_type = torch.device(device).type
-        accelerator = torch.accelerator.current_accelerator(check_available=True)
-        if accelerator is None or accelerator.type != device_type:
-            self.skipTest(f"{device_type} is not the accelerator in use")
+        with unittest.mock.patch.object(
+            torch.cpu, "get_device_name", create=True,
+            new=lambda device: f"Fake device {device}"
+        ):
+            self.assertEqual(_get_device_name("cpu"), "Fake device cpu")
+            self.assertEqual(_get_device_name(torch.device("cpu")), "Fake device cpu")
 
-        get_device_name = getattr(
-            torch.get_device_module(device_type), "get_device_name", None
+    @skipIfTorchDynamo("spawns a subprocess")
+    @unittest.skipIf(IS_FBCODE, "spawns a subprocess")
+    def test_accelerator_without_a_device_module_is_unnamed(self):
+        out = subprocess.check_output(
+            [sys.executable, "-c", _UNREGISTERED_BACKEND_SCRIPT],
+            stderr=subprocess.DEVNULL,
+        ).decode("ascii").strip().splitlines()
+        self.assertEqual(
+            out,
+            ["''", "{'SPLIT_N': 16, 'GROUP_SIZE_ROW': 4, 'num_stages': 1, 'num_warps': 4}"]
         )
-        if get_device_name is None:
-            self.assertEqual(_get_device_name(), "")
-        else:
-            self.assertEqual(_get_device_name(), get_device_name())
-            self.assertNotEqual(_get_device_name(), "")
+
+    def test_tuned_parameters_are_found_through_the_input_device(self):
+        # Round trip: what update() stores under a device's name must be found
+        # again by a lookup that only knows the input tensor's device. Nothing
+        # here needs an accelerator, or a second one.
+        from torch.sparse._triton_ops import bsr_dense_addmm_meta
+        from torch.sparse._triton_ops_meta import _operation_device_version_data, update
+
+        device_name = "Fake device cpu"
+        version = ("test_tuned_parameters_are_found_through_the_input_device", torch.float16, 0.5)
+        key = (256, 256, 256, 16, 16, True, False, True)
+        tuned = dict(GROUP_SIZE_ROW=2, SPLIT_N=8, num_stages=3, num_warps=5)
+
+        def get_meta(**kwargs):
+            f = io.StringIO()
+            with redirect_stderr(f):
+                return bsr_dense_addmm_meta(256, 256, 256, 16, 16, 0, 1, dtype=torch.float16,
+                                            sparsity=0.5, _version=version[0], **kwargs)
+
+        update("bsr_dense_addmm", device_name, version, key, tuple(tuned[k] for k in sorted(tuned)))
+        try:
+            with unittest.mock.patch.object(
+                torch.cpu, "get_device_name", create=True, new=lambda device: device_name
+            ):
+                self.assertEqual(get_meta(device="cpu"), tuned)
+            # Without the device, the process accelerator names the key instead,
+            # and it is never this one, so the entry must not be found.
+            self.assertNotEqual(get_meta(), tuned)
+        finally:
+            del _operation_device_version_data["bsr_dense_addmm", device_name, version]
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())
 instantiate_device_type_tests(TestSparseCompressed, globals())
 instantiate_device_type_tests(TestSparseCompressedTritonKernels, globals())
-instantiate_device_type_tests(
-    TestSparseTritonMetaDeviceName, globals(), allow_mps=True, allow_xpu=True
-)
 
 if __name__ == '__main__':
     run_tests()
