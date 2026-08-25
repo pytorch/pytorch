@@ -64,7 +64,10 @@ capture Inductor's unrelated Triton compiles).
 from __future__ import annotations
 
 import functools
+import os
+import threading
 import time
+import weakref
 from dataclasses import asdict, dataclass
 from typing import Any, TYPE_CHECKING, TypeVar
 
@@ -98,6 +101,33 @@ _ARTIFACT_NAME = "native_dsl_compile"
 log = torch._logging.getArtifactLogger(__name__, _ARTIFACT_NAME)
 
 R = TypeVar("R")
+
+
+class _ForkSafeRLock:
+    __slots__ = ("_lock", "__weakref__")
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        with _instrumentation_locks_guard:
+            _instrumentation_locks.add(self)
+
+    def _reset_after_fork(self) -> None:
+        self._lock = threading.RLock()
+
+
+_instrumentation_locks: weakref.WeakSet[_ForkSafeRLock] = weakref.WeakSet()
+_instrumentation_locks_guard = threading.Lock()
+
+
+def _reset_instrumentation_locks_after_fork() -> None:
+    global _instrumentation_locks_guard
+    _instrumentation_locks_guard = threading.Lock()
+    for lock in tuple(_instrumentation_locks):
+        lock._reset_after_fork()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_instrumentation_locks_after_fork)
 
 
 @dataclass(frozen=True)
@@ -198,6 +228,7 @@ def _make_wrapper(
     dsl: str,
     key_fn: Callable[..., str] | None,
     sample: Callable[[], tuple[int | None, int | None]],
+    lock: _ForkSafeRLock | None = None,
 ) -> Callable[..., R]:
     """Shared instrumentation core for both DSL entry points.
 
@@ -207,6 +238,8 @@ def _make_wrapper(
     only ``sample`` (and the reported ``dsl``) differ.
     """
 
+    instrumentation_lock = lock if lock is not None else _ForkSafeRLock()
+
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> R:
         # Fast path: do nothing extra unless a sink is listening. This runs on
@@ -215,52 +248,79 @@ def _make_wrapper(
         if not _listening():
             return fn(*args, **kwargs)
 
-        _, misses_before = sample()
-        start = time.perf_counter()
-        try:
-            result = fn(*args, **kwargs)
-            outcome_is_error = False
-        except Exception:
-            outcome_is_error = True
-            raise
-        finally:
-            wall_ms = (time.perf_counter() - start) * 1e3
-            hits_after, misses_after = sample()
-            compiled = (
-                not outcome_is_error
-                and misses_before is not None
-                and misses_after is not None
-                and misses_after > misses_before
-            )
-            if outcome_is_error:
-                outcome = "error"
-            else:
-                outcome = "compiled" if compiled else "cache_hit"
-            if callable(op):
-                # A label callback must never change the wrapped fn's outcome:
-                # this runs in the finally block, so a raised exception would
-                # mask the real result/error. Fall back to a safe label.
-                try:
-                    op_label = op(*args, **kwargs)
-                except Exception:
-                    op_label = "<op-label-error>"
-            else:
-                op_label = op
-            _emit(
-                CompileEvent(
-                    op=op_label,
-                    dsl=dsl,
-                    outcome=outcome,
-                    compiled=compiled,
-                    wall_ms=wall_ms,
-                    key=_format_key(args, kwargs, key_fn),
-                    hits=hits_after or 0,
-                    misses=misses_after or 0,
-                )
-            )
-        return result
+        return _invoke_with_instrumentation(
+            lambda: fn(*args, **kwargs),
+            op,
+            dsl,
+            key_fn,
+            sample,
+            args,
+            kwargs,
+            instrumentation_lock,
+        )
 
     return wrapper
+
+
+def _invoke_with_instrumentation(
+    call: Callable[[], R],
+    op: str | Callable[..., str],
+    dsl: str,
+    key_fn: Callable[..., str] | None,
+    sample: Callable[[], tuple[int | None, int | None]],
+    key_args: tuple[Any, ...],
+    key_kwargs: dict[str, Any],
+    lock: _ForkSafeRLock,
+) -> R:
+    """Run ``call`` and attribute its cache event to the logical call arguments."""
+    # Keep the acquired lock object local: an at-fork callback can replace
+    # ``lock._lock`` before this context exits in the child.
+    with lock._lock:
+        _, misses_before = sample()
+        start = time.perf_counter()
+        outcome_is_error = True
+        try:
+            result = call()
+            outcome_is_error = False
+        finally:
+            try:
+                wall_ms = (time.perf_counter() - start) * 1e3
+                hits_after, misses_after = sample()
+                compiled = (
+                    not outcome_is_error
+                    and misses_before is not None
+                    and misses_after is not None
+                    and misses_after > misses_before
+                )
+                if outcome_is_error:
+                    outcome = "error"
+                else:
+                    outcome = "compiled" if compiled else "cache_hit"
+                if callable(op):
+                    # A label callback must never change the wrapped fn's outcome:
+                    # this runs in the finally block, so a raised exception would
+                    # mask the real result/error. Fall back to a safe label.
+                    try:
+                        op_label = op(*key_args, **key_kwargs)
+                    except Exception:
+                        op_label = "<op-label-error>"
+                else:
+                    op_label = op
+                _emit(
+                    CompileEvent(
+                        op=op_label,
+                        dsl=dsl,
+                        outcome=outcome,
+                        compiled=compiled,
+                        wall_ms=wall_ms,
+                        key=_format_key(key_args, key_kwargs, key_fn),
+                        hits=hits_after or 0,
+                        misses=misses_after or 0,
+                    )
+                )
+            except Exception:
+                pass
+        return result
 
 
 def _cache_info_sampler(fn: Any) -> Callable[[], tuple[int | None, int | None]]:
@@ -396,6 +456,7 @@ class InstrumentedTritonKernel:
         self._kernel = kernel
         self._op = op
         self._key_fn = key_fn
+        self._lock = _ForkSafeRLock()
 
     @property
     def jit_kernel(self) -> Any:
@@ -411,7 +472,9 @@ class InstrumentedTritonKernel:
         # kernel[grid](*args) is the launch path -- wrap the bound launcher in
         # the shared core so the compile that may fire inside it is recorded.
         launcher = self._kernel[grid]
-        return _make_wrapper(launcher, self._op, "triton", self._key_fn, self._sample)
+        return _make_wrapper(
+            launcher, self._op, "triton", self._key_fn, self._sample, self._lock
+        )
 
     def __getattr__(self, name: str) -> Any:
         # Delegate everything else (warmup, cache_key, wrap_triton hooks, ...)
@@ -482,7 +545,12 @@ class InstrumentedHelionKernel:
         key_fn: Callable[..., str] | None,
     ) -> None:
         self._kernel = kernel
-        self._wrapped = _make_wrapper(kernel, op, "helion", key_fn, self._sample)
+        self._op = op
+        self._key_fn = key_fn
+        self._lock = _ForkSafeRLock()
+        self._wrapped = _make_wrapper(
+            kernel, op, "helion", key_fn, self._sample, self._lock
+        )
 
     @property
     def helion_kernel(self) -> Any:
@@ -493,6 +561,27 @@ class InstrumentedHelionKernel:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self._wrapped(*args, **kwargs)
+
+    def run_with_instrumentation(
+        self,
+        call: Callable[[], R],
+        /,
+        *key_args: Any,
+        **key_kwargs: Any,
+    ) -> R:
+        """Run an alternate call and attribute its event to the supplied key args."""
+        if not _listening():
+            return call()
+        return _invoke_with_instrumentation(
+            call,
+            self._op,
+            "helion",
+            self._key_fn,
+            self._sample,
+            key_args,
+            key_kwargs,
+            self._lock,
+        )
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._kernel, name)
@@ -598,9 +687,15 @@ def instrumented_helion_kernel(
 ) -> Callable[[Callable[..., R]], InstrumentedHelionKernel]:
     """Create and instrument a regular or AOT Helion kernel."""
     import helion  # pyrefly: ignore[missing-import]
-    import helion.experimental  # pyrefly: ignore[missing-import]
 
-    kernel_decorator = helion.experimental.aot_kernel if aot else helion.kernel
+    if not aot:
+        kernel_decorator = helion.kernel
+    elif hasattr(helion, "aot_kernel"):
+        kernel_decorator = helion.aot_kernel
+    else:
+        from helion.experimental import aot_kernel  # pyrefly: ignore[missing-import]
+
+        kernel_decorator = aot_kernel
 
     def decorator(fn: Callable[..., R]) -> InstrumentedHelionKernel:
         return instrument_helion_kernel(op, key_fn=key_fn)(

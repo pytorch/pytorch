@@ -6,9 +6,15 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+import threading
+import time
+import types
 import unittest
+import warnings
 from collections import namedtuple
+from unittest import mock
 
 from torch._logging._internal import TorchLogsFormatter, trace_log
 from torch._native.instrumentation import (
@@ -17,6 +23,7 @@ from torch._native.instrumentation import (
     instrument_flydsl_compile,
     instrument_helion_kernel,
     instrument_triton_kernel,
+    instrumented_helion_kernel,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.logging_utils import log_settings, preserve_log_state
@@ -207,6 +214,125 @@ class TestInstrumentation(_LoggerCaptureTest):
 
         self.assertEqual(len(self.messages), 1)
         self.assertIn("error", self.messages[0])
+
+    def test_base_exception_is_preserved(self):
+        interrupt = KeyboardInterrupt("stop")
+
+        def compile_fn():
+            raise interrupt
+
+        instrumented = instrument_cutedsl_compile("aten::topk")(compile_fn)
+        with self.assertRaisesRegex(KeyboardInterrupt, "stop") as raised:
+            instrumented()
+        self.assertIs(raised.exception, interrupt)
+        self.assertIn("error", self.messages[0])
+
+    def test_reporting_failure_preserves_result_and_error(self):
+        fake = _FakeJitCache()
+        compile_fn = instrument_cutedsl_compile("aten::topk")(fake)
+
+        with mock.patch(
+            "torch._native.instrumentation._emit",
+            side_effect=RuntimeError("reporting failed"),
+        ):
+            self.assertIsNotNone(compile_fn(256, 64))
+            fake.raise_on_call = True
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                compile_fn(512, 128)
+
+    def test_concurrent_calls_are_classified_once(self):
+        class SlowFakeJitCache(_FakeJitCache):
+            def __call__(self, *args, **kwargs):
+                time.sleep(0.05)
+                return super().__call__(*args, **kwargs)
+
+        fake = SlowFakeJitCache()
+        compile_fn = instrument_cutedsl_compile("aten::topk")(fake)
+        start = threading.Barrier(3)
+        errors = []
+
+        def worker():
+            try:
+                start.wait()
+                compile_fn(256, 64)
+            except BaseException as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        start.wait()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(self.messages), 2)
+        self.assertEqual(sum("compiled" in msg for msg in self.messages), 1)
+        self.assertEqual(sum("cache_hit" in msg for msg in self.messages), 1)
+
+    @unittest.skipUnless(hasattr(os, "fork"), "requires os.fork")
+    def test_lock_is_reinitialized_after_fork(self):
+        parent_pid = os.getpid()
+        entered = threading.Event()
+        release = threading.Event()
+
+        def compile_fn():
+            if (
+                os.getpid() == parent_pid
+                and threading.current_thread() is not threading.main_thread()
+            ):
+                entered.set()
+                release.wait()
+            return "ok"
+
+        instrumented = instrument_cutedsl_compile("aten::topk")(compile_fn)
+        worker = threading.Thread(target=instrumented)
+        worker.start()
+        self.assertTrue(entered.wait(timeout=5))
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                child_pid = os.fork()
+            if child_pid == 0:
+                try:
+                    import signal
+
+                    signal.alarm(2)
+                    result = instrumented()
+                    os._exit(0 if result == "ok" else 2)
+                except BaseException:
+                    os._exit(3)
+            _, status = os.waitpid(child_pid, 0)
+        finally:
+            release.set()
+            worker.join(timeout=5)
+
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(os.WIFEXITED(status))
+        self.assertEqual(os.WEXITSTATUS(status), 0)
+
+    @unittest.skipUnless(hasattr(os, "fork"), "requires os.fork")
+    def test_current_thread_can_fork_while_holding_lock(self):
+        parent_pid = os.getpid()
+
+        def compile_fn():
+            return os.fork()
+
+        instrumented = instrument_cutedsl_compile("aten::topk")(compile_fn)
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                child_pid = instrumented()
+        except BaseException:
+            if os.getpid() != parent_pid:
+                os._exit(3)
+            raise
+
+        if child_pid == 0:
+            os._exit(0)
+        _, status = os.waitpid(child_pid, 0)
+        self.assertTrue(os.WIFEXITED(status))
+        self.assertEqual(os.WEXITSTATUS(status), 0)
 
     def test_callable_op_label_used_in_log(self):
         # op may be a callable evaluated per-call (e.g. to derive the aten
@@ -450,6 +576,68 @@ class TestHelionKernelInstrumentation(_LoggerCaptureTest):
         self.assertIs(kernel.helion_kernel, fake)
         self.assertEqual(kernel.cache_key, "helion-cache")
 
+    def test_alternate_call_is_instrumented(self):
+        fake = _FakeHelionKernel()
+        kernel = instrument_helion_kernel(
+            "aten::add", key_fn=lambda variant: f"variant={variant}"
+        )(fake)
+
+        def alternate_call():
+            return fake("bound")
+
+        self.assertEqual(
+            kernel.run_with_instrumentation(alternate_call, "logical"), "launched"
+        )
+        self.assertEqual(
+            kernel.run_with_instrumentation(alternate_call, "logical"), "launched"
+        )
+
+        self.assertEqual(len(self.messages), 2)
+        self.assertIn("compiled", self.messages[0])
+        self.assertIn("cache_hit", self.messages[1])
+        self.assertIn("variant=logical", self.messages[0])
+
+    def test_combined_aot_prefers_top_level_helion_api(self):
+        fake_kernel = _FakeHelionKernel()
+        calls = []
+
+        def aot_kernel(**settings):
+            calls.append(settings)
+            return lambda fn: fake_kernel
+
+        helion = types.ModuleType("helion")
+        helion.aot_kernel = aot_kernel
+        with mock.patch.dict(sys.modules, {"helion": helion}):
+            kernel = instrumented_helion_kernel(
+                "aten::add", aot=True, static_shapes=True
+            )(lambda: None)
+
+        self.assertIs(kernel.helion_kernel, fake_kernel)
+        self.assertEqual(calls, [{"static_shapes": True}])
+
+    def test_combined_aot_supports_legacy_helion_api(self):
+        fake_kernel = _FakeHelionKernel()
+        calls = []
+
+        def aot_kernel(**settings):
+            calls.append(settings)
+            return lambda fn: fake_kernel
+
+        helion = types.ModuleType("helion")
+        helion.__path__ = []
+        experimental = types.ModuleType("helion.experimental")
+        experimental.aot_kernel = aot_kernel
+        with mock.patch.dict(
+            sys.modules,
+            {"helion": helion, "helion.experimental": experimental},
+        ):
+            kernel = instrumented_helion_kernel(
+                "aten::add", aot=True, static_shapes=True
+            )(lambda: None)
+
+        self.assertIs(kernel.helion_kernel, fake_kernel)
+        self.assertEqual(calls, [{"static_shapes": True}])
+
 
 class TestTlparseOutput(TestCase):
     """The instrumentation's whole point on production jobs is tlparse-
@@ -648,7 +836,12 @@ _DSL_INSTRUMENTATION_RULES = (
     ),
     (
         "helion",
-        ("helion.kernel", "helion.jit", "helion.experimental.aot_kernel"),
+        (
+            "helion.kernel",
+            "helion.jit",
+            "helion.aot_kernel",
+            "helion.experimental.aot_kernel",
+        ),
         "instrument_helion_kernel",
         "instrumented_helion_kernel",
     ),
@@ -848,11 +1041,12 @@ class TestInstrumentationCoverage(TestCase):
                 self.assertEqual(n, 1, f"{dsl}/{form}: scan missed the site")
                 self.assertEqual(v, [], f"{dsl}/{form}: wrongly flagged")
 
-        aot_v, aot_n = _scan_for_missing_instrumentation(
-            "@helion.experimental.aot_kernel\ndef h(): ...\n", "<helion-aot-bad>"
-        )
-        self.assertEqual(aot_n, 1)
-        self.assertEqual(len(aot_v), 1)
+        for decorator in ("helion.aot_kernel", "helion.experimental.aot_kernel"):
+            aot_v, aot_n = _scan_for_missing_instrumentation(
+                f"@{decorator}\ndef h(): ...\n", "<helion-aot-bad>"
+            )
+            self.assertEqual(aot_n, 1)
+            self.assertEqual(len(aot_v), 1)
 
         jit_v, jit_n = _scan_for_missing_instrumentation(
             "@helion.jit\ndef h(): ...\n", "<helion-jit-bad>"

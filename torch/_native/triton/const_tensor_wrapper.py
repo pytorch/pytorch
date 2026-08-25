@@ -60,3 +60,7 @@ class ConstTensorWrapper:
     def element_size(self) -> int:
         with torch._C.DisableTorchFunctionSubclass():
             return self._tensor.element_size()
+
+    def view(self, *shape: int) -> "ConstTensorWrapper":
+        with torch._C.DisableTorchFunctionSubclass():
+            return ConstTensorWrapper(self._tensor.view(*shape))

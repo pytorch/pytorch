@@ -16,6 +16,8 @@ from .dsl_registry import dsl_registry, DSLModuleProtocol
 from .registry import (
     _OpCondFn,
     _OpImplFn,
+    _OverrideNode,
+    _register_auxiliary_override_sync,
     deregister_op_overrides as _deregister_op_overrides_impl,
     register_op_override as _register_op_override_impl,
 )
@@ -104,6 +106,21 @@ def deregister_op_overrides() -> None:
     _deregister_op_overrides_impl(disable_dsl_names=_HELION_DSL_NAME)
 
 
+def _sync_cross_entropy_overrides(
+    graph: list[_OverrideNode], fallback_kernel: object | None
+) -> None:
+    from .ops.cross_entropy.helion_impl import (
+        _install_autograd_fallthrough,
+        _uninstall_autograd_fallthrough,
+    )
+
+    if any(node.dsl_name == _HELION_DSL_NAME and node.active for node in graph):
+        if fallback_kernel is not None:
+            _install_autograd_fallthrough(fallback_kernel)
+    else:
+        _uninstall_autograd_fallthrough()
+
+
 def register_op_override(
     lib_symbol: str,
     op_symbol: str,
@@ -135,4 +152,7 @@ def register_op_override(
 
 dsl_registry.register_dsl(
     _HELION_DSL_NAME, cast(DSLModuleProtocol, sys.modules[__name__])
+)
+_register_auxiliary_override_sync(
+    "cross_entropy_loss", "CUDA", _sync_cross_entropy_overrides
 )
