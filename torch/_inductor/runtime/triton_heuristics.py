@@ -19,6 +19,8 @@ import sys
 import threading
 import time
 from collections import namedtuple
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from typing import (
     Any,
     cast,
@@ -541,6 +543,19 @@ def _resolve_load_device(device: int | None, device_type: str) -> int | None:
     from torch._dynamo.device_interface import get_interface_for_device
 
     return get_interface_for_device(device_type.replace("hip", "cuda")).current_device()
+
+
+@dataclasses.dataclass
+class _MutationBenchmarkContext:
+    """Mutation restoration policy for one nested autotuning transaction."""
+
+    autotuner: CachingAutotuner
+    cpu_copy_arg_names: OrderedSet[str] | None = None
+
+
+_mutation_benchmark_context: ContextVar[_MutationBenchmarkContext | None] = ContextVar(
+    "_mutation_benchmark_context", default=None
+)
 
 
 class CachingAutotuner(KernelInterface):
@@ -1577,61 +1592,98 @@ class CachingAutotuner(KernelInterface):
             )
         return result
 
-    def copy_args_to_cpu_if_needed(self, *args, **kwargs):
+    @contextmanager
+    def _mutation_benchmarking(self):
+        """Reuse the restore policy while taking a fresh snapshot per benchmark."""
+        active = _mutation_benchmark_context.get()
+        if active is not None and active.autotuner is self:
+            yield
+            return
+
+        token = _mutation_benchmark_context.set(_MutationBenchmarkContext(self))
+        try:
+            yield
+        finally:
+            _mutation_benchmark_context.reset(token)
+
+    def _get_args_to_copy_to_cpu(self, *args, **kwargs) -> OrderedSet[str]:
         """
-        To support benchmarking in the presence of mutated args, we need to avoid
-        autotuning contaminating them. We try to pass cloned args to the kernel.
-        If those clones would increase the peak memory usage, however, we instead
-        copy to cpu and restore them after each iteration. Figure out the args
-        to be copied and do the copying.
+        Choose which mutated args should be restored from CPU during benchmarking.
+        Args not selected here are cloned on the accelerator instead.
         """
         if not self.optimize_mem:
-            return {}
+            return OrderedSet()
 
-        copies = {}
         try:
             if torch.accelerator.current_accelerator() is None:
                 # No initialized accelerator; skip memory-optimized path
-                return {}
+                return OrderedSet()
             budget = (
                 torch.accelerator.max_memory_allocated()
                 - torch.accelerator.memory_allocated()
             )
         except RuntimeError:
             # Possibly a custom CUDA allocator, see https://github.com/pytorch/pytorch/issues/163257
-            return {}
+            return OrderedSet()
+
+        names: OrderedSet[str] = OrderedSet()
+
+        def maybe_select(name, arg):
+            nonlocal budget
+            if name not in self.mutated_arg_names:
+                return
+            if not isinstance(arg, torch.Tensor):
+                raise AssertionError(
+                    f"Expected torch.Tensor for mutated arg, got {type(arg)}"
+                )
+            if arg.device.type not in ("cuda", "xpu"):
+                return
+            required_storage_length = compute_required_storage_length(
+                arg.size(),
+                arg.stride(),
+                0,
+            )
+            size = required_storage_length * arg.element_size()
+            if size > budget:
+                names.add(name)
+            else:
+                budget -= size
+
+        for name, arg in zip(self.fn.arg_names, args):
+            maybe_select(name, arg)
+
+        for name, arg in kwargs.items():
+            maybe_select(name, arg)
+
+        return names
+
+    def _copy_args_to_cpu(self, names: Container[str], *args, **kwargs):
+        copies = {}
 
         def maybe_copy(name, arg):
-            if name in self.mutated_arg_names and arg.device.type in (
-                "cuda",
-                "xpu",
-            ):
-                nonlocal budget
-                if not isinstance(arg, torch.Tensor):
-                    raise AssertionError(
-                        f"Expected torch.Tensor for mutated arg, got {type(arg)}"
-                    )
-                required_storage_length = compute_required_storage_length(
-                    arg.size(),
-                    arg.stride(),
-                    0,
+            if name not in names:
+                return
+            if not isinstance(arg, torch.Tensor):
+                raise AssertionError(
+                    f"Expected torch.Tensor for mutated arg, got {type(arg)}"
                 )
-                size = required_storage_length * arg.element_size()
-                if size > budget:
-                    cpu_arg = torch.empty_strided(
-                        (required_storage_length,),
-                        (1,),
-                        dtype=arg.dtype,
-                        device="cpu",
-                        pin_memory=True,
-                    )
-                    cpu_arg.copy_(
-                        arg.as_strided((required_storage_length,), (1,)),
-                        non_blocking=True,
-                    )
-                    copies[name] = (arg, cpu_arg)
-                else:
-                    budget -= size
+            required_storage_length = compute_required_storage_length(
+                arg.size(),
+                arg.stride(),
+                0,
+            )
+            cpu_arg = torch.empty_strided(
+                (required_storage_length,),
+                (1,),
+                dtype=arg.dtype,
+                device="cpu",
+                pin_memory=True,
+            )
+            cpu_arg.copy_(
+                arg.as_strided((required_storage_length,), (1,)),
+                non_blocking=True,
+            )
+            copies[name] = (arg, cpu_arg)
 
         for name, arg in zip(self.fn.arg_names, args):
             maybe_copy(name, arg)
@@ -1640,6 +1692,19 @@ class CachingAutotuner(KernelInterface):
             maybe_copy(name, arg)
 
         return copies
+
+    def copy_args_to_cpu_if_needed(self, *args, **kwargs):
+        """Copy mutated args selected for CPU restoration during benchmarking."""
+        context = _mutation_benchmark_context.get()
+        if context is not None and context.autotuner is self:
+            if context.cpu_copy_arg_names is None:
+                context.cpu_copy_arg_names = self._get_args_to_copy_to_cpu(
+                    *args, **kwargs
+                )
+            names = context.cpu_copy_arg_names
+        else:
+            names = self._get_args_to_copy_to_cpu(*args, **kwargs)
+        return self._copy_args_to_cpu(names, *args, **kwargs)
 
     def restore_args_from_cpu(self, cpu_copies):
         for pair in cpu_copies.values():
@@ -1813,6 +1878,7 @@ class CachingAutotuner(KernelInterface):
 
     def benchmark_all_configs(self, *args, **kwargs):
         with (
+            self._mutation_benchmarking(),
             dynamo_timed(
                 "CachingAutotuner.benchmark_all_configs",
                 log_pt2_compile_event=True,
@@ -2306,16 +2372,19 @@ class CachingAutotuner(KernelInterface):
         if not self._should_coordesc_tune:
             return launcher
 
-        with dynamo_timed(
-            "CachingAutotuner.coordinate_descent_tuning",
-            # These generate too many pt2_compile_event logs:
-            log_pt2_compile_event=False,
-            metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
-            dynamo_compile_column_us="runtime_triton_autotune_time_us",
-            compile_id=self.compile_id,
-            is_backward=self.is_backward,
-            log_waitcounter=True,
-            waitcounter_name_override="triton_autotuner",
+        with (
+            self._mutation_benchmarking(),
+            dynamo_timed(
+                "CachingAutotuner.coordinate_descent_tuning",
+                # These generate too many pt2_compile_event logs:
+                log_pt2_compile_event=False,
+                metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
+                dynamo_compile_column_us="runtime_triton_autotune_time_us",
+                compile_id=self.compile_id,
+                is_backward=self.is_backward,
+                log_waitcounter=True,
+                waitcounter_name_override="triton_autotuner",
+            ),
         ):
             return self._coordinate_descent_tuning(launcher, *args, **kwargs)
 
@@ -2498,46 +2567,66 @@ class CachingAutotuner(KernelInterface):
             ) is not DEFER:
                 return result
 
-        if len(self.launchers) != 1:
-            if len(self.launchers) == 0:
-                start_time = time.time_ns()
-                self.precompile()
-                self.precompile_time_taken_ns = time.time_ns() - start_time
-            if len(self.launchers) > 1:
-                for plugin in self._plugins:
-                    if (
-                        result := plugin.pre_autotune(
-                            self, *args, stream=stream, **kwargs
-                        )
-                    ) is not DEFER:
-                        return result
-                # Re-check: a plugin may have mutated launchers down to one.
+        config = self.launchers[0].config if len(self.launchers) == 1 else None
+        needs_mutation_benchmarking = (
+            len(self.launchers) != 1
+            or (
+                bool(self.inductor_meta.get("combo_tuning_groups"))
+                and not getattr(config, "found_by_combo_autotune", False)
+            )
+            or (
+                bool(self.inductor_meta.get("coordinate_descent_tuning", False))
+                and not getattr(config, "found_by_coordesc", False)
+            )
+        )
+        mutation_benchmarking = (
+            self._mutation_benchmarking()
+            if needs_mutation_benchmarking
+            else nullcontext()
+        )
+        with mutation_benchmarking:
+            if len(self.launchers) != 1:
+                if len(self.launchers) == 0:
+                    start_time = time.time_ns()
+                    self.precompile()
+                    self.precompile_time_taken_ns = time.time_ns() - start_time
                 if len(self.launchers) > 1:
-                    self.autotune_to_one_config(*args, **kwargs)
+                    for plugin in self._plugins:
+                        if (
+                            result := plugin.pre_autotune(
+                                self, *args, stream=stream, **kwargs
+                            )
+                        ) is not DEFER:
+                            return result
+                    # Re-check: a plugin may have mutated launchers down to one.
+                    if len(self.launchers) > 1:
+                        self.autotune_to_one_config(*args, **kwargs)
 
-        if self.inductor_meta.get("combo_tuning_groups") and not getattr(
-            self.launchers[0].config, "found_by_combo_autotune", False
-        ):
-            with dynamo_timed(
-                "CachingAutotuner.combo_sequential_autotune",
-                log_pt2_compile_event=False,
-                metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
-                dynamo_compile_column_us="runtime_triton_autotune_time_us",
-                compile_id=self.compile_id,
-                is_backward=self.is_backward,
-                log_waitcounter=True,
-                waitcounter_name_override="triton_autotuner",
+            if self.inductor_meta.get("combo_tuning_groups") and not getattr(
+                self.launchers[0].config, "found_by_combo_autotune", False
             ):
-                self.launchers = [
-                    self._combo_sequential_autotune(self.launchers[0], *args, **kwargs)
-                ]
+                with dynamo_timed(
+                    "CachingAutotuner.combo_sequential_autotune",
+                    log_pt2_compile_event=False,
+                    metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
+                    dynamo_compile_column_us="runtime_triton_autotune_time_us",
+                    compile_id=self.compile_id,
+                    is_backward=self.is_backward,
+                    log_waitcounter=True,
+                    waitcounter_name_override="triton_autotuner",
+                ):
+                    self.launchers = [
+                        self._combo_sequential_autotune(
+                            self.launchers[0], *args, **kwargs
+                        )
+                    ]
 
-        if not getattr(
-            self.launchers[0].config, "found_by_coordesc", False
-        ) and self.inductor_meta.get("coordinate_descent_tuning", False):
-            self.launchers = [
-                self.coordinate_descent_tuning(self.launchers[0], *args, **kwargs)
-            ]
+            if not getattr(
+                self.launchers[0].config, "found_by_coordesc", False
+            ) and self.inductor_meta.get("coordinate_descent_tuning", False):
+                self.launchers = [
+                    self.coordinate_descent_tuning(self.launchers[0], *args, **kwargs)
+                ]
 
         (launcher,) = self.launchers
         # Ensure the final launcher is marked as a winner for bundle filtering.
