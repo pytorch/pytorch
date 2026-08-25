@@ -1854,10 +1854,20 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     }
     kernel_launched = true;
 
-    res = at::empty(
-        {B, M, num_heads, Kv},
-        query.options().dtype(
-            CutlassToAtenDtype<typename Kernel::output_t>::atScalarType()));
+    const auto output_options = query.options().dtype(
+        CutlassToAtenDtype<typename Kernel::output_t>::atScalarType());
+    // Local windows can fully mask rows. Without a window, shared cumulative
+    // metadata proves packed Q/K lengths match unless seqlen_k shortens K.
+    const bool may_have_fully_masked_rows =
+        window_size.value_or(0) > 0 ||
+        (custom_mask_type ==
+             static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) &&
+         (seqstart_q.has_value()
+              ? seqlen_k.has_value() || !seqstart_q->is_same(*seqstart_k)
+              : max_seqlen_q > max_seqlen_k));
+    res = may_have_fully_masked_rows
+        ? at::zeros({B, M, num_heads, Kv}, output_options)
+        : at::empty({B, M, num_heads, Kv}, output_options);
 
     // NOTE: Should be aligned (by padding) in case M is
     // not a good number for loading during backward
