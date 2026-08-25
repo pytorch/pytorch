@@ -153,23 +153,20 @@ class Muon(Optimizer):
         }
         super().__init__(params, defaults)
 
-    def add_param_group(self, param_group: dict) -> None:
-        super().add_param_group(param_group)
-        group = self.param_groups[-1]
-        allow_batched_matrices = group["allow_batched_matrices"]
-        for p in group["params"]:
-            if _ndim_supported(p.ndim, allow_batched_matrices):
-                continue
-            self.param_groups.pop()
-            if allow_batched_matrices:
+        for group in self.param_groups:
+            allow_batched_matrices = group["allow_batched_matrices"]
+            for p in group["params"]:
+                if _ndim_supported(p.ndim, allow_batched_matrices):
+                    continue
+                if allow_batched_matrices:
+                    raise ValueError(
+                        "Muon with allow_batched_matrices=True requires parameters with "
+                        f"at least two dimensions, but found a parameter with size: {p.size()}"
+                    )
                 raise ValueError(
-                    "Muon with allow_batched_matrices=True requires parameters with at least "
-                    f"two dimensions, but found a parameter with size: {p.size()}"
+                    f"Muon only supports 2D parameters whereas we found a parameter with size: {p.size()}. "
+                    "Batches of matrices, shaped [..., M, N], are supported with allow_batched_matrices=True."
                 )
-            raise ValueError(
-                f"Muon only supports 2D parameters whereas we found a parameter with size: {p.size()}. "
-                "Batches of matrices, shaped [..., M, N], are supported with allow_batched_matrices=True."
-            )
 
     def _init_group(
         self,
