@@ -21,8 +21,8 @@ from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
+    skipIfRocm,
     TEST_CUDA,
-    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -354,9 +354,8 @@ class AbstractFaultToleranceTest:
         self._store_barrier("ft_reused_uuid_rejected")
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM,
-        "RCCL 2.30.4 blocks in ncclCommInitRankConfig(blocking=0) when a rank "
+    @skipIfRocm(
+        msg="RCCL 2.30.4 blocks in ncclCommInitRankConfig(blocking=0) when a rank "
         "is missing, so timeout-retry reconfigure hangs",
     )
     def test_reconfigure_timeout_is_retryable(self):
