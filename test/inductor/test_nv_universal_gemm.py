@@ -815,7 +815,65 @@ class TestNVUniversalGemmHeuristics(TestCase):
 
         self.assertEqual(
             analysis.grouped_reduction("out", "gemm", 4, 1, torch.float32),
-            GemmReductionConfig("out", 4, 1, "sum", "identity"),
+            GemmReductionConfig(
+                output_name="out",
+                group=4,
+                axis=1,
+                reduction_type="sum",
+                source_type="identity",
+            ),
+        )
+
+    def test_dense_reduction_uses_generated_callback_contract(self):
+        import dataclasses
+
+        import cutlass.cute as cute
+
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
+            BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES,
+            DENSE_GEMM_REDUCTION_CAPABILITIES,
+        )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+        from torch._inductor.kernel.gemm_epilogue_codegen import (
+            GemmReductionCompileConfig,
+        )
+
+        args = GemmReductionArguments(
+            group=8,
+            axis=1,
+            reduction_type="sum",
+            source_type="square",
+            reduction_algorithm="variance",
+            feeds_main=True,
+            finalizer_fn=("def finalize(value, group):\n    return value / group"),
+        )
+        config = GemmReductionCompileConfig.from_args(args, cute)
+
+        self.assertEqual(
+            config.constexprs()[:5],
+            (8, 1, "sum", "variance", True),
+        )
+        self.assertNotIn("square", config.constexprs())
+        self.assertEqual(config.reduction.source(3.0), 9.0)
+        self.assertEqual(config.reduction.finalize(16.0, 8), 2.0)
+        self.assertTrue(
+            DENSE_GEMM_REDUCTION_CAPABILITIES.supports("sum", "square", "variance")
+        )
+        self.assertFalse(
+            DENSE_GEMM_REDUCTION_CAPABILITIES.supports("variance_affine:1:0", "square")
+        )
+        secondary = dataclasses.replace(
+            args,
+            feeds_main=False,
+            secondary_feed_output="secondary",
+            secondary_consumer_fn=(
+                "def consume(accumulator, primary, secondary):\n"
+                "    return accumulator > 0.0"
+            ),
+        )
+        self.assertTrue(DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(secondary))
+        self.assertFalse(
+            BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES.supports_contract(secondary)
         )
 
     def test_grouped_reduction_rejects_ambiguous_composite(self):
