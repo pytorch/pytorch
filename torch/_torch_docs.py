@@ -4505,7 +4505,7 @@ Args:
     other (Tensor or Number): the divisor
 
 Returns:
-    A named tuple (quotient, remainder) containing the quotient and remainder value.
+    A named tuple (quotient, remainder) containing the quotient and remainder values.
 
 Example::
 

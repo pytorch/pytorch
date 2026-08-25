@@ -6461,7 +6461,6 @@ a")
             # type: (int, Tensor) -> Tuple[Tensor, Tensor]
             return divmod(a, b)
 
-
         def divmod_test_iterator(func, num, den):
             for i in num:
                 for j in den:

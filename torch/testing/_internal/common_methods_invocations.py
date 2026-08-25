@@ -957,6 +957,7 @@ def sample_inputs_divmod(op, device, dtype, requires_grad, **kwargs):
         (make_args(S, S), non_zero_make_args(S, S)),
         (make_args(S, S), non_zero_make_args(S, 1)),
         (make_args(S, S), 2),
+        (make_args(), 2),
     ]
 
     for s1, s2 in samples:
