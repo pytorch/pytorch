@@ -225,13 +225,13 @@ if [[ -d "${HF_CACHE}" && "$TEST_CONFIG" != "onnx" ]]; then
   export HF_HOME="${HF_CACHE}"
 fi
 
-if [[ "$TEST_CONFIG" == 'default' ]]; then
-  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-    export HIP_VISIBLE_DEVICES=0
-  else
-    export CUDA_VISIBLE_DEVICES=0
-  fi
-fi
+# if [[ "$TEST_CONFIG" == 'default' ]]; then
+#   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+#     export HIP_VISIBLE_DEVICES=0
+#   else
+#     export CUDA_VISIBLE_DEVICES=0
+#   fi
+# fi
 
 if [[ "$TEST_CONFIG" == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export HIP_VISIBLE_DEVICES=0,1,2,3
