@@ -605,7 +605,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // registered does not pay for a duration measurement nobody reads.
   bool hasCompletionHooks();
   void runCompletionHooks(
-      const ::c10d::Work* work,
+      uint64_t completion_key,
       std::optional<float> duration_ms);
 
   void attachMemoryHook();
@@ -717,7 +717,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::unordered_map<
       unsigned long long,
-      std::vector<c10::intrusive_ptr<WorkNCCL>>>
+      std::vector<std::shared_ptr<WorkNCCL::State>>>
       graph_capture_work_refs_;
   std::mutex graph_capture_work_mutex_;
 

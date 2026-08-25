@@ -136,9 +136,10 @@ class TORCH_API Work : public torch::CustomClassHolder {
 
   virtual std::chrono::milliseconds getTimeout() const;
 
-  // Opaque identity used to correlate a caller-facing Work with a backend's
-  // tensor-free tracking copy. Valid while either Work is alive.
-  virtual const void* getCompletionKey() const;
+  // Opaque identity used to correlate a Work with backend completion. A
+  // backend whose completion can outlive the Work must override this with a
+  // non-reused key.
+  virtual uint64_t getCompletionKey() const;
 
   OpType retrieveOpType() const;
 
