@@ -2724,6 +2724,67 @@ class TestOptimRenewed(TestCase):
             expected,
         )
 
+    @parametrize("matrix_shape", [(2, 5), (5, 2)])
+    def test_muon_batched_matrices(self, device, matrix_shape):
+        torch.manual_seed(2)
+        batch_shape = (2, 3)
+        momentum = 0.8
+        param = Parameter(
+            torch.randn(
+                (*batch_shape, *matrix_shape),
+                device=device,
+                dtype=torch.bfloat16,
+            )
+        )
+        reference_params = [
+            Parameter(matrix.clone())
+            for matrix in param.detach().reshape(-1, *matrix_shape)
+        ]
+        kwargs = {
+            "lr": 0.03,
+            "weight_decay": 0.2,
+            "momentum": momentum,
+            "nesterov": False,
+            "ns_steps": 3,
+        }
+        optimizer = torch.optim.Muon([param], allow_batched_matrices=True, **kwargs)
+        reference_optimizer = torch.optim.Muon(reference_params, **kwargs)
+        grad_scales = torch.tensor(
+            [0.1, 1.0, 10.0, 0.2, 2.0, 20.0],
+            device=device,
+            dtype=param.dtype,
+        ).reshape(*batch_shape, 1, 1)
+        expected_momentum = torch.zeros_like(param)
+
+        for _ in range(2):
+            grad = torch.randn_like(param) * grad_scales
+            param.grad = grad.clone()
+            expected_momentum.lerp_(grad, 1 - momentum)
+            for reference_param, reference_grad in zip(
+                reference_params,
+                grad.reshape(-1, *matrix_shape),
+                strict=True,
+            ):
+                reference_param.grad = reference_grad.clone()
+
+            optimizer.step()
+            reference_optimizer.step()
+
+        self.assertEqual(param, torch.stack(reference_params).reshape_as(param))
+        self.assertEqual(
+            optimizer.state[param]["momentum_buffer"],
+            expected_momentum,
+        )
+
+        shape = (0, 2, 5)
+        param = Parameter(torch.empty(shape, device=device))
+        param.grad = torch.empty_like(param)
+        optimizer = torch.optim.Muon([param], ns_steps=100, allow_batched_matrices=True)
+
+        optimizer.step()
+
+        self.assertEqual(tuple(optimizer.state[param]["momentum_buffer"].shape), shape)
+
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
