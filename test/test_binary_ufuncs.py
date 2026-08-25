@@ -1048,6 +1048,8 @@ class TestBinaryUfuncsDevice(TestCase):
     @dtypes(*all_types_and(torch.half))
     def test_rdivmod(self, device, dtype):
         samples = [(2, 3)]
+        if dtype in (torch.float16, torch.float32, torch.float64):
+            samples += [(2.5, 3), (3.3, 2)]
         if dtype != torch.uint8:
             samples += [(-2, 3), (2, -3)]
         for a, b in samples:
