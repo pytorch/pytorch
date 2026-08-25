@@ -297,6 +297,36 @@ namespace {
             *out_ptr_NCDHW = static_cast<scalar_t>(0);
           }
         }
+      } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
+        // The taps are placed around the unclipped index, so this branch samples at the raw
+        // x, y, z rather than at the clipped ix, iy, iz above.
+        opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
+        index_t x_taps[4], y_taps[4], z_taps[4];
+        resolve_cubic_taps(grid_sampler_unnormalize(x, inp_W, align_corners), inp_W, padding_mode,
+                           align_corners, x_coeffs, static_cast<opmath_t*>(nullptr), x_taps);
+        resolve_cubic_taps(grid_sampler_unnormalize(y, inp_H, align_corners), inp_H, padding_mode,
+                           align_corners, y_coeffs, static_cast<opmath_t*>(nullptr), y_taps);
+        resolve_cubic_taps(grid_sampler_unnormalize(z, inp_D, align_corners), inp_D, padding_mode,
+                           align_corners, z_coeffs, static_cast<opmath_t*>(nullptr), z_taps);
+
+        auto inp_ptr_NC = input.data + n * inp_sN;
+        auto out_ptr_NCDHW = output.data + n * out_sN + d * out_sD + h * out_sH + w * out_sW;
+        for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCDHW += out_sC) {
+          opmath_t value = static_cast<opmath_t>(0);
+          #pragma unroll
+          for (int k = 0; k < 4; ++k) {
+            #pragma unroll
+            for (int j = 0; j < 4; ++j) {
+              auto row = inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH;
+              const opmath_t weight_zy = z_coeffs[k] * y_coeffs[j];
+              #pragma unroll
+              for (int i = 0; i < 4; ++i) {
+                value += static_cast<opmath_t>(row[x_taps[i] * inp_sW]) * weight_zy * x_coeffs[i];
+              }
+            }
+          }
+          *out_ptr_NCDHW = static_cast<scalar_t>(value);
+        }
       }
     }
   }
@@ -573,15 +603,15 @@ namespace {
       const auto grid_offset = n * grid_sN + d * grid_sD + h * grid_sH + w * grid_sW;
 
       // get the corresponding input x, y, z coordinates from grid
-      scalar_t ix = grid.data[grid_offset];
-      scalar_t iy = grid.data[grid_offset + grid_sCoor];
-      scalar_t iz = grid.data[grid_offset + 2 * grid_sCoor];
+      scalar_t x = grid.data[grid_offset];
+      scalar_t y = grid.data[grid_offset + grid_sCoor];
+      scalar_t z = grid.data[grid_offset + 2 * grid_sCoor];
 
       // multipliers for gradients on ix, iy, and iz
       scalar_t gix_mult, giy_mult, giz_mult;
-      ix = grid_sampler_compute_source_index_set_grad(ix, inp_W, padding_mode, align_corners, &gix_mult);
-      iy = grid_sampler_compute_source_index_set_grad(iy, inp_H, padding_mode, align_corners, &giy_mult);
-      iz = grid_sampler_compute_source_index_set_grad(iz, inp_D, padding_mode, align_corners, &giz_mult);
+      scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
+      scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
+      scalar_t iz = grid_sampler_compute_source_index_set_grad(z, inp_D, padding_mode, align_corners, &giz_mult);
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get corner pixel values from (x, y, z)
@@ -742,6 +772,55 @@ namespace {
         gGrid_ptr_NDHW[0] = static_cast<scalar_t>(0);
         gGrid_ptr_NDHW[1] = static_cast<scalar_t>(0);
         gGrid_ptr_NDHW[2] = static_cast<scalar_t>(0);
+      } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
+        using opmath_t = at::opmath_type<scalar_t>;
+        // The taps are placed around the unclipped index, so the clipping ix, iy, iz went through
+        // above is undone here; their multipliers are the unnormalize ones.
+        opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
+        opmath_t x_coeffs_grad[4], y_coeffs_grad[4], z_coeffs_grad[4];
+        index_t x_taps[4], y_taps[4], z_taps[4];
+        opmath_t x_mult, y_mult, z_mult;
+        resolve_cubic_taps(grid_sampler_unnormalize_set_grad(static_cast<opmath_t>(x), inp_W, align_corners, &x_mult),
+                           inp_W, padding_mode, align_corners, x_coeffs, x_coeffs_grad, x_taps);
+        resolve_cubic_taps(grid_sampler_unnormalize_set_grad(static_cast<opmath_t>(y), inp_H, align_corners, &y_mult),
+                           inp_H, padding_mode, align_corners, y_coeffs, y_coeffs_grad, y_taps);
+        resolve_cubic_taps(grid_sampler_unnormalize_set_grad(static_cast<opmath_t>(z), inp_D, align_corners, &z_mult),
+                           inp_D, padding_mode, align_corners, z_coeffs, z_coeffs_grad, z_taps);
+
+        opmath_t gix = static_cast<opmath_t>(0);
+        opmath_t giy = static_cast<opmath_t>(0);
+        opmath_t giz = static_cast<opmath_t>(0);
+
+        const scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
+        index_t NC_offset = n * gInp_sN;
+        auto inp_ptr_NC = input.data + n * inp_sN;
+        for (index_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, NC_offset += gInp_sC, inp_ptr_NC += inp_sC) {
+          const opmath_t gOut = *gOut_ptr_NCDHW;
+          #pragma unroll
+          for (int k = 0; k < 4; ++k) {
+            #pragma unroll
+            for (int j = 0; j < 4; ++j) {
+              auto row = inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH;
+              const index_t grad_row = NC_offset + z_taps[k] * gInp_sD + y_taps[j] * gInp_sH;
+              #pragma unroll
+              for (int i = 0; i < 4; ++i) {
+                if (input_requires_grad) {
+                  // See Note [Passing pointer and offset to fastAtomicAdd].
+                  fastAtomicAdd(grad_input.data, grad_row + x_taps[i] * gInp_sW, grad_input_memory_span,
+                                static_cast<scalar_t>(gOut * x_coeffs[i] * y_coeffs[j] * z_coeffs[k]), true);
+                }
+                const opmath_t value = static_cast<opmath_t>(row[x_taps[i] * inp_sW]);
+                gix -= value * x_coeffs_grad[i] * y_coeffs[j] * z_coeffs[k] * gOut;
+                giy -= value * x_coeffs[i] * y_coeffs_grad[j] * z_coeffs[k] * gOut;
+                giz -= value * x_coeffs[i] * y_coeffs[j] * z_coeffs_grad[k] * gOut;
+              }
+            }
+          }
+        }
+        scalar_t *gGrid_ptr_NDHW = grad_grid.data + index * gGrid_sW;
+        gGrid_ptr_NDHW[0] = static_cast<scalar_t>(x_mult * gix);
+        gGrid_ptr_NDHW[1] = static_cast<scalar_t>(y_mult * giy);
+        gGrid_ptr_NDHW[2] = static_cast<scalar_t>(z_mult * giz);
       }
     }
   }
@@ -797,7 +876,7 @@ void launch_grid_sampler_3d_forward_kernel(
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
   check_grid_sampler_common(input, grid);
-  check_grid_sampler_3d(input, grid, interpolation_mode);
+  check_grid_sampler_3d(input, grid);
 
   auto N = input.size(0);
   auto D = grid.size(1);
@@ -905,7 +984,7 @@ void launch_grid_sampler_3d_backward_kernel(
     bool align_corners, std::array<bool,2> output_mask) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
-  check_grid_sampler_3d_backward(input, grid, grad_output, interpolation_mode);
+  check_grid_sampler_3d_backward(input, grid, grad_output);
 
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
