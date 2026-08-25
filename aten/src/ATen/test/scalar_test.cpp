@@ -3,6 +3,7 @@
 #include <iostream>
 #include <random>
 #include <c10/core/SymInt.h>
+#include <c10/util/Exception.h>
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
 #ifndef _USE_MATH_DEFINES
@@ -53,17 +54,17 @@ void test_overflow() {
   ASSERT_EQ(s1.toInt(), 100000);
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  ASSERT_THROW(s1.toHalf(), std::runtime_error);
+  ASSERT_THROW(s1.toHalf(), c10::Error);
 
   s1 = Scalar(NAN);
   ASSERT_TRUE(std::isnan(s1.toFloat()));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  ASSERT_THROW(s1.toInt(), std::runtime_error);
+  ASSERT_THROW(s1.toInt(), c10::Error);
 
   s1 = Scalar(INFINITY);
   ASSERT_TRUE(std::isinf(s1.toFloat()));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  ASSERT_THROW(s1.toInt(), std::runtime_error);
+  ASSERT_THROW(s1.toInt(), c10::Error);
 }
 
 TEST(TestScalar, TestScalar) {
