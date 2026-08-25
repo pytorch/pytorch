@@ -1373,6 +1373,16 @@ class TensorMetadata:
                 result.append(value)
 
 
+def _same_int_expr(a: IntLikeType, b: IntLikeType) -> bool:
+    if isinstance(a, SymInt) or isinstance(b, SymInt):
+        return (
+            isinstance(a, SymInt)
+            and isinstance(b, SymInt)
+            and a.node.expr == b.node.expr
+        )
+    return a == b
+
+
 def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
@@ -2164,7 +2174,7 @@ class FakeTensorMode(TorchDispatchMode):
             and metadata.layout == torch.strided
             and statically_known_true(metadata.storage_offset == 0)
             and all(
-                statically_known_true(actual == expected)
+                _same_int_expr(actual, expected)
                 for actual, expected in zip(
                     metadata.stride,
                     make_contiguous_strides_for(output.shape),
@@ -2175,6 +2185,8 @@ class FakeTensorMode(TorchDispatchMode):
         metadata.shape = tuple(state.convert_output(v) for v in metadata.shape)
         metadata.stride = tuple(state.convert_output(v) for v in metadata.stride)
         metadata.storage_offset = state.convert_output(metadata.storage_offset)
+        # An int payload is a backreference to an input SymNode. torch.empty
+        # would recompute the stride or offset and lose that node identity.
         is_canonical_contiguous = is_canonical_contiguous and not any(
             isinstance(value, _SymIntOutputStub) and isinstance(value.value, int)
             for value in (*metadata.stride, metadata.storage_offset)
@@ -2391,7 +2403,11 @@ class FakeTensorMode(TorchDispatchMode):
             view_arg = args[cast(int, entry.view_idx)]
             if not isinstance(view_arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 raise AssertionError("view_arg must be a FakeTensor")
-        view_dtype_matches = view_arg is not None and metadata.dtype == view_arg.dtype
+        view_dtype_matches = (
+            view_arg is not None
+            and metadata.dtype == view_arg.dtype
+            and not metadata.requires_grad
+        )
 
         with in_kernel_invocation_manager(self), maybe_suppress():
             if view_dtype_matches:

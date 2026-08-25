@@ -3747,6 +3747,39 @@ class FakeTensorDispatchCache(TestCase):
             empty_strided.assert_not_called()
             self._assert_symbolic_cache_hit(before_hit, actual, expected)
 
+    def test_cache_contiguous_output_preserves_stride_expressions(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        fake_mode.cache_crosscheck_enabled = False
+
+        with fake_mode:
+            u0 = shape_env.create_unbacked_symint()
+            u1 = shape_env.create_unbacked_symint()
+            torch._check(u0 >= 1)
+            torch._check(u1 >= 1)
+            x = torch.empty_strided((u0, u1), (u1, 1))
+            FakeTensorMode.cache_clear()
+            expected = aten.stack.default([x, x], 0)
+            before_hit = FakeTensorMode.cache_info()
+
+            with patch.object(
+                torch, "empty_strided", wraps=torch.empty_strided
+            ) as empty_strided:
+                actual = aten.stack.default([x, x], 0)
+
+            empty_strided.assert_called_once()
+            self.assertEqual(
+                tuple(
+                    s.node.expr if isinstance(s, torch.SymInt) else s
+                    for s in actual.stride()
+                ),
+                tuple(
+                    s.node.expr if isinstance(s, torch.SymInt) else s
+                    for s in expected.stride()
+                ),
+            )
+            self._assert_symbolic_cache_hit(before_hit, actual, expected)
+
     def test_cache_symbolic_noncontiguous_output_preserves_strides(self):
         fake_mode, x = self._symbolic_cache_input()
 
@@ -3785,6 +3818,23 @@ class FakeTensorDispatchCache(TestCase):
                 actual.untyped_storage()._cdata,
                 x.untyped_storage()._cdata,
             )
+            self._assert_symbolic_cache_hit(before_hit, actual, expected)
+
+    def test_cache_view_output_preserves_resized_storage(self):
+        fake_mode = FakeTensorMode()
+        fake_mode.cache_crosscheck_enabled = False
+
+        with fake_mode:
+            x = torch.randn(4, 8)
+            torch.ops.inductor.resize_storage_bytes_(x, 0)
+            FakeTensorMode.cache_clear()
+            expected = aten.slice.Tensor(x, 0, 1, 3)
+            before_hit = FakeTensorMode.cache_info()
+            actual = aten.slice.Tensor(x, 0, 1, 3)
+
+            self.assertEqual(x.untyped_storage().nbytes(), 0)
+            self.assertEqual(expected.untyped_storage().nbytes(), 0)
+            self.assertEqual(actual.untyped_storage().nbytes(), 0)
             self._assert_symbolic_cache_hit(before_hit, actual, expected)
 
     def test_cache_symbolic_view_output_restores_view_bits(self):
