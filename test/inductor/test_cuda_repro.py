@@ -2763,6 +2763,8 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             torch.testing.assert_close(
                 foo(inp),
                 foo_c(inp),
+                rtol=0,
+                atol=0,
                 equal_nan=True,
                 check_device=True,
                 check_dtype=False,
