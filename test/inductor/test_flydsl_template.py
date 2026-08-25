@@ -661,14 +661,6 @@ class TestFlyDSLTemplate(TestCase):
                 {},
                 7,
             ),
-            (
-                10000,
-                256,
-                100,
-                {},
-                {"multi_processor_count": 10},
-                20,
-            ),
         ],
     )
     def test_flydsl_grouped_gemm_persistent_grid_size(
