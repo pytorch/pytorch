@@ -563,7 +563,7 @@ void pushGlobalProfilingCallbacks(
           .scopes(scopes);
 
   // Arm the drain gate before the global callback and fire on any thread. If
-  // this a new profiling session, also bump the session generation.
+  // this is a new profiling session, also bump the session generation.
   // disableProfiler() relies on this to know it must drain in-flight callbacks.
   global_callback_session.activate(new_session);
 
