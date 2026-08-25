@@ -71,7 +71,7 @@ jobs:
           # setup-python needs this to resolve the latest 3.15 beta. No-op for
           # the exact stable versions the other Pythons pass.
           allow-prereleases: true
-      - uses: actions/download-artifact@v6.0.0
+      - uses: actions/download-artifact@v7.0.0
         with:
           name: ${{ inputs.build_name }}
           path: ${{ runner.temp }}/artifacts
