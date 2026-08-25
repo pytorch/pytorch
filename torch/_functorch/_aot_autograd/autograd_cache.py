@@ -143,6 +143,76 @@ def should_bundle_autograd_cache() -> bool:
     return config.bundled_autograd_cache or torch._dynamo.config.caching_precompile
 
 
+def sync_cache_decision_cross_ranks(local_hit: bool) -> bool:
+    """
+    Whether every rank hit AOTAutogradCache. The caller has to drop a lone hit.
+
+    Compilation itself issues collectives (see config._sync_decision_cross_ranks and the
+    inductor pass that reorders collectives), and only the ranks that actually compile
+    reach them, so the hit/miss decision has to be unanimous. Every rank that could
+    reach one of those collectives should call this.
+
+    The outcome is synchronized rather than the cache key: a key only says which entries
+    are candidates, while the hit is decided afterwards by evaluating each candidate's
+    dynamic shape guards against rank local hints, which can diverge for equal keys.
+
+    No attempt to skip collective free graphs: the partitioner can gate on the joint
+    graph, but this sees the Dynamo graph, where a DTensor collective is still just a
+    redistribute() call. Gating here would no-op the feature for the TP/SP jobs it is
+    for, and a 4 byte gloo all_reduce is nothing next to a compile.
+    """
+    dist = torch.distributed
+    if not (dist.is_available() and dist.is_initialized()):
+        return local_hit
+    if dist.get_world_size() < 2:
+        return local_hit
+
+    from torch._dynamo.distributed import get_compile_sync_pg
+
+    if not config._sync_cache_decision_cross_ranks:
+        # Nothing to decide, but _sync_decision_cross_ranks builds this same group lazily
+        # on the partitioner path, which a partial cache hit leaves to the ranks that
+        # missed: a subset of ranks building a group hangs in the rendezvous, and worse,
+        # advances _world.group_count only on those ranks, which is the salt every later
+        # group name is derived from. Build it here instead, where every rank is. Skipped
+        # without gloo so such a build keeps failing where it did before, in the
+        # partitioner and only for the graphs it actually syncs.
+        if config._sync_decision_cross_ranks and dist.is_gloo_available():
+            get_compile_sync_pg()
+        return local_hit
+
+    pg = get_compile_sync_pg()
+    if pg is None:
+        return local_hit
+
+    from torch._subclasses.fake_tensor import unset_fake_temporarily
+    from torch.utils._mode_utils import no_dispatch
+
+    with no_dispatch(), unset_fake_temporarily():
+        decision = torch.tensor(
+            [local_hit],
+            dtype=torch.int32,
+            device=dist.distributed_c10d._get_object_coll_device(pg),
+        )
+        dist.all_reduce(decision, op=dist.ReduceOp.MIN, group=pg)
+        all_ranks_hit = bool(decision.item())
+
+    if all_ranks_hit:
+        return True
+
+    # The collective only carries whether every rank hit, so each rank reports its
+    # own decision here: grep for local_hit=False to find the ranks that missed.
+    log.info(
+        "AOTAutograd cache cross rank miss: rank=%d local_hit=%s",
+        dist.get_rank(),
+        local_hit,
+    )
+
+    if local_hit:
+        counters["aot_autograd"]["autograd_cache_cross_rank_miss"] += 1
+    return False
+
+
 def check_node_safe(node: Node) -> None:
     """
     Checks that the node only uses supported operators. We are starting with very
@@ -607,7 +677,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return (_ident, (name,))
 
     # pyrefly: ignore [bad-override]
-    def reducer_override(self, obj: Any) -> Any:
+    def reducer_override(self, obj: object) -> Any:
         """
         Override to handle tensor subclasses (like DTensor) that aren't caught
         by the dispatch_table's exact type matching.
@@ -628,7 +698,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return super().reducer_override(obj)
 
     @staticmethod
-    def _format_global_for_cache_key(name: str, obj: Any) -> str:
+    def _format_global_for_cache_key(name: str, obj: object) -> str:
         if (numpy_key := numpy_wrapper_cache_key(obj)) is not None:
             return f"# cache_key_numpy_wrapper {name}: {numpy_key!r}"
 
@@ -674,10 +744,10 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
     def _hash_bytes_for_cache(self, data: bytes) -> str:
         return hashlib.blake2b(data, digest_size=16).hexdigest()
 
-    def _hash_pickled_value_for_cache(self, value: Any) -> str:
+    def _hash_pickled_value_for_cache(self, value: object) -> str:
         return self._hash_bytes_for_cache(pickle.dumps(value))
 
-    def _stable_hash_for_cache_value(self, obj: Any) -> str:
+    def _stable_hash_for_cache_value(self, obj: object) -> str:
         """Get a stable hash for an object used inside tensor subclass metadata."""
         from torch._custom_class_base import CustomClassBase
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -1079,17 +1149,59 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         debug_lines: list[str] = []
         cache_event_time = time.time_ns()
         cache_state = None
+        result: tuple[GenericAOTAutogradResult[Any, Any], bytes] | None = None
+
+        # Most often this is BypassAOTAutogradCache, but
+        # if there's ever different reason we can't cache,
+        # we still never want to hard throw an exception, since
+        # we can always fallback to a cache bypass.
+        # As an example, if the user calls autograd via
+        # standalone inductor, we will sometimes get a GraphModule
+        # that doesn't actually have a `.graph` on it. Instead
+        # of checking every single case, we safely catch the exception
+        # in those cases.
+        def record_bypass(e: Exception) -> None:
+            nonlocal cache_key, cache_state, cache_event_time
+            cache_key = None
+            counters["aot_autograd"]["autograd_cache_bypass"] += 1
+            log.info("Bypassing autograd cache due to: %s", e)
+            cache_state = "bypass"
+            cache_event_time = time.time_ns()
+            cache_info["cache_bypass_reason"] = str(e)
+            cache_info["cache_bypass_exception_type"] = type(e).__name__
+            cache_info["cache_bypass_traceback"] = traceback.format_exc().split("\n")
+            # TODO: this gets logged implicitly by cache_bypass_reason,
+            # and here we explicitly log it into tlparse.
+            # We may want to log this as an extra column in Scuba, though.
+            cache_info["cache_bypass_hard_exception"] = not isinstance(
+                e, BypassAOTAutogradCache
+            )
+            if remote:
+                log_cache_bypass("bypass_aot_autograd", str(e))
+            if config.strict_autograd_cache or torch._dynamo.config.strict_precompile:
+                raise e
+
         try:
             cache_key, debug_lines = autograd_cache_key(
                 mod, args, aot_config, compiler_config_extra, act_input_paths
             )
-            result: tuple[GenericAOTAutogradResult[Any, Any], bytes] | None = (
-                AOTAutogradCache._lookup(
-                    cache_key, local, remote, args, cache_info, aot_config
-                )
+            result = AOTAutogradCache._lookup(
+                cache_key, local, remote, args, cache_info, aot_config
             )
-            if result is not None:
-                (entry, pickled_content) = result
+        except Exception as e:
+            record_bypass(e)
+
+        # Outside the try so bypassing ranks reach it too, and before the load rather
+        # than after: the load ends in _check_guards, which installs the entry's guards
+        # into the ShapeEnv (see [Note: Caching guards generated by AOTAutograd and
+        # Inductor]). Dropping the callable does not undo that, so a rank rejected post
+        # load would recompile under constraints the cleanly missing ranks never saw.
+        if not sync_cache_decision_cross_ranks(result is not None):
+            result = None
+
+        if result is not None:
+            (entry, pickled_content) = result
+            try:
                 fx_config = create_fx_config(compiler_config_extra, compile_region_name)
                 compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                 # Make the compiled_fn serializable, where the serialize function just
@@ -1097,6 +1209,33 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 compiled_fn = SerializableCompiledFunction(
                     compiled_fn, lambda: pickle.loads(pickled_content)
                 )
+            # Count missing the FXGraphCache as a miss not a bypass, which is what
+            # leaving cache_state unset gets us from the tail below.
+            except FXGraphCacheMiss as e:
+                if (
+                    config.strict_autograd_cache
+                    or torch._dynamo.config.strict_precompile
+                ):
+                    raise e
+            except Exception as e:
+                record_bypass(e)
+
+            # Unanimous above, so every rank reaches this backstop. It catches the one
+            # asymmetry the first sync cannot see: an entry that loaded here but whose
+            # FXGraphCache missed on another rank. FXGraphCacheMiss is raised before
+            # _check_guards, so this does leave the ShapeEnv lopsided and only buys
+            # lockstep recompiling instead of a hang, which is enough for a window that
+            # needs the two caches to disagree with each other.
+            if not sync_cache_decision_cross_ranks(compiled_fn is not None):
+                compiled_fn = None
+
+            # Reported only once the hit is final, so a rank whose hit was rejected falls
+            # through to the miss tail instead: no autograd_cache_hit, no time saved in
+            # cache_info, and no ephemeral timeout bump for time it is about to spend
+            # compiling anyway. cache_status_detailed, which _lookup already put in
+            # cache_info, is deliberately left alone: it describes what the lookup found,
+            # which is true either way.
+            if compiled_fn is not None:
                 log.info("AOTAutograd cache hit for key %s", cache_key)
 
                 counters["aot_autograd"]["autograd_cache_hit"] += 1
@@ -1123,45 +1262,12 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
 
-            if compiled_fn is None:
-                log.info("AOTAutograd cache miss for key %s", cache_key)
-                counters["aot_autograd"]["autograd_cache_miss"] += 1
-                cache_state = "miss"
-                cache_event_time = time.time_ns()
-        # Count missing the FXGraphCache as a miss not a bypass
-        except FXGraphCacheMiss as e:
+        if compiled_fn is None and cache_state is None:
+            log.info("AOTAutograd cache miss for key %s", cache_key)
             counters["aot_autograd"]["autograd_cache_miss"] += 1
             cache_state = "miss"
-            if config.strict_autograd_cache or torch._dynamo.config.strict_precompile:
-                raise e
-        # Most often this is BypassAOTAutogradCache, but
-        # if there's ever different reason we can't cache,
-        # we still never want to hard throw an exception, since
-        # we can always fallback to a cache bypass.
-        # As an example, if the user calls autograd via
-        # standalone inductor, we will sometimes get a GraphModule
-        # that doesn't actually have a `.graph` on it. Instead
-        # of checking every single case, we safely catch the exception
-        # in those cases.
-        except Exception as e:
-            cache_key = None
-            counters["aot_autograd"]["autograd_cache_bypass"] += 1
-            log.info("Bypassing autograd cache due to: %s", e)
-            cache_state = "bypass"
             cache_event_time = time.time_ns()
-            cache_info["cache_bypass_reason"] = str(e)
-            cache_info["cache_bypass_exception_type"] = type(e).__name__
-            cache_info["cache_bypass_traceback"] = traceback.format_exc().split("\n")
-            # TODO: this gets logged implicitly by cache_bypass_reason,
-            # and here we explicitly log it into tlparse.
-            # We may want to log this as an extra column in Scuba, though.
-            cache_info["cache_bypass_hard_exception"] = not isinstance(
-                e, BypassAOTAutogradCache
-            )
-            if remote:
-                log_cache_bypass("bypass_aot_autograd", str(e))
-            if config.strict_autograd_cache or torch._dynamo.config.strict_precompile:
-                raise e
+
         if compiled_fn is None:
             # Set the cache key so we can save a cache result later
             symints = AOTAutogradCache._filter_backed_symints(args)

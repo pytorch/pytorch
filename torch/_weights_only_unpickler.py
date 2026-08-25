@@ -15,7 +15,7 @@
 # `_clear_safe_globals()` (`torch.serialization.clear_safe_globals`)
 # `_get_safe_globals()` (`torch.serialization.get_safe_globals`)
 
-# Based of https://github.com/python/cpython/blob/main/Lib/pickle.py
+# Based on https://github.com/python/cpython/blob/main/Lib/pickle.py
 # Expected to be useful for loading PyTorch model weights
 # For example:
 # data = urllib.request.urlopen('https://download.pytorch.org/models/resnet50-0676ba61.pth').read()
@@ -157,7 +157,6 @@ def _tensor_rebuild_functions():
         torch._utils._rebuild_tensor_v3,
         torch._utils._rebuild_sparse_tensor,
         torch._utils._rebuild_meta_tensor_no_storage,
-        torch._utils._rebuild_nested_tensor,
         torch._utils._rebuild_wrapper_subclass,
         # Allowlisting this, but not allowlisting the numpy functions by default
         # Reasoning is that we don't have control over the numpy functions, but
@@ -339,16 +338,6 @@ class Unpickler:
                     self.append(_get_allowed_globals()[full_path])
                 elif full_path in _get_user_allowed_globals():
                     self.append(_get_user_allowed_globals()[full_path])
-                elif full_path in (
-                    [
-                        "torch.nested._internal.nested_tensor.NestedTensor",
-                        "torch.nested._internal.nested_tensor._rebuild_njt",
-                        "torch._dynamo.decorators._DimRange",
-                    ]
-                ):
-                    raise UnpicklingError(
-                        "``torch.nested`` and ``torch._dynamo`` must be imported to load nested jagged tensors (NJTs)"
-                    )
                 elif full_path in (
                     [
                         "torch.distributed.device_mesh.DeviceMesh",
