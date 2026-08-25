@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
+    skipIfCppFakeTensor,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -1446,6 +1447,7 @@ def forward(self, L_nested_counter_c_0_ : {fx_class}, L_nested_counter_c_1_ : {f
     return (add_1,)""",
         )
 
+    @skipIfCppFakeTensor("C++ FakeTensor has different FX node names")
     def test_nested_reference_trace(self):
         def foo(nested_queue, x):
             q1 = nested_queue.q
@@ -1712,6 +1714,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         expected = x * 4.0
         self.assertEqual(result, expected)
 
+    @skipIfCppFakeTensor("C++ FakeTensor has different FX node names")
     def test_export_joint(self):
         torch.library.define(
             "_TestOpaqueObject::module_mul",

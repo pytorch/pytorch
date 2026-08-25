@@ -22,7 +22,6 @@ from itertools import count
 from operator import attrgetter
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
-from unittest import mock
 
 import torch._inductor.async_compile
 import torch.fx
@@ -103,6 +102,10 @@ from torch._inductor.utils import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._logging import trace_structured
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_inputs_temporarily,
+    FakeTensorMode,
+)
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
@@ -929,13 +932,13 @@ def fake_tensor_prop(
     with enable_python_dispatcher():
         fake_mode = detect_fake_mode(example_inputs)
         if not fake_mode:
-            fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+            fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
             FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
         else:
             ctx = (
                 contextlib.nullcontext()
                 if not force_allow_non_fake_inputs
-                else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
+                else allow_non_fake_inputs_temporarily(fake_mode)
             )
             with ctx:  # type: ignore[attr-defined]
                 FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
@@ -2529,7 +2532,7 @@ def fw_compiler_freezing(
         if tracing_context.fw_metadata:
             static_input_idxs = tracing_context.fw_metadata.static_input_indices
 
-    with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+    with allow_non_fake_inputs_temporarily(fake_mode):
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,

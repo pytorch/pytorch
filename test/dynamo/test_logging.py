@@ -22,7 +22,7 @@ from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     find_free_port,
     IS_WINDOWS,
-    munge_exc,
+    munge_exc, skipIfCppFakeTensor,
     skipIfTorchDynamo,
     skipIfWindows,
 )
@@ -350,6 +350,7 @@ class LoggingTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
 
     @make_logging_test()
+    @skipIfCppFakeTensor("C++ FakeTensor has a different repr")
     def test_dynamo_error(self, records):
         try:
             fn_opt = torch.compile(dynamo_error_fn, backend="inductor")

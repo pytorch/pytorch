@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     parametrize,
     TEST_WITH_TORCHDYNAMO,
+    xfailIf,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
@@ -3517,7 +3518,9 @@ class TestRandomTensorCreation(TestCase):
                     torch.normal(input, std)
 
     # https://github.com/pytorch/pytorch/issues/126834
-    @xfailIfTorchDynamo
+    @xfailIf(
+        TEST_WITH_TORCHDYNAMO and not torch._dynamo.config.use_cpp_fake_tensor
+    )
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_from_to(self, device, dtype):
