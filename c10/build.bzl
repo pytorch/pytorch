@@ -11,7 +11,6 @@ def define_targets(rules, c10_name = "c10"):
             "//c10/macros",
             "//c10/mobile:CPUCachingAllocator",
             "//c10/mobile:CPUProfilingAllocator",
-            "//c10/util:TypeCast",
             "//c10/util:base",
             "//c10/util:typeid",
         ] + rules.if_cuda(
