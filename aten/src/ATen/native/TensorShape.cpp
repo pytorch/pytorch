@@ -1358,17 +1358,14 @@ static Tensor make_qtensor(
   return result;
 }
 
-static void copy_fake_tensor_metadata(
-    const Tensor& self,
-    TensorImpl* result_impl) {
+static void copy_fake_tensor_metadata(const Tensor& self, TensorImpl* result) {
   if (!self.is_fake()) {
     return;
   }
-  if (auto fake_device = self.unsafeGetTensorImpl()->fake_device()) {
-    result_impl->set_and_normalize_fake_device(*fake_device);
-  }
-  result_impl->set_fake_tensor_mode(
-      self.unsafeGetTensorImpl()->fake_tensor_mode());
+  auto fake_device = self.unsafeGetTensorImpl()->fake_device();
+  TORCH_INTERNAL_ASSERT(fake_device.has_value());
+  result->set_and_normalize_fake_device(*fake_device);
+  result->set_fake_tensor_mode(self.unsafeGetTensorImpl()->fake_tensor_mode());
 }
 
 Tensor as_strided_tensorimpl(
