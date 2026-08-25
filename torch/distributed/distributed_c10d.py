@@ -1470,7 +1470,7 @@ class GroupMember(metaclass=_WorldMeta):
 
 def _get_default_timeout(backend: str) -> timedelta:
     # see note on nccl vs other backend timeout (constants.py)
-    if backend == Backend.NCCL:
+    if backend in (Backend.NCCL, "nccl-legacy", "nccl2", "nccl-lazy"):
         if not isinstance(default_pg_nccl_timeout, timedelta):
             # TODO moco benchmark on CPU initializes pgnccl backend today, triggered this assert in CI before it was
             # changed to be a warning.  We should fix the moco model.

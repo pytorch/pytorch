@@ -447,6 +447,21 @@ test_python() {
   assert_git_not_dirty
 }
 
+test_cpuset_num_threads() {
+  # Regression test for https://github.com/pytorch/pytorch/issues/193859
+  # When the process is restricted to a single CPU via a cpuset/affinity mask,
+  # the default intraop thread count must respect that limit rather than the
+  # host's physical core count. Clear the *_NUM_THREADS env vars so the count
+  # is derived from the affinity mask instead of an explicit override.
+  if ! command -v taskset >/dev/null; then
+    echo "taskset not available, skipping cpuset num_threads test"
+    return
+  fi
+  env -u OMP_NUM_THREADS -u MKL_NUM_THREADS taskset -c 0 python -c \
+    'import torch; n = torch.get_num_threads(); print("num_threads =", n); assert n == 1, n'
+  assert_git_not_dirty
+}
+
 test_python_smoke() {
   # Smoke tests for H100/B200
   install_nvmath
@@ -2593,6 +2608,7 @@ elif [[ "${TEST_CONFIG}" == "tsan" ]]; then
 else
   install_torchvision
   install_monkeytype
+  test_cpuset_num_threads
   test_python
   test_aten
   test_vec256
