@@ -16069,7 +16069,7 @@ op_db: list[OpInfo] = [
                    'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
-                   'TestOperatorsDevice', 'test_vjpvmap', device_type='cuda'
+                   'TestOperatorsDevice', 'test_vjpvmap', device_type=('cuda', 'xpu')
                ),
                DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=9e-3, rtol=2e-1), }),
@@ -16235,7 +16235,11 @@ op_db: list[OpInfo] = [
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
-                   'TestOperatorsDevice', 'test_vjpvmap',
+                   'TestOperatorsDevice', 'test_vjpvmap', device_type=('cpu', 'cuda')
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-4, rtol=5e-5)}),
+                   'TestOperatorsDevice', 'test_vjpvmap', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
