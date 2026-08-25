@@ -447,18 +447,17 @@ class _Recorder(unittest.TestResult):
         self.skipped_reasons[self._key(test)] = reason
 
 
+_Def = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
 @functools.cache
-def _parsed(filename: str) -> dict[int, ast.AST]:
+def _parsed(filename: str) -> dict[int, ast.FunctionDef | ast.AsyncFunctionDef]:
     """{first line of a def: its node} for one source file, parsed once."""
     try:
         tree = ast.parse(Path(filename).read_text(encoding="utf-8"), filename=filename)
     except (OSError, SyntaxError):
         return {}
-    return {
-        n.lineno: n
-        for n in ast.walk(tree)
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
+    return {n.lineno: n for n in ast.walk(tree) if isinstance(n, _Def)}
 
 
 def _skip_names(node: ast.AST) -> tuple[set[str], set[str]]:
@@ -496,8 +495,10 @@ def _gate_names(cls: type, method: str, seen: set[str], depth: int = 0) -> set[s
     if depth > 5 or method in seen:
         return set()
     seen.add(method)
-    fn = inspect.unwrap(getattr(cls, method, None))
-    code = getattr(fn, "__code__", None)
+    attr = getattr(cls, method, None)
+    if attr is None:
+        return set()
+    code = getattr(inspect.unwrap(attr), "__code__", None)
     if code is None:
         return set()
     node = _parsed(code.co_filename).get(code.co_firstlineno)
