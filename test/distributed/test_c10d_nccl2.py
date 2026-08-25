@@ -1154,6 +1154,7 @@ class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
         self,
         extra: str = "",
         device_id: str = 'torch.device("cuda:0")',
+        child_env: dict[str, str] | None = None,
     ) -> None:
         try:
             subprocess.check_output(
@@ -1164,6 +1165,7 @@ class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
                 ],
                 stderr=subprocess.STDOUT,
                 cwd=os.path.dirname(os.path.realpath(__file__)),
+                env=child_env,
                 timeout=300,
             )
         except subprocess.TimeoutExpired:
@@ -1182,6 +1184,18 @@ class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
     @skip_if_lt_x_gpu(1)
     def test_eager_init_without_device_id(self) -> None:
         self._run_child(device_id="None")
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires at least 2 GPUs")
+    def test_eager_init_with_per_rank_visible_device(self) -> None:
+        child_env = os.environ.copy()
+        visible_devices = child_env.get("CUDA_VISIBLE_DEVICES")
+        child_env["CUDA_VISIBLE_DEVICES"] = (
+            visible_devices.split(",")[1].strip() if visible_devices else "1"
+        )
+        child_env["LOCAL_RANK"] = "1"
+        self._run_child(device_id="None", child_env=child_env)
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
