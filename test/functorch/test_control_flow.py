@@ -7188,6 +7188,29 @@ class GraphModule(torch.nn.Module):
         with self.assertRaises(BackendCompilerFailed):
             torch.compile(fn, fullgraph=True)(x)
 
+    @requires_cuda
+    def test_associative_scan_in_vmap_pointwise_compile_mixed_batched_pytree(self):
+        a = torch.randn(3, 5, 2, device="cuda")
+        b = torch.randn(5, 2, device="cuda")
+
+        def combine_fn(l, r):
+            return {"a": l["a"] + r["a"], "b": l["b"] + r["b"]}
+
+        def fn(a, b):
+            def inner_fn(ai):
+                return associative_scan(
+                    combine_fn, {"a": ai, "b": b}, dim=0, combine_mode="pointwise"
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(a)
+
+        exp_list = [
+            _fake_associative_scan(combine_fn, {"a": a[i], "b": b}, dim=0)
+            for i in range(a.shape[0])
+        ]
+        exp = {k: torch.stack([o[k] for o in exp_list]) for k in ("a", "b")}
+        self.assertEqual(torch.compile(fn)(a, b), exp)
+
     @parametrize("batch_size", [2, 3, 5])
     def test_associative_scan_in_vmap_eager_nonpointwise(self, batch_size):
         # Eager counterpart of the compile nonpointwise test: a dim-sensitive
