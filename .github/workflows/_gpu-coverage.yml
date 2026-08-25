@@ -1,0 +1,119 @@
+name: gpu-coverage
+
+# Fails when a PR adds a test that needs an H100/B200 but does not add it to the
+# corresponding smoke list in .ci/pytorch/test.sh, so the test would silently skip
+# wherever CI happens to run it.
+#
+# Needs a torch build because it measures which tests are enabled at a simulated
+# compute capability (see tools/testing/introspection) rather than pattern-matching
+# skip decorators. It reuses an existing build artifact, so it adds no build.
+#
+# Structure mirrors _test-diff.yml: a container job on an ARC runner, matching
+# _linux-test.yml's `test-osdc`. The classic EC2 pool is not provisioned in ARC mode,
+# so a plain `runs-on: linux.4xlarge` job would hang waiting for a runner.
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Build artifact / environment to reuse (e.g. linux-jammy-py3.10-gcc11).
+      docker-image:
+        required: true
+        type: string
+        description: Docker image to run in (the build's image).
+      runner_prefix:
+        required: false
+        type: string
+        default: ""
+      runner:
+        required: false
+        type: string
+        default: "l-x86iavx512-8-64"
+        description: ARC runner label (without prefix) to run on.
+      s3-bucket:
+        required: false
+        type: string
+        default: "gha-artifacts"
+
+jobs:
+  gpu-coverage:
+    if: github.repository_owner == 'pytorch' && github.event_name == 'pull_request'
+    runs-on: ${{ inputs.runner_prefix }}${{ inputs.runner }}
+    container:
+      image: ${{ inputs.docker-image }}
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - name: Setup Linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          use-arc: true
+          # merge-base against the base branch needs full history; a treeless clone
+          # would lazy-fetch per blob.
+          checkout-mode: normal
+          submodules: 'false'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure AWS credentials
+        id: aws-creds
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+          role-duration-seconds: 18000
+
+      - name: Collect changed files
+        id: changed
+        # Container jobs default to `sh`, which lacks the bash builtins used below.
+        shell: bash
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -ex
+          git config --global --add safe.directory '*'
+          # NOT --depth=1: a shallow fetch grafts the base tip as parentless, so
+          # merge-base fails and the check would silently pass having read nothing.
+          git fetch --no-tags origin "$BASE_REF"
+          base=$(git merge-base HEAD "origin/$BASE_REF")
+          git diff --name-only "$base" HEAD > all_changed.txt
+          # test.sh is in scope too: editing it can drop coverage with no test file
+          # touched.
+          { grep -cE '^(test/(.*/)?test_[^/]*\.py|\.ci/pytorch/test\.sh)$' \
+              all_changed.txt || true; } > count.txt
+          echo "count=$(cat count.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Download build artifacts
+        if: steps.changed.outputs.count != '0'
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
+        with:
+          name: ${{ inputs.build-environment }}
+          s3-bucket: ${{ inputs.s3-bucket }}
+          use-gha: ${{ steps.aws-creds.outcome != 'success' }}
+
+      - name: Check GPU smoke-list coverage
+        if: steps.changed.outputs.count != '0'
+        shell: bash
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          TESTINTRO_CACHE: ${{ runner.temp }}/testintro-cache
+        run: |
+          set -ex
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          # A pruned or failed build leaves no wheel. Exiting 0 here would report a
+          # green check having measured nothing.
+          if [ ${#wheels[@]} -eq 0 ]; then
+            echo "::error::no build artifact in $(pwd)/dist; gpu-coverage measured nothing"
+            ls -la . dist 2>&1 || true
+            exit 1
+          fi
+          # gpu_coverage imports no torch itself; the wheel is imported only by
+          # collector worker subprocesses, which are launched by path.
+          pip install "${wheels[0]}[opt-einsum]"
+          python tools/testing/gpu_coverage.py --changed
