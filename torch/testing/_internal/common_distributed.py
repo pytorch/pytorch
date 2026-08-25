@@ -1297,18 +1297,13 @@ class DistributedTestBase(MultiProcessTestCase):
         else:
             return "gloo"
 
-    def create_pg(self, device, world_size=None):
+    def create_pg(self, device, world_size=None, backend=None):
         if world_size is None:
             world_size = self.world_size
+        backend = backend or self.backend(device)
         num_visible_devices = torch.get_device_module(device).device_count()
         store = torch.distributed.FileStore(self.file_name, num_visible_devices)
-        torch.distributed.init_process_group(
-            backend=self.backend(device),
-            world_size=world_size,
-            rank=self.rank,
-            store=store,
-        )
-        if "nccl" in self.backend(device) or "xccl" in self.backend(device):
+        if "nccl" in backend or "xccl" in backend:
             accelerator = torch.accelerator.current_accelerator()
             if accelerator:
                 device_type = accelerator.type
@@ -1317,9 +1312,15 @@ class DistributedTestBase(MultiProcessTestCase):
                 torch.accelerator.set_device_index(device)
             else:
                 raise RuntimeError(
-                    f"Expected to find an accelerator when initializing process group"
-                    f" with {self.backend(device)} backend, but got None"
+                    "Expected to find an accelerator when initializing process group"
+                    f" with {backend} backend, but got None"
                 )
+        torch.distributed.init_process_group(
+            backend=backend,
+            world_size=world_size,
+            rank=self.rank,
+            store=store,
+        )
         return torch.distributed.distributed_c10d._get_default_group()
 
     def rank_to_device(self, device):
