@@ -3047,6 +3047,7 @@ class GraphLowering(torch.fx.Interpreter):
                 "Finished codegen for all nodes. The list of kernel names available: %s",
                 V.graph.all_codegen_kernel_names,
             )
+            print(f"[fqn_debug] graph.py: fx_fqn_map size={len(self.fx_fqn_map)}, sample={list(self.fx_fqn_map.items())[:3]}")
 
             result = self.wrapper_code.generate(self.is_inference)
             self.wrapper_code.pop_codegened_graph()
