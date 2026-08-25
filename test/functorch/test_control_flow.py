@@ -5088,14 +5088,6 @@ class AssociativeScanModels:
             return results
 
 
-# Skip a @parametrize("device", ...) case when device is cuda but no GPU is present.
-_skip_cuda_if_unavailable = decorateIf(
-    unittest.skip("Test requires CUDA."),
-    lambda params: params["device"] == torch.device("cuda")
-    and not torch.cuda.is_available(),
-)
-
-
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class AssociativeScanTests(TestCase):
@@ -6876,10 +6868,9 @@ class GraphModule(torch.nn.Module):
             associative_scan(fct_output_output_alias, inp, 0)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_simple(self, combine_mode, device):
-        x = torch.randn(3, 4, 2, device=device)
+    @requires_cuda
+    def test_associative_scan_in_vmap_simple(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
 
         def combine_fn(a, b):
             return a + b
@@ -6902,9 +6893,8 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_autograd(self, combine_mode, device):
+    @requires_cuda
+    def test_associative_scan_in_vmap_autograd(self, combine_mode):
         # The stack's motivation is an efficient backward, so exercise autograd
         # through vmap(associative_scan(...)): compare grads against the fake
         # reference and run a full gradcheck in double precision.
@@ -6919,7 +6909,7 @@ class GraphModule(torch.nn.Module):
 
             return torch.vmap(inner_fn, in_dims=0)(x)
 
-        x = torch.randn(3, 4, 2, device=device, requires_grad=True)
+        x = torch.randn(3, 4, 2, device="cuda", requires_grad=True)
         (grad,) = torch.autograd.grad(fn(x).sum(), x)
         x_ref = x.detach().clone().requires_grad_(True)
         exp = torch.stack(
@@ -6931,16 +6921,15 @@ class GraphModule(torch.nn.Module):
         (grad_exp,) = torch.autograd.grad(exp.sum(), x_ref)
         self.assertEqual(grad, grad_exp)
 
-        xd = torch.randn(2, 3, 2, dtype=torch.double, device=device, requires_grad=True)
+        xd = torch.randn(2, 3, 2, dtype=torch.double, device="cuda", requires_grad=True)
         self.assertTrue(torch.autograd.gradcheck(fn, (xd,)))
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_pytree(self, combine_mode, device):
+    @requires_cuda
+    def test_associative_scan_in_vmap_pytree(self, combine_mode):
         xs = {
-            "a": torch.randn(3, 5, 2, device=device),
-            "b": torch.randn(3, 5, 2, device=device),
+            "a": torch.randn(3, 5, 2, device="cuda"),
+            "b": torch.randn(3, 5, 2, device="cuda"),
         }
 
         def combine_fn(l, r):
@@ -6973,10 +6962,9 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(torch.compile(fn)(xs["a"], xs["b"]), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_reverse(self, combine_mode, device):
-        x = torch.randn(3, 4, 2, device=device)
+    @requires_cuda
+    def test_associative_scan_in_vmap_reverse(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
 
         def combine_fn(a, b):
             return a * b
@@ -7001,10 +6989,9 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_nested(self, combine_mode, device):
-        x = torch.randn(2, 3, 4, 2, device=device)
+    @requires_cuda
+    def test_associative_scan_in_vmap_nested(self, combine_mode):
+        x = torch.randn(2, 3, 4, 2, device="cuda")
 
         def combine_fn(a, b):
             return a + b
@@ -7034,11 +7021,10 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_additional_inputs(self, combine_mode, device):
-        x = torch.randn(3, 4, 2, device=device)
-        h = torch.randn(3, 2, device=device)
+    @requires_cuda
+    def test_associative_scan_in_vmap_additional_inputs(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
+        h = torch.randn(3, 2, device="cuda")
 
         def fn(x, h):
             def inner_fn(xi, hi):
@@ -7063,10 +7049,9 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(torch.compile(fn)(x, h), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_scan_length_one(self, combine_mode, device):
-        x = torch.randn(3, 1, 2, device=device)
+    @requires_cuda
+    def test_associative_scan_in_vmap_scan_length_one(self, combine_mode):
+        x = torch.randn(3, 1, 2, device="cuda")
 
         def combine_fn(a, b):
             return a + b
@@ -7242,10 +7227,9 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(fn(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_nonzero_in_dims(self, combine_mode, device):
-        x = torch.randn(4, 3, 2, device=device)
+    @requires_cuda
+    def test_associative_scan_in_vmap_nonzero_in_dims(self, combine_mode):
+        x = torch.randn(4, 3, 2, device="cuda")
 
         def combine_fn(a, b):
             return a + b
@@ -7270,10 +7254,9 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_nonzero_out_dims(self, combine_mode, device):
-        x = torch.randn(3, 4, 2, device=device)
+    @requires_cuda
+    def test_associative_scan_in_vmap_nonzero_out_dims(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
 
         def combine_fn(a, b):
             return a + b
@@ -7299,13 +7282,10 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_unbatched_additional_inputs(
-        self, combine_mode, device
-    ):
-        x = torch.randn(3, 4, 2, device=device)
-        h = torch.randn(2, device=device)
+    @requires_cuda
+    def test_associative_scan_in_vmap_unbatched_additional_inputs(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
+        h = torch.randn(2, device="cuda")
 
         def fn(x, h):
             def inner_fn(xi, hi):
@@ -7330,13 +7310,12 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(torch.compile(fn)(x, h), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_nonzero_scan_dim(self, combine_mode, device):
+    @requires_cuda
+    def test_associative_scan_in_vmap_nonzero_scan_dim(self, combine_mode):
         # The frontend moves the scan dim to 0 (associative_scan.py movedim),
         # while the batch rule parks the batch dim on the last axis; exercise the
         # interaction with a scan dim that is neither 0 nor the batched axis.
-        x = torch.randn(3, 4, 5, device=device)
+        x = torch.randn(3, 4, 5, device="cuda")
 
         def combine_fn(a, b):
             return a + b
@@ -7359,12 +7338,11 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(torch.compile(fn)(x), exp)
 
     @parametrize("combine_mode", ["generic", "pointwise"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @_skip_cuda_if_unavailable
-    def test_associative_scan_in_vmap_zero_length_scan_dim(self, combine_mode, device):
+    @requires_cuda
+    def test_associative_scan_in_vmap_zero_length_scan_dim(self, combine_mode):
         # Size-0 scan dim under vmap: the frontend short-circuits (see the size-0
         # note in associative_scan) and each batch element returns its input.
-        x = torch.randn(3, 0, 2, device=device)
+        x = torch.randn(3, 0, 2, device="cuda")
 
         def combine_fn(a, b):
             return a + b
