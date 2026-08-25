@@ -76,16 +76,12 @@ inline void check_grid_sampler_3d(
   const TensorBase& grid,
   int64_t interpolation_mode
 ) {
+  (void)interpolation_mode;
   TORCH_CHECK(
     input.dim() == 5 && input.dim() == grid.dim(),
     "grid_sampler(): expected 5D input and grid with same number of "
     "dimensions, but got input with sizes ", input.sizes(),
     " and grid with sizes ", grid.sizes());
-  TORCH_CHECK(
-    !(input.dim() == 5 &&
-      static_cast<GridSamplerInterpolation>(interpolation_mode) ==
-        GridSamplerInterpolation::Bicubic),
-    "grid_sampler(): bicubic interpolation only supports 4D input");
 }
 
 // See NOTE [ grid_sampler Native Functions ].

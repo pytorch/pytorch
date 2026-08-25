@@ -274,6 +274,60 @@ static inline void add_value_bounded(
   safe_add_2d(data, iy, ix, sH, sW, H, W, delta);
 }
 
+template<typename scalar_t>
+static inline scalar_t get_value_bounded_3d(
+    const scalar_t* data,
+    scalar_t x,
+    scalar_t y,
+    scalar_t z,
+    int64_t W,
+    int64_t H,
+    int64_t D,
+    int64_t sW,
+    int64_t sH,
+    int64_t sD,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+  x = compute_coordinates(x, W, padding_mode, align_corners);
+  y = compute_coordinates(y, H, padding_mode, align_corners);
+  z = compute_coordinates(z, D, padding_mode, align_corners);
+
+  int64_t ix = static_cast<int64_t>(x);
+  int64_t iy = static_cast<int64_t>(y);
+  int64_t iz = static_cast<int64_t>(z);
+
+  if (within_bounds_3d(iz, iy, ix, D, H, W)) {
+    return data[iz * sD + iy * sH + ix * sW];
+  }
+  return static_cast<scalar_t>(0);
+}
+
+template<typename scalar_t>
+static inline void add_value_bounded_3d(
+    scalar_t* data,
+    scalar_t x,
+    scalar_t y,
+    scalar_t z,
+    int64_t W,
+    int64_t H,
+    int64_t D,
+    int64_t sW,
+    int64_t sH,
+    int64_t sD,
+    scalar_t delta,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+  x = compute_coordinates(x, W, padding_mode, align_corners);
+  y = compute_coordinates(y, H, padding_mode, align_corners);
+  z = compute_coordinates(z, D, padding_mode, align_corners);
+
+  int64_t ix = static_cast<int64_t>(x);
+  int64_t iy = static_cast<int64_t>(y);
+  int64_t iz = static_cast<int64_t>(z);
+
+  safe_add_3d(data, iz, iy, ix, sD, sH, sW, D, H, W, delta);
+}
+
 // Calculate the differential of the cubic convolution, i.e. `d coeff / d x`
 template<typename scalar_t>
 static inline void get_cubic_coefficients_grad(

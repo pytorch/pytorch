@@ -295,6 +295,64 @@ void add_value_bounded(
   safe_add_2d(data, iy, ix, sH, sW, H, W, delta, NC_offset, memory_span);
 }
 
+template<typename scalar_t>
+__forceinline__ __device__
+scalar_t get_value_bounded_3d(
+    const scalar_t* data,
+    scalar_t x,
+    scalar_t y,
+    scalar_t z,
+    int W,
+    int H,
+    int D,
+    int sW,
+    int sH,
+    int sD,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+  x = compute_coordinates(x, W, padding_mode, align_corners);
+  y = compute_coordinates(y, H, padding_mode, align_corners);
+  z = compute_coordinates(z, D, padding_mode, align_corners);
+
+  int ix = static_cast<int>(x);
+  int iy = static_cast<int>(y);
+  int iz = static_cast<int>(z);
+
+  if (within_bounds_3d(iz, iy, ix, D, H, W)) {
+    return data[iz * sD + iy * sH + ix * sW];
+  }
+  return static_cast<scalar_t>(0);
+}
+
+template<typename scalar_t, typename index_t>
+__forceinline__ __device__
+void add_value_bounded_3d(
+    scalar_t* data,
+    scalar_t x,
+    scalar_t y,
+    scalar_t z,
+    int W,
+    int H,
+    int D,
+    int sW,
+    int sH,
+    int sD,
+    scalar_t delta,
+    GridSamplerPadding padding_mode,
+    bool align_corners,
+    const index_t NC_offset,
+    const index_t memory_span) {
+  x = compute_coordinates(x, W, padding_mode, align_corners);
+  y = compute_coordinates(y, H, padding_mode, align_corners);
+  z = compute_coordinates(z, D, padding_mode, align_corners);
+
+  int ix = static_cast<int>(x);
+  int iy = static_cast<int>(y);
+  int iz = static_cast<int>(z);
+
+  safe_add_3d(data, iz, iy, ix, sD, sH, sW, D, H, W, delta, NC_offset, memory_span);
+}
+
 // Calculate the differential of the cubic convolution, i.e. `d coeff / d x`
 template<typename scalar_t>
 __forceinline__ __device__

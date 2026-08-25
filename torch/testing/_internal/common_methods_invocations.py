@@ -8795,8 +8795,12 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
     padding_modes = ("zeros", "border", "reflection")
 
     for dim in (2, 3):
-
-        modes_ = (*modes, "bicubic") if dim == 2 else modes
+        device_type = torch.device(device).type
+        # grid_sampler_3d double backward is only implemented for bilinear.
+        # Keep 3D bicubic in forward/reference-style coverage, but avoid
+        # autograd/functorch paths that require grad-of-grad.
+        supports_3d_bicubic = device_type != "mps" and not requires_grad
+        modes_ = (*modes, "bicubic") if dim == 2 or (dim == 3 and supports_3d_bicubic) else modes
 
         for mode, padding_mode, align_corners in itertools.product(modes_, padding_modes, align_cornerss):
             yield SampleInput(
@@ -8806,6 +8810,19 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
                 padding_mode=padding_mode,
                 align_corners=align_corners,
             )
+
+
+def error_inputs_grid_sample(op_info, device, **kwargs):
+    if torch.device(device).type == "mps":
+        make_arg = partial(make_tensor, dtype=torch.float32, device=device)
+        yield ErrorInput(
+            SampleInput(
+                make_arg((1, 1, 2, 2, 2)),
+                make_arg((1, 1, 1, 1, 3)),
+                mode="bicubic",
+            ),
+            error_regex="Unsupported Bicubic interpolation",
+        )
 
 def reference_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
 
@@ -8874,7 +8891,8 @@ def sample_inputs_grid_sampler_3d(op_info, device, dtype, requires_grad, **kwarg
     _make_grid = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad,
                          low=-4, high=4)
 
-    modes = (0,)
+    supports_3d_bicubic = torch.device(device).type != "mps"
+    modes = (0, 2) if supports_3d_bicubic else (0,)
     padding_modes = (0, 1, 2)
     align_cornerss = (False, True)
     shape_pairs = [
@@ -21955,6 +21973,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sample,
+        error_inputs_func=error_inputs_grid_sample,
         reference_inputs_func=reference_inputs_grid_sample,
         supports_gradgrad=True,
         gradcheck_nondet_tol=1e-15),

@@ -5571,7 +5571,7 @@ def grid_sample(
                        or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
         mode (str): interpolation mode to calculate output values
             ``'bilinear'`` | ``'nearest'`` | ``'bicubic'``. Default: ``'bilinear'``
-            Note: ``mode='bicubic'`` supports only 4-D input.
+            Note: ``mode='bicubic'`` supports both 4-D and 5-D input.
             When ``mode='bilinear'`` and the input is 5-D, the interpolation mode
             used internally will actually be trilinear. However, when the input is 4-D,
             the interpolation mode will legitimately be bilinear.

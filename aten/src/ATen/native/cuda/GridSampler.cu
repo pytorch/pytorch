@@ -297,6 +297,47 @@ namespace {
             *out_ptr_NCDHW = static_cast<scalar_t>(0);
           }
         }
+      } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
+        ix = grid_sampler_unnormalize(x, inp_W, align_corners);
+        iy = grid_sampler_unnormalize(y, inp_H, align_corners);
+        iz = grid_sampler_unnormalize(z, inp_D, align_corners);
+
+        opmath_t ix_nw = std::floor(ix);
+        opmath_t iy_nw = std::floor(iy);
+        opmath_t iz_nw = std::floor(iz);
+
+        const opmath_t tx = ix - ix_nw;
+        const opmath_t ty = iy - iy_nw;
+        const opmath_t tz = iz - iz_nw;
+
+        opmath_t x_coeffs[4];
+        opmath_t y_coeffs[4];
+        opmath_t z_coeffs[4];
+        get_cubic_upsampling_coefficients<opmath_t>(x_coeffs, tx);
+        get_cubic_upsampling_coefficients<opmath_t>(y_coeffs, ty);
+        get_cubic_upsampling_coefficients<opmath_t>(z_coeffs, tz);
+
+        auto inp_ptr_NC = input.data + n * inp_sN;
+        auto out_ptr_NCDHW = output.data + n * out_sN + d * out_sD + h * out_sH + w * out_sW;
+        for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCDHW += out_sC) {
+          opmath_t coefficients_z[4];
+
+          #pragma unroll 4
+          for (index_t k = 0; k < 4; ++k) {
+            opmath_t coefficients_y[4];
+            #pragma unroll 4
+            for (index_t j = 0; j < 4; ++j) {
+              coefficients_y[j] =
+                  x_coeffs[0] * get_value_bounded_3d<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + j, iz_nw - 1 + k, inp_W, inp_H, inp_D, inp_sW, inp_sH, inp_sD, padding_mode, align_corners) +
+                  x_coeffs[1] * get_value_bounded_3d<scalar_t>(inp_ptr_NC, ix_nw + 0, iy_nw - 1 + j, iz_nw - 1 + k, inp_W, inp_H, inp_D, inp_sW, inp_sH, inp_sD, padding_mode, align_corners) +
+                  x_coeffs[2] * get_value_bounded_3d<scalar_t>(inp_ptr_NC, ix_nw + 1, iy_nw - 1 + j, iz_nw - 1 + k, inp_W, inp_H, inp_D, inp_sW, inp_sH, inp_sD, padding_mode, align_corners) +
+                  x_coeffs[3] * get_value_bounded_3d<scalar_t>(inp_ptr_NC, ix_nw + 2, iy_nw - 1 + j, iz_nw - 1 + k, inp_W, inp_H, inp_D, inp_sW, inp_sH, inp_sD, padding_mode, align_corners);
+            }
+            coefficients_z[k] = cubic_interp1d(coefficients_y[0], coefficients_y[1], coefficients_y[2], coefficients_y[3], ty);
+          }
+
+          *out_ptr_NCDHW = cubic_interp1d(coefficients_z[0], coefficients_z[1], coefficients_z[2], coefficients_z[3], tz);
+        }
       }
     }
   }
@@ -742,6 +783,94 @@ namespace {
         gGrid_ptr_NDHW[0] = static_cast<scalar_t>(0);
         gGrid_ptr_NDHW[1] = static_cast<scalar_t>(0);
         gGrid_ptr_NDHW[2] = static_cast<scalar_t>(0);
+      } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
+        ix = grid_sampler_unnormalize_set_grad(grid.data[grid_offset], inp_W, align_corners, &gix_mult);
+        iy = grid_sampler_unnormalize_set_grad(grid.data[grid_offset + grid_sCoor], inp_H, align_corners, &giy_mult);
+        iz = grid_sampler_unnormalize_set_grad(grid.data[grid_offset + 2 * grid_sCoor], inp_D, align_corners, &giz_mult);
+
+        scalar_t ix_nw = std::floor(ix);
+        scalar_t iy_nw = std::floor(iy);
+        scalar_t iz_nw = std::floor(iz);
+
+        const scalar_t tx = ix - ix_nw;
+        const scalar_t ty = iy - iy_nw;
+        const scalar_t tz = iz - iz_nw;
+
+        scalar_t x_coeffs[4];
+        scalar_t y_coeffs[4];
+        scalar_t z_coeffs[4];
+        scalar_t x_coeffs_grad[4];
+        scalar_t y_coeffs_grad[4];
+        scalar_t z_coeffs_grad[4];
+
+        get_cubic_upsampling_coefficients<scalar_t>(x_coeffs, tx);
+        get_cubic_upsampling_coefficients<scalar_t>(y_coeffs, ty);
+        get_cubic_upsampling_coefficients<scalar_t>(z_coeffs, tz);
+        get_cubic_coefficients_grad<scalar_t>(x_coeffs_grad, tx);
+        get_cubic_coefficients_grad<scalar_t>(y_coeffs_grad, ty);
+        get_cubic_coefficients_grad<scalar_t>(z_coeffs_grad, tz);
+
+        scalar_t gix = static_cast<scalar_t>(0);
+        scalar_t giy = static_cast<scalar_t>(0);
+        scalar_t giz = static_cast<scalar_t>(0);
+
+        const scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
+        index_t NC_offset = n * gInp_sN;
+        const scalar_t *inp_ptr_NC = input.data + n * inp_sN;
+        for (index_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, NC_offset += gInp_sC, inp_ptr_NC += inp_sC) {
+          const scalar_t gOut = *gOut_ptr_NCDHW;
+
+          #pragma unroll 4
+          for (index_t k = 0; k < 4; ++k) {
+            #pragma unroll 4
+            for (index_t j = 0; j < 4; ++j) {
+              #pragma unroll 4
+              for (index_t i = 0; i < 4; ++i) {
+                if (input_requires_grad) {
+                  add_value_bounded_3d<scalar_t>(
+                      grad_input.data,
+                      ix_nw - 1 + i,
+                      iy_nw - 1 + j,
+                      iz_nw - 1 + k,
+                      inp_W,
+                      inp_H,
+                      inp_D,
+                      gInp_sW,
+                      gInp_sH,
+                      gInp_sD,
+                      gOut * x_coeffs[i] * y_coeffs[j] * z_coeffs[k],
+                      padding_mode,
+                      align_corners,
+                      NC_offset,
+                      grad_input_memory_span);
+                }
+
+                scalar_t val = get_value_bounded_3d<scalar_t>(
+                    inp_ptr_NC,
+                    ix_nw - 1 + i,
+                    iy_nw - 1 + j,
+                    iz_nw - 1 + k,
+                    inp_W,
+                    inp_H,
+                    inp_D,
+                    inp_sW,
+                    inp_sH,
+                    inp_sD,
+                    padding_mode,
+                    align_corners);
+
+                gix -= val * x_coeffs_grad[i] * y_coeffs[j] * z_coeffs[k] * gOut;
+                giy -= val * y_coeffs_grad[j] * x_coeffs[i] * z_coeffs[k] * gOut;
+                giz -= val * z_coeffs_grad[k] * x_coeffs[i] * y_coeffs[j] * gOut;
+              }
+            }
+          }
+        }
+
+        scalar_t *gGrid_ptr_NDHW = grad_grid.data + index * gGrid_sW;
+        gGrid_ptr_NDHW[0] = gix_mult * gix;
+        gGrid_ptr_NDHW[1] = giy_mult * giy;
+        gGrid_ptr_NDHW[2] = giz_mult * giz;
       }
     }
   }
