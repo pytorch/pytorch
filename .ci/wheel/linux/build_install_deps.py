@@ -16,41 +16,8 @@ import time
 from pathlib import Path
 
 
-# NumPy build-time pin selected by Python version. Checked high-to-low; the
-# first entry whose (major, minor) floor is satisfied wins. A plain string
-# prefix ("cp31") would wrongly capture cp315, so match on the version tuple.
-# Keep in sync with .ci/manywheel/build_common.sh.
-NUMPY_PINS: list[tuple[tuple[int, int], str]] = [
-    ((3, 15), "2.5.1"),
-    ((3, 14), "2.3.4"),
-    ((3, 10), "2.1.0"),
-]
-DEFAULT_NUMPY = "2.0.2"
-
-
-def retry(cmd: list[str], delays: tuple[int, ...] = (1, 2, 4, 8)) -> None:
-    """Run cmd, retrying with backoff on failure (mirrors the shell retry helper)."""
-    last_rc = 0
-    for delay in (0, *delays):
-        if delay:
-            time.sleep(delay)
-        result = subprocess.run(cmd)
-        if result.returncode == 0:
-            return
-        last_rc = result.returncode
-    sys.exit(last_rc)
-
-
-def pip_install(*args: str) -> None:
-    retry([sys.executable, "-m", "pip", "install", *args])
-
-
-def numpy_pin() -> str:
-    version = sys.version_info[:2]
-    for floor, pin in NUMPY_PINS:
-        if version >= floor:
-            return pin
-    return DEFAULT_NUMPY
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # .ci/wheel
+from _common import install_numpy, pip_install
 
 
 def is_rocm_py315() -> bool:
@@ -115,7 +82,7 @@ def main() -> None:
     if not os.environ.get("SKIP_SETUP_CLEAN"):
         subprocess.run([sys.executable, "-m", "spin", "clean"], check=True)
     pip_install("-q", "-r", "requirements.txt")
-    pip_install("-q", "--pre", f"numpy=={numpy_pin()}")
+    install_numpy()
     # auditwheel repacks the manywheel with a valid ZIP64 record for >4GB ROCm
     # wheels (pypa/wheel#692); imported by repair_wheel.py. CD-only, so it is
     # installed here rather than in requirements.txt, and pinned for
