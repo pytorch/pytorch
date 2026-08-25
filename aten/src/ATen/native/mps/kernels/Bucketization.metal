@@ -98,8 +98,10 @@ kernel void searchsorted_sorter(
     constant int64_t* data_sort [[buffer(8)]],
     uint2 tgid [[threadgroup_position_in_grid]],
     uint2 tid2 [[thread_position_in_threadgroup]],
-    uint2 tptg [[threads_per_threadgroup]]) {
-  for (int64_t tid = tgid.x * tptg.x + tid2.x; tid < numel_in; tid += tptg.x) {
+    uint2 tptg [[threads_per_threadgroup]],
+    uint2 tgpg [[threadgroups_per_grid]]) {
+  for (int64_t tid = tgid.x * tptg.x + tid2.x; tid < numel_in;
+       tid += tptg.x * tgpg.x) {
     // If boundaries tensor is 1d, we always search the entire boundary tensor
     int64_t start_bd = is_1d_boundaries ? 0 : tid / idim_in * idim_bd;
     int64_t end_bd = start_bd + idim_bd;
@@ -129,8 +131,10 @@ kernel void searchsorted(
     constant int64_t& is_1d_boundaries [[buffer(7)]],
     uint2 tgid [[threadgroup_position_in_grid]],
     uint2 tid2 [[thread_position_in_threadgroup]],
-    uint2 tptg [[threads_per_threadgroup]]) {
-  for (int64_t tid = tgid.x * tptg.x + tid2.x; tid < numel_in; tid += tptg.x) {
+    uint2 tptg [[threads_per_threadgroup]],
+    uint2 tgpg [[threadgroups_per_grid]]) {
+  for (int64_t tid = tgid.x * tptg.x + tid2.x; tid < numel_in;
+       tid += tptg.x * tgpg.x) {
     // If boundaries tensor is 1d, we always search the entire boundary tensor
     int64_t start_bd = is_1d_boundaries ? 0 : tid / idim_in * idim_bd;
     int64_t end_bd = start_bd + idim_bd;
@@ -161,7 +165,8 @@ kernel void searchsorted(
       constant int64_t* data_sort [[buffer(8)]],                             \
       uint2 tgid [[threadgroup_position_in_grid]],                           \
       uint2 tid2 [[thread_position_in_threadgroup]],                         \
-      uint2 tptg [[threads_per_threadgroup]]);                               \
+      uint2 tptg [[threads_per_threadgroup]],                                \
+      uint2 tgpg [[threadgroups_per_grid]]);                                 \
   template [[host_name("searchsorted_" #INPUT_T "_" #OUTPUT_T)]] kernel void \
   searchsorted<INPUT_T, OUTPUT_T>(                                           \
       constant INPUT_T * data_in [[buffer(0)]],                              \
@@ -174,7 +179,8 @@ kernel void searchsorted(
       constant int64_t& is_1d_boundaries [[buffer(7)]],                      \
       uint2 tgid [[threadgroup_position_in_grid]],                           \
       uint2 tid2 [[thread_position_in_threadgroup]],                         \
-      uint2 tptg [[threads_per_threadgroup]]);
+      uint2 tptg [[threads_per_threadgroup]],                                \
+      uint2 tgpg [[threadgroups_per_grid]]);
 
 REGISTER_SEARCHSORTED_OP(float, int);
 REGISTER_SEARCHSORTED_OP(float, long);

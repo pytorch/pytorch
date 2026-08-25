@@ -55,6 +55,16 @@ treat_parameters_as_free_to_save = True
 # Applies CSE to the graph before partitioning
 cse = True
 
+# When the partitioner's _size_of encounters a (Fake)ScriptObject in node
+# metadata, it has no general way to know the object's true memory footprint:
+# a ScriptObject may hold tensors internally. By default we raise rather than
+# guess. Enabling this flag makes _size_of assume such objects are zero size,
+# which unblocks dynamic-shapes compilation of models containing ScriptObject
+# parameters (e.g. embedding-table configs from FBGEMM) at the cost of
+# soundness. This is a temporary escape hatch until we have a principled way to
+# probe the size of a (Fake)ScriptObject.
+unsafe_treat_script_objects_as_zero_size = False
+
 from torch._environment import is_fbcode
 
 
@@ -94,9 +104,12 @@ autograd_cache_normalize_inputs = not is_fbcode()
 #
 # Deprecated: Custom ops returning aliased outputs is deprecated and will
 # become an error in a future version of PyTorch. Currently error_on_custom_op_aliasing
-# is True only in CI.
+# is True in CI unless explicitly overridden.
 check_custom_op_aliasing = True
-error_on_custom_op_aliasing = bool(os.getenv("CI"))
+error_on_custom_op_aliasing: bool = Config(
+    env_name_force="TORCHINDUCTOR_ERROR_ON_CUSTOM_OP_ALIASING",
+    default=bool(os.getenv("CI")),
+)
 
 
 def remote_autograd_cache_default() -> bool | None:
@@ -201,7 +214,7 @@ activation_memory_budget_runtime_estimator = "flops"
 # used memory-efficient quantized DP solution
 activation_memory_budget_solver = "dp"
 
-# This dumps out a SVG visualization of the expected runtime vs. activation
+# This dumps out an SVG visualization of the expected runtime vs. activation
 # memory tradeoffs for all memory budget values from 0 to 1 in increments of
 # 0.5. See an example here:
 # https://github.com/pytorch/pytorch/pull/126320#discussion_r1625104015
@@ -355,7 +368,6 @@ generate_fake_kernels_from_real_mismatches = False
 fake_tensor_prefer_device_type: str | None = None
 
 # CUDAGraph safe run_with_rng functionalization.
-# TODO: turn on by default
 graphsafe_rng_functionalization = True
 
 # Whether or not to eagerly compile the backward
@@ -409,7 +421,25 @@ guess_tangent_strides_as_outputs = not is_fbcode()
 
 # This is a temporary config to ensure all ranks take the same decision in the partitioner
 # it will ultimately be removed once we share size_hints across ranks through compiler collectives
+# Only the ranks that actually compile reach the partitioner, so with AOTAutogradCache on
+# this needs _sync_cache_decision_cross_ranks below to keep hits unanimous. Without it a
+# partial cache hit hangs the ranks that missed, as it did before that config existed.
 _sync_decision_cross_ranks = False
+
+# Compilation itself issues collectives, for example, when _sync_decision_cross_ranks is
+# set, those collectives only run on the ranks that actually compile, so a cache hit on
+# one rank and a miss on another desyncs the process group and hangs. This config makes
+# the outcome uniform: after every rank has consulted AOTAutogradCache, the hits are discarded
+# unless *all* ranks hit.
+# Synchronizing the outcome rather than the cache key is deliberate. A key only covers
+# whether an entry exists; a rank can find its entry and still miss because the entry's
+# dynamic shape guards do not hold for that rank's hints (`guard_miss`).
+# Precondition: every rank has to reach AOTAutogradCache.try_load for the same compiles,
+# since that is where the collective is issued. try_load runs only for a
+# SerializableAOTDispatchCompiler backend with local or remote caching on, so a rank that
+# differs on enable_autograd_cache, force_disable_caches, or the remote cache JustKnob
+# never joins the all_reduce and hangs the ranks that did.
+_sync_cache_decision_cross_ranks = False
 
 # By default apply inlined saved_tensors_hooks only for "donated" buffers.
 # "donated" buffers are invisible to the user, they are intermediates of the forward graph.
@@ -435,6 +465,13 @@ force_autograd_cache = False
 # annotated with regional inductor compile. Please read torch.fx.passes.regional_inductor
 # on to explicitly annotate. This is currently only used by inductor lite mode.
 selective_decompose: bool = False
+
+# Complex Support
+# This config disallows decomposition of complex-valued Tensors using
+# `torch._subclasses.complex_tensor.ComplexTensor` by decomposing everything into
+# real-valued operations, passing through the regular pipeline as necessary,
+# then converting back to a regular tensor.
+enable_complex_wrapper: bool = False
 
 
 if TYPE_CHECKING:
