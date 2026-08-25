@@ -635,11 +635,12 @@ multi_kernel_hints: list[int] = []
 
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CUTEDSL, NVGEMM, CK, CKTILE, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CUTEDSL, FLYDSL, NVGEMM, CK, CKTILE, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
+# FLYDSL: FlyDSL templates for ROCm GPUs (experimental).
 # NVGEMM: NVIDIA Universal GEMM via cutlass.operators (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
@@ -761,6 +762,8 @@ use_post_grad_passes: bool = True
 cutedsl_enable_autotuning: bool = (
     os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
 )
+
+flydsl_enable_autotuning: bool = os.environ.get("FLYDSL_ENABLE_AUTOTUNING", "0") == "1"
 
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
@@ -2710,6 +2713,12 @@ class cuda(cutlass):
 
     # Whether to keep intermediate files dring compilation.
     enable_ptxas_info = False
+
+    # When True, inductor autotune pushes a per-op dynamic-dims mask for
+    # symbolic GEMM dims so TunableOp persists wildcard kernel-map entries that
+    # runtime concrete-miss lookups can reuse. False stops producing new
+    # wildcard entries; existing rows in a loaded file still satisfy lookups.
+    autotune_tunableop_dynamic_dims_wildcard: bool = False
 
 
 @inherit_fields_from(cutlass)
