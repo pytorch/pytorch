@@ -144,6 +144,7 @@
 /aten/src/ATen/native/Foreach* @janeyx99
 /aten/src/ATen/native/Fused* @janeyx99
 # /test/test_functional_optim.py
+/torch/foreach/ @janeyx99
 /torch/optim/ @albanD @janeyx99
 #
 # [core_aten_runtime]
