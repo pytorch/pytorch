@@ -2134,11 +2134,14 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
     )
     if scaled_mm is None:
         return False
+    target = scaled_mm.target
+    if not callable(target):
+        return False
 
     from torch.fx.operator_schemas import normalize_function
 
     normalized = normalize_function(
-        scaled_mm.target,
+        target,
         scaled_mm.args,
         scaled_mm.kwargs,
         normalize_to_only_use_kwargs=True,
