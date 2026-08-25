@@ -5112,6 +5112,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if not self.inside_reduction or (
             not indexing.has_rmask()
             and not has_rindex
+            and load_buffer is self.body
             # The address and predicate producers for a narrowed load live in
             # the loop-local compute buffer, so re-emit it for each loop chunk.
             and not reduction_axes_omitted

@@ -253,6 +253,19 @@ def helper(x):
             )
             self.assertTrue(predicate_options.reduction_axes_omitted)
 
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_indirect_load_cse_across_reduction_loop(self):
+        def fn(x, buf, idx):
+            selected = torch.gather(buf, -2, idx)
+            value = selected + x.sum(dim=-1, keepdim=True)
+            return x + value, buf.scatter(-2, idx, value)
+
+        x = torch.ones(2, 2, 1025, device=GPU_TYPE)
+        buf = torch.ones(2, 8, 1, device=GPU_TYPE)
+        idx = torch.arange(4, device=GPU_TYPE).reshape(2, 2, 1)
+        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        self.assertEqual(compiled(x, buf, idx), fn(x, buf, idx))
+
     def test_reduction_invariant_load_indexing_extents(self):
         self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))
         xnumel = sympy.Integer(65)
