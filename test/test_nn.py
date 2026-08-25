@@ -35,7 +35,7 @@ from torch.nn import Buffer, Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
 from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, run_tests, TestCase, \
-    skipIfNoLapack, skipIfRocm, skipIfRocmVersionLessThan, getRocmVersion, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, TEST_MULTIACCELERATOR, \
+    skipIfNoLapack, skipIfRocm, skipIfRocmVersionLessThan, getRocmVersion, TEST_MPS, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, TEST_MULTIACCELERATOR, \
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
@@ -4326,7 +4326,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, "expected input to have non-empty spatial dimensions"):
             F.grid_sample(torch.empty(1, 1, 0, 2), grid, align_corners=False)
 
-        if torch.backends.mps.is_available():
+        if TEST_MPS:
             # a backend whose 5-D sampler implements bilinear and nearest only refuses bicubic
             with self.assertRaisesRegex(RuntimeError, "bicubic interpolation with 5D input"):
                 F.grid_sample(torch.empty(1, 1, 2, 2, 2, device='mps'),
@@ -11671,9 +11671,12 @@ class TestNNDeviceType(NNTestCase):
             out2 = model(inp2)
             self.assertTrue(torch.equal(out1, out2))
 
+    @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
+    @parametrize_test("align_corners", [True, False])
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @onlyNativeDeviceTypes
-    @dtypes(torch.double)
-    def test_grid_sample_3d_bicubic_matches_2d(self, device, dtype):
+    @dtypes(torch.double, torch.float)
+    def test_grid_sample_3d_bicubic_matches_2d(self, device, dtype, padding_mode, align_corners):
         # A volume that does not vary along z is sampled by the same separable kernel the 4-D
         # sampler applies, since the four cubic weights of the z axis sum to one.
         image = torch.randn(2, 3, 7, 8, device=device, dtype=dtype)
@@ -11682,13 +11685,37 @@ class TestNNDeviceType(NNTestCase):
         # a z away from a voxel centre gives the four z taps a real weight each, and one
         # that far inside a 5-deep axis keeps every tap in bounds, so no padding drops one
         grid_3d = torch.cat([grid_2d, torch.full_like(grid_2d[..., :1], 0.1)], dim=-1).unsqueeze(1)
-        for padding_mode in ('zeros', 'border', 'reflection'):
-            for align_corners in (True, False):
-                out_2d = F.grid_sample(image, grid_2d, mode='bicubic',
-                                       padding_mode=padding_mode, align_corners=align_corners)
-                out_3d = F.grid_sample(volume, grid_3d, mode='bicubic',
-                                       padding_mode=padding_mode, align_corners=align_corners)
-                self.assertEqual(out_3d.squeeze(2), out_2d)
+        out_2d = F.grid_sample(image, grid_2d, mode='bicubic',
+                               padding_mode=padding_mode, align_corners=align_corners)
+        out_3d = F.grid_sample(volume, grid_3d, mode='bicubic',
+                               padding_mode=padding_mode, align_corners=align_corners)
+        # 5-D sums the 64 taps flat in the accumulate type where 4-D nests two cubic_interp1d
+        # stages in the scalar type, so single precision needs a tolerance
+        tolerance = {} if dtype == torch.double else {"atol": 1e-4, "rtol": 1e-4}
+        self.assertEqual(out_3d.squeeze(2), out_2d, **tolerance)
+
+    @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    def test_grid_sample_3d_bicubic_non_finite(self, device, dtype, padding_mode):
+        # A tap the padding drops contributes a zero value and keeps its coefficient, which is
+        # what get_value_bounded does in 4-D. So a coordinate or a voxel that is not finite has
+        # to reach the same answer at both ranks: neither the dropped tap's own value nor the
+        # voxel it would otherwise alias may enter the sum.
+        image = torch.randn(1, 1, 5, 5, device=device, dtype=dtype)
+        image[0, 0, 0, 0] = float('inf')
+        volume = image.unsqueeze(2).expand(1, 1, 5, 5, 5).contiguous()
+        for coordinate in (float('nan'), float('inf'), -float('inf'), 50.0):
+            grid_2d = torch.full((1, 1, 2, 2), coordinate, device=device, dtype=dtype)
+            grid_2d[0, 0, 1] = 0.1  # a sane sample beside the bad one
+            grid_3d = torch.cat(
+                [grid_2d, torch.full_like(grid_2d[..., :1], 0.1)], dim=-1).unsqueeze(1)
+            out_2d = F.grid_sample(image, grid_2d, mode='bicubic',
+                                   padding_mode=padding_mode, align_corners=False)
+            out_3d = F.grid_sample(volume, grid_3d, mode='bicubic',
+                                   padding_mode=padding_mode, align_corners=False)
+            self.assertEqual(out_3d.squeeze(2), out_2d)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)

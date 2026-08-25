@@ -8869,6 +8869,7 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
 
     # 5-D bicubic is implemented for CPU and CUDA; the other backends refuse it, and
     # check_grid_sampler_3d is where they say so.
+    # TODO: yield it for mps, xpu, mtia and privateuse1 too once their 5-D sampler has the mode.
     bicubic_dims = (2, 3) if torch.device(device).type in ("cpu", "cuda") else (2,)
 
     for dim in (2, 3):

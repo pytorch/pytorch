@@ -82,7 +82,9 @@ inline void check_grid_sampler_3d(
     " and grid with sizes ", grid.sizes());
 }
 
-// Overload for a backend whose 5D sampler implements bilinear and nearest only.
+// The overload a backend whose 5D sampler has bilinear and nearest only calls.
+// torch-xpu-ops calls it at the commit third_party/xpu.txt pins; drop it once
+// that call site moves to the two argument form.
 // See NOTE [ grid_sampler Native Functions ].
 inline void check_grid_sampler_3d(
   const TensorBase& input,
@@ -90,10 +92,11 @@ inline void check_grid_sampler_3d(
   int64_t interpolation_mode
 ) {
   check_grid_sampler_3d(input, grid);
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
     static_cast<GridSamplerInterpolation>(interpolation_mode) !=
       GridSamplerInterpolation::Bicubic,
-    "grid_sampler(): bicubic interpolation with 5D input is not supported by this backend");
+    "grid_sampler(): bicubic interpolation with 5D input is not "
+    "implemented for ", input.device().type());
 }
 
 // See NOTE [ grid_sampler Native Functions ].
