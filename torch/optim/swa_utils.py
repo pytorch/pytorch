@@ -560,6 +560,15 @@ class SWALR(LRScheduler):
             for group, lr in zip(self.optimizer.param_groups, prev_lrs, strict=True)
         ]
 
+    @override
+    def _extra_repr(self) -> str:
+        swa_lrs = [group["swa_lr"] for group in self.optimizer.param_groups]
+        return (
+            f"swa_lrs: {swa_lrs}\n"
+            f"anneal_epochs: {self.anneal_epochs}\n"
+            f"anneal_strategy: {self._anneal_strategy}"
+        )
+
     def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]) -> None:
         self._anneal_strategy = anneal_strategy
         if anneal_strategy == "cos":

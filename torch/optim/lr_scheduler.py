@@ -92,6 +92,46 @@ def _update_param_group_val(
         param_group[key] = val
 
 
+def _callable_repr(fn: Any) -> str:
+    """Name a callable without printing its address.
+
+    ``repr`` of a function or of an instance of a callable class embeds the
+    object's id, which is exactly what ``__repr__`` here exists to remove.
+    """
+    return getattr(fn, "__qualname__", None) or type(fn).__qualname__
+
+
+def _param_group_setting(optimizer: Optimizer, key: str) -> list[Any] | None:
+    """Collect group[key] across param groups, or None if any group lacks it.
+
+    ``OneCycleLR`` writes max_lr and the momentum bounds into the param groups
+    only when ``last_epoch == -1``, so a scheduler built to resume a run can
+    legitimately be missing them and ``__repr__`` must not raise.
+    """
+    groups = optimizer.param_groups
+    if any(key not in group for group in groups):
+        return None
+    return [group[key] for group in groups]
+
+
+def _schedulers_repr(schedulers: Sequence[LRScheduler]) -> str:
+    """Render nested schedulers one per line, indented one level.
+
+    ``LRScheduler.__repr__`` indents everything ``_extra_repr`` returns by one
+    more level, so indenting the children once here is what makes nesting
+    compound at arbitrary depth. Interpolating the list instead would go
+    through ``list.__repr__`` and splice ``[``, ``]`` and ``, `` into the
+    middle of each child's own multi-line block.
+    """
+    if not schedulers:
+        return "schedulers: []"
+    children = "\n".join(
+        "\n".join(f"    {line}" for line in repr(scheduler).split("\n"))
+        for scheduler in schedulers
+    )
+    return f"schedulers: [\n{children}\n]"
+
+
 class LRScheduler:
     r"""Base class for all learning rate schedulers.
 
@@ -498,7 +538,8 @@ class LambdaLR(LRScheduler):
 
     @override
     def _extra_repr(self) -> str:
-        return f"lr_lambdas: {self.lr_lambdas}"
+        names = ", ".join(_callable_repr(fn) for fn in self.lr_lambdas)
+        return f"lr_lambdas: [{names}]"
 
 
 class MultiplicativeLR(LRScheduler):
@@ -625,7 +666,8 @@ class MultiplicativeLR(LRScheduler):
 
     @override
     def _extra_repr(self) -> str:
-        return f"lr_lambdas: {self.lr_lambdas}"
+        names = ", ".join(_callable_repr(fn) for fn in self.lr_lambdas)
+        return f"lr_lambdas: [{names}]"
 
 
 class StepLR(LRScheduler):
@@ -1299,7 +1341,7 @@ class SequentialLR(LRScheduler):
 
     @override
     def _extra_repr(self) -> str:
-        return f"milestones: {self._milestones}\nschedulers: {self._schedulers}"
+        return f"milestones: {self._milestones}\n{_schedulers_repr(self._schedulers)}"
 
 
 class PolynomialLR(LRScheduler):
@@ -1658,7 +1700,7 @@ class ChainedScheduler(LRScheduler):
 
     @override
     def _extra_repr(self) -> str:
-        return f"schedulers: {self._schedulers}"
+        return _schedulers_repr(self._schedulers)
 
 
 class ReduceLROnPlateau(LRScheduler):
@@ -2196,21 +2238,28 @@ class CyclicLR(LRScheduler):
 
     @override
     def _extra_repr(self) -> str:
-        extra = (
-            f"max_lrs: {self.max_lrs}\n"
-            f"total_size: {self.total_size}\n"
-            f"step_ratio: {self.step_ratio}\n"
-            f"mode: {self.mode}\n"
-            f"gamma: {self.gamma}\n"
-            f"scale_mode: {self.scale_mode}\n"
-            f"cycle_momentum: {self.cycle_momentum}"
-        )
+        lines = [
+            f"max_lrs: {self.max_lrs}",
+            f"total_size: {self.total_size}",
+            f"step_ratio: {self.step_ratio}",
+        ]
+        if self._scale_fn_custom is not None:
+            # A custom scale_fn leaves mode unvalidated and gamma unread, so
+            # reporting either would describe a schedule this scheduler does
+            # not follow.
+            lines.append(f"scale_fn: {_callable_repr(self._scale_fn_custom)}")
+        else:
+            lines += [f"mode: {self.mode}", f"gamma: {self.gamma}"]
+        lines += [
+            f"scale_mode: {self.scale_mode}",
+            f"cycle_momentum: {self.cycle_momentum}",
+        ]
         if self.cycle_momentum:
-            extra += (
-                f"\nbase_momentums: {self.base_momentums}\n"
-                f"max_momentums: {self.max_momentums}"
-            )
-        return extra
+            lines += [
+                f"base_momentums: {self.base_momentums}",
+                f"max_momentums: {self.max_momentums}",
+            ]
+        return "\n".join(lines)
 
 
 class CosineAnnealingWarmRestarts(LRScheduler):
@@ -2722,4 +2771,30 @@ class OneCycleLR(LRScheduler):
 
     @override
     def _extra_repr(self) -> str:
-        return f"total_steps: {self.total_steps}\ncycle_momentum: {self.cycle_momentum}"
+        lines = []
+        # OneCycleLR keeps max_lr on the param groups rather than on self, and
+        # sets initial_lr -- which the base __repr__ reports as base_lrs -- to
+        # max_lr / div_factor, so without this the value the caller passed
+        # appears nowhere.
+        max_lrs = _param_group_setting(self.optimizer, "max_lr")
+        if max_lrs is not None:
+            lines.append(f"max_lrs: {max_lrs}")
+        lines.append(f"total_steps: {self.total_steps}")
+        # pct_start is not stored; the first phase ends at
+        # ``pct_start * total_steps - 1``.
+        lines.append(
+            f"pct_start: {(self._schedule_phases[0]['end_step'] + 1) / self.total_steps}"
+        )
+        # Guarded for the same reason _anneal_func guards it: a scheduler
+        # restored from a checkpoint written before this attribute existed
+        # does not have it, and __repr__ must not raise on one.
+        if hasattr(self, "_anneal_func_type"):
+            lines.append(f"anneal_strategy: {self._anneal_func_type}")
+        lines.append(f"three_phase: {len(self._schedule_phases) == 3}")
+        lines.append(f"cycle_momentum: {self.cycle_momentum}")
+        if self.cycle_momentum:
+            for key in ("base_momentum", "max_momentum"):
+                momentums = _param_group_setting(self.optimizer, key)
+                if momentums is not None:
+                    lines.append(f"{key}s: {momentums}")
+        return "\n".join(lines)
