@@ -13,6 +13,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -24,37 +25,34 @@ if not dist.is_available():
     sys.exit(0)
 
 
-# Determine available devices
-DEVICE = "cuda"
-devices = ["cpu"]
-if acc := torch.accelerator.current_accelerator(True):
-    devices += [acc.type]
-
-
 def with_comms(func=None):
     if func is None:
         return partial(with_comms)
 
     @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        if (
-            torch.cuda.is_available()
-            and torch.accelerator.device_count() < self.world_size
-        ):
-            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
+    def wrapper(self, device, *args, **kwargs):
+        # The device arg is injected per device variant by
+        # instantiate_device_type_tests; every test method takes it as the
+        # first positional argument after self.
+        device_type = torch.device(device).type
+        if device_type != "cpu":
+            device_count = torch.get_device_module(device_type).device_count()
+            if device_count < self.world_size:
+                sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
 
-        self.pg = self.create_pg(device=DEVICE)
-        self.device = DEVICE
+        self.pg = self.create_pg(device=device_type)
+        self.device = device_type
         try:
-            return func(self, *args, **kwargs)
+            return func(self, device, *args, **kwargs)
         finally:
             torch.distributed.destroy_process_group()
 
     return wrapper
 
 
-@instantiate_parametrized_tests
-class TestFunctionalDifferentials(MultiThreadedTestCase):
+class TestFunctionalDifferentialsDevice(MultiThreadedTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 4
@@ -67,7 +65,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
     # Forward Correctness Tests
     # ============================================================
 
-    @parametrize("device", devices)
     @parametrize("reduce_op", ["sum", "avg", "min", "max"])
     def test_all_reduce_forward(self, device, reduce_op):
         """Test all_reduce does all_reduce in forward.
@@ -95,7 +92,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         expected = torch.full(shape, fill_value=expected_val, device=device)
         self.assertEqual(output, expected)
 
-    @parametrize("device", devices)
     def test_all_reduce_premul_sum_forward(self, device):
         """Test all_reduce forward with PREMUL_SUM ReduceOp."""
         shape = (3, 3)
@@ -113,7 +109,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         expected = torch.full(shape, fill_value=expected_val, device=device)
         self.assertEqual(output, expected)
 
-    @parametrize("device", devices)
     @parametrize("gather_dim", [0, 1, 2])
     def test_all_gather_tensor_forward(self, device, gather_dim):
         """Test all_gather_tensor produces correct output shape.
@@ -142,7 +137,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             expected_chunk = torch.full((3, 3, 3), fill_value=float(r), device=device)
             self.assertEqual(chunk, expected_chunk)
 
-    @parametrize("device", devices)
     @parametrize("scatter_dim", [0, 1])
     def test_reduce_scatter_tensor_forward(self, device, scatter_dim):
         """Test reduce_scatter_tensor produces correct output shape.
@@ -177,7 +171,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         expected = torch.full_like(output, fill_value=expected_value)
         self.assertEqual(output, expected)
 
-    @parametrize("device", devices)
     def test_all_to_all_single_forward(self, device):
         """Test all_to_all_single with uniform splits.
 
@@ -209,7 +202,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             expected_chunk = torch.full((2, 3), fill_value=float(r), device=device)
             self.assertEqual(chunk, expected_chunk)
 
-    @parametrize("device", devices)
     def test_all_reduce_coalesced_forward(self, device):
         """Test all_reduce_coalesced does all_reduce on each tensor.
 
@@ -232,7 +224,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             expected = torch.full_like(input_tensor, fill_value=expected_value)
             self.assertEqual(output, expected)
 
-    @parametrize("device", devices)
     def test_all_gather_into_tensor_coalesced_forward(self, device):
         """Test all_gather_into_tensor_coalesced gathers each tensor.
 
@@ -255,7 +246,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             expected_shape[0] *= self.world_size
             self.assertEqual(list(output.shape), expected_shape)
 
-    @parametrize("device", devices)
     def test_reduce_scatter_tensor_coalesced_forward(self, device):
         """Test reduce_scatter_tensor_coalesced reduces and scatters each tensor.
 
@@ -289,7 +279,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
     # Backward Correctness Tests
     # ============================================================
 
-    @parametrize("device", devices)
     @parametrize("reduce_op", ["sum", "avg", "min", "max"])
     def test_all_reduce_backward(self, device, reduce_op):
         """Test all_reduce backward does all_reduce.
@@ -340,7 +329,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             )
             self.assertEqual(grad_input, expected_grad_input)
 
-    @parametrize("device", devices)
     def test_all_reduce_premul_sum_backward(self, device):
         """Test all_reduce backward with PREMUL_SUM ReduceOp."""
         shape = (3, 3)
@@ -370,7 +358,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         )
         self.assertEqual(input_tensor.grad, expected_grad)
 
-    @parametrize("device", devices)
     @parametrize("reduce_op", ["min", "max"])
     def test_all_reduce_nan_backward(self, device, reduce_op):
         """Test all_reduce backward passes through all-reduced grad for NaN inputs."""
@@ -402,7 +389,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         else:
             self.assertFalse(grad.isnan().any())
 
-    @parametrize("device", devices)
     @parametrize("gather_dim", [0, 1, 2])
     def test_all_gather_tensor_backward(self, device, gather_dim):
         """Test all_gather_tensor backward does reduce_scatter.
@@ -438,7 +424,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         )
         self.assertEqual(grad_input, expected_grad_input)
 
-    @parametrize("device", devices)
     @parametrize("scatter_dim", [0, 1])
     def test_reduce_scatter_tensor_backward(self, device, scatter_dim):
         """Test reduce_scatter_tensor backward does all_gather.
@@ -483,7 +468,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         )
         self.assertEqual(grad_input, expected_grad_input)
 
-    @parametrize("device", devices)
     def test_all_to_all_single_backward(self, device):
         """Test all_to_all_single backward reverses split sizes.
 
@@ -521,7 +505,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         )
         self.assertEqual(grad_input, expected_grad_input)
 
-    @parametrize("device", devices)
     def test_all_reduce_coalesced_backward(self, device):
         """Test all_reduce_coalesced backward does all_reduce on each gradient.
 
@@ -548,7 +531,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             )
             self.assertEqual(input_tensor.grad, expected_grad)
 
-    @parametrize("device", devices)
     def test_all_gather_into_tensor_coalesced_backward(self, device):
         """Test all_gather_into_tensor_coalesced backward does reduce_scatter on each gradient.
 
@@ -575,7 +557,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             )
             self.assertEqual(input_tensor.grad, expected_grad)
 
-    @parametrize("device", devices)
     def test_reduce_scatter_tensor_coalesced_backward(self, device):
         """Test reduce_scatter_tensor_coalesced backward does all_gather on each gradient.
 
@@ -603,6 +584,100 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             self.assertIsNotNone(input_tensor.grad)
             expected_grad = torch.ones_like(input_tensor)
             self.assertEqual(input_tensor.grad, expected_grad)
+
+    # ============================================================
+    # _c10d_functional_autograd Backward Compatibility Tests
+    # ============================================================
+
+    def test_all_gather_into_tensor_autograd_backward(self, device):
+        """Test _c10d_functional_autograd.all_gather_into_tensor backward.
+
+        Verifies backward compatibility: the autograd ops should have the same
+        backward behavior as _c10d_functional ops.
+        """
+        group_name = dist.group.WORLD.group_name
+
+        input_tensor = torch.randn(3, 3, requires_grad=True, device=device)
+        output = torch.ops._c10d_functional_autograd.all_gather_into_tensor(
+            input_tensor, self.world_size, group_name
+        )
+        output = fcols.wait_tensor(output)
+
+        # Backward with ones
+        output.sum().backward()
+
+        # Gradient should be reduce_scatter of ones (all world_size)
+        self.assertIsNotNone(input_tensor.grad)
+        expected_grad = torch.full(
+            (3, 3), fill_value=float(self.world_size), device=device
+        )
+        self.assertEqual(input_tensor.grad, expected_grad)
+
+    def test_reduce_scatter_tensor_autograd_backward(self, device):
+        """Test _c10d_functional_autograd.reduce_scatter_tensor backward.
+
+        Verifies backward compatibility: the autograd ops should have the same
+        backward behavior as _c10d_functional ops.
+        """
+        group_name = dist.group.WORLD.group_name
+
+        input_tensor = torch.randn(
+            4 * self.world_size, 3, requires_grad=True, device=device
+        )
+        output = torch.ops._c10d_functional_autograd.reduce_scatter_tensor(
+            input_tensor, "sum", self.world_size, group_name
+        )
+        output = fcols.wait_tensor(output)
+
+        # Backward with ones
+        output.sum().backward()
+
+        # Gradient should be all_gather of ones
+        self.assertIsNotNone(input_tensor.grad)
+        expected_grad = torch.ones_like(input_tensor)
+        self.assertEqual(input_tensor.grad, expected_grad)
+
+    def test_all_to_all_single_autograd_backward(self, device):
+        """Test _c10d_functional_autograd.all_to_all_single backward.
+
+        Verifies backward compatibility: the autograd ops should have the same
+        backward behavior as _c10d_functional ops.
+        """
+        group_name = dist.group.WORLD.group_name
+        group_size = dist.group.WORLD.size()
+
+        input_tensor = torch.randn(
+            4 * self.world_size, 3, requires_grad=True, device=device
+        )
+        output_split_sizes = [input_tensor.shape[0] // group_size] * group_size
+        input_split_sizes = output_split_sizes
+
+        output = torch.ops._c10d_functional_autograd.all_to_all_single(
+            input_tensor, output_split_sizes, input_split_sizes, group_name
+        )
+        output = fcols.wait_tensor(output)
+
+        # Backward
+        output.sum().backward()
+
+        # Gradient should have same shape as input
+        self.assertIsNotNone(input_tensor.grad)
+        self.assertEqual(input_tensor.grad.shape, input_tensor.shape)
+        expected_grad = torch.ones_like(input_tensor)
+        self.assertEqual(input_tensor.grad, expected_grad)
+
+
+@instantiate_parametrized_tests
+class TestFunctionalDifferentials(MultiThreadedTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @property
+    def world_size(self):
+        return 4
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
 
     # ============================================================
     # torch.library.opcheck Tests
@@ -702,90 +777,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         )
 
     # ============================================================
-    # _c10d_functional_autograd Backward Compatibility Tests
-    # ============================================================
-
-    @parametrize("device", devices)
-    def test_all_gather_into_tensor_autograd_backward(self, device):
-        """Test _c10d_functional_autograd.all_gather_into_tensor backward.
-
-        Verifies backward compatibility: the autograd ops should have the same
-        backward behavior as _c10d_functional ops.
-        """
-        group_name = dist.group.WORLD.group_name
-
-        input_tensor = torch.randn(3, 3, requires_grad=True, device=device)
-        output = torch.ops._c10d_functional_autograd.all_gather_into_tensor(
-            input_tensor, self.world_size, group_name
-        )
-        output = fcols.wait_tensor(output)
-
-        # Backward with ones
-        output.sum().backward()
-
-        # Gradient should be reduce_scatter of ones (all world_size)
-        self.assertIsNotNone(input_tensor.grad)
-        expected_grad = torch.full(
-            (3, 3), fill_value=float(self.world_size), device=device
-        )
-        self.assertEqual(input_tensor.grad, expected_grad)
-
-    @parametrize("device", devices)
-    def test_reduce_scatter_tensor_autograd_backward(self, device):
-        """Test _c10d_functional_autograd.reduce_scatter_tensor backward.
-
-        Verifies backward compatibility: the autograd ops should have the same
-        backward behavior as _c10d_functional ops.
-        """
-        group_name = dist.group.WORLD.group_name
-
-        input_tensor = torch.randn(
-            4 * self.world_size, 3, requires_grad=True, device=device
-        )
-        output = torch.ops._c10d_functional_autograd.reduce_scatter_tensor(
-            input_tensor, "sum", self.world_size, group_name
-        )
-        output = fcols.wait_tensor(output)
-
-        # Backward with ones
-        output.sum().backward()
-
-        # Gradient should be all_gather of ones
-        self.assertIsNotNone(input_tensor.grad)
-        expected_grad = torch.ones_like(input_tensor)
-        self.assertEqual(input_tensor.grad, expected_grad)
-
-    @parametrize("device", devices)
-    def test_all_to_all_single_autograd_backward(self, device):
-        """Test _c10d_functional_autograd.all_to_all_single backward.
-
-        Verifies backward compatibility: the autograd ops should have the same
-        backward behavior as _c10d_functional ops.
-        """
-        group_name = dist.group.WORLD.group_name
-        group_size = dist.group.WORLD.size()
-
-        input_tensor = torch.randn(
-            4 * self.world_size, 3, requires_grad=True, device=device
-        )
-        output_split_sizes = [input_tensor.shape[0] // group_size] * group_size
-        input_split_sizes = output_split_sizes
-
-        output = torch.ops._c10d_functional_autograd.all_to_all_single(
-            input_tensor, output_split_sizes, input_split_sizes, group_name
-        )
-        output = fcols.wait_tensor(output)
-
-        # Backward
-        output.sum().backward()
-
-        # Gradient should have same shape as input
-        self.assertIsNotNone(input_tensor.grad)
-        self.assertEqual(input_tensor.grad.shape, input_tensor.shape)
-        expected_grad = torch.ones_like(input_tensor)
-        self.assertEqual(input_tensor.grad, expected_grad)
-
-    # ============================================================
     # _c10d_functional_autograd opcheck Tests
     # ============================================================
 
@@ -838,8 +829,8 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         )
 
 
-@instantiate_parametrized_tests
-class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
+class TestFunctionalDifferentialsWithCompileDevice(DistributedTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
     # ============================================================
     # torch.compile Integration Tests
     # ============================================================
@@ -849,7 +840,7 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
         return 2
 
     @with_comms
-    def test_all_reduce_compile(self):
+    def test_all_reduce_compile(self, device):
         """Test that all_reduce backward works with torch.compile."""
         shape = (3, 3)
         group_name = dist.group.WORLD.group_name
@@ -903,7 +894,7 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
                 self.assertEqual(input_tensor.grad, expected_grad)
 
     @with_comms
-    def test_all_gather_tensor_compile(self):
+    def test_all_gather_tensor_compile(self, device):
         """Test that all_gather_tensor backward works with torch.compile."""
         group_name = dist.group.WORLD.group_name
 
@@ -923,7 +914,7 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
         self.assertEqual(input_tensor.grad, expected_grad)
 
     @with_comms
-    def test_reduce_scatter_tensor_compile(self):
+    def test_reduce_scatter_tensor_compile(self, device):
         """Test that reduce_scatter_tensor backward works with torch.compile."""
         group_name = dist.group.WORLD.group_name
 
@@ -948,7 +939,7 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
         self.assertEqual(input_tensor.grad, expected_grad)
 
     @with_comms
-    def test_all_to_all_single_compile(self):
+    def test_all_to_all_single_compile(self, device):
         """Test that all_to_all_single backward works with torch.compile."""
         group_name = dist.group.WORLD.group_name
 
@@ -980,7 +971,7 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
     # ============================================================
 
     @with_comms
-    def test_all_gather_into_tensor_autograd_compile(self):
+    def test_all_gather_into_tensor_autograd_compile(self, device):
         """Test that _c10d_functional_autograd.all_gather_into_tensor works with torch.compile."""
         group_name = dist.group.WORLD.group_name
 
@@ -1003,7 +994,7 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
         self.assertEqual(input_tensor.grad, expected_grad)
 
     @with_comms
-    def test_reduce_scatter_tensor_autograd_compile(self):
+    def test_reduce_scatter_tensor_autograd_compile(self, device):
         """Test that _c10d_functional_autograd.reduce_scatter_tensor works with torch.compile."""
         group_name = dist.group.WORLD.group_name
 
@@ -1028,7 +1019,7 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
         self.assertEqual(input_tensor.grad, expected_grad)
 
     @with_comms
-    def test_all_to_all_single_autograd_compile(self):
+    def test_all_to_all_single_autograd_compile(self, device):
         """Test that _c10d_functional_autograd.all_to_all_single works with torch.compile."""
         group_name = dist.group.WORLD.group_name
         group_size = dist.group.WORLD.size()
@@ -1062,7 +1053,13 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
 
 
 instantiate_device_type_tests(
-    TestFunctionalDifferentialsWithCompile, globals(), only_for=DEVICE
+    TestFunctionalDifferentialsDevice, globals(), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFunctionalDifferentialsWithCompileDevice,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
 )
 
 if __name__ == "__main__":
