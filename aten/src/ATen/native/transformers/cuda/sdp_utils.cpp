@@ -89,6 +89,7 @@ constexpr bool kCuDNNFrontendSupportsD256 = false;
 bool priority_order_init_ = false;
 
 // Needs to be kept in-sync with test_fused_sdp_choice in test_transformers.py
+// and test_pattern_matcher in dynamo/test_activation_checkpointing.py
 bool check_prefer_cudnn_attention() {
   static const bool prefer_cudnn = c10::utils::check_env("TORCH_CUDNN_SDPA_DEPRIORITIZED") != true;
   if (!prefer_cudnn) {
