@@ -223,7 +223,7 @@ std::shared_ptr<FlightRecorderHook> FlightRecorderHook::attach(
     hook->pg_->registerCompletionHook(
         hook->hook_id_, [weak](const CompletionHookArgs& args) {
           if (auto self = weak.lock()) {
-            self->retireCompleted(args.work, args.duration_ms);
+            self->retireCompleted(args.completion_key, args.duration_ms);
           }
         });
     hook->push_completion_ = true;
@@ -411,7 +411,7 @@ void FlightRecorderHook::remove() {
 }
 
 void FlightRecorderHook::retireCompleted(
-    const Work* work,
+    uint64_t completion_key,
     std::optional<float> duration) {
   // From the completion hook this runs on whichever thread the backend
   // established completion on, usually its watchdog. Only the map lookup
@@ -420,7 +420,7 @@ void FlightRecorderHook::retireCompleted(
   InflightOp op;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto id_it = work_ids_.find(work->getCompletionKey());
+    auto id_it = work_ids_.find(completion_key);
     if (id_it == work_ids_.end()) {
       // Not one of ours -- an op recorded by a natively recording backend, one
       // issued under a graph capture, one already evicted, or one from before
@@ -552,7 +552,7 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
   while (inflight_.size() > max_inflight_) {
     auto oldest = inflight_.begin();
     if (oldest->second.work_key) {
-      work_ids_.erase(oldest->second.work_key);
+      work_ids_.erase(*oldest->second.work_key);
     }
     inflight_.erase(oldest);
   }
@@ -674,10 +674,10 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
     }
     if (args.work && push_completion_) {
       // The op is only *issued* at this point, so the entry stays un-retired.
-      // The backend's completion hook is what says when it is really done, and
-      // the caller and tracking Works share the correlation key used here.
-      it->second.work_key = args.work->getCompletionKey();
-      work_ids_[it->second.work_key] = args.op_id;
+      // The backend's completion hook is what says when it is really done.
+      const auto completion_key = args.work->getCompletionKey();
+      it->second.work_key = completion_key;
+      work_ids_[completion_key] = args.op_id;
       lock.unlock();
       // A completion established before that registration found no mapping and
       // retired nothing, leaving a finished collective reading "scheduled" for
@@ -687,7 +687,7 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
       // was never seen to finish (Hooks.hpp). Asked with the lock dropped,
       // since isCompleted() calls into the backend -- see the lock-order note.
       if (args.work->isCompleted() && args.work->isSuccess()) {
-        retireCompleted(args.work.get(), workDuration(*args.work));
+        retireCompleted(completion_key, workDuration(*args.work));
       }
       return;
     }
