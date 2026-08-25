@@ -21,6 +21,7 @@ from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
+from torch._subclasses.fake_tensor import maybe_get_fake_constant
 from torch.utils._pytree import SequenceKey
 
 from .. import graph_break_hints, polyfills, variables
@@ -1960,8 +1961,8 @@ class SizeVariable(TupleVariable):
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # torch.Size items may be TensorVariables wrapping scalar tensors with
-        # known constant values (node.meta["example_value"].constant).  Extract
-        # the actual int values so the hash matches eager torch.Size hashing.
+        # known constant values. Extract the actual int values so the hash
+        # matches eager torch.Size hashing.
         from .tensor import TensorVariable
 
         int_items: list[int] = []
@@ -1976,7 +1977,7 @@ class SizeVariable(TupleVariable):
                 example_value = (
                     meta.get("example_value") if isinstance(meta, dict) else None
                 )
-                constant = getattr(example_value, "constant", None)
+                constant = maybe_get_fake_constant(example_value)
                 if isinstance(constant, torch.Tensor) and constant.numel() == 1:
                     int_items.append(int(constant.item()))
                     continue
@@ -2135,7 +2136,8 @@ class SizeVariable(TupleVariable):
             index = arg.sym_num
         elif isinstance(arg, TensorVariable):
             value = get_fake_value(arg.as_proxy().node, tx)
-            if value.constant is None or value.constant.numel() != 1:
+            constant = maybe_get_fake_constant(value)
+            if constant is None or constant.numel() != 1:
                 unimplemented(
                     gb_type="Indexing torch.Size with non-scalar tensor",
                     context=f"get_item_dyn {self} {arg}",
@@ -2144,7 +2146,7 @@ class SizeVariable(TupleVariable):
                     ),
                     hints=[*graph_break_hints.USER_ERROR],
                 )
-            index = value.constant.item()
+            index = constant.item()
         else:
             index = arg.as_python_constant()
 

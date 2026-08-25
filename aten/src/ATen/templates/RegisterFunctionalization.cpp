@@ -38,7 +38,7 @@ constexpr auto exclude_keys_for_meta_dispatch =
         c10::DispatchKey::FuncTorchDynamicLayerFrontMode,
         c10::DispatchKey::Python,
         c10::DispatchKey::PreDispatch,
-
+        c10::DispatchKey::Fake,
     });
 
 // Helper around at::has_internal_overlap.

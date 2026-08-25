@@ -14,6 +14,7 @@ from torch import Tensor
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import try_use_slice
+from torch.testing._internal.common_utils import skipIfCppFakeTensor
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -1699,6 +1700,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     )
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    @skipIfCppFakeTensor("C++ FakeTensor has different FX node names")
     def test_alias2_dynamic(self):
         self.test_alias2(_dynamic=True)
 
