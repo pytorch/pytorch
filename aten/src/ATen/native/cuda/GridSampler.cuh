@@ -335,11 +335,12 @@ void resolve_cubic_taps(
   if (coeffs_grad != nullptr) {
     get_cubic_coefficients_grad<scalar_t>(coeffs_grad, coord - base);
   }
-  #pragma unroll
+  #pragma unroll 4
   for (int i = 0; i < 4; ++i) {
-    const scalar_t tap = compute_coordinates(base - 1 + i, static_cast<int>(size), padding_mode, align_corners);
-    // the comparison decides, not the cast: a coordinate that is not finite fails both sides,
-    // where converting it to an integer is undefined
+    // the comparison decides, not the cast: a coordinate that is not
+    // finite fails both sides, where converting it is undefined
+    const scalar_t tap = compute_coordinates(
+        base - 1 + i, static_cast<int>(size), padding_mode, align_corners);
     indices[i] = (tap >= 0 && tap < static_cast<scalar_t>(size))
         ? static_cast<index_t>(tap)
         : static_cast<index_t>(-1);
