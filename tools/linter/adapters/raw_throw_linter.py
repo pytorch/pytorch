@@ -53,6 +53,7 @@ ALLOWED_EXCEPTION_TYPES = {
     "WorkerException": "torch/csrc/api/",
     "py::cast_error": "torch/csrc/jit/",  # caught by name in jit/python
     "py::error_already_set": "",  # a Python error is set; rethrowing preserves it
+    "MyException": "c10/test/",  # LeftRight_test, caught by EXPECT_THROW
     # Drives the unwinder's own control flow; caught by name in
     # fast_symbolizer.h and unwind.cpp.
     "UnwindError": "torch/csrc/profiler/",
