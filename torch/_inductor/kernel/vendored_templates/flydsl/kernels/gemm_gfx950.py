@@ -395,6 +395,7 @@ def gemm_gfx950_kernel(
         fx.Int64.ir_type,
         fx.Int64(tid // GFX950_WAVE_SIZE * GFX950_WAVE_SIZE * async_load_bytes),
     )
+    g2s_copy_layout = fx.make_layout(async_load_vec_size, 1)
 
     def make_wave_lds_ptr(ptr):
         return ptr + fx.Int32(wave_offset) // in_data_bytes
@@ -421,9 +422,8 @@ def gemm_gfx950_kernel(
             else:
                 safe_global_k_idx = global_k_idx
             global_offset = safe_global_m_idx * a_row_stride + safe_global_k_idx
-            unit_layout = fx.make_layout(1, 1)
-            src = fx.make_view(fx.get_iter(a_buf) + global_offset, unit_layout)
-            dst = fx.make_view(lds_ptr, unit_layout)
+            src = fx.make_view(fx.get_iter(a_buf) + global_offset, g2s_copy_layout)
+            dst = fx.make_view(lds_ptr, g2s_copy_layout)
             rocdl.sched_barrier(0)
             fx.copy_atom_call(async_g2s_copy_atom, src, dst)
             rocdl.sched_barrier(0)
@@ -448,9 +448,8 @@ def gemm_gfx950_kernel(
             else:
                 safe_global_k_idx = global_k_idx
             global_offset = safe_global_n_idx * b_row_stride + safe_global_k_idx
-            unit_layout = fx.make_layout(1, 1)
-            src = fx.make_view(fx.get_iter(b_buf) + global_offset, unit_layout)
-            dst = fx.make_view(lds_ptr, unit_layout)
+            src = fx.make_view(fx.get_iter(b_buf) + global_offset, g2s_copy_layout)
+            dst = fx.make_view(lds_ptr, g2s_copy_layout)
             rocdl.sched_barrier(0)
             fx.copy_atom_call(async_g2s_copy_atom, src, dst)
             rocdl.sched_barrier(0)
@@ -623,6 +622,7 @@ def gemm_hti_gfx950_kernel(
         fx.Int64.ir_type,
         fx.Int64(tid // GFX950_WAVE_SIZE * GFX950_WAVE_SIZE * async_load_bytes),
     )
+    g2s_copy_layout = fx.make_layout(async_load_vec_size, 1)
 
     def make_wave_lds_ptr(ptr):
         return ptr + fx.Int32(wave_offset) // in_data_bytes
@@ -655,9 +655,8 @@ def gemm_hti_gfx950_kernel(
             else:
                 safe_global_k_idx = global_k_idx
             global_offset = safe_global_m_idx * a_row_stride + safe_global_k_idx
-            unit_layout = fx.make_layout(1, 1)
-            src = fx.make_view(fx.get_iter(a_buf) + global_offset, unit_layout)
-            dst = fx.make_view(lds_ptr, unit_layout)
+            src = fx.make_view(fx.get_iter(a_buf) + global_offset, g2s_copy_layout)
+            dst = fx.make_view(lds_ptr, g2s_copy_layout)
             rocdl.sched_barrier(0)
             fx.copy_atom_call(async_g2s_copy_atom, src, dst)
             rocdl.sched_barrier(0)
@@ -682,9 +681,8 @@ def gemm_hti_gfx950_kernel(
             else:
                 safe_global_k_idx = global_k_idx
             global_offset = safe_global_n_idx * b_row_stride + safe_global_k_idx
-            unit_layout = fx.make_layout(1, 1)
-            src = fx.make_view(fx.get_iter(b_buf) + global_offset, unit_layout)
-            dst = fx.make_view(lds_ptr, unit_layout)
+            src = fx.make_view(fx.get_iter(b_buf) + global_offset, g2s_copy_layout)
+            dst = fx.make_view(lds_ptr, g2s_copy_layout)
             rocdl.sched_barrier(0)
             fx.copy_atom_call(async_g2s_copy_atom, src, dst)
             rocdl.sched_barrier(0)
