@@ -87,7 +87,7 @@ class _TestJITIRToONNX(_JITIRToONNXTestMixin):
     creating concrete sub-types. See MakeTestCase().
     """
 
-    hw_classification = common_utils.HardwareClassification.CPU
+    hw_classification = common_utils.HardwareClassification.GENERIC
 
     def test_example_ir(self):
         graph_ir = """
@@ -205,7 +205,7 @@ class _TestJITIRToONNXCuda(_JITIRToONNXTestMixin):
 
 
 def MakeTestCase(opset_version: int, base: type) -> type:
-    name = f"TestJITIRToONNX_opset{opset_version}"
+    name = f"{base.__name__.lstrip('_')}_opset{opset_version}"
     return type(
         str(name),
         (pytorch_test_common.ExportTestCase,),
@@ -216,7 +216,6 @@ def MakeTestCase(opset_version: int, base: type) -> type:
 TestJITIRToONNX_opset14 = MakeTestCase(14, _TestJITIRToONNX)
 TestJITIRToONNXCUDA_opset14 = MakeTestCase(14, _TestJITIRToONNXCuda)
 
-instantiate_device_type_tests(TestJITIRToONNX_opset14, globals(), only_for=("cpu",))
 instantiate_device_type_tests(TestJITIRToONNXCUDA_opset14, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
