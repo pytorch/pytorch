@@ -10,9 +10,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     requires_capabilities,
 )
-from torch.testing._internal.common_distributed import (
-    skip_if_lt_x_gpu,
-)
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -147,7 +145,9 @@ class TestShardedEmbedding(ShardedTensorTestBase):
             self._run_sharded_embedding(spec, [8, 6, 5, 4, 7], 23, 16, device)
             self._run_sharded_embedding(spec, [4], 15, 14, device)
             self._run_sharded_embedding(spec, [34], 15, 14, device, padding_idx=10)
-            self._run_sharded_embedding(spec, [8, 6, 5, 4], 23, 13, device, padding_idx=12)
+            self._run_sharded_embedding(
+                spec, [8, 6, 5, 4], 23, 13, device, padding_idx=12
+            )
             self._run_sharded_embedding(
                 spec,
                 [4, 5, 6],
@@ -206,7 +206,9 @@ class TestShardedEmbedding(ShardedTensorTestBase):
             self._run_sharded_embedding(spec, [8, 6, 5, 4], 19, 11, device)
             self._run_sharded_embedding(spec, [6, 7, 6], 21, 11, device)
             self._run_sharded_embedding(spec, [4], 21, 11, device)
-            self._run_sharded_embedding(spec, [8, 6, 5, 4], 21, 11, device, padding_idx=10)
+            self._run_sharded_embedding(
+                spec, [8, 6, 5, 4], 21, 11, device, padding_idx=10
+            )
             self._run_sharded_embedding(
                 spec,
                 [6, 5, 8],
@@ -218,7 +220,9 @@ class TestShardedEmbedding(ShardedTensorTestBase):
             self._run_sharded_embedding(spec, [4], 14, 11, device, max_norm=2.5)
 
 
-instantiate_device_type_tests(TestShardedEmbedding, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestShardedEmbedding, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
