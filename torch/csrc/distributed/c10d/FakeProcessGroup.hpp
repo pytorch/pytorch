@@ -160,16 +160,20 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> allreduce_sparse(
-      std::vector<at::Tensor>& /* tensors */,
-      const AllreduceOptions& /* opts */ = AllreduceOptions()) override {
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) override {
     checkCollectiveError();
-    // Sparse tensors do not support the in-place ops applyUniformReduction
-    // uses, so this stays a no-op. Fail loudly rather than silently returning
-    // an unreduced result while the sibling collectives honour the contract.
-    TORCH_CHECK(
-        !uniformRanks(),
-        "FakeProcessGroup: allreduce_sparse is not supported under "
-        "simulate_uniform_ranks.");
+    if (uniformRanks()) {
+      TORCH_CHECK(
+          opts.reduceOp.op_ != ReduceOp::PRODUCT,
+          "FakeProcessGroup: allreduce_sparse does not support PRODUCT under "
+          "simulate_uniform_ranks.");
+      at::AutoDispatchBelowAutograd guard;
+      for (auto& tensor : tensors) {
+        applyUniformReduction(tensor, opts.reduceOp);
+      }
+      return c10::make_intrusive<FakeWork>(tensors);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -561,10 +565,9 @@ class FakeProcessGroup : public Backend {
   // The modeling cost is that ranks cannot diverge, so this cannot surface
   // rank-divergence bugs. It is off by default; existing behavior is untouched.
   //
-  // Two collectives stay outside the contract because uniformity does not make
-  // them locally computable: `scatter` on a non-root rank has no access to the
-  // root's list at all, and `allreduce_sparse` cannot use the in-place ops the
-  // reductions are built from, so it raises rather than under-reduce.
+  // `scatter` on a non-root rank stays outside the contract because it has no
+  // access to the root's list. Sparse all-reduce supports the same contract
+  // except for PRODUCT, which sparse tensors do not support.
   bool uniformRanks() const {
     return options_ != nullptr && options_->simulate_uniform_ranks;
   }

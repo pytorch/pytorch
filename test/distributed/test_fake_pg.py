@@ -1090,6 +1090,34 @@ class TestFakePGUniformRanks(TestCase):
 
         self.assertEqual(tensor, torch.full((3,), 16.0))
 
+    def test_sparse_allreduce_sum_scales_values(self):
+        """Sparse SUM scales the stored values without changing sparsity."""
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.sparse_coo_tensor(
+            torch.tensor([[0, 2]]), torch.tensor([2.0, 3.0]), size=(4,)
+        ).coalesce()
+
+        work = pg.allreduce_sparse([tensor])
+        work.wait()
+
+        expected = torch.tensor([8.0, 0.0, 12.0, 0.0])
+        self.assertEqual(tensor.to_dense(), expected)
+        self.assertEqual(work.result()[0].to_dense(), expected)
+
+    def test_sparse_allreduce_product_raises(self):
+        """Sparse PRODUCT remains unsupported under uniform-rank simulation."""
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.sparse_coo_tensor(
+            torch.tensor([[0, 2]]), torch.tensor([2.0, 3.0]), size=(4,)
+        ).coalesce()
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = dist.ReduceOp.PRODUCT
+
+        with self.assertRaisesRegex(
+            RuntimeError, "allreduce_sparse does not support PRODUCT"
+        ):
+            pg.allreduce_sparse([tensor], opts)
+
     def test_allreduce_premul_sum_applies_factor_then_scales(self):
         """PREMUL_SUM sums factor * x over every rank."""
         pg = self._init(rank=0, world_size=4)
