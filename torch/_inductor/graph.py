@@ -977,6 +977,7 @@ class GraphLowering(torch.fx.Interpreter):
             example_inputs=example_inputs,
             shape_env=self._shape_env,
             cpp_wrapper=self.cpp_wrapper,
+            fx_wrapper=self.fx_wrapper,
             aot_mode=self.aot_mode,
             extern_node_serializer=self.extern_node_serializer,
             is_inference=self.is_inference,
@@ -3002,11 +3003,17 @@ class GraphLowering(torch.fx.Interpreter):
         with config.patch("triton.store_cubin", False):
             self.scheduler = Scheduler(self.operations)
 
+    def _init_wrapper_and_scheduler(self) -> None:
+        if self.wrapper_code is None:
+            self.init_wrapper_code()
+        if self.scheduler is None:
+            self._update_scheduler()
+        else:
+            V.graph.scheduler = self.scheduler
+
     def codegen(self) -> tuple[ValueWithLineMap, ValueWithLineMap]:
         with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
-            self.init_wrapper_code()
-
-            self._update_scheduler()
+            self._init_wrapper_and_scheduler()
             V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
 
             self.wrapper_code.push_codegened_graph(self)
@@ -3039,7 +3046,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.device_idxs = parent_graph.device_idxs
             self.device_type = parent_graph.device_type
 
-            self._update_scheduler()
+            self._init_wrapper_and_scheduler()
             self.scheduler.codegen()
 
     def count_bytes(
