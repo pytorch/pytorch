@@ -8,10 +8,10 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 class BenchmarkDTensorDispatch(BenchmarkBase):
-    def __init__(self, operator, world_size) -> None:
+    def __init__(self, operator, world_size, device="cuda") -> None:
         super().__init__(
             category=f"dtensor_dispatch_{operator}",
-            device="cuda",
+            device=device,
         )
         self.world_size = world_size
 
@@ -20,11 +20,11 @@ class BenchmarkDTensorDispatch(BenchmarkBase):
         return prefix
 
     def description(self) -> str:
-        return f"DTensor dispatch time for {self.category()}"
+        return f"DTensor dispatch instructions for {self.category()} on {self.device()}"
 
     def _prepare_once(self) -> None:
         self.mesh = torch.distributed.device_mesh.init_device_mesh(
-            "cuda", (self.world_size,), mesh_dim_names=("dp",)
+            self.device(), (self.world_size,), mesh_dim_names=("dp",)
         )
         self.a = DTensor.from_local(
             torch.ones(10, 10, device=self.device()), self.mesh, [Replicate()]
@@ -39,7 +39,7 @@ class BenchmarkDTensorDispatch(BenchmarkBase):
 
 class BenchmarkDetach(BenchmarkDTensorDispatch):
     def __init__(self, world_size) -> None:
-        super().__init__(operator="detach", world_size=world_size)
+        super().__init__(operator="detach", world_size=world_size, device="meta")
 
     def _work(self) -> None:
         self.a.detach()
@@ -47,7 +47,7 @@ class BenchmarkDetach(BenchmarkDTensorDispatch):
 
 class BenchmarkToFromLocal(BenchmarkDTensorDispatch):
     def __init__(self, world_size) -> None:
-        super().__init__(operator="to_from_local", world_size=world_size)
+        super().__init__(operator="to_from_local", world_size=world_size, device="meta")
 
     def _work(self) -> None:
         local = self.a.to_local()
@@ -109,7 +109,7 @@ class BenchmarkInplace(BenchmarkDTensorDispatch):
 
 class BenchmarkView(BenchmarkDTensorDispatch):
     def __init__(self, world_size) -> None:
-        super().__init__(operator="view", world_size=world_size)
+        super().__init__(operator="view", world_size=world_size, device="meta")
 
     def _work(self) -> None:
         self.a.view(100)
@@ -125,7 +125,9 @@ class BenchmarkRandom(BenchmarkDTensorDispatch):
 
 class BenchmarkCustomHandler(BenchmarkDTensorDispatch):
     def __init__(self, world_size) -> None:
-        super().__init__(operator="custom_handler", world_size=world_size)
+        super().__init__(
+            operator="custom_handler", world_size=world_size, device="meta"
+        )
 
     def _work(self) -> None:
         torch.ops.aten.is_same_size(self.a, self.b)

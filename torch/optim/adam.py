@@ -84,7 +84,7 @@ class Adam(Optimizer):
                 )
             if betas[1].numel() != 1:
                 raise ValueError("Tensor betas[1] must be 1-element")
-        betas = tuple(map(_to_scalar, betas))
+        betas = (_to_scalar(betas[0]), _to_scalar(betas[1]))
 
         defaults = {
             "lr": lr,
@@ -415,7 +415,7 @@ def _single_tensor_adam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform stepweight decay
+                # Perform step weight decay
                 param.mul_(1 - lr * weight_decay)
             else:
                 # Nested if is necessary to bypass jitscript rules
@@ -687,7 +687,7 @@ def _multi_tensor_adam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform stepweight decay
+                # Perform step weight decay
                 torch._foreach_mul_(device_params, 1 - lr * weight_decay)
             else:
                 # Reuse the intermediate memory (device_grads) already allocated for maximize
@@ -791,11 +791,11 @@ def _multi_tensor_adam(
 
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             torch._foreach_add_(exp_avg_sq_sqrt, eps)
-            torch._foreach_addcdiv_(
+            torch._foreach_addcdiv_(  # type: ignore[arg-type]
                 device_params,
                 device_exp_avgs,
                 exp_avg_sq_sqrt,
-                step_size,  # type: ignore[arg-type]
+                step_size,
             )
 
 

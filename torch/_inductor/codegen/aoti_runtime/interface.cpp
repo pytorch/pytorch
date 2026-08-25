@@ -39,8 +39,8 @@ static thread_local std::string g_aoti_last_error;
             std::to_string(actual_size));                         \
   } while (0)
 
-// AOTInductor uses at::addmm_out, which doesn't supports
-// arguments that requires gradient. For this reason, we
+// AOTInductor uses at::addmm_out, which doesn't support
+// arguments that require gradient. For this reason, we
 // enforce no_grad context for run APIs.
 //
 // A RAII, thread local (!) guard that enables or disables grad mode upon
@@ -70,6 +70,33 @@ std::unordered_map<std::string, AtenTensorHandle> constant_map_from_pairs(
     input_map.emplace(pairs[i].name, pairs[i].handle);
   }
   return input_map;
+}
+
+// Shared constructor for AOTInductorModelCreate / AOTInductorModelCreateV2.
+// `populate(constant_map)` is called between model construction and
+// optional embedded-blob loading.
+template <typename Populate>
+AOTIRuntimeError createModelImpl(
+    AOTInductorModelHandle* model_handle,
+    bool load_constants_from_blob,
+    Populate&& populate) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto constant_map = std::make_shared<torch::aot_inductor::ConstantMap>();
+    auto constant_array = std::make_shared<
+        std::vector<torch::aot_inductor::ConstantHandle>>();
+    auto* model = new torch::aot_inductor::AOTInductorModel(
+        constant_map,
+        constant_array,
+        // device_str is hardcoded, as AOTInductorModelCreate is only used
+        // for CPU models.
+        "cpu",
+        "");
+    populate(*constant_map);
+    if (load_constants_from_blob) {
+      model->load_constants();
+    }
+    *model_handle = reinterpret_cast<AOTInductorModelHandle>(model);
+  })
 }
 
 } // namespace
@@ -110,6 +137,44 @@ AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
   })
 }
 
+
+AOTIRuntimeError AOTInductorModelContainerCreateWithExternalConstants(
+    AOTInductorModelContainerHandle* container_handle,
+    size_t num_models,
+    const char* device_str,
+    const char* cubin_dir,
+    const AOTInductorConstantMapEntry* constant_entries,
+    size_t num_constant_entries) {
+  if (num_models == 0) {
+    std::cerr << "Error: num_models must be positive, but got 0\n";
+    return AOTI_RUNTIME_FAILURE;
+  }
+  if (num_constant_entries != 0 && constant_entries == nullptr) {
+    std::cerr << "Error: constant_entries is null but num_constant_entries is "
+              << num_constant_entries << "\n";
+    return AOTI_RUNTIME_FAILURE;
+  }
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::optional<std::string> cubin_dir_opt;
+    if (cubin_dir != nullptr) {
+      cubin_dir_opt.emplace(cubin_dir);
+    }
+    // Rebuild the std map on the DSO side of the boundary so no std container
+    // crosses the ABI; the entries are C-compatible (name + AtenTensorHandle).
+    std::unordered_map<std::string, AtenTensorHandle> constants;
+    constants.reserve(num_constant_entries);
+    for (size_t i = 0; i < num_constant_entries; ++i) {
+      constants.emplace(constant_entries[i].name, constant_entries[i].handle);
+    }
+    auto* container = new torch::aot_inductor::AOTInductorModelContainer(
+        num_models,
+        std::string(device_str),
+        constants,
+        cubin_dir_opt);
+    *container_handle =
+        reinterpret_cast<AOTInductorModelContainerHandle>(container);
+  })
+}
 
 AOTIRuntimeError AOTInductorModelContainerDelete(
     AOTInductorModelContainerHandle container_handle) {
@@ -390,10 +455,23 @@ AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpuPairs(
 AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle) {
-  return AOTInductorModelContainerUpdateConstantBuffer(container_handle,
-          constant_map_handle,
-          /*use_inactive*/ true,
-          /*validate_full_update*/ true);
+  return AOTInductorModelContainerUpdateConstantBuffer(
+      container_handle,
+      constant_map_handle,
+      /*use_inactive=*/true,
+      /*validate_full_update=*/true);
+}
+
+AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs) {
+  return AOTInductorModelContainerUpdateConstantBufferPairs(
+      container_handle,
+      pairs,
+      num_pairs,
+      /*use_inactive=*/true,
+      /*validate_full_update=*/true);
 }
 
 AOTIRuntimeError AOTInductorModelContainerFreeInactiveConstantBuffer(
@@ -489,29 +567,34 @@ AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
 
 AOTIRuntimeError AOTInductorModelCreate(
     AOTInductorModelHandle* model_handle,
-    AOTInductorConstantMapHandle constant_map_handle){
-    CONVERT_EXCEPTION_TO_ERROR_CODE({
-      auto constant_map = std::make_shared<torch::aot_inductor::ConstantMap>();
-      auto constant_array = std::make_shared<std::vector<torch::aot_inductor::ConstantHandle>>();
-      auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
-
-      auto model = new torch::aot_inductor::AOTInductorModel(
-          constant_map,
-          constant_array,
-          "cpu", // device_str is hardcoded, as AOTInductorModelCreate is only use for CPU models
-          ""
-      );
-
-      if (input_map) {
-        for (auto const& kv : *input_map) {
-          constant_map->emplace(kv.first, kv.second);
+    AOTInductorConstantMapHandle constant_map_handle) {
+  return createModelImpl(
+      model_handle, constant_map_handle == nullptr, [=](auto& constant_map) {
+        auto* input_map = reinterpret_cast<
+            std::unordered_map<std::string, AtenTensorHandle>*>(
+            constant_map_handle);
+        if (input_map) {
+          for (const auto& kv : *input_map) {
+            constant_map.emplace(kv.first, kv.second);
+          }
         }
-      } else {
-        model->load_constants();
-      }
+      });
+}
 
-      *model_handle = reinterpret_cast<AOTInductorModelHandle>(model);
-    })}
+AOTIRuntimeError AOTInductorModelCreateV2(
+    AOTInductorModelHandle* model_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs) {
+  return createModelImpl(
+      model_handle, pairs == nullptr || num_pairs == 0, [=](auto& constant_map) {
+        if (pairs && num_pairs > 0) {
+          constant_map.reserve(num_pairs);
+          for (size_t i = 0; i < num_pairs; ++i) {
+            constant_map.emplace(pairs[i].name, pairs[i].handle);
+          }
+        }
+      });
+}
 
 AOTIRuntimeError AOTInductorModelRun(
     AOTInductorModelHandle model_handle,
@@ -592,6 +675,16 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantsBlobSize(
       { *ret_size = container->constant_blob_size(); })
 }
 
+AOTIRuntimeError AOTInductorModelContainerDidCallLoadConstants(
+    AOTInductorModelContainerHandle container_handle,
+    bool* did_call_load_constants) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *did_call_load_constants = container->did_call_load_constants(); })
+}
+
 
 // Load weights from a single blob in weight_blob_ptr
 AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(
@@ -604,6 +697,18 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(
       {container->update_constants_from_blob(weight_blob_ptr); })
     }
 
+AOTIRuntimeError AOTInductorSetUsePinnedAsyncConstantsCopy(bool enabled) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    torch::aot_inductor::setUsePinnedAsyncConstantsCopy(enabled);
+  })
+}
+
+AOTIRuntimeError AOTInductorSetPinnedAsyncConstantsCopyStageBufferBytes(
+    size_t bytes) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    torch::aot_inductor::setPinnedAsyncConstantsCopyStageBufferBytes(bytes);
+  })
+}
 
 AOTIRuntimeError AOTInductorGetLastError(
     const char** error_msg) {

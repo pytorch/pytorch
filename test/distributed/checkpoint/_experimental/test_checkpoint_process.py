@@ -458,7 +458,7 @@ class TestCheckpointProcess(TestCase):
             shared_tensor[0][0],
             42.0,
             places=6,
-            msg=f"Expected subprocess signature 42.0, got {shared_tensor[0]}. "
+            msg=lambda msg: f"{msg}\nExpected subprocess signature 42.0, got {shared_tensor[0]}. "
             f"Shared memory not working - subprocess modifications not visible!",
         )
 

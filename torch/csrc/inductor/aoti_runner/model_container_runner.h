@@ -65,6 +65,7 @@ class TORCH_API AOTIModelContainerRunner {
   void swap_constant_buffer();
   void free_inactive_constant_buffer();
   void update_constant_buffer_from_blob(const std::string& weights_path);
+  bool did_call_load_constants() const;
 
   std::vector<std::string> get_call_spec();
 
@@ -85,6 +86,16 @@ class TORCH_API AOTIModelContainerRunner {
       const std::string& device_str,
       const std::string& cubin_dir,
       const bool run_single_threaded);
+
+  // Construct with externally-provided weights. Skips the .so weight load
+  // entirely (no GPU allocation) and seeds the container's constants map
+  // from the caller-supplied tensors. The caller retains ownership.
+  AOTIModelContainerRunner(
+      const std::string& model_so_path,
+      size_t num_models,
+      const std::string& device_str,
+      const std::string& cubin_dir,
+      std::unordered_map<std::string, at::Tensor>& constants);
 
   // Default constructor for custom device implementations that don't
   // use .so files. Derived classes must override run_impl().
@@ -127,15 +138,24 @@ class TORCH_API AOTIModelContainerRunner {
   decltype(&AOTInductorModelContainerGetCallSpec) get_call_spec_func_{nullptr};
   decltype(&AOTInductorModelContainerGetConstantsBlobSize)
       get_constants_blob_size_func_{nullptr};
+  decltype(&AOTInductorModelContainerDidCallLoadConstants)
+      did_call_load_constants_func_{nullptr};
   decltype(&AOTInductorModelUpdateConstantsFromBlob)
       update_constants_from_blob_func_{nullptr};
   decltype(&AOTInductorGetLastError) get_last_error_func_{nullptr};
+  decltype(&AOTInductorModelContainerCreateWithExternalConstants)
+      create_with_external_constants_func_{nullptr};
 
   AOTInductorModelContainerHandle container_handle_ = nullptr;
 
   AOTIProxyExecutorHandle proxy_executor_handle_ = nullptr;
 
  private:
+  void load_aoti_symbols(
+      const std::string& model_so_path,
+      const std::string& device_str,
+      bool run_single_threaded);
+
   std::unique_ptr<torch::aot_inductor::ProxyExecutor> proxy_executor_;
 };
 
