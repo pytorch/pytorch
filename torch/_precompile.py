@@ -824,8 +824,18 @@ def _capture(
         if isinstance(a, torch.Tensor):
             a.grad = None
     fake_mode = None
+    shape_env = None
+    initial_runtime_asserts: set[Any] = set()
     if any(marks):
         flat_args, fake_mode = _fakeify_with_unbacked(pb_flat, user_flat, marks)
+        shape_env = fake_mode.shape_env
+        if shape_env is None:
+            raise AssertionError("mark_unbacked capture requires a ShapeEnv")
+        initial_runtime_asserts = {
+            runtime_assert.expr
+            for assertions in shape_env.deferred_runtime_asserts.values()
+            for runtime_assert in assertions
+        }
         user_input_shapes = [
             None
             if base is None
@@ -935,6 +945,23 @@ def _capture(
         for a, g in zip(real_flat, saved_grads):
             if isinstance(a, torch.Tensor):
                 a.grad = g
+    if shape_env is not None:
+        added_runtime_asserts = sorted(
+            {
+                str(runtime_assert.expr)
+                for assertions in shape_env.deferred_runtime_asserts.values()
+                for runtime_assert in assertions
+                if runtime_assert.expr not in initial_runtime_asserts
+            }
+        )
+        if added_runtime_asserts:
+            raise PrecompileError(
+                "precompile: fn introduced deferred runtime shape constraints that the "
+                "standalone driver cannot enforce yet: "
+                f"{added_runtime_asserts}. Rewrite fn to avoid the deferred constraint. "
+                "For equality constraints between input dimensions, give those "
+                "dimensions a shared shape_id or capture them static."
+            )
     _check_no_constant_tensors(gm)
     _assert_no_control_flow_subgraphs(gm)
     _assert_supported(gm)
@@ -3769,13 +3796,10 @@ class _PrecompileApi:
         runtime asserts. Other dims stay static.
         Dims that MUST be equal at runtime (e.g. two inputs combined by a broadcast that
         requires equal sizes, ``model(a) + model(b)``) MUST be given a SHARED ``shape_id``
-        so a mismatch is rejected; marking two such dims INDEPENDENTLY currently bakes a
-        SILENT equal-size assumption and a runtime mismatch does NOT raise the loud failure
-        eager gives (invariant 3). This is a harvesting gap, not an inherent limit of the
-        standalone artifact: the capture ShapeEnv DOES record the equality (as a deferred
-        runtime assert, e.g. ``Eq(u0, u1)``), but precompile does not yet harvest/enforce
-        those relational asserts in the driver -- only the decorator's declared min/max feed
-        the runtime bound checks. A shared ``shape_id`` is the way to get the check today.
+        so a mismatch is rejected. Any new deferred runtime shape constraint that the
+        standalone driver cannot enforce, whether between independently marked input
+        dims or on a derived data-dependent size, raises ``PrecompileError`` instead of
+        baking the example relation.
 
         Returns ``(python_code, cache)`` -- an executable Python source string (the
         single source of truth for the calling convention) and a
