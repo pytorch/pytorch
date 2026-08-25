@@ -967,11 +967,37 @@ class HPUTestBase(DeviceTypeTestBase):
         cls.primary_device = "hpu:0"
 
 
+# Out-of-tree PrivateUse1 backends (e.g. NPU, MTIA) share this single
+# PrivateUse1TestBase class. Rather than have every backend edit the same
+# `_capabilities()` method body (which would force unrelated backends'
+# PRs to conflict with each other), each backend registers its own
+# capability provider here, at module import time, before any test runs:
+#
+#     register_privateuse1_capabilities(lambda: {
+#         Capability.dtype.bf16: lambda: True,
+#     })
+#
+# `_capabilities()` merges every registered provider's map, so a provider
+# registered later wins on a key an earlier one already declared.
+_PRIVATEUSE1_CAPABILITY_PROVIDERS: list[Callable[[], dict]] = []
+
+
+def register_privateuse1_capabilities(provider: Callable[[], dict]) -> None:
+    _PRIVATEUSE1_CAPABILITY_PROVIDERS.append(provider)
+
+
 class PrivateUse1TestBase(DeviceTypeTestBase):
     primary_device: ClassVar[str]
     device_mod = None
     device_type = "privateuse1"
     bypass_device_restrictions = False
+
+    @classmethod
+    def _capabilities(cls):
+        capabilities = super()._capabilities()
+        for provider in _PRIVATEUSE1_CAPABILITY_PROVIDERS:
+            capabilities.update(provider())
+        return capabilities
 
     @classmethod
     def get_primary_device(cls):
