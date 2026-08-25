@@ -493,6 +493,26 @@ endif()
 cmake_dependent_option(USE_PRIORITIZED_TEXT_FOR_LD "Use prioritized text linker for ld."
   "${USE_PRIORITIZED_TEXT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
 
+# LLVM BOLT post-link binary optimization. Visible on AArch64, x86 and ppc64le.
+# Defaults ON for aarch64+linux+CUDA builds that also apply the linker script
+# optimization and a suitable llvm-bolt (>=21) is available. Depends on the
+# linker script because the committed profiles were collected with it enabled.
+function(check_llvm_bolt_version var item)
+  execute_process(COMMAND ${item} --version OUTPUT_VARIABLE _cmd_out)
+  string(REGEX MATCH "[0-9]+\.[0-9]+\.[0-9]+" _bolt_version "${_cmd_out}")
+  if(${_bolt_version} VERSION_LESS 21)
+    set(${var} FALSE PARENT_SCOPE)
+  endif()
+endfunction()
+find_program(LLVM_BOLT_EXECUTABLE NAMES llvm-bolt VALIDATOR check_llvm_bolt_version)
+
+set(USE_LLVM_BOLT_DEFAULT OFF)
+if(LINUX AND USE_CUDA AND CPU_AARCH64 AND USE_PRIORITIZED_TEXT_FOR_LD AND LLVM_BOLT_EXECUTABLE)
+  set(USE_LLVM_BOLT_DEFAULT ON)
+endif()
+cmake_dependent_option(USE_LLVM_BOLT "Optimize libraries with LLVM BOLT."
+  "${USE_LLVM_BOLT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
+
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
 # on Windows and AArch64.
@@ -839,40 +859,48 @@ endif()
 
 # Prioritized Text Linker Optimization
 if(USE_PRIORITIZED_TEXT_FOR_LD)
-
-  set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
-  set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
-
-  execute_process(
-    COMMAND ${Python_EXECUTABLE}
-            ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py
-            --filein "${LINKER_SCRIPT_FILE_IN}"
-            --fout  "${LINKER_SCRIPT_FILE_OUT}"
-    RESULT_VARIABLE _gen_result
-    OUTPUT_VARIABLE _gen_output
-    ERROR_VARIABLE  _gen_error
-  )
-
-  if(NOT _gen_result EQUAL 0)
-    message(FATAL_ERROR
-      "Failed to generate linker script:\n${_gen_output}\n${_gen_error}")
-  endif()
-
   append_cxx_flag_if_supported("-ffunction-sections" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fdata-sections" CMAKE_CXX_FLAGS)
   append_c_flag_if_supported("-ffunction-sections" CMAKE_C_FLAGS)
   append_c_flag_if_supported("-fdata-sections" CMAKE_C_FLAGS)
 
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -T${LINKER_SCRIPT_FILE_OUT}")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -T${LINKER_SCRIPT_FILE_OUT}")
+  set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
+  set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
+  set(LINKER_SCRIPT_PATH "${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py")
+  add_custom_command(
+    OUTPUT "${LINKER_SCRIPT_FILE_OUT}"
+    COMMAND ${Python_EXECUTABLE}
+            "${LINKER_SCRIPT_PATH}"
+            --filein "${LINKER_SCRIPT_FILE_IN}"
+            --fout   "${LINKER_SCRIPT_FILE_OUT}"
+    DEPENDS "${LINKER_SCRIPT_PATH}"
+            "${LINKER_SCRIPT_FILE_IN}"
+    VERBATIM
+  )
+  add_custom_target(generate_linker_script DEPENDS "${LINKER_SCRIPT_FILE_OUT}")
+elseif(LINUX AND CPU_AARCH64)
+  message(WARNING [[
+  It is strongly recommend to enable linker script optimization for all AArch64 Linux builds.
+  To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+  ]])
+endif()
 
-else()
-  if(LINUX AND CPU_AARCH64)
-    message(WARNING [[
-    It is strongly recommend to enable linker script optimization for all AArch64 Linux builds.
-    To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
-    ]])
-  endif()
+if(USE_LLVM_BOLT)
+  # BOLT requires -fno-reorder-blocks-and-partition for the compiler and
+  # --emit-relocs for the linker. Since --emit-relocs increases the binary
+  # size, we limit the use to libraries that are actually optimized by BOLT
+  # instead of applying globally (see torch_optimize_layout_if_enabled)
+  # NVIDIA internal benchmarking shows -fno-plt also provides a perf boost.
+  append_cxx_flag_if_supported("-fno-plt" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-fno-reorder-blocks-and-partition" CMAKE_CXX_FLAGS)
+  append_c_flag_if_supported("-fno-plt" CMAKE_C_FLAGS)
+  append_c_flag_if_supported("-fno-reorder-blocks-and-partition" CMAKE_C_FLAGS)
+
+  # Extract the committed BOLT profiles for the build-time optimization
+  # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
+  set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
+  file(ARCHIVE_EXTRACT INPUT "${CMAKE_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
+       DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
 endif()
 
 # Build libtorch mobile library, which contains ATen/TH ops and native support
@@ -1032,6 +1060,22 @@ cmake_dependent_option(
   "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
+# Flash Attention needs sm80+; disable it if no resolved arch reaches that.
+if(USE_FLASH_ATTENTION AND USE_CUDA AND NOT USE_ROCM)
+  string(REPLACE " " ";" _flash_attn_archs "${NVCC_FLAGS_EXTRA_readable}")
+  set(_flash_attn_has_sm80 OFF)
+  foreach(_arch IN LISTS _flash_attn_archs)
+    if(_arch MATCHES "^(sm|compute)_([0-9]+)" AND CMAKE_MATCH_2 GREATER_EQUAL 80)
+      set(_flash_attn_has_sm80 ON)
+    endif()
+  endforeach()
+  if(_flash_attn_archs AND NOT _flash_attn_has_sm80)
+    message(STATUS
+      "Disabling USE_FLASH_ATTENTION: it needs a CUDA architecture >= 8.0, "
+      "but the resolved CUDA architectures are '${_flash_attn_archs}'")
+    set(USE_FLASH_ATTENTION OFF)
+  endif()
+endif()
 
 IF(USE_ROCM AND ("gfx942" IN_LIST PYTORCH_ROCM_ARCH OR "gfx950" IN_LIST PYTORCH_ROCM_ARCH))
   message(WARNING "Setting USE_MSLK for gfx942/gfx950 to ON by default, doing ROCM build")
@@ -1059,6 +1103,23 @@ cmake_dependent_option(
   "Enable memory-efficient attention for scaled dot product attention.\
   Will be disabled if not supported by the platform" ON
   "USE_CUDA OR USE_ROCM" OFF)
+
+cmake_dependent_option(
+  USE_CMAKE_INSTRUMENTATION
+  "Use cmake-instrumentation to collect build metrics"
+  OFF # disabled by default because it causes CI timeouts
+  "CMAKE_VERSION VERSION_GREATER_EQUAL 4.3"
+  OFF
+)
+if(USE_CMAKE_INSTRUMENTATION)
+  cmake_instrumentation(
+    API_VERSION 1
+    DATA_VERSION 1.0
+    HOOKS postCMakeBuild
+    OPTIONS trace
+    CALLBACK "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_trace_summary.py" --root "${CMAKE_CURRENT_SOURCE_DIR}" --index
+  )
+endif()
 
 #
 # Cannot be put into Dependencies.cmake due circular dependency:
