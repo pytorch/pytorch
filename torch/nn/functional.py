@@ -7145,10 +7145,8 @@ def grouped_mm(
 
     Computes a grouped matrix multiply that shares weight shapes across experts but
     allows jagged token counts per expert, which is common in Mixture-of-Experts
-    (MoE) layers. Both ``mat_a`` and ``mat_b`` must be 2D or 3D tensors that already
-    satisfy the physical layout restrictions of grouped GEMM kernels (e.g., row-major
-    ``mat_a`` and column-major ``mat_b`` for FP8 inputs). Inputs are currently
-    expected to be ``torch.bfloat16`` values on CUDA devices with :math:`SM \ge 80`.
+    (MoE) layers. Both ``mat_a`` and ``mat_b`` must be 2D or 3D tensors. Inputs are currently
+    expected to be ``torch.float16``, ``torch.bfloat16``, or ``torch.float32`` values on CUDA devices with :math:`SM \ge 80`.
 
     Args:
         mat_a: Left operand. When 2D, its leading dimension is sliced into groups
@@ -7163,14 +7161,12 @@ def grouped_mm(
             ``weight.transpose(-2, -1)`` as ``mat_b``.
         offs: Optional 1D tensor of monotonically increasing ``int32`` offsets that
             delimit the jagged dimension of any 2D operand. ``offs[i]`` marks the end
-            of group ``i`` and ``offs[-1]`` must be strictly less than the total
+            of group ``i`` and ``offs[-1]`` must be less than or equal to the total
             length of that operand's sliced dimension; elements beyond ``offs[-1]``
             are ignored.
-        bias: Optional tensor that is added to the grouped outputs. Bias is not
-            jagged and must be broadcastable to the result shape of each group.
-        out_dtype: Optional dtype that controls the accumulation/output dtype.
-            Passing ``torch.float32`` accumulates BF16 inputs in FP32 while keeping
-            the grouped GEMM API non-differentiable.
+        bias: Optional tensor for bias addition. Currently must be ``None`` (bias is not
+            supported yet).
+        out_dtype: Optional output dtype. When provided, it must match ``mat_a.dtype``.
 
     Returns:
         A tensor containing the concatenated results of each per-group GEMM with
