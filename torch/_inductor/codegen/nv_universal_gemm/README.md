@@ -7,18 +7,20 @@ programs must fall back without partially claiming their reduction producers.
 
 ## Lowering flow
 
-1. `NVGemmEpilogueCapture` normalizes fused scheduler nodes and interprets their
-   Loop IR once.
-2. `NVGemmEpilogueLowering` recognizes reduction regions and produces an
+1. For each proposed scheduler-node fusion, `NVGemmEpilogueCapture` normalizes
+   the accumulated candidate and interprets its Loop IR.
+2. `NVGemmEpilogueLowering` uses iteration ranges, reduction ranges, and access
+   strides to recognize supported reduction regions and produces an
    `NVGemmEpilogueProgram`. The program owns captured nodes, reduction regions,
    the backend-neutral `GemmReductionPlan`, and tile constraints.
 3. `NVUniversalGemmScheduling` applies fusion ordering, provider capability,
    and output-liveness policy. Pointwise lowering produces a
    `GemmEpiloguePlan` containing source, inputs, outputs, and name bindings.
-4. Supported pointwise Loop IR becomes direct CuTeDSL source; unsupported
-   expressions fall back to EVT through the same plan. Reduction callbacks
-   become a `GemmReductionCompileConfig` shared by dense and block-scaled
-   providers.
+4. Supported Loop IR becomes direct CuTeDSL source; unsupported expressions
+   fall back to EVT through the same plan. Generated epilogues complete
+   fragment-local reductions and return partial values for reductions that span
+   fragments or threads. Dense and block-scaled kernels receive the shared
+   geometry and generated combine/finalize callbacks needed to merge partials.
 5. Scheduling and both providers validate the same reduction contract through
    `NVGemmReductionCapabilities` before the kernel claims its nodes.
 
@@ -33,11 +35,8 @@ programs must fall back without partially claiming their reduction producers.
 | Reduction-fed full-shape consumers | General fused graph | One planned feed-main value | Primary plus one secondary callback; additional consumers fall back |
 | Compressed reduction outputs | General scheduler outputs | At most one | At most one |
 | Reduction geometry | General Triton reduction domains | Grouped GEMM M or N axis | Grouped GEMM M or N axis |
-| Composite reductions | Expressible as ordinary Triton IR | Online softmax plus supported primitive reductions | Online softmax, variance, logsumexp, and supported primitive reductions |
+| Composite reductions | Expressible as ordinary Triton IR | Generated from supported reduction and pointwise FX nodes | Generated from supported reduction and pointwise Loop IR nodes |
 | Unsupported expression | Triton scheduling or lowering fallback | FlexGEMM fallback | NVGEMM fallback |
 
-NVGEMM is therefore not at Triton parity. It is close to FlexGEMM for the
-shared single-reduction contract, but the two CuTeDSL backends are not exact
-substitutes: FlexGEMM has FX-level ownership and provider-wide scalar capture,
-while NVGEMM recognizes more composite Loop IR reductions and supports a second
-reduction-fed consumer.
+NVGEMM represents each captured program through the structure of its Loop IR,
+with its semantics carried by the generated epilogue and reduction callbacks.
