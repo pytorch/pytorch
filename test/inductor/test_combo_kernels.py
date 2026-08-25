@@ -2227,6 +2227,82 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
                 counters["inductor"]["combo_subkernel_autotune_fallback"], 0
             )
 
+    @requires_cuda_and_triton
+    def test_compile_time_autotune_mutation_policy_is_stable(self):
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        def fn(a, b, c, d):
+            a.add_(1)
+            b.sigmoid_()
+            c = c + 5
+            d.tanh_()
+            return a, b, c, d
+
+        inputs = [
+            torch.randn(1 << 12, device=GPU_TYPE),
+            torch.randn(1 << 13, device=GPU_TYPE),
+            torch.randn(128, device=GPU_TYPE),
+            torch.randn(1 << 11, device=GPU_TYPE),
+        ]
+        expected = fn(*(x.clone() for x in inputs))
+        actual_inputs = tuple(x.clone() for x in inputs)
+        policies = {}
+        copy_calls = {}
+        available_memory = 0
+        original = CachingAutotuner.copy_args_to_cpu_if_needed
+
+        def record_policy(autotuner, *args, **kwargs):
+            nonlocal available_memory
+            copy_calls[autotuner] = copy_calls.get(autotuner, 0) + 1
+            available_memory = 0 if copy_calls[autotuner] % 2 else 1 << 40
+            copies = original(autotuner, *args, **kwargs)
+            if autotuner.mutated_arg_names and not autotuner.inductor_meta.get(
+                "combo_grid_meta"
+            ):
+                policies.setdefault(autotuner, set()).add(frozenset(copies))
+            return copies
+
+        def max_memory_allocated(*args, **kwargs):
+            return available_memory
+
+        counters.clear()
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "compile_threads": 1,
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                    "autotune_remote_cache": False,
+                    "bundled_autotune_remote_cache": False,
+                }
+            ),
+            patch.object(
+                CachingAutotuner,
+                "copy_args_to_cpu_if_needed",
+                record_policy,
+            ),
+            patch.object(
+                torch.accelerator,
+                "max_memory_allocated",
+                max_memory_allocated,
+            ),
+            patch.object(torch.accelerator, "memory_allocated", return_value=0),
+        ):
+            actual, code = run_and_get_code(torch.compile(fn), *actual_inputs)
+
+        self.assertEqual(actual, expected)
+        self.assertIn("SequentialFlattenComboKernelGrid", " ".join(code))
+        self.assertGreater(counters["inductor"]["combo_subkernel_autotune"], 0)
+        self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
+        multi_config_policies = [
+            values for key, values in policies.items() if copy_calls[key] > 1
+        ]
+        self.assertGreater(len(multi_config_policies), 0)
+        self.assertTrue(any(next(iter(values)) for values in multi_config_policies))
+        for values in multi_config_policies:
+            self.assertEqual(len(values), 1)
+
     @requires_gpu_and_triton
     def test_compile_time_autotune_looped_reduction(self):
         # rnumel above the persistent threshold but below the split-reduction
