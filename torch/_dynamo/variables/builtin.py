@@ -503,7 +503,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             operator.ixor,
             operator.ior,
             operator.concat,
-            operator.iconcat,
             operator.index,
         }
         from .tensor import supported_comparison_ops
@@ -559,7 +558,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             operator.ixor,
             operator.ior,
             operator.concat,
-            operator.iconcat,
         }
         return fns  # type: ignore[return-value]
 

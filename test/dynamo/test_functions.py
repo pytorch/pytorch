@@ -3948,6 +3948,19 @@ class GraphModule(torch.nn.Module):
         opt_fn_list = torch.compile(fn_list_const, fullgraph=True)
         self.assertEqual(opt_fn_list(), [1, 2, 3, 4])
 
+    def test_operator_iconcat_list_mutation(self):
+        # iconcat should mutate the first list arg in-place and return it
+        def fn(a, b):
+            return operator.iconcat(a, b)
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        a = [1, 2, 3]
+        b = [4, 5]
+        result = opt_fn(a, b)
+        self.assertEqual(result, [1, 2, 3, 4, 5])
+        self.assertEqual(a, [1, 2, 3, 4, 5])
+        self.assertIs(result, a)
+
     def test_operator_iconcat_tuple(self):
         # iconcat on tuples (immutable) should desugar to concat
         # via IN_PLACE_DESUGARING_MAP, since tuples can't be mutated in-place
