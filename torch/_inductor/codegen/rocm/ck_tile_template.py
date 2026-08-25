@@ -30,7 +30,9 @@ class CKTileTemplate(ROCmTemplate):
         "BF16": "ck_tile::bfloat16_t",
     }
 
-    # Keys are _TORCH_DTYPE_TO_CK values and must match _CK_DTYPE_ALIASES.
+    # Bytes per element, used for the alignment and LDS budget math in the gemm
+    # templates. Keys are _TORCH_DTYPE_TO_CK values. This table does not decide
+    # which instances exist; see GEMM_DTYPES in ck_tile_universal_gemm_template.
     ck_dtype_to_size = {
         _TORCH_DTYPE_TO_CK[torch.float16]: 2,
         _TORCH_DTYPE_TO_CK[torch.bfloat16]: 2,
@@ -49,11 +51,9 @@ class CKTileTemplate(ROCmTemplate):
 
     def globals(self) -> IndentedBuffer:
         res = super().globals()
-        alias_lines = "\n".join(
-            f"                using {name} = {ctype};"
-            for name, ctype in self._CK_DTYPE_ALIASES.items()
-        )
-        res.splice(f"\n{alias_lines}\n")
+        res.newline()
+        for name, ctype in self._CK_DTYPE_ALIASES.items():
+            res.writeline(f"using {name} = {ctype};")
         return res
 
     def torch_type_to_ck(self, node: IRNode, ptr: str) -> str:

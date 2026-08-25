@@ -816,13 +816,10 @@ struct FlatmmPipelineProblem
         }
         self.assertTrue(labels)
         self.assertEqual(labels, set(self._ck_tile.GEMM_DTYPES))
-        self.assertEqual(
-            set(template_cls._CK_DTYPE_ALIASES),
-            cpp_aliases - {"Row", "Col"},
-        )
-        self.assertLessEqual(
-            set(self._ck_tile.GEMM_DTYPES), set(template_cls.ck_dtype_to_size)
-        )
+        # emit_ck_instance splices these labels into `using ADataType = ...;`, so a
+        # label without a rendered alias produces HIP that does not compile.
+        self.assertLessEqual(labels, cpp_aliases)
+        self.assertLessEqual(labels, set(template_cls.ck_dtype_to_size))
 
     @_parametrize_dtype
     @parametrize("epilogue", ("Default", "CShuffle"))
