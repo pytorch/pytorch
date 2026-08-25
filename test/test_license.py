@@ -82,15 +82,36 @@ class TestLicense(TestCase):
         self.assertTrue(any("New license file(s)" in e for e in errors), msg=errors)
 
     def test_audit_missing_license_file(self) -> None:
+        present = [("third_party/shipped/LICENSE", "MIT\n")]
+        present += [
+            (f"third_party/dep{i}/LICENSE", "MIT\n") for i in range(9)
+        ]
+        listed = [p for p, _ in present] + ["third_party/removed/LICENSE"]
+        paths_literal = ", ".join(f'"{p}"' for p in listed)
         errors, skip_reason = _audit_fixture(
-            'license = "MIT"\nlicense-files = ["third_party/shipped/LICENSE", '
-            '"third_party/removed/LICENSE"]',
+            f'license = "MIT"\nlicense-files = [{paths_literal}]',
             'excluded = []\n\n[[spdx]]\nexpression = "MIT"\n'
-            'paths = ["third_party/shipped/LICENSE", "third_party/removed/LICENSE"]',
-            [("third_party/shipped/LICENSE", "MIT\n")],
+            f"paths = [{paths_literal}]",
+            present,
         )
         self.assertIsNone(skip_reason)
         self.assertTrue(
+            any("do not exist in the checkout" in e for e in errors), msg=errors
+        )
+
+    def test_audit_sparse_skips_missing_path_check(self) -> None:
+        listed = ['"LICENSE"', '"third_party/present/LICENSE"'] + [
+            f'"third_party/missing_{i}/LICENSE"' for i in range(18)
+        ]
+        paths_literal = ", ".join(listed)
+        errors, skip_reason = _audit_fixture(
+            f'license = "MIT"\nlicense-files = [{paths_literal}]',
+            'excluded = []\n\n[[spdx]]\nexpression = "MIT"\n'
+            f"paths = [{paths_literal}]",
+            [("LICENSE", "MIT\n"), ("third_party/present/LICENSE", "MIT\n")],
+        )
+        self.assertIsNone(skip_reason)
+        self.assertFalse(
             any("do not exist in the checkout" in e for e in errors), msg=errors
         )
 

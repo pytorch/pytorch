@@ -32,6 +32,9 @@ SPDX_OMIT_FROM_PROJECT_LICENSE = frozenset({"LicenseRef-NvidiaProprietary"})
 _SKIP_REASON = (
     "third_party/ has no discoverable license files (submodules not checked out)"
 )
+# Missing-path enforcement runs only when most declared license-files exist on disk
+# (full / quick-checks checkout). Sparse CPU/CUDA CI omits many submodules.
+_POPULATED_CHECKOUT_MIN_PRESENT_FRACTION = 0.9
 
 
 def _skip_discovery_path(path: str) -> bool:
@@ -109,6 +112,13 @@ def expected_project_license_expression(spdx: dict[str, str]) -> str:
     return " AND ".join(_parenthesize_compound_expression(e) for e in expressions)
 
 
+def _checkout_looks_populated(repo_root: Path, included: set[str]) -> bool:
+    if not included:
+        return True
+    present = sum(1 for path in included if (repo_root / path).is_file())
+    return present / len(included) >= _POPULATED_CHECKOUT_MIN_PRESENT_FRACTION
+
+
 def audit_repo_license_files(repo_root: Path) -> tuple[list[str], str | None]:
     """Return (errors, skip_reason). skip_reason is set when discovery is skipped."""
     pyproject = repo_root / "pyproject.toml"
@@ -149,10 +159,11 @@ def audit_repo_license_files(repo_root: Path) -> tuple[list[str], str | None]:
         )
 
     if missing := sorted(p for p in inc if not (repo_root / p).is_file()):
-        err.append(
-            "license-files lists path(s) that do not exist in the checkout: "
-            + ", ".join(missing)
-        )
+        if _checkout_looks_populated(repo_root, inc):
+            err.append(
+                "license-files lists path(s) that do not exist in the checkout: "
+                + ", ".join(missing)
+            )
 
     spdx_keys = set(spdx)
     if spdx_keys != inc:
