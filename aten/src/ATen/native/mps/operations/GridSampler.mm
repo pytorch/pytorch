@@ -130,7 +130,7 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
       check_grid_sampler_2d(input, grid);
       break;
     case 3:
-      check_grid_sampler_3d(input, grid, _interpolation_mode);
+      check_grid_sampler_3d(input, grid);
       break;
     default:
       TORCH_INTERNAL_ASSERT(false, "Only 2D and 3D sampling are supported, but got: ", sampler_dims);
@@ -331,7 +331,7 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
                                                         bool align_corners,
                                                         std::array<bool, 2> output_mask) {
   using namespace mps;
-  check_grid_sampler_3d_backward(input, grid, grad_output, interpolation_mode);
+  check_grid_sampler_3d_backward(input, grid, grad_output);
 
   TORCH_CHECK_NOT_IMPLEMENTED(interpolation_mode == 0 || interpolation_mode == 1,
                               "grid_sampler_3d backward on MPS only supports bilinear and nearest interpolation");

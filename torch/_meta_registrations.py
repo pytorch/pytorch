@@ -5913,8 +5913,8 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
             f" and grid with sizes {grid.shape}"
         ),
     )
-    # CPU and CUDA sample 5D bicubic; the backends that do not reject it in eager, so the
-    # trace has to reject it too rather than succeed and fail at run time.
+    # CPU and CUDA sample 5D bicubic, mps and xpu reject it in eager, so the trace
+    # rejects it too instead of succeeding and failing at run time.
     torch._check(
         input.device.type not in ("mps", "xpu")
         or interpolation_mode != GridSamplerInterpolation.BICUBIC.value,
