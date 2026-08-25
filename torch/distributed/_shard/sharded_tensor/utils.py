@@ -127,7 +127,7 @@ def build_metadata_from_local_shards(
     first_shard_requires_grad = local_shards[0].tensor.requires_grad
     first_shard_is_pinned = local_shards[0].tensor.is_pinned()
 
-    # 1). Validate local tensors and associated metadatas
+    # 1). Validate local tensors and associated metadata
     for local_shard in local_shards:
         local_shard_tensor = local_shard.tensor
         local_shard_meta = local_shard.metadata
