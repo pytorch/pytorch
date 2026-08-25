@@ -1,14 +1,14 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
-#include <c10/util/TypeSafeSignMath.h>
-#include <c10/util/complex.h>
+#include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/TypeSafeSignMath.h>
+#include <torch/headeronly/util/complex.h>
 
 #include <cmath>
 #include <limits>
 #include <type_traits>
 
-namespace c10 {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 // In some versions of MSVC, there will be a compiler error when building.
 // C4146: unary minus operator applied to unsigned type, result still unsigned
 // C4804: unsafe use of type 'bool' in operation
@@ -50,11 +50,11 @@ overflows(From f, bool strict_unsigned = false) {
     // `a + 255 * b`.
     if (!strict_unsigned) {
       return greater_than_max<To>(f) ||
-          (c10::is_negative(f) &&
+          (is_negative(f) &&
            -static_cast<uint64_t>(f) > static_cast<uint64_t>(limit::max()));
     }
   }
-  return c10::less_than_lowest<To>(f) || greater_than_max<To>(f);
+  return less_than_lowest<To>(f) || greater_than_max<To>(f);
 }
 
 template <typename To, typename From>
@@ -112,4 +112,8 @@ std::enable_if_t<is_complex<From>::value, bool> overflows(
              typename scalar_value_type<To>::type,
              typename From::value_type>(f.imag(), strict_unsigned);
 }
+HIDDEN_NAMESPACE_END(torch, headeronly)
+
+namespace c10 {
+using torch::headeronly::overflows;
 } // namespace c10
