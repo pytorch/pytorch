@@ -642,6 +642,9 @@ def register_interface_for_device(
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
+    from .variables.user_defined import UserDefinedClassVariable
+
+    UserDefinedClassVariable._in_graph_classes.cache_clear()
 
 
 def get_interface_for_device(device: str | torch.device) -> type[DeviceInterface]:
