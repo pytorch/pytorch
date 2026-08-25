@@ -59,6 +59,7 @@ from ..runtime.runtime_utils import (
 )
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
+    _IntLike,
     cache_property_on_self,
     decompose_index,
     expr_fits_within_32bit,
@@ -509,8 +510,8 @@ class NodeInfo(NamedTuple):
     node_schedule: list
     tiling: dict
     tiling_scores: dict | None
-    numel: Any
-    rnumel: Any
+    numel: _IntLike
+    rnumel: _IntLike
     features: SIMDKernelFeatures
     is_persistent_reduction: bool
 
@@ -2956,6 +2957,8 @@ class SIMDScheduling(BaseScheduling):
         )
         for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
             buffer_name = partial_accum.buffer_name
+            if buffer_name in V.graph.removed_buffers:
+                continue
 
             stride_str = f"({nsplit}) * ({rnumel})"
             start = f"{idx} * {stride_str}"
@@ -2967,27 +2970,50 @@ class SIMDScheduling(BaseScheduling):
             opname = reduction_type2op.get(
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
-            final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
+            reduced = (
+                f"{ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
+            )
+
+            buffer = V.graph.get_buffer(buffer_name)
+            if not isinstance(buffer, ir.Buffer):
+                raise AssertionError(type(buffer))
 
             # Restore the exact original shape via .view() to handle keepdim
             # and multi-dimensional reductions correctly.
-            buffer = V.graph.get_buffer(buffer_name)
-            if buffer is not None:
-                final_shape = [
-                    V.graph.wrapper_code.codegen_python_sizevar(s)
-                    for s in buffer.get_layout().size
-                ]
-                final_shape_str = f"[{', '.join(final_shape)}]"
-                final_reduce += f".view({final_shape_str})"
+            final_shape = [
+                V.graph.wrapper_code.codegen_python_sizevar(s)
+                for s in buffer.get_layout().size
+            ]
+            reduced += f".view([{', '.join(final_shape)}])"
 
-            # The workspace tensor is in torch.float, need a cast if the buffer is
-            # not.
-            if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
-                final_reduce += f".to({buffer_dtype})"
-            V.graph.wrapper_code.writeline(final_reduce)
-            # mark the buffer as allocated, so we don't try to allocate
-            # it again when it's later used
-            V.graph.wrapper_code.allocated.add(buffer_name)
+            spec = buffer.get_output_spec()
+            if isinstance(spec, ir.NonOwningLayout):
+                # The buffer is a view into another buffer's storage (e.g. a
+                # cat destination). Rebinding the name would leave the
+                # underlying region never written; write through the view
+                # instead. copy_() also handles any dtype conversion from the
+                # torch.float workspace.
+                # See https://github.com/pytorch/pytorch/issues/193061
+                V.graph.wrapper_code.codegen_allocation(buffer)
+                V.graph.wrapper_code.writeline(f"{buffer_name}.copy_({reduced})")
+            elif type(spec) in (ir.FixedLayout, ir.FlexibleLayout):
+                # The workspace tensor is in torch.float, need a cast if the
+                # buffer is not.
+                if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
+                    reduced += f".to({buffer_dtype})"
+                V.graph.wrapper_code.writeline(f"{buffer_name} = {reduced}")
+                # mark the buffer as allocated, so we don't try to allocate
+                # it again when it's later used
+                V.graph.wrapper_code.allocated.add(buffer_name)
+            else:
+                # Rebinding the name silently drops the write for any spec
+                # that must be written through rather than bound (e.g.
+                # MutationLayoutSHOULDREMOVE, CommBufferLayout). Fail loudly
+                # rather than producing wrong results.
+                raise AssertionError(
+                    f"unsupported mix-order reduction output spec "
+                    f"{type(spec).__name__} for {buffer_name}"
+                )
 
         kernel.deallocate_workspaces()
 
@@ -4505,10 +4531,17 @@ class SIMDScheduling(BaseScheduling):
                     # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((src_code, kernel, node_group))
             else:
+                # Compile-time subkernel autotuning is not vetted for deterministic mode.
+                deterministic_compile_time_fallback = (
+                    per_subkernel_blocks
+                    and config.combo_kernel_compile_time_autotune
+                    and config.deterministic
+                )
                 if (
                     enable_autotune
                     and per_subkernel_blocks
                     and config.combo_kernel_compile_time_autotune
+                    and not deterministic_compile_time_fallback
                     and not only_gen_src_code
                 ):
                     group = list(node_group)
@@ -4553,7 +4586,11 @@ class SIMDScheduling(BaseScheduling):
                         # pyrefly: ignore [bad-argument-type]
                         kernel_code_list.append((co_src, co_kernel, [pn]))
                     continue
-                no_bench_mode = per_subkernel_blocks and not enable_autotune
+                # Use heuristic block sizes when autotuning is disabled or when
+                # deterministic mode prevents compile-time subkernel benchmarking.
+                no_bench_mode = per_subkernel_blocks and (
+                    not enable_autotune or deterministic_compile_time_fallback
+                )
                 fusion_pns: list[Any] = []
                 fusion_configs: list[Any] = []
                 carve_out_pns: list[Any] = []
@@ -4587,7 +4624,8 @@ class SIMDScheduling(BaseScheduling):
                     kernel = self._build_combo_kernel(
                         fusion_pns,
                         node_schedule_map,
-                        enable_autotune=enable_autotune,
+                        enable_autotune=enable_autotune
+                        and not deterministic_compile_time_fallback,
                         mixed_sizes=mixed_sizes,
                         per_subkernel_blocks=per_subkernel_blocks,
                         only_gen_src_code=only_gen_src_code,

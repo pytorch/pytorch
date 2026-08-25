@@ -447,6 +447,21 @@ test_python() {
   assert_git_not_dirty
 }
 
+test_cpuset_num_threads() {
+  # Regression test for https://github.com/pytorch/pytorch/issues/193859
+  # When the process is restricted to a single CPU via a cpuset/affinity mask,
+  # the default intraop thread count must respect that limit rather than the
+  # host's physical core count. Clear the *_NUM_THREADS env vars so the count
+  # is derived from the affinity mask instead of an explicit override.
+  if ! command -v taskset >/dev/null; then
+    echo "taskset not available, skipping cpuset num_threads test"
+    return
+  fi
+  env -u OMP_NUM_THREADS -u MKL_NUM_THREADS taskset -c 0 python -c \
+    'import torch; n = torch.get_num_threads(); print("num_threads =", n); assert n == 1, n'
+  assert_git_not_dirty
+}
+
 test_python_smoke() {
   # Smoke tests for H100/B200
   install_nvmath
@@ -1149,18 +1164,17 @@ test_better_benchmark() {
   benchmark_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/better-benchmark.XXXXXX")"
   mkdir -p "${test_reports_dir}" "${debug_dir}"
 
-  git clone --depth 1 --branch main https://github.com/eellison/better-benchmark.git "${benchmark_dir}"
+  git clone --depth 1 --branch main \
+    https://github.com/eellison/better-benchmark.git "${benchmark_dir}"
   pushd "${benchmark_dir}"
 
   local gpu_indices
   gpu_indices="$(python - <<'PY'
-import sys
 import torch
 
 count = torch.cuda.device_count()
 if count < 1:
     raise RuntimeError("Expected at least one GPU")
-print(f"Found {count} GPUs", file=sys.stderr)
 print(",".join(str(index) for index in range(count)))
 PY
 )"
@@ -1170,11 +1184,10 @@ PY
     --all-shapes \
     --gpus "${gpu_indices}" \
     --output "${debug_dir}/current.json"
-  # TODO: Add a single-input CI export mode to bench_report.py. For now it
-  # requires --compare, so compare the result with itself and export the
-  # unchanged head values as PyTorch v3 dashboard records.
-  python scripts/bench_report.py \
-    --compare "${debug_dir}/current.json" "${debug_dir}/current.json" \
+  python scripts/dashboard_export.py \
+    --input "${debug_dir}/current.json" \
+    --model-accounting benchmarks/model_accounting/b200 \
+    --timing auto \
     --ci-json "${test_reports_dir}/inductor_kernel_benchmark.json"
   popd
 }
@@ -2595,6 +2608,7 @@ elif [[ "${TEST_CONFIG}" == "tsan" ]]; then
 else
   install_torchvision
   install_monkeytype
+  test_cpuset_num_threads
   test_python
   test_aten
   test_vec256

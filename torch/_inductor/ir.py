@@ -662,7 +662,7 @@ class IRNode:
     def wrap_for_lowering(self) -> IRNode:
         return TensorBox.create(self)
 
-    def _post_init_setattr(self, attr: str, value: Any) -> None:
+    def _post_init_setattr(self, attr: str, value: object) -> None:
         # Intended for use in __post_init__ for enforcing an invariant on a dataclass
         # If you must, can also be used for setting provenance info
         # We would like to try and minimize these usages though
@@ -3842,7 +3842,7 @@ class SqueezeView(BaseView):
 
         return new_size, reindex
 
-    def __init__(self, data: Any) -> None:
+    def __init__(self, data: object) -> None:
         raise AssertionError("use SqueezeView.create()")
 
 
@@ -5210,7 +5210,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
         return self.real_layout().storage_size()
 
     def get_buffer(self) -> Buffer:
-        def unwrap_views(target: Any) -> Any:
+        def unwrap_views(target: object) -> object:
             if isinstance(target, MutationLayoutSHOULDREMOVE):
                 return unwrap_views(target.target)
             if isinstance(target, BaseView):
@@ -7226,7 +7226,7 @@ class ExternKernel(InputsKernel):
     def get_read_writes(self) -> dependencies.ReadWrites:
         read_writes = super().get_read_writes()
 
-        def add_ir_read(value: Any) -> None:
+        def add_ir_read(value: object) -> None:
             if isinstance(value, IRNode):
                 name = value.maybe_get_name()
                 if name is not None:
@@ -7987,8 +7987,14 @@ class ExternKernel(InputsKernel):
         n_args = len(args)
         n_pos_args = len(self.arg_properties)
         # For cpp wrapper, if some positional args are not provided, we need to check
-        # if they're in the kwargs or use their default value
-        if n_args < n_pos_args:
+        # if they're in the kwargs or use their default value. This is schema-based and
+        # only applies to OpOverloads: for HigherOrderOperators (and other non-OpOverload
+        # kernels) collect_arg_kwarg_properties fills arg_properties with empty placeholder
+        # dicts (one per flattened input, not the positional-arg count), so they have no
+        # "name"/"default_value" to fill from and the args/kwargs from unflatten_args are
+        # already complete. e.g. triton_kernel_wrapper_functional passes all its tensors via
+        # kwargs (n_args == 0), which would otherwise index empty dicts here -> KeyError.
+        if n_args < n_pos_args and isinstance(self.op_overload, torch._ops.OpOverload):
             log.debug(
                 "%s has %d unprovided positional arguments. "
                 "Will check if they are in the keyword arguments or will use default values.",
@@ -9967,36 +9973,19 @@ class FallbackKernel(ExternKernelAlloc):
                 kernel not in config.aot_inductor.custom_ops_to_c_shims
             )
 
-        # Handle the special case where a complex number is input to a C-shim kernel for
-        # a scalar input.  The torchgen'ed shim API will use type "double", which is
-        # incompatible with complex numbers, forcing a fallback to runtime dispatch.
+        # Scalars the C-shim's double ABI cannot represent must use the proxy executor
+        # instead; see _cshim_scalar_abi_forces_proxy.
         if (
             V.graph.cpp_wrapper
             and isinstance(kernel, torch._ops.OpOverload)
             and not self.use_runtime_dispatch
         ):
-
-            def is_number(t: torch.JitType) -> bool:
-                if isinstance(t, torch.OptionalType):
-                    return is_number(t.getElementType())
-                return isinstance(t, torch.NumberType)
-
-            # Using unflatten_args is a bit of a hack, but all the complex arguments we
+            # Using unflatten_args is a bit of a hack, but all the scalar arguments we
             # care about are in self.constant_args, and calling unflatten_args puts them
             # in the correct order without triggering codegen.
             args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
-            # Append kwarg values to args.  ordered_kwargs_for_cpp_kernel is guaranteed
-            # to be set, since this is an OpOverload kernel.
-            args_iter = itertools.chain(
-                args,
-                (
-                    self.get_kwargs_value(k, **kwargs)
-                    for k in self.ordered_kwargs_for_cpp_kernel
-                ),
-            )
-            self.use_runtime_dispatch = any(
-                isinstance(v, complex) and is_number(a.real_type)
-                for v, a in zip(args_iter, kernel._schema.arguments)
+            self.use_runtime_dispatch = self._cshim_scalar_abi_forces_proxy(
+                kernel, args, kwargs
             )
 
         self.codegen_comment(wrapper)
@@ -10110,6 +10099,62 @@ class FallbackKernel(ExternKernelAlloc):
             return False
         return kernel not in config.aot_inductor.custom_ops_to_c_shims
 
+    @staticmethod
+    def _cshim_scalar_abi_forces_proxy(
+        kernel: _OpOverloads, args: Any, kwargs: Any
+    ) -> bool:
+        # Whether a Scalar arg cannot survive the C-shim's `double` Scalar ABI. Complex
+        # does not fit a double at all; bool and int lose their type, which ATen rejects
+        # (`alpha=1` -> `1.0`) or silently mis-promotes. Such ops go to the proxy executor,
+        # which serializes each scalar with its real type. Used by both codegen() and
+        # _materialize_scalar_tensor_args.
+        if not V.graph.cpp_wrapper or not isinstance(kernel, torch._ops.OpOverload):
+            return False
+
+        def is_number(t: torch.JitType) -> bool:
+            if isinstance(t, torch.OptionalType):
+                return is_number(t.getElementType())
+            return isinstance(t, torch.NumberType)
+
+        def is_integral_tensor(v: Any) -> bool:
+            if not isinstance(v, IRNode):
+                return False
+            try:
+                dtype = v.get_dtype()
+            except (AttributeError, NotImplementedError):
+                return False
+            return (
+                dtype is not None
+                and not dtype.is_floating_point
+                and not dtype.is_complex
+            )
+
+        has_integral_tensor = any(
+            is_integral_tensor(v) for v in itertools.chain(args, kwargs.values())
+        )
+
+        for i, arg_info in enumerate(kernel._schema.arguments):
+            if arg_info.name in kwargs:
+                value = kwargs[arg_info.name]
+            elif not arg_info.kwarg_only and i < len(args):
+                value = args[i]
+            else:
+                value = arg_info.default_value
+            if not is_number(arg_info.real_type):
+                continue
+            if isinstance(value, complex):
+                return True
+            # A bool Scalar is its own c10::Scalar kind; the double ABI turns True into
+            # 1.0, which is neither boolean nor integral. Ungated by has_integral_tensor
+            # because it also changes dtype inference on ops with no tensor arg at all
+            # (full(size, True) is bool, full(size, 1.0) is float).
+            if type(value) is bool:
+                return True
+            # `type(...) is int`, not isinstance: bool subclasses int, handled above.
+            if type(value) is int and has_integral_tensor:
+                return True
+        return False
+
     @classmethod
     def _materialize_scalar_tensor_args(
         cls, kernel: _OpOverloads, args: Any, kwargs: Any
@@ -10127,7 +10172,12 @@ class FallbackKernel(ExternKernelAlloc):
         # as *real* tensors (see the V.graph.constants branch there).
         if not isinstance(kernel, torch._ops.OpOverload):
             return args, kwargs, False
-        if not cls._uses_aot_proxy_executor(kernel):
+        # Materialize for anything codegen() will send to the proxy executor: no C-shim,
+        # or a scalar the C-shim's double ABI cannot represent.
+        if not (
+            cls._uses_aot_proxy_executor(kernel)
+            or cls._cshim_scalar_abi_forces_proxy(kernel, args, kwargs)
+        ):
             return args, kwargs, False
 
         tensor_dtypes: list[torch.dtype] = []
@@ -12223,6 +12273,16 @@ class _WaitKernel(_CollectiveKernel):
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_wait_tensor")
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        if (
+            self.op_overload is torch.ops._c10d_functional.wait_tensors.default
+            and V.graph.cpp_wrapper
+        ):
+            from .exc import CppWrapperCodegenError
+
+            raise CppWrapperCodegenError(
+                "_c10d_functional.wait_tensors is not supported with "
+                "C++ wrapper/AOTInductor"
+            )
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         wrapper.generate_extern_kernel_alloc(self)
 
@@ -12230,7 +12290,15 @@ class _WaitKernel(_CollectiveKernel):
             self.codegen_size_asserts(wrapper)
 
     def get_volatile_reads(self) -> Sequence[IRNode]:
-        inp = self.inputs[0]
+        volatile_reads: list[IRNode] = []
+        for inp in pytree.tree_leaves(self.inputs):
+            if not isinstance(inp, IRNode):
+                raise AssertionError("Expected isinstance(inp, IRNode)")
+            volatile_reads.extend(self._get_volatile_reads(inp))
+        return volatile_reads
+
+    @staticmethod
+    def _get_volatile_reads(inp: IRNode) -> Sequence[IRNode]:
         if not isinstance(inp, IRNode):
             raise AssertionError("Expected isinstance(inp, IRNode)")
         if isinstance(inp, _CollectiveKernel):
@@ -12257,20 +12325,26 @@ class _WaitKernel(_CollectiveKernel):
             return []
 
     @classmethod
-    def create_wait(cls, kernel: _OpOverloads, inp: TensorBox) -> None:
+    def create_wait(
+        cls, kernel: _OpOverloads, inp: TensorBox | list[TensorBox]
+    ) -> None:
         with V.graph.fake_mode:
             result = cls.process_kernel(kernel, inp)
         if result.unbacked_bindings:
             raise AssertionError(f"{kernel} {result.unbacked_bindings}")
+        inps = pytree.tree_leaves(inp)
+        if not inps:
+            raise AssertionError(f"{kernel} requires at least one tensor")
+        device = inps[0].get_device()
         packed = cls(
-            NoneLayout(device=inp.get_device()),
+            NoneLayout(device=device),
             kernel,
             result.tensor_args,
             result.non_tensor_args,
             result.unflatten_args,
         )
-        packed.mutation_outputs.append(
-            MutationOutput(NoneLayout(device=inp.get_device()), inp, packed)
+        packed.mutation_outputs.extend(
+            MutationOutput(NoneLayout(device=device), tensor, packed) for tensor in inps
         )
 
     def get_read_writes(self) -> dependencies.ReadWrites:
