@@ -20,7 +20,7 @@ from .. import graph_break_hints, variables
 from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..source import AttrSource
 from ..utils import istype, unpack_iterable
-from .base import getset_build, getset_read, GetSet, Member, Method, VariableTracker
+from .base import GetSet, getset_build, getset_read, Member, Method, VariableTracker
 from .constant import ConstantVariable
 from .object_protocol import generic_str
 
@@ -517,5 +517,3 @@ class NameErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#NameError
     _kwarg_attrs = ("name",)
     tp_members = {"name": Member(getset_read(lambda s: s._attrs["name"]))}
-
-
