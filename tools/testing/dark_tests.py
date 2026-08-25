@@ -53,6 +53,50 @@ WHERE t.time_inserted > now() - INTERVAL {days: Int32} DAY
 """
 
 
+# Job names embed the runner label, so the observed capability of a run is
+# readable from the job name. g4dn/g5/g6 are the sm75-sm89 runners every
+# auto-discovered config lands on; h100/b200 are the scarce ones the smoke lists
+# curate. Aggregated in ClickHouse rather than returned per job: a week of
+# per-(test, job) rows is orders of magnitude larger than the answer.
+BIG_RUNNERS = ("linux.aws.h100", "linux.dgx.b200")
+SMALL_RUNNERS = ("linux.g4dn", "linux.g5.", "linux.g6.")
+
+ARCH_QUERY = """
+SELECT
+    t.classname AS classname,
+    t.name AS name,
+    maxIf(1, empty(t.skipped) AND ({big})) AS ran_big,
+    maxIf(1, notEmpty(t.skipped) AND ({small})) AS skipped_small
+FROM default.test_run_s3 t
+INNER JOIN default.workflow_job j FINAL ON t.job_id = j.id
+INNER JOIN default.workflow_run w FINAL ON j.run_id = w.id
+WHERE t.time_inserted > now() - INTERVAL {{days: Int32}} DAY
+  AND j.created_at > now() - INTERVAL {{days: Int32}} DAY
+  AND w.created_at > now() - INTERVAL {{days: Int32}} DAY
+  AND t.classname != ''
+  AND w.head_branch = 'main'
+  AND w.head_repository.'full_name' = 'pytorch/pytorch'
+GROUP BY t.classname, t.name
+HAVING ran_big = 1 AND skipped_small = 1
+""".format(
+    big=" OR ".join(f"j.name LIKE '%{r}%'" for r in BIG_RUNNERS),
+    small=" OR ".join(f"j.name LIKE '%{r}%'" for r in SMALL_RUNNERS),
+)
+
+
+def requires_big_gpu(days: int) -> set[str]:
+    """Tests observed running on an h100/b200 runner and skipping on a small one.
+
+    This is the same question gpu_coverage.py answers by simulation, but measured,
+    so it sees requirements expressed anywhere -- setUp, a test body, a library
+    probe -- not only those a decorator declares.
+    """
+    from tools.testing.clickhouse import query_clickhouse
+
+    rows = query_clickhouse(ARCH_QUERY, {"days": days})
+    return {f"{r['classname']}::{r['name']}" for r in rows}
+
+
 class Enumerated(NamedTuple):
     tests: dict[str, set[str]]  # {file: {Class::method}}
     xfail: set[str]  # expected failures: run, but recorded as skipped
@@ -128,6 +172,31 @@ def unscheduled(files: list[str]) -> set[str]:
 
     known = set(TESTS)
     return {f for f in files if f[len("test/") : -len(".py")] not in known}
+
+
+def unlisted(needs_big: set[str], defined: dict[str, set[str]]) -> dict[str, list[str]]:
+    """Of the tests measured to need an h100/b200, those a smoke list omits.
+
+    ciflow/h100 and ciflow/b200 are independent labels, so a test needing scarce
+    hardware belongs in both lists; missing from either is a gap.
+    """
+    from tools.testing.gpu_coverage import selects, smoke_patterns, TARGETS, TEST_SH
+
+    text = TEST_SH.read_text(encoding="utf-8")
+    patterns = {fn: smoke_patterns(text, fn) for _, _, fn in TARGETS}
+    owner = {t: rel for rel, tests in defined.items() for t in tests}
+
+    out: dict[str, list[str]] = {}
+    for test in sorted(needs_big):
+        rel = owner.get(test)
+        if rel is None:
+            continue
+        include = rel[len("test/") : -len(".py")]
+        if any(
+            not selects(patterns[fn].get(include, []), test) for _, _, fn in TARGETS
+        ):
+            out.setdefault(rel, []).append(test)
+    return out
 
 
 def disabled() -> set[str]:
@@ -227,9 +296,13 @@ def main() -> int:
         if gap:
             report[rel] = gap
 
+    # Only available from a live query: --ran-json carries no per-job detail.
+    needs_big = set() if args.ran_json else requires_big_gpu(args.days)
+
     payload = {
         "dark": {k: v for k, v in report.items() if k not in no_config},
         "unscheduled": {k: v for k, v in report.items() if k in no_config},
+        "unlisted": unlisted(needs_big, enum.tests),
         "unreadable": enum.unreadable,
         "partially_enumerated": enum.partial,
         "ambiguous": sorted({t for tests in report.values() for t in tests} & masked),
@@ -248,6 +321,10 @@ def main() -> int:
     for section, title in (
         (dark, "never observed running"),
         (no_cfg, "no CI config selects this file"),
+        (
+            payload["unlisted"],
+            "measured to need an h100/b200, missing from a smoke list",
+        ),
     ):
         for rel in sorted(section):
             print(f"\n{rel}: {len(section[rel])} test(s), {title}")
