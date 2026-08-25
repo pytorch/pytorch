@@ -109,12 +109,16 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
 
     if device_type == "cpu":
         generator = torch._C.default_generator
+    elif device_type == "cuda":
+        generator = torch.cuda.default_generators[storage.device.index]
+    elif device_type == "mps":
+        generator = torch.mps._get_default_mps_generator()
+    elif device_type == "xpu":
+        generator = torch.xpu.default_generators[storage.device.index]
+    elif device_type == "mtia":
+        generator = torch.mtia.default_generators[storage.device.index]
     else:
-        # Generic accelerator path: resolves to whichever accelerator is
-        # active (CUDA/XPU/MPS/PrivateUse1/...) via the same hooks-based
-        # dispatch used by torch.accelerator.random, so a new accelerator
-        # backend works here without adding a device-type branch.
-        generator = torch._C._accelerator_getDefaultGenerator(storage.device.index)
+        raise AssertionError(f"unhandled device type {device_type}")
     state = generator.get_state()
     try:
         generator.manual_seed(0)
