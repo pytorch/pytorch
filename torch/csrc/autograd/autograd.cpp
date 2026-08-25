@@ -144,7 +144,7 @@ static variable_list run_backward(
       create_graph,
       accumulate_grad,
       output_edges);
-  // check if grad_inputs contains None or not base on the allow_unused flag
+  // check if grad_inputs contains None or not based on the allow_unused flag
   if (!inputs.empty() && !allow_unused) {
     size_t num_inputs = inputs.size();
     for (const auto i : c10::irange(num_inputs)) {

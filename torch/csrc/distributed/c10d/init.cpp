@@ -90,7 +90,7 @@ bool acquire_gil() {
     return true;
   }
 
-  // If we end up here, its probably still a "pass" from the perspective of
+  // If we end up here, it's probably still a "pass" from the perspective of
   // checking whether python is stuck. but currently we don't check the return
   // value of this function anyway, just check whether it returned quickly vs
   // timing out.  Taking a long time is the main sign of trouble.  Fast return

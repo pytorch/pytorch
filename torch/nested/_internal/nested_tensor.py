@@ -74,7 +74,7 @@ class NestedTensor(torch.Tensor):
     _lengths: Optional[torch.Tensor]
     # NOTE [ Nested ints for ragged sizes and strides ]
     #
-    # Jagged layout tensors are tensors that represent a n-dim tensor with a
+    # Jagged layout tensors are tensors that represent an n-dim tensor with a
     # ragged dimension, but are backed by an (n-1)-dim tensor underneath, e.g.,
     # a jagged tensor with outer shape [B, x, D] is represented internally by a
     # tensor with shape [sum(x), D] where we introduce what we call a nested int

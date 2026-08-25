@@ -8,7 +8,7 @@ from torch.utils._pytree import tree_flatten
 
 # flattens with support for slices
 # Note: a better way to do this would
-# be register/unregister slices as pytree nodes
+# be to register/unregister slices as pytree nodes
 # but there is no unregister API in the pytorch
 # pytree impl
 def _get_flat_args(

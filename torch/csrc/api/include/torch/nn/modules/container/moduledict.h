@@ -162,7 +162,7 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
     stream << "torch::nn::ModuleDict";
   }
 
-  /// Attempts to returns the `Module` associated with the given `key`. Throws
+  /// Attempts to return the `Module` associated with the given `key`. Throws
   /// an exception if no such `key` is stored in the `ModuleDict`. Check
   /// contains(key) before for a non-throwing way of access.
   std::shared_ptr<Module> operator[](const std::string& key) const {
