@@ -5,10 +5,11 @@ import unittest
 import torch
 import torch._inductor
 from torch._dynamo.utils import counters
-from torch._inductor.test_case import TestCase, run_tests
+from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils._triton import has_triton
+
 
 try:
     # importing this will register fbgemm lowerings for inductor
