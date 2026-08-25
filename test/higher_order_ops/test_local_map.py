@@ -32,6 +32,8 @@ if torch.distributed.is_available():
     from torch.distributed.tensor.placement_types import Replicate, Shard
 
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -231,6 +233,7 @@ def get_local_mapped_functions(mesh):
     return cp_decorated, cp_function
 
 
+@instantiate_parametrized_tests
 class TestLocalMap(TestCase):
     def setUp(self):
         super().setUp()
@@ -869,6 +872,432 @@ class GraphModule(torch.nn.Module):
         joint = ap_style_initial_capture(
             MyModule(), lambda: (torch.randn(80, 80, requires_grad=True),)
         )
+        with fx_traceback.preserve_node_meta():
+            joint_inputs = [
+                node.meta["val"]
+                for node in joint.graph.nodes
+                if node.op == "placeholder"
+            ]
+            inlined = make_fx(torch.fx.Interpreter(joint).run)(*joint_inputs)
+
+        error, _ = _is_functional_graph(inlined.graph)
+        self.assertIsNone(error)
+
+    def _check_python_mutation_deferred_inlining(self, mutation):
+        @torch.compiler.allow_in_graph
+        def clone_and_add(value):
+            result = value.clone()
+            result.add_(1)
+            return result
+
+        def mutation_body(w, x):
+            y = torch.matmul(x, w.t())
+            unmutated = y * y
+            if mutation == "method":
+                y.view(-1).add_(1)
+            elif mutation == "operator":
+                y += 1
+            elif mutation == "dunder":
+                y.__iadd__(1)
+            elif mutation == "inplace_arg":
+                F.relu(y, True)
+            elif mutation == "out_arg":
+                out = torch.empty_like(y)
+                torch.add(y.detach(), 1, out=out)
+                y = y + out
+            elif mutation == "opaque":
+                y = clone_and_add(y)
+            else:
+                raise AssertionError(f"Unknown mutation {mutation}")
+            return y * unmutated
+
+        replicate_linear = local_map(
+            mutation_body,
+            out_placements=((Replicate(), Replicate(), Replicate()),),
+            in_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                (Replicate(), Replicate(), Replicate()),
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Linear(80, 80)
+
+            def forward(self, x):
+                return replicate_linear(self.w.weight, x)
+
+        joint = ap_style_initial_capture(
+            MyModule(), lambda: (torch.randn(80, 80, requires_grad=True),)
+        )
+        local_map_gms = []
+        for node in joint.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.local_map_hop
+            ):
+                local_map_gms.append(joint.get_submodule(node.args[0].target))
+        fw_gm = next(gm for gm in local_map_gms if not gm.meta["is_backward"])
+        bw_gm = next(gm for gm in local_map_gms if gm.meta["is_backward"])
+
+        weight = torch.randn(80, 80)
+        x = torch.randn(80, 80)
+        fw_result = fw_gm(weight, x)
+        self.assertEqual(fw_result[0], mutation_body(weight, x))
+        if mutation == "out_arg":
+            grad_output = torch.ones_like(fw_result[0])
+            actual_grads = bw_gm(*fw_result[1:], grad_output)
+            expected_weight = weight.detach().requires_grad_()
+            expected_x = x.detach().requires_grad_()
+            expected_output = mutation_body(expected_weight, expected_x)
+            expected_grads = torch.autograd.grad(
+                expected_output,
+                (expected_weight, expected_x),
+                grad_output,
+            )
+            self.assertEqual(actual_grads, expected_grads)
+
+        with fx_traceback.preserve_node_meta():
+            joint_inputs = [
+                node.meta["val"]
+                for node in joint.graph.nodes
+                if node.op == "placeholder"
+            ]
+            inlined = make_fx(torch.fx.Interpreter(joint).run)(*joint_inputs)
+
+        error, _ = _is_functional_graph(inlined.graph)
+        self.assertIsNone(error)
+
+    @unittest.skipIf(*get_skip_reasons())
+    @parametrize(
+        "mutation",
+        [
+            "method",
+            "operator",
+            "dunder",
+            "inplace_arg",
+            "out_arg",
+            "opaque",
+        ],
+    )
+    def test_python_mutations_deferred_inlining(self, mutation):
+        self._check_python_mutation_deferred_inlining(mutation)
+
+    @unittest.skipIf(*get_skip_reasons())
+    @unittest.skipIf(not has_triton_package(), "requires triton package")
+    def test_mutating_hop_with_nested_custom_autograd(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_functional,
+            triton_kernel_wrapper_mutation,
+        )
+
+        def triton_add_inplace_(y, addend=10000):
+            n = y.numel()
+            block = 1024
+
+            def grid(meta):
+                return (triton.cdiv(n, meta["BLOCK"]),)
+
+            add_scalar_inplace_kernel[grid](y, addend, n, BLOCK=block)
+            return y
+
+        @local_map(
+            out_placements=((Replicate(), Replicate(), Replicate()),),
+            in_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                (Replicate(), Replicate(), Replicate()),
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+        def replicate_linear(w, x):
+            y = torch.matmul(x, w.t())
+            y = torch.cond(
+                x.sum() > 0,
+                lambda value: MyTransform.apply(value),
+                lambda value: value + 2,
+                (y,),
+            )
+            triton_add_inplace_(y)
+            return y
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Linear(80, 80)
+
+            def forward(self, x):
+                return replicate_linear(self.w.weight, x)
+
+        joint = ap_style_initial_capture(
+            MyModule(), lambda: (torch.randn(80, 80, requires_grad=True),)
+        )
+        local_map_gms = []
+        for node in joint.graph.nodes:
+            if (
+                node.op != "call_function"
+                or node.target is not torch.ops.higher_order.local_map_hop
+            ):
+                continue
+            body_node = node.args[0]
+            self.assertIsInstance(body_node, torch.fx.Node)
+            self.assertEqual(body_node.op, "get_attr")
+            self.assertIsInstance(body_node.target, str)
+            local_map_gms.append(joint.get_submodule(body_node.target))
+
+        self.assertEqual(len(local_map_gms), 2)
+        fw_gm = next(gm for gm in local_map_gms if not gm.meta["is_backward"])
+        fw_call_nodes = [
+            node for node in fw_gm.graph.nodes if node.op == "call_function"
+        ]
+        fw_targets = {node.target for node in fw_call_nodes}
+        functional_nodes = [
+            node
+            for node in fw_call_nodes
+            if node.target is triton_kernel_wrapper_functional
+        ]
+        self.assertEqual(len(functional_nodes), 1)
+        self.assertNotIn(triton_kernel_wrapper_mutation, fw_targets)
+
+        output_node = next(node for node in fw_gm.graph.nodes if node.op == "output")
+        fw_returns = output_node.args[0]
+        self.assertIsInstance(fw_returns, tuple)
+        self.assertEqual(fw_returns[0].target, operator.getitem)
+        self.assertIs(fw_returns[0].args[0], functional_nodes[0])
+        self.assertEqual(fw_returns[0].args[1], "Y_ptr")
+
+    @unittest.skipIf(*get_skip_reasons())
+    def test_opaque_unfunctionalizable_hop_without_mutation(self):
+        @torch.compiler.allow_in_graph
+        def opaque_transform(value):
+            return MyTransform.apply(value)
+
+        @local_map(
+            out_placements=((Replicate(), Replicate(), Replicate()),),
+            in_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                (Replicate(), Replicate(), Replicate()),
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+        def replicate_linear(w, x):
+            y = opaque_transform(torch.matmul(x, w.t()))
+            return y * 2
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Linear(80, 80)
+
+            def forward(self, x):
+                return replicate_linear(self.w.weight, x)
+
+        ap_style_initial_capture(
+            MyModule(), lambda: (torch.randn(80, 80, requires_grad=True),)
+        )
+
+    @unittest.skipIf(*get_skip_reasons())
+    def test_mutation_with_opaque_custom_autograd(self):
+        @torch.compiler.allow_in_graph
+        def opaque_transform(value):
+            return MyTransform.apply(value)
+
+        def mutation_body(w, x):
+            y = torch.matmul(x, w.t())
+            custom = opaque_transform(y)
+            mutated = y.clone()
+            mutated.add_(1)
+            return custom + mutated
+
+        replicate_linear = local_map(
+            mutation_body,
+            out_placements=((Replicate(), Replicate(), Replicate()),),
+            in_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                (Replicate(), Replicate(), Replicate()),
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Linear(80, 80)
+
+            def forward(self, x):
+                return replicate_linear(self.w.weight, x)
+
+        joint = ap_style_initial_capture(
+            MyModule(), lambda: (torch.randn(80, 80, requires_grad=True),)
+        )
+        local_map_gms = []
+        for node in joint.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.local_map_hop
+            ):
+                local_map_gms.append(joint.get_submodule(node.args[0].target))
+        fw_gm = next(gm for gm in local_map_gms if not gm.meta["is_backward"])
+        bw_gm = next(gm for gm in local_map_gms if gm.meta["is_backward"])
+
+        weight = torch.randn(80, 80)
+        x = torch.randn(80, 80)
+        fw_result = fw_gm(weight, x)
+        self.assertEqual(fw_result[0], mutation_body(weight, x))
+
+        grad_output = torch.ones_like(fw_result[0])
+        actual_grads = bw_gm(*fw_result[1:], grad_output)
+        expected_weight = weight.detach().requires_grad_()
+        expected_x = x.detach().requires_grad_()
+        expected_output = mutation_body(expected_weight, expected_x)
+        expected_grads = torch.autograd.grad(
+            expected_output,
+            (expected_weight, expected_x),
+            grad_output,
+        )
+        self.assertEqual(actual_grads, expected_grads)
+
+    @unittest.skipIf(*get_skip_reasons())
+    def test_mutation_after_cond(self):
+        def true_branch(value):
+            return value.sin()
+
+        def false_branch(value):
+            return value.cos()
+
+        def mutation_body(w, x):
+            y = torch.matmul(x, w.t())
+            branch_result = torch.cond(
+                x.sum() > 0,
+                true_branch,
+                false_branch,
+                (y,),
+            )
+            y.add_(1)
+            return branch_result + y
+
+        replicate_linear = local_map(
+            mutation_body,
+            out_placements=((Replicate(), Replicate(), Replicate()),),
+            in_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                (Replicate(), Replicate(), Replicate()),
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Linear(80, 80)
+
+            def forward(self, x):
+                return replicate_linear(self.w.weight, x)
+
+        joint = ap_style_initial_capture(
+            MyModule(), lambda: (torch.randn(80, 80, requires_grad=True),)
+        )
+        local_map_gms = []
+        for node in joint.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.local_map_hop
+            ):
+                local_map_gms.append(joint.get_submodule(node.args[0].target))
+        fw_gm = next(gm for gm in local_map_gms if not gm.meta["is_backward"])
+
+        weight = torch.randn(80, 80)
+        x = torch.ones(80, 80)
+        self.assertEqual(fw_gm(weight, x)[0], mutation_body(weight, x))
+
+        with fx_traceback.preserve_node_meta():
+            joint_inputs = [
+                node.meta["val"]
+                for node in joint.graph.nodes
+                if node.op == "placeholder"
+            ]
+            inlined = make_fx(torch.fx.Interpreter(joint).run)(*joint_inputs)
+
+        error, _ = _is_functional_graph(inlined.graph)
+        self.assertIsNone(error)
+
+    @unittest.skipIf(*get_skip_reasons())
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_mutation_after_nested_compile_region(self):
+        @nested_compile_region
+        def region(value):
+            return torch.as_strided(value, value.shape, (2, 1)).clone()
+
+        def true_branch(value):
+            # Keep the cond operand unmodified while giving invoke_subgraph a
+            # non-dense operand whose layout must survive functionalization.
+            value = value.clone()[:, ::2]
+            nested = region(value)
+            value.add_(1)
+            return value + nested
+
+        def false_branch(value):
+            return value[:, ::2] * 3
+
+        @local_map(
+            out_placements=((Replicate(), Replicate(), Replicate()),),
+            in_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                (Replicate(), Replicate(), Replicate()),
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+        def replicate_linear(w, x):
+            y = torch.matmul(x, w.t())
+            return torch.cond(
+                x.sum() > 0,
+                true_branch,
+                false_branch,
+                (y,),
+            )
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Linear(80, 80)
+
+            def forward(self, x):
+                return replicate_linear(self.w.weight, x)
+
+        joint = ap_style_initial_capture(
+            MyModule(), lambda: (torch.randn(80, 80, requires_grad=True),)
+        )
+        local_map_gms = []
+        for node in joint.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.local_map_hop
+            ):
+                local_map_gms.append(joint.get_submodule(node.args[0].target))
+        fw_gm = next(gm for gm in local_map_gms if not gm.meta["is_backward"])
+
+        weight = torch.randn(80, 80)
+        x = torch.ones(80, 80)
+        expected_view = torch.matmul(x, weight.t()).clone()[:, ::2]
+        expected_nested = torch.as_strided(
+            expected_view, expected_view.shape, (2, 1)
+        ).clone()
+        expected_view.add_(1)
+        self.assertEqual(fw_gm(weight, x)[0], expected_view + expected_nested)
+
         with fx_traceback.preserve_node_meta():
             joint_inputs = [
                 node.meta["val"]
