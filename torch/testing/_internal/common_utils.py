@@ -2134,6 +2134,17 @@ def skipIfCppFakeTensor(reason):
     return unittest.skipIf(config.use_cpp_fake_tensor, reason)
 
 
+_CppFakeExpectedT = TypeVar("_CppFakeExpectedT")
+
+
+def expectedIfCppFakeTensor(
+    cpp_expected: _CppFakeExpectedT, python_expected: _CppFakeExpectedT
+) -> _CppFakeExpectedT:
+    from torch._dynamo import config
+
+    return cpp_expected if config.use_cpp_fake_tensor else python_expected
+
+
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
     """
     Usage:

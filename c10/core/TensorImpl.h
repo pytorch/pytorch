@@ -278,6 +278,7 @@ struct C10_API FakeTensorMode {
   void set_constant(
       const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
       c10::intrusive_ptr<c10::TensorImpl> constant);
+  void clear_constant(const c10::intrusive_ptr<c10::TensorImpl>& fake_impl);
 
   // return the real constant a fake tensor was created from, or nullptr
   c10::intrusive_ptr<c10::TensorImpl> get_constant(
@@ -287,6 +288,7 @@ struct C10_API FakeTensorMode {
   // drop non-CPU constants, keeping cheap CPU ones for constant folding
   void clear_non_cpu_constants();
 
+ private:
   // key = constant storage, values = all fake tensors that share this storage
   // (aliases)
   struct ConstantAliases {
@@ -329,6 +331,7 @@ struct C10_API ExtraMeta {
     custom_storage_error_msg_ = other.custom_storage_error_msg_;
     fake_device_ = other.fake_device_;
     fake_tensor_mode_ = other.fake_tensor_mode_;
+    real_tensor_ = other.real_tensor_;
   }
   ExtraMeta& operator=(const ExtraMeta& other) = delete;
   ExtraMeta(ExtraMeta&& other) = delete;
