@@ -4977,7 +4977,11 @@ class AlgorithmSelectorCache(PersistentCache):
             }
 
         extern_choice = next(
-            (choice for choice in choices if cls._is_extern(choice)),
+            (
+                choice
+                for choice in choices
+                if cls._uses_layout_preserving_inputs(choice)
+            ),
             None,
         )
         extern_input_nodes = input_nodes
@@ -4991,7 +4995,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
             extern_input_nodes = extern_choice.input_nodes
 
-            if extern_choice.name == "addmm":
+            if cls._is_extern(extern_choice) and extern_choice.name == "addmm":
                 unique_example_inputs_extern = addmm_unique_example_inputs_extern()
 
         example_inputs = list(unique_example_inputs.values())
@@ -5107,11 +5111,27 @@ class AlgorithmSelectorCache(PersistentCache):
     def _is_extern(choice: ChoiceCaller) -> bool:
         return isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
 
+    @staticmethod
+    def _uses_layout_preserving_inputs(choice: ChoiceCaller) -> bool:
+        """Return whether benchmark inputs must preserve their original layout.
+
+        In-process template benchmarks use these tensors when generated kernels
+        consume runtime layout metadata. Subprocess reconstruction currently
+        preserves sizes and strides, but not nonzero storage offsets.
+        """
+        from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplateCaller
+
+        return AlgorithmSelectorCache._is_extern(choice) or isinstance(
+            choice, FlyDSLTemplateCaller
+        )
+
     @classmethod
     def benchmark_choice(
         cls, choice: ChoiceCaller, autotune_args: AutotuneArgs
     ) -> float:
-        benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
+        benchmark_tensors = autotune_args.get_benchmark_tensors(
+            cls._uses_layout_preserving_inputs(choice)
+        )
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
         try:
@@ -5205,7 +5225,7 @@ class AlgorithmSelectorCache(PersistentCache):
         rank = dist.get_rank(process_group)
 
         benchmark_tensors: BenchmarkTensors = autotune_args.get_benchmark_tensors(
-            cls._is_extern(choice)
+            cls._uses_layout_preserving_inputs(choice)
         )
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
