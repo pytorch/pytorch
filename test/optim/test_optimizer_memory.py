@@ -8,9 +8,12 @@ Covers:
 - Differentiable path correctness (backward + gradcheck for Adam/RAdam/NAdam/Rprop)
 - CUDA graph capture + replay verification for capturable paths
 - dtype coverage (fp16, bf16, fp32, fp64) on both CPU and CUDA
-- state_dict round-trip
-- torch.compile compatibility
-- Orthogonality: weight_decay, maximize, foreach combinations
+- Orthogonality: weight_decay + maximize combinations
+
+Redundant with test/test_optim.py and removed:
+- state_dict round-trip (covered by test_state_dict_deterministic, line 1582)
+- torch.compile parity (covered by CompiledOptimizerParityTests.test_correctness)
+- foreach vs single-tensor (covered by test_foreach_matches_forloop, line 889)
 """
 
 from __future__ import annotations
@@ -169,7 +172,7 @@ class TestNAdamNumerical(TestCase):
                 self.assertEqual(old, new, atol=1e-6, rtol=1e-6)
 
     def test_denom_not_reordered(self):
-        """Verify .sqrt().div_() != .div().sqrt_() — the trap."""
+        """Verify .sqrt().div_() != .div().sqrt_() -- the trap."""
         x = torch.tensor([4.0], dtype=torch.float64)
         correct = x.div(0.25).sqrt()  # sqrt(4/0.25) = 4
         wrong = x.sqrt().div_(0.25)  # sqrt(4)/0.25 = 8
@@ -295,10 +298,9 @@ class TestRAdamNumerical(TestCase):
                 beta1, beta2, lr_val, eps = 0.9, 0.999, 0.001, 1e-8
                 step_before = 9
 
-                # --- Shared initial state ---
                 p_orig = torch.rand(shape, dtype=dtype)
 
-                # --- Oracle: pre-patch _single_tensor_radam (verbatim) ---
+                # Oracle: pre-patch _single_tensor_radam (verbatim)
                 p_oracle = p_orig.clone()
                 ea_o = torch.zeros_like(p_oracle)
                 esq_o = torch.zeros_like(p_oracle)
@@ -321,7 +323,7 @@ class TestRAdamNumerical(TestCase):
                     has_complex=False,
                 )
 
-                # --- Shipped: _single_tensor_radam from torch.optim.radam ---
+                # Shipped: _single_tensor_radam from torch.optim.radam
                 p_shipped = p_orig.clone()
                 ea_s = torch.zeros_like(p_shipped)
                 esq_s = torch.zeros_like(p_shipped)
@@ -359,22 +361,17 @@ class TestRAdamNumerical(TestCase):
 
 
 class TestAdamDenomChain(TestCase):
-    def test_chain_fp32(self):
-        self._check(torch.float32)
-
-    def test_chain_fp64(self):
-        self._check(torch.float64)
-
-    def _check(self, dtype):
-        x = torch.rand(128, dtype=dtype)
-        bc_sqrt = torch.tensor(0.97, dtype=dtype)
-        sn = torch.tensor(-1.0, dtype=dtype)
-        eps = torch.tensor(1e-8, dtype=dtype)
-        old = (x.sqrt() / (bc_sqrt * sn)).add_(eps / sn)
-        new = x.sqrt()
-        new.div_(bc_sqrt * sn)
-        new.add_(eps / sn)
-        self.assertEqual(old, new, atol=1e-6, rtol=1e-6)
+    def test_chain(self):
+        for dtype in [torch.float32, torch.float64]:
+            x = torch.rand(128, dtype=dtype)
+            bc_sqrt = torch.tensor(0.97, dtype=dtype)
+            sn = torch.tensor(-1.0, dtype=dtype)
+            eps = torch.tensor(1e-8, dtype=dtype)
+            old = (x.sqrt() / (bc_sqrt * sn)).add_(eps / sn)
+            new = x.sqrt()
+            new.div_(bc_sqrt * sn)
+            new.add_(eps / sn)
+            self.assertEqual(old, new, atol=1e-6, rtol=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -383,19 +380,14 @@ class TestAdamDenomChain(TestCase):
 
 
 class TestRpropSignChain(TestCase):
-    def test_chain_fp32(self):
-        self._check_chain(torch.float32)
-
-    def test_chain_fp64(self):
-        self._check_chain(torch.float64)
-
-    def _check_chain(self, dtype):
-        a = torch.rand(128, dtype=dtype)
-        b = torch.rand(128, dtype=dtype)
-        old = a.mul(b).sign()
-        new = a.mul(b)
-        new.sign_()
-        self.assertEqual(old, new)
+    def test_chain(self):
+        for dtype in [torch.float32, torch.float64]:
+            a = torch.rand(128, dtype=dtype)
+            b = torch.rand(128, dtype=dtype)
+            old = a.mul(b).sign()
+            new = a.mul(b)
+            new.sign_()
+            self.assertEqual(old, new)
 
     def test_where_combined(self):
         """Combined torch.where must match sequential copy_ version."""
@@ -414,39 +406,26 @@ class TestRpropSignChain(TestCase):
         )
         self.assertEqual(old, new)
 
-    def test_where_dtype_promotion_fp32(self):
-        self._check_where_dtype(torch.float32)
-
-    def test_where_dtype_promotion_fp64(self):
-        self._check_where_dtype(torch.float64)
-
-    def test_where_dtype_promotion_fp16(self):
-        self._check_where_dtype(torch.float16)
-
-    def test_where_dtype_promotion_bf16(self):
-        self._check_where_dtype(torch.bfloat16)
-
-    def _check_where_dtype(self, dtype):
+    def test_where_dtype_promotion(self):
         """Confirm 1.0 scalar promotion matches original 1 int across dtypes."""
-        sign = torch.tensor([-2.0, 0.0, 3.0], dtype=dtype)
-        ep = torch.tensor(1.2, dtype=dtype)
-        em = torch.tensor(0.8, dtype=dtype)
+        for dtype in [torch.float32, torch.float64, torch.float16, torch.bfloat16]:
+            sign = torch.tensor([-2.0, 0.0, 3.0], dtype=dtype)
+            ep = torch.tensor(1.2, dtype=dtype)
+            em = torch.tensor(0.8, dtype=dtype)
 
-        # Original sequential version
-        old = sign.clone()
-        old.copy_(torch.where(old.gt(0), ep, old))
-        old.copy_(torch.where(old.lt(0), em, old))
-        old.copy_(torch.where(old.eq(0), 1, old))
+            old = sign.clone()
+            old.copy_(torch.where(old.gt(0), ep, old))
+            old.copy_(torch.where(old.lt(0), em, old))
+            old.copy_(torch.where(old.eq(0), 1, old))
 
-        # New combined version (uses 1.0 float scalar)
-        new = torch.where(
-            sign.gt(0),
-            ep,
-            torch.where(sign.lt(0), em, 1.0),
-        )
+            new = torch.where(
+                sign.gt(0),
+                ep,
+                torch.where(sign.lt(0), em, 1.0),
+            )
 
-        self.assertEqual(old.dtype, new.dtype)
-        self.assertEqual(old, new, atol=1e-3, rtol=1e-3)
+            self.assertEqual(old.dtype, new.dtype)
+            self.assertEqual(old, new, atol=1e-3, rtol=1e-3)
 
 
 # ---------------------------------------------------------------------------
@@ -516,166 +495,43 @@ class TestDiffGradcheck(TestCase):
 
 
 # ---------------------------------------------------------------------------
-# dtype coverage: fp16/bf16 on both CPU and CUDA
+# dtype coverage: in-place chain equivalence across dtypes on CPU
 # ---------------------------------------------------------------------------
 
 
 class TestDiffDtypeCorrectness(TestCase):
-    def test_nadam_denom_fp32_cpu(self):
-        self._nadam(torch.float32, "cpu")
+    def test_nadam_denom(self):
+        for dtype in [torch.float32, torch.float64, torch.float16, torch.bfloat16]:
+            x = torch.rand(128, dtype=dtype)
+            bc2 = torch.tensor(0.95, dtype=dtype)
+            old = x.div(bc2).sqrt()
+            new = x.div(bc2).sqrt_()
+            self.assertEqual(old, new, atol=1e-2, rtol=1e-2)
 
-    def test_nadam_denom_fp64_cpu(self):
-        self._nadam(torch.float64, "cpu")
+    def test_adam_denom(self):
+        for dtype in [torch.float32, torch.float64, torch.float16, torch.bfloat16]:
+            x = torch.rand(128, dtype=dtype)
+            bc_sqrt = torch.tensor(0.97, dtype=dtype)
+            sn = torch.tensor(-1.0, dtype=dtype)
+            eps = torch.tensor(1e-8, dtype=dtype)
+            old = (x.sqrt() / (bc_sqrt * sn)).add_(eps / sn)
+            new = x.sqrt()
+            new.div_(bc_sqrt * sn)
+            new.add_(eps / sn)
+            self.assertEqual(old, new, atol=1e-2, rtol=1e-2)
 
-    def test_nadam_denom_fp16_cpu(self):
-        self._nadam(torch.float16, "cpu")
-
-    def test_nadam_denom_bf16_cpu(self):
-        self._nadam(torch.bfloat16, "cpu")
-
-    def _nadam(self, dtype, device):
-        x = torch.rand(128, dtype=dtype, device=device)
-        bc2 = torch.tensor(0.95, dtype=dtype, device=device)
-        old = x.div(bc2).sqrt()
-        new = x.div(bc2).sqrt_()
-        self.assertEqual(old, new, atol=1e-2, rtol=1e-2)
-
-    def test_adam_denom_fp32_cpu(self):
-        self._adam(torch.float32, "cpu")
-
-    def test_adam_denom_fp64_cpu(self):
-        self._adam(torch.float64, "cpu")
-
-    def test_adam_denom_fp16_cpu(self):
-        self._adam(torch.float16, "cpu")
-
-    def test_adam_denom_bf16_cpu(self):
-        self._adam(torch.bfloat16, "cpu")
-
-    def _adam(self, dtype, device):
-        x = torch.rand(128, dtype=dtype, device=device)
-        bc_sqrt = torch.tensor(0.97, dtype=dtype, device=device)
-        sn = torch.tensor(-1.0, dtype=dtype, device=device)
-        eps = torch.tensor(1e-8, dtype=dtype, device=device)
-        old = (x.sqrt() / (bc_sqrt * sn)).add_(eps / sn)
-        new = x.sqrt()
-        new.div_(bc_sqrt * sn)
-        new.add_(eps / sn)
-        self.assertEqual(old, new, atol=1e-2, rtol=1e-2)
-
-    def test_rprop_sign_fp32_cpu(self):
-        self._rprop(torch.float32, "cpu")
-
-    def test_rprop_sign_fp64_cpu(self):
-        self._rprop(torch.float64, "cpu")
-
-    def test_rprop_sign_fp16_cpu(self):
-        self._rprop(torch.float16, "cpu")
-
-    def test_rprop_sign_bf16_cpu(self):
-        self._rprop(torch.bfloat16, "cpu")
-
-    def _rprop(self, dtype, device):
-        a = torch.rand(128, dtype=dtype, device=device)
-        b = torch.rand(128, dtype=dtype, device=device)
-        old = a.mul(b).sign()
-        new = a.mul(b)
-        new.sign_()
-        self.assertEqual(old, new, atol=1e-2, rtol=1e-2)
+    def test_rprop_sign(self):
+        for dtype in [torch.float32, torch.float64, torch.float16, torch.bfloat16]:
+            a = torch.rand(128, dtype=dtype)
+            b = torch.rand(128, dtype=dtype)
+            old = a.mul(b).sign()
+            new = a.mul(b)
+            new.sign_()
+            self.assertEqual(old, new, atol=1e-2, rtol=1e-2)
 
 
 # ---------------------------------------------------------------------------
-# state_dict round-trip
-# ---------------------------------------------------------------------------
-
-
-class TestStateDictRoundTrip(TestCase):
-    def _check(self, opt_cls, kwargs):
-        p = torch.randn(N)
-        p.grad = torch.randn(N)
-        opt = opt_cls([p], **kwargs)
-        opt.step()
-        sd = opt.state_dict()
-
-        p2 = torch.randn(N)
-        p2.grad = torch.randn(N)
-        opt2 = opt_cls([p2], **kwargs)
-        opt2.load_state_dict(sd)
-
-        self.assertEqual(opt.state[p].keys(), opt2.state[p2].keys())
-        for k in opt.state[p]:
-            v1, v2 = opt.state[p][k], opt2.state[p2][k]
-            if isinstance(v1, torch.Tensor):
-                self.assertEqual(v1, v2)
-            else:
-                self.assertEqual(v1, v2)
-
-    def test_adam(self):
-        self._check(optim.Adam, {"lr": 1e-3, "foreach": False})
-
-    def test_adam_amsgrad(self):
-        self._check(optim.Adam, {"lr": 1e-3, "amsgrad": True, "foreach": False})
-
-    def test_nadam(self):
-        self._check(optim.NAdam, {"lr": 1e-3, "foreach": False})
-
-    def test_radam(self):
-        self._check(optim.RAdam, {"lr": 1e-3, "foreach": False})
-
-    def test_rprop(self):
-        self._check(optim.Rprop, {"lr": 1e-2, "foreach": False})
-
-    def test_rmsprop(self):
-        self._check(optim.RMSprop, {"lr": 1e-2, "foreach": False})
-
-    def test_asgd(self):
-        self._check(optim.ASGD, {"lr": 0.1, "foreach": False})
-
-
-# ---------------------------------------------------------------------------
-# torch.compile
-# ---------------------------------------------------------------------------
-
-
-class TestCompileCompatibility(TestCase):
-    def test_adam(self):
-        self._check(optim.Adam, {"lr": 1e-3, "foreach": False})
-
-    def test_nadam(self):
-        self._check(optim.NAdam, {"lr": 1e-3, "foreach": False})
-
-    def test_radam(self):
-        self._check(optim.RAdam, {"lr": 1e-3, "foreach": False})
-
-    def test_rprop(self):
-        self._check(optim.Rprop, {"lr": 1e-2, "foreach": False})
-
-    def _check(self, opt_cls, kwargs, n_steps=5):
-        shape = (64,)
-        p_init = torch.randn(shape)
-        grads = [torch.randn(shape) for _ in range(n_steps)]
-
-        # --- Eager reference ---
-        p_ref = p_init.clone()
-        opt_ref = opt_cls([p_ref], **{**kwargs, "capturable": False})
-        for g in grads:
-            p_ref.grad = g.clone()
-            opt_ref.step()
-
-        # --- Compiled: cannot use fullgraph=True because
-        # _use_grad_for_differentiable inserts a graph break ---
-        p = p_init.clone()
-        opt = opt_cls([p], **{**kwargs, "capturable": False})
-        compiled_step = torch.compile(opt.step)
-        for g in grads:
-            p.grad = g.clone()
-            compiled_step()
-
-        self.assertEqual(p, p_ref, atol=1e-5, rtol=1e-5)
-
-
-# ---------------------------------------------------------------------------
-# Orthogonality: weight_decay, maximize, foreach
+# Orthogonality: weight_decay + maximize combinations
 # ---------------------------------------------------------------------------
 
 
@@ -697,7 +553,6 @@ class TestOrthogonality(TestCase):
         p2.grad = g.clone()
         opt2.step()
 
-        # Baseline and flagged runs must differ -- flags actually changed behavior
         self.assertNotEqual(p1, p2)
 
     def test_adam_wd_max(self):
@@ -712,207 +567,147 @@ class TestOrthogonality(TestCase):
     def test_rprop_max(self):
         self._check(optim.Rprop, {"lr": 1e-2}, use_wd=False)
 
-    def test_foreach_vs_single_adam(self):
-        self._check_foreach(optim.Adam, {"lr": 1e-3})
-
-    def test_foreach_vs_single_nadam(self):
-        self._check_foreach(optim.NAdam, {"lr": 1e-3})
-
-    def test_foreach_vs_single_radam(self):
-        self._check_foreach(optim.RAdam, {"lr": 1e-3})
-
-    def test_foreach_vs_single_rprop(self):
-        self._check_foreach(optim.Rprop, {"lr": 1e-2})
-
-    def _check_foreach(self, opt_cls, kwargs):
-        torch.manual_seed(42)
-        p1 = torch.randn(64)
-        p2 = p1.clone()
-        g = torch.randn(64)
-
-        opt1 = opt_cls([p1], **{**kwargs, "foreach": False})
-        p1.grad = g.clone()
-        opt1.step()
-
-        opt2 = opt_cls([p2], **{**kwargs, "foreach": True})
-        p2.grad = g.clone()
-        opt2.step()
-
-        self.assertEqual(p1, p2, atol=1e-6, rtol=1e-6)
-
 
 # ---------------------------------------------------------------------------
-# CUDA-only: peak memory budget + CUDA graph capture + replay verification
+# CUDA-only: peak memory budget
 # ---------------------------------------------------------------------------
 
 
 class TestOptimizerMemoryBudgetCUDA(TestCase):
     device_type = "cuda"
 
-    def _check_budget(self, opt_cls, opt_kwargs):
-        param = torch.randn(N, device="cuda")
-        grad = torch.randn(N, device="cuda")
-        param.grad = grad
-        opt = opt_cls([param], **{**opt_kwargs, "foreach": False})
-        opt.step()
-        param.grad = grad.clone()
+    def test_peak_memory_budget(self):
+        configs = [
+            (optim.Adam, {"lr": 1e-3}),
+            (optim.Adam, {"lr": 1e-3, "amsgrad": True}),
+            (optim.AdamW, {"lr": 1e-3}),
+            (optim.SGD, {"lr": 0.1}),
+            (optim.SGD, {"lr": 0.1, "momentum": 0.9}),
+            (optim.Adagrad, {"lr": 0.1}),
+            (optim.Adadelta, {"lr": 1.0}),
+            (optim.Adamax, {"lr": 2e-3}),
+            (optim.NAdam, {"lr": 1e-3}),
+            (optim.RAdam, {"lr": 1e-3}),
+            (optim.RMSprop, {"lr": 1e-2}),
+            (optim.Rprop, {"lr": 1e-2}),
+            (optim.ASGD, {"lr": 0.1}),
+        ]
+        for opt_cls, opt_kwargs in configs:
+            param = torch.randn(N, device="cuda")
+            grad = torch.randn(N, device="cuda")
+            param.grad = grad
+            opt = opt_cls([param], **{**opt_kwargs, "foreach": False})
+            opt.step()
+            param.grad = grad.clone()
 
-        param_bytes = param.numel() * param.element_size()
-        state_bytes = _get_state_bytes(opt)
-        budget = param_bytes + param_bytes + state_bytes + param_bytes
+            param_bytes = param.numel() * param.element_size()
+            state_bytes = _get_state_bytes(opt)
+            budget = param_bytes + param_bytes + state_bytes + param_bytes
 
-        torch.cuda.reset_peak_memory_stats()
-        torch.cuda.synchronize()
-        baseline = torch.cuda.memory_allocated()
-        opt.step()
-        torch.cuda.synchronize()
-        peak = torch.cuda.max_memory_allocated()
+            torch.cuda.reset_peak_memory_stats()
+            torch.cuda.synchronize()
+            baseline = torch.cuda.memory_allocated()
+            opt.step()
+            torch.cuda.synchronize()
+            peak = torch.cuda.max_memory_allocated()
 
-        self.assertLessEqual(
-            peak - baseline,
-            budget,
-            f"Peak {peak - baseline} exceeds budget {budget}",
-        )
+            self.assertLessEqual(
+                peak - baseline,
+                budget,
+                f"Peak {peak - baseline} exceeds budget {budget} for {opt_cls.__name__}",
+            )
 
-    def test_adam(self):
-        self._check_budget(optim.Adam, {"lr": 1e-3})
 
-    def test_adam_amsgrad(self):
-        self._check_budget(optim.Adam, {"lr": 1e-3, "amsgrad": True})
-
-    def test_adamw(self):
-        self._check_budget(optim.AdamW, {"lr": 1e-3})
-
-    def test_sgd(self):
-        self._check_budget(optim.SGD, {"lr": 0.1})
-
-    def test_sgd_momentum(self):
-        self._check_budget(optim.SGD, {"lr": 0.1, "momentum": 0.9})
-
-    def test_adagrad(self):
-        self._check_budget(optim.Adagrad, {"lr": 0.1})
-
-    def test_adadelta(self):
-        self._check_budget(optim.Adadelta, {"lr": 1.0})
-
-    def test_adamax(self):
-        self._check_budget(optim.Adamax, {"lr": 2e-3})
-
-    def test_nadam(self):
-        self._check_budget(optim.NAdam, {"lr": 1e-3})
-
-    def test_radam(self):
-        self._check_budget(optim.RAdam, {"lr": 1e-3})
-
-    def test_rmsprop(self):
-        self._check_budget(optim.RMSprop, {"lr": 1e-2})
-
-    def test_rprop(self):
-        self._check_budget(optim.Rprop, {"lr": 1e-2})
-
-    def test_asgd(self):
-        self._check_budget(optim.ASGD, {"lr": 0.1})
+# ---------------------------------------------------------------------------
+# CUDA-only: graph capture + replay
+# ---------------------------------------------------------------------------
 
 
 class TestCUDAGraphCapture(TestCase):
     device_type = "cuda"
 
-    def _check_graph(self, opt_cls, opt_kwargs, n_steps=5):
+    def test_graph_capture_replay(self):
+        configs = [
+            (optim.Adam, {"lr": 1e-3, "capturable": True}),
+            (optim.Adam, {"lr": 1e-3, "capturable": True, "amsgrad": True}),
+            (optim.Rprop, {"lr": 1e-2, "capturable": True}),
+            (optim.RAdam, {"lr": 1e-3, "capturable": True}),
+        ]
+        n_steps = 5
         shape = (64,)
         grad = torch.randn(shape, device="cuda")
 
-        # Create param once, clone for eager path
-        p_init = torch.randn(shape, device="cuda")
+        for opt_cls, opt_kwargs in configs:
+            p_init = torch.randn(shape, device="cuda")
 
-        # --- Eager reference: run N steps ---
-        p_eager = p_init.clone()
-        p_eager.grad = grad.clone()
-        opt_eager = opt_cls([p_eager], **{**opt_kwargs, "foreach": False})
-        opt_eager.step()  # init state
-        for _ in range(n_steps):
+            # Eager reference
+            p_eager = p_init.clone()
             p_eager.grad = grad.clone()
+            opt_eager = opt_cls([p_eager], **{**opt_kwargs, "foreach": False})
             opt_eager.step()
+            for _ in range(n_steps):
+                p_eager.grad = grad.clone()
+                opt_eager.step()
 
-        # --- Graph: capture one step, replay N times ---
-        p_graph = p_init.clone()
-        p_graph.grad = grad.clone()
-        opt_graph = opt_cls([p_graph], **{**opt_kwargs, "foreach": False})
-        opt_graph.step()  # init state
-
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
+            # Graph path
+            p_graph = p_init.clone()
+            p_graph.grad = grad.clone()
+            opt_graph = opt_cls([p_graph], **{**opt_kwargs, "foreach": False})
             opt_graph.step()
 
-        for _ in range(n_steps):
-            p_graph.grad = grad.clone()
-            g.replay()
-            torch.cuda.synchronize()
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                opt_graph.step()
 
-        # Verify final states match
-        self.assertEqual(p_eager, p_graph, atol=1e-5, rtol=1e-5)
-        self.assertFalse(torch.isnan(p_graph).any())
-        self.assertFalse(torch.isinf(p_graph).any())
+            for _ in range(n_steps):
+                p_graph.grad = grad.clone()
+                g.replay()
+                torch.cuda.synchronize()
 
-    def test_adam(self):
-        self._check_graph(optim.Adam, {"lr": 1e-3, "capturable": True})
-
-    def test_adam_amsgrad(self):
-        self._check_graph(optim.Adam, {"lr": 1e-3, "capturable": True, "amsgrad": True})
-
-    def test_rprop(self):
-        self._check_graph(optim.Rprop, {"lr": 1e-2, "capturable": True})
-
-    def test_radam(self):
-        self._check_graph(optim.RAdam, {"lr": 1e-3, "capturable": True})
+            self.assertEqual(
+                p_eager, p_graph, atol=1e-5, rtol=1e-5,
+                msg=f"Graph replay diverged for {opt_cls.__name__}",
+            )
+            self.assertFalse(torch.isnan(p_graph).any())
+            self.assertFalse(torch.isinf(p_graph).any())
 
 
+# ---------------------------------------------------------------------------
 # CUDA dtype coverage
+# ---------------------------------------------------------------------------
+
+
 class TestDiffDtypeCorrectnessCUDA(TestCase):
     device_type = "cuda"
 
-    def test_nadam_denom_fp16(self):
-        self._nadam(torch.float16)
+    def test_nadam_denom(self):
+        for dtype in [torch.float16, torch.bfloat16]:
+            x = torch.rand(128, dtype=dtype, device="cuda")
+            bc2 = torch.tensor(0.95, dtype=dtype, device="cuda")
+            old = x.div(bc2).sqrt()
+            new = x.div(bc2).sqrt_()
+            self.assertEqual(old, new, atol=1e-2, rtol=1e-2)
 
-    def test_nadam_denom_bf16(self):
-        self._nadam(torch.bfloat16)
+    def test_adam_denom(self):
+        for dtype in [torch.float16, torch.bfloat16]:
+            x = torch.rand(128, dtype=dtype, device="cuda")
+            bc_sqrt = torch.tensor(0.97, dtype=dtype, device="cuda")
+            sn = torch.tensor(-1.0, dtype=dtype, device="cuda")
+            eps = torch.tensor(1e-8, dtype=dtype, device="cuda")
+            old = (x.sqrt() / (bc_sqrt * sn)).add_(eps / sn)
+            new = x.sqrt()
+            new.div_(bc_sqrt * sn)
+            new.add_(eps / sn)
+            self.assertEqual(old, new, atol=1e-2, rtol=1e-2)
 
-    def _nadam(self, dtype):
-        x = torch.rand(128, dtype=dtype, device="cuda")
-        bc2 = torch.tensor(0.95, dtype=dtype, device="cuda")
-        old = x.div(bc2).sqrt()
-        new = x.div(bc2).sqrt_()
-        self.assertEqual(old, new, atol=1e-2, rtol=1e-2)
-
-    def test_adam_denom_fp16(self):
-        self._adam(torch.float16)
-
-    def test_adam_denom_bf16(self):
-        self._adam(torch.bfloat16)
-
-    def _adam(self, dtype):
-        x = torch.rand(128, dtype=dtype, device="cuda")
-        bc_sqrt = torch.tensor(0.97, dtype=dtype, device="cuda")
-        sn = torch.tensor(-1.0, dtype=dtype, device="cuda")
-        eps = torch.tensor(1e-8, dtype=dtype, device="cuda")
-        old = (x.sqrt() / (bc_sqrt * sn)).add_(eps / sn)
-        new = x.sqrt()
-        new.div_(bc_sqrt * sn)
-        new.add_(eps / sn)
-        self.assertEqual(old, new, atol=1e-2, rtol=1e-2)
-
-    def test_rprop_sign_fp16(self):
-        self._rprop(torch.float16)
-
-    def test_rprop_sign_bf16(self):
-        self._rprop(torch.bfloat16)
-
-    def _rprop(self, dtype):
-        a = torch.rand(128, dtype=dtype, device="cuda")
-        b = torch.rand(128, dtype=dtype, device="cuda")
-        old = a.mul(b).sign()
-        new = a.mul(b)
-        new.sign_()
-        self.assertEqual(old, new, atol=1e-2, rtol=1e-2)
+    def test_rprop_sign(self):
+        for dtype in [torch.float16, torch.bfloat16]:
+            a = torch.rand(128, dtype=dtype, device="cuda")
+            b = torch.rand(128, dtype=dtype, device="cuda")
+            old = a.mul(b).sign()
+            new = a.mul(b)
+            new.sign_()
+            self.assertEqual(old, new, atol=1e-2, rtol=1e-2)
 
 
 instantiate_device_type_tests(TestOptimizerMemoryBudgetCUDA, globals())
