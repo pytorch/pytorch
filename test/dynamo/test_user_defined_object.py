@@ -1,12 +1,16 @@
 # Owner(s): ["module: dynamo"]
 
+import copy
 import dataclasses
+import sys
 import types
 import unittest
 
 import torch
 import torch._dynamo.testing as dynamo_testing
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class SlotsOnly:
@@ -842,11 +846,713 @@ class TestClassSetattr(TestCase):
             MyModule.x = 20
             return MyModule.x
 
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         result = opt_fn()
         self.assertEqual(result, 20)
 
         MyModule.x = 10
+
+
+# ---------------------------------------------------------------------------
+# __setitem__ on user-defined classes / metaclasses
+# ---------------------------------------------------------------------------
+
+
+# Metaclasses kept at module level — Dynamo's traced LOAD_BUILD_CLASS does
+# not currently propagate the `metaclass=` kwarg.
+
+
+class _SetitemMetaBasic(type):
+    def __setitem__(cls, key, value):
+        cls._store[key] = value
+
+    def __getitem__(cls, key):
+        return cls._store[key]
+
+
+class _ClassWithBasicMeta(metaclass=_SetitemMetaBasic):
+    _store: dict = {}
+
+
+class _SetitemMetaPerClass(type):
+    def __setitem__(cls, key, value):
+        cls.entries[key] = value
+
+    def __getitem__(cls, key):
+        return cls.entries[key]
+
+
+class _PerClassEntries(metaclass=_SetitemMetaPerClass):
+    entries: dict = {}
+
+
+class _SetitemMetaValidating(type):
+    def __setitem__(cls, key, value):
+        if not isinstance(key, str):
+            raise TypeError("class registry expects string keys")
+        cls.registry[key] = value
+
+
+class _ValidatingClass(metaclass=_SetitemMetaValidating):
+    registry: dict = {}
+
+
+class _SetitemDelitemMeta(type):
+    def __setitem__(cls, key, value):
+        cls._store[key] = value
+
+    def __getitem__(cls, key):
+        return cls._store[key]
+
+    def __delitem__(cls, key):
+        del cls._store[key]
+
+
+class _DelClassMeta(metaclass=_SetitemDelitemMeta):
+    _store: dict = {}
+
+
+class TestUserDefinedSetitem(TestCase):
+    """__setitem__ on user-defined classes (UDOV) and metaclasses (UDCV).
+
+    enable_trace_load_build_class lets us define helper classes inside the
+    test body — keeps the helper next to the assertion that exercises it.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        self._b_prev = torch._dynamo.config.enable_trace_load_build_class
+        torch._dynamo.config.enable_trace_unittest = True
+        torch._dynamo.config.enable_trace_load_build_class = True
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
+        torch._dynamo.config.enable_trace_load_build_class = self._b_prev
+
+    # -- instance __setitem__ --
+
+    @make_dynamo_test
+    def test_validating_ok(self):
+        class V:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                if not isinstance(key, str):
+                    raise TypeError("only string keys allowed")
+                if value < 0:
+                    raise ValueError("negative values forbidden")
+                self.data[key] = value
+
+        obj = V()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 5)
+        with self.assertRaises(TypeError):
+            obj[1] = 5
+        with self.assertRaises(ValueError):
+            obj["a"] = -1
+
+    @make_dynamo_test
+    def test_transforming_value(self):
+        class T:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value * 2
+
+        obj = T()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 10)
+
+    @make_dynamo_test
+    def test_inherited_method(self):
+        class Base:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+        class Derived(Base):
+            pass
+
+        obj = Derived()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 5)
+
+    @make_dynamo_test
+    def test_overriding_method(self):
+        class Base:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+        class Override(Base):
+            def __setitem__(self, key, value):
+                self.data[key] = value + 100
+
+        obj = Override()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 105)
+
+    @make_dynamo_test
+    def test_return_value_ignored(self):
+        class R:
+            def __init__(self):
+                self.data = {}
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+                return "ignored"
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+        obj = R()
+        obj["a"] = 5
+        self.assertEqual(obj["a"], 5)
+
+    @make_dynamo_test
+    def test_side_effects_in_method(self):
+        class S:
+            def __init__(self):
+                self.data = {}
+                self.last_key = None
+                self.last_value = None
+                self.call_count = 0
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.last_key = key
+                self.last_value = value
+                self.call_count += 1
+                self.data[key] = value
+
+        obj = S()
+        obj["a"] = 1
+        obj["b"] = 2
+        self.assertEqual(obj.call_count, 2)
+        self.assertEqual(obj.last_key, "b")
+        self.assertEqual(obj.last_value, 2)
+        self.assertEqual(obj["a"], 1)
+        self.assertEqual(obj["b"], 2)
+
+    @make_dynamo_test
+    def test_explicit_method_call(self):
+        class B:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+        obj = B()
+        obj.__setitem__("a", 5)
+        self.assertEqual(obj["a"], 5)
+
+    @make_dynamo_test
+    def test_multiple_keys(self):
+        class B:
+            def __init__(self):
+                self.data = {}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+        obj = B()
+        for i in range(5):
+            obj[i] = i * 10
+        for i in range(5):
+            self.assertEqual(obj[i], i * 10)
+
+    @make_dynamo_test
+    def test_no_setitem_raises_typeerror(self):
+        class N:
+            def __init__(self, data):
+                self.data = data
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+        obj = N([1, 2, 3])
+        with self.assertRaises(TypeError):
+            obj[0] = 100
+
+    # -- metaclass __setitem__: Cls[k] = v --
+
+    @make_dynamo_test
+    def test_metaclass_basic(self):
+        _ClassWithBasicMeta["a"] = 1
+        self.assertEqual(_ClassWithBasicMeta["a"], 1)
+
+    @make_dynamo_test
+    def test_metaclass_multiple(self):
+        _PerClassEntries["x"] = 10
+        _PerClassEntries["y"] = 20
+        self.assertEqual(_PerClassEntries["x"], 10)
+        self.assertEqual(_PerClassEntries["y"], 20)
+
+    @make_dynamo_test
+    def test_metaclass_validating(self):
+        _ValidatingClass["k"] = 99
+        self.assertEqual(_ValidatingClass.registry["k"], 99)
+        with self.assertRaises(TypeError):
+            _ValidatingClass[123] = 99
+
+    # -- __delitem__ on user-defined classes --
+
+    @make_dynamo_test
+    def test_delitem_basic(self):
+        class D:
+            def __init__(self):
+                self.data = {"a": 1, "b": 2}
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def __delitem__(self, key):
+                del self.data[key]
+
+        obj = D()
+        del obj["a"]
+        self.assertNotIn("a", obj.data)
+        self.assertEqual(obj.data, {"b": 2})
+
+    @make_dynamo_test
+    def test_delitem_tracks(self):
+        class D:
+            def __init__(self):
+                self.data = {"a": 1, "b": 2, "c": 3}
+                self.deleted = []
+
+            def __delitem__(self, key):
+                self.deleted.append(key)
+                del self.data[key]
+
+        obj = D()
+        del obj["a"]
+        del obj["c"]
+        self.assertEqual(obj.deleted, ["a", "c"])
+        self.assertEqual(obj.data, {"b": 2})
+
+    @make_dynamo_test
+    def test_delitem_validating(self):
+        class D:
+            def __init__(self):
+                self.data = {1: "a"}
+
+            def __delitem__(self, key):
+                if not isinstance(key, int):
+                    raise TypeError("only int keys")
+                del self.data[key]
+
+        obj = D()
+        del obj[1]
+        self.assertEqual(obj.data, {})
+
+        obj2 = D()
+        with self.assertRaises(TypeError):
+            del obj2["nope"]
+
+    @make_dynamo_test
+    def test_delitem_explicit_method_call(self):
+        class D:
+            def __init__(self):
+                self.data = {"a": 1}
+
+            def __delitem__(self, key):
+                del self.data[key]
+
+        obj = D()
+        obj.__delitem__("a")
+        self.assertEqual(obj.data, {})
+
+    @make_dynamo_test
+    def test_delitem_no_method_typeerror(self):
+        class D:
+            def __init__(self):
+                self.data = [1, 2, 3]
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+        obj = D()
+        with self.assertRaises(TypeError):
+            del obj[0]
+
+    # -- metaclass __delitem__: del Cls[k] --
+
+    @make_dynamo_test
+    def test_metaclass_delitem(self):
+        _DelClassMeta["x"] = 1
+        _DelClassMeta["y"] = 2
+        del _DelClassMeta["x"]
+        self.assertNotIn("x", _DelClassMeta._store)
+        self.assertEqual(_DelClassMeta["y"], 2)
+
+
+class TestObjectConstruction(TestCase):
+    @make_dynamo_test
+    def test_object_call_identity(self):
+        a = object()
+        b = object()
+        self.assertEqual(a is a, True)
+        self.assertEqual(a is b, False)
+        self.assertEqual(type(a) is object, True)
+
+    @make_dynamo_test
+    def test_object_call_as_sentinel(self):
+        sentinel = object()
+        self.assertEqual(sentinel == 1, False)
+        self.assertEqual(sentinel == sentinel, True)
+
+    def test_object_call_escapes_graph_breaks(self):
+        # A bare object() that escapes the compiled region is opaque and
+        # sourceless, so reconstruction graph-breaks (runs in eager) rather
+        # than failing; the returned value is a real object instance.
+        cnt = dynamo_testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            return x + 1, object()
+
+        _, s = fn(torch.randn(3))
+        self.assertIs(type(s), object)
+        self.assertEqual(cnt.frame_count, 0)
+
+
+class _Namespace(types.SimpleNamespace):
+    pass
+
+
+class _OverridingNamespace(types.SimpleNamespace):
+    def __repr__(self) -> str:
+        return "overridden"
+
+    def __eq__(self, other: object) -> bool:
+        return True
+
+
+class _InitNamespace(types.SimpleNamespace):
+    def __init__(self, a: int = 1) -> None:
+        super().__init__(a=a, b=a * 2)
+
+
+class _RequiredArgNamespace(types.SimpleNamespace):
+    def __init__(self, a: int) -> None:
+        super().__init__(a=a)
+
+
+@torch._dynamo.config.patch(enable_trace_unittest=True)
+class TestSimpleNamespace(TestCase):
+    """types.SimpleNamespace, ported from CPython's SimpleNamespaceTests."""
+
+    @make_dynamo_test
+    def test_constructor(self):
+        def check(ns, expected):
+            self.assertEqual(len(ns.__dict__), len(expected))
+            self.assertEqual(vars(ns), expected)
+            self.assertEqual(list(vars(ns).items()), list(expected.items()))
+
+        check(types.SimpleNamespace(), {})
+        check(types.SimpleNamespace(x=1, y=2), {"x": 1, "y": 2})
+
+    @make_dynamo_test
+    def test_constructor_positional(self):
+        # namespace_init grew its optional positional argument in 3.13.
+        if sys.version_info < (3, 13):
+            with self.assertRaises(TypeError):
+                types.SimpleNamespace({"x": 1})
+            return
+
+        def check(ns, expected):
+            self.assertEqual(len(ns.__dict__), len(expected))
+            self.assertEqual(vars(ns), expected)
+            self.assertEqual(list(vars(ns).items()), list(expected.items()))
+
+        check(
+            types.SimpleNamespace({"x": 1, "y": 2}, x=4, z=3), {"x": 4, "y": 2, "z": 3}
+        )
+        check(types.SimpleNamespace([["x", 1], ["y", 2]]), {"x": 1, "y": 2})
+        check(types.SimpleNamespace([], x=4), {"x": 4})
+
+    @make_dynamo_test
+    def test_constructor_errors(self):
+        with self.assertRaises(TypeError):
+            types.SimpleNamespace([], [])  # too many positional arguments
+        with self.assertRaises(TypeError):
+            types.SimpleNamespace(1)  # not a mapping or iterable
+        with self.assertRaises(TypeError):
+            types.SimpleNamespace([1])  # non-iterable element
+        # Below 3.13 no positional argument is accepted at all, so the pair
+        # check never runs and the argument count TypeError comes out instead.
+        pair_error = ValueError if sys.version_info >= (3, 13) else TypeError
+        with self.assertRaises(pair_error):
+            types.SimpleNamespace([["x"]])  # not a pair
+        with self.assertRaises(TypeError):
+            types.SimpleNamespace({1: 2})  # non-string key
+        with self.assertRaises(TypeError):
+            types.SimpleNamespace(**{1: 2})
+
+    @make_dynamo_test
+    def test_attrget(self):
+        ns = types.SimpleNamespace(x=1, y=2)
+        self.assertEqual(ns.x, 1)
+        self.assertEqual(ns.y, 2)
+        with self.assertRaises(AttributeError):
+            ns.z
+
+    @make_dynamo_test
+    def test_attrset(self):
+        ns = types.SimpleNamespace(x=1)
+        ns.y = "ham"
+        ns.z = None
+        self.assertEqual(ns.__dict__, dict(x=1, y="ham", z=None))
+
+    @make_dynamo_test
+    def test_attrdel(self):
+        ns = types.SimpleNamespace(x=1, y=2, w=3)
+        with self.assertRaises(AttributeError):
+            del ns.spam
+        del ns.y
+        self.assertEqual(vars(ns), dict(x=1, w=3))
+        ns.y = "spam"
+        self.assertEqual(vars(ns), dict(x=1, w=3, y="spam"))
+
+    @make_dynamo_test
+    def test_repr(self):
+        ns = types.SimpleNamespace(x=1, y=2, w=3)
+        self.assertEqual(repr(ns), "namespace(x=1, y=2, w=3)")
+        self.assertEqual(repr(types.SimpleNamespace()), "namespace()")
+        self.assertEqual(repr(types.SimpleNamespace(x="spam")), "namespace(x='spam')")
+
+    @make_dynamo_test
+    def test_repr_subclass(self):
+        self.assertEqual(repr(_Namespace(a=1)), "_Namespace(a=1)")
+
+    @make_dynamo_test
+    def test_recursive_repr(self):
+        ns = types.SimpleNamespace(c="cookie")
+        ns.spam = ns
+        self.assertEqual(repr(ns), "namespace(c='cookie', spam=namespace(...))")
+        sub = _Namespace()
+        sub.spam = sub
+        self.assertEqual(repr(sub), "_Namespace(spam=_Namespace(...))")
+
+    @make_dynamo_test
+    def test_equal(self):
+        ns = types.SimpleNamespace()
+        ns.x = 1
+        self.assertEqual(types.SimpleNamespace(), types.SimpleNamespace())
+        self.assertEqual(types.SimpleNamespace(x=1), ns)
+        self.assertFalse(ns == types.SimpleNamespace())
+        # __eq__ returns NotImplemented against a non-namespace
+        self.assertFalse(types.SimpleNamespace() == 1)
+        self.assertTrue(types.SimpleNamespace() != 1)
+
+    @make_dynamo_test
+    def test_ordering_unsupported(self):
+        with self.assertRaises(TypeError):
+            types.SimpleNamespace(x=1) < types.SimpleNamespace(x=2)  # noqa: B015
+
+    @make_dynamo_test
+    def test_as_dict(self):
+        ns = types.SimpleNamespace(spam="spamspamspam")
+        with self.assertRaises(TypeError):
+            len(ns)
+        with self.assertRaises(TypeError):
+            iter(ns)
+        with self.assertRaises(TypeError):
+            "spam" in ns  # noqa: B015
+        with self.assertRaises(TypeError):
+            ns["spam"]
+
+    @make_dynamo_test
+    def test_nested(self):
+        ns1 = types.SimpleNamespace(a=1, b=2)
+        ns2 = types.SimpleNamespace(x=ns1)
+        self.assertEqual(vars(ns1), dict(a=1, b=2))
+        self.assertEqual(ns2.x.a, 1)
+        self.assertEqual(ns2.x, ns1)
+
+    @make_dynamo_test
+    def test_recursive(self):
+        ns1 = types.SimpleNamespace(c="cookie")
+        ns2 = types.SimpleNamespace()
+        ns3 = types.SimpleNamespace(x=1)
+        ns1.spam = ns1
+        ns2.spam = ns3
+        ns3.spam = ns2
+        self.assertEqual(ns1.spam, ns1)
+        self.assertEqual(ns1.spam.spam, ns1)
+        self.assertEqual(ns2.spam.spam, ns2)
+
+    @make_dynamo_test
+    def test_subclass(self):
+        spam = _Namespace(ham=8, eggs=9)
+        self.assertIs(type(spam), _Namespace)
+        self.assertEqual(vars(spam), {"ham": 8, "eggs": 9})
+
+    @make_dynamo_test
+    def test_subclass_overrides_c_slots(self):
+        # A Python __repr__/__eq__ on the subclass replaces the C slot.
+        self.assertEqual(repr(_OverridingNamespace(a=1)), "overridden")
+        self.assertTrue(_OverridingNamespace(a=1) == 1)
+
+    @unittest.skipIf(sys.version_info < (3, 13), "copy.replace added in 3.13")
+    @make_dynamo_test
+    def test_replace(self):
+        ns = types.SimpleNamespace(x=11, y=22)
+        ns2 = copy.replace(ns)
+        self.assertEqual(ns2, ns)
+        self.assertIsNot(ns2, ns)
+        self.assertIs(type(ns2), types.SimpleNamespace)
+        ns2.x = 3
+        self.assertEqual(ns.x, 11)
+        self.assertEqual(vars(copy.replace(ns, x=1)), {"x": 1, "y": 22})
+        self.assertEqual(vars(copy.replace(ns, x=1, y=2)), {"x": 1, "y": 2})
+
+    @unittest.skipIf(sys.version_info < (3, 13), "copy.replace added in 3.13")
+    @make_dynamo_test
+    def test_replace_subclass(self):
+        spam2 = copy.replace(_Namespace(ham=8, eggs=9), ham=5)
+        self.assertIs(type(spam2), _Namespace)
+        self.assertEqual(vars(spam2), {"ham": 5, "eggs": 9})
+
+    @make_dynamo_test
+    def test_subclass_init_via_super(self):
+        # namespace_init is a tp_init slot wrapper, reached through super().
+        self.assertEqual(vars(_InitNamespace(2)), {"a": 2, "b": 4})
+
+    @unittest.skipIf(sys.version_info < (3, 13), "copy.replace added in 3.13")
+    @make_dynamo_test
+    def test_replace_subclass_with_init(self):
+        got = copy.replace(_InitNamespace(1), a=5)
+        self.assertIs(type(got), _InitNamespace)
+        self.assertEqual(vars(got), {"a": 5, "b": 2})
+
+    @unittest.skipIf(sys.version_info < (3, 13), "copy.replace added in 3.13")
+    @make_dynamo_test
+    def test_replace_keeps_constructor_only_attrs(self):
+        # namespace_replace calls type(self)(), so the copy starts from what the
+        # constructor produced; PyDict_Update only overlays what self carries.
+        ns = _InitNamespace(1)
+        del ns.b
+        self.assertEqual(vars(copy.replace(ns, a=5)), {"a": 5, "b": 2})
+
+    @unittest.skipIf(sys.version_info < (3, 13), "copy.replace added in 3.13")
+    @make_dynamo_test
+    def test_replace_subclass_init_requires_arg(self):
+        # type(self)() is what raises here, so skipping __init__ would swallow it.
+        with self.assertRaises(TypeError):
+            copy.replace(_RequiredArgNamespace(1), a=5)
+
+    @make_dynamo_test
+    def test_constructor_arity_message(self):
+        if sys.version_info < (3, 13):
+            with self.assertRaisesRegex(TypeError, "no positional arguments expected"):
+                types.SimpleNamespace({}, {})
+            return
+        # PyArg_UnpackTuple gets its funcname from _PyType_Name(Py_TYPE(ns)),
+        # so a subclass reports its own name.
+        too_many = "expected at most 1 argument, got 2"
+        with self.assertRaisesRegex(TypeError, f"SimpleNamespace {too_many}"):
+            types.SimpleNamespace({}, {})
+        with self.assertRaisesRegex(TypeError, f"_Namespace {too_many}"):
+            _Namespace({}, {})
+
+    @unittest.skipIf(sys.version_info < (3, 13), "positional argument added in 3.13")
+    def test_str_subclass_key_graph_breaks(self):
+        # PyUnicode_Check takes a str subclass, but Dynamo models the instance
+        # dict with exact-str names, so this graph-breaks instead of tracing.
+        class MyStr(str):
+            __slots__ = ()
+
+        def fn(x):
+            return len(vars(types.SimpleNamespace({MyStr("a"): 1}))), x + 1
+
+        x = torch.randn(3)
+        with self.assertRaisesRegex(Unsupported, "str subclass key in SimpleNamespace"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.compile(fn, backend="eager")(x)[0], fn(x)[0])
+
+    @unittest.skipIf(sys.version_info < (3, 13), "positional argument added in 3.13")
+    def test_non_constant_key_graph_breaks(self):
+        # Formatting a tensor produces a StringFormatVariable, which is str-typed
+        # but has no constant value to use as an attribute name.
+        def fn(x):
+            return len(vars(types.SimpleNamespace({f"a{x}": 1}))), x + 1
+
+        with self.assertRaisesRegex(Unsupported, "non-constant key in SimpleNamespace"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
+
+    def test_holds_tensors_in_one_graph(self):
+        def fn(x):
+            ns = types.SimpleNamespace(a=x + 1)
+            ns.b = ns.a * 2
+            del ns.a
+            return ns
+
+        cnt = dynamo_testing.CompileCounter()
+        x = torch.randn(3)
+        got = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertIs(type(got), types.SimpleNamespace)
+        self.assertEqual(vars(got), vars(fn(x)))
+
+    def test_argument_from_outside(self):
+        # A namespace built before the compiled region reaches Dynamo through
+        # VariableBuilder rather than SideEffects, so it needs the same model.
+        def fn(ns, x):
+            before = repr(ns)
+            ns.total = ns.scale * x
+            return before, ns.total, ns == types.SimpleNamespace(name="cfg", scale=2)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        ns_eager = types.SimpleNamespace(name="cfg", scale=2)
+        ns_compiled = types.SimpleNamespace(name="cfg", scale=2)
+        self.assertEqual(fn(ns_eager, x), opt_fn(ns_compiled, x))
+        # The write to ns.total has to replay onto the caller's object.
+        self.assertEqual(vars(ns_eager), vars(ns_compiled))
+
+    @unittest.skipIf(sys.version_info < (3, 13), "copy.replace added in 3.13")
+    def test_replace_from_outside(self):
+        def fn(ns, x):
+            ns.total = ns.scale * x
+            return ns == copy.replace(ns, total=ns.total)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        ns_eager = types.SimpleNamespace(name="cfg", scale=2)
+        ns_compiled = types.SimpleNamespace(name="cfg", scale=2)
+        self.assertEqual(fn(ns_eager, x), opt_fn(ns_compiled, x))
+        self.assertEqual(vars(ns_eager), vars(ns_compiled))
 
 
 if __name__ == "__main__":

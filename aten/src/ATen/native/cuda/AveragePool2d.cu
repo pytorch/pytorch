@@ -194,8 +194,8 @@ __global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const index_t nthreads,
     bool count_include_pad, bool use_divisor) {
   CUDA_KERNEL_LOOP_TYPE(index, nthreads, index_t) {
     const int c = index % channels;
-    const int w = (index / channels) % width;
-    const int h = (index / channels / width) % height;
+    const int w = (index / channels) % width + pad_w;
+    const int h = (index / channels / width) % height + pad_h;
     const int n = index / channels / width / height;
 
     const int phstart = (h < kernel_h) ? 0 : (h - kernel_h) / stride_h + 1;
@@ -412,7 +412,7 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
     "avg_pool2d_backward_out_cuda_frame",
     [&] {
-      const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, std::is_same<scalar_t, double>::value ? double_threads : 1024);
+      const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, std::is_same_v<scalar_t, double> ? double_threads : 1024);
       const uint32_t num_blocks = ceil_div<uint32_t>(count, num_threads);
 
       using accscalar_t = acc_type<scalar_t, true>;

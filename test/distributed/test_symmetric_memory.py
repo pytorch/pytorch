@@ -1,11 +1,13 @@
 # Owner(s): ["module: c10d"]
 
 import itertools
+import json
 import os
 import random
 import re
-from contextlib import nullcontext
-from unittest import skip, skipIf, skipUnless
+import tempfile
+from contextlib import contextmanager, nullcontext
+from unittest import skipIf, skipUnless
 
 import torch
 import torch.distributed as dist
@@ -18,7 +20,8 @@ from torch._inductor.utils import (
     fresh_inductor_cache,
     run_and_get_triton_code,
 )
-from torch.distributed._functional_collectives import all_gather_tensor
+from torch._prims_common import make_contiguous_strides_for
+from torch.distributed._functional_collectives import all_gather_single
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
@@ -27,20 +30,23 @@ from torch.distributed._symmetric_memory import (
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
-from torch.testing._internal.common_cuda import (
-    SM100OrLater,
-    SM89OrLater,
-    SM90OrLater,
-    xfailIfSM100OrLater,
+from torch.distributed._symmetric_memory._nccl import (
+    NcclCommRegistration,
+    register_external_nccl_comm,
 )
+from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
+from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
     requires_multicast_support,
+    requires_nccl,
+    setup_torchcomms_pg,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
+    skip_if_rocm_ver_atleast_multiprocess,
     skip_if_rocm_ver_lessthan_multiprocess,
 )
 from torch.testing._internal.common_utils import (
@@ -49,14 +55,32 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     requires_cuda_p2p_access,
     run_tests,
+    TEST_WITH_ROCM,
     TestCase,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 test_contexts = [nullcontext, _test_mode]
 
-# Set environment variable to disable multicast for all tests in this module
-os.environ["TORCH_SYMM_MEM_DISABLE_MULTICAST"] = "1"
+
+@contextmanager
+def _enable_multicast_for_test(test_case: TestCase, device_index: int):
+    old_disable_multicast = os.environ.pop("TORCH_SYMM_MEM_DISABLE_MULTICAST", None)
+    try:
+        if not _SymmetricMemory.has_multicast_support(DeviceType.CUDA, device_index):
+            test_case.skipTest("multicast support is not available")
+        yield
+    finally:
+        if old_disable_multicast is not None:
+            os.environ["TORCH_SYMM_MEM_DISABLE_MULTICAST"] = old_disable_multicast
+
+
+def _lc_ag_output_shape(shape: tuple[int, ...], world_size: int) -> tuple[int, ...]:
+    if len(shape) == 0:
+        return (world_size,)
+    return (shape[0] * world_size, *shape[1:])
+
 
 # So that tests are written in device-agnostic way
 device_type = "cuda"
@@ -199,6 +223,68 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    def test_alloc_rendezvous_on_current_stream(self) -> None:
+        # Regression test for https://github.com/pytorch/pytorch/issues/181086:
+        # the memset issued by empty() and the memcpys issued by the first
+        # rendezvous() must follow the caller's current stream instead of
+        # implicitly using the default stream.
+        self._init_process()
+
+        # Only the CUDA backend is fixed; NCCL/NVSHMEM still issue these ops
+        # synchronously on the default stream.
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        stream = torch.cuda.Stream()
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CUDA]
+        ) as prof:
+            with torch.cuda.stream(stream):
+                t = symm_mem.empty(1024, device="cuda")
+                symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+                symm_mem_hdl.barrier()
+            torch.cuda.synchronize()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trace_path = os.path.join(tmpdir, "trace.json")
+            prof.export_chrome_trace(trace_path)
+            with open(trace_path) as f:
+                events = json.load(f)["traceEvents"]
+
+        # Only GPU-track events carry args.stream. The barrier kernel launched
+        # on the current stream even before the fix, so its trace stream id
+        # identifies the user stream.
+        barrier_events = [
+            ev
+            for ev in events
+            if "barrier" in ev.get("name", "") and "stream" in ev.get("args", {})
+        ]
+        self.assertGreater(len(barrier_events), 0)
+        user_stream = barrier_events[0]["args"]["stream"]
+        # Restrict to the alloc/rendezvous window (everything before the
+        # barrier) so unrelated copies elsewhere in the profile cannot affect
+        # the result.
+        barrier_ts = min(ev["ts"] for ev in barrier_events)
+        mem_events = [
+            ev
+            for ev in events
+            if ev.get("name", "").startswith(("Memset", "Memcpy"))
+            and "stream" in ev.get("args", {})
+            and ev["ts"] < barrier_ts
+        ]
+        # ROCm records no memset/memcpy activities for these ops, most likely
+        # because HIP lowers a small fill and the pointer-array uploads to blit
+        # kernels, so there is nothing to check the stream of there.
+        if not TEST_WITH_ROCM:
+            self.assertGreater(len(mem_events), 0)
+        for ev in mem_events:
+            self.assertEqual(ev["args"]["stream"], user_stream, ev["name"])
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_get_signal_pad(self) -> None:
         self._init_process()
 
@@ -263,6 +349,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_rendezvous_via_pg_allgather(self) -> None:
         import pickle
 
@@ -287,16 +374,23 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             ag_entries = [
                 e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
             ]
-            # On NVLink-fabric hardware both the RendezvousRequest and handle
-            # exchange go through pg_all_gather → 2 allgathers. On hardware
-            # without NVLink fabric only the RendezvousRequest uses
-            # pg_all_gather (handle exchange falls back to ipc_channel) → 1.
-            self.assertIn(
-                len(ag_entries),
-                [1, 2],
-                f"expected 1 or 2 NCCL _all_gather_base from rendezvous, "
-                f"got {len(ag_entries)}: {[e['profiling_name'] for e in entries]}",
+            bc_entries = [e for e in entries if e["profiling_name"] == "nccl:broadcast"]
+            has_mc = symm_mem_hdl.multicast_ptr != 0
+            # Exchanges routed through the PG: the RendezvousRequest allgather
+            # (always), the handle exchange allgather (NVLink-fabric hardware
+            # only; elsewhere handles go through ipc_channel), and, when
+            # multicast is set up, a success-flag allgather plus a multicast
+            # handle broadcast (fabric only).
+            lo, hi = (2, 3) if has_mc else (1, 2)
+            self.assertTrue(
+                lo <= len(ag_entries) <= hi,
+                f"expected {lo} to {hi} NCCL _all_gather_base from rendezvous "
+                f"(multicast={has_mc}), got {len(ag_entries)}: "
+                f"{[e['profiling_name'] for e in entries]}",
             )
+            self.assertLessEqual(len(bc_entries), 1)
+            if bc_entries:
+                self.assertTrue(has_mc)
 
             symm_mem_hdl.barrier()
             for peer in range(self.world_size):
@@ -310,6 +404,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_rendezvous_custom_backend(self) -> None:
         # Simulate the ncclx multi-backend setup.  NCCLXStub wraps NCCL
         # (CUDA-only, like ncclx) and registers via extended_api=True.
@@ -360,7 +455,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertGreaterEqual(
             len(ag_entries),
             1,
-            f"expected NCCL _all_gather_base from PG rendezvous, "
+            lambda msg: f"{msg}\nexpected NCCL _all_gather_base from PG rendezvous, "
             f"got: {[e['profiling_name'] for e in entries]}",
         )
 
@@ -374,6 +469,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_pg_rendezvous_abort_after(self) -> None:
         self._init_process()
 
@@ -400,6 +496,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     @parametrize("symm_mem_input", [True, False])
     def test_low_contention_all_gather(self, symm_mem_input: bool) -> None:
         self._init_process()
@@ -423,10 +520,105 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         for r in range(self.world_size):
             self.assertTrue(chunks[r].eq(r).all())
 
+    def _run_lc_ag_ce_multicast_correctness(
+        self, symm_mem_input: bool, shape: tuple[int, ...]
+    ) -> None:
+        self._init_process()
+
+        with _enable_multicast_for_test(self, self.device.index):
+            if symm_mem_input:
+                t = _SymmetricMemory.empty_strided_p2p(
+                    size=shape,
+                    stride=make_contiguous_strides_for(shape),
+                    dtype=torch.float32,
+                    device=self.device,
+                    group_name="0",
+                ).fill_(self.rank)
+            else:
+                t = torch.full(
+                    shape, self.rank, dtype=torch.float32, device=self.device
+                )
+
+            res = torch.ops.symm_mem._low_contention_all_gather_ce_multicast(t, "0")
+            self.assertEqual(res.shape, _lc_ag_output_shape(shape, self.world_size))
+
+            chunks = res.chunk(self.world_size)
+            for r in range(self.world_size):
+                self.assertTrue(
+                    chunks[r].eq(r).all(),
+                    f"rank {self.rank} chunk {r} value {chunks[r].flatten()[0].item()}",
+                )
+
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
+    @parametrize("shape", [(), (64, 64)])
+    @parametrize("symm_mem_input", [True, False])
+    def test_low_contention_all_gather_ce_multicast(
+        self, symm_mem_input: bool, shape: tuple[int, ...]
+    ) -> None:
+        self._run_lc_ag_ce_multicast_correctness(symm_mem_input, shape)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
+    @parametrize("shape", [(), (64, 64)])
+    def test_low_contention_all_gather_ce_multicast_out(
+        self, shape: tuple[int, ...]
+    ) -> None:
+        self._init_process()
+
+        with _enable_multicast_for_test(self, self.device.index):
+            t = torch.full(shape, self.rank, dtype=torch.float32, device=self.device)
+            out_shape = _lc_ag_output_shape(shape, self.world_size)
+            out = _SymmetricMemory.empty_strided_p2p(
+                size=out_shape,
+                stride=make_contiguous_strides_for(out_shape),
+                dtype=torch.float32,
+                device=self.device,
+                group_name="0",
+            )
+
+            res = torch.ops.symm_mem._low_contention_all_gather_ce_multicast_out(
+                t, "0", out
+            )
+            self.assertEqual(res.data_ptr(), out.data_ptr())
+            self.assertEqual(res.shape, out_shape)
+
+            chunks = res.chunk(self.world_size)
+            for r in range(self.world_size):
+                self.assertTrue(
+                    chunks[r].eq(r).all(),
+                    f"rank {self.rank} chunk {r} value {chunks[r].flatten()[0].item()}",
+                )
+
+            meta_t = torch.empty(shape, dtype=torch.float32, device="meta")
+            meta_out = torch.empty(out_shape, dtype=torch.float32, device="meta")
+            meta_res = torch.ops.symm_mem._low_contention_all_gather_ce_multicast_out(
+                meta_t, "0", meta_out
+            )
+            self.assertEqual(meta_res.shape, out_shape)
+            self.assertEqual(meta_res.dtype, meta_out.dtype)
+            self.assertEqual(meta_res.device, meta_out.device)
+
+            bad_out_shape = (out_shape[0] + 1, *out_shape[1:])
+            bad_meta_out = torch.empty(
+                bad_out_shape, dtype=torch.float32, device="meta"
+            )
+            with self.assertRaisesRegex(RuntimeError, "expected out shape"):
+                torch.ops.symm_mem._low_contention_all_gather_ce_multicast_out(
+                    meta_t, "0", bad_meta_out
+                )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     @parametrize("reduce_op", ["sum", "avg"])
     @parametrize("symm_mem_input", [True, False])
     def test_low_contention_reduce_scatter(
@@ -504,6 +696,84 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    def test_get(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+
+        # Full-buffer get from a peer's allocation.
+        src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        hdl = symm_mem.rendezvous(src, group=group_name)
+        dist.barrier()
+
+        if self.rank == 0:
+            dst = torch.empty_like(src)
+            symm_mem.get(dst, hdl, peer=1)
+            torch.testing.assert_close(dst, torch.ones_like(dst))
+
+        dist.barrier()
+
+        # Offset get: copy a sub-region of the peer's allocation.
+        src_base = symm_mem.empty(2 * numel, dtype=dtype, device=self.device)
+        src_base.copy_(
+            torch.arange(2 * numel, dtype=dtype, device=self.device)
+            + self.rank * 2 * numel
+        )
+        hdl = symm_mem.rendezvous(src_base, group=group_name)
+        dist.barrier()
+
+        if self.rank == 0:
+            offset = numel // 2
+            dst = torch.empty(numel, dtype=dtype, device=self.device)
+            symm_mem.get(dst, hdl, peer=1, offset=offset)
+            expected = (
+                torch.arange(offset, offset + numel, dtype=dtype, device=self.device)
+                + 2 * numel
+            )
+            torch.testing.assert_close(dst, expected)
+
+            # Filling a sub-region: pass a view; the rest of dst is untouched.
+            larger_dst = torch.full((numel + 1,), -1, dtype=dtype, device=self.device)
+            symm_mem.get(larger_dst[:numel], hdl, peer=1, offset=offset)
+            self.assertEqual(larger_dst[:numel], expected)
+            self.assertEqual(larger_dst[numel], -1)
+
+            noncontig_dst = torch.empty(2 * numel, dtype=dtype, device=self.device)[::2]
+            with self.assertRaisesRegex(ValueError, "contiguous"):
+                symm_mem.get(noncontig_dst, hdl, peer=1)
+
+            with self.assertRaisesRegex(ValueError, "non-negative"):
+                symm_mem.get(
+                    torch.empty(numel, dtype=dtype, device=self.device),
+                    hdl,
+                    peer=1,
+                    offset=-1,
+                )
+
+            with self.assertRaisesRegex(ValueError, "exceeds"):
+                symm_mem.get(
+                    torch.empty(1, dtype=dtype, device=self.device),
+                    hdl,
+                    peer=1,
+                    offset=hdl.buffer_size // dst.element_size(),
+                )
+
+            with self.assertRaisesRegex(ValueError, "invalid peer"):
+                symm_mem.get(
+                    torch.empty(numel, dtype=dtype, device=self.device),
+                    hdl,
+                    peer=hdl.world_size,
+                )
+
+        dist.barrier()
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_dispatcher_torchbind_symmetric_memory(self) -> None:
         self._init_process()
         group_name = dist.group.WORLD.group_name
@@ -518,6 +788,31 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         # Exercise dispatcher schema that accepts a TorchBind
         # SymmetricMemory object (__torch__.torch.classes.c10d.SymmetricMemory).
         torch.ops.symm_mem._barrier(sm)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    def test_cuda_multimem_barrier_kernel(self) -> None:
+        self._init_process()
+
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        group_name = dist.group.WORLD.group_name
+        with _enable_multicast_for_test(self, self.device.index):
+            t = symm_mem.empty(64, device=self.device)
+            symm_mem_hdl = symm_mem.rendezvous(t, group=group_name)
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CUDA],
+            ) as prof:
+                symm_mem_hdl.barrier()
+                torch.cuda.synchronize()
+            self.assertTrue(
+                any("multimem_barrier_kernel" in event.key for event in prof.events()),
+                "expected multimem_barrier_kernel in profiler events",
+            )
 
 
 # We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
@@ -806,6 +1101,43 @@ class AsyncTPTest(MultiProcContinuousTest):
                 f"Expected strides to match: {output_0.stride()} vs {output_1.stride()}"
             )
 
+    @skip_if_lt_x_gpu(2)
+    def test_fused_matmul_reduce_scatter_bfloat16_custom_reduce(self) -> None:
+        self._init_process()
+
+        M = 64
+        N = 32
+        K = 1024
+        group = dist.group.WORLD
+        rank = self.rank
+
+        torch.manual_seed(42 + rank)
+        A = torch.rand(M, K, device="cuda", dtype=torch.bfloat16)
+        B = torch.rand(K, N, device="cuda", dtype=torch.bfloat16)
+
+        output_0 = _fused_matmul_reduce_scatter_fallback(
+            A, B, "avg", scatter_dim=0, group_name=group.group_name
+        )
+        output_1 = torch.ops.symm_mem.fused_matmul_reduce_scatter(
+            A, B, "avg", scatter_dim=0, group_name=group.group_name
+        )
+
+        torch.testing.assert_close(output_0, output_1, rtol=1e-2, atol=1e-2)
+        self.assertEqual(output_0.stride(), output_1.stride())
+
+        # The fused reducer is only selected under graph capture, so the eager
+        # call above does not cover it. output_1 already sized the symmetric
+        # memory workspace, which cannot grow during capture.
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            output_2 = torch.ops.symm_mem.fused_matmul_reduce_scatter(
+                A, B, "avg", scatter_dim=0, group_name=group.group_name
+            )
+        graph.replay()
+        torch.cuda.synchronize()
+        torch.testing.assert_close(output_0, output_2, rtol=1e-2, atol=1e-2)
+        self.assertEqual(output_0.stride(), output_2.stride())
+
     @skip_if_rocm_multiprocess  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
     @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
@@ -954,6 +1286,7 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     @parametrize("set_device", [True, False])
     def test_empty_strided_p2p(self, set_device: bool) -> None:
         self._init_process(set_device)
@@ -975,6 +1308,7 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
     )
     @skip_if_rocm_ver_lessthan_multiprocess((7, 0))
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     @parametrize("set_device", [True, False])
     def test_empty_strided_p2p_persistent(self, set_device: bool) -> None:
         self._init_process(set_device)
@@ -1117,6 +1451,71 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         # impossible to terminate the process in this state.
         os._exit(0)
 
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_barrier_channel_out_of_bounds(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(64, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        num_slots = symm_mem_hdl.signal_pad_size // 4
+        max_channel = num_slots // self.world_size
+
+        # channel == max_channel must be rejected
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            symm_mem_hdl.barrier(channel=max_channel)
+        torch.cuda.synchronize()
+
+        # channel == max_channel - 1 must be accepted
+        if max_channel > 1:
+            symm_mem_hdl.barrier(channel=max_channel - 1)
+        torch.cuda.synchronize()
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_put_wait_signal_channel_out_of_bounds(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(64, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        num_slots = symm_mem_hdl.signal_pad_size // 4
+        max_channel = num_slots // self.world_size
+        peer = (self.rank + 1) % self.world_size
+
+        # An over-capacity channel would write past the signal pad, into the
+        # peer's tensor data (see #191618). Both ops must reject it host-side.
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            symm_mem_hdl.put_signal(dst_rank=peer, channel=max_channel)
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            symm_mem_hdl.wait_signal(src_rank=peer, channel=max_channel)
+
+        # The boundary channel is accepted: ring-exchange a signal on it.
+        src = (self.rank - 1) % self.world_size
+        symm_mem_hdl.put_signal(dst_rank=peer, channel=max_channel - 1)
+        symm_mem_hdl.wait_signal(src_rank=src, channel=max_channel - 1)
+        torch.cuda.synchronize()
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_put_wait_signal_rank_out_of_bounds(self) -> None:
+        self._init_process()
+
+        t = symm_mem.empty(64, device="cuda")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+
+        # An out-of-range rank indexes a wild signal pad pointer (put_signal)
+        # or a slot past the signal pad, in the tensor data (wait_signal).
+        # get_signal_pad wraps the wild pointer in a tensor handed to the user.
+        for bad_rank in (-1, self.world_size):
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                symm_mem_hdl.put_signal(dst_rank=bad_rank)
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                symm_mem_hdl.wait_signal(src_rank=bad_rank)
+            with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
+                symm_mem_hdl.get_signal_pad(bad_rank)
+
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
@@ -1165,8 +1564,6 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("align_bytes", [4, 8, 16])
     @parametrize("size_bytes", [4, 8192, 8196])
-    # https://github.com/pytorch/pytorch/issues/164015
-    @xfailIfSM100OrLater
     def test_multimem_one_shot_all_reduce(
         self, dtype: torch.dtype, size_bytes: int, align_bytes: int
     ) -> None:
@@ -1180,19 +1577,15 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
 
         res = torch.ops.symm_mem.multimem_one_shot_all_reduce(inp, "sum", group_name)
 
-        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
+        gathered_inps = all_gather_single(inp, 0, "0").view(self.world_size, -1)
         # Only verify that the results are close to the sum of inputs across
         # ranks (see Note [multimem_one_shot_all_reduce]).
-        torch.testing.assert_close(
-            gathered_inps.sum(dim=0), res, rtol=1e-03, atol=1e-05
-        )
+        self.assertEqual(gathered_inps.sum(dim=0), res)
 
     @skip_if_lt_x_gpu(4)
     @requires_multicast_support()
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("size_bytes", [4, 8192, 8196])
-    # https://github.com/pytorch/pytorch/issues/164015
-    @xfailIfSM100OrLater
     def test_multimem_one_shot_reduce_out(
         self, dtype: torch.dtype, size_bytes: int
     ) -> None:
@@ -1210,13 +1603,11 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
             inp, "sum", root, group_name, out
         )
 
-        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
+        gathered_inps = all_gather_single(inp, 0, "0").view(self.world_size, -1)
         # Only verify that the results are close to the sum of inputs across
         # ranks (see Note [multimem_one_shot_all_reduce]).
         if self.rank == root:
-            torch.testing.assert_close(
-                gathered_inps.sum(dim=0), out, rtol=1e-03, atol=1e-05
-            )
+            self.assertEqual(gathered_inps.sum(dim=0), out)
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -1255,6 +1646,7 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(4)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_two_shot_all_reduce(self) -> None:
         self._init_process()
         group_name = dist.group.WORLD.group_name
@@ -1291,14 +1683,14 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
             self._verify_all_reduce_result(inp, res if inplace else out)
 
     def _verify_all_reduce_result(self, inp, res):
-        gathered_res = all_gather_tensor(res, 0, "0").view(self.world_size, -1)
+        gathered_res = all_gather_single(res, 0, "0").view(self.world_size, -1)
         # Verify that the results across ranks are identical
         self.assertEqual(
             (gathered_res == gathered_res[0, :]).all(dim=0).sum(), inp.numel()
         )
 
         # Verify that the result are close to the sum of inputs across ranks
-        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
+        gathered_inps = all_gather_single(inp, 0, "0").view(self.world_size, -1)
         torch.testing.assert_close(
             gathered_inps.sum(dim=0), res, rtol=1e-01, atol=1e-01
         )
@@ -1367,8 +1759,8 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
             torch.ops.symm_mem.reduce_scatter_out(res, group_name, True, out)
 
     def _verify_reduce_scatter_result(self, inp, res):
-        gathered_res = all_gather_tensor(res, 0, "0").view(self.world_size, *res.shape)
-        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, *inp.shape)
+        gathered_res = all_gather_single(res, 0, "0").view(self.world_size, *res.shape)
+        gathered_inps = all_gather_single(inp, 0, "0").view(self.world_size, *inp.shape)
         sum_inps = gathered_inps.sum(0)
         slice_width = sum_inps.shape[-1] // self.world_size
         for i in range(self.world_size):
@@ -1408,6 +1800,75 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
+class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
+        torch.manual_seed(42 + self.rank)
+
+    def _run_low_contention_all_gather_ce_multicast_cuda_graph(self) -> None:
+        group_name = dist.group.WORLD.group_name
+        inp = torch.full((64, 64), self.rank, dtype=torch.float32, device=self.device)
+        out = symm_mem.empty(
+            inp.shape[0] * self.world_size,
+            *inp.shape[1:],
+            dtype=inp.dtype,
+            device=self.device,
+        )
+        symm_mem.rendezvous(out, group=group_name)
+
+        def run_op() -> torch.Tensor:
+            return torch.ops.symm_mem._low_contention_all_gather_ce_multicast_out(
+                inp, group_name, out
+            )
+
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            warmup = run_op()
+        torch.cuda.current_stream().wait_stream(s)
+        torch.cuda.synchronize()
+
+        graph = torch.cuda.CUDAGraph()
+        observed = torch.empty_like(warmup)
+        with torch.cuda.graph(graph):
+            inp.add_(1.0)
+            if self.rank == 0:
+                # Skew one rank so replay catches missing CE multicast ordering.
+                torch.cuda._sleep(20_000_000)
+            res = run_op()
+            observed.copy_(res)
+
+        for _ in range(4):
+            graph.replay()
+        torch.cuda.synchronize()
+
+        expected_delta = float(inp[0, 0].item()) - self.rank
+        chunks = observed.chunk(self.world_size)
+        for r in range(self.world_size):
+            self.assertEqual(
+                chunks[r],
+                torch.full_like(chunks[r], r + expected_delta),
+                msg=f"CUDA graph replay mismatch for rank {r}",
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
+    def test_low_contention_all_gather_ce_multicast_cuda_graph(self) -> None:
+        self._init_process()
+
+        with _enable_multicast_for_test(self, self.device.index):
+            self._run_low_contention_all_gather_ce_multicast_cuda_graph()
+
+
+@instantiate_parametrized_tests
+@requires_cuda_p2p_access()
 class LoweringTest(MultiProcContinuousTest):
     def _init_process(self) -> None:
         torch.cuda.set_device(self.device)
@@ -1418,7 +1879,6 @@ class LoweringTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skip("Fails with 'one_shot_all_reduce' not found in AOT graph, TODO: fix")
     @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
     @fresh_cache()
@@ -1526,7 +1986,9 @@ class LoweringTest(MultiProcContinuousTest):
 
         p2p_matches = re.findall(r"buf\d+ = empty_strided_p2p", code_no_reuse)
         self.assertEqual(
-            len(p2p_matches), 2, f"Expected 2 p2p allocations, got {len(p2p_matches)}"
+            len(p2p_matches),
+            2,
+            lambda msg: f"{msg}\nExpected 2 p2p allocations, got {len(p2p_matches)}",
         )
 
         # Check numerical result for no_reuse path
@@ -1569,7 +2031,7 @@ class LoweringTest(MultiProcContinuousTest):
         self.assertEqual(
             len(p2p_matches_reuse),
             1,
-            f"Expected 1 p2p allocation (reuse), got {len(p2p_matches_reuse)}",
+            lambda msg: f"{msg}\nExpected 1 p2p allocation (reuse), got {len(p2p_matches_reuse)}",
         )
 
         cuda_matches = re.findall(r"buf\d+ = empty_strided_cuda", code_reuse)
@@ -1628,7 +2090,7 @@ class LoweringTest(MultiProcContinuousTest):
         self.assertGreaterEqual(
             out_calls,
             6,
-            f"Expected at least 6 out= calls (3 mm + 3 allreduce), got {out_calls}.",
+            lambda msg: f"{msg}\nExpected at least 6 out= calls (3 mm + 3 allreduce), got {out_calls}.",
         )
 
         # Output buffers should be reused across layers (ping-pong).
@@ -1636,7 +2098,7 @@ class LoweringTest(MultiProcContinuousTest):
         self.assertGreaterEqual(
             reuse_count,
             2,
-            f"Expected at least 2 buffer reuses, got {reuse_count}.",
+            lambda msg: f"{msg}\nExpected at least 2 buffer reuses, got {reuse_count}.",
         )
 
     @skip_if_rocm_multiprocess  # requires registered-buffer support
@@ -1677,6 +2139,95 @@ class LoweringTest(MultiProcContinuousTest):
             ", out=",
             code,
             "one_shot_all_reduce_copy_out should have out= parameter.",
+        )
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
+    @fresh_inductor_cache()
+    def test_low_contention_all_gather_planned_output_codegen(self):
+        self._init_process()
+
+        with _enable_multicast_for_test(self, self.device.index):
+
+            def func(x):
+                return torch.ops.symm_mem._low_contention_all_gather_ce_multicast(
+                    x, "0"
+                )
+
+            x = torch.full((8, 8), self.rank, dtype=torch.float32, device=self.device)
+            compiled = torch.compile(func, fullgraph=True)
+            code = run_and_get_triton_code(compiled, x)
+
+            FileCheck().check("empty_strided_p2p").check("alloc_id=").check(
+                "_low_contention_all_gather_ce_multicast_out"
+            ).check(", out=").run(code)
+
+            res = compiled(x)
+            self.assertEqual(res.shape, (8 * self.world_size, 8))
+            chunks = res.chunk(self.world_size)
+            for r in range(self.world_size):
+                self.assertTrue(chunks[r].eq(r).all())
+
+    def _make_lc_ag_out_graph(self, num_collectives: int) -> torch.fx.Graph:
+        graph = torch.fx.Graph()
+        waits = []
+        for i in range(num_collectives):
+            x = graph.placeholder(f"x{i}")
+            x.meta["val"] = torch.empty(8, 8, device=self.device)
+            out = graph.placeholder(f"out{i}")
+            out.meta["val"] = torch.empty(8 * self.world_size, 8, device=self.device)
+            ag = graph.call_function(
+                torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                args=(x, self.world_size, "0"),
+                kwargs={"out": out},
+            )
+            ag.meta["val"] = out.meta["val"]
+            mm = graph.call_function(torch.ops.aten.mm.default, args=(x, x))
+            mm.meta["val"] = torch.empty(8, 8, device=self.device)
+            wait = graph.call_function(
+                torch.ops._c10d_functional.wait_tensor.default,
+                args=(out,),
+            )
+            wait.meta["val"] = out.meta["val"]
+            waits.append(wait)
+        graph.output(tuple(waits))
+        return graph
+
+    def _run_lc_ag_pass_test(self, graph: torch.fx.Graph) -> None:
+        from torch._inductor.fx_passes import low_contention_collectives as lc
+
+        old_has_multicast_support = lc._has_multicast_support
+        try:
+            lc._has_multicast_support = lambda device_index: True
+            config_patches = {
+                "aten_distributed_optimizations.low_contention_min_bytes_per_rank": 0,
+                "aten_distributed_optimizations."
+                "low_contention_all_gather_ce_multicast": True,
+            }
+            with _test_mode(), torch._inductor.config.patch(config_patches):
+                lc.replace_collectives_with_low_contention(graph)
+        finally:
+            lc._has_multicast_support = old_has_multicast_support
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    def test_low_contention_all_gather_out_rewrite_preserves_out(self) -> None:
+        self._init_process()
+
+        graph = self._make_lc_ag_out_graph(num_collectives=1)
+        original_out = next(n for n in graph.nodes if n.name == "out0")
+        self._run_lc_ag_pass_test(graph)
+
+        target = torch.ops.symm_mem._low_contention_all_gather_ce_multicast_out.default
+        replacement = next(n for n in graph.nodes if n.target is target)
+        self.assertIs(replacement.args[2], original_out)
+        self.assertFalse(
+            any(
+                n.target
+                is torch.ops._c10d_functional.all_gather_into_tensor_out.default
+                for n in graph.nodes
+            )
         )
 
     @skip_if_rocm_multiprocess  # test requires support for registered buffers
@@ -1800,6 +2351,36 @@ class LoweringTest(MultiProcContinuousTest):
         # Verify that exactly one symm_mem allocation call is generated
         FileCheck().check_count("empty_strided_p2p(", 1, exactly=True).run(code)
 
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_symm_mem_alloc_id_no_collision_after_reseed(self):
+        """Regression test for issue #192087.
+
+        The persistent symm_mem alloc_id must stay unique across graphs even
+        when the global random module is reseeded between compilations, as
+        TestCase.setUp does via random.seed(). Otherwise different-sized
+        allocations collide in the process-global persistent allocation map and
+        fail with an allocation-size-mismatch error.
+        """
+        self._init_process()
+
+        def alloc_id(n):
+            def func(x):
+                return torch.ops.symm_mem.one_shot_all_reduce(x + 1, "sum", "0")
+
+            x = torch.rand(n, n, device=self.device)
+            code = run_and_get_triton_code(torch.compile(func, fullgraph=True), x)
+            match = re.search(r"alloc_id=(\d+)", code)
+            self.assertIsNotNone(match, "expected a symm_mem allocation in the code")
+            return match.group(1)
+
+        random.seed(1234)
+        id_small = alloc_id(4)
+        random.seed(1234)
+        id_large = alloc_id(8)
+        self.assertNotEqual(id_small, id_large)
+
 
 class SymmMemSingleProcTest(TestCase):
     @requires_cuda
@@ -1877,6 +2458,29 @@ class SymmMemSingleProcTest(TestCase):
         _SymmetricMemory.memset32(t, offset=0, val=1, count=64)
         _SymmetricMemory.memset32(t, offset=63, val=1, count=1)
 
+    @requires_cuda
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    def test_is_symm_mem_enabled_for_group(self):
+        # Rendezvous no longer requires enable_symm_mem_for_group, so
+        # is_symm_mem_enabled_for_group must not require it either
+        # (https://github.com/pytorch/pytorch/issues/193027).
+        self.assertFalse(symm_mem.is_symm_mem_enabled_for_group("unregistered_group"))
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        try:
+            group_name = dist.group.WORLD.group_name
+            self.assertTrue(symm_mem.is_symm_mem_enabled_for_group(group_name))
+            self.assertFalse(
+                symm_mem.is_symm_mem_enabled_for_group("unregistered_group")
+            )
+            with _test_mode(group_names={"mocked_group"}):
+                self.assertTrue(symm_mem.is_symm_mem_enabled_for_group("mocked_group"))
+                self.assertFalse(symm_mem.is_symm_mem_enabled_for_group(group_name))
+        finally:
+            dist.destroy_process_group()
+
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
@@ -1889,6 +2493,7 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         torch.cuda.set_device(self.device)
         torch.manual_seed(42 + self.rank)
 
+    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
@@ -1917,6 +2522,7 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_mempool_compute_ops(self):
         self._init_process()
         group_name = dist.group.WORLD.group_name
@@ -1935,6 +2541,275 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         y = torch.ops.symm_mem.one_shot_all_reduce(y, "sum", group_name)
         expected = torch.mm(x, w) * self.world_size
         self.assertEqual(y, expected)
+
+    def _mempool_barrier_roundtrip(self, mempool, numel, dtype, group_name):
+        # Allocate a symmetric tensor from the pool, then run a bounded
+        # barrier / buffer round-trip. A polluted signal pad would deadlock the
+        # CAS barrier, so timeout_ms makes a regression fail cleanly.
+        with torch.cuda.use_mem_pool(mempool):
+            t = torch.empty(numel, dtype=dtype, device=self.device)
+        hdl = symm_mem.rendezvous(t, group=group_name)
+        t.fill_(self.rank)
+        hdl.barrier(timeout_ms=60000)
+        for peer in range(self.world_size):
+            buf = hdl.get_buffer(peer, (numel,), dtype)
+            self.assertTrue(buf.eq(peer).all())
+        hdl.barrier(timeout_ms=60000)
+        return t, hdl
+
+    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_recycled_alloc_signal_pad(self):
+        # Regression test for the signal-pad pollution bug: the symmetric
+        # allocator (ncclMemAlloc / cuMemCreate) does not zero memory, so a
+        # fresh allocation whose region is recycled from a previously-used block
+        # could start the CAS-based barrier() protocol from a non-zero signal
+        # pad and deadlock. alloc() zeros the pad up front. Allocate from the
+        # SymmMem MemPool and run a barrier round-trip, free, then allocate the
+        # same size again (recycling the freed block) and confirm the round-trip
+        # still works on the recycled region.
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        mempool = symm_mem.get_mem_pool(self.device)
+        numel, dtype = 1024, torch.float
+
+        t1, hdl1 = self._mempool_barrier_roundtrip(mempool, numel, dtype, group_name)
+        del hdl1, t1
+        t2, hdl2 = self._mempool_barrier_roundtrip(mempool, numel, dtype, group_name)
+        del hdl2, t2
+
+    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_large_alloc_barrier(self):
+        # alloc() only zeros the signal pad, not the whole (much larger) data
+        # buffer. Confirm the signaling protocol still initializes correctly on
+        # a large allocation: run a barrier / buffer round-trip and check data.
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        mempool = symm_mem.get_mem_pool(self.device)
+        numel, dtype = 4 * 1024 * 1024, torch.float
+        self._mempool_barrier_roundtrip(mempool, numel, dtype, group_name)
+
+    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_storage_reuse(self):
+        """MemPool with no_split=True returns the same VA for same-size allocs."""
+        self._init_process()
+
+        mempool = symm_mem.get_mem_pool(self.device)
+        numel = 1024
+        dtype = torch.float
+
+        with torch.cuda.use_mem_pool(mempool):
+            t1 = torch.empty(numel, dtype=dtype, device=self.device)
+        ptr1 = t1.data_ptr()
+        del t1
+
+        with torch.cuda.use_mem_pool(mempool):
+            t2 = torch.empty(numel, dtype=dtype, device=self.device)
+        ptr2 = t2.data_ptr()
+
+        self.assertEqual(
+            ptr1,
+            ptr2,
+            "MemPool should return the same storage block for same-size re-allocation",
+        )
+
+    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_symm_mem_empty_storage_reuse(self):
+        """symm_mem.empty() reuses storage across alloc/free cycles via the MemPool."""
+        self._init_process()
+
+        size = (1024,)
+        stride = (1,)
+        alloc_id = 13 + random.randint(0, 2147483647)
+        dtype = torch.float
+
+        # We must use the alloc_id argument to guarantee the reuse of previously
+        # allocated memory
+        t1 = _SymmetricMemory.empty_strided_p2p(
+            size, stride, dtype=dtype, device=self.device, alloc_id=alloc_id
+        )
+        ptr1 = t1.data_ptr()
+        del t1
+
+        t2 = _SymmetricMemory.empty_strided_p2p(
+            size, stride, dtype=dtype, device=self.device, alloc_id=alloc_id
+        )
+        ptr2 = t2.data_ptr()
+
+        self.assertEqual(
+            ptr1,
+            ptr2,
+            "symm_mem.empty() should reuse the same storage block via the implicit MemPool",
+        )
+
+
+@instantiate_parametrized_tests
+@requires_cuda_p2p_access()
+class TorchCommsCudaSymmMemTest(MultiProcContinuousTest):
+    """CUDA symm_mem rendezvous against a torchcomms-backed PG.
+
+    Builds a torchcomms comm, wraps it in _BackendWrapper, registers it as
+    the NCCL backend on a bare ProcessGroup, and exercises symm_mem on the
+    CUDA backend (cuMemMap/IPC).
+    """
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    @requires_nccl()
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skipIf(not _TORCHCOMM_AVAILABLE, "torchcomms not installed")
+    @skipIf(TEST_WITH_ROCM, "torchcomms nccl backend not available on ROCm")
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_pg_for_rendezvous", [True, False])
+    def test_cuda_symm_mem_rendezvous_nccl(self, use_pg_for_rendezvous: bool) -> None:
+        torch.cuda.set_device(self.device)
+        suffix = f"usepg_{use_pg_for_rendezvous}"
+        group_name = f"torchcomms_cuda_symm_mem_nccl_{suffix}"
+        store_path = os.environ.get(
+            "TORCHCOMM_STORE_PATH",
+            f"/tmp/test_torchcomms_cuda_symm_mem_"
+            f"{os.environ.get('MASTER_PORT', '0')}_{suffix}",
+        )
+        pg = setup_torchcomms_pg(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            device=self.device,
+            store_path=store_path,
+            group_name=group_name,
+        )
+        pg.use_pg_for_symm_mem_rendezvous = use_pg_for_rendezvous
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(self.rank)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=group_name)
+        self.assertEqual(symm_mem_hdl.rank, self.rank)
+        self.assertEqual(symm_mem_hdl.world_size, self.world_size)
+
+        symm_mem_hdl.barrier()
+        for peer in range(self.world_size):
+            buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
+            self.assertTrue(buf.eq(peer).all())
+        symm_mem_hdl.barrier()
+
+
+@requires_cuda
+@skipIf(TEST_WITH_ROCM, "NCCL symmetric memory is not supported on ROCm")
+@skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
+class ExternalNcclCommRegistrationTest(TestCase):
+    """Tests for the external NCCL comm registration API
+    (``register_external_nccl_comm`` and the ``NcclCommRegistration`` handle
+    from ``torch.distributed._symmetric_memory._nccl``), exercised against a
+    *real* ``ncclComm_t``.
+
+    The comm is created in-process via NCCL's ``ncclCommInitAll`` (single
+    rank, single GPU) through ctypes, so no live multi-rank job is needed.
+    These run the real C++ registry path: register the real pointer into the
+    per-device ``NCCLDevCommManager`` and unregister via the handle.
+    """
+
+    def _make_real_comm(self, device_index: int = 0) -> int:
+        """Create a real 1-rank ncclComm on ``device_index`` and return its
+        pointer as an int. The comm is destroyed at test teardown."""
+        import ctypes
+
+        # The registration entry point only exists in NCCL builds with
+        # symm-mem device support; skip otherwise.
+        try:
+            from torch._C._distributed_c10d import (  # noqa: F401
+                _register_external_nccl_comm,
+            )
+        except ImportError:
+            self.skipTest("PyTorch built without NCCL symmetric-memory device support")
+
+        try:
+            nccl = ctypes.CDLL("libnccl.so.2")
+        except OSError as e:
+            self.skipTest(f"libnccl.so.2 not loadable: {e}")
+
+        nccl.ncclCommInitAll.restype = ctypes.c_int
+        nccl.ncclCommInitAll.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        nccl.ncclCommDestroy.restype = ctypes.c_int
+        nccl.ncclCommDestroy.argtypes = [ctypes.c_void_p]
+
+        torch.cuda.set_device(device_index)
+        comm = ctypes.c_void_p()
+        devs = (ctypes.c_int * 1)(device_index)
+        ret = nccl.ncclCommInitAll(ctypes.byref(comm), 1, devs)
+        if ret != 0 or not comm.value:
+            self.skipTest(f"ncclCommInitAll failed (ret={ret})")
+        # Destroy the comm after the test (LIFO; runs after the test body has
+        # already unregistered it).
+        self.addCleanup(nccl.ncclCommDestroy, ctypes.c_void_p(comm.value))
+        return comm.value
+
+    def test_register_unregister_real_comm(self) -> None:
+        comm_ptr = self._make_real_comm()
+        reg = register_external_nccl_comm("ext_nccl_reg_basic", comm_ptr, "cuda:0")
+        self.assertIsInstance(reg, NcclCommRegistration)
+        self.assertTrue(reg._active)
+        self.assertEqual(reg._group_name, "ext_nccl_reg_basic")
+        self.assertEqual(reg._device, torch.device("cuda:0"))
+
+        reg.unregister()
+        self.assertFalse(reg._active)
+        reg.unregister()  # idempotent: second call is a no-op, must not raise
+
+    def test_register_holds_and_drops_comm_ref(self) -> None:
+        # When a source comm object is passed, the handle keeps a strong ref
+        # to it (so a stray `del comm` can't dangle the registered pointer)
+        # and releases it on unregister.
+        comm_ptr = self._make_real_comm()
+        sentinel = object()
+        reg = register_external_nccl_comm(
+            "ext_nccl_reg_ref", comm_ptr, "cuda:0", comm=sentinel
+        )
+        self.assertIs(reg._comm, sentinel)
+        reg.unregister()
+        self.assertIsNone(reg._comm)
+
+    def test_context_manager_real_comm(self) -> None:
+        comm_ptr = self._make_real_comm()
+        reg = register_external_nccl_comm("ext_nccl_reg_cm", comm_ptr, "cuda:0")
+        with reg as entered:
+            self.assertIs(entered, reg)
+            self.assertTrue(reg._active)
+        # __exit__ unregisters.
+        self.assertFalse(reg._active)
+
+    def test_register_null_pointer_raises(self) -> None:
+        # The registration helper rejects a null comm pointer before touching
+        # the registry (C++ TORCH_CHECK).
+        try:
+            from torch._C._distributed_c10d import (  # noqa: F401
+                _register_external_nccl_comm,
+            )
+        except ImportError:
+            self.skipTest("PyTorch built without NCCL symmetric-memory device support")
+        with self.assertRaises(RuntimeError):
+            register_external_nccl_comm("ext_nccl_reg_null", 0, "cuda:0")
 
 
 if __name__ == "__main__":

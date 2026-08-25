@@ -65,9 +65,9 @@ class WorkerSpec:
         max_restarts: number of max retries for the workers
         monitor_interval: monitor status of workers every ``n`` seconds
         master_port: fixed port to run the c10d store on rank 0
-                     if not specified then will chose a random free port
+                     if not specified then will choose a random free port
         master_addr: fixed master_addr to run the c10d store on rank 0
-                     if not specified then will chose hostname on agent rank 0
+                     if not specified then will choose hostname on agent rank 0
         redirects: redirect std streams to a file,
                    selectively redirect for a particular
                    local rank by passing a map
@@ -236,7 +236,7 @@ class WorkerState(str, Enum):
     1. Worker group failure|unhealthy observed
     2. Membership change detected
 
-    When actions (start, stop, rdzv, retry, etc) on worker group fails
+    When actions (start, stop, rdzv, retry, etc) on worker group fail
     and results in the action being partially applied to the worker group
     the state will be ``UNKNOWN``. Typically this happens on uncaught/unhandled
     exceptions during state change events on the agent. The agent is not
@@ -596,7 +596,7 @@ class SimpleElasticAgent(ElasticAgent):
         Time complexity: each worker O(1), overall O(1)
 
         Slow Path: when workers have different roles and world sizes. We use the
-        the following algorithm:
+        following algorithm:
 
         1. Each agent writes its configuration(group_rank, group_world_size
            , num_workers) to the common store.
@@ -605,7 +605,7 @@ class SimpleElasticAgent(ElasticAgent):
         3. Determine the global rank: the global rank of the workers is computed
            by cumulative sum of the local_world_size for all workers in front of it.
            For efficiency reasons each worker is assigned a base global rank
-           such that it's workers are in the range [base_global_rank,
+           such that its workers are in the range [base_global_rank,
            base_global_rank + local_world_size).
         4. Determine the role rank: The role rank is determined using the algorithms
            in the point 3 with the exception that the ranks are calculated with

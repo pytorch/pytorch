@@ -25,7 +25,7 @@ namespace test {
         std::string::npos) {                                            \
       FAIL() << "Error message \"" << assert_throws_with_error_message  \
              << "\" did not contain expected substring \"" << substring \
-             << "\"";                                                   \
+             << '"';                                                    \
     }                                                                   \
   }
 

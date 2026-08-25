@@ -73,7 +73,7 @@ class OnnxDecompMeta:
                         self.onnx_function, "__traced", self.onnx_function.__name__
                     )
             except Exception as e:
-                # Log an warning if the op is custom. Raise exception for builtin ops.
+                # Log a warning if the op is custom. Raise exception for builtin ops.
                 if not self.is_custom:
                     raise
                 else:
@@ -198,7 +198,7 @@ class ONNXRegistry:
         target: TorchOp,
         onnx_decomposition: OnnxDecompMeta,
     ) -> None:
-        """Registers a OnnxDecompMeta to an operator.
+        """Registers an OnnxDecompMeta to an operator.
 
         Args:
             target: The PyTorch node callable target.
