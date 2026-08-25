@@ -464,6 +464,14 @@ class _ShapeEnvPickleData:
         self.data = env.__dict__.copy()
         del self.data["tracked_fakes"]
         del self.data["fake_tensor_cache"]
+        # foreign_unbacked_symbol_cache is a WeakKeyDictionary keyed by live
+        # ShapeEnvs. It is derived, reconstructed-on-demand state that must not
+        # cross the pickle boundary: stock pickle cannot serialize the
+        # WeakKeyDictionary's internal remove-closure, and with dill its weakref
+        # keys would drag foreign ShapeEnvs into the payload and clobber the
+        # destination fake_mode.shape_env on unpickle. It is already treated as
+        # non-state (see ShapeEnv.non_state_variable_names).
+        del self.data["foreign_unbacked_symbol_cache"]
 
     def unpickle(self, unpickle_state: _UnpickleState) -> ShapeEnv:
         # Fill in the existing ShapeEnv rather than creating a new one
