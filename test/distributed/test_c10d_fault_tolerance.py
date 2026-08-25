@@ -354,6 +354,11 @@ class AbstractFaultToleranceTest:
         self._store_barrier("ft_reused_uuid_rejected")
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
+    @unittest.skipIf(
+        TEST_WITH_ROCM,
+        "RCCL 2.30.4 blocks in ncclCommInitRankConfig(blocking=0) when a rank "
+        "is missing, so timeout-retry reconfigure hangs",
+    )
     def test_reconfigure_timeout_is_retryable(self):
         if self.backend_name != "nccl2":
             self.skipTest("nonblocking NCCL initialization behavior")
@@ -391,11 +396,6 @@ def _make_fault_tolerance_test_class(backend):
         cls = unittest.skipIf(
             not TEST_CUDA or torch.cuda.device_count() < 3,
             "fault tolerance CUDA tests require at least 3 GPUs",
-        )(cls)
-    if backend.name == "nccl2":
-        cls = unittest.skipIf(
-            TEST_WITH_ROCM,
-            "nccl2 reconfigure is not supported with RCCL",
         )(cls)
     return cls
 

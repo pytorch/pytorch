@@ -64,9 +64,7 @@ ncclResult_t DefaultNcclApi::commAbort(ncclComm_t comm) {
 
 ncclResult_t DefaultNcclApi::commRevoke(ncclComm_t comm) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-// RCCL advertises NCCL_VERSION_CODE >= 2.28 but does not provide
-// ncclCommRevoke; on ROCm fall through to the unsupported path.
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0) && !defined(USE_ROCM)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
   return ncclCommRevoke(comm, 0);
 #else
   std::ignore = comm;
