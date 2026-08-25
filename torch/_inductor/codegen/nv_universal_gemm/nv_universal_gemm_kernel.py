@@ -38,6 +38,7 @@ from torch._inductor.ir import (
 )
 from torch._inductor.kernel.gemm_epilogue import (
     GEMM_ACCUMULATOR_ARG_NAME,
+    GEMM_LOCAL_REDUCTION_RESULT_NAME,
     GemmEpiloguePlan,
     GemmReductionArguments,
 )
@@ -107,12 +108,25 @@ class CuTeDSLEpilogueArguments:
         import torch
 
         inputs, outputs = _cutedsl_epilogue_io(epilogue_fn)
+        local_reduce_outputs = tuple(
+            name for name in outputs if name == GEMM_LOCAL_REDUCTION_RESULT_NAME
+        )
+        if len(local_reduce_outputs) > 1:
+            raise ValueError("CuTeDSL epilogues support one local reduction result")
+        outputs = tuple(
+            name for name in outputs if name != GEMM_LOCAL_REDUCTION_RESULT_NAME
+        )
         scalar_broadcast_names = frozenset(
             name
             for name, value in kwargs.items()
             if isinstance(value, torch.Tensor) and value.ndim == 0
         )
-        schema = CuTeDSLEpilogueSchema(inputs, outputs, scalar_broadcast_names)
+        schema = CuTeDSLEpilogueSchema(
+            inputs,
+            outputs,
+            scalar_broadcast_names,
+            returns_local_reduce=bool(local_reduce_outputs),
+        )
         names = schema.parameter_names
         unexpected = kwargs.keys() - OrderedSet(names)
         missing = OrderedSet(names) - kwargs.keys()
@@ -1511,6 +1525,10 @@ class NVUniversalGemmKernel(Kernel):
                     )
                     for field, value in rendered_reduction.specialization_items()
                     if value is not None
+                    or (
+                        rendered_reduction.tensor_epilogue_returns_local_reduce
+                        and field in ("reduction_type", "source_fn")
+                    )
                 }
                 reduction_args = tensor_args | reduction_args
                 reduction_args_expr = ", ".join(
