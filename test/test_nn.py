@@ -4927,24 +4927,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     for input_requires_grad in [False, True]:
                         test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad)
 
-    def test_grid_sample_3d_bicubic_matches_2d(self):
-        # A volume that does not vary along z is sampled by the same separable kernel the 4-D
-        # sampler applies, since the four cubic weights of the z axis sum to one.
-        for device in ['cpu'] + (['cuda'] if TEST_CUDA else []):
-            image = torch.randn(2, 3, 7, 8, device=device, dtype=torch.double)
-            volume = image.unsqueeze(2).expand(2, 3, 5, 7, 8).contiguous()
-            grid_2d = torch.randn(2, 4, 6, 2, device=device, dtype=torch.double).clamp(-1.2, 1.2)
-            # a z away from a voxel centre gives the four z taps a real weight each, and one
-            # that far inside a 5-deep axis keeps every tap in bounds, so no padding drops one
-            grid_3d = torch.cat([grid_2d, torch.full_like(grid_2d[..., :1], 0.1)], dim=-1).unsqueeze(1)
-            for padding_mode in ('zeros', 'border', 'reflection'):
-                for align_corners in (True, False):
-                    out_2d = F.grid_sample(image, grid_2d, mode='bicubic',
-                                           padding_mode=padding_mode, align_corners=align_corners)
-                    out_3d = F.grid_sample(volume, grid_3d, mode='bicubic',
-                                           padding_mode=padding_mode, align_corners=align_corners)
-                    self.assertEqual(out_3d.squeeze(2), out_2d)
-
     def test_grid_sample_nearest_neighbor_rounding_mode_consistency(self):
 
         device_list = ['cpu']
@@ -11688,6 +11670,25 @@ class TestNNDeviceType(NNTestCase):
             out1 = model(inp1)
             out2 = model(inp2)
             self.assertTrue(torch.equal(out1, out2))
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    def test_grid_sample_3d_bicubic_matches_2d(self, device, dtype):
+        # A volume that does not vary along z is sampled by the same separable kernel the 4-D
+        # sampler applies, since the four cubic weights of the z axis sum to one.
+        image = torch.randn(2, 3, 7, 8, device=device, dtype=dtype)
+        volume = image.unsqueeze(2).expand(2, 3, 5, 7, 8).contiguous()
+        grid_2d = torch.randn(2, 4, 6, 2, device=device, dtype=dtype).clamp(-1.2, 1.2)
+        # a z away from a voxel centre gives the four z taps a real weight each, and one
+        # that far inside a 5-deep axis keeps every tap in bounds, so no padding drops one
+        grid_3d = torch.cat([grid_2d, torch.full_like(grid_2d[..., :1], 0.1)], dim=-1).unsqueeze(1)
+        for padding_mode in ('zeros', 'border', 'reflection'):
+            for align_corners in (True, False):
+                out_2d = F.grid_sample(image, grid_2d, mode='bicubic',
+                                       padding_mode=padding_mode, align_corners=align_corners)
+                out_3d = F.grid_sample(volume, grid_3d, mode='bicubic',
+                                       padding_mode=padding_mode, align_corners=align_corners)
+                self.assertEqual(out_3d.squeeze(2), out_2d)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
