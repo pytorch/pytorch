@@ -110,6 +110,7 @@ from .base import (
     Method,
     MutationType,
     NO_SUCH_SUBOBJ,
+    readonly_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -4458,9 +4459,9 @@ class InspectVariable(UserDefinedObjectVariable):
     # avoid tracing the property getters. The redirect is per-type, so a getter
     # declines (returns None) when the attribute doesn't apply to self.value.
     tp_getset = {
-        "parameters": GetSet(_parameters, None),
-        "kind": GetSet(_kind, None),
-        "name": GetSet(_name, None),
+        "parameters": GetSet(_parameters, readonly_setter),
+        "kind": GetSet(_kind, readonly_setter),
+        "name": GetSet(_name, readonly_setter),
     }
 
 
@@ -5195,7 +5196,7 @@ class UserDefinedDequeVariable(UserDefinedObjectVariable):
     # ref: deque_getset[] in CPython Modules/_collectionsmodule.c; maxlen is a
     # read-only getset (deque_get_maxlen, no setter).
     tp_getset = {
-        "maxlen": GetSet(_maxlen, None),
+        "maxlen": GetSet(_maxlen, readonly_setter),
     }
 
 
@@ -5539,7 +5540,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
             return variables.UserMethodVariable(polyfills.mapping_get, self)
         return None
 
-    tp_getset = {"get": GetSet(_get, None)}
+    tp_getset = {"get": GetSet(_get, readonly_setter)}
 
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self._maybe_get_baseclass_method("__len__") in dict_methods:
