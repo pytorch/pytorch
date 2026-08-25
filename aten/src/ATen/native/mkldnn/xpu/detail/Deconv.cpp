@@ -1,4 +1,6 @@
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/ops/empty.h>
+#include <c10/core/Scalar.h>
 #include <c10/xpu/XPUFunctions.h>
 
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>

@@ -7,6 +7,7 @@
 #include <ATen/native/mkldnn/xpu/FusionUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/utils/ParamUtils.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/full.h>
 #include <ATen/ops/neg.h>
 #include <c10/core/Scalar.h>
