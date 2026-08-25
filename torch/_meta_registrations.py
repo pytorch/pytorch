@@ -4829,7 +4829,15 @@ def shift_dtype_check(fn_name, self, val):
         )
 
 
-@register_meta([aten.__rshift__.Tensor, aten.__rshift__.Scalar])
+@register_meta(
+    [
+        aten.__rshift__.Tensor,
+        aten.__rshift__.Scalar,
+        aten.__rshift__.Scalar_out,
+        aten.__rshift__.Tensor_out,
+    ]
+)
+@out_wrapper(exact_dtype=True)
 def meta_rshifts(self, other):
     shift_dtype_check("rshift", self, other)
     return elementwise_meta(
@@ -4837,7 +4845,15 @@ def meta_rshifts(self, other):
     )
 
 
-@register_meta([aten.__lshift__.Tensor, aten.__lshift__.Scalar])
+@register_meta(
+    [
+        aten.__lshift__.Tensor,
+        aten.__lshift__.Scalar,
+        aten.__lshift__.Scalar_out,
+        aten.__lshift__.Tensor_out,
+    ]
+)
+@out_wrapper(exact_dtype=True)
 def meta_lshifts(self, other):
     shift_dtype_check("lshift", self, other)
     return elementwise_meta(
@@ -8206,7 +8222,7 @@ def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
 
 # From aten/src/ATen/native/UnaryOps.cpp
 @register_meta([aten.nan_to_num.default, aten.nan_to_num.out])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def nan_to_num(self, nan=None, posinf=None, neginf=None):
     return torch.empty_like(self)
 
