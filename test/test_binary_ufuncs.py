@@ -1,7 +1,6 @@
 # Owner(s): ["module: tests"]
 # ruff: noqa: F841
 
-from torch.testing._internal.common_device_type import onlyCPU
 import itertools
 import math
 import operator
@@ -26,6 +25,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMeta,
     instantiate_device_type_tests,
+    onlyCPU,
     onlyNativeDeviceTypes,
     onlyOn,
     OpDTypes,
