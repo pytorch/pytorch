@@ -49,7 +49,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-class TestIndexing(TestCase):
+class TestIndexingDevice(TestCase):
     def test_index(self, device):
         def consec(size, start=1):
             sequence = torch.ones(torch.tensor(size).prod(0)).cumsum(0)
@@ -2394,7 +2394,7 @@ class TestIndexing(TestCase):
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-class NumpyTests(TestCase):
+class NumpyTestsDevice(TestCase):
     def test_index_no_floats(self, device):
         a = torch.tensor([[[5.0]]], device=device)
 
@@ -2630,9 +2630,11 @@ class NumpyTests(TestCase):
 
 
 instantiate_device_type_tests(
-    TestIndexing, globals(), except_for="meta", allow_mps=True, allow_xpu=True
+    TestIndexingDevice, globals(), except_for="meta", allow_mps=True, allow_xpu=True
 )
-instantiate_device_type_tests(NumpyTests, globals(), except_for="meta", allow_xpu=True)
+instantiate_device_type_tests(
+    NumpyTestsDevice, globals(), except_for="meta", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
