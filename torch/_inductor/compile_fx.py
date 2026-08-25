@@ -3496,7 +3496,7 @@ def _compile_fx_main(
             except ShortenTraceback as e:
                 # We will also shorten the traceback inside dynamo.
                 # This is only useful if inductor is called directly with an FX graph.
-                raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+                raise e.remove_dynamo_frames() from None
 
 
 def graph_returns_tuple(gm: GraphModule) -> bool:
