@@ -3,6 +3,7 @@
 import os
 import pathlib
 import subprocess
+import sys
 import unittest
 
 from torch.testing._internal.common_utils import (
@@ -35,7 +36,7 @@ class TestFunctionalAutogradBenchmark(TestCase):
         with TemporaryFileName() as out_file:
             cmd = ["python3", benchmark_script]
             if IS_WINDOWS:
-                cmd[0] = "python"
+                cmd[0] = sys.executable
             # Only run the warmup
             cmd += ["--num-iters", "0"]
             # Only run the vjp task (fastest one)
