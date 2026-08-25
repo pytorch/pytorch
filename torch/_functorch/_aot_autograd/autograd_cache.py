@@ -282,17 +282,25 @@ def check_node_safe(node: Node) -> None:
         # that dynamo assumes are safe to trace. If dynamo assumes they are safely to blindly trace, then
         # they should be safe to cache as well.
         # (2) in the steady-state (some time in H2?) we shouldn't see these anymore, once inline builtin nn modules by default
-        # (3) We do not allow user made nn modules in the graph today, only function calls.
+        # (3) Dynamo does not allow user-made nn modules in the graph today.
+        # Registered GraphModule children are validated separately below.
         pass
     else:
         raise BypassAOTAutogradCache(f"Unsupported node op {node.op}")
 
 
+def _iter_named_graph_modules(
+    gm: torch.fx.GraphModule,
+) -> Generator[tuple[str, torch.fx.GraphModule], None, None]:
+    for name, module in gm.named_modules():
+        if isinstance(module, torch.fx.GraphModule):
+            yield name, module
+
+
 def check_cacheable(gm: torch.fx.GraphModule) -> None:
     """
-    Checks that the graph module only uses supported operators
+    Checks that the graph module and its subgraphs only use supported operators.
     """
-    nodes = gm.graph.nodes
     if torch._inductor.config.freezing:
         raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
@@ -306,17 +314,16 @@ def check_cacheable(gm: torch.fx.GraphModule) -> None:
         raise BypassAOTAutogradCache(
             "Won't cache a graph with fakify_first_call enabled"
         )
-    for node in nodes:
-        check_node_safe(node)
-
-    # Saved tensors hooks are globally set subgraphs,
-    # that are not used explicitly in the main graph.
-    # They are inlined in aot_autograd graphs.
-    # Subgraphs are only used for caching logic.
-    if hasattr(gm, "saved_tensors_hooks_pack_0"):
-        check_cacheable(gm.saved_tensors_hooks_pack_0)  # type: ignore[arg-type]
-        # We have guarantee of unpack subgraph existence if pack subgraph exists
-        check_cacheable(gm.saved_tensors_hooks_unpack_0)  # type: ignore[arg-type]
+    # Validate every registered nested GraphModule, including HOP bodies and
+    # saved-tensor-hook subgraphs attached without graph nodes.
+    for module_name, module in _iter_named_graph_modules(gm):
+        try:
+            for node in module.graph.nodes:
+                check_node_safe(node)
+        except BypassAOTAutogradCache as e:
+            if not module_name:
+                raise
+            raise BypassAOTAutogradCache(f"{e}\nSubgraph: {module_name}") from e
 
 
 def _get_context_fn_cache_hash(context_fn: Callable[..., Any]) -> str | None:
@@ -341,14 +348,6 @@ def _get_context_fn_cache_hash(context_fn: Callable[..., Any]) -> str | None:
     return None
 
 
-def _iter_graph_modules(
-    gm: torch.fx.GraphModule,
-) -> Generator[torch.fx.GraphModule, None, None]:
-    for module in gm.modules():
-        if isinstance(module, torch.fx.GraphModule):
-            yield module
-
-
 def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list[str]:
     """
     Collect cache hashes from all context_fn used in SAC HOPs within the graph module.
@@ -357,7 +356,7 @@ def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list[str]:
     lacks a cache_hash attribute.
     """
     hashes = []
-    for module in _iter_graph_modules(gm):
+    for _, module in _iter_named_graph_modules(gm):
         context_fn = module.meta.get("_checkpoint_context_fn")
         if context_fn is not None:
             cache_hash = _get_context_fn_cache_hash(context_fn)
@@ -481,7 +480,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             raise AssertionError("Triton is not available")
 
         triton_kernels = []
-        for module in _iter_graph_modules(gm):
+        for _, module in _iter_named_graph_modules(gm):
             for node in module.graph.nodes:
                 triton_kernels.extend(self._iter_triton_kernels_from_node(node))
 
