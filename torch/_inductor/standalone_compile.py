@@ -699,7 +699,8 @@ def compile_to_python(
     *,
     options: dict[str, Any] | None = None,
     is_inference: bool = True,
-    output_strides: list[tuple[int, ...] | None] | None = None,
+    is_backward: bool = False,
+    output_strides: list[tuple[str, ...] | None] | None = None,
 ) -> tuple[str, bytes | None]:
     """Compile ``gm`` and return ``(inner_python, cache)`` -- the INNER half of the
     backend contract behind ``torch.compiler.precompile``.
@@ -717,10 +718,11 @@ def compile_to_python(
     layer -- a companion change in ``torch._functorch.aot_autograd`` wraps this and
     composes AOTAutograd's codegen'd runtime wrappers around the result.
     Callers must run ``call`` under ``torch.no_grad()`` (the kernels use out= ops).
-    ``is_inference`` selects Inductor's inference or training layout heuristics. If
-    ``output_strides`` is provided, it is extended with the layouts selected for the
-    graph outputs so an AOTAutograd backward can be lowered against the forward's actual
-    saved-activation layouts.
+    ``is_inference`` selects Inductor's inference or training layout heuristics, while
+    ``is_backward`` enables backward-specific lowering constraints. If ``output_strides``
+    is provided, it is extended with the layouts selected for the graph outputs so an
+    AOTAutograd backward can be lowered against the forward's actual saved-activation
+    layouts.
 
     Caller preconditions (this layer does not re-derive them):
 
@@ -860,6 +862,7 @@ def compile_to_python(
             static_input_idxs=(),
             cudagraphs=BoxedBool(False),
             is_inference=is_inference,
+            is_backward=is_backward,
             boxed_forward_device_index=BoxedDeviceIndex(None),
         )
         artifacts = torch.compiler.save_cache_artifacts()
