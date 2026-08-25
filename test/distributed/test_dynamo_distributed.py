@@ -26,7 +26,7 @@ from torch._dynamo import config
 from torch._dynamo.backends.distributed import DDPOptimizer
 from torch._dynamo.comptime import comptime
 from torch._dynamo.device_interface import CudaInterface, DeviceGuard
-from torch._dynamo.testing import collect_results, CompileCounter
+from torch._dynamo.testing import collect_results, CompileCounter, EagerAndRecordGraphs
 from torch._dynamo.utils import same
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.compiler import set_enable_guard_collectives
@@ -2431,6 +2431,54 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             ).run(GUARDS_FILE.getvalue())
 
             self.assertTrue(same(correct_outputs, outputs))
+
+    def test_fsdp_skip_guards_dynamic_static_specialization(self):
+        """
+        skip_fsdp_guards must not prevent static specialization of module
+        int/tuple attributes under dynamic shapes. They used to be wrapped as
+        SymInt graph inputs (unlike every other nn module source), which
+        bloated Triton kernels with symbolic size args and hurt fusion.
+        """
+
+        class Attn(nn.Module):
+            def __init__(self, dim, heads):
+                super().__init__()
+                self.heads = heads
+                self.head_dim = dim // heads
+                self.qkv = nn.Linear(dim, 3 * dim)
+
+            def forward(self, x):
+                B, S, D = x.shape
+                qkv = self.qkv(x).view(B, S, 3, self.heads, self.head_dim)
+                q, k, v = (t.transpose(1, 2) for t in qkv.unbind(2))
+                q = torch.nn.functional.layer_norm(q, (self.head_dim,))
+                o = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                return o.transpose(1, 2).reshape(B, S, D)
+
+        device = f"{self.device_type}:{self.rank}"
+        inputs = torch.rand(2, 16, 32, device=device)
+
+        def sym_placeholder_count(skip_guards):
+            torch._dynamo.reset()
+            m = Attn(32, 4).to(device)
+            m.apply(init_weights)
+            fsdp_m = FSDP(m, use_orig_params=True)
+            backend = EagerAndRecordGraphs()
+            with torch._dynamo.config.patch(skip_fsdp_guards=skip_guards):
+                opt_m = torch.compile(fsdp_m, backend=backend, dynamic=True)
+                opt_m(inputs)
+            placeholders = [
+                n for n in backend.graphs[0].graph.nodes if n.op == "placeholder"
+            ]
+            return sum(
+                1
+                for n in placeholders
+                if isinstance(n.meta.get("example_value"), torch.SymInt)
+            )
+
+        # heads/head_dim must specialize either way; only input batch/seq
+        # dims should remain symbolic.
+        self.assertEqual(sym_placeholder_count(True), sym_placeholder_count(False))
 
     def test_fsdp_skip_register_attr_or_module(self):
         """

@@ -2434,7 +2434,10 @@ class VariableBuilder:
         if (
             istype(value, tuple)
             and all(ConstantVariable.is_literal(item) for item in value)
-            and self.source.guard_source.is_unspecialized_nn_module()
+            and (
+                self.source.guard_source.is_unspecialized_nn_module()
+                or self.source.guard_source.is_fsdp_module()
+            )
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return TupleVariable([ConstantVariable.create(item) for item in value])
