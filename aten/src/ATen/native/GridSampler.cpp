@@ -47,8 +47,7 @@ namespace {
     // See NOTE [ grid_sampler Native Functions ].
     // Add checks here in case this is called instead of grid_sampler.
     check_grid_sampler_common(input, grid);
-    check_grid_sampler_3d(
-      input, grid, static_cast<int64_t>(interpolation_mode));
+    check_grid_sampler_3d(input, grid);
 
     int64_t N = input.size(0);
     int64_t C = input.size(1);
@@ -249,8 +248,7 @@ namespace {
     // See NOTE [ grid_sampler Native Functions ].
     // Add checks here in case this is called instead of grid_sampler.
     check_grid_sampler_common(input, grid);
-    check_grid_sampler_3d(
-      input, grid, static_cast<int64_t>(interpolation_mode));
+    check_grid_sampler_3d(input, grid);
 
     auto input_requires_grad = output_mask[0];
     Tensor grad_input = ([&]() {
@@ -1090,7 +1088,7 @@ Tensor grid_sampler_3d_cpu(const Tensor& input, const Tensor& grid,
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
   check_grid_sampler_common(input, grid);
-  check_grid_sampler_3d(input, grid, interpolation_mode);
+  check_grid_sampler_3d(input, grid);
 
   return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "grid_sampler3d_cpu", [&] {
     return grid_sampler_3d_cpu_impl<scalar_t>(

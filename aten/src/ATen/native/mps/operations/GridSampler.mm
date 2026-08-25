@@ -130,7 +130,7 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
       check_grid_sampler_2d(input, grid);
       break;
     case 3:
-      check_grid_sampler_3d(input, grid, _interpolation_mode);
+      check_grid_sampler_3d(input, grid);
       break;
     default:
       TORCH_INTERNAL_ASSERT(false, "Only 2D and 3D sampling are supported, but got: ", sampler_dims);
