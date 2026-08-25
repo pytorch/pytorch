@@ -2088,7 +2088,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             dist.destroy_process_group()
         else:
             log_test_info(self.rank, "Excluded from shrink test - exiting immediately")
-            dist.destroy_process_group()
+            # Survivors shrink with NCCL_SHRINK_ABORT and abort the parent, so
+            # the excluded rank must abort too; destroy here would hang.
+            pg1._get_backend(torch.device(device)).abort()
             return
 
         # Performance analysis (only for participating ranks)
