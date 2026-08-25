@@ -51,7 +51,7 @@ import weakref
 from collections import defaultdict
 from contextlib import AbstractContextManager
 from enum import auto, Enum
-from typing import Any, cast, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Literal, TYPE_CHECKING, TypeVar
 
 import torch.fx
 from torch import Tensor
@@ -526,6 +526,8 @@ def cudagraphify(
     mutated_input_idxs: tuple[int, ...] = (),
     kernel_free_cudagraph: bool = False,
     user_visible_output_idxs: tuple[int, ...] = (),
+    cudagraph_managed_input_rerecord_limit: int | None = None,
+    cudagraph_managed_input_rerecord_action: Literal["copy", "skip"] | None = None,
     compile_id: CompileId | None = None,
 ) -> tuple[ModelType, OutputType]:
     if is_backward and is_inference:
@@ -535,6 +537,14 @@ def cudagraphify(
         if is_backward
         else (CompilationMode.INFERENCE if is_inference else CompilationMode.FORWARD)
     )
+    if cudagraph_managed_input_rerecord_limit is None:
+        cudagraph_managed_input_rerecord_limit = (
+            config.triton.cudagraph_managed_input_rerecord_limit
+        )
+    if cudagraph_managed_input_rerecord_action is None:
+        cudagraph_managed_input_rerecord_action = (
+            config.triton.cudagraph_managed_input_rerecord_action
+        )
 
     with dynamo_timed_cudagraph("cudagraphify.get_container", compile_id, mode):
         manager = get_container(device_index).get_tree_manager()
@@ -551,6 +561,8 @@ def cudagraphify(
         kernel_free_cudagraph,
         user_visible_output_idxs,
         compile_id,
+        cudagraph_managed_input_rerecord_limit,
+        cudagraph_managed_input_rerecord_action,
     )
 
 
@@ -2372,11 +2384,11 @@ class CUDAGraphTreeManager:
         self.graph_counter = itertools.count(0)
         self.func_counter = itertools.count(0)
 
-        # mapping from graph_id to (function id to mutation type hint) since we are
-        # specializing on a particular combination of Parent Node -> Function ID.
-        self.non_cudagraph_managed_mutation_hint: dict[
-            GraphID | None, dict[FunctionID, bool]
-        ] = defaultdict(dict)
+        # Mapping from graph_id to whether a function must execute eagerly on
+        # that parent/function edge.
+        self.skip_cudagraph: dict[GraphID | None, dict[FunctionID, bool]] = defaultdict(
+            dict
+        )
         self.warmup_node_counter = itertools.count(start=-1, step=-1)
 
         # mapping from graph_id to (function id to re-record count). We fall back to
@@ -2384,8 +2396,7 @@ class CUDAGraphTreeManager:
         self.num_rerecord: dict[GraphID | None, dict[FunctionID, int]] = defaultdict(
             lambda: defaultdict(lambda: 0)
         )
-        # Per parent/function edge, track changing cudagraph-managed input
-        # slots. Once a slot crosses the limit, new children copy it.
+        # Per parent/function edge, track changing cudagraph-managed input slots.
         self.cudagraph_managed_input_rerecord: dict[
             GraphID | None, dict[FunctionID, dict[int, int]]
         ] = {}
@@ -2483,14 +2494,14 @@ class CUDAGraphTreeManager:
             inputs,
             self._get_cuda_graph_recorded_tensor_checker(),
         ):
-            self.non_cudagraph_managed_mutation_hint[node_id][function_id] = True
+            self.skip_cudagraph[node_id][function_id] = True
             # warn once per function_id
             if function_id in self.warned_mutation:
                 return
             self.warned_mutation.add(function_id)
             log_cudagraph_skip_and_bump_counter(maybe_mutation_str)
         else:
-            self.non_cudagraph_managed_mutation_hint[node_id][function_id] = False
+            self.skip_cudagraph[node_id][function_id] = False
 
     def _get_node_id(self) -> GraphID | None:
         if self.current_node is None:
@@ -2508,25 +2519,45 @@ class CUDAGraphTreeManager:
             > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
         )
 
-    def _update_demoted_cudagraph_managed_idxs(
+    def _update_cudagraph_managed_input_rerecord(
         self,
         node_id: GraphID | None,
         function_id: FunctionID,
-        mismatched_idxs: OrderedSet[int],
-    ) -> None:
-        demoted_idxs = self.demoted_cudagraph_managed_idxs.setdefault(
-            node_id, {}
-        ).setdefault(function_id, OrderedSet())
+        copyable_idxs: OrderedSet[int],
+    ) -> tuple[int, ...]:
+        wrapped_function = self.ids_to_funcs[function_id]
+        action = wrapped_function.cudagraph_managed_input_rerecord_action
+        if action == "copy":
+            demoted_idxs = self.demoted_cudagraph_managed_idxs.setdefault(
+                node_id, {}
+            ).setdefault(function_id, OrderedSet())
+            action_idxs = copyable_idxs - demoted_idxs
+        elif action == "skip":
+            action_idxs = copyable_idxs
+            demoted_idxs = OrderedSet()
+        else:
+            raise AssertionError(
+                f"unknown cudagraph managed input re-record action: {action}"
+            )
+
         rerecord_counts = self.cudagraph_managed_input_rerecord.setdefault(
             node_id, {}
         ).setdefault(function_id, {})
-        for idx in mismatched_idxs - demoted_idxs:
+        reached_limit_idxs = []
+        for idx in action_idxs:
             rerecord_counts[idx] = rerecord_counts.get(idx, 0) + 1
             if (
                 rerecord_counts[idx]
-                >= config.triton.cudagraph_managed_input_rerecord_limit
+                >= wrapped_function.cudagraph_managed_input_rerecord_limit
             ):
-                demoted_idxs.add(idx)
+                if action == "copy":
+                    demoted_idxs.add(idx)
+                else:
+                    reached_limit_idxs.append(idx)
+
+        if reached_limit_idxs:
+            self.skip_cudagraph[node_id][function_id] = True
+        return tuple(reached_limit_idxs)
 
     def _get_demoted_cudagraph_managed_idxs(
         self, function_id: FunctionID
@@ -2566,15 +2597,15 @@ class CUDAGraphTreeManager:
                 )
 
         node_id = self._get_node_id()
-        if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
+        if function_id not in self.skip_cudagraph[node_id]:
             self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
 
         # Early exit if the function mutates inputs which are neither parameters/buffers nor
         # cudagraph recorded tensors. This check should happen after `try_end_curr_recording`
         # and `try_end_curr_warmup` which may change self.current_node.
-        if self.non_cudagraph_managed_mutation_hint[node_id][
-            function_id
-        ] or self.exceed_rerecord_limit(node_id, function_id):
+        if self.skip_cudagraph[node_id][function_id] or self.exceed_rerecord_limit(
+            node_id, function_id
+        ):
             return self.ids_to_funcs[function_id].model(new_inputs)
 
         # warming up a function and subsequentally recording may use different memory addresses
@@ -2683,19 +2714,20 @@ class CUDAGraphTreeManager:
 
             if len(self.ids_to_funcs[function_id].mutated_input_idxs) > 0:
                 self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
-                if self.non_cudagraph_managed_mutation_hint[self._get_node_id()][
-                    function_id
-                ]:
+                if self.skip_cudagraph[self._get_node_id()][function_id]:
                     return self.ids_to_funcs[function_id].model(new_inputs)
 
             demotable_cudagraph_managed_idxs = (
                 cudagraph_managed_mismatched_idxs - non_demotable_cudagraph_managed_idxs
             )
+            skip_cudagraph_managed_input_idxs: tuple[int, ...] = ()
             if demotable_cudagraph_managed_idxs:
-                self._update_demoted_cudagraph_managed_idxs(
-                    self._get_node_id(),
-                    function_id,
-                    demotable_cudagraph_managed_idxs,
+                skip_cudagraph_managed_input_idxs = (
+                    self._update_cudagraph_managed_input_rerecord(
+                        self._get_node_id(),
+                        function_id,
+                        demotable_cudagraph_managed_idxs,
+                    )
                 )
 
             # nb: run before checkpointing because checkpointing is slow, and we will
@@ -2704,6 +2736,17 @@ class CUDAGraphTreeManager:
             if unexpected_rerecord:
                 curr_node_id = self._get_node_id()
                 self.num_rerecord[curr_node_id][function_id] += 1
+                if skip_cudagraph_managed_input_idxs:
+                    _id = curr_node_id.id if curr_node_id else None
+                    log_cudagraph_skip_and_bump_counter(
+                        f"skipping cudagraph due to function {function_id.id} reaching "
+                        f"the cudagraph-managed input re-recording threshold "
+                        f"(={self.ids_to_funcs[function_id].cudagraph_managed_input_rerecord_limit}) "
+                        f"on cudagraph node {_id} for input indices "
+                        f"{list(skip_cudagraph_managed_input_idxs)}."
+                    )
+                    return self.ids_to_funcs[function_id].model(new_inputs)
+
                 if self.exceed_rerecord_limit(curr_node_id, function_id):
                     _id = curr_node_id.id if curr_node_id else None
                     # unexpected_rerecord_reason is either a string (if debug was enabled)
@@ -2872,6 +2915,8 @@ class CUDAGraphTreeManager:
         kernel_free_cudagraph: bool,
         user_visible_output_idxs: tuple[int, ...],
         compile_id: CompileId | None,
+        cudagraph_managed_input_rerecord_limit: int,
+        cudagraph_managed_input_rerecord_action: Literal["copy", "skip"],
     ) -> tuple[
         ModelType,
         OutputType,
@@ -2890,6 +2935,8 @@ class CUDAGraphTreeManager:
             tuple(t for t in constants if isinstance(t, torch.Tensor) and t.is_cuda),
             placeholders,
             mutated_input_idxs,
+            cudagraph_managed_input_rerecord_limit,
+            cudagraph_managed_input_rerecord_action,
             kernel_free_cudagraph,
             user_visible_output_idxs_set,
         )
