@@ -4173,7 +4173,7 @@ def _companion_attribute_guards(
         if (link := _attribute_link(guard.originating_source)) is not None
     }
     failed = {id(guard) for guard, _ in failures}
-    result = []
+    result: list[tuple[Guard, Exception]] = []
     for guard in guards:
         if id(guard) in failed:
             continue
