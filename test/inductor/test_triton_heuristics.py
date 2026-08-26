@@ -43,9 +43,11 @@ from torch._inductor.runtime.hints import (
     HeuristicType,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
+    ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
+from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
@@ -208,6 +210,43 @@ class TestTritonHeuristics(TestCase):
 
         with self.assertRaisesRegex(AssertionError, "exceeds Triton maximum"):
             make_matmul_triton_config({"x": 256, "y": 128, "r": 64}, 8, 1)
+
+    @parametrize("rnumel", [256, 512, 1024])
+    def test_persistent_max_autotune_includes_default_config(self, rnumel):
+        size_hints = {"x": 2048, "r0_": rnumel}
+        triton_meta = {"device": self._fake_cuda_device_properties()}
+        expected_max_configs = {
+            256: [(4, 1), (1, 2), (8, 2)],
+            512: [(2, 1), (1, 4), (8, 4)],
+            1024: [(1, 1), (1, 8)],
+        }
+
+        default_configs = _persistent_reduction_configs(
+            size_hints=size_hints,
+            reduction_hint=ReductionHint.INNER,
+            inductor_meta={},
+            triton_meta=triton_meta,
+        )
+        max_autotune_configs = _persistent_reduction_configs(
+            size_hints=size_hints,
+            reduction_hint=ReductionHint.INNER,
+            inductor_meta={"max_autotune": True},
+            triton_meta=triton_meta,
+        )
+
+        self.assertEqual(len(default_configs), 1)
+        self.assertEqual(
+            [
+                (config.kwargs["XBLOCK"], config.num_warps)
+                for config in max_autotune_configs
+            ],
+            expected_max_configs[rnumel],
+        )
+
+        default_keys = [triton_config_to_hashable(c) for c in default_configs]
+        max_autotune_keys = [triton_config_to_hashable(c) for c in max_autotune_configs]
+        self.assertEqual(max_autotune_keys[: len(default_keys)], default_keys)
+        self.assertEqual(len(max_autotune_keys), len(set(max_autotune_keys)))
 
     def test_reduction_min_block_preserves_tile_product(self):
         cfg = _enforce_reduction_config_block_minimums(
