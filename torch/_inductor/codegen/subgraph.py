@@ -26,7 +26,7 @@ from torch._inductor.ir import (
     ir_node_to_tensor,
     Layout,
 )
-from torch._inductor.runtime.benchmarking import benchmarker
+from torch._inductor.runtime.benchmarking import benchmarker, has_graph_benchmarker
 from torch._inductor.utils import do_bench_using_profiling
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
@@ -273,7 +273,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         if self._benchmark_with_cudagraphs:
             device = benchmarker.infer_device(*sym_inputs, *args, out)
-            return benchmarker.benchmark_gpu_with_graph(fn, device=device)
+            if has_graph_benchmarker(device):
+                return benchmarker.benchmark_gpu_with_graph(fn, device=device)
 
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(fn)

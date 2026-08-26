@@ -68,7 +68,7 @@ if TYPE_CHECKING:
     )
 
 from . import config
-from .runtime.benchmarking import benchmarker
+from .runtime.benchmarking import benchmarker, has_graph_benchmarker
 from .virtualized import V
 
 
@@ -594,7 +594,10 @@ class BenchmarkRequest:
 
             if self.benchmark_with_cudagraphs:
                 device = benchmarker.infer_device(*input_tensors, out)
-                res = benchmarker.benchmark_gpu_with_graph(fn, device=device)
+                if has_graph_benchmarker(device):
+                    res = benchmarker.benchmark_gpu_with_graph(fn, device=device)
+                else:
+                    res = self.do_bench(fn, *input_tensors, out)
             else:
                 res = self.do_bench(fn, *input_tensors, out)
 
@@ -985,9 +988,10 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
                 out.copy_(out_new)  # for correctness checking
             if self.benchmark_with_cudagraphs:
                 device = benchmarker.infer_device(*input_tensors, out_new)
-                return benchmarker.benchmark_gpu_with_graph(
-                    lambda: algo(*input_tensors), device=device
-                )
+                if has_graph_benchmarker(device):
+                    return benchmarker.benchmark_gpu_with_graph(
+                        lambda: algo(*input_tensors), device=device
+                    )
             if config.profile_bandwidth_with_do_bench_using_profiling:
                 return do_bench_using_profiling(lambda: algo(*input_tensors))
             return benchmarker.benchmark(algo, input_tensors, {})

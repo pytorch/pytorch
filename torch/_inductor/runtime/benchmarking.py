@@ -145,6 +145,13 @@ def register_graph_benchmarker(
     _GRAPH_BENCHMARK_DISPATCH[device_type] = fn
 
 
+def has_graph_benchmarker(device: str | torch.device) -> bool:
+    resolved_device = torch.device(device) if isinstance(device, str) else device
+    if not isinstance(resolved_device, torch.device):
+        raise TypeError(f"Expected torch.device, got {type(resolved_device)}")
+    return resolved_device.type in _GRAPH_BENCHMARK_DISPATCH
+
+
 def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any]:
     from torch._inductor import config
 
