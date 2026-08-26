@@ -388,6 +388,21 @@ class BackendEntryPointTest(TestCase):
             dist.ProcessGroup.BackendType.NCCL,
         )
 
+    def test_nccl2_device_uses_rank_without_local_rank(self):
+        opts = c10d._DistributedBackendOptions()
+        opts.enable_reconfigure = False
+        opts.process_group = None
+        opts.group_rank = 1
+        opts.global_ranks_in_group = [2, 3]
+        with (
+            unittest.mock.patch.dict(os.environ),
+            unittest.mock.patch.object(torch.cuda, "device_count", return_value=4),
+            unittest.mock.patch.object(torch.cuda, "is_initialized", return_value=True),
+            unittest.mock.patch.object(torch.cuda, "current_device", return_value=0),
+        ):
+            os.environ.pop("LOCAL_RANK", None)
+            self.assertEqual(c10d._nccl2_device(opts), torch.device("cuda:3"))
+
     def test_nccl_legacy_backend_registration(self):
         c10d._register_builtin_nccl_legacy_backend()
 

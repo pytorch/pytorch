@@ -223,7 +223,7 @@ std::shared_ptr<FlightRecorderHook> FlightRecorderHook::attach(
     hook->pg_->registerCompletionHook(
         hook->hook_id_, [weak](const CompletionHookArgs& args) {
           if (auto self = weak.lock()) {
-            self->retireCompleted(args.completion_key, args.duration_ms);
+            self->retireCompleted(args.completionKey, args.duration_ms);
           }
         });
     hook->push_completion_ = true;
@@ -551,8 +551,8 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
   // on it), so the buffer's own capacity is the bound.
   while (inflight_.size() > max_inflight_) {
     auto oldest = inflight_.begin();
-    if (oldest->second.work_key) {
-      work_ids_.erase(*oldest->second.work_key);
+    if (oldest->second.workKey) {
+      work_ids_.erase(*oldest->second.workKey);
     }
     inflight_.erase(oldest);
   }
@@ -676,7 +676,7 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
       // The op is only *issued* at this point, so the entry stays un-retired.
       // The backend's completion hook is what says when it is really done.
       const auto completion_key = args.work->getCompletionKey();
-      it->second.work_key = completion_key;
+      it->second.workKey = completion_key;
       work_ids_[completion_key] = args.op_id;
       lock.unlock();
       // A completion established before that registration found no mapping and
