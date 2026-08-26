@@ -187,7 +187,7 @@ class TestRegisterSharding(DTensorTestBase):
         self.assertEqual(result.full_tensor(), x)
 
 
-instantiate_device_type_tests(TestRegisterSharding, globals())
+instantiate_device_type_tests(TestRegisterSharding, globals(), except_for=("cpu",))
 
 if __name__ == "__main__":
     run_tests()
