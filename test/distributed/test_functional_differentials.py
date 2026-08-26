@@ -403,7 +403,13 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
     @parametrize("device", devices)
     @parametrize("reduce_op", ["min", "max"])
     def test_all_reduce_nan_backward(self, device, reduce_op):
-        """Test all_reduce backward passes through all-reduced grad for NaN inputs."""
+        """Test all_reduce backward routes grad correctly for NaN inputs.
+
+        Note: the multi-threaded PG reduces min/max via torch.min/torch.max,
+        which propagate NaN, so the reduced output at the NaN position is NaN.
+        Real backends (e.g. NCCL) do not guarantee NaN propagation through
+        min/max, so the reduced output there may differ from this test.
+        """
         shape = (3, 3)
         group_name = dist.group.WORLD.group_name
         rank = dist.get_rank()
@@ -419,18 +425,22 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         output = fcols.all_reduce(input_tensor, reduce_op, group=group_name)
         output.sum().backward()
 
+        # Output is NaN only at [0, 0] (NaN propagates through the threaded PG).
+        # Grad G = world_size flows to the NaN holder (rank 0) at [0, 0], and to
+        # the extremum holder elsewhere: rank 0 for min (value 0), the last rank
+        # for max (value world_size - 1). Every other element is 0.
+        G = float(self.world_size)
         grad = input_tensor.grad
-        # NaN elements receive the all-reduced grad (world_size) rather than NaN
-        all_reduced_grad = float(self.world_size)
+        self.assertFalse(grad.isnan().any())
+        expected_grad = torch.zeros_like(input_tensor)
+        if reduce_op == "min" and rank == 0:
+            expected_grad.fill_(G)
+        elif reduce_op == "max" and rank == self.world_size - 1:
+            expected_grad.fill_(G)
+            expected_grad[0, 0] = 0.0
         if rank == 0:
-            self.assertEqual(grad[0, 0], all_reduced_grad)
-            # Non-NaN elements on the extremum-holding rank get world_size
-            if reduce_op == "min":
-                self.assertEqual(grad[0, 1], all_reduced_grad)
-            else:
-                self.assertEqual(grad[0, 1], 0.0)
-        else:
-            self.assertFalse(grad.isnan().any())
+            expected_grad[0, 0] = G
+        self.assertEqual(grad, expected_grad)
 
     @parametrize("device", devices)
     @parametrize("gather_dim", [0, 1, 2])
@@ -630,7 +640,13 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
     @parametrize("device", devices)
     @parametrize("reduce_op", ["min", "max"])
     def test_all_reduce_coalesced_nan_backward(self, device, reduce_op):
-        """Test all_reduce_coalesced backward passes all-reduced grad for NaN inputs."""
+        """Test all_reduce_coalesced backward routes grad correctly for NaN inputs.
+
+        Note: the multi-threaded PG reduces min/max via torch.min/torch.max,
+        which propagate NaN, so the reduced output at the NaN position is NaN.
+        Real backends (e.g. NCCL) do not guarantee NaN propagation through
+        min/max, so the reduced output there may differ from this test.
+        """
         shapes = [(3, 3), (2, 2)]
         group_name = dist.group.WORLD.group_name
         rank = dist.get_rank()
@@ -649,19 +665,23 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         loss = sum(output.sum() for output in outputs)
         loss.backward()
 
-        # NaN elements receive the all-reduced grad (world_size) rather than NaN
-        all_reduced_grad = float(self.world_size)
+        # Output is NaN only at [0, 0] (NaN propagates through the threaded PG).
+        # Grad G = world_size flows to the NaN holder (rank 0) at [0, 0], and to
+        # the extremum holder elsewhere: rank 0 for min (value 0), the last rank
+        # for max (value world_size - 1). Every other element is 0.
+        G = float(self.world_size)
         for input_tensor in input_tensors:
             grad = input_tensor.grad
+            self.assertFalse(grad.isnan().any())
+            expected_grad = torch.zeros_like(input_tensor)
+            if reduce_op == "min" and rank == 0:
+                expected_grad.fill_(G)
+            elif reduce_op == "max" and rank == self.world_size - 1:
+                expected_grad.fill_(G)
+                expected_grad[0, 0] = 0.0
             if rank == 0:
-                self.assertEqual(grad[0, 0], all_reduced_grad)
-                # Non-NaN elements on the extremum-holding rank get world_size
-                if reduce_op == "min":
-                    self.assertEqual(grad[0, 1], all_reduced_grad)
-                else:
-                    self.assertEqual(grad[0, 1], 0.0)
-            else:
-                self.assertFalse(grad.isnan().any())
+                expected_grad[0, 0] = G
+            self.assertEqual(grad, expected_grad)
 
     @parametrize("device", devices)
     def test_all_gather_into_tensor_coalesced_backward(self, device):

@@ -701,13 +701,14 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
     output = wait_tensor(output)
     if _is_min_max(reduce_op):
         fwd_input, fwd_output = ctx.saved_tensors
-        fwd_input_isnan = fwd_input.isnan()
+        fwd_output = wait_tensor(fwd_output)
+        # Route grad to the extremum holder (input == output). A NaN input is
+        # the extremum only when the reduced output is also NaN; gating on both
+        # keeps the two masks disjoint even if the backend drops NaN in min/max.
         output = torch.ops.aten.where.self(
-            fwd_input_isnan,
+            fwd_input.isnan() & fwd_output.isnan(),
             output,
-            torch.ops.aten.where.ScalarOther(
-                fwd_input == wait_tensor(fwd_output), output, 0
-            ),
+            torch.ops.aten.where.ScalarOther(fwd_input == fwd_output, output, 0),
         )
     return output, None, None
 
@@ -940,13 +941,17 @@ def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
     if _is_min_max(reduce_op):
         saved = ctx.saved_tensors
         n = len(grad_inputs)
-        fwd_inputs, fwd_outputs = saved[:n], saved[n:]
+        fwd_inputs = saved[:n]
+        fwd_outputs = [wait_tensor(o) for o in saved[n:]]
+        # Route grad to the extremum holder (input == output). A NaN input is
+        # the extremum only when the reduced output is also NaN; gating on both
+        # keeps the two masks disjoint even if the backend drops NaN in min/max.
         grad_inputs = [
             torch.ops.aten.where.self(
-                fwd_input.isnan(),
+                fwd_input.isnan() & fwd_output.isnan(),
                 grad_input,
                 torch.ops.aten.where.ScalarOther(
-                    fwd_input == wait_tensor(fwd_output), grad_input, 0
+                    fwd_input == fwd_output, grad_input, 0
                 ),
             )
             for grad_input, fwd_input, fwd_output in zip(
