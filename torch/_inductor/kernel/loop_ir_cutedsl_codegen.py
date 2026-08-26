@@ -498,9 +498,7 @@ class LoopIRCuteDSLCodegen:
             raise NotImplementedError("CuTeDSL reduction consumer has no output")
         if reduction_name is not None:
             codegen.input_values[reduction_name] = reduction_value
-        else:
-            if group is None:
-                raise NotImplementedError("synthetic reduction consumer needs a group")
+        elif group is not None:
             region = analysis.reduction_region(
                 buffer.get_name(),
                 accumulator_name,
