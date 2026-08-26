@@ -986,31 +986,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), c10::SymInt(0), c10::SymInt(0), Tensor(), Tensor(), Tensor());
 }
 
-namespace {
-
-// Check the pointer and stride alignment required by cuDNN varlen SDPA.
-bool has_aligned_varlen_layout(const Tensor& tensor) {
-  constexpr int64_t alignment_bytes = 16;
-  if (!tensor.numel()) {
-    return true;
-  }
-  if (tensor.dim() == 0 || tensor.stride(-1) != 1 ||
-      reinterpret_cast<uintptr_t>(tensor.const_data_ptr()) % alignment_bytes !=
-          0) {
-    return false;
-  }
-  const int64_t alignment = alignment_bytes / tensor.element_size();
-  for (int64_t dim = 0; dim < tensor.dim() - 1; ++dim) {
-    if (tensor.size(dim) > 1 &&
-        (tensor.stride(dim) <= 0 || tensor.stride(dim) % alignment != 0)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-} // namespace
-
 std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _cudnn_attention_forward(
     const Tensor& query,
     const Tensor& key,
@@ -1043,11 +1018,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
       "cuDNN attention expects query, key and value to have the same dtype, got ",
       query.scalar_type(), ", ", key.scalar_type(), " and ", value.scalar_type());
   TORCH_CHECK(
-      !has_kv_cache ||
+      !is_nested ||
           (has_aligned_varlen_layout(query) &&
            has_aligned_varlen_layout(key) &&
            has_aligned_varlen_layout(value)),
-      "cuDNN KV-cache attention requires query, key and value to have "
+      "cuDNN varlen attention requires query, key and value to have "
       "16-byte-aligned storage and non-broadcast strides, with a contiguous "
       "last dimension.");
   TORCH_CHECK(
@@ -1139,6 +1114,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     const int64_t num_heads_v = value.size(-2);
     const int64_t head_dim_qk = query.size(-1);
     const int64_t head_dim_v = value.size(-1);
+    TORCH_CHECK(
+        block_table.has_value() || key.size(-1) == query.size(-1),
+        "cuDNN varlen attention requires key head dimension to match query, got ",
+        key.size(-1), " and ", query.size(-1));
     TORCH_CHECK(
         block_table.has_value() || cumulative_sequence_length_kv.has_value(),
         "cuDNN varlen attention requires cum_seq_k unless a block_table is given.");
