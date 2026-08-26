@@ -23,7 +23,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MX_GEMM,
 )
 from torch.testing._internal.common_device_type import (
-    expectedFailureCPU,
     instantiate_device_type_tests,
     onlyCUDA,
     onlyOn,
@@ -31,8 +30,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_quantized import ceil_div, to_blocked
 from torch.testing._internal.common_utils import (
-    get_gcc_major_version,
-    IS_ARM64,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     skipIfRocm,
@@ -2173,9 +2170,6 @@ _E8M0_ONE_ULP_ABOVE = [
     for e in range(8)
 ]
 _E8M0_ONE_ULP_EXPECTED = [127 + e + 1 for e in range(8)]
-_AARCH64_GCC13_EXPECTED_FAILURE = (
-    [expectedFailureCPU] if IS_ARM64 and get_gcc_major_version() == 13 else []
-)
 
 
 def _cvt_e8m0_rceil(inp):
@@ -2196,22 +2190,12 @@ class TestCvtE8M0RceilFallback(TestCase):
         "SM100+ uses the PTX instruction, not the software fallback",
     )
     @onlyOn(["cpu", "cuda", "xpu"])
-    @parametrize(
-        "dtype",
-        (
-            torch.float32,
-            subtest(torch.bfloat16, decorators=_AARCH64_GCC13_EXPECTED_FAILURE),
-            subtest(torch.float16, decorators=_AARCH64_GCC13_EXPECTED_FAILURE),
-        ),
-    )
+    @parametrize("dtype", (torch.float32, torch.bfloat16, torch.float16))
     def test_correctness(self, device, dtype):
         """Compiled output matches eager for finite values, subnormals, and zero.
 
         fp16/bf16 are upcast to fp32 inside the fallback (exactly), so all three
-        dtypes must agree with the eager reference. On aarch64 GCC 13, the CPU
-        variants are expected to fail because the generated C++ upcast hits an
-        internal compiler error in convert_mode_scalar. The upcast IR route is
-        covered on CUDA/XPU regardless.
+        dtypes must agree with the eager reference.
         """
         inp = torch.tensor(
             [
