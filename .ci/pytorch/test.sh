@@ -222,6 +222,10 @@ if [[ "$TEST_CONFIG" == 'default' ]]; then
   fi
 fi
 
+if [[ "$TEST_CONFIG" == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export HIP_VISIBLE_DEVICES=0,1,2,3
+fi
+
 if [[ "$TEST_CONFIG" == 'slow' ]]; then
   export PYTORCH_TEST_WITH_SLOW=1
   export PYTORCH_TEST_SKIP_FAST=1
@@ -1787,8 +1791,14 @@ test_distributed_4gpu() {
   # Python suite only; the multi-GPU C++/mpiexec tests already run on the
   # standard `distributed` job.
   echo "Testing distributed python tests that need more than 2 GPUs"
+  local min_gpus
+  min_gpus=$(python - <<'PY'
+from torch.testing._internal.common_distributed import STANDARD_DISTRIBUTED_GPUS
+print(STANDARD_DISTRIBUTED_GPUS + 1)
+PY
+)
   # shellcheck disable=SC2086
-  time python test/run_test.py --distributed-tests --multigpu-filter multigpu --multigpu-min-gpus 3 --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
+  time python test/run_test.py --distributed-tests --multigpu-filter multigpu --multigpu-min-gpus "$min_gpus" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
 }
 
