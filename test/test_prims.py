@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     dtypes,
     OpDTypes,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -41,6 +42,78 @@ NVPRIM_ATEN_FALLBACK_WARNING = "fallback to aten executor"
 GET_ISOLATED_GRAPHMODULE_ERROR = "get_isolated_graphmodule failed on decomposition"
 
 class TestPrimsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    @dtypes(torch.float32)
+    def test_broadcast_in_dim(self, device, dtype):
+        def _wrapper(a, b, broadcast_dimensions):
+            return prims.broadcast_in_dim(a, b.shape, broadcast_dimensions)
+
+        traced = make_traced(_wrapper)
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        for executor in ('aten',):
+            fn = partial(traced, executor=executor)
+            # Same shape
+            shape = (5, 5)
+            a = make_arg(shape)
+            b = make_arg(shape, low=0.0, high=0.0)
+            result = fn(a, b, (0, 1))
+
+            self.assertEqual(result.shape, a.shape)
+            self.assertTrue(result.is_contiguous)
+            self.assertEqual(a, result)
+
+            # Error input: reordering dims
+            with self.assertRaises(Exception):
+                result = fn(a, b, (1, 0))
+
+            # Adding outermost dimensions
+            a = make_arg((5, 5))
+            b = make_arg((3, 3, 5, 5), low=0.0, high=0.0)
+            result = fn(a, b, (2, 3))
+
+            self.assertEqual(result.shape, b.shape)
+            self.assertEqual(a.broadcast_to(b.shape), result)
+
+            # Expands
+            a = make_arg((1, 5, 1))
+            b = make_arg((3, 5, 7), low=0.0, high=0.0)
+            result = fn(a, b, (0, 1, 2))
+
+            self.assertEqual(result.shape, b.shape)
+            self.assertEqual(a.expand_as(result), result)
+
+            # Unsqueezes
+            a = make_arg((1, 2, 3))
+            b = make_arg((1, 2, 1, 3), low=0.0, high=0.0)
+            result = fn(a, b, (0, 1, 3))
+
+            self.assertEqual(result.shape, b.shape)
+            self.assertEqual(a.unsqueeze(2), result)
+
+    @onlyAccelerator
+    @dtypes(torch.float32)
+    def test_broadcast_in_dim_sum(self, device, dtype):
+        def _wrapper(a):
+            a_sum = prims.sum(a, [0, 1])
+            a_bc = prims.broadcast_in_dim(a_sum, [], [])
+            return a_bc
+
+        traced = make_traced(_wrapper)
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        for executor in ('aten',):
+            fn = partial(traced, executor=executor)
+            shape = (5, 5)
+            a = make_arg(shape)
+            result = fn(a)
+
+            self.assertEqual(result.shape, ())
+            self.assertTrue(result.is_contiguous)
+            self.assertEqual(_wrapper(a), result)
+
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float64, torch.long)
     def test_cbrt_prim(self, device, dtype):
@@ -110,6 +183,26 @@ class TestPrimsDevice(TestCase):
             node.target.name().startswith("prims") for node in call_function_nodes
         )
         self.assertTrue(all_prims_namespace)
+
+    @onlyAccelerator
+    @dtypes(torch.float32)
+    @parametrize("correction", [0, 1])
+    def test_var(self, device, dtype, correction):
+        def _wrapper(a):
+            return prims.var(a, [0, 1], correction=correction)
+
+        traced = make_traced(_wrapper)
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        for executor in ('aten',):
+            fn = partial(traced, executor=executor)
+            shape = (5, 5)
+            a = make_arg(shape)
+            result = fn(a)
+
+            self.assertEqual(result.shape, ())
+            self.assertTrue(result.is_contiguous)
+            self.assertEqual(_wrapper(a), result)
 
     @dtypes(torch.float32)
     def test_memory_format_strides(self, device, dtype):
@@ -248,86 +341,6 @@ class TestPrimsDevice(TestCase):
         self.assertEqual(result.device.type, "cpu")
         self.assertEqual(result.shape, (1,))
 
-
-class TestPrimsAccelerator(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @dtypes(torch.float32)
-    def test_broadcast_in_dim(self, device, dtype):
-        def _wrapper(a, b, broadcast_dimensions):
-            return prims.broadcast_in_dim(a, b.shape, broadcast_dimensions)
-
-        traced = make_traced(_wrapper)
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
-
-        for executor in ('aten',):
-            fn = partial(traced, executor=executor)
-            shape = (5, 5)
-            a = make_arg(shape)
-            b = make_arg(shape, low=0.0, high=0.0)
-            result = fn(a, b, (0, 1))
-
-            self.assertEqual(result.shape, a.shape)
-            self.assertTrue(result.is_contiguous)
-            self.assertEqual(a, result)
-
-            with self.assertRaises(Exception):
-                fn(a, b, (1, 0))
-
-            a = make_arg((5, 5))
-            b = make_arg((3, 3, 5, 5), low=0.0, high=0.0)
-            result = fn(a, b, (2, 3))
-            self.assertEqual(result.shape, b.shape)
-            self.assertEqual(a.broadcast_to(b.shape), result)
-
-            a = make_arg((1, 5, 1))
-            b = make_arg((3, 5, 7), low=0.0, high=0.0)
-            result = fn(a, b, (0, 1, 2))
-            self.assertEqual(result.shape, b.shape)
-            self.assertEqual(a.expand_as(result), result)
-
-            a = make_arg((1, 2, 3))
-            b = make_arg((1, 2, 1, 3), low=0.0, high=0.0)
-            result = fn(a, b, (0, 1, 3))
-            self.assertEqual(result.shape, b.shape)
-            self.assertEqual(a.unsqueeze(2), result)
-
-    @dtypes(torch.float32)
-    def test_broadcast_in_dim_sum(self, device, dtype):
-        def _wrapper(a):
-            a_sum = prims.sum(a, [0, 1])
-            a_bc = prims.broadcast_in_dim(a_sum, [], [])
-            return a_bc
-
-        traced = make_traced(_wrapper)
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
-
-        for executor in ('aten',):
-            fn = partial(traced, executor=executor)
-            a = make_arg((5, 5))
-            result = fn(a)
-            self.assertEqual(result.shape, ())
-            self.assertTrue(result.is_contiguous)
-            self.assertEqual(_wrapper(a), result)
-
-    @dtypes(torch.float32)
-    @parametrize("correction", [0, 1])
-    def test_var(self, device, dtype, correction):
-        def _wrapper(a):
-            return prims.var(a, [0, 1], correction=correction)
-
-        traced = make_traced(_wrapper)
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
-
-        for executor in ('aten',):
-            fn = partial(traced, executor=executor)
-            a = make_arg((5, 5))
-            result = fn(a)
-            self.assertEqual(result.shape, ())
-            self.assertTrue(result.is_contiguous)
-            self.assertEqual(_wrapper(a), result)
-
-
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)
@@ -364,9 +377,8 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
             torch._prims_common.check(True, lambda: 'message')
 
 
-instantiate_device_type_tests(TestPrimsDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(
-    TestPrimsAccelerator, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    TestPrimsDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
 )
 
 
@@ -435,7 +447,7 @@ class TestRefs(TestCase):
 
 
 
-instantiate_device_type_tests(TestRefs, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestRefs, globals())
 
 
 class TestDecomp(TestCase):
@@ -481,7 +493,7 @@ class TestDecomp(TestCase):
         self.assertEqual(res, expected)
 
 
-instantiate_device_type_tests(TestDecomp, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestDecomp, globals())
 
 
 if __name__ == "__main__":
