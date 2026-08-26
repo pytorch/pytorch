@@ -525,7 +525,7 @@ class TestJoin(MultiProcessTestCase):
             device=device,
         )
 
-instantiate_device_type_tests(TestJoin, globals(), except_for="cpu")
+instantiate_device_type_tests(TestJoin, globals(), except_for="cpu", allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
