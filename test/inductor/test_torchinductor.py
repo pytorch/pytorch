@@ -107,6 +107,7 @@ from torch.testing._internal.common_quantization import (
     _group_quantize_tensor_symmetric,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     DeterministicGuard,
     instantiate_parametrized_tests,
     IS_ARM64,
@@ -6379,6 +6380,21 @@ for dtype in (torch.int32, torch.int64):
         ),
     )
     @parametrize("nhwc", (False, True))
+    # ROCm 7.14+ Triton conv2d backward accuracy issue for
+    # channels_groups=[61, 151, 1], stride=1, padding=0, kernel=1, nhwc=True.
+    # expectedFailure so a ROCm fix XPASSes instead of remaining silently skipped.
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda p: (
+            TEST_WITH_ROCM
+            and _get_torch_rocm_version() >= (7, 14)
+            and p["channels_groups"] == [61, 151, 1]
+            and p["stride"] == 1
+            and p["padding"] == 0
+            and p["kernel"] == 1
+            and p["nhwc"]
+        ),
+    )
     @with_tf32_off
     def test_conv2d_backward_parametrized(
         self,
@@ -6392,22 +6408,6 @@ for dtype in (torch.int32, torch.int64):
         in_channels = channels_groups[0]
         out_channels = channels_groups[1]
         groups = channels_groups[2]
-
-        if (
-            TEST_WITH_ROCM
-            and _get_torch_rocm_version() >= (7, 14)
-            and channels_groups == [61, 151, 1]
-            and stride == 1
-            and padding == 0
-            and kernel == 1
-            and dilation in (1, 2)
-            and nhwc
-        ):
-            self.skipTest(
-                "ROCm 7.14+ Triton conv2d backward accuracy issue for "
-                "channels_groups=[61, 151, 1], stride=1, padding=0, "
-                "kernel=1, dilation=1/2, nhwc=True"
-            )
 
         if torch._inductor.compile_fx.fx_compile_mode == FxCompileMode.SUBPROCESS:
             # TODO: Remove this workaround once TF32 settings are properly passed to subprocess
