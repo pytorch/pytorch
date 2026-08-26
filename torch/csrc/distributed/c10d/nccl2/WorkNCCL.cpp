@@ -37,7 +37,8 @@ WorkNCCL::WorkNCCL(
       work_start_time_(std::chrono::steady_clock::now()),
       timeout_ms_(timeout_ms),
       timing_enabled_(comm->collectivesTimingEnabled()),
-      completionKey_(nextCompletionKey.fetch_add(1, std::memory_order_relaxed)) {
+      completionKey_(
+          nextCompletionKey.fetch_add(1, std::memory_order_relaxed)) {
   start_event_ = comm_->getEvent(timing_enabled_);
   end_event_ = comm_->getEvent(timing_enabled_);
   future_work_result_ =
@@ -58,7 +59,8 @@ WorkNCCL::WorkNCCL(
       work_start_time_(std::chrono::steady_clock::now()),
       timeout_ms_(timeout_ms),
       timing_enabled_(comm->collectivesTimingEnabled()),
-      completionKey_(nextCompletionKey.fetch_add(1, std::memory_order_relaxed)) {
+      completionKey_(
+          nextCompletionKey.fetch_add(1, std::memory_order_relaxed)) {
   start_event_ = comm_->getEvent(timing_enabled_);
   end_event_ = comm_->getEvent(timing_enabled_);
   future_work_result_ =
