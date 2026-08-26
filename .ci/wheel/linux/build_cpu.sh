@@ -18,6 +18,7 @@ echo "Building CPU wheel for architecture: $ARCH"
 if [[ "$ARCH" == "s390x" ]]; then
     # Build for z15 to enable full ZVECTOR support
     export CFLAGS="$CFLAGS -march=z15"
+    export CXXFLAGS="$CXXFLAGS -march=z15"
 fi
 
 WHEELHOUSE_DIR="wheelhousecpu"
