@@ -139,7 +139,7 @@ class WorkNCCL : public c10d::Work {
   // whether getDuration() can be served for this work.
   bool timing_enabled_{false};
   uint64_t seq_{0};
-  uint64_t completion_key_;
+  uint64_t completionKey_;
 
   std::mutex terminal_status_mutex_;
   std::atomic<WorkStatus> status_{WorkStatus::NOT_STARTED};

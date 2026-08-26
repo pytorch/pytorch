@@ -20,7 +20,7 @@
 namespace c10d::nccl2 {
 
 namespace {
-std::atomic<uint64_t> next_completion_key{1};
+std::atomic<uint64_t> nextCompletionKey{1};
 } // namespace
 
 WorkNCCL::WorkNCCL(
@@ -37,8 +37,7 @@ WorkNCCL::WorkNCCL(
       work_start_time_(std::chrono::steady_clock::now()),
       timeout_ms_(timeout_ms),
       timing_enabled_(comm->collectivesTimingEnabled()),
-      completion_key_(
-          next_completion_key.fetch_add(1, std::memory_order_relaxed)) {
+      completionKey_(nextCompletionKey.fetch_add(1, std::memory_order_relaxed)) {
   start_event_ = comm_->getEvent(timing_enabled_);
   end_event_ = comm_->getEvent(timing_enabled_);
   future_work_result_ =
@@ -59,8 +58,7 @@ WorkNCCL::WorkNCCL(
       work_start_time_(std::chrono::steady_clock::now()),
       timeout_ms_(timeout_ms),
       timing_enabled_(comm->collectivesTimingEnabled()),
-      completion_key_(
-          next_completion_key.fetch_add(1, std::memory_order_relaxed)) {
+      completionKey_(nextCompletionKey.fetch_add(1, std::memory_order_relaxed)) {
   start_event_ = comm_->getEvent(timing_enabled_);
   end_event_ = comm_->getEvent(timing_enabled_);
   future_work_result_ =
@@ -162,7 +160,7 @@ void WorkNCCL::notifyCompletion() {
           << "Cannot measure collective duration: " << e.what();
     }
   }
-  comm_->runCompletionHooks(completion_key_, duration);
+  comm_->runCompletionHooks(completionKey_, duration);
 }
 
 WorkNCCL::WorkStatus WorkNCCL::checkStatus(
@@ -353,7 +351,7 @@ uint64_t WorkNCCL::getSequencenumber() const {
 }
 
 uint64_t WorkNCCL::getCompletionKey() const {
-  return completion_key_;
+  return completionKey_;
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
