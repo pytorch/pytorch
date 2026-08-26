@@ -264,47 +264,36 @@ struct nextafter_functor {
     return static_cast<T>(::metal::nextafter(a, b));
   }
 
-  using bits_t = ushort;
-  static constexpr constant bits_t kSignMask = bits_t(1)
-      << (sizeof(bfloat) * CHAR_BIT - 1);
-  static constexpr constant bits_t kMagMask = kSignMask - 1;
-  static constexpr constant bits_t kInfinity =
-      as_type<bits_t>(::metal::numeric_limits<bfloat>::infinity());
-  // numeric_limits<bfloat>::denorm_min() is BFLT_MIN in Metal, i.e. the
-  // smallest normal (0x0080), so the smallest subnormal is spelled directly.
-  static constexpr constant bits_t kSmallestSubnormal = 1;
-
-  static inline bits_t nextafter_bfloat_bits(
+  static inline ushort nextafter_bfloat_bits(
       const bfloat from,
       const bfloat to) {
-    const bits_t uf = as_type<bits_t>(from);
-    const bits_t ut = as_type<bits_t>(to);
-    const bits_t af = uf & kMagMask;
-    const bits_t at = ut & kMagMask;
-    if (af > kInfinity || at > kInfinity) {
-      // Match the CPU NaN payload; NaN is never subnormal so this is safe.
-      return as_type<bits_t>(bfloat(from + to));
-    }
-    if (uf == ut) {
+    ushort uf = as_type<ushort>(from);
+    const ushort ut = as_type<ushort>(to);
+    const ushort af = uf & 0x7fff;
+    const ushort at = ut & 0x7fff;
+
+    if (uf == ut || (af == 0 && at == 0)) {
       return ut;
     }
-    if (af == 0 && at == 0) {
-      return ut; // +-0 -> +-0, sign taken from `to`
-    }
     if (af == 0) {
-      return bits_t((ut & kSignMask) | kSmallestSubnormal);
+      return ushort((ut & 0x8000) | 1);
     }
-    // Sign-magnitude is not ordered like an integer, so re-apply the sign.
-    const bool neg = (uf & kSignMask) != 0;
-    const int of = neg ? -int(af) : int(af);
-    const int ot = (ut & kSignMask) ? -int(at) : int(at);
-    const bool up = of < ot;
-    return neg ? (up ? bits_t(uf - 1) : bits_t(uf + 1))
-               : (up ? bits_t(uf + 1) : bits_t(uf - 1));
+
+    const bool neg = (uf & 0x8000) != 0;
+    const int from_value = neg ? -int(af) : int(af);
+    const int to_value = (ut & 0x8000) ? -int(at) : int(at);
+    uf += ((from_value < to_value) != neg) ? 1 : -1;
+    return uf;
   }
 
   inline bfloat operator()(const bfloat from, const bfloat to) {
-    return as_type<bfloat>(nextafter_bfloat_bits(from, to));
+    ushort result;
+    if (from != from || to != to) {
+      result = as_type<ushort>(bfloat(from + to));
+    } else {
+      result = nextafter_bfloat_bits(from, to);
+    }
+    return as_type<bfloat>(result);
   }
 };
 

@@ -16149,10 +16149,6 @@ class TestConsistency(TestCaseMPS):
         self.assertEqual(mps_out.layout, cpu_out.layout)
 
     def _compute_tolerances(self, op, dtype):
-        # nextafter is defined on bit patterns, so bf16 must match exactly:
-        # a flushed subnormal differs by ~1e-41, far inside the default tolerance.
-        if op.name == "nextafter" and dtype == torch.bfloat16:
-            return (0, 0)
         if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype in [torch.float32, torch.complex64]:
             return (1e-4, 3e-5)
 
@@ -16269,6 +16265,9 @@ class TestConsistency(TestCaseMPS):
             mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample, opt_dtype)
 
             atol, rtol = self._compute_tolerances(op, dtype)
+            # Forward is bit-exact; backward may include inexact broadcast reductions.
+            if op.name == "nextafter":
+                atol, rtol = 0, 0
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
                mps_sample.kwargs.get("mode") == "bilinear" and
                mps_sample.kwargs.get("recompute_scale_factor") is True and
