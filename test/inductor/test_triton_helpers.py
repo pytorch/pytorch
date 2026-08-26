@@ -554,12 +554,10 @@ instantiate_device_type_tests(
     allow_xpu=True,
 )
 
-if HAS_GPU_DEVICE:
-    if HAS_TRITON:
-        instantiate_device_type_tests(MinimumMaximumTest, globals(), only_for=GPU_TYPE)
+if HAS_GPU_DEVICE and HAS_TRITON:
+    instantiate_device_type_tests(MinimumMaximumTest, globals(), only_for=GPU_TYPE)
 
 
 if __name__ == "__main__":
-    if HAS_GPU_DEVICE:
-        if HAS_TRITON:
-            run_tests()
+    if HAS_GPU_DEVICE and HAS_TRITON:
+        run_tests()
