@@ -7,16 +7,36 @@ from typing import NamedTuple
 import torch
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import \
-    (instantiate_parametrized_tests, parametrize, run_tests, skipIfNoCuteDSL,
-     subtest, TestCase, DeterministicGuard, TEST_CUDA, TEST_WITH_ROCM, serialTest)
-from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, onlyAccelerator, dtypes, dtypesIfCUDA,
-     toleranceOverride, tol,)
-from torch.testing._internal.common_dtype import \
-    (all_passthru_types, all_passthru_types_and, get_all_dtypes,)
-
-from torch.testing._internal.common_cuda import gfx_arch_supports_opportunistic_fastatomics, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    gfx_arch_supports_opportunistic_fastatomics,
+    SM90OrLater,
+)
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCPU,
+    onlyAccelerator,
+    dtypes,
+    dtypesIfCUDA,
+    toleranceOverride,
+    tol,
+)
+from torch.testing._internal.common_dtype import (
+    all_passthru_types,
+    all_passthru_types_and,
+    get_all_dtypes,
+)
+from torch.testing._internal.common_utils import (
+    DeterministicGuard,
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    serialTest,
+    skipIfNoCuteDSL,
+    subtest,
+    TestCase,
+    TEST_CUDA,
+    TEST_WITH_ROCM,
+)
 
 # Protects against includes accidentally setting the default dtype
 if torch.get_default_dtype() is not torch.float32:
@@ -135,7 +155,6 @@ class TestScatterGather(TestCase):
         if device != 'cpu':
             ref_cpu = torch.gather(src.cpu(), dim=1, index=ind.cpu())
             self.assertEqual(res.cpu(), ref_cpu, atol=0, rtol=0)
-
 
     @dtypes(torch.bool)
     def test_gather_bool(self, device, dtype):
@@ -432,7 +451,6 @@ class TestScatterGather(TestCase):
                 if (include_self):
                     expected_result[1] = 0
                 self.assertEqual(input, expected_result)
-
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
@@ -1177,10 +1195,6 @@ class TestScatterAddOverrideCorrectness(TestCase):
 instantiate_parametrized_tests(TestScatterAddOverrideConds)
 instantiate_parametrized_tests(TestScatterAddOverrideCorrectness)
 
-
-# Generic Device Test Framework instantiation, see
-#   https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
-#   for details.
 instantiate_device_type_tests(TestScatterGather, globals())
 
 if __name__ == '__main__':
