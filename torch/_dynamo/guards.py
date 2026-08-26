@@ -4576,6 +4576,11 @@ class GuardsStatePickler(pickle.Pickler):
         import sympy
 
         if _is_precompile_handle(obj):
+            if self._keep(obj):
+                raise torch._dynamo.exc.PackageError(
+                    "a guard directly references a precompile handle; pass the "
+                    "underlying model inputs instead"
+                )
             return _Missing, ("precompile handle",)
 
         if id(obj) in self.empty_values:
