@@ -3997,11 +3997,6 @@ class DeviceCachingAllocator {
     if (isRetry) {
       stats.num_alloc_retries += 1;
     }
-#ifdef FBCODE_CAFFE2
-    bool in_fbcode = true;
-#else
-    bool in_fbcode = false;
-#endif
 
     if (allowed_memory_maximum.has_value() &&
         total_allocated_memory + size > allowed_memory_maximum.value()) {
@@ -4039,10 +4034,7 @@ class DeviceCachingAllocator {
       }
     }
 
-    if (
-        // Temporarily disable checkpointing & cudagraphs internally
-        p.is_expandable_segments_active &&
-        !(in_fbcode && p.pool->owner_PrivatePool)) {
+    if (p.is_expandable_segments_active) {
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {
