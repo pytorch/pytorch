@@ -691,6 +691,7 @@ class TestUnshardParamsNoShard(TestUnshardParamsBase):
         self.run_subtests(
             self._get_test_unshard_params_writeback_config(),
             self._test_unshard_params_writeback,
+            device=device,
         )
 
     @skip_if_lt_x_gpu(1)
@@ -706,6 +707,7 @@ class TestUnshardParamsNoShard(TestUnshardParamsBase):
         self.run_subtests(
             config,
             self._test_unshard_params_param_data,
+            device=device,
         )
 
 
