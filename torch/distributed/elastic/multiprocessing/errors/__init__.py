@@ -340,6 +340,7 @@ def record(
     ::
 
      error_handler = get_error_handler()
+     error_handler.set_entrypoint_fn_name(foobar.__qualname__)
      error_handler.initialize()
      try:
          foobar()
@@ -375,6 +376,7 @@ def record(
         def wrapper(*args: _P.args, **kwargs: _P.kwargs):
             if error_handler is None:
                 raise AssertionError  # assertion for mypy type checker
+            error_handler.set_entrypoint_fn_name(f.__qualname__)
             error_handler.initialize()
             try:
                 return f(*args, **kwargs)
