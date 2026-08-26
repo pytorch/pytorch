@@ -20,6 +20,7 @@ from torch.testing._internal.common_quantized import (
     qengine_is_x86,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     raise_on_run_directly,
     skipIfTorchDynamo,
     TestCase,
@@ -32,6 +33,8 @@ logger = logging.getLogger(__name__)
 
 
 class TestQuantizedSparseKernels(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     @override_qengines
     def test_sparse_qlinear(self):
@@ -262,6 +265,8 @@ class SparseQuantizedModel(nn.Module):
 
 
 class TestQuantizedSparseLayers(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @override_qengines
     def test_sparse_qlinear(self):
         # Note: At the moment, for sparse kernels
