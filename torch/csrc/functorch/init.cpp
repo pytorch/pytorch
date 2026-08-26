@@ -186,16 +186,22 @@ static Tensor _unwrap_functional_tensor(
   auto functional =
       at::functionalization::impl::unsafeGetFunctionalWrapper(self);
 
-  // Multi-output views returned to the user must replay the original operation
-  // to preserve autograd's mutation restrictions, even if an internal sync
-  // already regenerated the value using a select or slice.
+  // Regeneration goes through view_copy() ops; functorch wants real views
+  // back, which is what the guard below selects. A multi-output view handed
+  // to the user must replay the original op to keep autograd's mutation
+  // restriction, even if an internal sync already rebuilt the value with a
+  // select or slice. Only under add_back_views: with view_copy the outputs
+  // are not views, so that restriction does not exist.
   at::functionalization::impl::FunctionalizationReapplyViewsGuard guard(
       add_back_views);
   functional->apply_updates();
-  if (add_back_views && functional->is_multi_output_view()) {
-    functional->regenerate_from_base();
-  } else if (!functional->is_up_to_date()) {
-    functional->regenerate_from_base(/*single_output_replay=*/true);
+  const bool exact = add_back_views && functional->is_multi_output_view();
+  // Regenerate when stale, or when we need the exact replay and what we have
+  // is a cheap one. Replaying unconditionally would put the O(N^2) this change
+  // removes straight back at the unwrap boundary.
+  if (!functional->is_up_to_date() ||
+      (exact && functional->regenerated_single_output())) {
+    functional->regenerate_from_base(/*single_output_replay=*/!exact);
   }
   return functional->value();
 }

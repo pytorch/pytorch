@@ -4973,6 +4973,19 @@ class TestFunctionalize(TestCase):
         ):
             out.mul_(2)
 
+    def test_multioutput_view_regeneration_matches_eager(self, device):
+        # An uneven split exercises the short final chunk, where the generated
+        # single-output replay relies on slice clamping the end, and the
+        # accumulating offsets of split_with_sizes.
+        def f(x):
+            base = x.clone()
+            outs = base.split(2)
+            base.add_(1)
+            return tuple(o.clone() for o in outs)
+
+        x = torch.arange(15.0, device=device).reshape(5, 3)
+        self.assertEqual(torch.func.functionalize(f)(x), f(x))
+
     def test_inplace_view(self, device):
         def f(x: torch.Tensor) -> torch.Tensor:
             tmp = torch.ones(4, device=device)

@@ -217,6 +217,10 @@ void FunctionalTensorWrapper::mutate_view_meta(const std::shared_ptr<at::functio
 void FunctionalTensorWrapper::replace_(const Tensor& other, bool from_lazy_regenerate) {
   // TODO: going to need to change this if we want nested functionalize() transforms.
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(other));
+  if (!from_lazy_regenerate) {
+    // A value that did not come from regenerate_from_base cannot be a cheap replay.
+    regenerated_single_output_ = false;
+  }
   value_ = other;
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
@@ -260,6 +264,10 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   generation_ = other->generation_;
   view_metas_ = other->view_metas_;
   is_symbolic_ = other->is_symbolic_;
+  // Must travel with view_metas_: the flag says whether that chain contains a
+  // multi-output view, and _unwrap_functional_tensor now uses it to decide
+  // between an exact and a cheap replay.
+  is_multi_output_view_ = other->is_multi_output_view_;
   // FREEZE the old storage, preventing mutations to it.
   // this is a huge pain to handle properly in all cases, so we ban it.
   functional_storage_impl()->freeze();
@@ -381,6 +389,7 @@ void FunctionalTensorWrapper::regenerate_from_base(bool single_output_replay) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
 
   replace_(t, /*from_lazy_regenerate=*/true);
+  regenerated_single_output_ = single_output_replay;
   generation_ = storage_impl->generation();
 }
 

@@ -1586,11 +1586,6 @@ def _maybe_unwrap_functional_tensor(maybe_tensor: Any, *, reapply_views: bool) -
         # This can happen if we functionalize a fn that returns a global,
         # which was never wrapped properly.
         return maybe_tensor
-    # Not needed: _unwrap_functional_tensor syncs as part of deciding how to
-    # regenerate the value. It is not free either - for a multi-output view the
-    # sync's cheap replay is traced before the exact one replaces it, leaving a
-    # dead view node in the graph.
-    torch._sync(maybe_tensor)
     return _unwrap_functional_tensor(maybe_tensor, reapply_views)
 
 

@@ -981,7 +981,14 @@ struct TORCH_API {self.classname} : public ViewMeta {{
 
     @property
     def single_output_replay_body(self) -> str | None:
-        return SINGLE_OUTPUT_VIEW_REPLAY.get(str(self.f.func.name))
+        # A new multi-output view op would otherwise silently inherit the base
+        # forward_single_output and stay quadratic, with no golden to flag it.
+        name = str(self.f.func.name)
+        if self.is_multi_output and name not in SINGLE_OUTPUT_VIEW_REPLAY:
+            raise AssertionError(
+                f"multi-output view {name} has no single-output replay"
+            )
+        return SINGLE_OUTPUT_VIEW_REPLAY.get(name)
 
     # Body of `forward_single_output`, or None if this operation does not override it.
     def single_output_impl(self) -> str | None:

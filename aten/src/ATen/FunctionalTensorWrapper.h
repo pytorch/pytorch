@@ -220,6 +220,13 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return is_multi_output_view_;
   }
 
+  // True when value_ was last rebuilt by the cheap single-output replay, so a
+  // caller that needs the exact one has to regenerate even if we are otherwise
+  // up to date. See _unwrap_functional_tensor.
+  bool regenerated_single_output() const {
+    return regenerated_single_output_;
+  }
+
   // See Note[resize_() in functionalization pass]
   void maybe_replace_storage(const Tensor& other);
 
@@ -289,6 +296,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // the copy_() from autograd as well.
   bool has_metadata_mutation_ = false;
   bool is_multi_output_view_ = false;
+  // See regenerated_single_output().
+  bool regenerated_single_output_ = false;
   // Did the tensor experience a set_() call.
   bool was_storage_changed_ = false;
   // Did the tensor experience a shallow_copy_data_() call.
