@@ -3,7 +3,6 @@
 import contextlib
 import functools
 import io
-import unittest
 from collections import OrderedDict
 from copy import deepcopy
 from itertools import product
@@ -19,6 +18,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     skipMeta,
+    skipCPUIf,
 )
 from torch.testing._internal.common_utils import (
     _assertGradAndGradgradChecks,
@@ -542,7 +542,6 @@ class TestDataParallel(TestCase):
 
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
     def test_scatter(self, device):
-        device = torch.device(device) if isinstance(device, str) else device
         x = torch.randn((4, 4), dtype=torch.double, device=device).requires_grad_()
         result = dp.scatter(x, (0, 1))
         self.assertEqual(len(result), 2)
@@ -708,12 +707,10 @@ class TestDataParallel(TestCase):
                     lambda msg: f"{msg}\nEpoch {epoch}: weights differ for {n1} after optimizer step",
                 )
 
+    @skipCPUIf(True, "dp.gather does not support CPU output_device")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
     def test_gather(self, device):
-        if isinstance(device, str) and device == "cpu":
-            raise unittest.SkipTest("dp.gather does not support CPU output_device")
-        device = torch.device(device) if isinstance(device, str) else device
-        output_device = -1 if device.type == 'cpu' else 0
+        output_device = -1 if torch.device(device).type == 'cpu' else 0
         inputs = (
             torch.randn(2, 4, device=device, requires_grad=True, dtype=torch.double),
             torch.randn(2, 4, device=torch.device(torch.device(device).type, 1), requires_grad=True, dtype=torch.double),
