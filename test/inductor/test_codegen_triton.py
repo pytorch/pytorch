@@ -44,6 +44,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_GPU,
     HAS_GPU_AND_TRITON,
+    TRITON_HAS_CPU,
 )
 from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -62,16 +63,16 @@ if has_triton_package():
         debug=True,
         do_not_specialize=["x"],
     )
-    def noinline_helper_for_codegen(x):
-        return x + 1
-
-    @triton.jit
-    def root_for_noinline_helper(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
+    def noinline_helper_for_codegen(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
         pid = tl.program_id(axis=0)
         offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
         mask = offsets < n_elements
-        values = noinline_helper_for_codegen(tl.load(x + offsets, mask=mask))
-        tl.store(out + offsets, values, mask=mask)
+        values = tl.load(x + offsets, mask=mask)
+        tl.store(out + offsets, values + 1, mask=mask)
+
+    @triton.jit
+    def root_for_noinline_helper(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
+        noinline_helper_for_codegen(x, out, n_elements, BLOCK_SIZE)
 
     @triton.jit
     def root_decorator_for_codegen(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -1171,7 +1172,7 @@ def helper(x):
         self.assertNotIn("tt.pointer_range", code_str)
 
     @unittest.skipUnless(
-        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
         "requires CPU or GPU Triton",
     )
     def test_user_defined_triton_kernel_preserves_root_jit_decorator(self):
@@ -1219,7 +1220,7 @@ def helper(x):
         self.assertIn("do_not_specialize=", code_str)
 
     @unittest.skipUnless(
-        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
         "requires CPU or GPU Triton",
     )
     def test_user_defined_triton_kernel_preserves_jit_decorator(self):
@@ -1237,10 +1238,18 @@ def helper(x):
         self.assertIn("debug=True", source)
         self.assertIn('do_not_specialize=["x"]', source)
 
-    @unittest.skipUnless(
-        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
-        "requires CPU or GPU Triton",
-    )
+        def fn(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            root_for_noinline_helper[(1,)](x, out, n_elements, BLOCK_SIZE=128)
+            return out
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(64, device=device)
+        result, _ = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, x + 1)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
     def test_user_defined_triton_kernel_preserves_aliased_jit_decorator(self):
         from torch._inductor.codegen.wrapper import (
             user_defined_triton_kernel_transitive_closure_source_code,
@@ -1270,10 +1279,7 @@ def helper(x):
                 "@triton.jit",
             )
 
-    @unittest.skipUnless(
-        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
-        "requires CPU or GPU Triton",
-    )
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
     def test_user_defined_triton_kernel_rejects_global_jit_decorator_option(self):
         from torch._inductor.codegen.wrapper import (
             user_defined_triton_kernel_transitive_closure_source_code,
@@ -1289,10 +1295,7 @@ def helper(x):
                 root_for_global_option_jit_helper
             )
 
-    @unittest.skipUnless(
-        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
-        "requires CPU or GPU Triton",
-    )
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
     def test_user_defined_triton_kernel_literal_eval_type_error(self):
         from torch._inductor.codegen.wrapper import _triton_jit_decorator_from_source
 

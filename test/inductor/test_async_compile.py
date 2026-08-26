@@ -404,6 +404,7 @@ size_hints={{'x': 32}}
                 return_value=None,
             ),
             patch("torch._inductor.async_compile.CompiledTritonKernels.save"),
+            patch("torch._inductor.async_compile._compile_start"),
             patch("torch._inductor.async_compile._set_triton_libdevice_path"),
         ):
             AsyncCompile().triton("triton_user_kernel", source_code)
