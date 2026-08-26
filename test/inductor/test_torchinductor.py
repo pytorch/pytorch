@@ -1405,7 +1405,7 @@ def skip_if_triton(fn):
 def skip_if_not_triton(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if not has_triton() or not is_triton_backend(self.device):
+        if not is_triton_backend(self.device):
             raise unittest.SkipTest(f"triton backend is required for {self.device}")
         return fn(self, *args, **kwargs)
 
@@ -10284,7 +10284,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @skip_if_no_accelerator
     def test_grid_sampler_expand_preserves_view(self):
         if self.device in ("cpu", "mps", "mtia"):
-            self.skipTest("accelerator backend not supported")
+            self.skipTest("requires CUDA or XPU")
 
         torch.manual_seed(0)
         torch._dynamo.reset()
@@ -20345,8 +20345,11 @@ if RUN_GPU or HAS_MPS:
 
             self.assertEqual(actual, expected, exact_stride=True)
 
-        @skip_if_not_cuda
         def test_addmm_beta_zero_mismatched_bias_cuda(self):
+            device_type = torch.device(self.device).type
+            if device_type != "cuda" or not torch.cuda.is_available():
+                self.skipTest("CUDA eager ignores addmm input shape when beta=0")
+
             def check(fn, args):
                 expected = fn(*args)
                 actual = torch.compile(fn, fullgraph=True)(*args)
