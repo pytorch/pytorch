@@ -425,7 +425,7 @@ class OverlapScheduler:
         bucket_mode: BucketMode | None = None,
         max_off_bucket_gb: float | None = 0.5,
         prioritize_bucketing_during_scheduling: bool = True,
-        pge_profile_path: str | None = None,
+        pge_profile_path: str | list[str] | None = None,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -434,7 +434,7 @@ class OverlapScheduler:
         self.max_in_flight_bytes: int = gb_to_bytes(max_in_flight_gb)
 
         # Profile-guided estimation: create estimator from profile path
-        if pge_profile_path and custom_runtime_estimation is None:
+        if pge_profile_path is not None and custom_runtime_estimation is None:
             from torch._inductor.fx_passes.profile_guided_estimation import (
                 ProfileGuidedEstimator,
             )
@@ -1912,7 +1912,7 @@ def schedule_overlap_bucketing(
     prioritize_bucketing_during_scheduling: bool = True,
     max_off_bucket_gb: float | None = 0.5,
     bucket_mode: BucketMode | None = None,
-    pge_profile_path: str | None = None,
+    pge_profile_path: str | list[str] | None = None,
     pre_bucketing_fsdp_collectives: bool = True,
     pre_bucketing_fsdp_collectives_bucket_cap_mb: float | None = None,
 ) -> torch.fx.GraphModule:
@@ -1946,6 +1946,8 @@ def schedule_overlap_bucketing(
             buckets before overlap scheduling.
         pre_bucketing_fsdp_collectives_bucket_cap_mb: Override bucket cap in MB for pre-bucketing.
             When None, auto-computes based on NCCL bandwidth model.
+        pge_profile_path: A Chrome Trace JSON path or an ordered list of same-capture
+            rank-profile paths. The first profile supplies non-collective estimates.
     """
     if not gm.graph.find_nodes(
         op="call_function",
@@ -2051,7 +2053,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
 
     # Profile-guided latency estimation
     pge_path = dist_opts.profile_guided_estimations_profile_path
-    if pge_path and "custom_runtime_estimation" not in kwargs:
+    if pge_path is not None and "custom_runtime_estimation" not in kwargs:
         kwargs["pge_profile_path"] = pge_path
 
     return schedule_overlap_bucketing(gm, **kwargs)  # type: ignore[arg-type]
