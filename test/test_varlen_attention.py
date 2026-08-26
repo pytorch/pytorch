@@ -975,6 +975,35 @@ class TestVarlenAttention(NNTestCase):
         self.assertEqual(cudnn_backward.call_count, 0)
 
     @skipIfRocm
+    @parametrize("different_kv_stride", [False, True])
+    def test_cudnn_varlen_shared_cu_seq(self, device, different_kv_stride):
+        """Reusing shared Q/K metadata preserves forward and backward results."""
+        _check_cudnn_varlen_supported(device)
+        torch.manual_seed(42)
+        total, num_heads, head_dim = 512, 4, 64
+        q = torch.randn(
+            total, num_heads, head_dim, device=device, dtype=torch.bfloat16
+        ).requires_grad_()
+
+        def make_kv():
+            shape = (total, num_heads, head_dim + 8) if different_kv_stride else q.shape
+            tensor = torch.randn(shape, device=device, dtype=torch.bfloat16)
+            return tensor[..., :head_dim].requires_grad_()
+
+        k, v = make_kv(), make_kv()
+        cu_seq = torch.tensor([0, 192, total], device=device, dtype=torch.int32)
+        grad_out = torch.randn_like(q)
+
+        def run(cu_seq_k):
+            with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+                out = varlen_attn(q, k, v, cu_seq, cu_seq_k, 320, 320)
+                return (out, *torch.autograd.grad(out, (q, k, v), grad_out))
+
+        expected = run(cu_seq.clone())
+        actual = run(cu_seq)
+        self.assertEqual(actual, expected)
+
+    @skipIfRocm
     @parametrize("tensor_idx", [0, 1, 2])
     def test_cudnn_varlen_unaligned_input_raises(self, device, tensor_idx):
         """Reject varlen inputs whose row strides are not 16-byte aligned.
