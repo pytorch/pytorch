@@ -338,6 +338,22 @@ def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
     )
 
 
+def _descriptor_functions(obj: Any) -> list[tuple[str, Any]]:
+    if isinstance(obj, property):
+        return [
+            (name, fn)
+            for name, fn in (
+                ("fget", obj.fget),
+                ("fset", obj.fset),
+                ("fdel", obj.fdel),
+            )
+            if fn is not None
+        ]
+    if isinstance(obj, functools.cached_property):
+        return [("func", obj.func)]
+    return []
+
+
 def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     """
     Given a code object, return a fully qualified name which will be used as
@@ -362,7 +378,11 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             if not hasattr(toplevel, part):
                 _raise_resolution_error(code, toplevel)
             toplevel = getattr(toplevel, part)
-            if inspect.isfunction(toplevel) or inspect.ismethod(toplevel):
+            if (
+                inspect.isfunction(toplevel)
+                or inspect.ismethod(toplevel)
+                or _descriptor_functions(toplevel)
+            ):
                 break
     seen = set()
 
@@ -381,6 +401,10 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             for i, const in enumerate(obj.co_consts):
                 if (res := _find_code_source(const)) is not None:
                     return f".co_consts[{i}]{res}"
+
+        for attr, wrapped in _descriptor_functions(obj):
+            if (res := _find_code_source(wrapped)) is not None:
+                return f".{attr}{res}"
 
         if inspect.ismethod(obj):
             if (res := _find_code_source(obj.__func__)) is not None:
@@ -424,6 +448,14 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                     try:
                         value = getattr(obj, name)
                     except AttributeError:
+                        continue
+                    wrapped = _descriptor_functions(value)
+                    if wrapped:
+                        for attr, fn in wrapped:
+                            if (res := _find_code_source(fn)) is not None:
+                                if fn.__name__ != name:
+                                    _raise_resolution_error(code, toplevel)
+                                return f".{attr}{res}"
                         continue
                     if not (
                         inspect.isfunction(value)
