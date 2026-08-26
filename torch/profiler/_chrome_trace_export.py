@@ -127,58 +127,28 @@ def _device_properties() -> list[dict[str, Any]]:
     """Per-device properties in the shape kineto's ``createDevicePropertiesJson``
     writes (it serializes ``cudaDeviceProp``).
 
-    Read through cuda.bindings when available -- the same ``cudaGetDeviceProperties``
-    kineto uses, and the only source exposing ``regsPerBlock`` -- otherwise from
-    torch's properties object, which carries everything but that field.
+    Every field kineto emits except ``regsPerBlock``, which torch's properties object
+    does not carry; it is left out rather than guessed from ``regsPerMultiprocessor``,
+    which only happens to match on current parts.
     """
-    try:
-        from cuda.bindings import (  # pyrefly: ignore[missing-import]
-            runtime as cuda_runtime,
-        )
-    except ImportError:
-        cuda_runtime = None  # type: ignore[assignment]
-
     props: list[dict[str, Any]] = []
     for i in range(torch.cuda.device_count()):
-        if cuda_runtime is not None:
-            err, p = cuda_runtime.cudaGetDeviceProperties(i)
-            if not err.value:
-                name = p.name
-                props.append(
-                    {
-                        "id": i,
-                        "name": name.decode() if isinstance(name, bytes) else name,
-                        "totalGlobalMem": p.totalGlobalMem,
-                        "computeMajor": p.major,
-                        "computeMinor": p.minor,
-                        "maxThreadsPerBlock": p.maxThreadsPerBlock,
-                        "maxThreadsPerMultiprocessor": p.maxThreadsPerMultiProcessor,
-                        "regsPerBlock": p.regsPerBlock,
-                        "warpSize": p.warpSize,
-                        "sharedMemPerBlock": p.sharedMemPerBlock,
-                        "numSms": p.multiProcessorCount,
-                        "regsPerMultiprocessor": p.regsPerMultiprocessor,
-                        "sharedMemPerBlockOptin": p.sharedMemPerBlockOptin,
-                        "sharedMemPerMultiprocessor": p.sharedMemPerMultiprocessor,
-                    }
-                )
-                continue
-        tp = torch.cuda.get_device_properties(i)
+        p = torch.cuda.get_device_properties(i)
         props.append(
             {
                 "id": i,
-                "name": tp.name,
-                "totalGlobalMem": tp.total_memory,
-                "computeMajor": tp.major,
-                "computeMinor": tp.minor,
-                "maxThreadsPerBlock": tp.max_threads_per_block,  # pyrefly: ignore[missing-attribute]
-                "maxThreadsPerMultiprocessor": tp.max_threads_per_multi_processor,  # pyrefly: ignore[missing-attribute]
-                "warpSize": tp.warp_size,
-                "sharedMemPerBlock": tp.shared_memory_per_block,  # pyrefly: ignore[missing-attribute]
-                "numSms": tp.multi_processor_count,
-                "regsPerMultiprocessor": tp.regs_per_multiprocessor,  # pyrefly: ignore[missing-attribute]
-                "sharedMemPerBlockOptin": tp.shared_memory_per_block_optin,  # pyrefly: ignore[missing-attribute]
-                "sharedMemPerMultiprocessor": tp.shared_memory_per_multiprocessor,  # pyrefly: ignore[missing-attribute]
+                "name": p.name,
+                "totalGlobalMem": p.total_memory,
+                "computeMajor": p.major,
+                "computeMinor": p.minor,
+                "maxThreadsPerBlock": p.max_threads_per_block,  # pyrefly: ignore[missing-attribute]
+                "maxThreadsPerMultiprocessor": p.max_threads_per_multi_processor,  # pyrefly: ignore[missing-attribute]
+                "warpSize": p.warp_size,
+                "sharedMemPerBlock": p.shared_memory_per_block,  # pyrefly: ignore[missing-attribute]
+                "numSms": p.multi_processor_count,
+                "regsPerMultiprocessor": p.regs_per_multiprocessor,  # pyrefly: ignore[missing-attribute]
+                "sharedMemPerBlockOptin": p.shared_memory_per_block_optin,  # pyrefly: ignore[missing-attribute]
+                "sharedMemPerMultiprocessor": p.shared_memory_per_multiprocessor,  # pyrefly: ignore[missing-attribute]
             }
         )
     return props

@@ -4605,7 +4605,15 @@ class TestPythonChromeTraceExport(TestCase):
         for key in ("cuda_driver_version", "cuda_runtime_version"):
             self.assertIn(key, py_trace)
             self.assertEqual(py_trace[key], kineto_trace[key])
-        self.assertEqual(py_trace["deviceProperties"], kineto_trace["deviceProperties"])
+        # regsPerBlock is the one field torch's device properties do not carry, so the
+        # exporter omits it; everything else must match what kineto wrote.
+        for py_device, kineto_device in zip(
+            py_trace["deviceProperties"], kineto_trace["deviceProperties"]
+        ):
+            self.assertEqual(
+                py_device,
+                {k: v for k, v in kineto_device.items() if k != "regsPerBlock"},
+            )
 
     def test_cuda_graph_annotations_reach_the_trace(self):
         """End to end: annotations recorded at capture are baked into a replay's
