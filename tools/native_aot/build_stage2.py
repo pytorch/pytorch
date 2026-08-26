@@ -36,10 +36,6 @@ import sysconfig
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
 BUILD_DIR = os.path.join(REPO, "build")
-# Where caffe2/CMakeLists.txt include()s native_aot.cmake from, spelled there as
-# ${CMAKE_BINARY_DIR}/native_aot: the generator writes the file here, so a change
-# on either side has to move both.
-NATIVE_AOT_ARTIFACTS_DIR = os.path.join(BUILD_DIR, "native_aot")
 # See export.py: as a script sys.path[0] is this directory, so the repo root
 # has to go on the path for `tools.native_aot` to import from any cwd. Appended,
 # not inserted, so the source torch/ tree never shadows the installed wheel.
@@ -55,6 +51,34 @@ def _report(msg: str) -> None:
     print(f"-- native-AOT stage 2: {msg}", file=sys.stderr, flush=True)
 
 
+# Long enough for a cold `import torch` on a machine already running a build,
+# short enough that a wedged one fails rather than holding the job to its step
+# limit with nothing on either stream.
+_PROBE_TIMEOUT = 300
+
+
+def _run_probe(code: str, expr: str) -> subprocess.CompletedProcess[str] | None:
+    """One probe subprocess, or None if it could not be run at all.
+
+    Bounded and guarded because should_run() answers from build properties and
+    degrades rather than raising: the SPAWN fails on its own (a fork returning
+    EAGAIN at the end of a MAX_JOBS build, an interpreter missing from the image),
+    and `import torch` against a wedged driver never returns. Either way
+    --print-verdict wrote nothing, the CI shell read that as neither RUN nor SKIP,
+    skipped the DSL install, and the real stage-2 run then demanded it."""
+    try:
+        return subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            cwd=HERE,
+            timeout=_PROBE_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        _report(f"probe {expr!r} could not run ({type(e).__name__}: {e})")
+        return None
+
+
 def _torch_probe(expr: str) -> bool:
     """Evaluate a torch expression in a SUBPROCESS and return its truth.
 
@@ -66,9 +90,9 @@ def _torch_probe(expr: str) -> bool:
       * verdict via stdout, not the exit code: a CUDA torch can segfault in
         interpreter teardown AFTER the expression evaluated (seen on B200)"""
     code = f"import torch; print('PROBE_OK' if ({expr}) else 'PROBE_NO', flush=True)"
-    probe = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, cwd=HERE
-    )
+    probe = _run_probe(code, expr)
+    if probe is None:
+        return False
     ok = "PROBE_OK" in probe.stdout
     if not ok and "PROBE_NO" not in probe.stdout:
         # torch failed to import or crashed. Degrading to a skip is by
@@ -84,9 +108,9 @@ def _torch_value(expr: str) -> str | None:
     Out of process for _torch_probe's reasons: reading the device capability in
     here would initialize CUDA in the driver process."""
     code = f"import torch; print('NAOT_VALUE:' + str({expr}), flush=True)"
-    out = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, cwd=HERE
-    )
+    out = _run_probe(code, expr)
+    if out is None:
+        return None
     for line in out.stdout.splitlines():
         if line.startswith("NAOT_VALUE:"):
             return line[len("NAOT_VALUE:") :]
@@ -127,12 +151,17 @@ def _cmake_cache_value(name: str) -> str | None:
     None rather than "": CMake calls a DEFINED-but-EMPTY entry false, so the two
     cannot be collapsed without the opt-out disagreeing with the build."""
     cache = os.path.join(BUILD_DIR, "CMakeCache.txt")
+    found = None
     try:
         with open(cache, errors="replace") as f:
             for line in f:
                 key, sep, value = line.partition("=")
                 if sep and key.split(":")[0] == name:
-                    return value.strip()
+                    # The LAST assignment, as CMake itself takes it: appending a
+                    # line to flip a setting without reconfiguring is a normal
+                    # thing to do, and taking the first read the opposite value
+                    # from the build that wrote it.
+                    found = value.strip()
     except OSError:
         # should_run() promises never to raise and this is the first thing it
         # reads. A root-created build/ gives PermissionError, a directory named
@@ -140,7 +169,7 @@ def _cmake_cache_value(name: str) -> str | None:
         # into a traceback, so the shell read "" != RUN and skipped the install
         # that the real invocation then demanded.
         _report(f"could not read {cache}; treating {name} as unset")
-    return None
+    return found
 
 
 # What CMake treats as TRUE for a QUOTED if() argument, which is the form the
@@ -159,13 +188,29 @@ def _cmake_false(value: str) -> bool:
     alike. An allowlist of falsy spellings instead left the two sides disagreeing on
     anything outside it, so the build skipped while stage 2 exported and relinked,
     then failed its own post-relink check complaining about the wrong thing."""
-    v = value.strip().lower()
-    if v in _CMAKE_TRUE_VALUES:
+    # Matched EXACTLY, no strip(): re-derived from `cmake -P` over the spellings
+    # that reach here, where " 1" is true and " y" is false.
+    if value.lower() in _CMAKE_TRUE_VALUES:
         return False
+    # Everything else is CMake's number parse, which tolerates LEADING whitespace
+    # and not trailing ("1 " and "1\n" are both false, and a value out of a
+    # $(grep ...) or a folded YAML scalar arrives exactly that way), reads hex as a
+    # C literal ("0x1" true, "0x0" false), and has never heard of float()'s
+    # python-only "1_0".
+    v = value.lstrip()
+    if v != v.rstrip() or "_" in v:
+        return True
     try:
         return float(v) == 0.0
     except ValueError:
-        return True
+        pass
+    body = v[1:] if v[:1] in "+-" else v
+    if body[:2].lower() == "0x":
+        try:
+            return int(v, 16) == 0
+        except ValueError:
+            pass
+    return True
 
 
 def _opted_out() -> bool:
@@ -175,7 +220,14 @@ def _opted_out() -> bool:
     # unsetting it, and counting that as "set" hid the cached opt-out below.
     env = os.getenv("TORCH_NATIVE_AOT") or ""
     if env:
-        return _cmake_false(env)
+        if not _cmake_false(env):
+            return False
+        # Reported HERE, once, naming the value and its source. Two callers each
+        # printed their own line afterwards, and both were wrong for the cache case:
+        # "TORCH_NATIVE_AOT is falsy" where the environment holds nothing, and
+        # "TORCH_NATIVE_AOT=0" for a cache entry that says OFF.
+        _report(f"disabled (TORCH_NATIVE_AOT={env} in this environment)")
+        return True
     # The cache too (where -DTORCH_NATIVE_AOT=0 lands), so a manual stage-2 run in
     # a tree configured that way does not export, relink a library the generated
     # CMake embeds nothing into, and then fail its own post-relink check.
@@ -281,15 +333,18 @@ def _dsl_runtime_archive() -> str | None:
 
 
 def should_run() -> bool:
-    """Whether stage 2 will export for this build. Answers from build
-    properties ONLY, and never raises.
+    """Whether stage 2 will export for this build.
+
+    Answers from build properties ONLY, and every step that touches the machine --
+    the CMake cache, the two torch subprocesses -- reports and returns a default
+    instead of raising: --print-verdict's caller compares stdout with ==, so a
+    traceback here is neither RUN nor SKIP.
 
     Separate from require_runtimes() because the CI shells ask this to decide
     whether to INSTALL the DSL wheels (--print-verdict): a verdict that demanded
     them could only ever say "no" on a fresh image."""
     if _opted_out():
-        _report("disabled (TORCH_NATIVE_AOT=0)")
-        return False
+        return False  # _opted_out() reports the value and where it came from
     # Everything downstream is ELF: the relink targets libtorch_cuda.so, and the
     # version script plus --exclude-libs are GNU-ld options. Without this arm a
     # Windows or macOS CUDA build demanded wheels that do not exist for it.
