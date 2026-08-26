@@ -80,10 +80,10 @@ case ${image} in
         PYTORCH_ROCM_ARCH="gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151"
         TARGET=rocm_final
         GPU_IMAGE=amd64/almalinux:8
-        if [[ "${GPU_ARCH_VERSION}" == "10.0" ]]; then
-            THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
-        else
+        if [[ "${GPU_ARCH_VERSION}" == "7.14" ]]; then
             THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
+        else
+            THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
         fi
         DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION} --build-arg THEROCK_INDEX_URL=${THEROCK_INDEX_URL}"
         ;;
