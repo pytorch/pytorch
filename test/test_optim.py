@@ -40,6 +40,7 @@ from torch.testing._internal.common_optimizers import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    gradcheck,
     markDynamoStrictTest,
     parametrize,
     run_tests,
@@ -96,6 +97,35 @@ def _bf16_state_init_hook(optimizer, args, kwargs):
                         dtype=torch.bfloat16,
                         memory_format=torch.preserve_format,
                     )
+
+
+def _inplace_diff_fn(p, grad, opt_state, opt_cls, kwargs, *ignored):
+    """Helper for gradcheck: runs one optimizer step and returns outputs."""
+    p = p.clone()
+    p.grad = grad
+    opt_state = {
+        k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in opt_state.items()
+    }
+    opt = opt_cls([p], **kwargs)
+    opt.state[p].update(opt_state)
+    opt.step()
+    return (p,) + tuple(
+        v
+        for v in opt.state[p].values()
+        if isinstance(v, torch.Tensor) and v.requires_grad
+    )
+
+
+def _get_optim_state_bytes(opt):
+    """Sum actual bytes of all state tensors via introspection."""
+    total = 0
+    for group in opt.param_groups:
+        for p in group["params"]:
+            if p in opt.state:
+                for v in opt.state[p].values():
+                    if isinstance(v, torch.Tensor):
+                        total += v.numel() * v.element_size()
+    return total
 
 
 @markDynamoStrictTest
@@ -2723,6 +2753,269 @@ class TestOptimRenewed(TestCase):
             optimizer.state[param]["momentum_buffer"],
             expected,
         )
+
+    # In-place rewrite tests (perf/optimizer-memory-eager-loop)
+
+    @optims(
+        [
+            o
+            for o in optim_db
+            if o.optim_cls.__name__ in ("Adam", "AdamW", "NAdam", "Rprop")
+        ],
+        dtypes=[torch.float32],
+    )
+    @onlyCUDA
+    def test_peak_memory_inplace(self, device, dtype, optim_info):
+        """Peak memory budget: in-place rewrites must not exceed
+        O(param + grad + state + 1 intermediate).
+        """
+        N = 1024
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+        for optim_input in optim_inputs:
+            kwargs = deepcopy(optim_input.kwargs)
+            kwargs["foreach"] = False
+            param = torch.randn(N, device=device, dtype=dtype)
+            grad = torch.randn(N, device=device, dtype=dtype)
+            param.grad = grad
+            opt = optim_cls([param], **kwargs)
+            opt.step()
+            param.grad = grad.clone()
+
+            param_bytes = param.numel() * param.element_size()
+            state_bytes = _get_optim_state_bytes(opt)
+            budget = param_bytes + param_bytes + state_bytes + param_bytes
+
+            torch.cuda.reset_peak_memory_stats()
+            torch.cuda.synchronize()
+            baseline = torch.cuda.memory_allocated()
+            opt.step()
+            torch.cuda.synchronize()
+            peak = torch.cuda.max_memory_allocated()
+
+            self.assertLessEqual(
+                peak - baseline,
+                budget,
+                f"Peak {peak - baseline} exceeds budget {budget} for {optim_cls.__name__}",
+            )
+
+    def test_inplace_chain_correctness(self, device):
+        """Verify in-place chain ops match out-of-place for modified optimizers."""
+        # NAdam: denom sqrt chain
+        for dtype in [torch.float32, torch.float64]:
+            x = torch.rand(128, dtype=dtype)
+            bc2 = torch.tensor(0.95, dtype=dtype)
+            old = x.div(bc2).sqrt()
+            new = x.div(bc2).sqrt_()
+            self.assertEqual(old, new, atol=1e-6, rtol=1e-6)
+
+            # Verify order matters
+            x2 = torch.tensor([4.0], dtype=dtype)
+            correct = x2.div(0.25).sqrt()
+            wrong = x2.sqrt().div_(0.25)
+            self.assertNotEqual(correct, wrong)
+
+        # Adam: denom sqrt chain
+        for dtype in [torch.float32, torch.float64]:
+            x = torch.rand(128, dtype=dtype)
+            bc_sqrt = torch.tensor(0.97, dtype=dtype)
+            sn = torch.tensor(-1.0, dtype=dtype)
+            eps = torch.tensor(1e-8, dtype=dtype)
+            old = (x.sqrt() / (bc_sqrt * sn)).add_(eps / sn)
+            new = x.sqrt()
+            new.div_(bc_sqrt * sn)
+            new.add_(eps / sn)
+            self.assertEqual(old, new, atol=1e-6, rtol=1e-6)
+
+        # Rprop: sign chain
+        for dtype in [torch.float32, torch.float64]:
+            a = torch.rand(128, dtype=dtype)
+            b = torch.rand(128, dtype=dtype)
+            old = a.mul(b).sign()
+            new = a.mul(b)
+            new.sign_()
+            self.assertEqual(old, new)
+
+        # Rprop: where combined
+        sign = torch.tensor([-2.0, 0.0, 3.0, -1.0, 5.0])
+        ep, em = 1.2, 0.8
+
+        old = sign.clone()
+        old.copy_(torch.where(old.gt(0), ep, old))
+        old.copy_(torch.where(old.lt(0), em, old))
+        old.copy_(torch.where(old.eq(0), 1, old))
+
+        new = torch.where(
+            sign.gt(0),
+            ep,
+            torch.where(sign.lt(0), em, 1.0),
+        )
+        self.assertEqual(old, new)
+
+        # Rprop: where dtype promotion
+        for dtype in [torch.float32, torch.float64, torch.float16, torch.bfloat16]:
+            sign = torch.tensor([-2.0, 0.0, 3.0], dtype=dtype)
+            ep = torch.tensor(1.2, dtype=dtype)
+            em = torch.tensor(0.8, dtype=dtype)
+
+            old = sign.clone()
+            old.copy_(torch.where(old.gt(0), ep, old))
+            old.copy_(torch.where(old.lt(0), em, old))
+            old.copy_(torch.where(old.eq(0), 1, old))
+
+            new = torch.where(
+                sign.gt(0),
+                ep,
+                torch.where(sign.lt(0), em, 1.0),
+            )
+
+            self.assertEqual(old.dtype, new.dtype)
+            self.assertEqual(old, new, atol=1e-3, rtol=1e-3)
+
+    def test_diff_gradcheck_adam(self, device):
+        """Differentiable-path gradcheck for Adam."""
+        state = {
+            "step": torch.tensor(10.0, requires_grad=False, dtype=torch.float64),
+            "exp_avg": torch.rand(10, requires_grad=True, dtype=torch.float64),
+            "exp_avg_sq": torch.rand(10, requires_grad=True, dtype=torch.float64),
+            "max_exp_avg_sq": torch.rand(10, requires_grad=True, dtype=torch.float64),
+        }
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _inplace_diff_fn,
+            (
+                p,
+                grad,
+                state,
+                torch.optim.Adam,
+                {"lr": 0.9, "differentiable": True, "amsgrad": True, "foreach": False},
+                *state.values(),
+            ),
+            check_batched_grad=False,
+        )
+
+    def test_diff_gradcheck_nadam(self, device):
+        """Differentiable-path gradcheck for NAdam."""
+        state = {
+            "step": torch.tensor(10.0, requires_grad=False, dtype=torch.float64),
+            "exp_avg": torch.rand(10, requires_grad=True, dtype=torch.float64),
+            "exp_avg_sq": torch.rand(10, requires_grad=True, dtype=torch.float64),
+            "mu_product": torch.tensor(1.0, requires_grad=True, dtype=torch.float64),
+        }
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _inplace_diff_fn,
+            (
+                p,
+                grad,
+                state,
+                torch.optim.NAdam,
+                {"lr": 0.9, "differentiable": True, "foreach": False},
+                *state.values(),
+            ),
+            check_batched_grad=False,
+        )
+
+    def test_diff_gradcheck_rprop(self, device):
+        """Differentiable-path gradcheck for Rprop."""
+        state = {
+            "step": torch.tensor(10.0, requires_grad=False, dtype=torch.float64),
+            "prev": torch.rand(10, requires_grad=True, dtype=torch.float64),
+            "step_size": torch.rand(10, requires_grad=True, dtype=torch.float64),
+        }
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _inplace_diff_fn,
+            (
+                p,
+                grad,
+                state,
+                torch.optim.Rprop,
+                {"lr": 0.9, "differentiable": True, "foreach": False},
+                *state.values(),
+            ),
+            check_batched_grad=False,
+        )
+
+    def test_dtype_correctness(self, device):
+        """In-place chain correctness at fp16/bf16 for modified optimizers."""
+        dtypes = [torch.float16, torch.bfloat16]
+        for dtype in dtypes:
+            # NAdam denom
+            x = torch.rand(128, dtype=dtype)
+            bc2 = torch.tensor(0.95, dtype=dtype)
+            self.assertEqual(
+                x.div(bc2).sqrt(), x.div(bc2).sqrt_(), atol=1e-2, rtol=1e-2
+            )
+
+            # Adam denom
+            x = torch.rand(128, dtype=dtype)
+            bc_sqrt = torch.tensor(0.97, dtype=dtype)
+            sn = torch.tensor(-1.0, dtype=dtype)
+            eps = torch.tensor(1e-8, dtype=dtype)
+            old = (x.sqrt() / (bc_sqrt * sn)).add_(eps / sn)
+            new = x.sqrt()
+            new.div_(bc_sqrt * sn)
+            new.add_(eps / sn)
+            self.assertEqual(old, new, atol=1e-2, rtol=1e-2)
+
+            # Rprop sign
+            a = torch.rand(128, dtype=dtype)
+            b = torch.rand(128, dtype=dtype)
+            self.assertEqual(a.mul(b).sign(), a.mul(b).sign_(), atol=1e-2, rtol=1e-2)
+
+        # CUDA dtype tests
+        if device == "cuda":
+            for dtype in [torch.float16, torch.bfloat16]:
+                x = torch.rand(128, dtype=dtype, device="cuda")
+                bc2 = torch.tensor(0.95, dtype=dtype, device="cuda")
+                self.assertEqual(
+                    x.div(bc2).sqrt(), x.div(bc2).sqrt_(), atol=1e-2, rtol=1e-2
+                )
+
+                x = torch.rand(128, dtype=dtype, device="cuda")
+                bc_sqrt = torch.tensor(0.97, dtype=dtype, device="cuda")
+                sn = torch.tensor(-1.0, dtype=dtype, device="cuda")
+                eps = torch.tensor(1e-8, dtype=dtype, device="cuda")
+                old = (x.sqrt() / (bc_sqrt * sn)).add_(eps / sn)
+                new = x.sqrt()
+                new.div_(bc_sqrt * sn)
+                new.add_(eps / sn)
+                self.assertEqual(old, new, atol=1e-2, rtol=1e-2)
+
+                a = torch.rand(128, dtype=dtype, device="cuda")
+                b = torch.rand(128, dtype=dtype, device="cuda")
+                self.assertEqual(
+                    a.mul(b).sign(), a.mul(b).sign_(), atol=1e-2, rtol=1e-2
+                )
+
+    def test_orthogonality_wd_maximize(self, device):
+        """weight_decay + maximize must produce different output for modified optimizers."""
+        for opt_cls in [torch.optim.Adam, torch.optim.NAdam, torch.optim.Rprop]:
+            torch.manual_seed(42)
+            p1 = torch.randn(64)
+            p2 = p1.clone()
+            g = torch.randn(64)
+
+            kwargs = {"lr": 1e-3, "foreach": False}
+            use_wd = opt_cls != torch.optim.Rprop
+
+            opt1 = opt_cls([p1], **kwargs)
+            p1.grad = g.clone()
+            opt1.step()
+
+            extra = {"maximize": True, "foreach": False}
+            if use_wd:
+                extra["weight_decay"] = 0.01
+            opt2 = opt_cls([p2], **{**kwargs, **extra})
+            p2.grad = g.clone()
+            opt2.step()
+
+            self.assertNotEqual(p1, p2)
+
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
