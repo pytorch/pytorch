@@ -16,6 +16,8 @@ import unittest.mock as mock
 # linter image, which has no built torch.
 from tools.native_aot import export, toolchains
 
+from torchgen import native_aot_decl
+
 
 _TOOLS_FILE = os.path.abspath(toolchains.__file__)
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(_TOOLS_FILE)))
@@ -93,6 +95,21 @@ def _write_sidecar(d, point, prefix="x", exts=(".o", ".h"), **over):
     sc.update(over)
     with open(os.path.join(d, prefix + ".json"), "w") as f:
         json.dump(sc, f)
+
+
+def _write_fake_decl(ops_dir, archs_line="", grid="[{'N': 1}]"):
+    """One declaration under ops_dir/fakeop/, the minimum _collect_jobs loads:
+    one grid point and the two C++ hooks, whose text nothing here reads."""
+    os.makedirs(os.path.join(ops_dir, "fakeop"), exist_ok=True)
+    with open(os.path.join(ops_dir, "fakeop", "aot.py"), "w") as f:
+        f.write(
+            'ATEN_OP = "fakeop"\nDISPATCH_KEY = "CUDA"\nKERNEL_MODULE = "k.py"\n'
+            + archs_line
+            + f"def kernel_precompile_grid():\n    return {grid}\n"
+            "def covered_axes(self):\n    return {}\n"
+            "def cpp_dispatch(spec):\n    return 'true'\n"
+            "def cpp_launch(spec, launch_fn):\n    return launch_fn\n"
+        )
 
 
 def _touch_artifacts(out_dir, prefix, exts=(".o", ".h"), tensor_args=None):
@@ -349,6 +366,14 @@ class TestArch(unittest.TestCase):
             with mock.patch.dict(os.environ, {"OTHER_DSL_ARCH": "sm_90a"}):
                 with self.assertRaisesRegex(RuntimeError, "--arch"):
                     export._effective_arch(None)
+            # ...and through the overload the production callers use: export_point
+            # and _job_needed both pass a toolchain, and honouring the variable for
+            # THOSE while refusing it here reinstates the whole bug -- which stayed
+            # green, because every assertion above omits the toolchain.
+            for tc in (toolchains.get_toolchain("cutedsl"), _Other()):
+                with self.subTest(kind=tc.kind):
+                    with self.assertRaisesRegex(RuntimeError, "CUTE_DSL_ARCH=sm_90a"):
+                        export._effective_arch(None, tc)
             # An explicit --arch is the way to say it, for every kind at once.
             self.assertEqual(export._effective_arch("sm_100a"), "sm_100a")
 
@@ -372,7 +397,11 @@ class TestArch(unittest.TestCase):
                 pass
 
             def export(self, b, out_dir, arch=None):
-                seen.append(b["prefix"])
+                # The PAIR, not the prefix alone: the prefix NAMES an arch and this
+                # is the arch the kernel is really compiled for, so recording only
+                # the prefix let "compile for no arch while the prefix claims one"
+                # pass, and the sidecar then labels a kernel it did not describe.
+                seen.append((b["prefix"], arch))
                 _touch_artifacts(out_dir, b["prefix"])
                 return {"tensor_args": []}
 
@@ -388,7 +417,8 @@ class TestArch(unittest.TestCase):
             ):
                 for arch in ("sm_90a", "sm_100a"):
                     export.export_point("fakeop", "aot_kernel.py", {"n": 1}, d, arch)
-                self.assertEqual(seen, ["k__sm90a", "k__sm100a"])
+                want = [("k__sm90a", "sm_90a"), ("k__sm100a", "sm_100a")]
+                self.assertEqual(seen, want)
                 # The sidecar WRITER, against what the readers require. It had
                 # no test: deleting "version" and "arch" from what export_point
                 # writes left the suite green, since every reader passes against
@@ -408,6 +438,22 @@ class TestArch(unittest.TestCase):
                 # ...and what it wrote is what the readers accept.
                 self.assertTrue(export.sources_current(written))
                 self.assertTrue(export.runtimes_current(written))
+
+                # The ON-DEVICE path, where the RESOLVED arch is the only one that
+                # can reach the prefix and the sidecar. Recording the raw argument
+                # left "arch": null -- which generation refuses -- behind an
+                # unqualified prefix, and nothing noticed: every case above passes
+                # --arch, where the raw and resolved values are the same string.
+                with _no_ambient_arch(device="sm_100"):
+                    export.export_point("fakeop", "aot_kernel.py", {"n": 2}, d, None)
+                with open(os.path.join(d, "k__sm100.json")) as f:
+                    on_device = json.load(f)
+                self.assertEqual(on_device["prefix"], "k__sm100")
+                self.assertEqual(on_device["arch"], "sm_100")
+                # The compile is still told the RAW arch (None = let the DSL take
+                # the local device, which is what was just detected); pinned so
+                # passing something else has to be a deliberate change here.
+                self.assertEqual(seen[-1], ("k__sm100", None))
 
     def test_job_skip_compares_the_arch(self):
         # Two exports into ONE --out-dir differing only in arch: comparing spec
@@ -429,6 +475,31 @@ class TestArch(unittest.TestCase):
                 with mock.patch.object(export, "_detected_arch", return_value="sm_100"):
                     self.assertTrue(export._job_needed(job, force=False))
 
+    def test_job_skip_re_exports_when_the_compiler_changed(self):
+        # The compiler appears in no file the source closure hashes, so without
+        # this an upgraded DSL wheel invalidates nothing and one tree mixes
+        # artifacts from two compilers while the build reports one. Every other
+        # skip fixture records the CURRENT versions, so dropping runtimes_current
+        # from the skip check entirely left the suite green.
+        #
+        # runtime_versions is patched rather than read: on a machine with no DSL
+        # wheels every version is "absent", which is deliberately NOT staleness,
+        # and this assertion would then invert. That is the linter image, where
+        # this suite runs.
+        with tempfile.TemporaryDirectory() as d:
+            point = {"dtype": "float32", "N": 4096}
+            job = ("fakeop", "aot_kernel.py", point, d, "sm_100a")
+            with (
+                _no_ambient_arch(),
+                mock.patch.object(
+                    export, "runtime_versions", return_value={"a-dsl": "9.9.9"}
+                ),
+            ):
+                _write_sidecar(d, point, arch="sm_100a", runtimes={"a-dsl": "9.9.9"})
+                self.assertFalse(export._job_needed(job, force=False))
+                _write_sidecar(d, point, arch="sm_100a", runtimes={"a-dsl": "0.0.1"})
+                self.assertTrue(export._job_needed(job, force=False))
+
     def test_job_skip_rejects_arch_less_sidecar_when_env_set(self):
         # The reported case, from the other side: a sidecar that recorded no
         # arch at all (an on-device export) must NOT satisfy a run whose
@@ -449,6 +520,72 @@ class TestArch(unittest.TestCase):
                     self.assertTrue(export._job_needed(job, force=False))
                 # Only where no arch can be resolved at all is it a match.
                 self.assertFalse(export._job_needed(job, force=False))
+
+    def test_cc_of_reads_the_capability_both_spellings_name(self):
+        # The exporter matches a declaration's ARCHS by STRING while the generator
+        # groups sidecars by capability, so the two spellings of one piece of
+        # hardware have to parse EQUAL -- a declaration pinning ('sm_100a',)
+        # disowned the 'sm_100' its own on-device export produced.
+        self.assertEqual(native_aot_decl.cc_of("sm_90"), (9, 0))
+        self.assertEqual(native_aot_decl.cc_of("sm_103a"), (10, 3))
+        self.assertEqual(
+            native_aot_decl.cc_of("sm_100a"), native_aot_decl.cc_of("sm_100")
+        )
+
+    def test_cc_of_refuses_what_it_cannot_read(self):
+        # Each would otherwise compute a plausible capability and emit a gate no
+        # device satisfies ("sm_9" -> (0, 9), "sm_1000" -> (100, 0)), so the op
+        # ships, links and declines every call unreported.
+        #
+        # assertRaisesRegex, not assertRaises: cc_of raises two different
+        # RuntimeErrors, so a bare check passed with the digit-length guard
+        # removed -- "sm_9" then tripped the RANGE error instead.
+        #
+        # The last four are what str.isdigit() let through: full-width digits,
+        # Arabic-Indic digits and a leading zero each parsed as capability 9.0,
+        # and the superscript reached int(), whose ValueError the loader's
+        # `except RuntimeError` could not wrap.
+        for bad in (
+            "sm_9",
+            "sm_1000",
+            "sm_100f",
+            "sm_",
+            "",
+            "100a",
+            "sm_10a0",
+            "sm_\uff19\uff10",
+            "sm_\u0669\u0660",
+            "sm_090",
+            "sm_\u00b2\u00b2",
+        ):
+            with self.subTest(arch=bad):
+                with self.assertRaisesRegex(
+                    RuntimeError, "cannot read a compute capability"
+                ):
+                    native_aot_decl.cc_of(bad)
+
+    def test_cc_of_refuses_a_capability_outside_the_known_range(self):
+        # Parses fine, but no such hardware: a gate for it is dead code.
+        with self.assertRaisesRegex(RuntimeError, "outside the known range"):
+            native_aot_decl.cc_of("sm_130")
+
+    def test_the_detected_arch_is_the_local_capability(self):
+        # An on-device export records this in the sidecar; without it the generated
+        # gate falls back to the declaration's ARCHS and advertises hardware nothing
+        # was compiled for. Every other test patches this function out, so it is the
+        # only place the mapping itself runs -- and it drops the "a" suffix on
+        # purpose, since the gate compares major.minor, which both spellings share.
+        fake = types.SimpleNamespace(
+            cuda=types.SimpleNamespace(
+                is_available=lambda: True, get_device_capability=lambda: (10, 3)
+            )
+        )
+        with mock.patch.dict(sys.modules, {"torch": fake}):
+            self.assertEqual(export._detected_arch(), "sm_103")
+        # No CUDA is "no local arch", not a crash in the middle of a build.
+        fake.cuda.is_available = lambda: False
+        with mock.patch.dict(sys.modules, {"torch": fake}):
+            self.assertIsNone(export._detected_arch())
 
     def test_archs_from_cuda_arch_list(self):
         # TORCH_CUDA_ARCH_LIST -> the EXPORTABLE_ARCHES subset; named,
@@ -1043,6 +1180,17 @@ class TestAbiValidation(unittest.TestCase):
                 f.write(b"/* \xff */\n" + self._header().encode("utf-8"))
             tc.validate_abi(dict(SIDECAR, _dir=d))
 
+    def test_a_header_that_cannot_be_read_is_not_silently_skipped(self):
+        # Only ABSENT means "nothing to check". A header that exists but cannot be
+        # read used to take the same path, so the ABI went unvalidated and the
+        # launcher shipped anyway -- and generation's own check is os.path.exists,
+        # which is true for this. A directory stands in for the unreadable file
+        # because mode 000 is still readable by root, which CI runs as.
+        with tempfile.TemporaryDirectory() as d:
+            os.mkdir(os.path.join(d, SIDECAR["prefix"] + ".h"))
+            with self.assertRaises(OSError):
+                toolchains.CuteDslToolchain().validate_abi(dict(SIDECAR, _dir=d))
+
     def test_absent_header_is_not_an_error(self):
         # Unit fixtures have no header; a real generation always does.
         toolchains.CuteDslToolchain().validate_abi(dict(SIDECAR, _dir="/nonexistent"))
@@ -1144,6 +1292,22 @@ class TestReadOnlyInputs(unittest.TestCase):
         for dist, v in versions.items():
             self.assertTrue(v, f"{dist} recorded an empty version")
 
+        # The VALUE, against a known one. _RUNTIMES and the sidecar assertions that
+        # compare against it are produced by THIS function, so a mutation that
+        # recorded a garbage version moved the fixture with it and passed.
+        from importlib.metadata import PackageNotFoundError
+
+        dists = toolchains.get_toolchain("cutedsl").RUNTIME_DISTS
+        with mock.patch("importlib.metadata.version", return_value="1.2.3"):
+            got = export.runtime_versions("cutedsl")
+        self.assertEqual(got, dict.fromkeys(dists, "1.2.3"))
+        # An uninstalled distribution is recorded as absent rather than omitted, so
+        # "compiled where the wheel was missing" differs from "compiled before this
+        # was recorded". Previously pinned only on a machine without the wheels.
+        with mock.patch("importlib.metadata.version", side_effect=PackageNotFoundError):
+            got = export.runtime_versions("cutedsl")
+        self.assertEqual(got, dict.fromkeys(dists, "absent"))
+
     def test_sources_current_roundtrip(self):
         # A sidecar whose recorded closure matches the tree is current;
         # editing any recorded file (or recording none) makes it stale.
@@ -1185,6 +1349,27 @@ class TestToolchainRegistry(unittest.TestCase):
         tc = toolchains.get_toolchain("cutedsl")
         with self.assertRaisesRegex(RuntimeError, "missing keys.*fake_args"):
             tc.validate_build_result({"prefix": "x", "fn": object(), "tensor_args": []})
+
+
+class TestDeclarationArchs(unittest.TestCase):
+    def test_a_malformed_archs_entry_is_refused_at_load(self):
+        # _SM_RE accepts "sm_9" and "sm_1000", which name no capability. Refused by
+        # the LOADER, which is the only place that knows which file to name -- and
+        # because export compares ARCHS by string, a typo there silently matched
+        # nothing, so the op was absent from the build with no diagnostic.
+        for bad in ("sm_9", "sm_1000"):
+            with self.subTest(archs=bad):
+                with tempfile.TemporaryDirectory() as ops:
+                    _write_fake_decl(ops, f"ARCHS = ({bad!r},)\n")
+                    path = os.path.join(ops, "fakeop", "aot.py")
+                    with self.assertRaisesRegex(RuntimeError, "compute capability"):
+                        native_aot_decl.load_declarations(path)
+                    # ...and the message names the file, which a refusal from
+                    # inside export could not.
+                    try:
+                        native_aot_decl.load_declarations(path)
+                    except RuntimeError as e:
+                        self.assertIn("aot.py", str(e))
 
 
 class TestDeclarationStaleness(unittest.TestCase):
@@ -1255,6 +1440,26 @@ class TestRegistryConsistency(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "not a subset"):
             toolchains._assert_link_exts_are_exportable({"bad": _Bad()})
+
+    def test_link_exts_must_be_declared(self):
+        # The realistic mistake is forgetting the attribute, and that direction is a
+        # subset of everything, so the subset rule alone accepted a kind that links
+        # nothing -- which is the silence this check exists to prevent.
+        class _Forgot(toolchains.Toolchain):
+            kind = "forgot"
+            artifact_exts = (".o", ".h")
+
+        with self.assertRaisesRegex(RuntimeError, "link_exts is not declared"):
+            toolchains._assert_link_exts_are_exportable({"forgot": _Forgot()})
+
+        # ...while an EXPLICIT empty tuple stays a real answer, for a kind whose
+        # launcher embeds the artifact instead of linking it.
+        class _Embeds(toolchains.Toolchain):
+            kind = "embeds"
+            artifact_exts = (".cubin",)
+            link_exts = ()
+
+        toolchains._assert_link_exts_are_exportable({"embeds": _Embeds()})
 
     def test_the_shipped_toolchains_are_consistent(self):
         # The import-time call, re-run explicitly so this is a test rather than a
