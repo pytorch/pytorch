@@ -2228,6 +2228,9 @@ test_executorch() {
 test_torchtitan() {
   install_torchao
   install_torchcomms
+  # muse_glimmer and kimi_k2_7 import torchvision at model-build time. Build it
+  # from the pinned commit rather than PyPI so it links the CI-built torch.
+  install_torchvision
 
   local torchtitan_commit
   torchtitan_commit=$(get_pinned_commit torchtitan)
