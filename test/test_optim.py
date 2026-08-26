@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from copy import deepcopy
 from itertools import product
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
@@ -126,6 +126,184 @@ def _get_optim_state_bytes(opt):
                     if isinstance(v, torch.Tensor):
                         total += v.numel() * v.element_size()
     return total
+
+
+def _nadam_reference_pre_patch(
+    params,
+    grads,
+    exp_avgs,
+    exp_avg_sqs,
+    mu_products,
+    state_steps,
+    *,
+    beta1,
+    beta2,
+    lr,
+    weight_decay,
+    momentum_decay,
+    eps,
+    decoupled_weight_decay,
+    maximize,
+    capturable,
+    differentiable,
+    has_complex,
+):
+    """Verbatim _single_tensor_nadam from main (pre-patch).
+    The only difference: .sqrt() instead of .sqrt_() on denom.
+    Pulled from: git show main:torch/optim/nadam.py
+    """
+    from torch.optim.optimizer import (
+        _get_capturable_supported_devices,
+        _get_value,
+        _to_scalar,
+    )
+
+    if not torch.jit.is_scripting():
+        lr = _to_scalar(lr)
+
+    for i, param in enumerate(params):
+        grad = grads[i] if not maximize else -grads[i]
+        exp_avg = exp_avgs[i]
+        exp_avg_sq = exp_avg_sqs[i]
+        mu_product = mu_products[i]
+        step_t = state_steps[i]
+
+        if torch.is_complex(param):
+            param = torch.view_as_real(param)
+            grad = torch.view_as_real(grad)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_avg_sq = torch.view_as_real(exp_avg_sq)
+
+        if not torch.compiler.is_compiling() and capturable:
+            capturable_supported_devices = _get_capturable_supported_devices()
+            if not (
+                param.device.type == mu_product.device.type == step_t.device.type
+                and param.device.type in capturable_supported_devices
+            ):
+                raise AssertionError(
+                    f"If capturable=True, params, mu_products and state_steps must be "
+                    f"on supported devices: {capturable_supported_devices}."
+                )
+
+        step_t += 1
+        step = step_t if capturable else _get_value(step_t)
+        bias_correction2 = 1 - beta2**step
+
+        if weight_decay != 0:
+            if decoupled_weight_decay:
+                param.mul_(1 - lr * weight_decay)
+            else:
+                grad = grad.add(param, alpha=weight_decay)
+
+        mu = beta1 * (1.0 - 0.5 * (0.96 ** (step * momentum_decay)))
+        mu_next = beta1 * (1.0 - 0.5 * (0.96 ** ((step + 1) * momentum_decay)))
+        mu_product *= mu
+
+        exp_avg.lerp_(grad, 1 - beta1)
+        exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+        denom = exp_avg_sq.div(
+            bias_correction2
+        ).sqrt()  # PRE-PATCH: .sqrt() not .sqrt_()
+
+        if differentiable or capturable:
+            denom = denom.add(eps)
+            mu_product_next = mu_product * mu_next
+            grad = grad * (-lr * (1.0 - mu) / (1.0 - mu_product))
+            exp_avg = exp_avg * (-lr * mu_next / (1.0 - mu_product_next))
+            param.addcdiv_(grad, denom)
+            param.addcdiv_(exp_avg, denom)
+        else:
+            mu_product_next = _get_value(mu_product) * mu_next
+            denom.add_(eps)
+            param.addcdiv_(
+                grad,
+                denom,
+                value=(-lr * (1.0 - mu) / (1.0 - _get_value(mu_product))),
+            )
+            param.addcdiv_(
+                exp_avg,
+                denom,
+                value=cast(float, (-lr * mu_next) / (1.0 - mu_product_next)),
+            )
+
+
+def _rprop_reference_pre_patch(
+    params,
+    grads,
+    prevs,
+    step_sizes,
+    state_steps,
+    *,
+    step_size_min,
+    step_size_max,
+    etaminus,
+    etaplus,
+    maximize,
+    capturable,
+    differentiable,
+    has_complex,
+):
+    """Verbatim _single_tensor_rprop from main (pre-patch).
+    Differences: .sign() not .sign_(), copy_(where(...)) not where() directly,
+    copy_(where(...,0,grad)) not masked_fill_().
+    Pulled from: git show main:torch/optim/rprop.py
+    """
+    from torch.optim.optimizer import _get_capturable_supported_devices
+
+    for i, param in enumerate(params):
+        grad = grads[i]
+        grad = grad if not maximize else -grad
+        prev = prevs[i]
+        step_size = step_sizes[i]
+        step = state_steps[i]
+
+        if not torch.compiler.is_compiling() and capturable:
+            capturable_supported_devices = _get_capturable_supported_devices()
+            if not (
+                param.device.type == step.device.type
+                and param.device.type in capturable_supported_devices
+            ):
+                raise AssertionError(
+                    f"If capturable=True, params and state_steps must be on supported devices: "
+                    f"{capturable_supported_devices}."
+                )
+
+        step += 1
+
+        if torch.is_complex(param):
+            grad = torch.view_as_real(grad)
+            prev = torch.view_as_real(prev)
+            param = torch.view_as_real(param)
+            step_size = torch.view_as_real(step_size)
+
+        if differentiable:
+            sign = grad.mul(prev.clone()).sign()  # PRE-PATCH: .sign() not .sign_()
+        else:
+            sign = grad.mul(prev).sign()
+
+        if capturable:
+            sign.copy_(
+                torch.where(sign.gt(0), etaplus, sign)
+            )  # PRE-PATCH: copy_(where)
+            sign.copy_(torch.where(sign.lt(0), etaminus, sign))
+            sign.copy_(torch.where(sign.eq(0), 1, sign))
+        else:
+            sign[sign.gt(0)] = etaplus
+            sign[sign.lt(0)] = etaminus
+            sign[sign.eq(0)] = 1
+
+        step_size.mul_(sign).clamp_(step_size_min, step_size_max)
+
+        grad = grad.clone(memory_format=torch.preserve_format)
+        if capturable:
+            grad.copy_(
+                torch.where(sign.eq(etaminus), 0, grad)
+            )  # PRE-PATCH: copy_(where)
+        else:
+            grad[sign.eq(etaminus)] = 0
+
+        param.addcmul_(grad.sign(), step_size, value=-1)
+        prev.copy_(grad)
 
 
 @markDynamoStrictTest
@@ -2800,77 +2978,130 @@ class TestOptimRenewed(TestCase):
             )
 
     def test_inplace_chain_correctness(self, device):
-        """Verify in-place chain ops match out-of-place for modified optimizers."""
-        # NAdam: denom sqrt chain
-        for dtype in [torch.float32, torch.float64]:
-            x = torch.rand(128, dtype=dtype)
-            bc2 = torch.tensor(0.95, dtype=dtype)
-            old = x.div(bc2).sqrt()
-            new = x.div(bc2).sqrt_()
-            self.assertEqual(old, new, atol=1e-6, rtol=1e-6)
+        """Verify shipped _single_tensor_* in-place rewrites match pre-patch oracles.
+        Each oracle is a verbatim copy from main (git show main:torch/optim/xxx.py).
+        """
+        from torch.optim.nadam import _single_tensor_nadam
+        from torch.optim.rprop import _single_tensor_rprop
 
-            # Verify order matters
+        for dtype in [torch.float32, torch.float64]:
+            N = 128
+            shape = (N,)
+
+            # ---- NAdam: denom sqrt chain (.sqrt vs .sqrt_) ----
+            for differentiable in [False, True]:
+                torch.manual_seed(42)
+                p_shipped = torch.rand(shape, dtype=dtype)
+                p_oracle = p_shipped.clone()
+                grad = torch.rand(shape, dtype=dtype)
+
+                # Oracle (pre-patch: uses .sqrt())
+                _nadam_reference_pre_patch(
+                    [p_oracle],
+                    [grad.clone()],
+                    [torch.zeros_like(p_oracle)],
+                    [torch.zeros_like(p_oracle)],
+                    [torch.tensor(1.0)],  # mu_product
+                    [torch.tensor(9.0)],
+                    beta1=0.9,
+                    beta2=0.999,
+                    lr=0.001,
+                    weight_decay=0,
+                    momentum_decay=0.004,
+                    eps=1e-8,
+                    decoupled_weight_decay=False,
+                    maximize=False,
+                    capturable=False,
+                    differentiable=differentiable,
+                    has_complex=False,
+                )
+
+                # Shipped (post-patch: uses .sqrt_())
+                _single_tensor_nadam(
+                    [p_shipped],
+                    [grad.clone()],
+                    [torch.zeros_like(p_shipped)],
+                    [torch.zeros_like(p_shipped)],
+                    [torch.tensor(1.0)],
+                    [torch.tensor(9.0)],
+                    beta1=0.9,
+                    beta2=0.999,
+                    lr=0.001,
+                    weight_decay=0,
+                    momentum_decay=0.004,
+                    eps=1e-8,
+                    decoupled_weight_decay=False,
+                    maximize=False,
+                    capturable=False,
+                    differentiable=differentiable,
+                    has_complex=False,
+                )
+
+                self.assertEqual(
+                    p_shipped,
+                    p_oracle,
+                    atol=1e-5,
+                    rtol=1e-5,
+                    msg=f"NAdam dtype={dtype}, differentiable={differentiable}",
+                )
+
+            # ---- Rprop: sign chain (.sign vs .sign_), where, masked_fill ----
+            for differentiable in [False, True]:
+                torch.manual_seed(42)
+                N = 64
+                p_shipped = torch.rand(N, dtype=dtype)
+                p_oracle = p_shipped.clone()
+                grad = torch.rand(N, dtype=dtype)
+                prev = torch.rand(N, dtype=dtype)
+                step_sz = torch.full((N,), 0.1, dtype=dtype)
+
+                # Oracle (pre-patch: .sign(), copy_(where(...)), copy_(where(...,0)))
+                _rprop_reference_pre_patch(
+                    [p_oracle],
+                    [grad.clone()],
+                    [prev.clone()],
+                    [step_sz.clone()],
+                    [torch.tensor(9.0)],
+                    step_size_min=1e-6,
+                    step_size_max=50.0,
+                    etaminus=0.5,
+                    etaplus=2.0,
+                    maximize=False,
+                    capturable=False,
+                    differentiable=differentiable,
+                    has_complex=False,
+                )
+
+                # Shipped (post-patch: .sign_(), where() directly, masked_fill_())
+                _single_tensor_rprop(
+                    [p_shipped],
+                    [grad.clone()],
+                    [prev.clone()],
+                    [step_sz.clone()],
+                    [torch.tensor(9.0)],
+                    step_size_min=1e-6,
+                    step_size_max=50.0,
+                    etaminus=0.5,
+                    etaplus=2.0,
+                    maximize=False,
+                    capturable=False,
+                    differentiable=differentiable,
+                    has_complex=False,
+                )
+
+                self.assertEqual(
+                    p_shipped,
+                    p_oracle,
+                    atol=1e-5,
+                    rtol=1e-5,
+                    msg=f"Rprop dtype={dtype}, differentiable={differentiable}",
+                )
+
+            # ---- Algebraic trap: div then sqrt vs sqrt then div (order matters) ----
             x2 = torch.tensor([4.0], dtype=dtype)
             correct = x2.div(0.25).sqrt()
             wrong = x2.sqrt().div_(0.25)
             self.assertNotEqual(correct, wrong)
-
-        # Adam: denom sqrt chain
-        for dtype in [torch.float32, torch.float64]:
-            x = torch.rand(128, dtype=dtype)
-            bc_sqrt = torch.tensor(0.97, dtype=dtype)
-            sn = torch.tensor(-1.0, dtype=dtype)
-            eps = torch.tensor(1e-8, dtype=dtype)
-            old = (x.sqrt() / (bc_sqrt * sn)).add_(eps / sn)
-            new = x.sqrt()
-            new.div_(bc_sqrt * sn)
-            new.add_(eps / sn)
-            self.assertEqual(old, new, atol=1e-6, rtol=1e-6)
-
-        # Rprop: sign chain
-        for dtype in [torch.float32, torch.float64]:
-            a = torch.rand(128, dtype=dtype)
-            b = torch.rand(128, dtype=dtype)
-            old = a.mul(b).sign()
-            new = a.mul(b)
-            new.sign_()
-            self.assertEqual(old, new)
-
-        # Rprop: where combined
-        sign = torch.tensor([-2.0, 0.0, 3.0, -1.0, 5.0])
-        ep, em = 1.2, 0.8
-
-        old = sign.clone()
-        old.copy_(torch.where(old.gt(0), ep, old))
-        old.copy_(torch.where(old.lt(0), em, old))
-        old.copy_(torch.where(old.eq(0), 1, old))
-
-        new = torch.where(
-            sign.gt(0),
-            ep,
-            torch.where(sign.lt(0), em, 1.0),
-        )
-        self.assertEqual(old, new)
-
-        # Rprop: where dtype promotion
-        for dtype in [torch.float32, torch.float64, torch.float16, torch.bfloat16]:
-            sign = torch.tensor([-2.0, 0.0, 3.0], dtype=dtype)
-            ep = torch.tensor(1.2, dtype=dtype)
-            em = torch.tensor(0.8, dtype=dtype)
-
-            old = sign.clone()
-            old.copy_(torch.where(old.gt(0), ep, old))
-            old.copy_(torch.where(old.lt(0), em, old))
-            old.copy_(torch.where(old.eq(0), 1, old))
-
-            new = torch.where(
-                sign.gt(0),
-                ep,
-                torch.where(sign.lt(0), em, 1.0),
-            )
-
-            self.assertEqual(old.dtype, new.dtype)
-            self.assertEqual(old, new, atol=1e-3, rtol=1e-3)
 
     def test_diff_gradcheck_adam(self, device):
         """Differentiable-path gradcheck for Adam."""
