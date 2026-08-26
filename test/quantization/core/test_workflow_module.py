@@ -299,46 +299,6 @@ class TestObserver(QuantizationTestCase):
             loaded = torch.jit.load(buf)
             self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @override_qengines
-    def test_state_dict_respects_device_affinity(self):
-        """
-        Tests that loading from a state dict loads buffers to the correct
-        device.
-        """
-        device_cpu = torch.device('cpu')
-        device_cuda = torch.device('cuda:0')
-        test_cases = itertools.product(
-            [device_cpu, device_cuda],
-            [device_cpu, device_cuda],
-            [MinMaxObserver, MovingAverageMinMaxObserver,
-             PerChannelMinMaxObserver,
-             MovingAveragePerChannelMinMaxObserver,
-             # TODO: enable this (separate PR)
-             # HistogramObserver,
-             PlaceholderObserver, RecordingObserver, NoopObserver,
-             FakeQuantize])
-
-        for device_source, device_target, obs_cls in test_cases:
-            # calibrated source model
-            model = obs_cls()
-            model.to(device_source)
-            model(torch.randn(4, 1, 4, 4, device=device_source))
-            # target model
-            model2 = obs_cls()
-            model2.to(device_target)
-            model2.load_state_dict(model.state_dict())
-            # verify that buffers stayed on model2's device
-            model_devices = {p.device for p in model2.parameters()} | \
-                {p.device for p in model2.buffers()}
-            # some observers do not have any buffers, so lessEqual instead of
-            # Equal
-            self.assertLessEqual(len(model_devices), 1)
-            if len(model_devices) == 1:
-                model_device = next(iter(model_devices))
-                self.assertEqual(model_device, device_target)
-
     def test_histogram_observer_consistent_buffer_shape(self):
         """
         Ensures that the buffer shapes do not change from uninitialized to
@@ -431,28 +391,6 @@ class TestObserver(QuantizationTestCase):
             # Verify that state_dict matches exactly with original one.
             self.assertEqual(scripted.state_dict(), scripted_2.state_dict())
 
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_observer_qparams_respects_device_affinity(self):
-        """
-        Ensure that the scale and zero_point returned by the observer
-        are on the same device as the input tensor.
-        """
-        observerList = [MinMaxObserver(),
-                        MovingAverageMinMaxObserver(),
-                        PerChannelMinMaxObserver(),
-                        MovingAveragePerChannelMinMaxObserver()]
-        for obs in observerList:
-            device = torch.device('cuda:1')
-            x = torch.randn(1, 2, device=device)
-            obs.to(device)
-            result = obs(x)
-            scale, zero_point = obs.calculate_qparams()
-
-            self.assertEqual(x.device, scale.device)
-            self.assertEqual(x.device, zero_point.device)
-
     def test_zero_numel(self):
         obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
                     PerChannelMinMaxObserver,
@@ -498,6 +436,68 @@ class TestObserver(QuantizationTestCase):
             new_obs.load_state_dict(obs.state_dict())
             self.assertTrue(torch.equal(obs.min_val, new_obs.min_val))
             self.assertTrue(torch.equal(obs.max_val, new_obs.max_val))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @override_qengines
+    def test_state_dict_respects_device_affinity(self):
+        """
+        Tests that loading from a state dict loads buffers to the correct
+        device.
+        """
+        device_cpu = torch.device('cpu')
+        device_cuda = torch.device('cuda:0')
+        test_cases = itertools.product(
+            [device_cpu, device_cuda],
+            [device_cpu, device_cuda],
+            [MinMaxObserver, MovingAverageMinMaxObserver,
+             PerChannelMinMaxObserver,
+             MovingAveragePerChannelMinMaxObserver,
+             # TODO: enable this (separate PR)
+             # HistogramObserver,
+             PlaceholderObserver, RecordingObserver, NoopObserver,
+             FakeQuantize])
+
+        for device_source, device_target, obs_cls in test_cases:
+            # calibrated source model
+            model = obs_cls()
+            model.to(device_source)
+            model(torch.randn(4, 1, 4, 4, device=device_source))
+            # target model
+            model2 = obs_cls()
+            model2.to(device_target)
+            model2.load_state_dict(model.state_dict())
+            # verify that buffers stayed on model2's device
+            model_devices = {p.device for p in model2.parameters()} | \
+                {p.device for p in model2.buffers()}
+            # some observers do not have any buffers, so lessEqual instead of
+            # Equal
+            self.assertLessEqual(len(model_devices), 1)
+            if len(model_devices) == 1:
+                model_device = next(iter(model_devices))
+                self.assertEqual(model_device, device_target)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_observer_qparams_respects_device_affinity(self):
+        """
+        Ensure that the scale and zero_point returned by the observer
+        are on the same device as the input tensor.
+        """
+        observerList = [MinMaxObserver(),
+                        MovingAverageMinMaxObserver(),
+                        PerChannelMinMaxObserver(),
+                        MovingAveragePerChannelMinMaxObserver()]
+        for obs in observerList:
+            device = torch.device('cuda:1')
+            x = torch.randn(1, 2, device=device)
+            obs.to(device)
+            result = obs(x)
+            scale, zero_point = obs.calculate_qparams()
+
+            self.assertEqual(x.device, scale.device)
+            self.assertEqual(x.device, zero_point.device)
+
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
@@ -857,34 +857,6 @@ class TestHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.histogram, [1., 0., 1., 2., 1., 0., 0., 1., 1., 1.])
 
 class TestFakeQuantize(TestCase):
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
-           qparams=hu.qparams(dtypes=torch.qint8)))
-    def test_fq_module_per_channel(self, device, X):
-        np.random.seed(NP_RANDOM_SEED)
-        X, (scale, zero_point, axis, torch_type) = X
-        quant_min = torch.iinfo(torch_type).min
-        quant_max = torch.iinfo(torch_type).max
-
-        X = to_tensor(X, device)
-        X.requires_grad_()
-        fq_module = FakeQuantize(default_per_channel_weight_observer, quant_min, quant_max, ch_axis=axis).to(device)
-        Y_prime = fq_module(X)
-        if fq_module.scale is None:
-            raise AssertionError("fq_module.scale should not be None")
-        if fq_module.zero_point is None:
-            raise AssertionError("fq_module.zero_point should not be None")
-        Y = _fake_quantize_per_channel_affine_reference(X, fq_module.scale,
-                                                        fq_module.zero_point, axis, quant_min, quant_max)
-        np.testing.assert_allclose(Y.cpu().detach().numpy(), Y_prime.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
-
-        # Test backward
-        dout = torch.rand_like(X, dtype=torch.float, device=device)
-        Y_prime.backward(dout)
-        dX = _fake_quantize_per_channel_affine_grad_reference(dout, X, fq_module.scale,
-                                                              fq_module.zero_point, axis, quant_min, quant_max)
-        np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
-
     def test_fq_serializable_per_channel(self):
         observer = default_per_channel_weight_observer
         quant_min = -128
@@ -912,6 +884,34 @@ class TestFakeQuantize(TestCase):
         fq_module = FakeQuantize(observer, quant_min=0, quant_max=127)
         self.assertEqual(fq_module.activation_post_process.quant_min, 0)
         self.assertEqual(fq_module.activation_post_process.quant_max, 127)
+
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
+           qparams=hu.qparams(dtypes=torch.qint8)))
+    def test_fq_module_per_channel(self, device, X):
+        np.random.seed(NP_RANDOM_SEED)
+        X, (scale, zero_point, axis, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
+        X = to_tensor(X, device)
+        X.requires_grad_()
+        fq_module = FakeQuantize(default_per_channel_weight_observer, quant_min, quant_max, ch_axis=axis).to(device)
+        Y_prime = fq_module(X)
+        if fq_module.scale is None:
+            raise AssertionError("fq_module.scale should not be None")
+        if fq_module.zero_point is None:
+            raise AssertionError("fq_module.zero_point should not be None")
+        Y = _fake_quantize_per_channel_affine_reference(X, fq_module.scale,
+                                                        fq_module.zero_point, axis, quant_min, quant_max)
+        np.testing.assert_allclose(Y.cpu().detach().numpy(), Y_prime.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
+
+        # Test backward
+        dout = torch.rand_like(X, dtype=torch.float, device=device)
+        Y_prime.backward(dout)
+        dX = _fake_quantize_per_channel_affine_grad_reference(dout, X, fq_module.scale,
+                                                              fq_module.zero_point, axis, quant_min, quant_max)
+        np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            sampled_dtype=st.sampled_from(['bf16', 'fp16', 'fp32']))
@@ -1070,49 +1070,6 @@ class TestDistributed(QuantizationTestCase):
             buffer_ids_after,
             msg="FakeQuant: Buffers must be modified in place")
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_qat_data_parallel(self):
-        """
-        Tests that doing QAT in nn.DataParallel does not crash.
-        """
-        if 'fbgemm' not in torch.backends.quantized.supported_engines:
-            return
-        with override_quantized_engine('fbgemm'):
-            device = torch.device('cuda')
-
-            model = nn.Sequential(
-                torch.ao.quantization.QuantStub(),
-                nn.Conv2d(3, 1, 1, bias=False),
-                nn.BatchNorm2d(1),
-                nn.ReLU(),
-                nn.Conv2d(1, 2, 3, stride=2, padding=1, bias=False),
-                nn.BatchNorm2d(2),
-                nn.AvgPool2d(14),
-                nn.Sigmoid(),
-                torch.ao.quantization.DeQuantStub(),
-            )
-
-            torch.ao.quantization.fuse_modules_qat(model, [['1', '2', '3'], ['4', '5']], inplace=True)
-
-            model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
-            torch.ao.quantization.prepare_qat(model, inplace=True)
-            model = nn.DataParallel(model, device_ids=[0, 1])
-            model.to(device)
-            model.train()
-
-            for epoch in range(3):
-                inputs = torch.rand(2, 3, 28, 28).to(device)
-                model(inputs)
-                if epoch >= 1:
-                    model.apply(torch.ao.quantization.disable_observer)
-                if epoch >= 2:
-                    model.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
-                quant_model = copy.deepcopy(model.module)
-                quant_model = torch.ao.quantization.convert(quant_model.eval().cpu(), inplace=False)
-                with torch.no_grad():
-                    out = quant_model(torch.rand(1, 3, 28, 28))
-
     def test_qat_convbn_fused_syncbn_replacement(self):
         """
         Tests that SyncBatchNorm replacement works for fused ConvBN.
@@ -1161,6 +1118,49 @@ class TestDistributed(QuantizationTestCase):
         self.assertTrue(
             hasattr(m[1], "qconfig"),
             "missing qconfig after SyncBatchNorm conversion")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_qat_data_parallel(self):
+        """
+        Tests that doing QAT in nn.DataParallel does not crash.
+        """
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            return
+        with override_quantized_engine('fbgemm'):
+            device = torch.device('cuda')
+
+            model = nn.Sequential(
+                torch.ao.quantization.QuantStub(),
+                nn.Conv2d(3, 1, 1, bias=False),
+                nn.BatchNorm2d(1),
+                nn.ReLU(),
+                nn.Conv2d(1, 2, 3, stride=2, padding=1, bias=False),
+                nn.BatchNorm2d(2),
+                nn.AvgPool2d(14),
+                nn.Sigmoid(),
+                torch.ao.quantization.DeQuantStub(),
+            )
+
+            torch.ao.quantization.fuse_modules_qat(model, [['1', '2', '3'], ['4', '5']], inplace=True)
+
+            model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
+            torch.ao.quantization.prepare_qat(model, inplace=True)
+            model = nn.DataParallel(model, device_ids=[0, 1])
+            model.to(device)
+            model.train()
+
+            for epoch in range(3):
+                inputs = torch.rand(2, 3, 28, 28).to(device)
+                model(inputs)
+                if epoch >= 1:
+                    model.apply(torch.ao.quantization.disable_observer)
+                if epoch >= 2:
+                    model.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
+                quant_model = copy.deepcopy(model.module)
+                quant_model = torch.ao.quantization.convert(quant_model.eval().cpu(), inplace=False)
+                with torch.no_grad():
+                    out = quant_model(torch.rand(1, 3, 28, 28))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
