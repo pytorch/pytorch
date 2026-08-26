@@ -16,7 +16,29 @@ from torch.testing._internal.common_distributed import (
 TEST_GPU_NUM = 4
 
 
-class ShardedTensorTestBase(MultiProcessTestCase):
+class CommonDistributedBackend(MultiProcessTestCase):
+    """Common intermediate class for distributed tests that need dynamic
+    backend resolution.
+
+    This class sits between ``MultiProcessTestCase`` (base class) and
+    concrete test classes. It provides a ``backend`` property that
+    dynamically resolves the distributed backend via
+    ``dist.get_default_backend_for_device(self.device_type)``, where
+    ``self.device_type`` is set by ``instantiate_device_type_tests``.
+
+    This class MUST NOT be added to existing intermediate classes (e.g.,
+    ``ShardedTensorTestBase``) — doing so triggers a TypeError because
+    ``instantiate_device_type_tests`` conflicts with custom ``device`` /
+    ``backend`` methods on classes in the existing inheritance chain.
+    See skill ``distributed_inheritance_chain.md`` error 2 for details.
+
+    Test classes should inherit from this class directly (not from
+    `ShardedTensorTestBase`) to get dynamic backend resolution without
+    hardcoding backend names. `ShardedTensorTestBase` is preserved
+    unchanged for backward compatibility with test files that do not
+    need dynamic backend resolution.
+    """
+
     @property
     def world_size(self):
         return TEST_GPU_NUM
@@ -63,6 +85,63 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         )
 
     def init_comms(self, init_rpc=True, backend=None):
+        if init_rpc:
+            self.init_rpc()
+        self.init_pg(backend=backend)
+
+    def destroy_comms(self, destroy_rpc=True):
+        # Wait for all ranks to reach here before starting shutdown.
+        dist.barrier()
+
+        if destroy_rpc:
+            rpc.shutdown()
+        dist.destroy_process_group()
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+
+class ShardedTensorTestBase(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return TEST_GPU_NUM
+
+    def init_pg(self, backend="nccl"):
+        if backend not in ["nccl", "gloo", "mpi", "hccl", "xccl"]:
+            raise RuntimeError(f"Backend {backend} not supported!")
+
+        # set device for accelerator pg for collectives
+        # must be called BEFORE init_process_group, otherwise HCCL
+        # communicator creation fails with "same physical device ID" error
+        if backend in ("nccl", "xccl", "hccl"):
+            torch.accelerator.set_device_index(self.rank)
+
+        dist.init_process_group(
+            backend=backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            init_method=f"file://{self.file_name}",
+        )
+
+    def init_rpc(self):
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
+            _transports=tp_transports()
+        )
+        rpc_backend_options.init_method = f"file://{self.file_name}"
+        for rank in range(self.world_size):
+            rpc_backend_options.set_device_map(
+                f"worker{rank}", {rank: self.rank, self.rank: rank}
+            )
+
+        rpc.init_rpc(
+            name=f"worker{self.rank:d}",
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=rpc_backend_options,
+        )
+
+    def init_comms(self, init_rpc=True, backend="nccl"):
         if init_rpc:
             self.init_rpc()
         self.init_pg(backend=backend)
