@@ -990,17 +990,6 @@ class TestOperators(TestCase):
                 xfail(
                     "nn.functional.layer_norm"
                 ),  # vmap: inplace into a regular tensor
-                # RuntimeError: NYI: querying is_contiguous inside of vmap
-                # for memory_format other than torch.contiguous_formats
-                xfail("nn.functional.max_pool2d"),
-                # RuntimeError: NYI: Tensor.clone(memory_format) inside vmap is only
-                # supported with memory_format torch.preserve_format or
-                # torch.contiguous_format (got ChannelsLast)
-                xfail("nn.functional.max_unpool2d"),
-                # RuntimeError: NYI: Tensor.clone(memory_format) inside vmap is only
-                # supported with memory_format torch.preserve_format
-                # or torch.contiguous_format (got ChannelsLast)s
-                xfail("nn.functional.max_unpool2d", "grad"),
                 xfail(
                     "nn.functional.rrelu"
                 ),  # RuntimeError: vmap: we do not yet support aten::rrelu_with_noise.
@@ -1159,9 +1148,6 @@ class TestOperators(TestCase):
             xfail("scatter_reduce", "prod"),  # item call
             # Batching rule not implemented for aten::_use_cudnn_ctc_loss.Tensor
             xfail("nn.functional.ctc_loss", device_type="cuda"),
-            # NYI: querying is_contiguous inside of vmap for memory_format other than torch.contiguous_format
-            xfail("nn.functional.max_unpool2d"),
-            xfail("nn.functional.max_unpool2d", "grad"),
             xfail("sparse.sampled_addmm", ""),
             xfail("sparse.mm", "reduce"),
             xfail("as_strided_scatter", ""),  # calls as_strided
@@ -1320,6 +1306,10 @@ class TestOperators(TestCase):
             tol1(
                 "linalg.householder_product",
                 {torch.float32: tol(atol=2e-04, rtol=9e-3)},
+            ),
+            tol1(
+                "linalg.polar",
+                {torch.float32: tol(atol=2e-04, rtol=1e-4)},
             ),
         ),
     )
@@ -1598,7 +1588,6 @@ class TestOperators(TestCase):
                 xfail("nn.functional.dropout2d", ""),
                 xfail("svd_lowrank", ""),
                 xfail("pca_lowrank", ""),
-                xfail("clamp"),
                 # something weird happening with channels_last
                 xfail("bfloat16"),
                 xfail("double"),
@@ -1947,10 +1936,6 @@ class TestOperators(TestCase):
                 # running_mean or running_var, which will be updated in place,
                 # were not batched.
                 xfail("nn.functional.instance_norm"),
-                # NYI: Tensor.clone(memory_format) inside vmap is only supported with
-                # memory_format torch.preserve_format or torch.contiguous_format (got ChannelsLast)
-                xfail("nn.functional.max_unpool2d"),
-                xfail("nn.functional.max_unpool2d", "grad"),
                 xfail(
                     "nn.functional.multi_margin_loss"
                 ),  # Forward AD not implemented and no decomposition
@@ -2293,8 +2278,6 @@ class TestOperators(TestCase):
         {
             # The size of tensor a (4) must match the size of tensor b (10) at non-singleton dimension 0
             xfail("masked_select"),
-            xfail("nn.functional.max_unpool2d", "grad"),  # contiguous call
-            xfail("nn.functional.max_unpool2d"),  # contiguous call
             xfail("to_sparse"),  # dispatch key issue
             xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
             # https://github.com/pytorch/pytorch/issues/96560#issuecomment-2151063723
@@ -2929,9 +2912,9 @@ class TestOperators(TestCase):
         sample_inputs = op.sample_inputs(device, dtype)
 
         for sample_input in sample_inputs:
-            # Check that the op raises NotImplementedError or appropriate failure
+            # Ordered operations either reject complex inputs or lack complex support.
             self.assertRaises(
-                RuntimeError,
+                (TypeError, NotImplementedError),
                 op,
                 sample_input.input,
                 *sample_input.args,

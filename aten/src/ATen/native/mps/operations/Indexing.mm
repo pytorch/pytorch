@@ -54,46 +54,6 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/Indexing_metallib.h>
 #endif
 
-id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder,
-                                        const TensorIteratorBase& iter,
-                                        bool use_64bit_index) {
-  constexpr uint32_t nOffsets = 3;
-  uint32_t numThreads = iter.numel();
-  const uint32_t nDim = iter.ndim();
-  const IntArrayRef& iterShape = iter.shape();
-  std::vector<uint32_t> iterShapeData(iterShape.size());
-  std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
-  TORCH_INTERNAL_ASSERT(iter.ntensors() >= nOffsets);
-  TORCH_CHECK(use_64bit_index || iter.can_use_32bit_indexing(),
-              "kernel data offsets can't be computed using 32-bit iterator of shape ",
-              iterShape);
-
-  for (const auto i : c10::irange(iterShape.size())) {
-    iterShapeData[i] = static_cast<uint32_t>(iterShape[i]);
-  }
-
-  for (const auto i : c10::irange(nDim)) {
-    for (const auto offset : c10::irange(nOffsets)) {
-      strides[i][offset] = static_cast<uint32_t>(iter.strides(offset)[i]);
-    }
-  }
-
-  auto kernelDataOffsetsPSO =
-      lib.getPipelineStateForFunc(use_64bit_index ? "kernel_index_offsets_64" : "kernel_index_offsets_32");
-  const auto elementSize = use_64bit_index ? sizeof(simd_ulong3) : sizeof(simd_uint3);
-  id<MTLBuffer> kernelDataOffsets = (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * elementSize).get();
-
-  [commandEncoder setComputePipelineState:kernelDataOffsetsPSO];
-  [commandEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
-  [commandEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
-  [commandEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
-  [commandEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
-
-  mtl_dispatch1DJob(commandEncoder, kernelDataOffsetsPSO, numThreads);
-
-  return kernelDataOffsets;
-}
-
 static std::string getBitSizeString(ScalarType scalar_type) {
   size_t scalarBitSize = c10::elementSize(scalar_type) * 8;
   TORCH_CHECK(scalarBitSize <= 64, "Unsupported data type: ", getMPSTypeString(scalar_type));
@@ -346,7 +306,7 @@ static inline const char* index_kernel_suffix(bool use_32bit_index) {
 }
 
 // Metal kernel-based nonzero using prefix-sum + scatter.
-// Step 1: Per-element exclusive prefix sum of nonzero flags + block totals.
+// Step 1: Per-block nonzero totals (block-local prefix scan).
 // Step 2: GPU prefix sum of block totals → block offsets + total count.
 // Host (optional):   Read back total count, allocate output, unless max_element is provided
 // Step 3: Scatter multi-dimensional indices into the output.
@@ -368,7 +328,7 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   const auto type_str = scalarToMetalTypeString(input);
   MPSStream* stream = getCurrentMPSStream();
 
-  // Count (step 1) indexes input/prefix by the flat element id, which is
+  // Count (step 1) indexes input by the flat element id, which is
   // bounded by numel, so its index width depends only on the input. Scatter
   // (step 3) also indexes the output, so it recomputes the width including out.
   const bool count_use_32bit_index = canUse32BitIndexMath(input);
@@ -396,13 +356,12 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   // with base 0, identical to the unchunked path.
   const uint64_t chunk_elems = (static_cast<uint64_t>(1) << 31) / threads_per_group * threads_per_group;
 
-  // Scratch buffers. prefix (intra-block, <= threadgroup size) and block_sums
-  // (per-block totals, likewise bounded) fit in uint32. block_offsets (the
-  // running cumulative count) and total_nonzero can exceed 2^32 for a large
-  // dense input, so they are int64, matching CUDA's int64 aggregate.
-  auto tmp32 = at::empty({numel + num_blocks_u32}, input.options().dtype(kInt));
-  Tensor prefix_buf = tmp32.slice(0, 0, numel);
-  Tensor block_sums_buf = tmp32.slice(0, numel, numel + num_blocks_u32);
+  // Scratch buffers. block_sums (per-block totals, bounded by the threadgroup
+  // size) fits in uint32. block_offsets (the running cumulative count) and
+  // total_nonzero can exceed 2^32 for a large dense input, so they are int64,
+  // matching CUDA's int64 aggregate. The per-element intra-block prefixes are
+  // not stored: the scatter kernel recomputes them in threadgroup memory.
+  Tensor block_sums_buf = at::empty({num_blocks_u32}, input.options().dtype(kInt));
   auto tmp64 = at::empty({num_blocks_u32 + 1}, input.options().dtype(kLong));
   Tensor block_offsets_buf = tmp64.slice(0, 0, num_blocks_u32);
   Tensor total_nonzero_buf = tmp64.slice(0, num_blocks_u32, num_blocks_u32 + 1);
@@ -416,7 +375,7 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
       for (uint64_t base = 0; base < static_cast<uint64_t>(numel); base += chunk_elems) {
         uint64_t this_chunk = std::min(chunk_elems, static_cast<uint64_t>(numel) - base);
         uint32_t block_base = static_cast<uint32_t>(base / threads_per_group);
-        mtl_setArgs(computeEncoder, input, prefix_buf, block_sums_buf, base, block_base);
+        mtl_setArgs(computeEncoder, input, block_sums_buf, base, block_base);
         mtl_dispatch1DJob(computeEncoder, pso_step1, this_chunk);
       }
 
@@ -467,16 +426,8 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
       for (uint64_t base = 0; base < static_cast<uint64_t>(numel); base += chunk_elems) {
         uint64_t this_chunk = std::min(chunk_elems, static_cast<uint64_t>(numel) - base);
         uint32_t block_base = static_cast<uint32_t>(base / threads_per_group);
-        mtl_setArgs(computeEncoder,
-                    input,
-                    prefix_buf,
-                    out,
-                    ndim_int,
-                    input.sizes(),
-                    block_offsets_buf,
-                    max_entries,
-                    base,
-                    block_base);
+        mtl_setArgs(
+            computeEncoder, input, out, ndim_int, input.sizes(), block_offsets_buf, max_entries, base, block_base);
         mtl_dispatch1DJob(computeEncoder, pso_step3, this_chunk);
       }
     }
@@ -694,12 +645,12 @@ TORCH_IMPL_FUNC(index_add_mps_out)
       encodeIndexBoundsCheck(computeEncoder, stream, index_, acc_result.size(dim));
       auto pipeline_state = lib.getPipelineStateForFunc(
           fmt::format("index_add_{}_{}", scalarToMetalTypeString(acc_result), scalarToMetalTypeString(index_)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "index_add", {acc_result, index_, acc_source});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_add", {acc_result, index_, acc_source}, stream);
       [computeEncoder setComputePipelineState:pipeline_state];
       mtl_setArgs(computeEncoder, acc_result, index_, acc_source, params);
       mtl_setBytes(computeEncoder, getMPSScalar(alpha, acc_type), 4);
       mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
   if (needs_acc_cast) {
@@ -804,7 +755,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
         encodeIndexBoundsCheck(computeEncoder, stream, index_, self.size(dim));
         auto pipeline_state = lib.getPipelineStateForFunc(
             fmt::format("index_select_dim_dense_{}bit_{}", copy_bytes * 8, scalarToMetalTypeString(index_)));
-        getMPSProfiler().beginProfileKernel(pipeline_state, "index_select", {self, index_});
+        getMPSProfiler().beginProfileKernel(pipeline_state, "index_select", {self, index_}, stream);
         [computeEncoder setComputePipelineState:pipeline_state];
         mtl_setArgs(computeEncoder, output, index_, self, params);
         const MTLSize grid = MTLSizeMake(inner_units, num_indices, outer);
@@ -813,7 +764,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
         const NSUInteger tgY = std::min<NSUInteger>(num_indices, std::max<NSUInteger>(1, maxTG / tgX));
         const NSUInteger tgZ = std::min<NSUInteger>(outer, std::max<NSUInteger>(1, maxTG / (tgX * tgY)));
         [computeEncoder dispatchThreads:grid threadsPerThreadgroup:MTLSizeMake(tgX, tgY, tgZ)];
-        getMPSProfiler().endProfileKernel(pipeline_state);
+        getMPSProfiler().endProfileKernel(pipeline_state, stream);
       }
     });
     return output;
@@ -839,11 +790,11 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
       encodeIndexBoundsCheck(computeEncoder, stream, index_, self.size(dim));
       auto pipeline_state = lib.getPipelineStateForFunc(
           fmt::format("index_select_dim_{}_{}", getBitSizeString(output), scalarToMetalTypeString(index_)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "index_select", {self, index_});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_select", {self, index_}, stream);
       [computeEncoder setComputePipelineState:pipeline_state];
       mtl_setArgs(computeEncoder, output, index_, self, params);
       mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 
@@ -956,11 +907,11 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
       auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format(
           "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
       mps::mtl_setArgs(compute_encoder, result, index, source, params);
       mps::mtl_dispatch1DJob(compute_encoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 
@@ -1088,6 +1039,37 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
     self.squeeze_();
   }
   return self;
+}
+
+static void put_kernel_mps(TensorIterator& iter, const TensorBase& self_base, const bool accumulate) {
+  // The generic native::put_ builds `iter` with source and the reshaped index
+  // as its two inputs. put_ addresses self by its logical (C-contiguous) flat
+  // position, so recover those tensors and reuse the index_put_ MPS kernels by
+  // treating self as a 1-D tensor addressed by the flat index. When self is
+  // already contiguous the view aliases its storage and the writes land in
+  // place; otherwise copy the result back.
+  const auto& source = iter.tensor(0);
+  const auto& index = iter.tensor(1);
+  auto& self = const_cast<Tensor&>(static_cast<const Tensor&>(self_base));
+
+  auto self_contig = self.contiguous();
+  c10::List<std::optional<Tensor>> indices;
+  indices.push_back(index.reshape(-1));
+  self_contig.view(-1).index_put_(indices, source.reshape(-1), accumulate);
+  if (!self.is_contiguous()) {
+    self.copy_(self_contig.view_as(self));
+  }
+}
+
+static void take_kernel_mps(TensorIterator& iter, const TensorBase& input_base) {
+  // take reads self by its logical (C-contiguous) flat position; the generic
+  // native::take_out builds `iter` with the index-shaped output and the index
+  // as operands. Reuse the advanced-indexing MPS kernel, writing straight into
+  // the output via index.out so no intermediate result tensor is allocated.
+  const auto& index = iter.tensor(1);
+  const auto& input = static_cast<const Tensor&>(input_base);
+  auto& out = const_cast<Tensor&>(iter.tensor(0));
+  at::index_out(out, input.reshape(-1), c10::List<std::optional<Tensor>>({index}));
 }
 
 static void index_fill_mps_kernel(TensorIterator& iter,
@@ -1247,4 +1229,6 @@ static void index_fill_mps_kernel(TensorIterator& iter,
 REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps)
 REGISTER_DISPATCH(index_fill_stub, &index_fill_mps_kernel)
 REGISTER_DISPATCH(index_put_stub, &mps::index_put_kernel_mps)
+REGISTER_DISPATCH(put_stub, &put_kernel_mps)
+REGISTER_DISPATCH(take_stub, &take_kernel_mps)
 } // namespace at::native

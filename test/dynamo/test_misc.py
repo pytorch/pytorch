@@ -99,7 +99,6 @@ from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     scoped_load_inline,
     set_default_dtype,
-    skipCUDAMemoryLeakCheckIf,
     skipIfHpu,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -511,6 +510,51 @@ graph():
         # popping a stale entry.
         with self.assertRaisesRegex(RuntimeError, "empty stack"):
             torch._C._dynamo_restore_local_dispatch_key_set()
+
+    def test_tracing_context_tls_defaults_present(self):
+        # The _guards thread-local defaults tracing_context/compile_context to
+        # None per thread, so the hot-path try_get() calls (once per compiled
+        # call) hit a present attribute instead of a slow getattr-miss on a
+        # thread that never ran compilation itself (e.g. a worker thread running
+        # code compiled on another thread).
+        import threading
+
+        from torch._guards import _TLS, CompileContext, TracingContext
+
+        result = {}
+
+        def worker():
+            result["tc_present"] = "tracing_context" in _TLS.__dict__
+            result["cc_present"] = "compile_context" in _TLS.__dict__
+            result["tc"] = TracingContext.try_get()
+            result["cc"] = CompileContext.try_get()
+            # Off-context (compile_context defaulted to None), get() still raises
+            # -- the default makes this the "not set" AssertionError rather than
+            # an AttributeError, on every thread regardless of history.
+            try:
+                CompileContext.get()
+                result["get_raised"] = None
+            except AssertionError:
+                result["get_raised"] = "AssertionError"
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+        self.assertTrue(result["tc_present"])
+        self.assertTrue(result["cc_present"])
+        self.assertIsNone(result["tc"])
+        self.assertIsNone(result["cc"])
+        self.assertEqual(result["get_raised"], "AssertionError")
+
+        # Exercise the set -> restore cycle against the new storage: try_get()
+        # sees the context inside tracing() and returns to the None default after.
+        from torch._guards import tracing
+
+        self.assertIsNone(TracingContext.try_get())
+        tc = TracingContext(None)
+        with tracing(tc):
+            self.assertIs(TracingContext.try_get(), tc)
+        self.assertIsNone(TracingContext.try_get())
 
     def test_compile_non_infra_empty_with_disalloed_dispatch_mode(self):
         from torch.utils._python_dispatch import TorchDispatchMode
@@ -2000,6 +2044,162 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = opt_fn()
         self.assertEqual(result, ((1, 2), (3, 4)))
 
+    def test_min_max_key_and_default(self):
+        # Items are non-constant (tensors), so the fully-constant fold path is
+        # skipped; the key maps each to a compile-time-constant (ndim), which is
+        # what the key comparison requires. Comparison is on key(item) but the
+        # original tensor is returned.
+        def fn(x, y, z):
+            tensors = [x, y, z]
+            return (
+                max(tensors, key=lambda t: t.ndim).sum(),
+                min(tensors, key=lambda t: t.ndim).sum(),
+                max(tensors, key=lambda t: t.ndim, default=x).sum(),
+                max([], default=y).sum(),
+                min([x + 1], default=z).sum(),
+                max(x, z, key=lambda t: t.ndim).sum(),
+                min(x, z, key=lambda t: t.ndim).sum(),
+            )
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+        x, y, z = torch.randn(2), torch.randn(2, 2), torch.randn(2, 2, 2)
+        self.assertEqual(opt(x, y, z), fn(x, y, z))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_min_max_key_none(self):
+        # key=None behaves like no key argument at all.
+        def fn(x):
+            return x + max([4, 1, 7], key=None) + min([4, 1, 7], key=None)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_min_max_default_none_sentinel(self):
+        # A real default=None must be honored for empty iterables and not be
+        # confused with the internal "omitted" sentinel (which raises).
+        def fn(x):
+            return (
+                max((), default=None),
+                min((), default=None),
+                max((), default=0),
+                x + 1,
+            )
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(opt(x)[:3], (None, None, 0))
+
+    def test_min_max_default_varargs_type_error(self):
+        def fn(a, b):
+            return max(a, b, default=0)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            fn(1, 2)
+        with self.assertRaises(TypeError):
+            opt(1, 2)
+
+    def test_min_max_empty_no_default_value_error(self):
+        def fn(xs):
+            return max(xs)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(ValueError):
+            fn([])
+        with self.assertRaises(ValueError):
+            opt([])
+
+    def test_int_base_indexable(self):
+        # int(x, base) resolves base via __index__ (PyNumber_AsSsize_t), so a
+        # non-constant __index__-able base must be accepted. Previously this
+        # raised an "invalid call to builtin op handler" graph break because
+        # call_int ignored the base argument entirely.
+        class MyIndexable:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                return self.value
+
+        def fn(x):
+            a = int("101", base=MyIndexable(2))
+            b = int("101", MyIndexable(36))
+            c = int(b"ff", base=MyIndexable(16))
+            return x + a + b + c
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_symint_explicit_dunder_index(self):
+        # Explicit s.__index__() on a SymInt binds int.__index__ (a C slot
+        # wrapper) as a method-wrapper whose call must dispatch to the
+        # nb_index slot model (specializing the symbol with a guard), not
+        # to SymNodeVariable.call_method's generic proxy path.
+        def fn(x):
+            s = x.size(0)
+            return x.sum() + s.__index__()
+
+        cnt = CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)
+        x = torch.randn(5)
+        self.assertEqual(opt(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_explicit_method_wrapper_call_constant_folds(self):
+        # Explicit dunder calls binding C slot wrappers on constant types
+        # must keep constant-folding through call_method when the VT has no
+        # dedicated slot impl (str subscript/concat, int.__bool__).
+        def fn(x):
+            a = "abc".__getitem__(1)
+            b = "ab".__add__("cd")
+            c = (7).__bool__()
+            d = (7).__index__()
+            return x + 1, a, b, c, d
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_explicit_range_dunder_bool(self):
+        # bool(range(...)) constant-folds before reaching the nb_bool slot, so
+        # the explicit wrapper call is the only path into RangeVariable's slot.
+        def fn(x):
+            return x + 1, range(0).__bool__(), range(5).__bool__()
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_int_base_out_of_range_value_error(self):
+        class MyIndexable:
+            def __index__(self):
+                return 37
+
+        def fn(xs):
+            return int("43", base=MyIndexable())
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(ValueError):
+            fn([])
+        with self.assertRaises(ValueError):
+            opt([])
+
+    def test_int_base_non_string_type_error(self):
+        def fn(n):
+            return int(n, base=16)
+
+        opt = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            fn(5)
+        with self.assertRaises(TypeError):
+            opt(5)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
         def f1(x, y):
@@ -2050,6 +2250,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         f(torch.tensor([3]))
         f(torch.tensor([4]))
         self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check_symbool_python_not(self):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x):
+            c = x.item()
+            torch._check(not (c * 2 == 0))
+            return torch.ones(c * 2)
+
+        out = f(torch.tensor(3, dtype=torch.int64))
+        self.assertEqual(out.shape, (6,))
+        self.assertEqual(len(backend.graphs), 1)
+
+        targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertIn(torch.sym_not, targets)
+        self.assertIn(torch.ops.aten._assert_scalar.default, targets)
+        self.assertNotIn(operator.not_, targets)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check_symbolic_shape_rel(self):
@@ -3330,6 +3549,43 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, foo2)
         self.assertEqual(ref, res)
         self.assertEqual(foo1.field, foo2.field)
+
+    def test_member_descriptor_set_delete_slot(self):
+        # member_descriptor (a __slots__ field) exposes __set__/__delete__ via
+        # the shared tp_descr_set slot; explicit calls should trace.
+        class Slotted:
+            __slots__ = ("a",)
+
+        def set_fn(x):
+            o = Slotted()
+            type(o).a.__set__(o, 9)
+            return x + o.a
+
+        def del_fn(x):
+            o = Slotted()
+            o.a = 4
+            type(o).a.__delete__(o)
+            return x + (0 if hasattr(o, "a") else 100)
+
+        for fn in (set_fn, del_fn):
+            opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+            self.assertEqual(opt_fn(torch.zeros(2)), fn(torch.zeros(2)))
+
+    def test_tuplegetter_readonly_slot(self):
+        # namedtuple field accessors are read-only; __set__/__delete__ raise
+        # AttributeError through the tp_descr_set slot.
+        P = collections.namedtuple("P", ["x", "y"])
+
+        def fn(t):
+            p = P(1, 2)
+            try:
+                type(p).x.__set__(p, 5)
+                return t + 1
+            except AttributeError as e:
+                return t, str(e)
+
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        self.assertEqual(opt_fn(torch.zeros(2)), fn(torch.zeros(2)))
 
     def test_dict_with_descriptor(self):
         class MyDescriptor:
@@ -5344,6 +5600,86 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         torch._dynamo.testing.standard_test(self, fn=fn1, nargs=3)
 
+    def test_dunder_class_across_vt_types(self):
+        # obj.__class__ under compile must return the type for VTs across
+        # families (list/dict/set subclasses, tensor, exception).
+        class MyList(list):
+            pass
+
+        class MyExc(ValueError):
+            pass
+
+        def fn(x):
+            return (
+                x + 1,
+                MyList([1, 2]).__class__,
+                {1: 2}.__class__,
+                {1, 2}.__class__,
+                x.__class__,
+                MyExc("boom").__class__,
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_instance_dunder_dict(self):
+        # An instance's writable __dict__ under compile.
+        class Foo:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        def fn(x):
+            obj = Foo()
+            return x + 1, dict(obj.__dict__)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_class_object_dunder_dict(self):
+        # A class object's __dict__ is a read-only mappingproxy, not an instance
+        # dict; both membership (which installs a dict guard) and item read must
+        # not route through the instance-dict machinery.
+        class Foo:
+            x = 5
+
+        def fn(t):
+            has_x = "x" in Foo.__dict__
+            return t + 1, has_x, Foo.__dict__["x"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.randn(4)
+        self.assertEqual(fn(t), opt_fn(t))
+
+    def test_hasattr_dunder_dict_no_dict_type(self):
+        # Types without an instance __dict__ (builtins, __slots__-only classes)
+        # must report hasattr(obj, "__dict__") == False under compile, while
+        # types that do have one report True.
+        class Slots:
+            __slots__ = ("a",)
+
+            def __init__(self):
+                self.a = 1
+
+        class Plain:
+            def __init__(self):
+                self.a = 1
+
+        def fn(x):
+            return (
+                x + 1,
+                hasattr(Slots(), "__dict__"),
+                hasattr([1, 2], "__dict__"),
+                hasattr(5, "__dict__"),
+                hasattr(Plain(), "__dict__"),
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_class_reassignment_graph_break(self):
         class BaseClass:
             def __init__(self, x):
@@ -5670,6 +6006,84 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(cnts.op_count, 3)
             cnts.clear()
+
+    def test_delete_deref(self):
+        # `del y` on a cell variable (captured by nested `g`) -> DELETE_DEREF
+        def fn(x):
+            y = x + 1
+
+            def g():
+                return y
+
+            z = y * 3
+            del y
+            return z
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_delete_deref_then_reassign(self):
+        def fn(x):
+            y = x + 1
+
+            def g():
+                return y
+
+            del y
+            y = x + 100
+            return g()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_delete_deref_read_after_delete(self):
+        # Reading a cell after `del` raises NameError in eager; Dynamo must match
+        # (reads of a deleted cell graph break and fall back to eager).
+        def fn(x):
+            y = x + 1
+
+            def g():
+                return y
+
+            del y
+            return g()
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        with self.assertRaises(NameError):
+            fn(x)
+        with self.assertRaises(NameError):
+            opt_fn(x)
+
+    def test_delete_deref_symint(self):
+        def fn(x):
+            s = x.shape[0] + 1
+
+            def g():
+                return s
+
+            del s
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_delete_deref_name_collision(self):
+        # An inlined comprehension's iteration variable shadows the `nonlocal`
+        # cell, so `x` occupies both a fast-local and a freevar slot. The
+        # DELETE_DEREF target is the cell, which lives in symbolic_cellvars.
+        x = 0
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f():
+            nonlocal x
+            x = [x for x in range(3)]
+            del x
+
+        f()
 
     def test_closure_with_mutation_and_graph_break(self):
         def fn():
@@ -7393,7 +7807,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "addcmul_positional",
             "addcdiv",
             "addcdiv_positional",
-            subtest("baddbmm", decorators=[expectedFailureDynamic]),
+            "baddbmm",
         ],
     )
     def test_scalar_arg_0d_tensor(self, op):
@@ -7414,8 +7828,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "addcmul_positional": lambda: a.addcmul(beta, b, c),
             "addcdiv": lambda: a.addcdiv(b, c.abs() + 1, value=beta),
             "addcdiv_positional": lambda: a.addcdiv(beta, b, c.abs() + 1),
-            # Z3 translation validation doesn't support unbacked symbols from
-            # baddbmm's scalar args (https://github.com/pytorch/pytorch/issues/162287).
             "baddbmm": lambda: m_batch.baddbmm(batch1, batch2, alpha=alpha, beta=beta),
         }
 
@@ -10880,7 +11292,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         @torch.compile(backend=counter)
         def fn(x):
-            return x * x
+            return torch.ones(2) * x
 
         fn(0)
         fn(1)
@@ -10994,6 +11406,136 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         fn(torch.randn(4, 6))
 
         self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(static_sources="L['x']")
+    def test_static_sources_tensor(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        # Without static-sources automatic dynamic would kick in on the second
+        # call and give us 2 frames; here every size specializes.
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(static_sources="L['x']")
+    def test_static_sources_int(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        fn(1)
+        fn(2)
+        fn(3)
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(static_sources="L['x']")
+    def test_static_sources_dynamic_override(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=True, backend=counter)
+        def fn(x):
+            return x * x
+
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(static_sources="L\\['x.*'\\]")
+    def test_static_sources_regex(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=True, backend=counter)
+        def fn(x1):
+            return x1 * x1
+
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(static_sources="L['x']:1")
+    def test_static_sources_per_dim(self):
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=True, backend=counter)
+        def fn(x):
+            return x * x
+
+        # Dim 0 stays dynamic, so varying it does not recompile.
+        fn(torch.randn(2, 4))
+        fn(torch.randn(3, 4))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Dim 1 is static, so varying it does.
+        fn(torch.randn(3, 5))
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(
+        dynamic_values="1111",
+        static_sources="L['x']",
+    )
+    def test_static_sources_beat_dynamic_values_tensor(self):
+        builder._DYNAMIC_VALUES = None
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        # Same shapes as test_dynamic_values_tensor, which gets 1 frame: the
+        # sentinel dim 1111 marks the dim dynamic. static-sources undoes that,
+        # so every size specializes instead.
+        fn(torch.randn(1111))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 3)
+
+    @torch.compiler.config.patch(
+        dynamic_values="1111",
+        static_sources="L['x']",
+    )
+    def test_static_sources_beat_dynamic_values_int(self):
+        builder._DYNAMIC_VALUES = None
+        builder._STATIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        # Same values as test_dynamic_values_int, which gets 1 frame. Unlike the
+        # tensor path, precedence here comes from is_static_source being checked
+        # before is_dynamic_value in wrap_literal -- this pins that ordering.
+        fn(1111)
+        fn(2)
+        fn(3)
+
+        self.assertEqual(counter.frame_count, 3)
 
     @torch.compiler.config.patch(unbacked_sources="L['x']:0")
     def test_unbacked_sources_per_dim(self):
@@ -14961,13 +15503,13 @@ fn
         from torch._dynamo.variables.user_defined import InspectVariable
 
         redirected_attrs = []
-        original_getattro_impl = InspectVariable.getattro_impl
+        original_redirect = InspectVariable._redirect
 
-        def tracking_getattro_impl(self, tx, name):
+        def tracking_redirect(self, tx, name):
             redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
             if name in redirects:
                 redirected_attrs.append(name)
-            return original_getattro_impl(self, tx, name)
+            return original_redirect(self, tx, name)
 
         def fn(x, gn):
             sig = inspect.signature(gn)
@@ -14979,7 +15521,7 @@ fn
             return a + b
 
         x = torch.randn(2, 3)
-        with patch.object(InspectVariable, "getattro_impl", tracking_getattro_impl):
+        with patch.object(InspectVariable, "_redirect", tracking_redirect):
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             result = opt_fn(x, gn)
 
@@ -17133,7 +17675,6 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertEqual(opt(), "1:2:3")
 
     @unittest.skipIf(sys.version_info >= (3, 12), "comprehensions inlined in 3.12+")
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_listcomp_implicit_iterator_survives_graph_break(self):
         """Regression test: the implicit .0 iterator in a list comprehension
         must survive graph breaks under NGB.
@@ -17161,7 +17702,6 @@ def forward(self, L_x_ : torch.Tensor):
         result = opt(x)
         self.assertTrue(torch.all(result > x))
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_module_hooks_dict_reconstructed_as_ordered_dict(self):
         """Empty hooks dicts on nn.Module must be reconstructed as OrderedDict,
         not plain dict, so that weakref.ref() works in RemovableHandle.
@@ -17175,6 +17715,117 @@ def forward(self, L_x_ : torch.Tensor):
         opt = torch.compile(fn, backend="eager")
         result = opt()
         self.assertEqual(result.shape, (3, 7))
+
+    def test_module_hook_handle_references_real_dict(self):
+        """A RemovableHandle created inside a compiled function must reference
+        the real module's (empty) hooks dict. This requires reconstructing the
+        empty hooks dict from its source; a sourceless fresh {} would make the
+        handle weakref point at the wrong object so remove() silently no-ops.
+        """
+
+        def hook(mod, inp, out):
+            return out
+
+        def fn(m, x):
+            y = m(x)
+            h = m.register_forward_hook(hook)
+            return y, h
+
+        m = torch.nn.Linear(3, 3)
+        opt = torch.compile(fn, backend="eager")
+        x = torch.randn(2, 3)
+        _, h = opt(m, x)
+        self.assertEqual(len(m._forward_hooks), 1)
+        self.assertIs(h.hooks_dict_ref(), m._forward_hooks)
+        h.remove()
+        self.assertEqual(len(m._forward_hooks), 0)
+
+    def test_custom_op_register_fake_inside_traced_function(self):
+        """Custom op defined with register_fake inside a traced function must
+        produce correct results. register_fake mutates _abstract_fn on the real
+        CustomOpDef as a side effect, so when the op is called before that
+        side effect is applied, get_fake_value graph-breaks ("Custom op missing
+        fake impl during tracing") and the op call falls back to eager. The
+        surrounding tensor ops still compile (exercising the resume path).
+        """
+        from typing import Tuple
+
+        def get_my_op():
+            @torch.library.custom_op("test::ngb_id", mutates_args=[])
+            def ngb_id(x: torch.Tensor) -> Tuple[torch.Tensor]:
+                return (x.clone(),)
+
+            @ngb_id.register_fake
+            def _(x: torch.Tensor) -> Tuple[torch.Tensor]:
+                return (x.clone(),)
+
+            return ngb_id
+
+        def fn(x):
+            x = x + 1  # non-empty prefix so a partial graph compiles
+            my_op = get_my_op()
+            return my_op(x)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=cnt)
+        x = torch.randn(3)
+        result = opt(x)
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0], x + 1)
+        # The op call graph-breaks to eager; the surrounding ops still compile.
+        self.assertGreaterEqual(cnt.frame_count, 1)
+
+    def test_custom_op_missing_fake_impl_hard_errors(self):
+        """A custom op genuinely missing its fake impl (register_fake never
+        called) must still hard-error under compile. The missing-fake-impl
+        graph break is scoped to the register_fake-side-effect-pending case, so
+        it must NOT silently swallow this into an eager fallback.
+        """
+
+        @torch.library.custom_op("test::ngb_missing_fake", mutates_args=[])
+        def ngb_missing_fake(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            return ngb_missing_fake(x) + 1
+
+        with self.assertRaises(RuntimeError):
+            fn(torch.randn(3))
+
+    def test_custom_op_defined_inside_without_fake_hard_errors(self):
+        """A custom op DEFINED INSIDE the traced function but never
+        register_fake'd must still hard-error, and the gate must key off a
+        pending `_abstract_fn` mutation SPECIFICALLY, not any pending mutation.
+
+        Unlike test_custom_op_missing_fake_impl_hard_errors (op at module
+        scope, whose opdef is untracked so the gate short-circuits at
+        `vt is None`), the opdef here is tracked in side_effects. We store an
+        unrelated attribute on it so it has a pending NON-`_abstract_fn`
+        mutation: a gate that checked `has_pending_mutation(vt)` instead of
+        `has_pending_mutation_of_attr(vt, "_abstract_fn")` would then wrongly
+        graph-break and silently fall the genuinely-broken op back to eager.
+        The specific check hard-errors as it must.
+        """
+
+        def get_op():
+            @torch.library.custom_op("test::ngb_inside_nofake", mutates_args=[])
+            def op(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            return op
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            my_op = get_op()
+            # pending non-_abstract_fn mutation on the tracked opdef
+            my_op._unrelated_marker = 1
+            return my_op(x)
+
+        with self.assertRaises(RuntimeError):
+            fn(torch.randn(3))
 
 
 instantiate_parametrized_tests(MiscTests)
@@ -17796,15 +18447,20 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             res = opt_func(a)
             self.assertIsInstance(res, torch.Tensor)
 
-    # Known CUDA memory leak: under propagate_real_tensors, a data-dependent
-    # .tolist() retains the real input tensor (via FakeTensor.real_tensor held by
-    # a TrackedFake) past torch._dynamo.reset(). See #190093.
-    @skipCUDAMemoryLeakCheckIf(True)
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
     @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
     def test_interpolate_propagate_real_tensors(self, device):
+        real_tensor_refs = []
+        from_tensor = torch._subclasses.FakeTensorMode.from_tensor
+
+        def record_real_tensor(mode, tensor, **kwargs):
+            fake = from_tensor(mode, tensor, **kwargs)
+            if mode.propagate_real_tensors and fake.real_tensor is not None:
+                real_tensor_refs.append(weakref.ref(fake.real_tensor))
+            return fake
+
         @torch.compile(backend="eager", fullgraph=True)
         def f(mask, box):
             # u0, u1 = mask.tolist()
@@ -17814,7 +18470,18 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
                 mask, (h, w), mode="bilinear", align_corners=False
             )
 
-        f(torch.tensor([30, 30], device=device), torch.tensor([68, 32], device=device))
+        with mock.patch.object(
+            torch._subclasses.FakeTensorMode, "from_tensor", record_real_tensor
+        ):
+            f(
+                torch.tensor([30, 30], device=device),
+                torch.tensor([68, 32], device=device),
+            )
+
+        self.assertTrue(real_tensor_refs)
+        torch._dynamo.reset()
+        gc.collect()
+        self.assertTrue(all(ref() is None for ref in real_tensor_refs))
 
     def test_scalar_isin_decomposition(self):
         def f():

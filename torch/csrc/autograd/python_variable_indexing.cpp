@@ -42,9 +42,7 @@ Py_ssize_t THPVariable_length(PyObject* self) {
     py::object ret = py::reinterpret_steal<py::object>(
         handle_torch_function(self, "__len__"));
     Py_ssize_t length = PyLong_AsSsize_t(ret.ptr());
-    if (PyErr_Occurred()) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(!PyErr_Occurred());
     return length;
   }
   const auto& self_ = THPVariable_Unpack(self);
@@ -152,7 +150,14 @@ inline Variable valueToTensor(
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   Scalar scalar;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
-    scalar = Scalar(THPUtils_unpackLong(value));
+    // uint64 values above INT64_MAX must not go through signed long long unpack
+    // (e.g. x[0] = 1 << 63). See
+    // https://github.com/pytorch/pytorch/issues/191458
+    if (options.dtype().toScalarType() == at::kUInt64) {
+      scalar = Scalar(THPUtils_unpackUInt64(value));
+    } else {
+      scalar = Scalar(THPUtils_unpackLong(value));
+    }
   } else if (PyFloat_Check(value)) {
     scalar = Scalar(THPUtils_unpackDouble(value));
   } else if (PyComplex_Check(value)) {
@@ -376,8 +381,7 @@ static THPObjectPtr wrapTuple(PyObject* index) {
   } else {
     res = PyTuple_Pack(1, index);
   }
-  if (!res)
-    throw python_error();
+  TORCH_CHECK_PYTHON(res);
   return res;
 }
 

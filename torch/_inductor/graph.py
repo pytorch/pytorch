@@ -3200,6 +3200,8 @@ class SubgraphLowering(GraphLowering):
     def __init__(self, parent: GraphLowering, *args: Any, **kwargs: Any) -> None:
         self.parent = parent
         super().__init__(*args, **kwargs)
+        # Donation indices use the parent graph's placeholder ordering, not ours.
+        self.bw_donated_idxs = None
 
     def allocate_non_dup_const_name(self, name: str | None, data: Tensor) -> str:
         name = super().allocate_non_dup_const_name(name, data)

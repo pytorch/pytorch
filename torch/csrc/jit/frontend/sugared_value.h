@@ -721,7 +721,7 @@ struct TORCH_API IterableTree : SugaredValue {
     return unroll_length_;
   }
 
-  // given a IterableTree node, get all the base iterables/leaves under the
+  // given an IterableTree node, get all the base iterables/leaves under the
   // IterableTree node. This enables
   // us to get all the basic SugaredValues that contains valid loop information
   // with len() and getitem()

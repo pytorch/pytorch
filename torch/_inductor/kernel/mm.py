@@ -391,7 +391,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
 
-    if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout):
+    if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout.device.type):
         counters["inductor"]["decompose_mm_pointwise"] += 1
         mat1 = L.unsqueeze(mat1, -1)
         mat2 = L.unsqueeze(mat2, 0)
@@ -443,7 +443,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         # Triton will ever win.
         #
         # To be conservative we increase this threshold for N/M by 2.
-        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "exhaustive"
+        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"
         if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
             templates_to_use.append(mm_template)
 
