@@ -103,11 +103,6 @@ _ipc_storage_reduce_check_registry: dict[str, _Callable] = {}
 
 
 def register_ipc_tensor_reducer(device_type: str, reduce_fn: _Callable) -> None:
-    r"""Register an IPC tensor reducer for a device type.
-
-    The reducer must follow the :mod:`multiprocessing` reducer contract and
-    return a callable plus the arguments used to rebuild the tensor.
-    """
     device_type = torch.device(device_type).type
     if device_type in _ipc_tensor_reduce_registry:
         raise RuntimeError(
@@ -117,10 +112,6 @@ def register_ipc_tensor_reducer(device_type: str, reduce_fn: _Callable) -> None:
 
 
 def register_ipc_storage_check(device_type: str, check_fn: _Callable) -> None:
-    r"""Register a direct storage pickling check for a device type.
-
-    The check must return ``True`` when the storage must not be pickled directly.
-    """
     device_type = torch.device(device_type).type
     if device_type in _ipc_storage_reduce_check_registry:
         raise RuntimeError(
