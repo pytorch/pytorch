@@ -1140,6 +1140,19 @@ class _CompileFxKwargs(TypedDict, total=False):
     get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]]
 
 
+def _cudagraph_compile_kwargs(
+    post_compile_override: bool | None,
+    *,
+    partition_only_regions: bool,
+) -> _CompileFxKwargs:
+    kwargs: _CompileFxKwargs = {}
+    if post_compile_override is not None:
+        kwargs["cudagraphs_post_compile_override"] = post_compile_override
+    if partition_only_regions:
+        kwargs["cudagraph_partition_only_regions"] = True
+    return kwargs
+
+
 class _CompileFxCallable(Protocol):
     def __call__(
         self,
@@ -1157,8 +1170,6 @@ def compile_fx_inner(
     **kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
     kwargs.setdefault("cudagraphs", None)
-    kwargs.setdefault("cudagraphs_post_compile_override", None)
-    kwargs.setdefault("cudagraph_partition_only_regions", False)
     kwargs.setdefault("static_input_idxs", ())
     kwargs.setdefault("is_backward", False)
     kwargs.setdefault("graph_id", None)
@@ -2715,16 +2726,16 @@ def fw_compiler_freezing(
             aot_example_inputs,
             static_input_idxs=static_input_idxs,
             cudagraphs=compiler_config_extra.forward_cudagraphs,
-            cudagraphs_post_compile_override=(
-                compiler_config_extra.forward_cudagraphs_post_compile_override
-            ),
-            cudagraph_partition_only_regions=(
-                compiler_config_extra.enable_forward_region_graph_partition
-            ),
             graph_id=compiler_config_extra.graph_id,
             is_inference=True,
             boxed_forward_device_index=compiler_config_extra.forward_device_index,
             layout_opt=layout_opt,
+            **_cudagraph_compile_kwargs(
+                compiler_config_extra.forward_cudagraphs_post_compile_override,
+                partition_only_regions=(
+                    compiler_config_extra.enable_forward_region_graph_partition
+                ),
+            ),
         )
 
     # aot_inductor codegens a call that takes in just the inputs, so we don't return a wrapper
@@ -3176,15 +3187,15 @@ def compile_fx_forward(
             example_inputs,
             static_input_idxs=get_static_input_idxs(fixed),
             cudagraphs=compiler_config_extra.forward_cudagraphs,
-            cudagraphs_post_compile_override=(
-                compiler_config_extra.forward_cudagraphs_post_compile_override
-            ),
-            cudagraph_partition_only_regions=(
-                compiler_config_extra.enable_forward_region_graph_partition
-            ),
             graph_id=compiler_config_extra.graph_id,
             is_inference=is_inference,
             boxed_forward_device_index=compiler_config_extra.forward_device_index,
+            **_cudagraph_compile_kwargs(
+                compiler_config_extra.forward_cudagraphs_post_compile_override,
+                partition_only_regions=(
+                    compiler_config_extra.enable_forward_region_graph_partition
+                ),
+            ),
         )
 
         if (
@@ -3229,13 +3240,14 @@ def compile_fx_backward(
 
         fixed = count_tangents(gm)
 
-        # Backward cudagraphs baseline. When the top level is off,
-        # compiler_config_extra.forward_cudagraphs may be True only because a
-        # forward region opted in; that bump is specific to the forward graph and
-        # must not leak into the backward, which has its own regions, so start
-        # from off and re-derive below. When the top level is on, keep the shared
+        # Backward cudagraphs baseline. A forward-region opt-in may have changed
+        # the shared box from False to True; that graph-local bump must not leak
+        # into the backward, which has its own regions. Otherwise keep sharing the
         # box so the backward respects the forward's final cudagraph determination.
-        if compiler_config_extra.top_level_cudagraphs:
+        if (
+            compiler_config_extra.top_level_cudagraphs
+            or compiler_config_extra.forward_cudagraphs_post_compile_override is None
+        ):
             backward_cudagraphs = compiler_config_extra.forward_cudagraphs
             backward_cudagraphs_post_compile_override = None
         else:
@@ -3316,15 +3328,13 @@ def compile_fx_backward(
                 example_inputs,
                 static_input_idxs=static_input_idxs,
                 cudagraphs=backward_cudagraphs,
-                cudagraphs_post_compile_override=(
-                    backward_cudagraphs_post_compile_override
-                ),
-                cudagraph_partition_only_regions=(
-                    enable_backward_region_graph_partition
-                ),
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
                 boxed_forward_device_index=(compiler_config_extra.forward_device_index),
+                **_cudagraph_compile_kwargs(
+                    backward_cudagraphs_post_compile_override,
+                    partition_only_regions=enable_backward_region_graph_partition,
+                ),
             )
 
 

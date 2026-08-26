@@ -871,12 +871,15 @@ def create_fx_config(
             compiler_config_extra.backward_cudagraphs_post_compile_override
         )
         boxed_forward_device_index = compiler_config_extra.forward_device_index
-    return {
+    fx_config: _CompileFxKwargs = {
         "cudagraphs": forward_cudagraphs,
-        "cudagraphs_post_compile_override": cudagraphs_post_compile_override,
         "boxed_forward_device_index": boxed_forward_device_index,
         "compile_region_name": compile_region_name,  # pyrefly: ignore[bad-typed-dict-key]
     }
+    if cudagraphs_post_compile_override is not None:
+        # Cache-key-only here; post_compile reads the value serialized in the graph.
+        fx_config["cudagraphs_post_compile_override"] = cudagraphs_post_compile_override
+    return fx_config
 
 
 def _check_triton_cache_version() -> None:
