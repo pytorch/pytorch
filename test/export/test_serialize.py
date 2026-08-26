@@ -42,7 +42,10 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipMPSIf,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -2673,64 +2676,8 @@ class TestSerializeAccelerator(TestCase):
         )
         self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
 
-
-class TestDeserializeAccelerator(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    _check_graph_nodes = TestDeserialize._check_graph_nodes
-    check_graph = TestDeserialize.check_graph
-
-    def test_device(self, device) -> None:
-        class MyModule(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 16, 3, stride=1, bias=True)
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                conv = self.conv(x)
-                relu = self.relu(conv)
-                mul = relu * 0.5
-                return mul
-
-        inp = torch.randn((1, 3, 224, 224), dtype=torch.float).to(device)
-        model = MyModule().eval().to(device)
-        self.check_graph(model, (inp,))
-
-
-class TestSaveLoadAccelerator(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    def test_save_load_accelerator_tensor(self, device) -> None:
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(64, 64)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        m = M().to(device)
-        inp = (torch.randn(1, 64, device=device),)
-        ep = torch.export.export(m, inp)
-        buffer = io.BytesIO()
-        save(ep, buffer)
-        buffer.seek(0)
-        loaded_ep = load(buffer)
-        loaded_sd = loaded_ep.state_dict
-        for name, param in loaded_sd.items():
-            self.assertEqual(
-                param.device.type,
-                torch.device(device).type,
-                lambda msg: f"{msg}\n{name} not on {device}",
-            )
-        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
-
-
-@unittest.skipUnless(HAS_TRITON, "requires triton")
-class TestSerializeTriton(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
+    @unittest.skipUnless(HAS_TRITON, "requires triton")
+    @skipMPSIf(True, "Triton is not available for MPS")
     def test_triton_hop(self, device) -> None:
         @triton.jit
         def add_kernel(
@@ -2878,6 +2825,8 @@ class TestSerializeTriton(TestCase):
                     serialized.example_inputs,
                 )
 
+    @unittest.skipUnless(HAS_TRITON, "requires triton")
+    @skipMPSIf(True, "Triton is not available for MPS")
     def test_triton_constexpr_matching(self, device) -> None:
         @triton.jit
         def kernel_with_constexprs(
@@ -2933,6 +2882,59 @@ class TestSerializeTriton(TestCase):
         self.assertIsNotNone(triton_node)
 
 
+class TestDeserializeAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    _check_graph_nodes = TestDeserialize._check_graph_nodes
+    check_graph = TestDeserialize.check_graph
+
+    def test_device(self, device) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, 3, stride=1, bias=True)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                conv = self.conv(x)
+                relu = self.relu(conv)
+                mul = relu * 0.5
+                return mul
+
+        inp = torch.randn((1, 3, 224, 224), dtype=torch.float).to(device)
+        model = MyModule().eval().to(device)
+        self.check_graph(model, (inp,))
+
+
+class TestSaveLoadAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_save_load_accelerator_tensor(self, device) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(64, 64)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M().to(device)
+        inp = (torch.randn(1, 64, device=device),)
+        ep = torch.export.export(m, inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        loaded_sd = loaded_ep.state_dict
+        for name, param in loaded_sd.items():
+            self.assertEqual(
+                param.device.type,
+                torch.device(device).type,
+                lambda msg: f"{msg}\n{name} not on {device}",
+            )
+        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
+
+
 instantiate_device_type_tests(
     TestSerializeAccelerator,
     globals(),
@@ -2949,9 +2951,6 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestSaveLoadAccelerator, globals(), except_for="cpu", allow_mps=True, allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestSerializeTriton, globals(), except_for="cpu", allow_xpu=True
 )
 
 
