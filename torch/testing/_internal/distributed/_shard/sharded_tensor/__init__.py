@@ -21,9 +21,22 @@ class ShardedTensorTestBase(MultiProcessTestCase):
     def world_size(self):
         return TEST_GPU_NUM
 
-    def init_pg(self, backend="nccl"):
-        if backend not in ["nccl", "gloo", "mpi", "hccl", "xccl"]:
-            raise RuntimeError(f"Backend {backend} not supported!")
+    @property
+    def backend(self) -> str:
+        return dist.get_default_backend_for_device(self.device_type)
+
+    def init_pg(self, backend=None):
+        if backend is None:
+            backend = self.backend
+
+        # set device for accelerator pg for collectives
+        # must be called BEFORE init_process_group, otherwise HCCL
+        # communicator creation fails with "same physical device ID" error
+        acc = torch.accelerator.current_accelerator()
+        if acc is not None:
+            curr_backend = dist.get_default_backend_for_device(acc)
+            if backend == curr_backend:
+                torch.accelerator.set_device_index(self.rank)
 
         dist.init_process_group(
             backend=backend,
@@ -31,10 +44,6 @@ class ShardedTensorTestBase(MultiProcessTestCase):
             rank=self.rank,
             init_method=f"file://{self.file_name}",
         )
-
-        # set device for nccl pg for collectives
-        if backend == "nccl" or backend == "xccl":
-            torch.accelerator.set_device_index(self.rank)
 
     def init_rpc(self):
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
@@ -53,7 +62,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
             rpc_backend_options=rpc_backend_options,
         )
 
-    def init_comms(self, init_rpc=True, backend="nccl"):
+    def init_comms(self, init_rpc=True, backend=None):
         if init_rpc:
             self.init_rpc()
         self.init_pg(backend=backend)
@@ -84,7 +93,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
 
 
 # wrapper to initialize comms (processgroup + rpc)
-def with_comms(func=None, init_rpc=True, backend="nccl"):
+def with_comms(func=None, init_rpc=True, backend=None):
     if func is None:
         return partial(
             with_comms,
@@ -94,16 +103,25 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
+        # Resolve backend: use self.backend if not explicitly provided
+        if backend is None:
+            resolved_backend = self.backend
+        else:
+            resolved_backend = backend
+
         # Skip test if backend requires accelerator but not enough devices available
         acc = torch.accelerator.current_accelerator()
-        if backend in ["nccl", "xccl", "hccl"]:
-            if (
-                acc is None
-                or backend != dist.get_default_backend_for_device(acc)
-                or torch.accelerator.device_count() < self.world_size
-            ):
+        if acc is not None:
+            curr_backend = dist.get_default_backend_for_device(acc)
+            if resolved_backend == curr_backend:
+                if torch.accelerator.device_count() < self.world_size:
+                    sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        else:
+            # No accelerator available, only allow gloo
+            if resolved_backend != "gloo":
                 sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-        self.init_comms(init_rpc=init_rpc, backend=backend)
+
+        self.init_comms(init_rpc=init_rpc, backend=resolved_backend)
         func(self, *args, **kwargs)
         self.destroy_comms(destroy_rpc=init_rpc)
 
