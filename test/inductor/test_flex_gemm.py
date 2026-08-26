@@ -6437,10 +6437,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
 
         self.assertTrue(torch.isnan(actual).all())
-        check = FileCheck().check("cutlass_math.")
+        check = FileCheck().check("cutlass.")
         match case:
             case "clamp":
-                check = check.check("max").check("cutlass_math.min")
+                check = check.check("max").check("cutlass.min")
             case "clamp_min":
                 check = check.check("max")
             case "clamp_max":

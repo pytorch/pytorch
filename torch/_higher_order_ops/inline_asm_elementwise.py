@@ -102,8 +102,7 @@ class InlineAsmElementwiseOp(HigherOrderOperator):
         dtype: torch.dtype,
         is_pure: bool = True,
         pack: int = 1,
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
     @overload
     def __call__(
@@ -114,8 +113,7 @@ class InlineAsmElementwiseOp(HigherOrderOperator):
         dtype: tuple[torch.dtype, ...],
         is_pure: bool = True,
         pack: int = 1,
-    ) -> tuple[torch.Tensor, ...]:
-        ...
+    ) -> tuple[torch.Tensor, ...]: ...
 
     def __call__(
         self,

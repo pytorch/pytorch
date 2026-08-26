@@ -1872,8 +1872,7 @@ class TritonOverrides(OpOverrides):
         cse = V.kernel.cse
         if pack > 1:
             args = ", ".join(
-                f"triton_helpers.inline_asm_pack({inp}, {pack})"
-                for inp in cast_inputs
+                f"triton_helpers.inline_asm_pack({inp}, {pack})" for inp in cast_inputs
             )
         call = asm_call(args)
         cache_key = f"inline_asm_elementwise({call})"
@@ -1882,8 +1881,7 @@ class TritonOverrides(OpOverrides):
             return result
 
         result = tuple(
-            cse.newvar(dtype=dt, shape=first_input.shape)
-            for dt in all_output_dtypes
+            cse.newvar(dtype=dt, shape=first_input.shape) for dt in all_output_dtypes
         )
         compute.writeline(f"{', '.join(map(str, result))} = {call}")
         if pack > 1:
