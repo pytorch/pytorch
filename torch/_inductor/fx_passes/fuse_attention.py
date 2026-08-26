@@ -6,7 +6,9 @@ import logging
 import torch
 from torch.utils._ordered_set import OrderedSet
 
-from ..._dynamo.utils import counters
+from ..._dynamo.exc import TensorifyScalarRestartAnalysis
+from ..._dynamo.symbolic_convert import TensorifyState
+from ..._dynamo.utils import _is_tensorify_enabled, counters
 from ..pattern_matcher import (
     filter_nodes,
     fwd_only,
@@ -1017,6 +1019,27 @@ def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
             scale_factor = scale_factor_node.args[1]
             # make sure the scale_factor a float/int. SymInt?
             if not isinstance(scale_factor, (float, int)):
+                # If it's a FakeTensor (result of tensorify), we signal Dynamo to specialize
+                # this scalar on restart so we can recover SDPA fusion.
+                if (
+                    isinstance(scale_factor, torch.fx.Node)
+                    and _is_tensorify_enabled()
+                    and "val" in scale_factor.meta
+                    and isinstance(
+                        val := scale_factor.meta["val"],
+                        torch._subclasses.fake_tensor.FakeTensor,
+                    )
+                    and val.item_memo is not None
+                    and hasattr(val.item_memo.node._expr, "name")
+                ):
+                    symbol_name = val.item_memo.node._expr.name
+                    if not TensorifyState.should_specialize(symbol_name):
+                        log.info(
+                            "Signaling tensorify restart to specialize SDPA scale: %s",
+                            symbol_name,
+                        )
+                        TensorifyState.specialize(symbol_name)
+                        raise TensorifyScalarRestartAnalysis
                 return False
         return _sfdp_params_check(match)
 
