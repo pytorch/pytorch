@@ -724,7 +724,7 @@ def all_reduce_setup_context(ctx, inputs, output):
     input, reduce_op, group_name = inputs
     ctx.group_name = group_name
     ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
-    if _is_min_max(reduce_op):
+    if _is_min_max(ctx.reduce_op):
         ctx.save_for_backward(input, output)
 
 
@@ -973,7 +973,7 @@ def all_reduce_coalesced_setup_context(ctx, inputs, output):
     tensor_list, reduce_op, group_name = inputs
     ctx.group_name = group_name
     ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
-    if _is_min_max(reduce_op):
+    if _is_min_max(ctx.reduce_op):
         ctx.save_for_backward(*tensor_list, *output)
 
 
