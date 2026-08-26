@@ -1059,6 +1059,23 @@ class TestFakePGUniformRanks(TestCase):
         """Existing behavior must be untouched unless the flag is set."""
         self.assertFalse(FakeProcessGroup.Options().simulate_uniform_ranks)
 
+    def test_new_group_inherits_uniform_rank_simulation(self):
+        opts = FakeProcessGroup.Options()
+        opts.simulate_uniform_ranks = True
+        dist.init_process_group(
+            backend="fake",
+            rank=0,
+            world_size=2,
+            store=FakeStore(),
+            pg_options=opts,
+        )
+
+        process_group = dist.new_group(ranks=[0, 1])
+        self.assertIsInstance(process_group, dist.ProcessGroup)
+        backend = process_group._get_backend(torch.device("cpu"))
+        self.assertIsInstance(backend, FakeProcessGroup)
+        self.assertTrue(backend.options.simulate_uniform_ranks)
+
     def test_allreduce_sum_scales_by_world_size(self):
         """Summing world_size identical tensors multiplies by world_size."""
         pg = self._init(rank=0, world_size=4)

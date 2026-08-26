@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 
+import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import FakeProcessGroup, FakeStore
 
@@ -22,6 +23,14 @@ def _create_fake_pg(common_opts, backend_opts):
     for every collective. It should be used as a convenient tool when playing
     with distributed but don't care about the actual data.
     """
+    # new_group() inherits the default backend name but not its options. Keep
+    # an explicitly selected fake-world contract consistent across subgroups.
+    if backend_opts is None and dist.is_initialized():
+        default_pg = dist.distributed_c10d._get_default_group()
+        default_backend = default_pg._get_backend(torch.device("cpu"))
+        if isinstance(default_backend, FakeProcessGroup):
+            backend_opts = default_backend.options
+
     return FakeProcessGroup._create_internal(
         common_opts.group_rank, common_opts.group_size, backend_opts
     )

@@ -432,9 +432,9 @@ class FakeProcessGroup : public Backend {
       // A slot need not be the size of that segment. Strict uniformity would
       // force the two to match, and rejecting the mismatch was tried: it
       // breaks callers that declare asymmetric splits or a receive-only rank,
-      // which the ads_fake_process_group tests cover and which the shapes here
-      // are meant to serve. The output shape the caller asked for is what it
-      // gets, so tile or truncate to fill it.
+      // which the direct fake-process-group tests cover and which the shapes
+      // here are meant to serve. The output shape the caller asked for is what
+      // it gets, so tile or truncate to fill it.
       //
       // Zero first: the slots should tile over the whole buffer, but a caller
       // that reshapes the output must never read uninitialized memory if they
