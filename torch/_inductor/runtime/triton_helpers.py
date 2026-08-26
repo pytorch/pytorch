@@ -101,7 +101,7 @@ def get_backend_options():
     return get_backend_options_for_target(target)
 
 
-def _is_concrete_backend_option_value(value: Any) -> bool:
+def _is_concrete_backend_option_value(value: object) -> bool:
     import sympy
 
     import torch
@@ -233,6 +233,16 @@ def _prod_accumulate(a, b):
 @triton.jit
 def prod(input, axis):
     return tl.reduce(input, axis, _prod_accumulate)
+
+
+@triton.jit
+def prod_inner_tree(input, axis, reduction_ordering: tl.constexpr):
+    # Strict-numerics only. Emitted solely on the strict path, which is gated
+    # behind has_triton_reduction_ordering(), so Triton builds lacking the
+    # keyword never compile this helper -- keeping default `prod` portable.
+    return tl.reduce(
+        input, axis, _prod_accumulate, reduction_ordering=reduction_ordering
+    )
 
 
 @triton.jit
@@ -1048,7 +1058,7 @@ def constexpr_next_power_of_2(
     n: tl.constexpr, *, _builder: object = None
 ) -> tl.constexpr:
     """
-    A version triton.next_power_of_two that can be used within a kernel on constants.
+    A version of triton.next_power_of_two that can be used within a kernel on constants.
     """
     if not isinstance(n, tl.constexpr):
         raise AssertionError(f"Expected tl.constexpr, got {type(n)}")

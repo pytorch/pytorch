@@ -91,6 +91,21 @@ class TestOnlineSoftmax(TestCase):
         self.assertIn("online_softmax_combine(", code)
         self.assertNotIn("online_softmax_reduce_scalar_combine", code)
 
+    @parametrize("op", (torch.softmax, torch.log_softmax))
+    @requires_nvidia_cuda
+    @inductor_config.patch(
+        {
+            "triton.persistent_reductions": False,
+            "split_reductions": False,
+        }
+    )
+    def test_scalar_online_softmax_default_operator(self, op):
+        x = torch.randn(4, 8193, dtype=torch.float32, device=GPU_TYPE)
+        act, (code,) = run_and_get_code(torch.compile(op), x, dim=-1)
+
+        self.assertEqual(op(x, dim=-1), act, rtol=1e-3, atol=1e-3)
+        self.assertIn("online_softmax_reduce_scalar_combine", code)
+
     def get_softmax_wrapper(self, V=50304, use_log_softmax=False, device=GPU_TYPE):
         N = 32 * 1024
 
@@ -359,6 +374,36 @@ class TestOnlineSoftmax(TestCase):
             self.assertNotIn("online_softmax_reduce_scalar_combine", code)
             self.assertIn("online_softmax_combine(", code)
             self.assertIn("combo_grid_meta", code)
+
+    @requires_nvidia_cuda
+    @inductor_config.patch(
+        {
+            **SCALAR_ONLINE_SOFTMAX_CONFIG,
+            "combo_kernels": True,
+            "combo_kernel_per_subkernel_blocks": True,
+            "combo_kernel_max_distance": -1,
+            "combo_kernel_peak_memory_increase_gb": None,
+            "combo_kernel_peak_memory_pct_threshold": None,
+        }
+    )
+    def test_ineligible_scalar_online_softmax_stays_in_combo_kernel(self):
+        def f(a, b, c, d, e, f_, g, h):
+            lhs = _prepare_softmax(a + b + c + d, -1)
+            rhs = _prepare_softmax(e + f_ + g + h, -1)
+            return (*lhs, *rhs)
+
+        args = tuple(
+            torch.randn(4, 8192, dtype=torch.float32, device=GPU_TYPE) for _ in range(8)
+        )
+        inductor_metrics.reset()
+        self.addCleanup(inductor_metrics.reset)
+        act, codes = run_and_get_code(torch.compile(f), *args)
+
+        self.assertEqual(f(*args), act, rtol=1e-3, atol=1e-3)
+        self.assertEqual(inductor_metrics.generated_kernel_count, 1)
+        code = "\n".join(codes)
+        self.assertNotIn("online_softmax_reduce_scalar_combine", code)
+        self.assertIn("combo_grid_meta", code)
 
     @requires_nvidia_cuda
     @inductor_config.patch(SCALAR_ONLINE_SOFTMAX_CONFIG)
@@ -807,6 +852,27 @@ class TestOnlineSoftmax(TestCase):
 
         opt_f = torch.compile(f)
         torch.testing.assert_close(f(x, y), opt_f(x, y), atol=1e-3, rtol=1e-3)
+
+    @requires_nvidia_cuda
+    @inductor_config.patch(
+        {
+            **SCALAR_ONLINE_SOFTMAX_CONFIG,
+            "triton.max_tiles": 3,
+            "triton.prefer_nd_tiling": True,
+        }
+    )
+    def test_scalar_online_softmax_3d_tiling(self):
+        def f(x, y):
+            return (x * y).softmax(dim=-1)
+
+        M, N, K = 32, 8, 8193
+        x = torch.randn(M, N, K, device=GPU_TYPE)
+        y = torch.randn(N, M, K, device=GPU_TYPE).permute(1, 0, 2)
+        act, (code,) = run_and_get_code(torch.compile(f), x, y)
+
+        self.assertEqual(f(x, y), act, atol=1e-3, rtol=1e-3)
+        self.assertIn("YBLOCK", code)
+        self.assertIn("online_softmax_reduce_scalar_combine", code)
 
     @parametrize("dtype", [torch.bfloat16, torch.float32])
     def test_nan_propagation(self, dtype):

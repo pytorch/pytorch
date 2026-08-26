@@ -1809,10 +1809,10 @@ class TritonTemplateKernel(TritonKernel):
         block_ptr=False,
         tma_compatibility_checker: TMACompatibilityChecker | None = None,
         mask_constant_index=False,
+        allow_reduction_invariant_indexing=False,
     ):
         """
-        Override the default indexing to use our custom mask and force
-        dense indexing.
+        Override the default indexing to use our custom mask and output shape.
         """
         return super().indexing(
             index,
@@ -1824,6 +1824,7 @@ class TritonTemplateKernel(TritonKernel):
             block_ptr=block_ptr,
             tma_compatibility_checker=tma_compatibility_checker,
             mask_constant_index=mask_constant_index,
+            allow_reduction_invariant_indexing=allow_reduction_invariant_indexing,
         )
 
     def codegen_range_tree(self):
@@ -3473,6 +3474,9 @@ class ExternKernelCaller(ChoiceCaller):
         self.has_out_variant = has_out_variant
         self.gm = choice.gm
         self.bmreq: BenchmarkRequest | None = None
+        # Per-op dynamic-dims mask stamped by choices.py to drive TunableOp
+        # wildcard persistence during autotune; only extern (aten) callers use it.
+        self.tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None
 
         from torch._inductor.autotune_process import (
             ExternKernelBenchmarkRequest,
@@ -3528,6 +3532,14 @@ class ExternKernelCaller(ChoiceCaller):
             raise AssertionError("self.bmreq must not be None")
         # pyrefly: ignore[missing-attribute]
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
+        mask = self.tunable_dyn_dims_mask
+        # TunableOp only exists in CUDA/ROCm builds; gate on the output device
+        # so a non-empty mask on a CPU op does not hit a missing _C binding.
+        if mask is not None and any(mask) and out.is_cuda:
+            with torch.cuda.tunable.dynamic_dims_mask(
+                M=mask[0], N=mask[1], K=mask[2], BATCH=mask[3]
+            ):
+                return self.bmreq.benchmark(*args, out=out)
         return self.bmreq.benchmark(*args, out=out)
 
     def benchmark_collective(self, *args, out):
@@ -4140,6 +4152,10 @@ class AlgorithmSelectorCache(PersistentCache):
                     # Await autotuning in subproc pool
                     autotune_start_ts = time.time()
                     results = AsyncAutotuner.get_results(final_choices, inputs_key)
+                    if not any(math.isfinite(timing) for timing in results.values()):
+                        raise self.create_no_valid_choices(
+                            name, "All choices failed to benchmark for backend."
+                        )
                     autotune_wait_ts = time.time() - autotune_start_ts
                     AlgorithmSelectorCache.log_results(
                         name,
@@ -4958,8 +4974,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 # benchmarks the expanded 2D input; keep both backed by the
                 # same values by making all rows identical.
                 global_tensor = unique_example_inputs[input_node.get_name()]
-                global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
-                additional_example_inputs[extern_name] = global_tensor[0].contiguous()
+                if global_tensor.shape[0] == 0:
+                    # No row to copy, and the 1D bias does not depend on M.
+                    bias = cls.benchmark_example_value(extern_node, hint_override)
+                else:
+                    global_tensor[:] = global_tensor[0:1].expand_as(global_tensor)
+                    bias = global_tensor[0].contiguous()
+                additional_example_inputs[extern_name] = bias
 
             return {
                 **unique_example_inputs,
@@ -4967,7 +4988,11 @@ class AlgorithmSelectorCache(PersistentCache):
             }
 
         extern_choice = next(
-            (choice for choice in choices if cls._is_extern(choice)),
+            (
+                choice
+                for choice in choices
+                if cls._uses_layout_preserving_inputs(choice)
+            ),
             None,
         )
         extern_input_nodes = input_nodes
@@ -4981,7 +5006,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
             extern_input_nodes = extern_choice.input_nodes
 
-            if extern_choice.name == "addmm":
+            if cls._is_extern(extern_choice) and extern_choice.name == "addmm":
                 unique_example_inputs_extern = addmm_unique_example_inputs_extern()
 
         example_inputs = list(unique_example_inputs.values())
@@ -5097,11 +5122,27 @@ class AlgorithmSelectorCache(PersistentCache):
     def _is_extern(choice: ChoiceCaller) -> bool:
         return isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
 
+    @staticmethod
+    def _uses_layout_preserving_inputs(choice: ChoiceCaller) -> bool:
+        """Return whether benchmark inputs must preserve their original layout.
+
+        In-process template benchmarks use these tensors when generated kernels
+        consume runtime layout metadata. Subprocess reconstruction currently
+        preserves sizes and strides, but not nonzero storage offsets.
+        """
+        from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplateCaller
+
+        return AlgorithmSelectorCache._is_extern(choice) or isinstance(
+            choice, FlyDSLTemplateCaller
+        )
+
     @classmethod
     def benchmark_choice(
         cls, choice: ChoiceCaller, autotune_args: AutotuneArgs
     ) -> float:
-        benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
+        benchmark_tensors = autotune_args.get_benchmark_tensors(
+            cls._uses_layout_preserving_inputs(choice)
+        )
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
         try:
@@ -5195,7 +5236,7 @@ class AlgorithmSelectorCache(PersistentCache):
         rank = dist.get_rank(process_group)
 
         benchmark_tensors: BenchmarkTensors = autotune_args.get_benchmark_tensors(
-            cls._is_extern(choice)
+            cls._uses_layout_preserving_inputs(choice)
         )
         inputs, output = benchmark_tensors.unpack()
         output.zero_()

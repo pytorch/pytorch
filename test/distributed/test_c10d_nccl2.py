@@ -5,6 +5,7 @@
 import ctypes
 import json
 import os
+import pickle
 import subprocess
 import sys
 import tempfile
@@ -74,6 +75,33 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         opts.config.max_ctas = 4
         self.assertEqual(opts.config.cga_cluster_size, 2)
         self.assertEqual(opts.config.max_ctas, 4)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 22), "Need NCCL 2.22+ for collective time estimation")
+    @skip_if_lt_x_gpu(2)
+    def test_time_estimate(self) -> None:
+        torch.cuda.set_device(self.device)
+        process_group = dist.distributed_c10d._get_default_group()
+        tensor = torch.full((1024,), self.rank, device=self.device)
+        with dist._time_estimator(group=process_group, device=self.device) as context:
+            dist.all_reduce(tensor)
+        if context.estimated_time is None:
+            self.fail("NCCL time estimator did not produce a result")
+        self.assertGreater(context.estimated_time, 0)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_allocate_tensor(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        if not backend.supports_tensor_alloc(self.device):
+            self.skipTest("multicast support is not available")
+        tensor = backend.allocate_tensor(1024, dtype=torch.float32, device=self.device)
+        tensor.fill_(self.rank)
+        dist.all_reduce(tensor)
+        self.assertEqual(
+            tensor,
+            torch.full_like(tensor, float(sum(range(self.world_size)))),
+        )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -378,6 +406,7 @@ class ProcessGroupNCCL2ScalableInitTest(_ProcessGroupNCCL2OptionsTest):
         self._check_all_reduce()
 
 
+@unittest.skipIf(torch.cuda.device_count() < 3, "requires at least 3 GPUs")
 class ProcessGroupNCCL2UnevenScalableInitTest(ProcessGroupNCCL2ScalableInitTest):
     world_size = 3
     ranks_per_root = 2
@@ -535,6 +564,146 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
                 work.wait()
         else:
             time.sleep(30)
+
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+
+class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_flight_recorder_dumped_on_timeout(self) -> None:
+        # The dump is written by the abort hook c10d::FlightRecorderHook
+        # registers, which nccl2 runs when it detects the timeout. NoHandling
+        # both keeps the process alive so the test can read the artifact back,
+        # and is the configuration where abortProcess() returns without running
+        # any hook -- so this only passes if the hooks fire at detection.
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        env = {
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "0",
+            "TORCH_FR_DUMP_TEMP_FILE": os.path.join(tempdir.name, "trace_"),
+        }
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=5))
+            self._check_all_reduce(pg)
+            # Gloo records into a FlightRecorder instance of its own. Give it
+            # something to hold so the dump below is evidence that only the
+            # backend whose abort hook fired reaches disk.
+            gloo_pg = dist.new_group(backend="gloo")
+            dist.all_reduce(torch.ones(7), group=gloo_pg)
+
+            path = env["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
+            if self.rank == 0:
+                # Nobody else joins, so this can never complete and the
+                # watchdog trips on it.
+                dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
+                # Healthy collectives must not have dumped anything, or the
+                # artifact below would not be evidence of the timeout.
+                self.assertFalse(os.path.exists(path))
+                # The watchdog wakes once a second; poll until the file is
+                # there and complete -- it reads back empty mid-write.
+                dump = None
+                deadline = time.time() + 60
+                while dump is None and time.time() < deadline:
+                    try:
+                        with open(path, "rb") as f:
+                            dump = pickle.load(f)
+                    except (OSError, EOFError, pickle.UnpicklingError):
+                        time.sleep(0.5)
+                self.assertIsNotNone(dump, msg=f"no trace written to {path}")
+                self.assertIn("version", dump)
+                self.assertIn("pg_config", dump)
+                self.assertIn("pg_status", dump)
+                # The collective that hung has to be in the trace -- that is the
+                # whole point of the post-mortem. timeout_ms pins it to the
+                # subgroup that timed out rather than the default group.
+                hung = [e for e in dump["entries"] if e["input_sizes"] == [[1024]]]
+                self.assertEqual(len(hung), 1)
+                self.assertEqual(hung[0]["profiling_name"], "nccl2:all_reduce")
+                self.assertEqual(hung[0]["timeout_ms"], 5000)
+                # ... and it has to read as unfinished. The watchdog marked this
+                # work TIMEDOUT, which Work::isCompleted() also answers true to,
+                # so a completion report on a failed work would retire the entry
+                # and hide the culprit. Only successful completion is pushed.
+                self.assertFalse(hung[0]["retired"], msg=str(hung[0]))
+                self.assertNotEqual(hung[0]["state"], "completed", msg=str(hung[0]))
+                # Unset reads None here; the JSON dump spells the same thing 0.
+                self.assertIsNone(hung[0]["time_discovered_completed_ns"])
+                # The healthy collectives on the same group did get their
+                # completion pushed, so the dump distinguishes them.
+                healthy = [e for e in dump["entries"] if e["input_sizes"] == [[4]]]
+                self.assertTrue(healthy)
+                for e in healthy:
+                    self.assertTrue(e["retired"], msg=str(e))
+                    self.assertEqual(e["state"], "completed", msg=str(e))
+                # A culprit with no code location is most of the diagnostic
+                # value gone, so the abort dump attempts stack traces (default
+                # on, TORCH_INCLUDE_STACK_TRACE) instead of giving up on them
+                # because symbolizing may need the GIL. Symbolizing is what is
+                # bounded, not skipped.
+                frames = hung[0]["frames"]
+                self.assertTrue(frames, msg=str(hung[0]))
+                self.assertTrue(
+                    any(f["filename"].endswith("test_c10d_nccl2.py") for f in frames),
+                    msg=str(frames),
+                )
+                # Only nccl2's instance, matching stock, whose sole
+                # DebugInfoWriter caller is ProcessGroupNCCL::dumpDebuggingInfo.
+                self.assertEqual(
+                    {e["profiling_name"].split(":")[0] for e in dump["entries"]},
+                    {"nccl2"},
+                )
+            else:
+                # A rank that saw no failure must not have written a trace.
+                time.sleep(30)
+                self.assertFalse(os.path.exists(path))
+
+        dist.destroy_process_group(gloo_pg)
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+
+# Its own class because the abort hook dumps at most once per process, and
+# MultiProcContinuousTest reuses the processes across a class's tests.
+class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_flight_recorder_dump_is_bounded(self) -> None:
+        # Symbolizing a traceback may need the GIL, so the attempt that
+        # includes stack traces is made under a bounded wait and abandoned for
+        # one without them if it does not land in time. What may never happen
+        # is the rank hanging in the abort hook instead of dying: the hook's
+        # one-shot mutex queues every other thread behind it. A zero bound runs
+        # both attempts out of time, and the rank still has to come back and a
+        # readable trace still has to reach disk.
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        env = {
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "0",
+            "TORCH_FR_DUMP_TEMP_FILE": os.path.join(tempdir.name, "trace_"),
+            "TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC": "0",
+        }
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=5))
+            self._check_all_reduce(pg)
+            path = env["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
+            if self.rank == 0:
+                dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
+                dump = None
+                deadline = time.time() + 60
+                while dump is None and time.time() < deadline:
+                    try:
+                        with open(path, "rb") as f:
+                            dump = pickle.load(f)
+                    except (OSError, EOFError, pickle.UnpicklingError):
+                        time.sleep(0.5)
+                self.assertIsNotNone(dump, msg=f"no trace written to {path}")
+                hung = [e for e in dump["entries"] if e["input_sizes"] == [[1024]]]
+                self.assertEqual(len(hung), 1)
+                self.assertEqual(hung[0]["profiling_name"], "nccl2:all_reduce")
+            else:
+                time.sleep(30)
 
         dist.destroy_process_group(pg)
         self._check_all_reduce()
@@ -965,7 +1134,7 @@ dist.init_process_group(
     rank=0,
     world_size=1,
     store=dist.HashStore(),
-    device_id=torch.device("cuda:0"),
+    device_id={device_id},
 )
 assert not torch.cuda.is_initialized(), "creating a process group initialized CUDA"
 {extra}
@@ -976,20 +1145,27 @@ dist.destroy_process_group()
 class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
     """Constructing a process group must not need the CUDA caching allocator up.
 
-    Eager init (`init_process_group(device_id=...)`) allocated the barrier
-    buffer from the caching allocator, so a process that had made no torch.cuda
-    call died inside init_process_group with "Allocator not initialized for
-    device 0". Any external launcher or library that builds the PG before
-    touching CUDA hits this. Runs in a subprocess because the harness (and
-    every other test here) calls torch.cuda.set_device in setUp, which hides it.
+    Eager init allocates the barrier buffer before a process necessarily makes
+    a torch.cuda call. Runs in a subprocess because the harness calls
+    torch.cuda.set_device in setUp, which hides uninitialized-allocator bugs.
     """
 
-    def _run_child(self, extra: str = "") -> None:
+    def _run_child(
+        self,
+        extra: str = "",
+        device_id: str = 'torch.device("cuda:0")',
+        child_env: dict[str, str] | None = None,
+    ) -> None:
         try:
             subprocess.check_output(
-                [sys.executable, "-c", _UNINITIALIZED_CUDA_SCRIPT.format(extra=extra)],
+                [
+                    sys.executable,
+                    "-c",
+                    _UNINITIALIZED_CUDA_SCRIPT.format(device_id=device_id, extra=extra),
+                ],
                 stderr=subprocess.STDOUT,
                 cwd=os.path.dirname(os.path.realpath(__file__)),
+                env=child_env,
                 timeout=300,
             )
         except subprocess.TimeoutExpired:
@@ -1002,6 +1178,42 @@ class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
     @skip_if_lt_x_gpu(1)
     def test_eager_init(self) -> None:
         self._run_child()
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_eager_init_without_device_id(self) -> None:
+        self._run_child(device_id="None")
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires at least 2 GPUs")
+    def test_eager_init_with_per_rank_visible_device(self) -> None:
+        child_env = os.environ.copy()
+        visible_devices = child_env.get("CUDA_VISIBLE_DEVICES")
+        child_env["CUDA_VISIBLE_DEVICES"] = (
+            visible_devices.split(",")[1].strip() if visible_devices else "1"
+        )
+        child_env["LOCAL_RANK"] = "1"
+        self._run_child(device_id="None", child_env=child_env)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_creator_without_process_group(self) -> None:
+        self._run_child(
+            """
+opts = torch._C._distributed_c10d._DistributedBackendOptions()
+opts.store = dist.HashStore()
+opts.group_rank = 0
+opts.group_size = 1
+opts.timeout = dist.constants.default_pg_timeout
+opts.group_id = "standalone"
+opts.global_ranks_in_group = [0]
+backend = dist.distributed_c10d._create_nccl2_process_group(opts, None)
+backend.shutdown()
+"""
+        )
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()

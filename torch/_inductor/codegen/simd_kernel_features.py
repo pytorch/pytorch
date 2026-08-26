@@ -15,11 +15,12 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from ...utils._ordered_set import OrderedSet
 from ...utils._sympy.functions import FloorDiv, Min, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
+from .. import ir
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
-from ..runtime.hints import ReductionHint
+from ..runtime.hints import ReductionHint, SCALAR_ONLINE_SOFTMAX_MIN_RBLOCK
 from ..runtime.runtime_utils import next_power_of_2
 from ..scheduler import SchedulerNode
-from ..utils import cache_on_self
+from ..utils import cache_on_self, prefix_is_reduction
 from ..virtualized import V
 
 
@@ -32,6 +33,10 @@ if typing.TYPE_CHECKING:
 _INNER_REDUCTION_RATIO = 32
 _SMALL_INNER_REDUCTION_RATIO = 16
 _SMALL_INNER_REDUCTION_MAX_RBLOCK = 512
+# Keep the scalar online-softmax selector within the simple fused kernels
+# covered by the performance sweep. These are profitability limits.
+_SCALAR_ONLINE_SOFTMAX_MAX_LOADS = 3
+_SCALAR_ONLINE_SOFTMAX_MAX_REDUCTIONS = 2
 
 
 def tiling_scores_suggest_inner_reduction(
@@ -104,7 +109,8 @@ class EnableReduction(NodeScheduleMarker):
 
 class SIMDKernelFeatures:
     """
-    An ordered schedule of nodes that will become a single kernel.
+    An ordered schedule of nodes that will become a single kernel. A separately
+    emitted stage may contribute only to ``indexing_node_schedule``.
     """
 
     def __init__(
@@ -114,8 +120,13 @@ class SIMDKernelFeatures:
         reduction_numel: sympy.Expr = sympy.S.One,
         coalesce_analysis: CoalesceVarAnalysis | None = None,
         tiling_scores: dict[str, sympy.Expr] | None = None,
+        *,
+        indexing_node_schedule: list[NodeScheduleEntry] | None = None,
     ):
         self.node_schedule = node_schedule
+        self.indexing_node_schedule = (
+            node_schedule if indexing_node_schedule is None else indexing_node_schedule
+        )
         # numel excludes reduction_numel
         self.numel: sympy.Expr = V.graph.sizevars.simplify(numel)
         self.reduction_numel: sympy.Expr = V.graph.sizevars.simplify(reduction_numel)
@@ -132,6 +143,7 @@ class SIMDKernelFeatures:
             self.reduction_numel,
             self.coalesce_analysis,
             tiling_scores,
+            indexing_node_schedule=self.indexing_node_schedule,
         )
 
     @cache_on_self
@@ -142,14 +154,44 @@ class SIMDKernelFeatures:
     def scheduler_nodes(self) -> Iterable[SchedulerNode]:
         return tuple(NodeScheduleMarker.only_nodes(self.node_schedule))
 
+    @cache_on_self
+    def indexing_scheduler_nodes(self) -> Iterable[SchedulerNode]:
+        return tuple(NodeScheduleMarker.only_nodes(self.indexing_node_schedule))
+
     def reduction_nodes(self) -> list[SchedulerNode]:
         return [n for n in self.scheduler_nodes() if n.is_reduction()]
+
+    @cache_on_self
+    def strict_reductions(self) -> tuple[ir.Reduction, ...]:
+        return tuple(
+            node.node.data
+            for node in self.reduction_nodes()
+            if isinstance(node.node, ir.ComputedBuffer)
+            and isinstance(node.node.data, ir.Reduction)
+            and node.node.data.strict_reduction_rblock is not None
+        )
+
+    def has_strict_multirow_reduction(self) -> bool:
+        return any(r.strict_reduction_multirow for r in self.strict_reductions())
+
+    @cache_on_self
+    def strict_reduction_rblock(self) -> int | None:
+        rblocks = OrderedSet(
+            reduction.strict_reduction_rblock for reduction in self.strict_reductions()
+        )
+        if not rblocks:
+            return None
+        if len(rblocks) != 1:
+            raise AssertionError(
+                f"strict reductions require one reduction block size, got {rblocks}"
+            )
+        return next(iter(rblocks))
 
     @cache_on_self
     def buf_accesses(self) -> dict[str, list[Dep]]:
         """only needed for config.benchmark_kernel"""
         buf_accesses = collections.defaultdict(list)
-        for node in self.scheduler_nodes():
+        for node in self.indexing_scheduler_nodes():
             for access in node.read_writes.reads | node.read_writes.writes:
                 buf_accesses[access.name].append(access)
         return buf_accesses
@@ -193,6 +235,59 @@ class SIMDKernelFeatures:
                     return True
         return False
 
+    def can_use_scalar_online_softmax(
+        self,
+        tiling: dict[str, sympy.Expr],
+        tiling_scores: dict[str, sympy.Expr] | None,
+    ) -> bool:
+        """Return whether scalar online-softmax accumulation is profitable."""
+        scheduler_nodes = tuple(self.scheduler_nodes())
+        if (
+            not scheduler_nodes
+            or tuple(self.indexing_scheduler_nodes()) != scheduler_nodes
+            or sum(prefix_is_reduction(prefix) for prefix in tiling) != 1
+            or not any(not prefix_is_reduction(prefix) for prefix in tiling)
+            or self.get_reduction_hint(tiling_scores) != ReductionHint.INNER
+        ):
+            return False
+
+        reduction_nodes = self.reduction_nodes()
+        if len(reduction_nodes) > _SCALAR_ONLINE_SOFTMAX_MAX_REDUCTIONS or not any(
+            isinstance(node.node, (ir.ComputedBuffer, ir.TemplateBuffer))
+            and node.node.get_reduction_type() == "online_softmax_reduce"
+            for node in reduction_nodes
+        ):
+            return False
+
+        produced_names = OrderedSet(
+            buf.get_name() for node in scheduler_nodes for buf in node.get_outputs()
+        )
+        external_reads = OrderedSet(
+            dep
+            for node in scheduler_nodes
+            for dep in node.read_writes.reads
+            if isinstance(dep, MemoryDep) and dep.name not in produced_names
+        )
+        if len(external_reads) > _SCALAR_ONLINE_SOFTMAX_MAX_LOADS:
+            return False
+
+        reduction_numel = self.reduction_numel
+        if free_unbacked_symbols(reduction_numel):
+            return False
+        reduction_numel_hint = next_power_of_2(
+            int(V.graph.sizevars.optimization_hint(reduction_numel))
+        )
+        if reduction_numel_hint < SCALAR_ONLINE_SOFTMAX_MIN_RBLOCK:
+            return False
+
+        device = scheduler_nodes[0].get_device()
+        return (
+            device is not None
+            and device.type == "cuda"
+            and torch.version.hip is None
+            and not self.has_multiple_escaping_full_size_outputs()
+        )
+
     def contains_op(self, op_name: str) -> bool:
         """True if V.ops.{op_name} is used in node_schedule"""
         return bool(self.op_counts().get(op_name))
@@ -208,7 +303,7 @@ class SIMDKernelFeatures:
     def select_index_dtype(self) -> torch.dtype:
         # Gather all used buffer names
         buffer_names: OrderedSet[str] = OrderedSet()
-        for node in self.scheduler_nodes():
+        for node in self.indexing_scheduler_nodes():
             buffer_names.update(node.get_buffer_names())
             buffer_names.update(node.used_buffer_names())
         buffers = [V.graph.get_buffer(name) for name in buffer_names]
@@ -253,7 +348,7 @@ class SIMDKernelFeatures:
 
         int32_max = sympy.Integer(2**31 - 1)
         int32_min = sympy.Integer(-(2**31))
-        for node in self.scheduler_nodes():
+        for node in self.indexing_scheduler_nodes():
             for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes):
                 if not isinstance(dep, MemoryDep):
                     continue
@@ -413,7 +508,7 @@ class MemoryEstimator:
         self.groups = groups
         self.symbols = [make_symbol(SymT.INDEX, i) for i in range(len(groups))]
         # We are doing two estimates simultaneously:
-        # 1) the first is a for a non-persistent (aka looped) reduction, using self.outside_loop/self.loops
+        # 1) the first is for a non-persistent (aka looped) reduction, using self.outside_loop/self.loops
         # we add an item to loops each corresponding to each reduction loop in the kernel
         # outside_loop is only used for broadcasting or point-wise ops that don't use the reduction dimension
         # 2) the second is for a persistent kernel, using self.persistent

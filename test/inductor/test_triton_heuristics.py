@@ -52,6 +52,7 @@ from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
     _enforce_reduction_config_block_minimums,
+    _find_names,
     _num_warps,
     _persistent_reduction_configs,
     _reduction_configs,
@@ -67,6 +68,12 @@ from torch._inductor.runtime.triton_heuristics import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
+
+
+class _FindNamesProbe:
+    # A gc-tracked stand-in for a CachingAutotuner; object() is untracked, so a
+    # dict holding one can itself stay untracked and escape gc.get_referrers.
+    pass
 
 
 @triton.jit
@@ -96,6 +103,41 @@ def get_autotuned_amd_sqr_kernel():
 @instantiate_parametrized_tests
 class TestTritonHeuristics(TestCase):
     device_type = GPU_TYPE
+
+    def test_find_names_ignores_frame_locals(self):
+        """
+        A kernel held only by frame locals has no name, so DebugAutotuner can
+        fall back to inductor_meta["kernel_name"]. The stack walk used to leak
+        _find_names' own `obj` and the caller's `self` into the result.
+        """
+        probe = _FindNamesProbe()
+        self.assertEqual(_find_names(probe), [])
+
+    def test_find_names_finds_namespace_binding(self):
+        probe = _FindNamesProbe()
+        namespace = {"triton_poi_fused_add_0": probe}
+        try:
+            self.assertIn("triton_poi_fused_add_0", _find_names(probe))
+        finally:
+            del namespace
+
+    def test_unbound_kernel_falls_back_to_inductor_meta_name(self):
+        """
+        The label DebugAutotuner.run derives for an unbound kernel. The stack
+        walk made _find_names return ['obj', 'self'], so max(..., key=len)
+        picked "self" instead of reaching the inductor_meta fallback.
+        """
+
+        class FakeAutotuner:
+            inductor_meta = {"kernel_name": "triton_poi_fused_add_0"}
+
+            def kernel_name(self):
+                possible_names = _find_names(self)
+                if possible_names:
+                    return f"{max(possible_names, key=len)}"
+                return self.inductor_meta["kernel_name"]
+
+        self.assertEqual(FakeAutotuner().kernel_name(), "triton_poi_fused_add_0")
 
     def test_triton_config(self):
         """
@@ -186,9 +228,38 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(cfg.kwargs["XBLOCK"], 512)
         self.assertEqual(cfg.kwargs["R0_BLOCK"], 128)
 
-    @parametrize("major,baseline_rblock", [(8, 2048), (10, 1024)])
-    def test_scalar_online_softmax_reduction_configs(self, major, baseline_rblock):
-        device = self._fake_cuda_device_properties()._replace(major=major)
+    @parametrize(
+        "major,cc,expected_baseline_configs,expected_scalar_configs",
+        [
+            (
+                8,
+                80,
+                [(1, 2048, 16, 1)],
+                [(1, 4096, 16, 1), (1, 8192, 4, 1), (1, 16384, 8, 1)],
+            ),
+            (
+                10,
+                100,
+                [(1, 1024, 8, 1)],
+                [(1, 4096, 16, 1), (1, 8192, 4, 1), (1, 16384, 8, 1)],
+            ),
+            (
+                10,
+                103,
+                [(1, 1024, 8, 1), (1, 4096, 8, 1)],
+                [
+                    (1, 4096, 16, 1),
+                    (1, 8192, 4, 1),
+                    (1, 16384, 8, 1),
+                    (1, 4096, 8, 1),
+                ],
+            ),
+        ],
+    )
+    def test_scalar_online_softmax_reduction_configs(
+        self, major, cc, expected_baseline_configs, expected_scalar_configs
+    ):
+        device = self._fake_cuda_device_properties()._replace(major=major, cc=cc)
         size_hints = {"x": 128, "r0_": 32768}
         triton_meta = {"device": device}
 
@@ -231,12 +302,13 @@ class TestTritonHeuristics(TestCase):
 
         self.assertEqual(
             config_values(set()),
-            [(1, baseline_rblock, baseline_rblock // 128, 1)],
+            expected_baseline_configs,
         )
         self.assertEqual(
             config_values({AutotuneHint.SCALAR_ONLINE_SOFTMAX}),
-            [(1, 4096, 16, 1), (1, 8192, 4, 1), (1, 16384, 8, 1)],
+            expected_scalar_configs,
         )
+        baseline_rblock = expected_baseline_configs[0][1]
         self.assertEqual(tiled_block_products(set())[0], baseline_rblock)
         scalar_tiled_products = tiled_block_products(
             {AutotuneHint.SCALAR_ONLINE_SOFTMAX}
