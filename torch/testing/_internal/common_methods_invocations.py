@@ -7282,8 +7282,10 @@ def sample_inputs_frexp(op_info, device, dtype, requires_grad, **kwargs):
     # Subnormals and signed zero. A frexp built on a float-valued library call
     # loses these wherever the backend flushes subnormals to zero, which the
     # generated samples never exercise. float64 is left out because gradcheck
-    # runs there, and the derivative at a float64 subnormal is 2**1074, which
-    # overflows to inf while the numerical estimate stays finite.
+    # runs there and would fail: the derivative at a subnormal is 1/2**exponent,
+    # which overflows to inf while the numerical estimate stays finite. The same
+    # overflow happens at float32 and float16, but nothing gradchecks those, so
+    # the only grad comparison these samples feed is inf against inf.
     bits_dtype = {
         torch.float32: torch.int32,
         torch.float16: torch.int16,
