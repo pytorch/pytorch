@@ -554,7 +554,7 @@ __host__ __device__
     abort();                     \
   }
 #else
-#if defined(USE_ROCM) && defined(__HIPCC__)
+#if defined(USE_ROCM) && defined(__HIP_DEVICE_COMPILE__)
 namespace torch::headeronly::detail {
 // OCKL treats is_last=1 append as printf format; double '%' for literal output.
 // Worst-case escaped size is 2 * N - 1 (each source byte may become two).
@@ -603,50 +603,37 @@ constexpr auto rocm_assert_concat(
   return rocm_assert_escape_format(msg.data);
 }
 
-__device__ __attribute__((flatten)) void rocm_assert_one_shot(
-    const char* msg,
+template <unsigned N>
+__device__ inline __attribute__((flatten)) void rocm_assert_one_shot_device(
+    const char (&msg)[N],
     unsigned length) {
   auto d = __ockl_fprintf_stderr_begin();
   __ockl_fprintf_append_string_n(d, msg, length, 1);
   __builtin_trap();
 }
 
+// Thin __host__ __device__ forwarder required: hipcc's device pass still
+// type-checks host-only call sites (e.g. MemoryAccess.cuh LoadWithCast ctors
+// that call host TensorIteratorBase APIs). A __device__-only helper fails with
+// "call to __device__ function from __host__ function". Host runtime uses the
+// #else __assert_fail macro; this wrapper is not emitted for host codegen.
 template <unsigned N>
-__host__ __device__ inline void rocm_kernel_assert(
-    const char* cond,
-    const char* file,
-    unsigned int line,
-    const char* func,
+__host__ __device__ inline void rocm_assert_one_shot(
     const char (&msg)[N],
-    unsigned msg_length) {
-#if defined(__HIP_DEVICE_COMPILE__)
-  (void)cond;
-  (void)file;
-  (void)line;
-  (void)func;
-  rocm_assert_one_shot(msg, msg_length);
-#else
-  (void)msg;
-  (void)msg_length;
-  __assert_fail(cond, file, line, func);
-#endif
+    unsigned length) {
+  rocm_assert_one_shot_device(msg, length);
 }
 } // namespace torch::headeronly::detail
 
-#define CUDA_KERNEL_ASSERT(cond)                             \
-  if C10_UNLIKELY (!(cond)) {                                \
-    static constexpr auto _rocm_assert_msg =                 \
-        ::torch::headeronly::detail::rocm_assert_concat(     \
-            __FILE__ ":" C10_STRINGIZE(__LINE__) ": ",       \
-            __func__,                                        \
+#define CUDA_KERNEL_ASSERT(cond)                              \
+  if C10_UNLIKELY (!(cond)) {                                 \
+    static constexpr auto _rocm_assert_msg =                  \
+        ::torch::headeronly::detail::rocm_assert_concat(      \
+            __FILE__ ":" C10_STRINGIZE(__LINE__) ": ",        \
+            __func__,                                         \
             ": Device-side assertion `" #cond "' failed.\n"); \
-    ::torch::headeronly::detail::rocm_kernel_assert(         \
-        #cond,                                               \
-        __FILE__,                                            \
-        static_cast<unsigned int>(__LINE__),                 \
-        __func__,                                            \
-        _rocm_assert_msg.data,                               \
-        _rocm_assert_msg.length);                            \
+    ::torch::headeronly::detail::rocm_assert_one_shot(        \
+        _rocm_assert_msg.data, _rocm_assert_msg.length);      \
   }
 #else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
@@ -654,7 +641,7 @@ __host__ __device__ inline void rocm_kernel_assert(
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
-#endif // defined(USE_ROCM) && defined(__HIPCC__)
+#endif // defined(USE_ROCM) && defined(__HIP_DEVICE_COMPILE__)
 #define CUDA_KERNEL_ASSERT_MSG(cond, msg)                              \
   if (C10_UNLIKELY(!(cond))) {                                         \
     __assert_fail(                                                     \
