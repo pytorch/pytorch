@@ -2966,6 +2966,29 @@ class TestSDPACudaOnly(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_cudnn_attention_decode_disabled_on_affected_blackwell(self, device):
+        cudnn_version = torch.backends.cudnn.version() or 0
+        device_capability = torch.cuda.get_device_capability()
+        affected_arch = device_capability[0] in (10, 11)
+        if not (affected_arch and cudnn_version >= 91900):
+            self.skipTest("Requires cuDNN 9.19+ on SM 10.x or 11.x")
+
+        query = torch.randn(2, 8, 1, 64, device=device, dtype=torch.float16)
+        key = torch.randn(2, 8, 128, 64, device=device, dtype=torch.float16)
+        value = torch.randn(2, 8, 128, 64, device=device, dtype=torch.float16)
+        params = SDPAParams(query, key, value, None, 0.0, False, False)
+
+        self.assertFalse(torch.backends.cuda.can_use_cudnn_attention(params))
+        with self.assertRaisesRegex(RuntimeError, "cuDNN SDPA decode is disabled"):
+            torch.ops.aten._scaled_dot_product_cudnn_attention.default(
+                query, key, value, None, False, 0.0, False, False
+            )
+        with self.assertRaisesRegex(RuntimeError, "cuDNN SDPA decode is disabled"):
+            torch.ops.aten._cudnn_attention_forward.default(
+                query, key, value, None, None, None, 1, 128, False, 0.0, False, False
+            )
+
     # TODO USED FOR TESTING THE SCORES, e.g. testing ALIBI we don't need this now
     def normalize_flash_attn_S(
         self,

@@ -163,6 +163,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
 #include <ATen/native/cudnn/MHA.h>
+#include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils.h>
 
 #include <ATen/cuda/Exceptions.h>
@@ -206,6 +207,12 @@ static void check_cudnn_sdpa_execution(fe::error_t err) {
             "calling torch.cuda.memory.set_per_process_memory_fraction(fraction) "
             "early in the process to leave memory available for cuDNN."
           : "");
+}
+
+void check_cudnn_sdpa_decode(int64_t s_q) {
+  TORCH_CHECK(
+      s_q != 1 || !sdp::is_cudnn_attention_decode_disabled(),
+      "cuDNN SDPA decode is disabled for cuDNN versions 9.19+ on SM 10.x and 11.x.");
 }
 
 // Whether we will use ragged offsets in the dense (non-nested) path
@@ -1539,6 +1546,7 @@ void run_cudnn_SDP_fprop(
   if (!q.numel() || !k.numel() || !v.numel()) {
     return;
   }
+  check_cudnn_sdpa_decode(s_q);
   Tensor seqlen_q, seqlen_kv;
   Tensor rag_off_q, rag_off_k, rag_off_v, rag_off_o, rag_off_lse;
 
@@ -1707,6 +1715,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
     }
     return;
   }
+  check_cudnn_sdpa_decode(s_q);
   const bool is_paged = page_table.has_value();
   TORCH_INTERNAL_ASSERT(
       !is_paged || seqused_k.has_value(),
@@ -1877,6 +1886,7 @@ void run_cudnn_SDP_bprop(
       !softmaxstats.numel()) {
     return;
   }
+  check_cudnn_sdpa_decode(s_q);
   Tensor seqlen_q, seqlen_kv;
   Tensor rag_off_q, rag_off_k, rag_off_v, rag_off_o, rag_off_lse;
 
@@ -2047,6 +2057,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
     dV.zero_();
     return;
   }
+  check_cudnn_sdpa_decode(s_q);
   TORCH_CHECK(
       softmaxstats.dim() == 2, "cuDNN SDPA expected a 2D (H, T) softmax_lse");
   auto softmaxstats_ = softmaxstats.unsqueeze(-1).transpose(0, 1);
