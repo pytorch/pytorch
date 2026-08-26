@@ -128,6 +128,7 @@ void XPUGraphImpl::capture_begin(
   auto graph_impl = xpuGraph_t(capture_stream_.queue(), sycl_property);
   graph_ = std::make_unique<xpuGraph_t>(std::move(graph_impl));
   graph_->begin_recording(capture_stream_.queue());
+  c10::xpu::XPUGraphCaptureRegistry::get().setActiveGraph(graph_.get());
 
   TORCH_INTERNAL_ASSERT(
       capture_stream_.queue().ext_oneapi_get_state() == queue_state::recording);
@@ -143,6 +144,7 @@ void XPUGraphImpl::capture_end() {
       "Capture must end on the same stream it began on.");
 
   graph_->end_recording();
+  c10::xpu::XPUGraphCaptureRegistry::get().clearActiveGraph();
 
   c10::xpu::XPUCachingAllocator::markCaptureEnd(capture_dev_);
 
