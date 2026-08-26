@@ -86,7 +86,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     runOnRocm,
-    skipIfRocm,
     skipIfRocmArch,
     skipIfWindows,
     skipIfWindowsXPU,
@@ -2009,7 +2008,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179958")
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
@@ -2026,13 +2024,14 @@ class AOTInductorTestsTemplate:
         model = Model()
 
         # Scale inputs so this grid-size test is not sensitive to FP16 BMM noise.
+        # Outputs stay under 0.125, where 1 fp16 ULP exceeds same()'s 1e-4 tolerance.
         def make_inputs(batch):
             return (
-                0.5
+                0.25
                 * random_matrix_with_scaled_reduction_dim(
                     M, K, batch, device=self.device, dtype=dtype, reduction_dim=-1
                 ),
-                0.5
+                0.25
                 * random_matrix_with_scaled_reduction_dim(
                     K, N, batch, device=self.device, dtype=dtype, reduction_dim=-2
                 ),
