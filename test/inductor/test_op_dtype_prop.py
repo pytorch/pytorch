@@ -327,9 +327,7 @@ class TestCase(InductorTestCase):
             return torch._foreach_mul(inputs, val)
 
         inputs = [torch.randn(8, device=device, dtype=torch.float32)]
-        scalar = torch.tensor(
-            0.333333333333333333, device=device, dtype=torch.float64
-        )
+        scalar = torch.tensor(0.333333333333333333, device=device, dtype=torch.float64)
 
         compiled = torch.compile(fn, fullgraph=True)
         code = run_and_get_triton_code(compiled, inputs, scalar)
