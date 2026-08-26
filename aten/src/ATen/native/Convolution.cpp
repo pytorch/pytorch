@@ -1,7 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/Config.h>
-#include <ATen/Parallel.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/ConvolutionMM3d.h>
@@ -69,8 +67,6 @@
 #include <ATen/ops/cudnn_convolution.h>
 #include <ATen/ops/cudnn_convolution_transpose.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/empty_like.h>
-#include <ATen/ops/empty_native.h>
 #include <ATen/ops/miopen_convolution.h>
 #include <ATen/ops/miopen_convolution_transpose.h>
 #include <ATen/ops/miopen_depthwise_convolution.h>

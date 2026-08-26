@@ -20,7 +20,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/cat.h>
 #include <ATen/ops/sparse_coo_tensor.h>
 #endif
 

@@ -16,8 +16,6 @@
 #include <torch/csrc/utils/structseq.h>
 #include <sstream>
 
-#include <structmember.h>
-
 namespace torch::utils {
 
 PyObject* returned_structseq_repr(PyStructSequence* obj) {

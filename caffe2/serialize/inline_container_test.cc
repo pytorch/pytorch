@@ -6,7 +6,6 @@
 #include <gtest/gtest.h>
 
 #include <c10/util/Logging.h>
-#include "c10/core/CPUAllocator.h"
 #include "c10/util/irange.h"
 #include "caffe2/serialize/in_memory_adapter.h"
 #include "caffe2/serialize/inline_container.h"

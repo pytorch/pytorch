@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/Config.h>
 #include <ATen/native/ConvUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -16,7 +15,6 @@
 #include <ATen/ops/miopen_convolution_transpose_native.h>
 #include <ATen/ops/miopen_depthwise_convolution_native.h>
 #include <ATen/ops/squeeze.h>
-#include <ATen/ops/sum.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #endif

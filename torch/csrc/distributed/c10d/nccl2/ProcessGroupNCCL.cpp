@@ -14,7 +14,6 @@
 #include <unordered_set>
 
 #include <ATen/Context.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/env.h>
@@ -25,7 +24,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 
 namespace c10d::nccl2 {
 

@@ -5,7 +5,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/WorkNCCL.hpp>
 
 #include <ATen/core/ivalue.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>

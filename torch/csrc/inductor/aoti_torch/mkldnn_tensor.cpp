@@ -1,4 +1,3 @@
-#include <ATen/Config.h>
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
 
 #if AT_MKLDNN_ENABLED()

@@ -30,8 +30,6 @@
 #include <ATen/ops/_print_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/allclose_native.h>
-#include <ATen/ops/aminmax.h>
-#include <ATen/ops/argsort_native.h>
 #include <ATen/ops/cat.h>
 #include <ATen/ops/clamp.h>
 #include <ATen/ops/clamp_max.h>

@@ -5,7 +5,6 @@
 #include <ATen/native/mkldnn/xpu/FusionUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/utils/ParamUtils.h>
-#include <ATen/ops/empty.h>
 #include <c10/util/Exception.h>
 #include <torch/library.h>
 #include <optional>

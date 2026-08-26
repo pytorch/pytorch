@@ -5,7 +5,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 
 #include <ATen/native/SortingUtils.h>
