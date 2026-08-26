@@ -140,12 +140,13 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 };
 
 struct CublasLtWorkspace {
-  CublasLtWorkspace() {
-    size = at::cuda::getCUDABlasLtWorkspaceSize();
-    workspace = at::cuda::getEagerCUDABlasWorkspace(size);
-    ptr = workspace.get();
-    if (ptr == nullptr && size != 0) {
+  CublasLtWorkspace()
+      : ptr(nullptr), size(at::cuda::getCUDABlasLtWorkspaceSize()) {
+    if (at::cuda::isCUDABlasWorkspaceCachingEnabled()) {
       ptr = at::cuda::getCUDABlasLtWorkspace(size);
+    } else {
+      workspace = at::cuda::allocateCUDABlasWorkspace(size);
+      ptr = workspace.get();
     }
   }
 

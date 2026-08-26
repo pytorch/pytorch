@@ -22,6 +22,11 @@ Returns the index of the current CUDA device.
 
 **Example:**
 
+The returned cuBLAS handle uses cuBLAS's default workspace unless ATen
+workspace caching is explicitly enabled. Internal ATen operations may
+temporarily bind an eager workspace to this handle, but restore the default
+workspace before releasing that allocation.
+
 ```cpp
 #include <c10/cuda/CUDAFunctions.h>
 

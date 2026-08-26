@@ -19,9 +19,9 @@ struct MAGMAQueue {
   MAGMAQueue() = delete;
 
   // Constructor
-  explicit MAGMAQueue(int64_t device_id) {
-    cublasHandle_t handle =
-        at::cuda::getCurrentCUDABlasHandle(workspace_);
+  explicit MAGMAQueue(int64_t device_id)
+      : handle_(at::cuda::getCurrentCUDABlasHandleWithWorkspace()) {
+    cublasHandle_t handle = handle_;
 #if !defined(USE_ROCM)
     // Magma operations is numerically sensitive, so TF32 should be off
     // regardless of the global flag.
@@ -51,7 +51,9 @@ struct MAGMAQueue {
   }
 
  private:
-  at::DataPtr workspace_;
+  // MAGMA borrows the cuBLAS handle until queue destruction, so keep its eager
+  // workspace owner alive for the same lifetime.
+  at::cuda::CUDABlasHandleWithWorkspace handle_;
   magma_queue_t magma_queue_;
 #if !defined(USE_ROCM)
   cublasMath_t original_math_mode;

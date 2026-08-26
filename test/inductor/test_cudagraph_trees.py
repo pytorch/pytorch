@@ -2171,11 +2171,11 @@ if HAS_CUDA_AND_TRITON:
                             or "at::cuda::blas::bgemm_internal_cublaslt<float, float>"
                             in str(e)
                         )
-                        # CUDA uses getCurrentCUDABlasHandle/getNewWorkspace,
-                        # ROCm uses getNewCUDABlasLtWorkspace/getCUDABlasLtWorkspace
+                        # CUDA and ROCm allocate BLAS workspaces through the
+                        # shared allocation helper.
                         self.assertTrue(
                             "getCurrentCUDABlasHandle" in str(e)
-                            or "getNewWorkspace" in str(e)
+                            or "allocateWorkspace" in str(e)
                             or "CUDABlasLtWorkspace" in str(e)
                         )
 
