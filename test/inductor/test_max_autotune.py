@@ -594,150 +594,6 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
-    def test_max_autotune_persistent_tma_workspace_reuse(self, device):
-        """
-        Test that make_kernel_render creates unique workspace names.
-
-        This test patches get_tma_workspace_arg to return the same WorkspaceArg
-        instance, simulating the bug condition where templates share workspace_arg.
-        The fix in make_kernel_render should create a new WorkspaceArg with a
-        unique name for each kernel, preventing self-assignment bugs like
-        'workspace_X = workspace_X; del workspace_X'.
-        """
-        from torch._inductor.codegen.common import WorkspaceZeroMode
-
-        def three_same_shape_matmuls(a, b, c, d, e, f):
-            x = torch.mm(a, b)
-            y = torch.mm(c, d)
-            z = torch.mm(e, f)
-            return x, y, z
-
-        M, K, N = 4608, 2048, 7040
-
-        a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
-        b = torch.randn(K, N, device=device, dtype=torch.bfloat16)
-
-        mm_tma_heuristic = CUDAPersistentTMATemplateConfigHeuristic()
-        mm_heuristic = CUDAMMTemplateConfigHeuristic()
-
-        original_tma_configs = mm_tma_heuristic.mm_configs
-        original_mm_configs = mm_heuristic.mm_configs
-
-        # Create a single WorkspaceArg to be returned by all calls
-        shared_workspace_arg = WorkspaceArg(
-            count=1024,
-            zero_mode=WorkspaceZeroMode.UNINITIALIZED,
-            device=torch.device(device),
-            outer_name="shared_workspace",
-        )
-
-        def mock_get_tma_workspace_arg(*args, **kwargs):
-            return shared_workspace_arg
-
-        try:
-            # Force only TMA template by clearing non-TMA configs
-            mm_heuristic.mm_configs = []
-
-            # Use a single TMA config to ensure deterministic behavior
-            mm_tma_heuristic.mm_configs = [GemmConfig(128, 128, 64, 4, 8, group_m=8)]
-
-            with (
-                config.patch(
-                    {
-                        "max_autotune_gemm": True,
-                        "max_autotune_gemm_backends": "TRITON",
-                        "triton.enable_persistent_tma_matmul": True,
-                    }
-                ),
-                fresh_cache(),
-                patch(
-                    "torch._inductor.heuristics.template.triton.get_tma_workspace_arg",
-                    mock_get_tma_workspace_arg,
-                ),
-            ):
-                torch._dynamo.reset()
-                compiled_fn = torch.compile(
-                    three_same_shape_matmuls, mode="max-autotune-no-cudagraphs"
-                )
-
-                _, _ = run_and_get_code(compiled_fn, a, b, a, b, a, b)
-
-        finally:
-            mm_tma_heuristic.mm_configs = original_tma_configs
-            mm_heuristic.mm_configs = original_mm_configs
-
-    @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
-    )
-    def test_workspace_size_bytes_accounts_for_dtype(self, device):
-        """workspace_size passed to benchmark request must be in bytes, not elements."""
-        import sympy
-
-        from torch._inductor.codegen.common import WorkspaceZeroMode
-        from torch._inductor.utils import get_dtype_size
-
-        count = 1024
-        dtype = torch.float32
-        expected_bytes = count * get_dtype_size(dtype)
-
-        fake_ws = WorkspaceArg(
-            count=sympy.Integer(count),
-            zero_mode=WorkspaceZeroMode.UNINITIALIZED,
-            device=torch.device(device),
-            outer_name="test_ws",
-            dtype=dtype,
-        )
-
-        captured_sizes = []
-        orig_init = TritonBenchmarkRequest.__init__
-
-        def spy_init(self, *args, **kwargs):
-            captured_sizes.append(kwargs.get("workspace_size"))
-            orig_init(self, *args, **kwargs)
-
-        M, K, N = 64, 64, 64
-        a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
-        b = torch.randn(K, N, device=device, dtype=torch.bfloat16)
-
-        mm_tma_heuristic = CUDAPersistentTMATemplateConfigHeuristic()
-        mm_heuristic = CUDAMMTemplateConfigHeuristic()
-        original_tma_configs = mm_tma_heuristic.mm_configs
-        original_mm_configs = mm_heuristic.mm_configs
-
-        try:
-            mm_heuristic.mm_configs = []
-            mm_tma_heuristic.mm_configs = [GemmConfig(128, 128, 64, 4, 8, group_m=8)]
-
-            with (
-                config.patch(
-                    {
-                        "max_autotune_gemm": True,
-                        "max_autotune_gemm_backends": "TRITON",
-                        "triton.enable_persistent_tma_matmul": True,
-                    }
-                ),
-                fresh_cache(),
-                patch(
-                    "torch._inductor.heuristics.template.triton.get_tma_workspace_arg",
-                    return_value=fake_ws,
-                ),
-                patch.object(TritonBenchmarkRequest, "__init__", spy_init),
-            ):
-                torch._dynamo.reset()
-                torch.compile(torch.mm, mode="max-autotune-no-cudagraphs")(a, b)
-
-        finally:
-            mm_tma_heuristic.mm_configs = original_tma_configs
-            mm_heuristic.mm_configs = original_mm_configs
-
-        ws_sizes = [s for s in captured_sizes if s is not None]
-        self.assertTrue(len(ws_sizes) > 0, "No workspace benchmark requests created")
-        for size in ws_sizes:
-            self.assertEqual(size, expected_bytes)
-
-    @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
-    )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
         "Hopper-style mm_persistent_tma template is shadowed by the Blackwell warp-specialized TMA template on data-center Blackwell.",
@@ -3426,6 +3282,154 @@ class TestMaxAutotuneCuda(TestCase):
         return a, b
 
     @fresh_cache()
+    @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    def test_max_autotune_persistent_tma_workspace_reuse(self, device):
+        """
+        Test that make_kernel_render creates unique workspace names.
+
+        This test patches get_tma_workspace_arg to return the same WorkspaceArg
+        instance, simulating the bug condition where templates share workspace_arg.
+        The fix in make_kernel_render should create a new WorkspaceArg with a
+        unique name for each kernel, preventing self-assignment bugs like
+        'workspace_X = workspace_X; del workspace_X'.
+        """
+        from torch._inductor.codegen.common import WorkspaceZeroMode
+
+        def three_same_shape_matmuls(a, b, c, d, e, f):
+            x = torch.mm(a, b)
+            y = torch.mm(c, d)
+            z = torch.mm(e, f)
+            return x, y, z
+
+        M, K, N = 4608, 2048, 7040
+
+        a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+        b = torch.randn(K, N, device=device, dtype=torch.bfloat16)
+
+        mm_tma_heuristic = CUDAPersistentTMATemplateConfigHeuristic()
+        mm_heuristic = CUDAMMTemplateConfigHeuristic()
+
+        original_tma_configs = mm_tma_heuristic.mm_configs
+        original_mm_configs = mm_heuristic.mm_configs
+
+        # Create a single WorkspaceArg to be returned by all calls
+        shared_workspace_arg = WorkspaceArg(
+            count=1024,
+            zero_mode=WorkspaceZeroMode.UNINITIALIZED,
+            device=torch.device(device),
+            outer_name="shared_workspace",
+        )
+
+        def mock_get_tma_workspace_arg(*args, **kwargs):
+            return shared_workspace_arg
+
+        try:
+            # Force only TMA template by clearing non-TMA configs
+            mm_heuristic.mm_configs = []
+
+            # Use a single TMA config to ensure deterministic behavior
+            mm_tma_heuristic.mm_configs = [GemmConfig(128, 128, 64, 4, 8, group_m=8)]
+
+            with (
+                config.patch(
+                    {
+                        "max_autotune_gemm": True,
+                        "max_autotune_gemm_backends": "TRITON",
+                        "triton.enable_persistent_tma_matmul": True,
+                    }
+                ),
+                fresh_cache(),
+                patch(
+                    "torch._inductor.heuristics.template.triton.get_tma_workspace_arg",
+                    mock_get_tma_workspace_arg,
+                ),
+            ):
+                torch._dynamo.reset()
+                compiled_fn = torch.compile(
+                    three_same_shape_matmuls, mode="max-autotune-no-cudagraphs"
+                )
+
+                _, _ = run_and_get_code(compiled_fn, a, b, a, b, a, b)
+
+        finally:
+            mm_tma_heuristic.mm_configs = original_tma_configs
+            mm_heuristic.mm_configs = original_mm_configs
+
+    @fresh_cache()
+    @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    def test_workspace_size_bytes_accounts_for_dtype(self, device):
+        """workspace_size passed to benchmark request must be in bytes, not elements."""
+        import sympy
+
+        from torch._inductor.codegen.common import WorkspaceZeroMode
+        from torch._inductor.utils import get_dtype_size
+
+        count = 1024
+        dtype = torch.float32
+        expected_bytes = count * get_dtype_size(dtype)
+
+        fake_ws = WorkspaceArg(
+            count=sympy.Integer(count),
+            zero_mode=WorkspaceZeroMode.UNINITIALIZED,
+            device=torch.device(device),
+            outer_name="test_ws",
+            dtype=dtype,
+        )
+
+        captured_sizes = []
+        orig_init = TritonBenchmarkRequest.__init__
+
+        def spy_init(self, *args, **kwargs):
+            captured_sizes.append(kwargs.get("workspace_size"))
+            orig_init(self, *args, **kwargs)
+
+        M, K, N = 64, 64, 64
+        a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+        b = torch.randn(K, N, device=device, dtype=torch.bfloat16)
+
+        mm_tma_heuristic = CUDAPersistentTMATemplateConfigHeuristic()
+        mm_heuristic = CUDAMMTemplateConfigHeuristic()
+        original_tma_configs = mm_tma_heuristic.mm_configs
+        original_mm_configs = mm_heuristic.mm_configs
+
+        try:
+            mm_heuristic.mm_configs = []
+            mm_tma_heuristic.mm_configs = [GemmConfig(128, 128, 64, 4, 8, group_m=8)]
+
+            with (
+                config.patch(
+                    {
+                        "max_autotune_gemm": True,
+                        "max_autotune_gemm_backends": "TRITON",
+                        "triton.enable_persistent_tma_matmul": True,
+                    }
+                ),
+                fresh_cache(),
+                patch(
+                    "torch._inductor.heuristics.template.triton.get_tma_workspace_arg",
+                    return_value=fake_ws,
+                ),
+                patch.object(TritonBenchmarkRequest, "__init__", spy_init),
+            ):
+                torch._dynamo.reset()
+                torch.compile(torch.mm, mode="max-autotune-no-cudagraphs")(a, b)
+
+        finally:
+            mm_tma_heuristic.mm_configs = original_tma_configs
+            mm_heuristic.mm_configs = original_mm_configs
+
+        ws_sizes = [s for s in captured_sizes if s is not None]
+        self.assertTrue(len(ws_sizes) > 0, "No workspace benchmark requests created")
+        for size in ws_sizes:
+            self.assertEqual(size, expected_bytes)
+
+    @fresh_cache()
     @skipIfXpu(msg="XPU doesn't support sm carveout")
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support sm carveout")
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support persistent TMA")
@@ -3934,7 +3938,7 @@ class TestMaxAutotuneCuda(TestCase):
 class TestTemplateConfigPruning(TestCase):
     """Test class for pruning logic in GEMM autotuning."""
 
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     @classmethod
     def setUpClass(cls):
@@ -5731,9 +5735,12 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         return f
 
     @contextlib.contextmanager
-    def _setup_mm_heuristic(self, use_async_compile: bool):
+    def _setup_mm_heuristic(self, use_async_compile: bool, device):
         """Setup MM heuristic with single GemmConfig and handle cleanup."""
-        mm_heuristic = CUDAMMTemplateConfigHeuristic()
+        if torch.device(device).type == "xpu":
+            mm_heuristic = XPUMMTemplateConfigHeuristic()
+        else:
+            mm_heuristic = CUDAMMTemplateConfigHeuristic()
         original_mm_configs = mm_heuristic.mm_configs
         gemm_config = GemmConfig(64, 64, 32, 2, 4, group_m=8)
         mm_heuristic.mm_configs = [gemm_config]
@@ -5903,7 +5910,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         f = self._get_mm_with_epilogue_fn()
         a, b = self._get_mm_inputs(device)
 
-        with self._setup_mm_heuristic(use_async_compile):
+        with self._setup_mm_heuristic(use_async_compile, device):
             with self.get_common_patches(
                 use_async_compile,
                 False,
@@ -5961,7 +5968,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         else:
             triton_time = unfused_time - estimated_fused + 0.01
 
-        with self._setup_mm_heuristic(use_async_compile):
+        with self._setup_mm_heuristic(use_async_compile, device):
             with self.get_common_patches(
                 use_async_compile,
                 False,
@@ -6026,7 +6033,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         f = self._get_mm_with_epilogue_fn()
         a, b = self._get_mm_inputs(device)
 
-        with self._setup_mm_heuristic(use_async_compile):
+        with self._setup_mm_heuristic(use_async_compile, device):
             with self.get_common_patches(
                 use_async_compile,
                 False,
@@ -6092,7 +6099,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         f = self._get_mm_with_epilogue_fn()
         a, b = self._get_mm_inputs(device)
 
-        with self._setup_mm_heuristic(use_async_compile):
+        with self._setup_mm_heuristic(use_async_compile, device):
             with self.get_common_patches(
                 use_async_compile,
                 False,
@@ -6140,7 +6147,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         def always_allow_prologue(*args):
             return True
 
-        with self._setup_mm_heuristic(use_async_compile):
+        with self._setup_mm_heuristic(use_async_compile, device):
             with self.get_common_patches(
                 use_async_compile,
                 False,
@@ -6412,12 +6419,7 @@ instantiate_device_type_tests(
     TestMaxAutotune, globals(), except_for="cpu", allow_xpu=True
 )
 instantiate_device_type_tests(TestMaxAutotuneCuda, globals(), only_for="cuda")
-instantiate_device_type_tests(
-    TestTemplateConfigPruning,
-    globals(),
-    except_for="cpu",
-    allow_xpu=True,
-)
+instantiate_device_type_tests(TestTemplateConfigPruning, globals(), only_for="cuda")
 instantiate_device_type_tests(
     TestMaxAutotunePrecompile,
     globals(),
