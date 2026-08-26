@@ -28,12 +28,19 @@ CUDA_ARCHES = ["12.6", "13.0", "13.2", "13.4"]
 CUDA_STABLE = "13.0"
 # Only consumed by generate_docker_release_matrix.py, whose Dockerfile installs
 # an already-published torch nightly. A CUDA version belongs here only once its
-# wheels are on the download.pytorch.org index, so 13.4 is deliberately absent.
+# wheels are on the download.pytorch.org index.
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "13.0": "13.0.3",
     "13.2": "13.2.1",
+    "13.4": "13.4.0",
 }
+# CUDA versions that can only produce the runtime docker image. The devel image
+# apt-installs cuda-toolkit-<major>-<minor> from NVIDIA's repo, which carries
+# 13-0 through 13-3 only: 13.4 is still a release candidate (13.4.0rc1). The
+# runtime image just pip-installs the published cu134 nightly, so it builds.
+# Drop an entry once its toolkit ships in the apt repo.
+CUDA_ARCHES_RUNTIME_IMAGE_ONLY = ["13.4"]
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
     "13.0": "9",
