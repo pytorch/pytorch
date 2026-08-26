@@ -48,13 +48,18 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
+    subtest,
     TEST_CUDA,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_XPU,
     xfailIfROCm,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU, IS_BIG_GPU
+from torch.testing._internal.inductor_utils import (
+    HAS_GPU,
+    IS_BIG_GPU,
+    requires_block_ptr,
+)
 
 
 if TEST_WITH_ROCM:
@@ -2196,6 +2201,39 @@ class CudaReproTests(TestCase):
         self.assertEqual(foo_c(t[1:]), foo(t_orig[1:]))
         self.assertEqual(t, t_orig)
 
+    def test_misaligned_saved_for_backward_input(self):
+        # A user input saved for backward but unused in forward compute reaches
+        # the backward graph as a primal. The backward compile must not assume
+        # it is aligned just because the first call's example was: unlike
+        # params/buffers, its address changes every call.
+        N = 1024
+
+        class ScaleGradient(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, value, weight):
+                ctx.save_for_backward(weight)
+                return value.expand(N).clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (weight,) = ctx.saved_tensors
+                return (grad_output * weight).sum().reshape(1), None
+
+        compiled = torch.compile(ScaleGradient.apply, dynamic=False)
+
+        def run(weight):
+            value = torch.ones(1, device=device_type, requires_grad=True)
+            compiled(value, weight).sum().backward()
+            self.assertEqual(value.grad, weight.sum().to(value.dtype).reshape(1))
+
+        aligned = torch.ones(N, device=device_type, dtype=torch.int32)
+        self.assertEqual(aligned.data_ptr() % 16, 0)
+        run(aligned)
+
+        misaligned = torch.ones(N + 1, device=device_type, dtype=torch.int32)[1:]
+        self.assertNotEqual(misaligned.data_ptr() % 16, 0)
+        run(misaligned)
+
     def test_non_commutative_scan_op(self):
         from torch._higher_order_ops.associative_scan import associative_scan
 
@@ -2313,7 +2351,10 @@ class CudaReproTests(TestCase):
         self.assertIn("reduction_hint=ReductionHint.INNER", persistent_code)
         self.assertNotIn("for roffset", persistent_code)
 
-    @parametrize("use_block_ptr", [False, True])
+    @parametrize(
+        "use_block_ptr",
+        [subtest(False), subtest(True, decorators=[requires_block_ptr])],
+    )
     @parametrize("dynamic_batch", [False, True])
     @config.patch(
         {
@@ -2719,7 +2760,16 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             if mark_dynamic:
                 torch._dynamo.mark_dynamic(inp, 0)
             foo_c = torch.compile(foo)
-            torch.testing.assert_allclose(foo(inp), foo_c(inp))
+            torch.testing.assert_close(
+                foo(inp),
+                foo_c(inp),
+                rtol=0,
+                atol=0,
+                equal_nan=True,
+                check_device=True,
+                check_dtype=False,
+                check_stride=False,
+            )
 
     @skipCUDAIf(
         not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
