@@ -125,7 +125,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     set_default_dtype,
     set_default_dtype_if_supported,
-    set_rng_seed,
     skipIfTorchDynamo,
     TEST_XPU,
     TestCase,
@@ -1967,6 +1966,7 @@ class TestDistributions(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_multinomial_2d(self):
         total_count = 10
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
@@ -1978,7 +1978,7 @@ class TestDistributions(DistributionsTestCase):
             Multinomial(total_count, p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3)
         )
         self.assertEqual(Multinomial(total_count, p).sample((6,)).size(), (6, 2, 3))
-        set_rng_seed(0)
+
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, p), [p])
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
 
@@ -2019,6 +2019,7 @@ class TestDistributions(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
@@ -2034,7 +2035,6 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(Categorical, (p,))
 
         # sample check for extreme value of probs
-        set_rng_seed(0)
         self.assertEqual(
             Categorical(s).sample(sample_shape=(2,)), torch.tensor([[0, 1], [0, 1]])
         )
@@ -2113,6 +2113,7 @@ class TestDistributions(DistributionsTestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_poisson_log_prob(self):
         rate = torch.randn(2, 3).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
@@ -2123,7 +2124,6 @@ class TestDistributions(DistributionsTestCase):
             expected = scipy.stats.poisson.logpmf(x.cpu(), l.cpu())
             self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
-        set_rng_seed(0)
         self._check_log_prob(Poisson(rate), lambda *args: ref_log_prob(rate, *args))
         self._check_log_prob(
             Poisson(rate_zero), lambda *args: ref_log_prob(rate_zero, *args)
@@ -2324,6 +2324,7 @@ class TestDistributions(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_uniform(self):
         low = torch.zeros(5, 5, requires_grad=True)
         high = (torch.ones(5, 5) * 3).requires_grad_()
@@ -2346,7 +2347,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(uniform.cdf(below_low).item(), 0)
         self.assertEqual(uniform.cdf(above_high).item(), 1)
 
-        set_rng_seed(1)
         self._gradcheck_log_prob(Uniform, (low, high))
         self._gradcheck_log_prob(Uniform, (low, 1.0))
         self._gradcheck_log_prob(Uniform, (0.0, high))
@@ -2365,6 +2365,7 @@ class TestDistributions(DistributionsTestCase):
 
     @expectedFailureMPS
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_vonmises_sample(self):
         for loc in [0.0, math.pi / 2.0]:
             for concentration in [0.03, 0.3, 1.0, 10.0, 100.0]:
@@ -2376,6 +2377,7 @@ class TestDistributions(DistributionsTestCase):
                     circular=True,
                 )
 
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_vonmises_logprob(self):
         concentrations = [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]
         for concentration in concentrations:
@@ -2386,6 +2388,7 @@ class TestDistributions(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_cauchy(self):
         loc = torch.zeros(5, 5, requires_grad=True)
         scale = torch.ones(5, 5, requires_grad=True)
@@ -2399,7 +2402,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Cauchy(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Cauchy(0.0, 1.0).sample((1,)).size(), (1,))
 
-        set_rng_seed(1)
         self._gradcheck_log_prob(Cauchy, (loc, scale))
         self._gradcheck_log_prob(Cauchy, (loc, 1.0))
         self._gradcheck_log_prob(Cauchy, (0.0, scale))
@@ -2418,6 +2420,7 @@ class TestDistributions(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_halfcauchy(self):
         scale = torch.ones(5, 5, requires_grad=True)
         scale_1d = torch.ones(1, requires_grad=True)
@@ -2429,7 +2432,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(HalfCauchy(scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(HalfCauchy(1.0).sample((1,)).size(), (1,))
 
-        set_rng_seed(1)
         self._gradcheck_log_prob(HalfCauchy, (scale,))
         self._gradcheck_log_prob(HalfCauchy, (1.0,))
 
@@ -2443,6 +2445,7 @@ class TestDistributions(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_halfnormal(self):
         std = torch.randn(5, 5).abs().requires_grad_()
         std_1d = torch.randn(1).abs().requires_grad_()
@@ -2455,7 +2458,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(HalfNormal(50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of std
-        set_rng_seed(1)
         self.assertEqual(
             HalfNormal(std_delta).sample(sample_shape=(1, 2)),
             torch.tensor([[[0.0, 0.0], [0.0, 0.0]]]),
@@ -2524,6 +2526,7 @@ class TestDistributions(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_lognormal(self):
         mean = torch.randn(5, 5, requires_grad=True)
         std = torch.randn(5, 5).abs().requires_grad_()
@@ -2539,7 +2542,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(LogNormal(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(1)
         self.assertEqual(
             LogNormal(mean_delta, std_delta).sample(sample_shape=(1, 2)),
             torch.tensor([[[math.exp(1), 1.0], [math.exp(1), 1.0]]]),
@@ -2599,7 +2601,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(LogisticNormal(-0.7, 50.0).sample().size(), (2,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(1)
         self.assertEqual(
             LogisticNormal(mean_delta, std_delta).sample(),
             torch.tensor(
@@ -2792,6 +2793,7 @@ class TestDistributions(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_normal(self):
         loc = torch.randn(5, 5, requires_grad=True)
         scale = torch.randn(5, 5).abs().requires_grad_()
@@ -2807,7 +2809,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Normal(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(1)
         self.assertEqual(
             Normal(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
             torch.tensor([[[1.0, 0.0], [1.0, 0.0]]]),
@@ -3562,6 +3563,7 @@ class TestDistributions(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_laplace(self):
         loc = torch.randn(5, 5, requires_grad=True)
         scale = torch.randn(5, 5).abs().requires_grad_()
@@ -3577,7 +3579,6 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Laplace(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(0)
         self.assertEqual(
             Laplace(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
             torch.tensor([[[1.0, 0.0], [1.0, 0.0]]]),
