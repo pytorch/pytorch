@@ -73,13 +73,7 @@ if TEST_WITH_ROCM:
 else:
     DEVICE_COUNT = 4
 
-if TEST_HPU:
-    # HPU is registered as "fake" in Backend.default_device_backend_map by default.
-    # The real HCCL backend should be registered by torch_hpu; this branch handles
-    # environments where that registration has not occurred.
-    DEVICE_TYPE = "hpu:0"
-    DISTRIBUTED_BACKEND = "hccl"
-elif torch.accelerator.is_available():
+if torch.accelerator.is_available():
     acc = torch.accelerator.current_accelerator()
     DEVICE_TYPE = str(acc)
     # Use the backend registered for this accelerator type. If no backend is
