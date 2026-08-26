@@ -29,7 +29,6 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTestContinuous,
-    get_devtype,
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
@@ -40,8 +39,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 
-
-device_type = torch.device(get_devtype())
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -66,8 +63,12 @@ class TestUnshardParamsBase(FSDPTestContinuous):
         self,
         writeback: bool,
         check_outer: bool,
+        device: str,
         **fsdp_kwargs: dict[str, Any],
     ):
+        # Type-only device (no index): each rank must stay on the device bound
+        # by the framework, and the injected `device` carries the primary index.
+        device_type = torch.device(torch.device(device).type)
         model = nn.Sequential(
             nn.Linear(5, 5, bias=False, device=device_type.type),
             nn.Linear(5, 3, bias=False, device=device_type.type),
@@ -131,7 +132,9 @@ class TestUnshardParamsBase(FSDPTestContinuous):
         cpu_offload: CPUOffload,
         mixed_precision: MixedPrecision | None,
         use_orig_params: bool,
+        device: str,
     ):
+        device_type = torch.device(torch.device(device).type)
         local_model = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
@@ -228,6 +231,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         self.run_subtests(
             self._get_test_unshard_params_writeback_config(),
             self._test_unshard_params_writeback,
+            device=device,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -239,6 +243,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         self.run_subtests(
             self._get_test_unshard_params_param_data_config(),
             self._test_unshard_params_param_data,
+            device=device,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -248,6 +253,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         testing that writing to padding does not persist.
         NOTE: This method depends on FSDP internals.
         """
+        device_type = torch.device(torch.device(device).type)
         model = FSDP(nn.Linear(1, 1, bias=False, device=device_type.type))
         flat_param = model._handle.flat_param
         self.assertEqual(1, flat_param.numel())
@@ -286,6 +292,7 @@ class TestUnshardParams(TestUnshardParamsBase):
                 "use_orig_params": [False, True],
             },
             self._test_unshard_params_respects_reshard,
+            device=device,
         )
 
     def _test_unshard_params_respects_reshard(
@@ -294,8 +301,10 @@ class TestUnshardParams(TestUnshardParamsBase):
         offload_to_cpu: bool,
         mixed_precision: MixedPrecision | None,
         use_orig_params: bool,
+        device: str,
     ):
         """NOTE: This method depends on FSDP internals."""
+        device_type = torch.device(torch.device(device).type)
         fsdp_kwargs = {
             "mixed_precision": mixed_precision,
             "use_orig_params": use_orig_params,
@@ -375,6 +384,7 @@ class TestUnshardParams(TestUnshardParamsBase):
                 "use_orig_params": [False, True],
             },
             self._test_unshard_params_recurse,
+            device=device,
         )
 
     def _test_unshard_params_recurse(
@@ -383,8 +393,10 @@ class TestUnshardParams(TestUnshardParamsBase):
         unshard_outer: bool,
         mixed_precision: MixedPrecision | None,
         use_orig_params: bool,
+        device: str,
     ):
         """NOTE: This method depends on FSDP internals."""
+        device_type = torch.device(torch.device(device).type)
         fsdp_kwargs = {
             "mixed_precision": mixed_precision,
             "use_orig_params": use_orig_params,
@@ -493,6 +505,7 @@ class TestUnshardParams(TestUnshardParamsBase):
                 "use_orig_params": [True],
             },
             self._test_with_grads_core,
+            device=device,
         )
 
     def _test_with_grads_core(
@@ -501,6 +514,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         offload_to_cpu: bool,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
+        device: str,
     ):
         def _check_grads(
             ddp_model: DDP,
@@ -567,6 +581,7 @@ class TestUnshardParams(TestUnshardParamsBase):
                 ]
             return None  # unused
 
+        device_type = torch.device(torch.device(device).type)
         is_supported = use_orig_params and not offload_to_cpu
         model = TransformerWithSharedParams.init(
             self.process_group,
@@ -624,9 +639,13 @@ class TestUnshardParams(TestUnshardParamsBase):
                 ]
             },
             self._test_with_grads_none_grads,
+            device=device,
         )
 
-    def _test_with_grads_none_grads(self, sharding_strategy: ShardingStrategy):
+    def _test_with_grads_none_grads(
+        self, sharding_strategy: ShardingStrategy, device: str
+    ):
+        device_type = torch.device(torch.device(device).type)
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -648,6 +667,7 @@ class TestUnshardParams(TestUnshardParamsBase):
 
     @skip_if_lt_x_gpu(2)
     def test_unshard_submodule(self, device):
+        device_type = torch.device(torch.device(device).type)
         model = nn.Sequential(
             nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16)),
             nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16)),
@@ -705,6 +725,7 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
                 with fsdp_module.summon_full_params(fsdp_module):
                     pass
 
+        device_type = torch.device(torch.device(device).type)
         model = FSDP(MyModule()).to(device_type.type)
         with self.assertRaisesRegex(
             AssertionError, "Cannot manually unshard parameters during forward/backward"
@@ -713,6 +734,7 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
 
     @skip_if_lt_x_gpu(2)
     def test_unshard_params_from_backward_raises(self, device):
+        device_type = torch.device(torch.device(device).type)
         model = FSDP(nn.Linear(2, 1, device=device_type.type))
         output = model(torch.ones(2, device=device_type.type))
 
