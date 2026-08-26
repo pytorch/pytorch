@@ -3580,6 +3580,15 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         uniform_cap = getattr(
             config, "combo_kernel_uniform_dispatch_max_num_nodes", max_num_nodes
         )
+        # The large cap may only be applied to a run that can actually reach
+        # uniform dispatch. This MUST stay in sync with the min_kernels gate in
+        # ComboKernel._detect_uniform_subkernels: if grouping enlarges a run that
+        # codegen then refuses to dispatch uniformly, the result is an oversized
+        # *sequential* combo kernel -- the exact regression the surgical cap
+        # exists to avoid (measured ~16% slower at 103 nodes).
+        uniform_min_run = max(
+            2, getattr(config, "combo_kernel_uniform_dispatch_min_kernels", 32)
+        )
 
         excluded_buffer_names: OrderedSet[str] = OrderedSet(
             [
@@ -3623,7 +3632,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     if uniform_dispatch and uniform_cap > max_num_nodes:
                         grouped_nodes.extend(
                             ForeachKernelSchedulerNode._chunk_uniform_aware(
-                                context_nodes, max_num_nodes, uniform_cap
+                                context_nodes,
+                                max_num_nodes,
+                                uniform_cap,
+                                uniform_min_run,
                             )
                         )
                     else:
@@ -3663,37 +3675,90 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     @staticmethod
     def _chunk_uniform_aware(
-        nodes: list[BaseSchedulerNode], small_cap: int, large_cap: int
+        nodes: list[BaseSchedulerNode],
+        small_cap: int,
+        large_cap: int,
+        min_run: int = 2,
     ) -> list[list[BaseSchedulerNode]]:
         """Group nodes for combo kernels when uniform dispatch is enabled.
 
-        Runs of >=2 structurally-identical nodes (same _uniform_structural_key)
-        are chunked at `large_cap` so their identical sub-kernels fuse into a few
-        large uniform kernels (the win). Every other node (unique key or not
-        keyable) is chunked at `small_cap`, exactly like the default path, so
-        NON-uniform combo groups never grow past combo_kernel_max_num_nodes and
-        cannot regress into oversized sequential-combo kernels.
+        Walks `nodes` in topological order and finds maximal CONTIGUOUS runs of
+        structurally-identical nodes (same _uniform_structural_key). A run is
+        chunked at `large_cap` only when it is long enough to actually reach
+        uniform dispatch (>= `min_run`, mirroring the min_kernels gate in
+        ComboKernel._detect_uniform_subkernels). Everything else -- unique keys,
+        unkeyable nodes, short runs, and any leftover tail too short to dispatch
+        -- is chunked at `small_cap` exactly like the default path.
+
+        Two invariants make this safe:
+
+        1. No group larger than `small_cap` is ever emitted unless it will
+           dispatch uniformly. Enlarging a group that codegen then refuses to
+           dispatch leaves an oversized *sequential* combo kernel, which is a
+           regression (measured ~16% slower at 103 nodes), not a no-op.
+        2. When no run qualifies, the output is byte-identical to the default
+           contiguous chunking. So enabling uniform dispatch cannot perturb a
+           model it never fires on -- which also keeps the dashboard's
+           non-activated models a valid control group.
+
+        Contiguity matters: the default path fuses topological neighbours.
+        Gathering same-key nodes from across the whole graph would extend buffer
+        live ranges and destroy locality, so runs are never merged across
+        intervening unrelated nodes.
         """
-        counts: "collections.Counter[tuple[Any, ...]]" = collections.Counter()
-        keys: list[tuple[Any, ...] | None] = []
-        for n in nodes:
-            k = ForeachKernelSchedulerNode._uniform_structural_key(n)
-            keys.append(k)
-            if k is not None:
-                counts[k] += 1
-        large_by_key: dict[tuple[Any, ...], list[BaseSchedulerNode]] = {}
-        small: list[BaseSchedulerNode] = []
-        for n, k in zip(nodes, keys):
-            if k is not None and counts[k] >= 2:
-                large_by_key.setdefault(k, []).append(n)
-            else:
-                small.append(n)
         out: list[list[BaseSchedulerNode]] = []
-        for bucket in large_by_key.values():
-            for i in range(0, len(bucket), large_cap):
-                out.append(bucket[i : i + large_cap])
-        for i in range(0, len(small), small_cap):
-            out.append(small[i : i + small_cap])
+        pending: list[BaseSchedulerNode] = []
+
+        def flush_pending() -> None:
+            for i in range(0, len(pending), small_cap):
+                out.append(pending[i : i + small_cap])
+            pending.clear()
+
+        keys: list[tuple[Any, ...] | None] = [
+            ForeachKernelSchedulerNode._uniform_structural_key(n) for n in nodes
+        ]
+
+        i, total = 0, len(nodes)
+        while i < total:
+            key = keys[i]
+            if key is None:
+                pending.append(nodes[i])
+                i += 1
+                continue
+            # extend a maximal contiguous run of the same structural key
+            j = i + 1
+            while j < total and keys[j] == key:
+                j += 1
+            run = nodes[i:j]
+            i = j
+            if len(run) < min_run:
+                # cannot dispatch uniformly -> treat exactly like the default path
+                pending.extend(run)
+                continue
+            # emit before the run so groups stay in source order
+            flush_pending()
+            if len(run) <= large_cap:
+                out.append(run)
+                continue
+            # Split into as few chunks as possible. Prefer balanced chunks so each
+            # piece still clears min_run; fall back to greedy large_cap chunks and
+            # demote a too-short tail rather than emit a non-dispatching big group.
+            n_chunks = -(-len(run) // large_cap)
+            base, rem = divmod(len(run), n_chunks)
+            if base >= min_run:
+                start = 0
+                for c in range(n_chunks):
+                    size = base + (1 if c < rem else 0)
+                    out.append(run[start : start + size])
+                    start += size
+            else:
+                for start in range(0, len(run), large_cap):
+                    chunk = run[start : start + large_cap]
+                    if len(chunk) >= min_run:
+                        out.append(chunk)
+                    else:
+                        pending.extend(chunk)
+        flush_pending()
         return out
 
     group_algorithm_for_combo_kernels: Callable[
