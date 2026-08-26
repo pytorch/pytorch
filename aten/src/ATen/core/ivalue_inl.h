@@ -1359,6 +1359,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     // We assume the devices in both vectors have the same consistent type, and
     // their indices are unique and sorted.
     std::vector<c10::Device> excessDevices;
+    excessDevices.reserve(subset.size());
     std::set_difference(
         subset.begin(),
         subset.end(),
