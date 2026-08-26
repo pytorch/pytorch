@@ -269,6 +269,7 @@ class TestTritonHeuristics(TestCase):
 
         default_keys = [triton_config_to_hashable(c) for c in default_configs]
         max_autotune_keys = [triton_config_to_hashable(c) for c in max_autotune_configs]
+        self.assertTrue(max_autotune_configs)
         self.assertEqual(max_autotune_keys, default_keys)
         self.assertTrue(all("YBLOCK" in c.kwargs for c in max_autotune_configs))
 
@@ -334,8 +335,8 @@ class TestTritonHeuristics(TestCase):
             type="hip",
             index=0,
             multi_processor_count=1,
-            cc="gfx942",
-            major=None,
+            cc=80,
+            major=8,
             regs_per_multiprocessor=65536,
             max_threads_per_multi_processor=2048,
             max_threads_per_block=1024,
