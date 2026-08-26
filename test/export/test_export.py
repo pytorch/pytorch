@@ -14887,6 +14887,34 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
             in str(cond_top_level_nn_module_stack)
         )
 
+    def test_cond_with_shared_module_weak_key_dict(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/161053
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                states = weakref.WeakKeyDictionary({self: 1})
+                return torch.cond(
+                    x.sum() > 0,
+                    lambda x: x + states[self],
+                    lambda x: x - 1,
+                    (x,),
+                )
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+                self.alias = self.bar
+
+            def forward(self, x):
+                return self.bar(x)
+
+        x = torch.ones(2)
+        ep = export(M(), (x,), strict=False)
+        self.assertEqual(ep.module()(x), x + 1)
+        FileCheck().check_count("torch.ops.higher_order.cond", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+
     # TODO: See https://github.com/pytorch/pytorch/issues/115790
     @unittest.expectedFailure
     def test_cond_with_module_stack_export_with_unflatten(self):

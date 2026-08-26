@@ -3407,25 +3407,22 @@ class GuardManager {
   }
 
   virtual void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
+    record_leaf_guard_properties(leaf_guard);
     _leaf_guards.emplace_back(std::move(leaf_guard));
   }
 
  public:
   // relational guard helpers
-  void set_has_object_aliasing_guard() {
-    _has_object_aliasing_guard = true;
-  }
-
-  void set_has_no_tensor_aliasing_guard() {
-    _has_no_tensor_aliasing_guard = true;
-  }
-
   bool has_object_aliasing_guard() {
     return _has_object_aliasing_guard;
   }
 
   bool has_no_tensor_aliasing_guard() {
     return _has_no_tensor_aliasing_guard;
+  }
+
+  bool has_unoptimized_relational_guard() {
+    return _has_unoptimized_relational_guard;
   }
 
  public:
@@ -3523,6 +3520,13 @@ class GuardManager {
       cloned_mgr->_leaf_guards.emplace_back(guard);
       if (std::shared_ptr<RelationalGuard> relational_guard =
               std::dynamic_pointer_cast<RelationalGuard>(guard)) {
+        // Cloned roots do not own the dedicated NO_TENSOR_ALIASING replay
+        // guard. Preserve only the classification needed to prevent ordinary
+        // dict-tag skips from omitting an unoptimized relational guard.
+        if (std::dynamic_pointer_cast<NO_TENSOR_ALIASING>(relational_guard) ==
+            nullptr) {
+          cloned_mgr->_has_unoptimized_relational_guard = true;
+        }
         add_relational_guard_resetter_to_cloned_root(
             cloned_root, relational_guard);
       }
@@ -3645,10 +3649,19 @@ class GuardManager {
     return true;
   }
 
-  bool check_no_tensor_aliasing_guards_fast(PyObject* value) {
+  std::optional<bool> check_no_tensor_aliasing_guards_fast(PyObject* value) {
+    auto it = _tensor_pointers.find(value);
+    if (it == _tensor_pointers.end() || it->second.empty()) {
+      return true;
+    }
     std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard =
         get_no_tensor_aliasing_guard(_root);
-    for (auto& tensor_weakref : _tensor_pointers[value]) {
+    if (no_tensor_aliasing_guard == nullptr) {
+      // Cloned roots do not own this guard. Tell the caller that the fast path
+      // is unavailable so it can fall back to the full recursive check.
+      return std::nullopt;
+    }
+    for (auto& tensor_weakref : it->second) {
       PyObject* tensor_ptr = nullptr;
       if (PyWeakref_GetRef(tensor_weakref.ptr(), &tensor_ptr) == 0) {
         _disable_dict_tag_matching = true;
@@ -3732,9 +3745,12 @@ class GuardManager {
           // if (is_weakref_valid(value) && check_dict_pointer_tags(value)) {
           if (check_dict_pointer_tags(value) &&
               check_tensor_metadata_fast(value)) {
-            if (check_no_tensor_aliasing_guards_fast(value)) {
-              return true;
-            } else {
+            std::optional<bool> no_tensor_aliasing_result =
+                check_no_tensor_aliasing_guards_fast(value);
+            if (no_tensor_aliasing_result.has_value()) {
+              if (*no_tensor_aliasing_result) {
+                return true;
+              }
               _disable_dict_tag_matching = true;
               return false;
             }
@@ -4127,6 +4143,26 @@ class GuardManager {
   }
 
  protected:
+  void record_leaf_guard_properties(
+      const std::shared_ptr<LeafGuard>& leaf_guard) {
+    std::shared_ptr<RelationalGuard> relational_guard =
+        std::dynamic_pointer_cast<RelationalGuard>(leaf_guard);
+    if (relational_guard == nullptr) {
+      return;
+    }
+
+    if (std::dynamic_pointer_cast<OBJECT_ALIASING>(relational_guard) !=
+        nullptr) {
+      _has_object_aliasing_guard = true;
+    }
+    if (std::dynamic_pointer_cast<NO_TENSOR_ALIASING>(relational_guard) !=
+        nullptr) {
+      _has_no_tensor_aliasing_guard = true;
+    } else {
+      _has_unoptimized_relational_guard = true;
+    }
+  }
+
   // Keeps a count of how many times this guard manager check function returns
   // False. This is used for sorting optimization.
   int64_t _fail_count{0};
@@ -4165,6 +4201,7 @@ class GuardManager {
   // relational guard helpers
   bool _has_object_aliasing_guard = false;
   bool _has_no_tensor_aliasing_guard = false;
+  bool _has_unoptimized_relational_guard = false;
 
   bool _is_dict = false;
   bool _is_immutable = false;
@@ -5538,7 +5575,9 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
   bool check_nopybind(
       FrameLocalsMapping* obj,
       bool matches_dict_tag = false) override { // borrowed ref
-    if (matches_dict_tag && _is_immutable_object && !_is_tensor) {
+    if (matches_dict_tag && _is_immutable_object && !_is_tensor &&
+        _guard_manager->has_no_accessors() &&
+        !_guard_manager->has_unoptimized_relational_guard()) {
       return true;
     }
 
@@ -5561,7 +5600,9 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
         PyDict_Check(obj),
         "FrameLocalsGuardAccessor check expected dict() input");
 
-    if (matches_dict_tag && _is_immutable_object && !_is_tensor) {
+    if (matches_dict_tag && _is_immutable_object && !_is_tensor &&
+        _guard_manager->has_no_accessors() &&
+        !_guard_manager->has_unoptimized_relational_guard()) {
       return true;
     }
 
@@ -5660,7 +5701,8 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) override {
     if (matches_dict_tag && _is_immutable_object && !_is_tensor &&
         !is_recording_dict_pointers(get_guard_manager()->get_root()) &&
-        _guard_manager->has_no_accessors()) {
+        _guard_manager->has_no_accessors() &&
+        !_guard_manager->has_unoptimized_relational_guard()) {
       return true;
     }
 
@@ -7249,9 +7291,6 @@ void install_object_aliasing_guard(
   // the newly added relational guard when the guard eval fails.
   x->get_root()->add_relational_guard_resetter(guard);
 
-  x->set_has_object_aliasing_guard();
-  y->set_has_object_aliasing_guard();
-
   // In case the guard is a DictGuardManager, OBJECT_ALIASING guard is a
   // permitted guard.
   x->add_permitted_leaf_guard(guard);
@@ -7280,7 +7319,6 @@ void install_no_tensor_aliasing_guard(
 
   for (const auto& guard_manager : guard_managers) {
     py::cast<GuardManager*>(guard_manager)->add_leaf_guard(guard);
-    py::cast<GuardManager*>(guard_manager)->set_has_no_tensor_aliasing_guard();
   }
 }
 
@@ -7903,6 +7941,9 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("fail_count", &GuardManager::fail_count)
       .def(
           "has_object_aliasing_guard", &GuardManager::has_object_aliasing_guard)
+      .def(
+          "has_unoptimized_relational_guard",
+          &GuardManager::has_unoptimized_relational_guard)
       .def(
           "is_guarded_value_immutable",
           &GuardManager::is_guarded_value_immutable)

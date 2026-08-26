@@ -2229,6 +2229,57 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(ref0, res0)
             self.assertEqual(ref1, res1)
 
+    def test_is_pinned_respects_torch_dispatch(self):
+        class PinnedOverrideTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @staticmethod
+            def __new__(cls, elem):
+                out = torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    elem.shape,
+                    strides=elem.stride(),
+                    storage_offset=elem.storage_offset(),
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
+                )
+                out.elem = elem
+                return out
+
+            def __tensor_flatten__(self):
+                return ["elem"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+                return PinnedOverrideTensor(inner_tensors["elem"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten.is_pinned.default:
+                    return True
+
+                def unwrap(x):
+                    return x.elem if isinstance(x, cls) else x
+
+                kwargs = {} if kwargs is None else kwargs
+                out = func(
+                    *pytree.tree_map(unwrap, args),
+                    **pytree.tree_map(unwrap, kwargs),
+                )
+                return pytree.tree_map(
+                    lambda x: cls(x) if isinstance(x, torch.Tensor) else x,
+                    out,
+                )
+
+        def fn(x):
+            return x.is_pinned()
+
+        x = PinnedOverrideTensor(torch.randn(2, device="meta"))
+        self.assertTrue(fn(x))
+        self.assertTrue(torch.compile(fn, backend="eager")(x))
+
     def test_wrapper_subclass_guards_on_inner_tensor(self):
         # Holds an inner tensor, that has a distinct shape from the outer wrapper tensor.
         # Also adds additional guards on the inner tensor's sizes.
