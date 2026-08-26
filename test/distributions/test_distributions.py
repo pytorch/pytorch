@@ -3168,7 +3168,7 @@ class TestDistributions(DistributionsTestCase):
 
     @expectedFailureMPS
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
+    @device_rng_seed(default=0, xpu=2)  # see Note [Randomized statistical tests]
     def test_multivariate_normal_sample(self):
         mean = torch.randn(3, requires_grad=True)
         tmp = torch.randn(3, 10)
