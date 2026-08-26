@@ -11,7 +11,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, OffloadPolicy
 from torch.nn.parallel.scatter_gather import _is_namedtuple
-from torch.testing._internal.common_distributed import skip_if_lt_x_devices
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DoubleLinear,
@@ -43,7 +43,7 @@ class TestFullyShardAutograd(FSDPTest):
             if param.grad is not None:
                 param.grad.div_(group.size())
 
-    @skip_if_lt_x_devices(2)
+    @skip_if_lt_x_gpu(2)
     def test_unused_forward_output(self):
         """
         Tests that gradients propagate when running a backward where some
@@ -89,7 +89,7 @@ class TestFullyShardAutograd(FSDPTest):
             ref_optim.zero_grad(set_to_none=(iter_idx % 2))
             check_sharded_parity(self, ref_model, model)
 
-    @skip_if_lt_x_devices(2)
+    @skip_if_lt_x_gpu(2)
     def test_unused_forward_module(self):
         """
         Tests that gradients propagate when running a backward where some
@@ -131,7 +131,7 @@ class TestFullyShardAutograd(FSDPTest):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
 
-    @skip_if_lt_x_devices(2)
+    @skip_if_lt_x_gpu(2)
     def test_nontensor_activations(self):
         """
         Tests that gradients propagate when running forward with nontensor
@@ -274,7 +274,7 @@ class TestFullyShardPostAccGradHookMultiProcess(FSDPTest):
     def world_size(self) -> int:
         return min(torch.get_device_module(device_type).device_count(), 2)
 
-    @skip_if_lt_x_devices(2)
+    @skip_if_lt_x_gpu(2)
     def test_post_acc_grad_hook_optim_parity(self):
         """
         Tests parity of running the optimizer via the post-accumulate-grad
