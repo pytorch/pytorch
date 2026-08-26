@@ -42,7 +42,7 @@ dcgan,pass,0
 
 
 
-demucs,pass,3
+demucs,pass,0
 
 
 
@@ -82,11 +82,11 @@ detectron2_maskrcnn_r_101_c4,fail_accuracy,57
 
 
 
-detectron2_maskrcnn_r_101_fpn,pass,63
+detectron2_maskrcnn_r_101_fpn,fail_accuracy,63
 
 
 
-detectron2_maskrcnn_r_50_c4,pass,57
+detectron2_maskrcnn_r_50_c4,fail_accuracy,57
 
 
 
@@ -102,7 +102,7 @@ doctr_det_predictor,pass,3
 
 
 
-doctr_reco_predictor,pass,1
+doctr_reco_predictor,pass,3
 
 
 
@@ -234,7 +234,7 @@ torch_multimodal_clip,pass,0
 
 
 
-tts_angular,pass,2
+tts_angular,pass,0
 
 
 

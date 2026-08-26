@@ -281,6 +281,7 @@ class Guard:
     user_stack: traceback.StackSummary | None = None
     _hash: int | None = None
     _unserializable: bool = False
+    _force_dict_keys_match: bool = False
 
     def __hash__(self) -> int:
         if self._hash is None:
@@ -698,7 +699,7 @@ class GuardsSet:
         return list(self.source_to_guards[source])
 
     def remove_guards_with_source(self, source: Source) -> None:
-        """Delete all guards that contains a given source"""
+        """Delete all guards that contain a given source"""
         from ._dynamo.source import is_from_source
 
         self.inner = OrderedSet(
@@ -821,7 +822,7 @@ class InvokeSubgraphReuseCondition:
     #   (InputTag.TENSOR, TensorMetadata)
     #   (InputTag.SYMNODE, sym_num — same object implies same symbol)
     #   (InputTag.CONSTANT, value)
-    #   (InputTag.MODULE, None)
+    #   (InputTag.OBJECT, None)
     # Tensor metadata is checked here because TENSOR_MATCH guards for
     # subgraph inputs may already exist before tracing and thus won't
     # appear in the guard delta.
@@ -1004,7 +1005,19 @@ class HopDispatchSetCache:
         return self.hop_cache_map[op]  # type: ignore[index]
 
 
-_TLS = threading.local()
+class _TLSStorage(threading.local):
+    # Default the hot-path attributes to None per thread so that
+    # TracingContext.try_get() / CompileContext.try_get() -- called on every
+    # torch.compile'd call -- hit a present attribute instead of paying for an
+    # AttributeError raise+catch inside getattr(). Without this, a thread that
+    # never ran compilation itself (e.g. a worker thread executing compiled code
+    # compiled on another thread) takes the slow getattr-miss path on every call.
+    def __init__(self) -> None:
+        self.tracing_context: TracingContext | None = None
+        self.compile_context: CompileContext | None = None
+
+
+_TLS = _TLSStorage()
 
 """
 TracingContext is the source of truth for all currently accumulated information
@@ -1215,7 +1228,7 @@ class TracingContext:
             except Exception as e:
                 # Prevent real_stack from getting attached
                 #
-                # The invariant is that if an Exception as real_stack, we've
+                # The invariant is that if an Exception has real_stack, we've
                 # appropriately attached a user stack and we no longer need to
                 # attach anything. Because we cannot conveniently interpose
                 # when an exception is thrown, we instead interpose everywhere
@@ -1528,6 +1541,8 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         FakeTensor,
         FakeTensorMode,
         get_plain_tensors,
+        is_fake_tensor,
+        maybe_get_fake_mode,
     )
 
     # If TracingContext has a fake_mode, use it authoritatively.
@@ -1548,17 +1563,19 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
-        if isinstance(flat_input, FakeTensor):
-            fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
+        if is_fake_tensor(flat_input):
+            fake_modes.append((maybe_get_fake_mode(flat_input), "fake tensor input", i))
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
             get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
             fake_tensors: list[FakeTensor] = [
-                x for x in out if isinstance(x, FakeTensor)
+                x
+                for x in out
+                if isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
             ]
             fake_modes.extend(
                 [
-                    (tensor.fake_mode, f"subclass input {i}", ix)
+                    (maybe_get_fake_mode(tensor), f"subclass input {i}", ix)
                     for ix, tensor in enumerate(fake_tensors)
                 ]
             )

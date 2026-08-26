@@ -36,6 +36,7 @@ from typing import (
 )
 from typing_extensions import (
     deprecated as _deprecated,
+    LiteralString as _LiteralString,
     Never as _Never,
     ParamSpec as _ParamSpec,
     Self as _Self,
@@ -179,6 +180,7 @@ else:
 if sys.platform == "win32":
 
     def _load_dll_libraries() -> None:
+        import importlib.util
         import sysconfig
 
         from torch.version import cuda as cuda_version
@@ -186,6 +188,13 @@ if sys.platform == "win32":
         pfiles_path = os.getenv("ProgramFiles", r"C:\Program Files")
         py_dll_path = os.path.join(sys.exec_prefix, "Library", "bin")
         th_dll_path = os.path.join(os.path.dirname(__file__), "lib")
+        # Anchor the DLL dir on the compiled _C extension rather than __file__:
+        # editable installs (e.g. scikit-build-core) run this __init__ from the
+        # source tree, whose lib/ is empty, while _C and its dependent DLLs live
+        # in the installed tree. In a wheel install both resolve to the same dir.
+        _spec = importlib.util.find_spec("torch._C")
+        if _spec is not None and _spec.origin:
+            th_dll_path = os.path.join(os.path.dirname(_spec.origin), "lib")
         usebase_path = os.path.join(
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
@@ -390,6 +399,26 @@ def _load_global_deps() -> None:
     lib_name = f"libtorch_global_deps{lib_ext}"
     here = os.path.abspath(__file__)
     global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
+
+    # In scikit-build-core editable installs with redirect mode, native libs are
+    # installed to the dist package location rather than relative to __file__.
+    if not os.path.exists(global_deps_lib_path):
+        try:
+            from importlib.metadata import distribution
+
+            installed = distribution("torch").locate_file(
+                os.path.join("torch", "lib", lib_name)
+            )
+            # The importlib metadata SimplePath protocol was missing the exists
+            # method in older versions; however, the actual Path implementation
+            # has it and newer versions of importlib metadata have added it to
+            # the protocol, making the following ignore unnecessary from
+            # importlib_metadata 7.0.1 and Python 3.13 onwards.
+            # pyrefly: ignore[missing-attribute]
+            if installed.exists():
+                global_deps_lib_path = str(installed)
+        except Exception:
+            pass
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
@@ -1524,6 +1553,7 @@ def is_storage(obj: object, /) -> _TypeGuard["TypedStorage | UntypedStorage"]:
         True
         >>>
         >>> # TypedStorage (legacy)
+        >>> warnings.filterwarnings("ignore", message=".*TypedStorage is deprecated")  # docs: hide
         >>> typed_storage = torch.TypedStorage(5, dtype=torch.float32)
         >>> torch.is_storage(typed_storage)
         True
@@ -1754,6 +1784,7 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
         * :func:`torch.Tensor.index_put` with ``accumulate=False``
@@ -1806,7 +1837,6 @@ def use_deterministic_algorithms(
           tensor is given
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
@@ -2051,7 +2081,7 @@ def is_warn_always_enabled() -> builtins.bool:
 def _check_with(
     error_type: type[BaseException],
     cond: builtins.bool | SymBool,
-    message: str | _Callable[[], object] | None,
+    message: _LiteralString | _Callable[[], object] | None,
 ) -> None:
     if not isinstance(cond, (builtins.bool, SymBool)):
         if isinstance(cond, torch.Tensor):
@@ -2089,7 +2119,8 @@ def _check_with(
 
 
 def _check(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2101,9 +2132,10 @@ def _check(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(RuntimeError, cond, message)
 
@@ -2115,7 +2147,7 @@ def _check(
 )
 def _check_is_size(
     i: "IntLikeType",
-    message: str | _Callable[[], object] | None = None,
+    message: _LiteralString | _Callable[[], object] | None = None,
     *,
     max: "IntLikeType | None" = None,
 ) -> None:
@@ -2150,7 +2182,8 @@ def _check_is_size(
 
 
 def _check_index(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2162,15 +2195,17 @@ def _check_index(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(IndexError, cond, message)
 
 
 def _check_value(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2182,15 +2217,17 @@ def _check_value(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(ValueError, cond, message)
 
 
 def _check_type(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2202,15 +2239,17 @@ def _check_type(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(TypeError, cond, message)
 
 
 def _check_not_implemented(
-    cond: builtins.bool | SymBool, message: str | _Callable[[], object] | None = None
+    cond: builtins.bool | SymBool,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2222,9 +2261,10 @@ def _check_not_implemented(
     Args:
         cond (:class:`bool`): If False, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_with(NotImplementedError, cond, message)
 
@@ -2232,7 +2272,7 @@ def _check_not_implemented(
 def _check_tensor_all_with(
     error_type: type[BaseException],
     cond: "torch.Tensor",
-    message: str | _Callable[[], object] | None = None,
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     if not is_tensor(cond):
         raise TypeError(f"cond must be a tensor, but got {type(cond)}")
@@ -2245,7 +2285,8 @@ def _check_tensor_all_with(
 
 # C++ equivalent: `TORCH_CHECK_TENSOR_ALL`
 def _check_tensor_all(
-    cond: "torch.Tensor", message: str | _Callable[[], object] | None = None
+    cond: "torch.Tensor",
+    message: _LiteralString | _Callable[[], object] | None = None,
 ) -> None:
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -2258,9 +2299,10 @@ def _check_tensor_all(
         cond (:class:`torch.Tensor`): Tensor of dtype ``torch.bool``. If any
             element is ``False``, throw error
 
-        message (str or Callable, optional): A string, or a callable that
-            returns a string or an object with a ``__str__()`` method, to be
-            used as the error message. Default: ``None``
+        message (LiteralString or Callable, optional): A literal string, or a
+            callable that returns a string or an object with a ``__str__()``
+            method, to be used as the error message. Use the callable form for a
+            dynamically constructed message. Default: ``None``
     """
     _check_tensor_all_with(RuntimeError, cond, message)
 
@@ -2661,6 +2703,7 @@ from torch import (
     distributed as distributed,
     distributions as distributions,
     fft as fft,
+    foreach as foreach,
     futures as futures,
     hub as hub,
     jit as jit,
@@ -2767,6 +2810,7 @@ from torch._linalg_utils import (  # type: ignore[misc]
     eig,
     lstsq,
     matrix_rank,
+    qr,
     solve,
 )
 from torch.utils.dlpack import from_dlpack, to_dlpack
@@ -2962,6 +3006,13 @@ class _TorchCompileWrapper:
         if hasattr(self.compiler_fn, "reset"):
             self.compiler_fn.reset()
 
+    # Forwarded so the backend's _dynamo_backend_init can be read off the
+    # wrapper (what get_compiler_fn receives); read at fire time so the hook
+    # can be set on the backend even after torch.compile() wraps it.
+    @property
+    def _dynamo_backend_init(self) -> _Any | None:
+        return getattr(self.compiler_fn, "_dynamo_backend_init", None)
+
 
 _InputT = _ParamSpec("_InputT")
 _RetT = _TypeVar("_RetT")
@@ -3096,7 +3147,7 @@ def compile(
         - `guard_filter_fn` that controls which dynamo guards are saved with compilations.
           This is an unsafe feature and there is no backward compatibility guarantee provided
           for dynamo guards as data types.
-          For stable helper functions to use, see the documentations in `torch.compiler`, for example:
+          For stable helper functions to use, see the documentation in `torch.compiler`, for example:
           - `torch.compiler.skip_guard_on_inbuilt_nn_modules_unsafe`
           - `torch.compiler.skip_guard_on_all_nn_modules_unsafe`
           - `torch.compiler.keep_tensor_guards_unsafe`
@@ -3381,8 +3432,9 @@ def get_device_module(device: "torch.device | str | None" = None) -> _ModuleType
     elif isinstance(device, str):
         device_module_name = torch.device(device).type
     elif device is None:
-        # Using default accelerator type. If no accelerator is available, it automatically returns CPU device.
-        device_module_name = torch._C._get_accelerator().type
+        # Use the current accelerator's type, falling back to CPU when none is available.
+        acc = torch._C._accelerator_getAccelerator()
+        device_module_name = acc.type if acc is not None else "cpu"
     else:
         raise RuntimeError(
             f"Invalid value of device '{device}', expect torch.device, str, or None"

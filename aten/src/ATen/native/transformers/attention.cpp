@@ -432,7 +432,15 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
 
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
         const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale, bool enable_gqa){
-  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa};
+  auto kernel_params = sdp::normalize_unbatched_input({
+      .query = query_,
+      .key = key,
+      .value = value,
+      .attn_mask = attn_mask_,
+      .dropout = dropout_p,
+      .is_causal = is_causal,
+      .enable_gqa = enable_gqa,
+  });
   auto backend = sdp::select_sdp_backend_cpp(kernel_params);
   if (backend == sdp::SDPBackend::error) {
     TORCH_CHECK(
@@ -455,15 +463,24 @@ int64_t _fused_sdp_choice_meta(
     bool is_causal,
     std::optional<double> scale,
     bool enable_gqa) {
-  auto query_key_set = query_.key_set();
+  auto kernel_params = sdp::normalize_unbatched_input({
+      .query = query_,
+      .key = key,
+      .value = value,
+      .attn_mask = attn_mask_,
+      .dropout = dropout_p,
+      .is_causal = is_causal,
+      .enable_gqa = enable_gqa,
+  });
+  auto query_key_set = kernel_params.query.key_set();
   bool has_hpu = query_key_set.has(c10::DispatchKey::HPU);
   if (has_hpu) {
     auto choice_int = at::_ops::_fused_sdp_choice::redispatch(
         c10::DispatchKeySet(DispatchKey::HPU),
-        query_,
-        key,
-        value,
-        attn_mask_,
+        kernel_params.query,
+        kernel_params.key,
+        kernel_params.value,
+        kernel_params.attn_mask,
         dropout_p,
         is_causal,
         scale,
@@ -473,7 +490,16 @@ int64_t _fused_sdp_choice_meta(
 #if defined(USE_ROCM)
   bool has_rocm = query_key_set.has(c10::DispatchKey::HIP);
   if (has_rocm) {
-    auto choice_int = _fused_sdp_choice_stub(at::kHIP, query_, key, value, attn_mask_, dropout_p, is_causal, scale, enable_gqa);
+    auto choice_int = _fused_sdp_choice_stub(
+        at::kHIP,
+        kernel_params.query,
+        kernel_params.key,
+        kernel_params.value,
+        kernel_params.attn_mask,
+        dropout_p,
+        is_causal,
+        scale,
+        enable_gqa);
     return choice_int;
   }
 #else
@@ -481,10 +507,10 @@ int64_t _fused_sdp_choice_meta(
   if (has_cuda) {
     auto choice_int = _fused_sdp_choice_stub(
         at::kCUDA,
-        query_,
-        key,
-        value,
-        attn_mask_,
+        kernel_params.query,
+        kernel_params.key,
+        kernel_params.value,
+        kernel_params.attn_mask,
         dropout_p,
         is_causal,
         scale,
@@ -496,10 +522,10 @@ int64_t _fused_sdp_choice_meta(
   if (has_xpu) {
     auto choice_int = _fused_sdp_choice_stub(
         at::kXPU,
-        query_,
-        key,
-        value,
-        attn_mask_,
+        kernel_params.query,
+        kernel_params.key,
+        kernel_params.value,
+        kernel_params.attn_mask,
         dropout_p,
         is_causal,
         scale,
@@ -640,6 +666,18 @@ bool should_compute_logsumexp(const Tensor& query, const Tensor& key, const Tens
   return any_inputs_require_grad && gradmode_enabled;
 }
 
+bool should_compute_logsumexp_with_attn_mask(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& attn_mask) {
+  const bool any_inputs_require_grad = query.requires_grad() ||
+      key.requires_grad() || value.requires_grad() ||
+      (attn_mask.has_value() && attn_mask->requires_grad());
+  const bool gradmode_enabled = at::GradMode::is_enabled();
+  return any_inputs_require_grad && gradmode_enabled;
+}
+
 std::tuple<at::Tensor, at::Tensor> pre_process_group_query_attention_input(
     const at::Tensor& query,
     const at::Tensor& key,
@@ -724,6 +762,31 @@ Tensor scaled_dot_product_attention(
     bool is_causal,
     std::optional<double> scale,
     bool enable_gqa) {
+  // Give fused backends a batch dimension for unbatched inputs.
+  if (query_.dim() == 3) {
+    auto normalized_params = sdp::normalize_unbatched_input({
+        .query = query_,
+        .key = key,
+        .value = value,
+        .attn_mask = attn_mask_,
+        .dropout = dropout_p,
+        .is_causal = is_causal,
+        .enable_gqa = enable_gqa,
+    });
+    if (normalized_params.query.dim() != query_.dim()) {
+      return at::native::scaled_dot_product_attention(
+                 normalized_params.query,
+                 normalized_params.key,
+                 normalized_params.value,
+                 normalized_params.attn_mask,
+                 dropout_p,
+                 is_causal,
+                 scale,
+                 enable_gqa)
+          .squeeze(0);
+    }
+  }
+
   using sdp::SDPBackend;
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   // NB: This op is CompositeImplicitAutograd -- autograd traces through the
@@ -757,15 +820,16 @@ Tensor scaled_dot_product_attention(
   auto attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
     case SDPBackend::cudnn_attention: {
+      // cuDNN SDPA backward does not support an attn_bias gradient.
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
-      return std::get<0>(out_lse_softmax);
+      return std::get<0>(std::move(out_lse_softmax));
     }
     case SDPBackend::flash_attention: {
       if(query_device_type == DeviceType::CUDA ||
          query_device_type == DeviceType::XPU) {
-        c10::SymInt og_size = query_.sym_size(-1);
+        c10::SymInt og_size = value.sym_size(-1);
         int alignment_size = (query_device_type == DeviceType::XPU) ? 1 : 8;
         Tensor query_padded = pad_last_dim(query_, alignment_size);
         Tensor key_padded = pad_last_dim(key, alignment_size);
@@ -781,18 +845,19 @@ Tensor scaled_dot_product_attention(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
     }
     case SDPBackend::efficient_attention: {
-      bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       if (attn_mask.has_value()) {
-        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
+        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);
       }
+      bool compute_logsumexp = should_compute_logsumexp_with_attn_mask(
+          query_, key, value, attn_mask);
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
-      return std::get<0>(out_and_lse);
+      return std::get<0>(std::move(out_and_lse));
     }
     case SDPBackend::overrideable: {
       auto out_lse_softmax = at::_scaled_dot_product_fused_attention_overrideable(
           query_, key, value, attn_mask, dropout_p, is_causal, false /*return_debug_mask*/, scale);
-      return std::get<0>(out_lse_softmax);
+      return std::get<0>(std::move(out_lse_softmax));
     }
     case SDPBackend::math: {
       const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();

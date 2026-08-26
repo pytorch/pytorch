@@ -1,5 +1,8 @@
 #pragma once
 
+#include <algorithm>
+#include <iterator>
+
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -14,6 +17,14 @@ class FakeWork : public Work {
     return true;
   }
 
+  // A fake collective is done the moment it is "issued". Work's default reads
+  // completed_, which nothing here ever sets, so without this a fake op would
+  // report as permanently in flight to anyone polling it even though wait()
+  // returns immediately.
+  bool isCompleted() override {
+    return true;
+  }
+
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
     auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
     fut->markCompleted();
@@ -25,6 +36,10 @@ class FakeProcessGroup : public Backend {
  public:
   struct Options : Backend::Options {
     explicit Options() : Backend::Options("fake") {}
+
+    c10::intrusive_ptr<Backend::Options> clone() const override {
+      return c10::make_intrusive<Options>(*this);
+    }
 
     int fake_option = 0;
     bool error_on_collective = false;
@@ -43,14 +58,52 @@ class FakeProcessGroup : public Backend {
     return "fake";
   }
 
+  // Nullable accessor exposed as the Python `.options` property, mirroring the
+  // getOptions()/getBackendOptions() split on ProcessGroupNCCL and
+  // ProcessGroupGloo. Returns null when the user constructed the group without
+  // options, which callers (and test_device_mesh) rely on to tell whether an
+  // options override was supplied.
+  c10::intrusive_ptr<Options> getOptions() {
+    return options_;
+  }
+
+  // options_ may be null when the user passed no options. splitGroup and
+  // mergeRemoteGroup unconditionally dereference the result, so coalesce to a
+  // fresh default Options rather than returning null. The child of a
+  // no-options parent thus carries a real Options, matching NCCL/Gloo.
   c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
-    return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
+    auto opts = options_ ? options_ : c10::make_intrusive<Options>();
+    return c10::static_intrusive_pointer_cast<Backend::Options>(opts);
   }
 
   void setTimeout(std::chrono::milliseconds /* timeout */) override {
     // FakeProcessGroup does no real communication, so there is no timeout to
     // configure. Override as a no-op so callers don't hit the warning the
     // Backend base class emits for unsupported backends.
+  }
+
+  bool supportsSplitting() const override {
+    return true;
+  }
+
+  // Create a sub-group from a subset of the parent's ranks. The fake backend
+  // performs no real communication, so there is no split collective to join:
+  // ranks outside the subgroup simply return nullptr (signalling
+  // non-membership), and members return a fresh FakeProcessGroup whose rank is
+  // their position within the sorted subgroup.
+  c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& /* store */,
+      const std::vector<int>& ranks,
+      const c10::intrusive_ptr<Backend::Options>& opts) override {
+    auto it = std::find(ranks.begin(), ranks.end(), rank_);
+    if (it == ranks.end()) {
+      return nullptr;
+    }
+    auto groupRank = static_cast<int>(std::distance(ranks.begin(), it));
+    auto fakeOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
+    TORCH_CHECK(fakeOpts != nullptr, "opts not a FakeProcessGroup::Options.");
+    return c10::make_intrusive<FakeProcessGroup>(
+        groupRank, static_cast<int>(ranks.size()), std::move(fakeOpts));
   }
 
   c10::intrusive_ptr<Work> broadcast(
@@ -278,35 +331,27 @@ class FakeProcessGroup : public Backend {
     checkCollectiveError();
     c10d::checkSplitSizes(inputSplitSizes, inputBuffer, size_);
     c10d::checkSplitSizes(outputSplitSizes, outputBuffer, size_);
+    TORCH_CHECK(
+        inputBuffer.is_contiguous(inputBuffer.suggest_memory_format()),
+        "Input tensor must be contiguous");
+    TORCH_CHECK(
+        outputBuffer.is_contiguous(outputBuffer.suggest_memory_format()),
+        "Output tensor must be contiguous");
     // See note in _allgather_base above.
     at::AutoDispatchBelowAutograd guard;
-    if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
-      outputBuffer.copy_(inputBuffer);
-    } else {
-      // Approximation: rank j's inputSplitSizes are unavailable here, so
-      // each output slot is filled by repeating inputBuffer[0:slot]. The
-      // values are deterministic but arbitrary; do not assert on them.
-      int64_t out_offset = 0;
-      auto in_size = inputBuffer.size(0);
-      for (int j = 0; j < size_; ++j) {
-        int64_t remaining = outputSplitSizes[j];
-        if (remaining > 0) {
-          TORCH_CHECK(
-              in_size > 0,
-              "alltoall_base: inputBuffer is empty but outputSplitSizes[",
-              j,
-              "] > 0");
-        }
-        int64_t dst = out_offset;
-        while (remaining > 0) {
-          auto chunk = std::min(remaining, in_size);
-          outputBuffer.narrow(0, dst, chunk)
-              .copy_(inputBuffer.narrow(0, 0, chunk));
-          dst += chunk;
-          remaining -= chunk;
-        }
-        out_offset += outputSplitSizes[j];
-      }
+    // Approximation: inputs from other ranks are unavailable here, so copy as
+    // much of the local input as fits and zero the remainder.
+    auto flat_input = inputBuffer.as_strided(
+        {inputBuffer.numel()}, {1}, inputBuffer.storage_offset());
+    auto flat_output =
+        outputBuffer
+            .as_strided(
+                {outputBuffer.numel()}, {1}, outputBuffer.storage_offset())
+            .zero_();
+    auto copy_size = std::min(flat_input.numel(), flat_output.numel());
+    if (copy_size > 0) {
+      flat_output.narrow(0, 0, copy_size)
+          .copy_(flat_input.narrow(0, 0, copy_size));
     }
     return c10::make_intrusive<FakeWork>();
   }

@@ -62,13 +62,11 @@ def main():
 
     with open(os.path.join(BUILD_DIR, ATEN_OPS_CSV_FILE), "w") as f:
         f.write("Operator,Schema\n")
-        for name, schema in aten_ops_list:
-            f.write(f'"``{name}``","{schema}"\n')
+        f.writelines(f'"``{name}``","{schema}"\n' for name, schema in aten_ops_list)
 
     with open(os.path.join(BUILD_DIR, PRIMS_OPS_CSV_FILE), "w") as f:
         f.write("Operator,Schema\n")
-        for name, schema in prims_ops_list:
-            f.write(f'"``{name}``","{schema}"\n')
+        f.writelines(f'"``{name}``","{schema}"\n' for name, schema in prims_ops_list)
 
 
 if __name__ == "__main__":
