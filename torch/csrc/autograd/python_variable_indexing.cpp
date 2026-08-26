@@ -42,9 +42,7 @@ Py_ssize_t THPVariable_length(PyObject* self) {
     py::object ret = py::reinterpret_steal<py::object>(
         handle_torch_function(self, "__len__"));
     Py_ssize_t length = PyLong_AsSsize_t(ret.ptr());
-    if (PyErr_Occurred()) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(!PyErr_Occurred());
     return length;
   }
   const auto& self_ = THPVariable_Unpack(self);
@@ -403,8 +401,7 @@ static THPObjectPtr wrapTuple(PyObject* index) {
   } else {
     res = PyTuple_Pack(1, index);
   }
-  if (!res)
-    throw python_error();
+  TORCH_CHECK_PYTHON(res);
   return res;
 }
 

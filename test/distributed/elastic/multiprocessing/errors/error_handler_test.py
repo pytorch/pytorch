@@ -9,6 +9,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from torch.distributed.elastic.multiprocessing.errors import (
+    error_handler as error_handler_mod,
+)
 from torch.distributed.elastic.multiprocessing.errors.error_handler import ErrorHandler
 from torch.distributed.elastic.multiprocessing.errors.handlers import get_error_handler
 
@@ -66,6 +69,26 @@ class ErrorHandlerTest(unittest.TestCase):
             self.assertIsNotNone(err["message"]["message"])
             self.assertIsNotNone(err["message"]["extraInfo"]["py_callstack"])
             self.assertIsNotNone(err["message"]["extraInfo"]["timestamp"])
+
+    def test_record_exception_with_fn_name(self):
+        with patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}):
+            eh = ErrorHandler()
+            eh.set_entrypoint_fn_name("raise_exception_fn")
+            eh.initialize()
+
+            with self.assertLogs(error_handler_mod.logger, level="DEBUG") as logs:
+                try:
+                    raise_exception_fn()
+                except Exception as e:
+                    eh.record_exception(e)
+
+            self.assertTrue(any("raise_exception_fn" in line for line in logs.output))
+
+            # extraInfo is a map<string,string> for downstream consumers, so the
+            # base handler logs fn_name rather than writing it to the error file
+            with open(self.test_error_file) as fp:
+                err = json.load(fp)
+            self.assertNotIn("fn_name", err["message"]["extraInfo"])
 
     def test_record_exception_no_error_file(self):
         # make sure record does not fail when no error file is specified in env vars

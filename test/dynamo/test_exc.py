@@ -434,16 +434,16 @@ ReluCompileError:""",
 translation validation failed.
 
 Model:
-  ==> L['shape'][0]: 0
-  ==> L['shape'][1]: 0
-  ==> L['shape'][2]: 0
+  ==> L['shape'][0]: 3
+  ==> L['shape'][1]: 3
+  ==> L['shape'][2]: 3
   ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
-  ==> s3: 0
-  ==> s52: 0
+  ==> s3: 3
+  ==> s52: 3
   ==> s77: 3
-  ==> s86: 0
+  ==> s86: 3
 
 Assertions:
   ==> (== 0 L['x'].storage_offset())
@@ -456,10 +456,10 @@ Assertions:
 
 Target Expressions:
   ==> (!= (+ s3 s52 s86) s77)
-  ==> (<= 0 s3)
-  ==> (<= 0 s52)
-  ==> (<= 0 s86)
+  ==> (<= 2 s3)
+  ==> (<= 2 s52)
   ==> (<= 2 s77)
+  ==> (<= 2 s86)
   ==> (== 0 L['x'].storage_offset())
   ==> (== 1 L['x'].stride()[0])
   ==> (== L['shape'][0] s86)
@@ -467,7 +467,6 @@ Target Expressions:
   ==> (== L['shape'][2] s3)
   ==> (== L['x'].size()[0] s77)
   ==> (> s77 0)
-  ==> (>= 0 s86)
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
