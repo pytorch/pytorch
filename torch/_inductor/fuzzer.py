@@ -154,7 +154,7 @@ class Status(Enum):
         )
 
 
-# Sometime the types of configs aren't expressive enough to be captured by python type system, so the options can be
+# Sometimes the types of configs aren't expressive enough to be captured by python type system, so the options can be
 # manually specified here:
 # TODO this needs to be indexed to the module, like inductor or dynamo, for name collisions
 TYPE_OVERRIDES: dict[str, list[Any]] = {

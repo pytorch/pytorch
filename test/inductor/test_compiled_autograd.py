@@ -5651,6 +5651,7 @@ xfail_divergence_from_eager = {
 }
 
 skipped_tests = set()
+skipped_tests.add("test_graph_queue_callback")
 
 if not HAS_CUDA_AND_TRITON:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler

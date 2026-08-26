@@ -15,7 +15,11 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
-from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
+from torch._C._distributed_c10d import (
+    _is_process_group_registered,
+    _SymmetricMemory,
+    Work as _Work,
+)
 from torch._prims_common import make_contiguous_strides_for
 from torch.utils._triton import has_triton
 
@@ -81,14 +85,22 @@ def _test_mode(group_names: set[str] | None = None) -> Generator[None, None, Non
 
 def is_symm_mem_enabled_for_group(group_name: c10d.GroupName) -> bool:
     """
-    Check if symmetric memory is enabled for a process group.
+    Check if symmetric memory can be used with a process group.
+
+    Symmetric memory no longer requires explicit enablement via
+    ``enable_symm_mem_for_group``. This returns ``True`` if the group is
+    resolvable and a symmetric memory allocator is registered for the current
+    accelerator.
 
     Args:
         group_name (str): the name of the process group.
     """
     if _is_test_mode:
         return _mocked_group_names is None or group_name in _mocked_group_names
-    return group_name in _group_name_to_store
+    device = torch.accelerator.current_accelerator(check_available=True)
+    if device is None or _SymmetricMemory.get_backend(device) is None:
+        return False
+    return _is_process_group_registered(group_name)
 
 
 _group_name_to_workspace_tensor: dict[str, torch.Tensor | None] = {}
@@ -2196,7 +2208,8 @@ def empty(  # type: ignore[misc]
         device (:class:`torch.device`, optional): the desired device of returned tensor.
             Default: if ``None``, uses the current device for the default tensor type
             (see :func:`torch.set_default_device`). :attr:`device` will be the CPU
-            for CPU tensor types and the current CUDA device for CUDA tensor types.
+            for CPU tensor types, the current CUDA device for CUDA tensor types,
+            and the current XPU device for XPU tensor types.
     """
     if len(size) == 1 and isinstance(size[0], Sequence):
         size = tuple(size[0])
