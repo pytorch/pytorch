@@ -1,3 +1,5 @@
+import functools
+
 import triton
 import triton.language as tl
 
@@ -82,6 +84,7 @@ def _pick_block_sizes(m: int, n: int) -> tuple[int, int]:
     return block_m, min(triton.next_power_of_2(n), 128)
 
 
+@functools.lru_cache(maxsize=1024)
 def _bmm_outer_product_launch_config(
     batch: int, m: int, n: int
 ) -> tuple[int, int, int]:
