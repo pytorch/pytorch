@@ -47,7 +47,7 @@ if torch.get_default_dtype() is not torch.float32:
 # This test file tests scatter and gather operations,
 #   like torch.scatter and torch.gather.
 
-class TestScatterGather(TestCase):
+class TestScatterGatherDevice(TestCase):
     # Fills an index tensor with valid indices
     def _fill_indices(self, idx, dim, dim_size, elems_per_row, m, n, o, unique_indices=True):
         for i in range(1 if dim == 0 else m):
@@ -1195,7 +1195,7 @@ class TestScatterAddOverrideCorrectness(TestCase):
 instantiate_parametrized_tests(TestScatterAddOverrideConds)
 instantiate_parametrized_tests(TestScatterAddOverrideCorrectness)
 
-instantiate_device_type_tests(TestScatterGather, globals())
+instantiate_device_type_tests(TestScatterGatherDevice, globals())
 
 if __name__ == '__main__':
     run_tests()
