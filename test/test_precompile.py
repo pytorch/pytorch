@@ -20,6 +20,7 @@ import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo import graph_break as _precompile_dynamo_break_here
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
+from torch._dynamo.exc import PackageError
 from torch._precompile import PrecompileError
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.testing import make_tensor
@@ -4093,6 +4094,13 @@ class TestPrecompile(TestCase):
                 restored = pickle.loads(buf.getvalue())
                 self.assertIsInstance(restored.installed, _Missing)
                 self.assertEqual(restored.scale, 2.0)
+
+                with self.assertRaisesRegex(
+                    PackageError, "guard directly references a precompile handle"
+                ):
+                    GuardsStatePickler(
+                        {id(handle): handle}, {}, {}, io.BytesIO()
+                    ).dump(handle)
 
             holder.installed = threading.RLock()
             with self.assertRaisesRegex(TypeError, "cannot pickle.*RLock"):
