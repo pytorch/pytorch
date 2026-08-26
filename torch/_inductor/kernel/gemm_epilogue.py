@@ -16,11 +16,13 @@ from .gemm_epilogue_utils import statically_known_shape_equal
 
 
 GEMM_ACCUMULATOR_ARG_NAME = "accum"
-GEMM_LOCAL_REDUCTION_RESULT_NAME = "_local_reduce"
 GEMM_REDUCTION_FRAGMENT_WIDTH = 32
-GEMM_REDUCTION_IDENTITY_SOURCE = "def _local_reduce_source(value):\n    return value"
 
 GemmReductionType = Literal["sum", "mean", "prod", "max", "min"]
+# "default" uses one associative reduction. The other values select physical
+# multi-pass schedules that generated scalar callbacks cannot yet express;
+# source, combine, finalize, and consumer arithmetic is still callback-generated.
+GemmReductionAlgorithm = Literal["default", "logsumexp", "online_softmax", "variance"]
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -30,10 +32,6 @@ class GemmEpiloguePlan:
     reads: tuple[str, ...] = ()
     writes: tuple[str, ...] = ()
     renames: dict[str, Any] = dataclasses.field(default_factory=dict)
-    # A pure ``GEMM_output * scalar`` epilogue can be routed through a
-    # backend's dedicated output-scale argument instead of compiling a generic
-    # elementwise epilogue. The value is the graph buffer name of that scalar.
-    output_scale: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -56,7 +54,7 @@ class GemmReductionGeometry:
 
     @property
     def needs_physical_callbacks(self) -> bool:
-        return self.axis == 0 or self.group > GEMM_REDUCTION_FRAGMENT_WIDTH
+        return self.axis == 0 or self.group > 32
 
     @property
     def group_size(self) -> int:
@@ -102,25 +100,8 @@ class GemmReductionGeometry:
         ) or statically_known_shape_equal(output_shape, grouped)
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class GemmReductionSpec:
-    """Semantic grouped reduction shared by analysis and codegen plans."""
-
-    group: int
-    axis: int
-    reduction_type: GemmReductionType
-    source_fn: str
-
-    def __post_init__(self) -> None:
-        _ = self.geometry
-
-    @property
-    def geometry(self) -> GemmReductionGeometry:
-        return GemmReductionGeometry(self.group, self.axis)
-
-
-@dataclasses.dataclass(frozen=True, kw_only=True)
-class GemmReductionConfig(GemmReductionSpec):
+@dataclasses.dataclass(frozen=True)
+class GemmReductionConfig:
     """Reduction recognized from frontend graph or scheduler loop IR.
 
     This is an analysis result, before output ownership and feed-main behavior
@@ -131,15 +112,25 @@ class GemmReductionConfig(GemmReductionSpec):
         group: Number of adjacent GEMM output elements in each reduction group.
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
         reduction_type: Associative primitive computed by the kernel.
-        source_fn: Generated source transformation applied before reduction.
+        source_type: Transformation applied to GEMM accumulator values.
+        reduction_algorithm: Optional multi-stage physical reduction algorithm.
     """
 
     output_name: str
+    group: int
+    axis: int
+    reduction_type: GemmReductionType
+    source_type: str
+    reduction_algorithm: GemmReductionAlgorithm = "default"
     finalizer_fn: str | None = None
     secondary_consumer_fn: str | None = None
 
+    @property
+    def geometry(self) -> GemmReductionGeometry:
+        return GemmReductionGeometry(self.group, self.axis)
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
+
+@dataclasses.dataclass(frozen=True)
 class GemmReductionPlan:
     """Backend-neutral reduction outputs passed from analysis to codegen.
 
@@ -147,9 +138,9 @@ class GemmReductionPlan:
         reduction_output: Optional compressed reduction output buffer.
         group: Number of adjacent GEMM output elements in each reduction group.
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
-        reduction_type: Associative primitive computed by a physical reduction.
-        source_fn: Generated source transformation applied before reduction.
-        combine_fn: Generated callback that combines physical reduction partials.
+        reduction_type: Associative primitive computed by the kernel.
+        source_type: Transformation applied to GEMM accumulator values.
+        reduction_algorithm: Optional multi-stage physical reduction algorithm.
         primary_output: Buffer receiving the primary GEMM result.
         feeds_main: Whether the reduction participates in the primary output.
         feed_output: Optional full-shape output consuming the reduction.
@@ -157,67 +148,25 @@ class GemmReductionPlan:
         finalizer_fn: Optional source for post-reduction scalar finalization.
         consumer_fn: Optional source for the primary full-shape consumer.
         secondary_consumer_fn: Optional source for the secondary consumer.
-        tensor_epilogue_returns_local_reduce: Whether the generated tensor epilogue
-            returns its fragment-local reduction value as its final result.
     """
 
+    reduction_output: str | None
     group: int
     axis: int
-    reduction_type: GemmReductionType | None = "sum"
-    source_fn: str | None = None
-    combine_fn: str | None = None
-    reduction_output: str | None
+    reduction_type: GemmReductionType
+    source_type: str
     primary_output: str
+    reduction_algorithm: GemmReductionAlgorithm = "default"
     feeds_main: bool = False
     feed_output: str | None = None
     secondary_feed_output: str | None = None
     finalizer_fn: str | None = None
     consumer_fn: str | None = None
     secondary_consumer_fn: str | None = None
-    tensor_epilogue_returns_local_reduce: bool = False
-
-    def __post_init__(self) -> None:
-        _ = self.geometry
-        physical_reduction = (self.reduction_type, self.source_fn)
-        if not self.tensor_epilogue_returns_local_reduce and any(
-            value is None for value in physical_reduction
-        ):
-            raise RuntimeError(
-                "physical GEMM reductions require a primitive and source callback"
-            )
-        if self.tensor_epilogue_returns_local_reduce and any(
-            value is not None for value in physical_reduction
-        ):
-            raise RuntimeError(
-                "generated epilogue reductions cannot use physical reduction inputs"
-            )
-        if self.tensor_epilogue_returns_local_reduce:
-            if self.geometry.needs_physical_callbacks != (self.combine_fn is not None):
-                raise RuntimeError(
-                    "generated epilogue reductions require callbacks only for physical geometry"
-                )
-        elif self.combine_fn is not None:
-            raise RuntimeError(
-                "kernel-lowered reductions cannot use a generated combine callback"
-            )
 
     @property
     def geometry(self) -> GemmReductionGeometry:
         return GemmReductionGeometry(self.group, self.axis)
-
-    @classmethod
-    def from_config(
-        cls, config: GemmReductionConfig, **plan_fields: Any
-    ) -> "GemmReductionPlan":
-        plan_fields.setdefault("finalizer_fn", config.finalizer_fn)
-        plan_fields.setdefault("secondary_consumer_fn", config.secondary_consumer_fn)
-        return cls(
-            group=config.group,
-            axis=config.axis,
-            reduction_type=config.reduction_type,
-            source_fn=config.source_fn,
-            **plan_fields,
-        )
 
     @property
     def auxiliary_outputs(self) -> tuple[str, ...]:
@@ -244,12 +193,10 @@ class GemmReductionArguments:
         secondary_feed_output: Optional second full-shape reduction consumer.
         group: Number of adjacent GEMM output elements in each reduction group.
         axis: GEMM output axis grouped by the reduction, either M (0) or N (1).
-        reduction_type: Associative primitive computed by a physical reduction.
-        source_fn: Generated source transformation applied before reduction.
-        combine_fn: Generated callback that combines physical reduction partials.
+        reduction_type: Associative primitive computed by the kernel.
+        source_type: Transformation applied to GEMM accumulator values.
+        reduction_algorithm: Optional multi-stage physical reduction algorithm.
         feeds_main: Whether the reduction also produces the primary GEMM output.
-        tensor_epilogue_returns_local_reduce: Whether the generated tensor epilogue
-            returns its fragment-local reduction value as its final result.
     """
 
     output: Any | None = None
@@ -257,14 +204,13 @@ class GemmReductionArguments:
     secondary_feed_output: Any | None = None
     group: int = 0
     axis: int = 1
-    reduction_type: GemmReductionType | None = "sum"
-    source_fn: str | None = GEMM_REDUCTION_IDENTITY_SOURCE
-    combine_fn: str | None = None
+    reduction_type: GemmReductionType = "sum"
+    source_type: str = "identity"
+    reduction_algorithm: GemmReductionAlgorithm = "default"
     feeds_main: bool = False
     finalizer_fn: str | None = None
     consumer_fn: str | None = None
     secondary_consumer_fn: str | None = None
-    tensor_epilogue_returns_local_reduce: bool = False
 
     TENSOR_FIELDS: ClassVar[tuple[str, ...]] = (
         "output",
@@ -275,13 +221,12 @@ class GemmReductionArguments:
         "group",
         "axis",
         "reduction_type",
-        "source_fn",
-        "combine_fn",
+        "source_type",
+        "reduction_algorithm",
         "feeds_main",
         "finalizer_fn",
         "consumer_fn",
         "secondary_consumer_fn",
-        "tensor_epilogue_returns_local_reduce",
     )
 
     @classmethod
@@ -298,10 +243,6 @@ class GemmReductionArguments:
         return self.feeds_main or any(
             value is not None for _, value in self.tensor_items()
         )
-
-    @property
-    def geometry(self) -> GemmReductionGeometry:
-        return GemmReductionGeometry(self.group, self.axis)
 
     @property
     def primary_enabled(self) -> bool:

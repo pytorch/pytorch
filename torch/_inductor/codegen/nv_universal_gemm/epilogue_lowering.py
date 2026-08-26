@@ -1,5 +1,13 @@
 # mypy: allow-untyped-defs
-"""Recognize NVGEMM epilogues and lower them to shared contracts."""
+"""Build NVGEMM epilogue plans from scheduler Loop IR.
+
+The scheduler captures a candidate fusion prefix before applying backend policy.
+This module derives grouped reduction geometry from ranges and access strides,
+then describes generated CuTeDSL callbacks with backend-neutral plans.
+``reduction_type`` identifies only the associative primitive; the captured
+expressions define source, finalizer, and consumer behavior. Vendored kernels
+retain ownership of physical traversal, synchronization, and storage.
+"""
 
 import dataclasses
 import math
@@ -12,7 +20,6 @@ from torch.utils._ordered_set import OrderedSet
 
 from ...ir import Buffer, ComputedBuffer, Pointwise, Reduction
 from ...kernel.gemm_epilogue import (
-    GEMM_REDUCTION_IDENTITY_SOURCE,
     GemmReductionConfig,
     GemmReductionGeometry,
     GemmReductionPlan,
@@ -22,11 +29,12 @@ from ...kernel.loop_ir_epilogue_lowering import (
     GemmEpilogueIRAnalysis,
     GemmEpilogueIRStore,
     grouped_reduction_axis_ir,
-    grouped_reduction_pattern_ir,
-    is_direct_bool_gt_zero_ir,
 )
 from ...scheduler import BaseSchedulerNode
 from ...virtualized import V
+
+
+GEMM_REDUCTION_IDENTITY_SOURCE = "def _local_reduce_source(value):\n    return value"
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -449,6 +457,8 @@ class NVGemmEpilogueLowering:
         if group <= 1:
             return None
 
+        from ...kernel.loop_ir_epilogue_lowering import grouped_reduction_pattern_ir
+
         store = analysis.store(node.get_name())
         reduction_ir = (
             None
@@ -529,7 +539,7 @@ class NVGemmEpilogueLowering:
         )
 
     @classmethod
-    def _direct_bool_mask_config(
+    def _secondary_bool_output_config(
         cls,
         gemm_node: Buffer,
         scheduler_node: BaseSchedulerNode,
@@ -547,8 +557,7 @@ class NVGemmEpilogueLowering:
             )
         ):
             return None
-        store = analysis.store(buffer.get_name())
-        if store is None or not is_direct_bool_gt_zero_ir(store, gemm_node.get_name()):
+        if analysis.store(buffer.get_name()) is None:
             return None
         reads = list(scheduler_node.read_writes.reads)
         if len(reads) != 1 or reads[0].name != gemm_node.get_name():
@@ -565,17 +574,24 @@ class NVGemmEpilogueLowering:
             for actual, wanted in zip(strides, expected)
         ):
             return None
+        from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+
+        try:
+            secondary_consumer_fn = LoopIRCuteDSLCodegen.consumer_from_buffer(
+                gemm_node.get_name(),
+                None,
+                buffer,
+                "_local_reduce_secondary_consumer",
+            )
+        except NotImplementedError:
+            return None
         return GemmReductionConfig(
             output_name=buffer.get_name(),
             group=2,
             axis=1,
             reduction_type="sum",
             source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
-            secondary_consumer_fn=(
-                "def _local_reduce_secondary_consumer("
-                "accumulator, primary_reduction, secondary_reduction):\n"
-                "    return accumulator > 0.0"
-            ),
+            secondary_consumer_fn=secondary_consumer_fn,
         )
 
     @classmethod
@@ -725,7 +741,7 @@ class NVGemmEpilogueLowering:
         gemm = context.gemm
         return cls._grouped_reduce_config(
             gemm, node, analysis
-        ) or cls._direct_bool_mask_config(gemm, node, analysis)
+        ) or cls._secondary_bool_output_config(gemm, node, analysis)
 
     @classmethod
     def _reduction_region(
