@@ -114,6 +114,12 @@ def archs_of(d: AotDeclaration) -> tuple[str, ...]:
 # Majors a generated gate could plausibly match. Narrow on purpose: see cc_of.
 _KNOWN_MAJORS = range(3, 13)
 
+# The whole spelling in one pattern, digits included, rather than stripping the
+# prefix and suffix and re-testing the middle. ASCII classes, not \d or
+# str.isdigit(): both are Unicode-aware, and full-width or Arabic-Indic digits
+# then read as an ordinary capability.
+_SM_SPELLING = re.compile(r"sm_([1-9][0-9]{1,2})a?")
+
 
 def cc_of(arch: str) -> tuple[int, int]:
     """sm string -> compute capability. "sm_90" -> (9, 0), "sm_103a" -> (10, 3).
@@ -128,14 +134,19 @@ def cc_of(arch: str) -> tuple[int, int]:
     (0, 9) and "sm_1000" (100, 0), each a gate no device satisfies, so the op
     ships, links and declines every call unreported. Suffixes other than the
     arch-conditional "a" (CUDA 12.9+'s family-conditional "f") are refused too --
-    they mean something the generator has not been taught."""
-    digits = arch.removeprefix("sm_").removesuffix("a")
-    if not arch.startswith("sm_") or not digits.isdigit() or len(digits) not in (2, 3):
+    they mean something the generator has not been taught.
+
+    _KNOWN_MAJORS would reject "sm_9" and "sm_1000" anyway (as capability 0.9 and
+    100.0), so the digit count in _SM_SPELLING is there for the DIAGNOSTIC: a
+    malformed string should be reported as unreadable, not as hardware that does
+    not exist."""
+    m = _SM_SPELLING.fullmatch(arch)
+    if m is None:
         raise RuntimeError(
             f"cannot read a compute capability from arch {arch!r}: expected "
             f"sm_<major><minor>[a], e.g. sm_90a or sm_100"
         )
-    major, minor = divmod(int(digits), 10)
+    major, minor = divmod(int(m.group(1)), 10)
     if major not in _KNOWN_MAJORS:
         raise RuntimeError(
             f"arch {arch!r} parses as compute capability {major}.{minor}, "
