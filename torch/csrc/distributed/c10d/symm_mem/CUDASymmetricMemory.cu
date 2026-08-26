@@ -16,6 +16,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <chrono>
+
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #elif defined(USE_ROCM)
@@ -32,6 +34,8 @@ namespace c10d::symmetric_memory {
 
 // A set of exchange methods with prefix "CUDASymmetricMemory"
 static StoreExchange storeExchange = StoreExchange("CUDASymmetricMemory");
+static constexpr auto kMulticastStoreExchangeTimeout =
+    std::chrono::milliseconds(60000);
 
 AllocationRef::AllocationRef(
     void* ptr,
@@ -658,16 +662,25 @@ static void init_multicast_for_block(
     // TODO implement storeExchange.broadcast
     std::vector<McHandleType> gathered_handles;
     try {
-      gathered_handles =
-          storeExchange.all_gather(store, rank, world_size, mc_exported_handle);
-    } catch (const c10::Error&) {
+      gathered_handles = storeExchange.all_gather(
+          store,
+          rank,
+          world_size,
+          mc_exported_handle,
+          kMulticastStoreExchangeTimeout);
+    } catch (const c10::Error& e) {
       if (rank == 0 && mc_handle != 0) {
         warn_cuda_driver_error(
             driver_api->cuMemRelease_(mc_handle),
             "SymmetricMemory: failed to release multicast handle");
         mc_handle = 0;
       }
-      throw;
+      TORCH_CHECK(
+          false,
+          "SymmetricMemory: failed to exchange multicast handle through store within ",
+          kMulticastStoreExchangeTimeout.count(),
+          " ms. ",
+          e.what_without_backtrace());
     }
     recv_handle = std::move(gathered_handles[0]);
   }
@@ -746,14 +759,19 @@ check_all:
   bool all_succeed = true;
   std::vector<bool> rank_successes;
   try {
-    rank_successes =
-        storeExchange.all_gather(store, rank, world_size, success_end);
-  } catch (const c10::Error&) {
+    rank_successes = storeExchange.all_gather(
+        store, rank, world_size, success_end, kMulticastStoreExchangeTimeout);
+  } catch (const c10::Error& e) {
     if constexpr (!use_fabric_handle) {
       close(recv_handle);
     }
     cleanup_multicast();
-    throw;
+    TORCH_CHECK(
+        false,
+        "SymmetricMemory: failed to exchange multicast success flags through store within ",
+        kMulticastStoreExchangeTimeout.count(),
+        " ms. ",
+        e.what_without_backtrace());
   }
   for (int r = 0; r < world_size; ++r) {
     all_succeed &= rank_successes[r];

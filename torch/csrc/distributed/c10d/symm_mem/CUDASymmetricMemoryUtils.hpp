@@ -5,7 +5,9 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <chrono>
 #include <cstring>
+#include <optional>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -97,7 +99,8 @@ class StoreExchange {
       const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
       int world_size,
-      T val) {
+      T val,
+      std::optional<std::chrono::milliseconds> timeout = std::nullopt) {
     static_assert(std::is_trivially_copyable_v<T>);
 
     std::vector<std::string> peer_keys;
@@ -114,6 +117,10 @@ class StoreExchange {
           reinterpret_cast<uint8_t*>(&val),
           reinterpret_cast<uint8_t*>(&val) + sizeof(T));
       store->set(peer_keys[rank], payload);
+    }
+
+    if (timeout.has_value()) {
+      store->wait(peer_keys, *timeout);
     }
 
     auto payloads = store->multiGet(peer_keys);
