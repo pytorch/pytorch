@@ -25,7 +25,6 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     run_tests,
     TEST_WITH_ROCM,
-    TEST_XPU,
 )
 
 
@@ -143,29 +142,6 @@ class ReplicateTest(MultiProcContinuousTest):
         self._compare_module(model, replicate_model)
 
     @requires_capabilities(Capability.distributed.backend)
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/179948"
-    )
-    @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
-    def test_replicate_move_args_kwargs_to_device(self, device):
-        class MyNet(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.a = nn.Linear(2, 2)
-
-            def forward(self, inp, *, kwarg=None):
-                if kwarg is not None:
-                    inp = inp @ kwarg
-                return self.a(inp)
-
-        model = MyNet().to(device)
-        replicate(model, device_id=torch.accelerator.current_device_index())
-        # CPU input ensures replicate can move arg and kwargs to device.
-        a, b = torch.randn(2, 2, device=device), torch.randn(2, 2, device=device)
-        model(a, kwarg=b).sum().backward()
-
-    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179854")
     @skip_if_lt_x_gpu(2)
     def test_replicate_ignore_module(self, device):
@@ -253,6 +229,37 @@ class ReplicateTest(MultiProcContinuousTest):
             replicate(model, device_id=[torch.device(device)])
 
 
+class ReplicateTestNoXPU(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    world_size = 2
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return dist.get_default_backend_for_device(cls.device_type())
+
+    @requires_capabilities(Capability.distributed.backend)
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/179948"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_replicate_move_args_kwargs_to_device(self, device):
+        class MyNet(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = nn.Linear(2, 2)
+
+            def forward(self, inp, *, kwarg=None):
+                if kwarg is not None:
+                    inp = inp @ kwarg
+                return self.a(inp)
+
+        model = MyNet().to(device)
+        replicate(model, device_id=torch.accelerator.current_device_index())
+        a, b = torch.randn(2, 2, device=device), torch.randn(2, 2, device=device)
+        model(a, kwarg=b).sum().backward()
+
+
 class ReplicateFullyShardInit(ReplicateTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -291,8 +298,9 @@ class ReplicateFullyShardInit(ReplicateTest):
             self.assertTrue(isinstance(linear.weight, DTensor))
 
 
-instantiate_device_type_tests(ReplicateTest, globals(), except_for="cpu")
-instantiate_device_type_tests(ReplicateFullyShardInit, globals(), except_for="cpu")
+instantiate_device_type_tests(ReplicateTest, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(ReplicateTestNoXPU, globals(), except_for="cpu")
+instantiate_device_type_tests(ReplicateFullyShardInit, globals(), except_for="cpu", allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
