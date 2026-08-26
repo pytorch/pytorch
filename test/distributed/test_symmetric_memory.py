@@ -2519,6 +2519,17 @@ class SymmMemWatchdogUnitTest(TestCase):
                 symm_mem.rendezvous(MagicMock(), "test_group")
             mock_handle.cancel.assert_called_once()
 
+    @patch("torch.distributed._symmetric_memory._SymmetricMemory")
+    def test_rendezvous_per_op_timeout_overrides_global(
+        self, MockSymmMem: MagicMock
+    ) -> None:
+        MockSymmMem.rendezvous.return_value = MagicMock()
+        symm_mem.set_watchdog_timeout(30.0)
+        with patch("torch.distributed._watchdog.cpu_timeout") as mock_cpu_timeout:
+            mock_cpu_timeout.return_value = MagicMock()
+            symm_mem.rendezvous(MagicMock(), "test_group", timeout=5.0)
+            mock_cpu_timeout.assert_called_once_with(5.0)
+
     # -- get_symm_mem_workspace --
 
     @patch("torch.distributed._symmetric_memory._SymmetricMemory")
@@ -2561,6 +2572,26 @@ class SymmMemWatchdogUnitTest(TestCase):
         finally:
             _group_name_to_workspace_tensor.pop("wd_test2", None)
 
+    @patch("torch.distributed._symmetric_memory._SymmetricMemory")
+    def test_get_workspace_per_op_timeout_overrides_global(
+        self, MockSymmMem: MagicMock
+    ) -> None:
+        from torch.distributed._symmetric_memory import _group_name_to_workspace_tensor
+
+        mock_tensor = MagicMock()
+        mock_tensor.numel.return_value = 1024
+        mock_tensor.element_size.return_value = 1
+        _group_name_to_workspace_tensor["wd_test3"] = mock_tensor
+        try:
+            MockSymmMem.rendezvous.return_value = MagicMock()
+            symm_mem.set_watchdog_timeout(30.0)
+            with patch("torch.distributed._watchdog.cpu_timeout") as mock_cpu_timeout:
+                mock_cpu_timeout.return_value = MagicMock()
+                symm_mem.get_symm_mem_workspace("wd_test3", 512, timeout=5.0)
+                mock_cpu_timeout.assert_called_once_with(5.0)
+        finally:
+            _group_name_to_workspace_tensor.pop("wd_test3", None)
+
     # -- put_signal --
 
     @patch("torch.distributed._symmetric_memory.get_backend", return_value="NCCL")
@@ -2600,6 +2631,16 @@ class SymmMemWatchdogUnitTest(TestCase):
             hdl = MagicMock(spec=[])
             symm_mem.put_signal(MagicMock(), hdl, 0)
             mock_stream_timeout.assert_not_called()
+
+    @patch("torch.distributed._symmetric_memory.get_backend", return_value="NCCL")
+    @patch("torch.ops.symm_mem.nccl_put_signal")
+    def test_put_signal_per_op_timeout_overrides_global(
+        self, mock_nccl_put: MagicMock, mock_get_backend: MagicMock
+    ) -> None:
+        symm_mem.set_watchdog_timeout(30.0)
+        with patch("torch.distributed._watchdog.stream_timeout") as mock_stream_timeout:
+            symm_mem.put_signal(MagicMock(), MagicMock(spec=[]), 0, timeout=5.0)
+            mock_stream_timeout.assert_called_once_with(5.0)
 
     # -- wait_signal --
 
@@ -2643,6 +2684,18 @@ class SymmMemWatchdogUnitTest(TestCase):
             hdl.device = "cuda:0"
             symm_mem.wait_signal(hdl, 0)
             mock_stream_timeout.assert_not_called()
+
+    @patch("torch.distributed._symmetric_memory.get_backend", return_value="NCCL")
+    @patch("torch.ops.symm_mem.nccl_wait_signal")
+    def test_wait_signal_per_op_timeout_overrides_global(
+        self, mock_nccl_wait: MagicMock, mock_get_backend: MagicMock
+    ) -> None:
+        symm_mem.set_watchdog_timeout(30.0)
+        with patch("torch.distributed._watchdog.stream_timeout") as mock_stream_timeout:
+            hdl = MagicMock(spec=[])
+            hdl.device = "cuda:0"
+            symm_mem.wait_signal(hdl, 0, timeout=5.0)
+            mock_stream_timeout.assert_called_once_with(5.0)
 
 
 @instantiate_parametrized_tests
