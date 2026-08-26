@@ -363,7 +363,6 @@ add_custom_command(
     --tags-path "aten/src/ATen/native/tags.yaml"
     $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
     $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
-    --force_schema_registration
     --gen_lazy_ts_backend
     ${GEN_PER_OPERATOR_FLAG}
   DEPENDS
