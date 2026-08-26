@@ -22,6 +22,7 @@ from torch._inductor.scheduler import (
     _LoopMutationTracker,
     _LoopStateSnapshot,
     ForeachKernelSchedulerNode,
+    FusedMixOrderReductions,
     FusedSchedulerNode,
     refresh_group_node_dependencies,
     Scheduler,
@@ -351,6 +352,58 @@ class ImplDetailTest(MockSchedulerTest):
         self.assertEqual(subkernel.group, original_group)
         self.assertEqual(foreach.read_writes, original_read_writes)
 
+    def test_nested_loop_state_rollback_savepoint(self):
+        computed_node = SchedulerNode(
+            V.graph.scheduler, self._create_computed_buffer_ax2()
+        )
+        original_state = computed_node.snapshot_loop_state()
+        outer = _LoopMutationTracker.create((computed_node,))
+        try:
+            computed_node.apply_loop_reindexing([64, 32])
+            outer_progress_state = computed_node.snapshot_loop_state()
+            self.assertNotEqual(outer_progress_state, original_state)
+
+            inner = _LoopMutationTracker.create((computed_node,))
+            try:
+                computed_node.apply_loop_reindexing([16, 128])
+                self.assertNotEqual(
+                    computed_node.snapshot_loop_state(), outer_progress_state
+                )
+            finally:
+                inner.finish(rollback=True)
+
+            self.assertEqual(computed_node.snapshot_loop_state(), outer_progress_state)
+        finally:
+            outer.finish(rollback=True)
+
+        self.assertEqual(computed_node.snapshot_loop_state(), original_state)
+        self.assertIsNone(computed_node._loop_mutation_listener)
+
+    def test_nested_fused_group_rollback(self):
+        node1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        node2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+        child = object.__new__(FusedSchedulerNode)
+        child.snodes = [node1]
+        child.group = node1.group
+        root = object.__new__(FusedMixOrderReductions)
+        root.node1 = child
+        root.node2 = node2
+        root.snodes = [node1, node2]
+        root.group = node1.group
+        original_group = child.group
+        snapshot = _LoopStateSnapshot.create((root,))
+
+        child.group = (child.group[0], (sympy.Integer(7), sympy.Integer(11)))
+        with mock.patch(
+            "torch._inductor.scheduler.refresh_group_node_dependencies"
+        ) as refresh:
+            snapshot.restore()
+
+        self.assertEqual(child.group, original_group)
+        refresh.assert_any_call(root)
+        refresh.assert_any_call(child)
+        self.assertEqual(refresh.call_count, 2)
+
     def test_reorder_modular_indexing(self):
         """
         There was a bug that we wrongly map i0 to the dimension with size 49
@@ -390,6 +443,48 @@ class ImplDetailTest(MockSchedulerTest):
         self.assertEqual(
             new_body.indexing_exprs["index0"],
             z2 + 49 * z1 + 2401 * ModularIndexing(z3, 1, 64),
+        )
+
+    def test_broadcast_orders_allow_mixed_identity_children(self):
+        scale = ir.TensorBox.create(
+            ir.Buffer(
+                name="scale",
+                layout=ir.FixedLayout(
+                    torch.device(GPU_TYPE), torch.float32, [6, 7], [7, 1]
+                ),
+            )
+        )
+        load_scale = scale.make_loader()
+
+        def make_node(ranges, indexed_dims):
+            def inner_fn(index):
+                return load_scale([index[indexed_dims[0]], index[indexed_dims[1]]]) * 2
+
+            buf = ir.Pointwise.create(
+                device=torch.device(GPU_TYPE),
+                dtype=torch.float32,
+                inner_fn=inner_fn,
+                ranges=ranges,
+            )
+            buf.realize()
+            computed = buf.data.data
+            computed.decide_layout()
+            return SchedulerNode(V.graph.scheduler, computed)
+
+        ordered = make_node([6, 7, 16, 16], (0, 1))
+        interleaved = make_node([6, 16, 7, 16], (0, 2))
+        reduction = mock.Mock()
+        reduction.get_buffer_names.return_value = OrderedSet(["scale"])
+
+        scheduler = Scheduler.__new__(Scheduler)
+        self.assertEqual(
+            scheduler._pointwise_reduction_broadcast_orders(
+                reduction,
+                [ordered, interleaved],
+                sympy.Integer(42),
+                sympy.Integer(256),
+            ),
+            [(0, 1, 2, 3), (0, 2, 1, 3)],
         )
 
     def test_weighted_cost_penalizes_uncoalesced(self):
@@ -919,25 +1014,27 @@ class LoopOrderingTest(TestCase):
         # Block reduction + broadcast pointwise should fuse into 1 kernel
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @staticmethod
+    def _square_block_broadcast(x):
+        block_size = 16
+        rows, cols = x.shape
+        blocks = (
+            x.reshape(
+                rows // block_size,
+                block_size,
+                cols // block_size,
+                block_size,
+            )
+            .permute(0, 2, 1, 3)
+            .contiguous()
+        )
+        scale = blocks.abs().amax(dim=(-2, -1), keepdim=True).clamp(min=1e-6)
+        quantized = blocks / scale
+        output = quantized.permute(0, 2, 1, 3).contiguous().reshape(rows, cols)
+        return output, scale.squeeze(-1).squeeze(-1)
+
     def test_square_block_broadcast_vertical_fusion(self):
         block_size = 16
-
-        def f(x):
-            rows, cols = x.shape
-            blocks = (
-                x.reshape(
-                    rows // block_size,
-                    block_size,
-                    cols // block_size,
-                    block_size,
-                )
-                .permute(0, 2, 1, 3)
-                .contiguous()
-            )
-            scale = blocks.abs().amax(dim=(-2, -1), keepdim=True).clamp(min=1e-6)
-            quantized = blocks / scale
-            output = quantized.permute(0, 2, 1, 3).contiguous().reshape(rows, cols)
-            return output, scale.squeeze(-1).squeeze(-1)
 
         original_memory = Scheduler._selected_tiling_memory
         individual_sizes = []
@@ -951,10 +1048,16 @@ class LoopOrderingTest(TestCase):
 
         x = torch.randn(6 * block_size, 7 * block_size, device=GPU_TYPE)
         with mock.patch.object(Scheduler, "_selected_tiling_memory", record_memory):
-            self.do_acc_test(f, x)
+            self.do_acc_test(self._square_block_broadcast, x)
         self.assertEqual(1, metrics.generated_kernel_count)
         self.assertIn((6, 16, 7, 16), individual_sizes)
         self.assertNotIn((6, 7, 16, 16), individual_sizes)
+
+    @inductor_config.patch(loop_ordering_after_fusion=False)
+    def test_square_block_broadcast_respects_disabled_loop_ordering(self):
+        x = torch.randn(6 * 16, 7 * 16, device=GPU_TYPE)
+        self.do_acc_test(self._square_block_broadcast, x)
+        self.assertEqual(2, metrics.generated_kernel_count)
 
     @inductor_config.patch(force_disable_caches=True)
     def test_square_block_broadcast_reindex_rollback(self):
@@ -2086,6 +2189,25 @@ class MemoryCoalescingTest(MockSchedulerTest):
         for expr, expected in test_cases:
             result = tiling_utils.solve_for_tiling(expr)
             self.assertEqual(result, expected)
+
+    def test_solve_for_tiling_nested_modularindexing(self):
+        from torch._inductor import tiling_utils
+
+        n0 = sympy.Symbol("n0", integer=True, nonnegative=True)
+        inner = ModularIndexing(n0 - 252252, 1, 50)
+        for expr in (
+            inner,
+            ModularIndexing(inner, 1, 50),
+            ModularIndexing(ModularIndexing(inner, 1, 50), 1, 50),
+        ):
+            # must not raise, and nested forms solve identically to the flat form
+            self.assertEqual(tiling_utils.solve_for_tiling(expr), sympy.Integer(252253))
+
+        # mixed nesting has no tiling solution, but must not raise either
+        mixed = FloorDiv(
+            ModularIndexing(5 * FloorDiv(ModularIndexing(n0 + 8, 1, 6), 5), 1, 36), 8
+        )
+        self.assertEqual(tiling_utils.solve_for_tiling(mixed), None)
 
     @parametrize("dynamic", (False, True))
     def test_induced_fused_tiling(self, dynamic):

@@ -358,8 +358,14 @@ ROCM_HOME = _find_rocm_home() if (torch.cuda._is_compiled() and torch.version.hi
 HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
 IS_HIP_EXTENSION = bool(ROCM_HOME is not None and torch.version.hip is not None)
 ROCM_VERSION = None
+HIP_VERSION = None
 if torch.version.hip is not None:
-    ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
+    HIP_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
+    if torch.version.rocm is None:
+        raise AssertionError(
+            "torch.version.hip is set but torch.version.rocm is not; "
+            "torch/version.py is inconsistent with this build of PyTorch")
+    ROCM_VERSION = tuple(int(v) for v in torch.version.rocm.split('.')[:2])
 
 CUDA_HOME = _find_cuda_home() if (torch.cuda._is_compiled() and torch.version.cuda) else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
@@ -475,9 +481,14 @@ JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 PLAT_TO_VCVARS = {
     'win32' : 'x86',
     'win-amd64' : 'x86_amd64',
+    'win-arm64' : 'arm64',
 }
 
 min_supported_cpython = "0x030A0000"  # Python 3.10 hexcode
+
+def _windows_cuda_lib_dir() -> str:
+    return os.path.join('lib', 'arm64' if sysconfig.get_platform().lower() == 'win-arm64' else 'x64')
+
 
 def get_cxx_compiler():
     if IS_WINDOWS:
@@ -1613,7 +1624,12 @@ def CUDAExtension(name, sources, *args, **kwargs):
                               hipify_result[s_abs].hipified_path is not None) else s_abs)
             # setup() arguments must *always* be /-separated paths relative to the setup.py directory,
             # *never* absolute paths
-            hipified_sources.add(os.path.relpath(hipified_s_abs, build_dir))
+            try:
+                hip_path = os.path.relpath(hipified_s_abs, build_dir)
+            except ValueError:
+                # Cross-drive on Windows: no relative path exists; fall back to absolute (#91797).
+                hip_path = hipified_s_abs
+            hipified_sources.add(hip_path)
 
         sources = list(hipified_sources)
 
@@ -1793,7 +1809,7 @@ def library_paths(device_type: str = "cpu", torch_include_dirs: bool = True, cro
             paths.append(os.path.join(WINDOWS_CUDA_HOME, lib_dir))
         else:
             if IS_WINDOWS:
-                lib_dir = os.path.join('lib', 'x64')
+                lib_dir = _windows_cuda_lib_dir()
             else:
                 lib_dir = 'lib64'
                 if (not os.path.exists(_join_cuda_home(lib_dir)) and
@@ -2366,7 +2382,8 @@ def _jit_compile(name,
                 clean_ctx_mgr = contextlib.nullcontext()
             with clean_ctx_mgr as clean_ctx:
                 if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
-                    assert hipify_python is not None  # noqa: S101
+                    if hipify_python is None:
+                        raise AssertionError("expected hipify_python to be not None")
                     hipify_result = hipify_python.hipify(
                         project_directory=build_directory,
                         output_directory=build_directory,
@@ -2614,10 +2631,11 @@ def _prepare_ldflags(extra_ldflags, with_cuda, with_sycl, verbose, is_standalone
         if verbose:
             logger.info('Detected CUDA files, patching ldflags')
         if IS_WINDOWS and not IS_HIP_EXTENSION:
-            extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib", "x64")}')
+            cuda_lib_dir = _windows_cuda_lib_dir()
+            extra_ldflags.append(f'/LIBPATH:{_join_cuda_home(cuda_lib_dir)}')
             extra_ldflags.append('cudart.lib')
             if CUDNN_HOME is not None:
-                extra_ldflags.append(f'/LIBPATH:{os.path.join(CUDNN_HOME, "lib", "x64")}')
+                extra_ldflags.append(f'/LIBPATH:{os.path.join(CUDNN_HOME, _windows_cuda_lib_dir())}')
         elif not IS_HIP_EXTENSION:
             extra_lib_dir = "lib64"
             if (not os.path.exists(_join_cuda_home(extra_lib_dir)) and

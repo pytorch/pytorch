@@ -316,6 +316,11 @@ class DeviceCodegen:
 
 KernelArgType = WorkspaceArg | TensorArg | SizeArg | TMADescriptorArg | ConstexprArg
 
+# Device index to emit into generated code: either a literal compile-time index, or a
+# code expression evaluated at run time (e.g. current_device_idx_expr() under
+# compile-on-one-rank).
+DeviceIdx = int | str
+
 device_codegens: dict[str, DeviceCodegen] = {}
 
 
@@ -323,14 +328,27 @@ class DeviceOpOverrides:
     def import_get_raw_stream_as(self, name: str) -> str:
         raise NotImplementedError
 
-    def set_device(self, device_idx: int) -> str:
+    def set_device(self, device_idx: DeviceIdx) -> str:
         raise NotImplementedError
 
     def synchronize(self) -> str:
         raise NotImplementedError
 
-    def device_guard(self, device_idx: int) -> str:
+    def device_guard(self, device_idx: DeviceIdx) -> str:
         raise NotImplementedError
+
+    def current_device_idx_expr(self) -> str:
+        # Runtime expression evaluating to the current device index. Used under
+        # compile-on-one-rank so the wrapper resolves its device at run time
+        # (rank-agnostic) instead of baking the compile-time index. Only CUDA/ROCm
+        # implements this today; raise something actionable rather than a bare
+        # NotImplementedError from deep inside device-context codegen.
+        raise RuntimeError(
+            f"compile-on-one-rank (device-as-parameter) is not supported on "
+            f"{type(self).__name__}: it has no current_device_idx_expr(), so the "
+            f"generated wrapper would bake the compile-time device index and not be "
+            f"rank-portable."
+        )
 
     def current_stream(self) -> str:
         raise NotImplementedError
@@ -442,6 +460,7 @@ class BackendFeature(Enum):
     BUCKETIZE = auto()
     INPLACE_BUFFERS = auto()
     MASKED_SCATTER_WITH_INDEX = auto()
+    MASKED_STORE = auto()
     SCAN = auto()
     SORT = auto()
     TUPLE_REDUCTION = auto()
@@ -743,6 +762,7 @@ def deduce_output_dtype_by_name(
     elif op_name in (
         "load",
         "store",
+        "masked_store",
         "store_reduction",
     ):
         buf_name = args[1]
@@ -1057,6 +1077,12 @@ def _all_in_parens(string: str) -> bool:
 
 # pyrefly: ignore [inconsistent-inheritance]
 class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
+    """
+    Base for backend op handlers that emit source strings. Subclasses override
+    individual ops; anything left unimplemented falls back to the decompositions
+    in OpDecompositions/BasicMathOpsMixin.
+    """
+
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:
         if (
@@ -1146,6 +1172,17 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     ) -> None:
         raise NotImplementedError(
             f"{type(self).__name__}: store should be handled by CSEProxy"
+        )
+
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: OpVarT,
+        mask: OpVarT,
+    ) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: masked_store should be handled by CSEProxy"
         )
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
@@ -1787,13 +1824,19 @@ class KernelArgs:
         Returns:
             name of the semaphores buffer
         """
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
         current_device = V.graph.get_current_device_or_throw()
+        # This name is emitted into the wrapper, so under compile-on-one-rank it cannot
+        # carry the rank's device index (the graph is single-device there, so the type
+        # alone still distinguishes buffers).
+        suffix = "" if _coor_enabled() else f"_{current_device.index}"
         arg = WorkspaceArg(
             count=min_size,
             zero_mode=WorkspaceZeroMode.ZERO_PER_GRAPH,
             dtype=torch.uint32,
             inner_name="sem_ptr",
-            outer_name=f"semaphores_{current_device.type}_{current_device.index}",
+            outer_name=f"semaphores_{current_device.type}{suffix}",
             device=current_device,
         )
         for existing_arg in self.workspace_args:
@@ -2111,6 +2154,13 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
     def get(self, cache_key: str) -> CSEVariableType:
         return self._cache[self.augment_key(cache_key)]
 
+    def contains_value(self, value: CSEVariableType) -> bool:
+        return (
+            value in self._cache.values()
+            or value in self.store_cache.values()
+            or value in self.reduction_cache.values()
+        )
+
     def generate(
         self,
         buffer: IndentedBuffer,
@@ -2353,6 +2403,15 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> None:
+        raise NotImplementedError
+
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mask: CSEVariable,
     ) -> None:
         raise NotImplementedError
 
@@ -3002,6 +3061,23 @@ class CSEProxy(DefaultHandler):
             self.kernel.store(name, index, value, mode=mode)
             self.kernel.num_store += 1
         self.kernel.record_op_trace("store", (name, index, value, mode), {})
+
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mask: CSEVariable,
+    ) -> None:
+        self.kernel.store_buffer_names.add(name)
+        # masked_store is only used for domain expansion. The false lanes are
+        # outside the logical output, so forwarding the computed value avoids an
+        # out-of-bounds read of the smaller destination in the expanded tail.
+        self._update_store_cache(name, value)
+        if name not in V.graph.removed_buffers:
+            self.kernel.masked_store(name, index, value, mask)
+            self.kernel.num_store += 1
+        self.kernel.record_op_trace("masked_store", (name, index, value, mask), {})
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)

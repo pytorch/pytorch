@@ -48,6 +48,12 @@ register_log("fsdp", ["torch.distributed.fsdp", "torch.distributed._composable.f
 register_log("dtensor", ["torch.distributed._tensor", "torch.distributed.tensor"])
 register_log("onnx", "torch.onnx")
 register_log("native_dsl", "torch._native")
+register_artifact(
+    "native_dsl_compile",
+    "Emits a log line and a tlparse record per torch._native DSL compile-cache call "
+    "(compiles and cache hits). Off by default: this fires on every op call.",
+    off_by_default=True,
+)
 register_log(
     "export",
     [
