@@ -87,11 +87,11 @@ def _module_scoped_hash_target(x):
     return x + 1
 
 
-# Mutable state deliberately hidden from the FX graph: allow_in_graph means
-# dynamo records only this function's qualified name, never its body.
 _OPAQUE_SCALE = [2.0]
 
 
+# Module-level so the cache key can round-trip this callable by import path.
+# A local function's "<locals>" qualname would fail before the stale-hit path.
 @torch._dynamo.allow_in_graph
 def _opaque_scaled(x):
     return x * _OPAQUE_SCALE[0]
@@ -885,7 +885,12 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         a = torch.randn(25)
         b = torch.randn(25)
 
-        fn(a, b)
+        self.assertEqual(fn(a, b), 2 * (a + b))
+        self._assert_autograd_cache_counters(miss=1, hit=0, saved=1, bypass=0)
+
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(fn(a, b), 2 * (a + b))
+        self._assert_autograd_cache_counters(miss=1, hit=1, saved=1, bypass=0)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -5119,11 +5124,13 @@ class HOPCacheTests(CacheKeyEquivalenceMixin, torch._dynamo.test_case.TestCase):
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_checkpoint_body_opaque_callable_not_stale(self):
-        """A cached checkpoint body must not outlive state its key cannot see.
+        """A cached checkpoint body must not outlive behavior its key cannot see.
 
-        _OPAQUE_SCALE is invisible to the dynamo graph, so the cache key is
-        unchanged when it moves. Asserts the gradient, not the counters: any
-        outcome that avoids the stale result is acceptable.
+        Dynamo leaves _opaque_scaled opaque, while AOT traces through it. The
+        cache key records its stable import path, not its body or referenced
+        state; changing _OPAQUE_SCALE models a deployment changing behavior at
+        that path. Assert the gradient, not the counters: any outcome that avoids
+        the stale result is acceptable.
         """
 
         def grad_of_compiled():
@@ -5136,13 +5143,15 @@ class HOPCacheTests(CacheKeyEquivalenceMixin, torch._dynamo.test_case.TestCase):
             )
             return torch.autograd.grad(compiled(x).sum(), x)[0]
 
+        original_scale = _OPAQUE_SCALE[0]
         try:
+            _OPAQUE_SCALE[0] = 2.0
             with fresh_cache():
                 self.assertEqual(grad_of_compiled(), torch.full((4,), 2.0))
                 _OPAQUE_SCALE[0] = 3.0
                 self.assertEqual(grad_of_compiled(), torch.full((4,), 3.0))
         finally:
-            _OPAQUE_SCALE[0] = 2.0
+            _OPAQUE_SCALE[0] = original_scale
 
 
 @instantiate_parametrized_tests
