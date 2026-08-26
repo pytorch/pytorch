@@ -2,6 +2,7 @@
 import multiprocessing
 import os
 import threading
+import warnings
 from collections.abc import Callable as _Callable
 from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
@@ -105,8 +106,11 @@ _ipc_storage_reduce_check_registry: dict[str, _Callable] = {}
 def register_ipc_tensor_reducer(device_type: str, reduce_fn: _Callable) -> None:
     device_type = torch.device(device_type).type
     if device_type in _ipc_tensor_reduce_registry:
-        raise RuntimeError(
-            f"An IPC tensor reducer for '{device_type}' has already been registered"
+        warnings.warn(
+            f"An IPC tensor reducer for '{device_type}' is already registered. "
+            "Overwriting it with the new reducer.",
+            UserWarning,
+            stacklevel=2,
         )
     _ipc_tensor_reduce_registry[device_type] = reduce_fn
 
@@ -114,8 +118,11 @@ def register_ipc_tensor_reducer(device_type: str, reduce_fn: _Callable) -> None:
 def register_ipc_storage_check(device_type: str, check_fn: _Callable) -> None:
     device_type = torch.device(device_type).type
     if device_type in _ipc_storage_reduce_check_registry:
-        raise RuntimeError(
-            f"An IPC storage check for '{device_type}' has already been registered"
+        warnings.warn(
+            f"An IPC storage check for '{device_type}' is already registered. "
+            "Overwriting it with the new check.",
+            UserWarning,
+            stacklevel=2,
         )
     _ipc_storage_reduce_check_registry[device_type] = check_fn
 
