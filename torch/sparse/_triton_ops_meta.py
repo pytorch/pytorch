@@ -111,44 +111,32 @@ from torch.hub import tqdm
 from torch.testing import make_tensor
 
 
-def _get_current_accelerator_type() -> str:
-    """Return the device type of the accelerator in use, or "" if there is none.
-
-    ``torch.accelerator.current_accelerator(check_available=True)`` is not usable
-    here: its availability check goes through ``torch.get_device_module``, which
-    raises for a PrivateUse1 backend that has been renamed without registering a
-    ``torch.<name>`` module. Deriving a tuning cache key must never raise, so such
-    a backend is reported as absent instead. ``is_available()`` is still consulted,
-    because that is what the previous cuda/xpu chain used to reject a backend that
-    is built but has no usable device.
-    """
-    acc = torch.accelerator.current_accelerator()
-    if acc is None:
-        return ""
-    is_available = getattr(getattr(torch, acc.type, None), "is_available", None)
-    return acc.type if is_available is not None and is_available() else ""
-
-
 def _get_device_name(device=None) -> str:
     """Return the device name that keys the Triton tuning tables.
 
     The key is persisted data: ``dump()`` writes it into this module's source
     during an offline tuning run and a different process reads it back, so the same
-    hardware must always produce the same name and producing it must never raise --
+    device must always produce the same name and producing it must never raise --
     a lookup miss is a designed outcome of :func:`get_meta`, a failure is not.
 
-    ``device`` names the device the parameters are tuned for or looked up for; when
-    it is unspecified the accelerator in use is used instead. A backend that
-    exposes no ``torch.<device_type>.get_device_name`` is unnamed, which is how an
-    absent accelerator has always been keyed.
+    ``device`` names the device the parameters are tuned for or looked up for. When
+    it is not given, the question is which device runs sparse Triton ops for a
+    caller that did not say, which is what ``check_device`` in
+    ``torch/sparse/_triton_ops.py`` answers with a hardcoded ``("cuda", "xpu")``;
+    that has no generic equivalent today, so this is deliberately not routed
+    through the accelerator API. Doing so would also key a CUDA process that has
+    registered a PrivateUse1 backend under the wrong device, since
+    ``at::getAccelerator`` returns PrivateUse1 ahead of CUDA.
+
+    A backend that exposes no ``torch.<device_type>.get_device_name`` is unnamed.
     """
-    if device == "":
-        # The tuning entry points pass "" when there is no accelerator in use.
-        device = None
-    device_type = (
-        _get_current_accelerator_type() if device is None else torch.device(device).type
-    )
-    module = getattr(torch, device_type, None) if device_type else None
+    if device is None:
+        if torch.cuda.is_available():
+            return torch.cuda.get_device_name()
+        if torch.xpu.is_available():
+            return torch.xpu.get_device_name()
+        return ""
+    module = getattr(torch, torch.device(device).type, None)
     get_device_name = getattr(module, "get_device_name", None)
     return "" if get_device_name is None else get_device_name(device)
 
@@ -519,13 +507,12 @@ def create_blocked_tensor(B, M, N, blocksize, sparsity, dtype, device):
 
 
 def optimize_scatter_mm(
-    m, k, n, bm, bk, dtype=torch.float16, device=None, sparsity=0.5, force=False
+    m, k, n, bm, bk, dtype=torch.float16, device="cuda", sparsity=0.5, force=False
 ):
     import triton
 
     from torch.sparse._triton_ops import bsr_scatter_mm, bsr_scatter_mm_indices_data
 
-    device = device or _get_current_accelerator_type()
     key = (m, k, n, bm, bk)
 
     version = (0, dtype, sparsity)
@@ -712,8 +699,8 @@ def tune_bsr_dense_addmm(
         version_dtype = (dtype, out_dtype)
     version = (0, version_dtype, sparsity)
     key = (M, K, N, BM, BK, beta == 0, beta == 1, alpha == 1)
-    # Key on the device the inputs live on, not on the process accelerator: the
-    # lookup below and the update at the end of this function must agree.
+    # Key on the device the inputs live on rather than on the caller-less default,
+    # so the lookup below and the update at the end of this function agree.
     device_name = _get_device_name(bsr.device)
 
     # For tuning, for an initial state, use parameters from the
@@ -811,13 +798,12 @@ def optimize_bsr_dense_addmm(
     use_right_alpha=False,
     dtype=torch.float16,
     out_dtype=None,
-    device=None,
+    device="cuda",
     sparsity=0.5,
     force=False,
     verbose=False,
     opname=None,
 ):
-    device = device or _get_current_accelerator_type()
     torch.manual_seed(0)
     bsr = create_blocked_tensor(
         0, m, k, (bm, bk), sparsity, dtype, device
@@ -848,11 +834,8 @@ def optimize_bsr_dense_addmm(
     )
 
 
-def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True, device=None):
+def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
     import itertools
-
-    device = device or _get_current_accelerator_type()
-    device_name = _get_device_name(device)
 
     sizes_lst = [
         256,
@@ -888,15 +871,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True, device
                     continue
                 if op == "scatter_mm":
                     optimize_scatter_mm(
-                        M,
-                        K,
-                        N,
-                        BM,
-                        BK,
-                        force=force,
-                        sparsity=sparsity,
-                        dtype=dtype,
-                        device=device,
+                        M, K, N, BM, BK, force=force, sparsity=sparsity, dtype=dtype
                     )
                 elif op in {"bsr_dense_addmm", "_int_bsr_dense_addmm"}:
                     if M == K and N == 50432:
@@ -914,7 +889,6 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True, device
                             force=force,
                             sparsity=sparsity,
                             dtype=dtype,
-                            device=device,
                             verbose=verbose,
                             opname=op,
                         )
@@ -944,18 +918,12 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True, device
             for sparsity1 in sparsity_lst:
                 torch.manual_seed(0)
                 bsr = create_blocked_tensor(
-                    0, M, K, (BM, BK), sparsity1, dtype, device
+                    0, M, K, (BM, BK), sparsity1, dtype, device="cuda"
                 ).to_sparse_bsr((BM, BK))
-                dense = make_tensor(K, N, dtype=dtype, device=device)
+                dense = make_tensor(K, N, dtype=dtype, device="cuda")
                 meta_lst = []
                 for sparsity in sparsity_lst:
-                    meta = get_meta(
-                        op,
-                        key,
-                        device_name,
-                        version=(0, dtype, sparsity),
-                        exact=True,
-                    )
+                    meta = get_meta(op, key, version=(0, dtype, sparsity), exact=True)
                     if meta is None:
                         continue
 
@@ -1005,12 +973,9 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True, device
                 print(sparsity1, index, key, meta_lst, speeddiff)
 
                 if index > 0:
+                    device_name = _get_device_name()
                     meta = get_meta(
-                        op,
-                        key,
-                        device_name,
-                        version=(0, dtype, meta_lst[0][1]),
-                        exact=True,
+                        op, key, version=(0, dtype, meta_lst[0][1]), exact=True
                     )
                     update(
                         op,

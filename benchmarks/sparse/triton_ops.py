@@ -225,7 +225,9 @@ if __name__ == "__main__":
         bm = bm_list[0]
         bk = bk_list[0] or bm
         if "bsr_scatter_mm6" in ops:
-            meta = torch.sparse._triton_ops.scatter_mm_meta(m, k, n, bm, bk)
+            meta = torch.sparse._triton_ops.scatter_mm_meta(
+                m, k, n, bm, bk, device=args.device
+            )
         elif "bsr_dense_mm_with_meta" in ops:
             meta = torch.sparse._triton_ops.bsr_dense_mm_meta(m, k, n, bm, bk)
         else:

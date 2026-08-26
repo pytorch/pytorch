@@ -6,10 +6,10 @@ import io
 import itertools
 import operator
 import random
-import subprocess
-import sys
+import types
 import unittest
 from contextlib import redirect_stderr
+from unittest.mock import patch
 
 import torch
 from torch.testing import FileCheck, make_tensor
@@ -4395,77 +4395,58 @@ class TestSparseCompressedTritonKernels(TestCase):
                          dict(GROUP_SIZE_ROW=4, SPLIT_N=4, num_stages=1, num_warps=4))
 
 
-# Renaming PrivateUse1 is process-global and one-shot, and it makes
-# torch.accelerator.current_accelerator() report a backend that has no
-# torch.<name> module, which torch.get_device_module() and
-# torch.accelerator.is_available() both raise for. Deriving a tuning cache key
-# must not: a miss is meant to fall back to the reference parameters below.
-_UNREGISTERED_BACKEND_SCRIPT = """\
-import torch
-from torch.sparse._triton_ops import bsr_dense_addmm_meta
-from torch.sparse._triton_ops_meta import _get_device_name
-
-torch.utils.rename_privateuse1_backend("tuningkeytestbackend")
-print(repr(_get_device_name()))
-print(bsr_dense_addmm_meta(256, 256, 256, 16, 16, 0, 1))
-"""
-
-
 class TestSparseTritonMetaDeviceName(TestCase):
     """_get_device_name supplies the device component of the key under which
     _operation_device_version_data stores tuned Triton parameters. It sits on the
-    miss path of an optimization lookup, so it must be total, and it must key on
-    the device the inputs are on rather than on whatever the process configured."""
+    miss path of an optimization lookup, so it must never raise, and it must key on
+    the device the inputs are on so that a lookup finds what a tuning run stored."""
 
     hw_classification = HardwareClassification.GENERIC
 
+    def _device_module(self, **attrs):
+        # privateuseone stands in for an accelerator that is neither cuda nor xpu.
+        # Patching the attribute avoids torch.utils.rename_privateuse1_backend,
+        # which is process-global and can only be called once.
+        return patch.object(
+            torch, "privateuseone", types.SimpleNamespace(**attrs), create=True
+        )
+
     def test_device_module_without_get_device_name_is_unnamed(self):
-        # torch.cpu, torch.mps and torch.mtia are all in this position.
         from torch.sparse._triton_ops_meta import _get_device_name
 
+        with self._device_module(is_available=lambda: True):
+            self.assertEqual(_get_device_name("privateuseone"), "")
+        # torch.cpu, torch.mps and torch.mtia are in the same position today.
         self.assertEqual(_get_device_name("cpu"), "")
 
-    def test_no_accelerator_is_unnamed(self):
+    def test_no_cuda_or_xpu_is_unnamed(self):
         from torch.sparse._triton_ops_meta import _get_device_name
 
-        with unittest.mock.patch.object(
-            torch.accelerator, "current_accelerator", lambda check_available=False: None
+        with patch.object(torch.cuda, "is_available", lambda: False), patch.object(
+            torch.xpu, "is_available", lambda: False
         ):
             self.assertEqual(_get_device_name(), "")
-            # What the tuning entry points pass when there is no accelerator.
-            self.assertEqual(_get_device_name(""), "")
 
-    def test_explicit_device_is_used_instead_of_the_accelerator(self):
+    def test_explicit_device_is_used_instead_of_the_default(self):
         from torch.sparse._triton_ops_meta import _get_device_name
 
-        with unittest.mock.patch.object(
-            torch.cpu, "get_device_name", create=True,
-            new=lambda device: f"Fake device {device}"
-        ):
-            self.assertEqual(_get_device_name("cpu"), "Fake device cpu")
-            self.assertEqual(_get_device_name(torch.device("cpu")), "Fake device cpu")
-
-    @skipIfTorchDynamo("spawns a subprocess")
-    @unittest.skipIf(IS_FBCODE, "spawns a subprocess")
-    def test_accelerator_without_a_device_module_is_unnamed(self):
-        out = subprocess.check_output(
-            [sys.executable, "-c", _UNREGISTERED_BACKEND_SCRIPT],
-            stderr=subprocess.DEVNULL,
-        ).decode("ascii").strip().splitlines()
-        self.assertEqual(
-            out,
-            ["''", "{'SPLIT_N': 16, 'GROUP_SIZE_ROW': 4, 'num_stages': 1, 'num_warps': 4}"]
-        )
+        with self._device_module(get_device_name=lambda device: f"Fake {device}"):
+            self.assertEqual(_get_device_name("privateuseone"), "Fake privateuseone")
+            self.assertEqual(
+                _get_device_name(torch.device("privateuseone")), "Fake privateuseone"
+            )
+            self.assertNotEqual(_get_device_name(), "Fake privateuseone")
 
     def test_tuned_parameters_are_found_through_the_input_device(self):
         # Round trip: what update() stores under a device's name must be found
-        # again by a lookup that only knows the input tensor's device. Nothing
-        # here needs an accelerator, or a second one.
+        # again by a lookup that only knows the input tensor's device. Needs no
+        # accelerator, and no second one.
         from torch.sparse._triton_ops import bsr_dense_addmm_meta
         from torch.sparse._triton_ops_meta import _operation_device_version_data, update
 
-        device_name = "Fake device cpu"
-        version = ("test_tuned_parameters_are_found_through_the_input_device", torch.float16, 0.5)
+        device_name = "Fake privateuseone"
+        version = ("test_tuned_parameters_are_found_through_the_input_device",
+                   torch.float16, 0.5)
         key = (256, 256, 256, 16, 16, True, False, True)
         tuned = dict(GROUP_SIZE_ROW=2, SPLIT_N=8, num_stages=3, num_warps=5)
 
@@ -4477,15 +4458,48 @@ class TestSparseTritonMetaDeviceName(TestCase):
 
         update("bsr_dense_addmm", device_name, version, key, tuple(tuned[k] for k in sorted(tuned)))
         try:
-            with unittest.mock.patch.object(
-                torch.cpu, "get_device_name", create=True, new=lambda device: device_name
-            ):
-                self.assertEqual(get_meta(device="cpu"), tuned)
-            # Without the device, the process accelerator names the key instead,
-            # and it is never this one, so the entry must not be found.
+            with self._device_module(get_device_name=lambda device: device_name):
+                self.assertEqual(get_meta(device="privateuseone"), tuned)
+            # Without the device the caller-less default names the key instead, and
+            # that is never this one, so the entry must not be found.
             self.assertNotEqual(get_meta(), tuned)
         finally:
             del _operation_device_version_data["bsr_dense_addmm", device_name, version]
+
+    def test_the_input_device_reaches_the_tuning_key(self):
+        # The device= arguments at these two call sites are the whole mechanism:
+        # without them the key comes from the caller-less default and a tuning run
+        # on any other device becomes unfindable. Nothing else in the suite
+        # exercises them, and no hardware configuration can -- the key is a device
+        # name and what differs here is the device type. The lookups are
+        # intercepted, so this needs no Triton and launches no kernel.
+        from torch.sparse import _triton_ops
+
+        class StopAtLookup(Exception):
+            pass
+
+        seen = []
+
+        def intercept(*args, device=None, **kwargs):
+            seen.append(device)
+            raise StopAtLookup
+
+        f = io.StringIO()
+        with redirect_stderr(f):
+            dense = torch.zeros(32, 16)
+            blocked = torch.zeros(32, 32)
+            blocked[:16, :16] = 1
+            bsr = blocked.to_sparse_bsr((16, 16))
+
+        with patch.object(_triton_ops, "scatter_mm_meta", intercept):
+            with self.assertRaises(StopAtLookup):
+                _triton_ops.bsr_scatter_mm_indices_data(bsr, dense)
+
+        with patch.object(_triton_ops, "bsr_dense_addmm_meta", intercept):
+            with self.assertRaises(StopAtLookup):
+                _triton_ops.bsr_dense_addmm(dense.clone(), bsr, dense)
+
+        self.assertEqual(seen, [bsr.device, bsr.device])
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
