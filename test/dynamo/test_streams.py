@@ -23,7 +23,6 @@ from torch._dynamo.testing import extract_graph, remove_trailing_space
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
@@ -1654,16 +1653,17 @@ class <lambda>(torch.nn.Module):
         )
         self.assertEqual(len(control_deps_nodes), 2)
 
-    @requires_cuda
-    def test_control_deps_multiple_waiters_thread_latest_passthrough(self) -> None:
-        consumer1 = torch.Stream(device="cuda")
-        consumer2 = torch.Stream(device="cuda")
-        fork = torch.Event()
-        join1 = torch.Event()
-        join2 = torch.Event()
+    def test_control_deps_multiple_waiters_thread_latest_passthrough(
+        self, device
+    ) -> None:
+        consumer1 = torch.Stream(device=device)
+        consumer2 = torch.Stream(device=device)
+        fork = torch.Event(device=device)
+        join1 = torch.Event(device=device)
+        join2 = torch.Event(device=device)
 
         def fn(x) -> torch.Tensor:
-            default_stream = torch.cuda.current_stream()
+            default_stream = torch.accelerator.current_stream(device)
             y = x + 1
             fork.record(default_stream)
 
@@ -1681,7 +1681,7 @@ class <lambda>(torch.nn.Module):
             default_stream.wait_event(join2)
             return out1 + out2
 
-        _, _, fw_graphs, _ = extract_graph(fn, torch.ones(2, 2, device="cuda"))
+        _, _, fw_graphs, _ = extract_graph(fn, torch.ones(2, 2, device=device))
         gm = fw_graphs[0]
 
         from torch._functorch._aot_autograd.streams import (
@@ -1714,9 +1714,10 @@ class <lambda>(torch.nn.Module):
         self.assertIs(muls[1].args[0].args[0], fork_waits[1])
         gm.graph.lint()
 
-    @requires_cuda
     @parametrize("sync_kind", ("wait_stream", "full_barrier"))
-    def test_intervening_sync_updates_event_passthrough(self, sync_kind) -> None:
+    def test_intervening_sync_updates_event_passthrough(
+        self, device, sync_kind
+    ) -> None:
         import operator
 
         from torch._functorch._aot_autograd.streams import (
@@ -1724,13 +1725,13 @@ class <lambda>(torch.nn.Module):
         )
         from torch._inductor.fx_passes.control_dependencies import control_deps
 
-        intervening_stream = torch.Stream(device="cuda")
-        consumer_stream = torch.Stream(device="cuda")
-        fork = torch.Event()
-        intervening_event = torch.Event()
+        intervening_stream = torch.Stream(device=device)
+        consumer_stream = torch.Stream(device=device)
+        fork = torch.Event(device=device)
+        intervening_event = torch.Event(device=device)
 
         def fn(x) -> torch.Tensor:
-            default_stream = torch.cuda.current_stream()
+            default_stream = torch.accelerator.current_stream(device)
             y = x + 1
             fork.record(default_stream)
 
@@ -1744,7 +1745,7 @@ class <lambda>(torch.nn.Module):
                 fork.wait()
                 return y * 2
 
-        _, _, fw_graphs, _ = extract_graph(fn, torch.ones(2, 2, device="cuda"))
+        _, _, fw_graphs, _ = extract_graph(fn, torch.ones(2, 2, device=device))
         gm = fw_graphs[0]
         wrap_all_sync_nodes_with_control_deps(gm)
         event_waits = []
@@ -1765,7 +1766,6 @@ class <lambda>(torch.nn.Module):
         self.assertIs(consumers[0].args[0].args[0], event_waits[0])
         gm.graph.lint()
 
-    @requires_cuda
     def test_control_deps_prevents_invalid_reordering(self, device) -> None:
         """
         Test that control_deps creates proper data dependencies that prevent invalid reordering.
@@ -3193,9 +3193,6 @@ class TestStreamsXPUSpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual_s1, expected_s1)
         self.assertEqual(actual_s2, expected_s2)
         self.assertEqual(actual_default, default_s.sycl_queue)
-
-
-instantiate_parametrized_tests(TestStreams)
 
 
 if __name__ == "__main__":
