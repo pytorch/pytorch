@@ -231,10 +231,11 @@ jobs:
 
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
-          # Used for GPU_FLAG since that doesn't play nice
+          # Used for GPU_FLAG/CPU_FLAG since that doesn't play nice
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
+            ${CPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
             -e GITHUB_ACTIONS \
