@@ -112,9 +112,16 @@ inline bool _naot_dim_too_big(int64_t d) {
 # the .out variant's kwarg binds). Registered as a catch-all custom op;
 # torch._native.aot_manifest prefers it over the Python covered_axes
 # matching when the library is loaded.
+# The trailing `return false;` is GENERATED, not the declaration's: a body that
+# answers only some paths would otherwise fall off the end of a bool function.
+# -Wreturn-type does not fire there -- the generated guards above it have returns of
+# their own -- so the compile is clean at -Wall -Wextra and the predicate returns
+# whatever is in the return register: a coverage claim the stub then declines (the
+# call loses its JIT route), or a crash.
 COVERS_FN_TMPL = """
 bool {op}_{key_lc}_covers({params}) {{
 {body}
+  return false;  // undecided above: not covered, the same default the stub takes
 }}
 """
 
@@ -249,12 +256,6 @@ def _by_arch(sidecars: list[dict]) -> dict[tuple[int, int], list[dict]]:
 # none of which fit the two accessors below.
 _TENSOR_ISH = re.compile(r"\bat::\w*Tensor\w*|\bc10::List<")
 
-# A sidecar prefix must be usable as a C identifier: it is pasted into
-# extern "C" declarations, launcher names and version-script patterns. Spelled
-# out rather than \w, which is Unicode by default and would accept "hello" with
-# an accent for a check whose whole contract is "usable as a C identifier".
-_C_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-
 
 def _int32_size_gate(params: str) -> str:
     """Runtime gate: decline any call whose tensor has a dimension that
@@ -272,9 +273,12 @@ def _int32_size_gate(params: str) -> str:
     value, because only it knows what it computed. `_naot_dim_too_big` is emitted for
     them to use (SIZE_GATE_HELPER); a prelude that skips it truncates silently, which
     on (2, 2, 2**30) left 256 elements un-accumulated with every dim far under the
-    limit. numel() here instead would decline any tensor over 2**31 elements even when
-    its collapsed extent is tiny, costing coverage on exactly the large shapes this
-    path exists for.
+    limit. That duty is UNENFORCED -- the generator cannot see a value a prelude
+    computes -- so it is a per-declaration review item: topk derives M = numel/N
+    without bounding it, which is accepted because M >= 2**31 needs ~2**42 elements.
+    numel() here instead would decline any tensor over 2**31 elements even when its
+    collapsed extent is tiny, costing coverage on exactly the large shapes this path
+    exists for.
 
     Emitted ahead of the prelude AND into cpp_covers, so no declaration hand-
     writes it and coverage never claims a shape the stub will refuse.
