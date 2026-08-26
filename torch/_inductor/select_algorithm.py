@@ -3474,6 +3474,9 @@ class ExternKernelCaller(ChoiceCaller):
         self.has_out_variant = has_out_variant
         self.gm = choice.gm
         self.bmreq: BenchmarkRequest | None = None
+        # Per-op dynamic-dims mask stamped by choices.py to drive TunableOp
+        # wildcard persistence during autotune; only extern (aten) callers use it.
+        self.tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None
 
         from torch._inductor.autotune_process import (
             ExternKernelBenchmarkRequest,
@@ -3529,6 +3532,14 @@ class ExternKernelCaller(ChoiceCaller):
             raise AssertionError("self.bmreq must not be None")
         # pyrefly: ignore[missing-attribute]
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
+        mask = self.tunable_dyn_dims_mask
+        # TunableOp only exists in CUDA/ROCm builds; gate on the output device
+        # so a non-empty mask on a CPU op does not hit a missing _C binding.
+        if mask is not None and any(mask) and out.is_cuda:
+            with torch.cuda.tunable.dynamic_dims_mask(
+                M=mask[0], N=mask[1], K=mask[2], BATCH=mask[3]
+            ):
+                return self.bmreq.benchmark(*args, out=out)
         return self.bmreq.benchmark(*args, out=out)
 
     def benchmark_collective(self, *args, out):
