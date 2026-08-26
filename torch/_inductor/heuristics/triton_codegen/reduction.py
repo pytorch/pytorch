@@ -486,7 +486,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         elif reduction_hint == ReductionHint.OUTER_TINY:
             configs = tiny_configs
 
-        if max_autotune_enabled:
+        if max_autotune_enabled and "y" not in size_hints:
             configs = unique_configs(
                 configs
                 + self._persistent_max_autotune_extras(

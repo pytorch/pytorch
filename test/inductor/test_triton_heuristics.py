@@ -36,6 +36,7 @@ except ImportError:
     raise unittest.SkipTest("requires triton")  # noqa: B904
 
 from torch._inductor import config
+from torch._inductor.heuristics.triton_codegen.reduction import ROCmReductionHeuristic
 from torch._inductor.runtime.hints import (
     AttrsDescriptorWrapper,
     AutotuneHint,
@@ -248,6 +249,29 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(max_autotune_keys[: len(default_keys)], default_keys)
         self.assertEqual(len(max_autotune_keys), len(set(max_autotune_keys)))
 
+    def test_rocm_persistent_tiled_max_autotune_configs_remain_tiled(self):
+        size_hints = {"x": 2048, "y": 16, "r0_": 512}
+        triton_meta = {"device": self._fake_rocm_device_properties()}
+        heuristic = ROCmReductionHeuristic()
+
+        default_configs = heuristic.get_persistent_configs(
+            size_hints=size_hints,
+            reduction_hint=ReductionHint.INNER,
+            inductor_meta={},
+            triton_meta=triton_meta,
+        )
+        max_autotune_configs = heuristic.get_persistent_configs(
+            size_hints=size_hints,
+            reduction_hint=ReductionHint.INNER,
+            inductor_meta={"max_autotune": True},
+            triton_meta=triton_meta,
+        )
+
+        default_keys = [triton_config_to_hashable(c) for c in default_configs]
+        max_autotune_keys = [triton_config_to_hashable(c) for c in max_autotune_configs]
+        self.assertEqual(max_autotune_keys, default_keys)
+        self.assertTrue(all("YBLOCK" in c.kwargs for c in max_autotune_configs))
+
     def test_reduction_min_block_preserves_tile_product(self):
         cfg = _enforce_reduction_config_block_minimums(
             [triton.Config({"XBLOCK": 64, "R0_BLOCK": 1024})],
@@ -302,6 +326,20 @@ class TestTritonHeuristics(TestCase):
             max_threads_per_multi_processor=2048,
             max_threads_per_block=1024,
             warp_size=32,
+        )
+
+    @staticmethod
+    def _fake_rocm_device_properties():
+        return DeviceProperties(
+            type="hip",
+            index=0,
+            multi_processor_count=1,
+            cc="gfx942",
+            major=None,
+            regs_per_multiprocessor=65536,
+            max_threads_per_multi_processor=2048,
+            max_threads_per_block=1024,
+            warp_size=64,
         )
 
     @staticmethod
