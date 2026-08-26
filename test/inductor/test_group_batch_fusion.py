@@ -11,10 +11,7 @@ import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    skipMPS,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import HAS_MPS, HAS_TRITON
 
@@ -425,8 +422,7 @@ class TestGroupBatchFusionAccelerator(_FusionCompareBase):
         )
         counters.clear()
 
-    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
-    @skipMPS
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={"batch_layernorm": {}},
         post_grad_fusion_options={},
