@@ -29,7 +29,9 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     requires_capabilities,
 )
-from torch.testing._internal.common_distributed import MultiProcContinuousTest
+from torch.testing._internal.common_distributed import (
+    MultiProcContinuousForInstantiateTest,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -39,8 +41,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 logger = logging.getLogger(__name__)
 
@@ -207,68 +207,30 @@ def _test_pg_transport_with_sharded_tensor(self, device) -> None:
     torch.testing.assert_close(expected_local_tensor, received_local_tensor)
 
 
-class PgTransportCPU(MultiProcContinuousTest):
+class PgTransportCPU(MultiProcContinuousForInstantiateTest):
     hw_classification = HardwareClassification.CPU
 
     world_size = 8
     timeout: timedelta = timedelta(seconds=20)
 
-    @classmethod
-    def backend_str(cls) -> str | None:
-        return "gloo"
-
-    @classmethod
-    def _device_type_str(cls) -> str:
-        # Do NOT name this `device_type`: `instantiate_device_type_tests` looks
-        # up `cls.device_type` on the generated subclass expecting the plain
-        # string set by its device-specific base (e.g. CPUTestBase). A
-        # same-named classmethod defined directly on this class wins that MRO
-        # lookup instead, crashing with "can only concatenate str (not
-        # 'method')" during collection -- the same conflict `PgTransportGPU`
-        # below already works around.
-        return "cpu"
-
-    @property
-    def device(self) -> torch.device:
-        return torch.device(self._device_type_str())
-
     def test_pg_transport(self, device) -> None:
-        _test_pg_transport(self, self.device)
+        _test_pg_transport(self, device)
 
     def test_pg_transport_with_mixed_content(self, device) -> None:
-        _test_pg_transport_with_mixed_content(self, self.device)
+        _test_pg_transport_with_mixed_content(self, torch.device(device))
 
     def test_pg_transport_with_sharded_tensor(self, device) -> None:
-        _test_pg_transport_with_sharded_tensor(self, self.device)
+        _test_pg_transport_with_sharded_tensor(self, torch.device(device))
 
 
 @skip_but_pass_in_sandcastle_if(
     not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
 )
-class PgTransportGPU(MultiProcContinuousTest):
+class PgTransportGPU(MultiProcContinuousForInstantiateTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
     world_size = 2
     timeout: timedelta = timedelta(seconds=20)
-
-    @classmethod
-    def _device_type_str(cls) -> str:
-        # `MultiProcContinuousTest` defines `device_type` as a classmethod, but in
-        # the class `instantiate_device_type_tests` generates, `PrivateUse1TestBase`
-        # sits earlier in the MRO and shadows it with a string class attribute.
-        # Accept either form; calling the string would raise
-        # "'str' object is not callable". `MultiProcContinuousTest`
-        # `._ensure_processes_spawned` makes the same accommodation.
-        device_type_attr = cls.device_type
-        return device_type_attr() if callable(device_type_attr) else device_type_attr
-
-    @classmethod
-    def backend_str(cls) -> str | None:
-        return dist.get_default_backend_for_device(cls._device_type_str())
-
-    @property
-    def device(self) -> torch.device:
-        return torch.device(f"{self._device_type_str()}:{self.rank}")
 
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
@@ -277,7 +239,7 @@ class PgTransportGPU(MultiProcContinuousTest):
         Capability.distributed.backend,
     )
     def test_pg_transport(self, device) -> None:
-        _test_pg_transport(self, self.device)
+        _test_pg_transport(self, self.current_device)
 
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
@@ -286,7 +248,7 @@ class PgTransportGPU(MultiProcContinuousTest):
         Capability.distributed.backend,
     )
     def test_pg_transport_with_mixed_content(self, device) -> None:
-        _test_pg_transport_with_mixed_content(self, self.device)
+        _test_pg_transport_with_mixed_content(self, self.current_device)
 
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
@@ -295,7 +257,7 @@ class PgTransportGPU(MultiProcContinuousTest):
         Capability.distributed.backend,
     )
     def test_pg_transport_with_sharded_tensor(self, device) -> None:
-        _test_pg_transport_with_sharded_tensor(self, self.device)
+        _test_pg_transport_with_sharded_tensor(self, self.current_device)
 
 
 class TestCastTensor(TestCase):
