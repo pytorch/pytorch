@@ -39,6 +39,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    HardwareClassification,
     parametrize,
     run_tests,
     serialTest,
@@ -50,6 +51,8 @@ from torch.testing._internal.common_utils import (
 
 
 class TestIndexingDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_index(self, device):
         def consec(size, start=1):
             sequence = torch.ones(torch.tensor(size).prod(0)).cumsum(0)
@@ -2395,6 +2398,8 @@ class TestIndexingDevice(TestCase):
 
 
 class NumpyTestsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_index_no_floats(self, device):
         a = torch.tensor([[[5.0]]], device=device)
 
