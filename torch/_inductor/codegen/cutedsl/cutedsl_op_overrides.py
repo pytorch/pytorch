@@ -749,8 +749,7 @@ class CuteDSLOpOverrides(OpOverrides):
         """Emit an inline PTX block elementwise over a fragment.
 
         The requested dtype or dtypes control the logical results and eventual
-        storage. E8M0 results may stay decoded as Float32 while fused consumers
-        use them.
+        storage.
         """
         if constraints is None:
             raise NotImplementedError(
