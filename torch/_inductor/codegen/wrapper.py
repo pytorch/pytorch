@@ -401,18 +401,29 @@ def _triton_jit_decorator_from_source(symbol) -> str:
                 def check_triton_jit_decorator_literals(
                     decorator: ast.Call,
                 ) -> None:
-                    try:
-                        for arg in decorator.args:
+                    nonliteral_options = []
+                    for index, arg in enumerate(decorator.args):
+                        try:
                             ast.literal_eval(arg)
-                        for keyword in decorator.keywords:
-                            if keyword.arg is None:
-                                raise ValueError
+                        except (TypeError, ValueError):
+                            nonliteral_options.append(f"positional option {index}")
+                    for keyword in decorator.keywords:
+                        if keyword.arg is None:
+                            nonliteral_options.append("**options")
+                            continue
+                        try:
                             ast.literal_eval(keyword.value)
-                    except ValueError as exc:
-                        raise AssertionError(
+                        except (TypeError, ValueError):
+                            nonliteral_options.append(f"{keyword.arg}=")
+                    if nonliteral_options:
+                        # Dropping these options would silently change kernel semantics,
+                        # including when this source is collected for a cache key.
+                        options = ", ".join(nonliteral_options)
+                        raise RuntimeError(
                             f"{symbol.__name__}: @triton.jit decorator options "
-                            "must be Python literals for Inductor codegen"
-                        ) from exc
+                            "must be Python literals for Inductor codegen; "
+                            f"non-literal options are not supported: {options}"
+                        )
 
                 for decorator in fn_def.decorator_list:
                     if is_triton_jit(decorator):

@@ -1304,12 +1304,27 @@ def helper(x):
 
         msg = (
             "global_option_jit_helper_for_codegen: @triton.jit decorator options "
-            "must be Python literals for Inductor codegen"
+            "must be Python literals for Inductor codegen; non-literal options "
+            "are not supported: repr="
         )
-        with self.assertRaisesRegex(AssertionError, msg):
+        with self.assertRaisesRegex(RuntimeError, msg):
             user_defined_triton_kernel_transitive_closure_source_code(
                 root_for_global_option_jit_helper
             )
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_literal_eval_type_error(self):
+        from torch._inductor.codegen.wrapper import _triton_jit_decorator_from_source
+
+        msg = "non-literal options are not supported: noinline="
+        with (
+            patch(
+                "torch._inductor.codegen.wrapper.ast.literal_eval",
+                side_effect=TypeError,
+            ),
+            self.assertRaisesRegex(RuntimeError, msg),
+        ):
+            _triton_jit_decorator_from_source(noinline_helper_for_codegen)
 
     @unittest.skipUnless(
         HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
