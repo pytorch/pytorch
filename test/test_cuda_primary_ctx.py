@@ -4,8 +4,17 @@ import sys
 import unittest
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
-from torch.testing._internal.common_utils import NoTest, run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_cuda import (
+    _get_torch_rocm_version,
+    TEST_CUDA,
+    TEST_MULTIGPU,
+)
+from torch.testing._internal.common_utils import (
+    NoTest,
+    run_tests,
+    TEST_WITH_ROCM,
+    TestCase,
+)
 
 
 # NOTE: this needs to be run in a brand new process
@@ -32,17 +41,24 @@ class TestCudaPrimaryCtx(TestCase):
                 TestCudaPrimaryCtx.CTX_ALREADY_CREATED_ERR_MSG,
             )
 
-    @skipIfRocm(
-        msg="last checked in ROCm 7, HIP runtime doesn't create context for hipSetDevice()"
-    )
     def test_set_device_0(self):
         # In CUDA 12 the behavior of cudaSetDevice has changed. It eagerly creates context on target.
         # The behavior of `torch.cuda.set_device(0)` should also create context on the device 0.
         # Initially, we should not have any context on device 0.
         self.assertFalse(torch._C._cuda_hasPrimaryContext(0))
         torch.cuda.set_device(0)
-        # Now after the device was set, the context should present in CUDA 12.
-        self.assertTrue(torch._C._cuda_hasPrimaryContext(0))
+        if TEST_WITH_ROCM and _get_torch_rocm_version() < (7, 14):
+            # hipSetDevice was lazy through ROCm 7.2: the primary context
+            # appears on first real use, not on set_device. Probed lazy on 7.2
+            # and eager on 7.14; if a version in between proves eager, lower
+            # this threshold.
+            self.assertFalse(torch._C._cuda_hasPrimaryContext(0))
+            torch.empty(1, device="cuda:0")
+            self.assertTrue(torch._C._cuda_hasPrimaryContext(0))
+        else:
+            # Now after the device was set, the context should present in
+            # CUDA 12, and in ROCm 7.14+ which matches the eager behavior.
+            self.assertTrue(torch._C._cuda_hasPrimaryContext(0))
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_str_repr(self):
