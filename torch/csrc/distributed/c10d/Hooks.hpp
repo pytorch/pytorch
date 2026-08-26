@@ -83,7 +83,7 @@ using AbortHook = std::function<void()>;
 // that an operation has finished.
 struct CompletionHookArgs {
   // Correlates completion with PostHookArgs::work.
-  uint64_t completion_key = 0;
+  uint64_t completionKey = 0;
   // The backend's own measurement of the op in ms, or nullopt if it does not
   // time its collectives. The backend supplies it because only the backend
   // knows whether timing is on -- Work::getDuration() throws when it is not,
