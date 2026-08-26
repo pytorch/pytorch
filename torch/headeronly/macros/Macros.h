@@ -471,7 +471,7 @@ __host__ __device__
     (void)(printf(                                                    \
         "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(           \
             __LINE__) ": %s: block: [%d,%d,%d], thread: [%d,%d,%d]: " \
-                      "Assertion failed: `" #cond "`: " msg "\n",     \
+                      "Assertion failed: `%s`: " msg "\n",            \
         __func__,                                                     \
         blockIdx.x,                                                   \
         blockIdx.y,                                                   \
@@ -479,6 +479,7 @@ __host__ __device__
         threadIdx.x,                                                  \
         threadIdx.y,                                                  \
         threadIdx.z,                                                  \
+        #cond,                                                        \
         ##__VA_ARGS__));                                              \
     (void)(_wassert(                                                  \
                _CRT_WIDE(#cond),                                      \
@@ -655,7 +656,7 @@ rocm_assert_one_shot(const char (&msg)[N], unsigned length) {
     printf(                                                            \
         "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(            \
             __LINE__) ": %s: block: [%d,%d,%d], thread: [%d,%d,%d]: "  \
-            "Assertion failed: `" #cond "`: " msg "\n",                \
+            "Assertion failed: `%s`: " msg "\n",                        \
         __func__,                                                      \
         blockIdx.x,                                                    \
         blockIdx.y,                                                    \
@@ -663,6 +664,7 @@ rocm_assert_one_shot(const char (&msg)[N], unsigned length) {
         threadIdx.x,                                                   \
         threadIdx.y,                                                   \
         threadIdx.z,                                                   \
+        #cond,                                                         \
         ##__VA_ARGS__); \
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
