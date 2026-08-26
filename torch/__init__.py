@@ -2703,6 +2703,7 @@ from torch import (
     distributed as distributed,
     distributions as distributions,
     fft as fft,
+    foreach as foreach,
     futures as futures,
     hub as hub,
     jit as jit,
@@ -3004,6 +3005,13 @@ class _TorchCompileWrapper:
     def reset(self) -> None:
         if hasattr(self.compiler_fn, "reset"):
             self.compiler_fn.reset()
+
+    # Forwarded so the backend's _dynamo_backend_init can be read off the
+    # wrapper (what get_compiler_fn receives); read at fire time so the hook
+    # can be set on the backend even after torch.compile() wraps it.
+    @property
+    def _dynamo_backend_init(self) -> _Any | None:
+        return getattr(self.compiler_fn, "_dynamo_backend_init", None)
 
 
 _InputT = _ParamSpec("_InputT")
