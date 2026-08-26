@@ -26,7 +26,6 @@ class CuTeDSLEpilogueSchema:
     inputs: tuple[str, ...]
     outputs: tuple[str, ...]
     scalar_broadcast_names: frozenset[str]
-    returns_local_reduce: bool = False
 
     @property
     def parameter_names(self) -> tuple[str, ...]:
@@ -101,9 +100,29 @@ class MaterializedTensorSSAReduction:
 
     reduce_op: object
     init_val: object
-    combine: Callable | None
-    source: Callable | None
-    finalize: Callable | None
+    combine: Callable
+    source: Callable
+    finalize: Callable
+
+
+def _identity_source(value):
+    return value
+
+
+def _square_source(value):
+    return value * value
+
+
+def _abs_source(value):
+    import cutlass.cute as cute
+
+    return cute.math.abs(value)
+
+
+def _abs_scale_source(value):
+    import cutlass.cute as cute
+
+    return cute.math.max(cute.math.abs(value), cute.full_like(value, 1e-12)) / 448.0
 
 
 def _identity_finalize(value, group):
@@ -124,6 +143,7 @@ def canonical_tensorssa_reduction_type(reduction_type: str) -> ReductionType:
 def materialize_tensorssa_reduction(
     reduction_type: ReductionType,
     cute: Any,
+    source_type: str = "identity",
     plan_type: str | None = None,
 ) -> MaterializedTensorSSAReduction:
     """Materialize the shared TensorSSA descriptor as CuTeDSL operands."""
@@ -135,18 +155,24 @@ def materialize_tensorssa_reduction(
     init_val = materialize_epilogue_function(
         f"def init():\n    return {reduction.init_val}", cute
     )()
+    source = {
+        "identity": _identity_source,
+        "square": _square_source,
+        "abs": _abs_source,
+        "abs_scale": _abs_scale_source,
+    }[source_type]
     finalize = (
         _mean_finalize
         if plan_type is not None and plan_type.startswith("mean")
         else _identity_finalize
     )
-    return MaterializedTensorSSAReduction(reduce_op, init_val, combine, None, finalize)
+    return MaterializedTensorSSAReduction(
+        reduce_op, init_val, combine, source, finalize
+    )
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class GemmReductionCompileConfig:
-    """Materialized compile-time reduction arguments shared by NVGEMM kernels."""
-
     args: GemmReductionArguments
     reduction: Any
     consumer: Any
@@ -161,59 +187,25 @@ class GemmReductionCompileConfig:
                 None if source is None else materialize_epilogue_function(source, cute)
             )
 
-        if args.tensor_epilogue_returns_local_reduce:
-            if any(
-                selector is not None
-                for selector in (
-                    args.reduction_type,
-                    args.source_fn,
-                )
-            ):
-                raise RuntimeError(
-                    "generated epilogue reductions cannot use physical reduction inputs"
-                )
-            if args.geometry.needs_physical_callbacks != (args.combine_fn is not None):
-                raise RuntimeError(
-                    "generated epilogue reductions require callbacks only for physical geometry"
-                )
-            reduction = MaterializedTensorSSAReduction(
-                None,
-                0.0,
-                materialize(args.combine_fn),
-                None,
-                materialize(args.finalizer_fn),
-            )
-        else:
-            if args.reduction_type is None or args.source_fn is None:
-                raise RuntimeError(
-                    "physical GEMM reductions require a primitive and source callback"
-                )
-            reduction = materialize_tensorssa_reduction(
-                canonical_tensorssa_reduction_type(args.reduction_type),
-                cute,
-                args.reduction_type,
-            )
-            reduction = dataclasses.replace(
-                reduction, source=materialize(args.source_fn)
-            )
-            finalizer = materialize(args.finalizer_fn)
-            if finalizer is not None:
-                reduction = dataclasses.replace(reduction, finalize=finalizer)
+        reduction = materialize_tensorssa_reduction(
+            canonical_tensorssa_reduction_type(args.reduction_type),
+            cute,
+            args.source_type,
+            args.reduction_type,
+        )
+        finalizer = materialize(args.finalizer_fn)
+        if finalizer is not None:
+            reduction = dataclasses.replace(reduction, finalize=finalizer)
 
         def materialize_consumer(source: str | None) -> Any:
             consumer = materialize(source)
-            if consumer is None or args.finalizer_fn is not None:
+            if consumer is None or finalizer is not None:
                 return consumer
-            reduction_finalize = reduction.finalize
-            if reduction_finalize is None:
-                raise RuntimeError(
-                    "generated epilogue reductions cannot use reduction consumers"
-                )
 
             def consume(accumulator, primary_reduction, secondary_reduction):
                 return consumer(
                     accumulator,
-                    reduction_finalize(primary_reduction, args.group),
+                    reduction.finalize(primary_reduction, args.group),
                     secondary_reduction,
                 )
 
@@ -231,8 +223,9 @@ class GemmReductionCompileConfig:
         return (
             args.group,
             args.axis,
+            args.reduction_type,
+            args.reduction_algorithm,
             args.feeds_main,
-            args.tensor_epilogue_returns_local_reduce,
         )
 
     def _primary_callbacks(self, *, include_consumer: bool = True) -> tuple[Any, ...]:
@@ -252,7 +245,6 @@ class GemmReductionCompileConfig:
             args.group,
             args.axis,
             args.feeds_main,
-            args.tensor_epilogue_returns_local_reduce,
             *self._primary_callbacks(),
         )
 
