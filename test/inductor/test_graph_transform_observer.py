@@ -10,17 +10,24 @@ import torch
 import torch._dynamo
 import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
+from torch._utils import _is_privateuse1_backend_available
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FUSED_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
+def _fused_attention_available() -> bool:
+    # Out-of-tree accelerator backends provide fused SDPA not covered by
+    # PLATFORM_SUPPORTS_FUSED_ATTENTION.
+    return PLATFORM_SUPPORTS_FUSED_ATTENTION or _is_privateuse1_backend_available()
+
+
 class TestGraphTransformObserver(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIf(not HAS_TRITON, "requires triton")
-    @skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "requires fused attention support")
+    @skipIf(not _fused_attention_available(), "requires fused attention support")
     def test_sdpa_rewriter(self, device):
         if shutil.which("dot") is None:
             self.skipTest("Requires dot")
