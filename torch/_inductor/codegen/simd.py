@@ -4033,10 +4033,12 @@ class SIMDScheduling(BaseScheduling):
         else:
             coalesce_analysis = None
 
+        print(f"[fqn_debug] simd.codegen_node: nodes={len(nodes)}, cudagraph_kernel_annotations={torch._inductor.config.triton.cudagraph_kernel_annotations}")
         if torch._inductor.config.triton.cudagraph_kernel_annotations:
             from torch._inductor.scheduler import get_fused_kernel_module_fqn
 
             V.graph._current_kernel_module_fqn = get_fused_kernel_module_fqn(nodes)
+            print(f"[fqn_debug] simd.codegen_node: _current_kernel_module_fqn={V.graph._current_kernel_module_fqn}")
         else:
             V.graph._current_kernel_module_fqn = None
 
