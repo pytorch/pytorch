@@ -43,6 +43,8 @@ identities, so this reproduces the ragged CUDA loop bit-for-bit.
 
 from __future__ import annotations
 
+from typing import NamedTuple, TYPE_CHECKING
+
 import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]  # noqa: TC002
 
 import cutlass
@@ -65,6 +67,10 @@ from .inner_tree_plan import (
     InnerTreeParams,
     vec_size as _vec_size,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 _MULTIROW_THREADS = 128
@@ -95,37 +101,64 @@ _ACC_TORCH_DTYPE = {
 
 
 # ---------------------------------------------------------------------------
+# Reduction combiners. ``op`` runs at trace time and keeps the existing
+# accumulator on the left so the emitted DAG order is unchanged for sum
+# (``a + b``) and mirrored for prod (``a * b``). ``identity`` is the value that
+# pads ragged tails and initializes accumulators -- 0.0 for sum (``x + 0 == x``)
+# and 1.0 for prod (``x * 1 == x``); using the wrong one corrupts every row.
+# ---------------------------------------------------------------------------
+
+
+def _add(a, b):
+    return a + b
+
+
+def _mul(a, b):
+    return a * b
+
+
+class _Reduction(NamedTuple):
+    name: str  # aten op name ("sum" / "prod"); disambiguates the compile cache
+    op: Callable  # trace-time combiner: _add / _mul
+    identity: float  # reduction identity: 0.0 for sum, 1.0 for prod
+
+
+_SUM = _Reduction("sum", _add, 0.0)
+_PROD = _Reduction("prod", _mul, 1.0)
+
+
+# ---------------------------------------------------------------------------
 # Trace-time reduction helpers. These run during ``cute.compile`` tracing and
 # emit the exact add DAG; ``vals`` / ``tree`` are Python lists of cute
 # ``Numeric`` register values.
 # ---------------------------------------------------------------------------
 
 
-def _linear_reduce(vals):
+def _linear_reduce(vals, op):
     acc = vals[0]
     for i in range(1, len(vals)):
-        acc = acc + vals[i]
+        acc = op(acc, vals[i])
     return acc
 
 
-def _inner_tree_reduce(vals):
+def _inner_tree_reduce(vals, op):
     v = list(vals)
     n = len(v)
     stride = 1
     while stride < n:
         i = 0
         while i + stride < n:
-            v[i] = v[i] + v[i + stride]
+            v[i] = op(v[i], v[i + stride])
             i += stride * 2
         stride *= 2
     return v[0]
 
 
-def _reduce_vec(vals, vec_size: int):
-    return _inner_tree_reduce(vals) if vec_size >= 4 else _linear_reduce(vals)
+def _reduce_vec(vals, vec_size: int, op):
+    return _inner_tree_reduce(vals, op) if vec_size >= 4 else _linear_reduce(vals, op)
 
 
-def _streaming_push(tree, val, load: int, max_depth: int) -> None:
+def _streaming_push(tree, val, load: int, max_depth: int, op) -> None:
     """Port of ``streaming_inner_tree_step``: merge count is the number of
     trailing zero bits of ``load + 1`` (``__ffs(load + 1) - 1``), capped at
     ``max_depth``. ``carry = tree_accs[--top] + carry`` keeps the existing
@@ -133,29 +166,32 @@ def _streaming_push(tree, val, load: int, max_depth: int) -> None:
     trailing_zeros = ((load + 1) & -(load + 1)).bit_length() - 1
     carry = val
     for _ in range(min(trailing_zeros, max_depth)):
-        carry = tree.pop() + carry
+        carry = op(tree.pop(), carry)
     tree.append(carry)
 
 
-def _warp_butterfly(val):
-    """Ascending-offset shuffle-XOR butterfly add reduce (matches the CUDA
+def _warp_butterfly(val, op):
+    """Ascending-offset shuffle-XOR butterfly reduce (matches the CUDA
     ``warp_reduce`` ASCENDING direction)."""
     offset = 1
     while offset < _WARP_SIZE:
-        val = val + cute.arch.shuffle_sync_bfly(
-            val, offset=offset, mask_and_clamp=_WARP_SIZE - 1
+        val = op(
+            val,
+            cute.arch.shuffle_sync_bfly(
+                val, offset=offset, mask_and_clamp=_WARP_SIZE - 1
+            ),
         )
         offset <<= 1
     return val
 
 
-def _load_vec_static(mIn, row, base: int, N: int, vec_size: int, acc, zero):
+def _load_vec_static(mIn, row, base: int, N: int, vec_size: int, acc, zero, op):
     """Load + reduce one vector group with compile-time ``base`` (multirow)."""
     vals = []
     for i in range(vec_size):
         off = base + i
         vals.append(acc(mIn[row, off]) if off < N else zero)
-    return _reduce_vec(vals, vec_size)
+    return _reduce_vec(vals, vec_size, op)
 
 
 @cute.jit
@@ -167,6 +203,7 @@ def _load_vec_dyn(
     vec_size: cutlass.Constexpr,
     acc: cutlass.Constexpr,
     zero,
+    op: cutlass.Constexpr,
 ):
     """Load + reduce one vector group with a runtime ``base`` (warp paths).
 
@@ -183,7 +220,7 @@ def _load_vec_dyn(
         if off < Int32(N):
             v = acc(mIn[row, off])
         vals.append(v)
-    return _reduce_vec(vals, vec_size)
+    return _reduce_vec(vals, vec_size, op)
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +229,7 @@ def _load_vec_dyn(
 # ---------------------------------------------------------------------------
 
 
-def _make_multirow(in_dt, acc, out_dt, N: int, vec_size: int):
+def _make_multirow(in_dt, acc, out_dt, N: int, vec_size: int, red: _Reduction):
     num_loads = _next_power_of_2(_ceil_div(N, vec_size))
 
     @cute.kernel
@@ -201,13 +238,13 @@ def _make_multirow(in_dt, acc, out_dt, N: int, vec_size: int):
         bx, _, _ = cute.arch.block_idx()
         row = bx * Int32(_MULTIROW_THREADS) + tx
         if row < num_outputs:
-            zero = acc(0.0)
+            zero = acc(red.identity)
             tree = []
             for load in cutlass.range_constexpr(num_loads):
                 val = _load_vec_static(
-                    mIn, row, load * vec_size, N, vec_size, acc, zero
+                    mIn, row, load * vec_size, N, vec_size, acc, zero, red.op
                 )
-                _streaming_push(tree, val, load, _MULTIROW_MAX_DEPTH)
+                _streaming_push(tree, val, load, _MULTIROW_MAX_DEPTH, red.op)
             mOut[row] = out_dt(tree[0])
 
     @cute.jit
@@ -225,7 +262,9 @@ def _make_multirow(in_dt, acc, out_dt, N: int, vec_size: int):
     return _launch
 
 
-def _make_looped(in_dt, acc, out_dt, N: int, vec_size: int, p: InnerTreeParams):
+def _make_looped(
+    in_dt, acc, out_dt, N: int, vec_size: int, p: InnerTreeParams, red: _Reduction
+):
     wpr = p.num_warps  # warps_per_reduction == num_warps in launch_looped
     rows_per_block = p.rows_per_block
     total_warps = wpr * rows_per_block
@@ -259,7 +298,7 @@ def _make_looped(in_dt, acc, out_dt, N: int, vec_size: int, p: InnerTreeParams):
                 acc, cute.make_layout(total_warps), byte_alignment=8
             )
 
-        zero = acc(0.0)
+        zero = acc(red.identity)
         final_sum = zero
         for b in cutlass.range_constexpr(p.num_batches):
             batch_offset, remaining_c, lpw, warp_chunk = batches[b]
@@ -282,9 +321,10 @@ def _make_looped(in_dt, acc, out_dt, N: int, vec_size: int, p: InnerTreeParams):
                 v = zero
                 if Int32(load) < this_batch_loads:
                     v = _warp_butterfly(
-                        _load_vec_dyn(mIn, row, base, N, vec_size, acc, zero)
+                        _load_vec_dyn(mIn, row, base, N, vec_size, acc, zero, red.op),
+                        red.op,
                     )
-                _streaming_push(tree, v, load, p.depth)
+                _streaming_push(tree, v, load, p.depth, red.op)
             warp_acc = tree[0]
 
             if const_expr(wpr > 1):
@@ -295,11 +335,11 @@ def _make_looped(in_dt, acc, out_dt, N: int, vec_size: int, p: InnerTreeParams):
                 merged = zero
                 if lane < Int32(wpr):
                     merged = warp_writes[row_in_block * Int32(wpr) + lane]
-                warp_acc = _warp_butterfly(merged)
+                warp_acc = _warp_butterfly(merged, red.op)
                 if const_expr(b + 1 < p.num_batches):
                     cute.arch.barrier()
 
-            final_sum = final_sum + warp_acc
+            final_sum = red.op(final_sum, warp_acc)
 
         if row_active:
             if lane == Int32(0):
@@ -321,7 +361,9 @@ def _make_looped(in_dt, acc, out_dt, N: int, vec_size: int, p: InnerTreeParams):
     return _launch
 
 
-def _make_two_partial(in_dt, acc, out_dt, N: int, vec_size: int, p: InnerTreeParams):
+def _make_two_partial(
+    in_dt, acc, out_dt, N: int, vec_size: int, p: InnerTreeParams, red: _Reduction
+):
     wpr = p.num_warps
     num_batches = p.num_batches
     wle = _WARP_SIZE * vec_size
@@ -373,16 +415,17 @@ def _make_two_partial(in_dt, acc, out_dt, N: int, vec_size: int, p: InnerTreePar
             this_warp_elements = tail
         this_batch_loads = (this_warp_elements + Int32(wle - 1)) // Int32(wle)
 
-        zero = acc(0.0)
+        zero = acc(red.identity)
         tree = []
         for load in cutlass.range_constexpr(eff):
             base = warp_start + Int32(load * wle) + lane * Int32(vec_size)
             v = zero
             if Int32(load) < this_batch_loads:
                 v = _warp_butterfly(
-                    _load_vec_dyn(mIn, row, base, N, vec_size, acc, zero)
+                    _load_vec_dyn(mIn, row, base, N, vec_size, acc, zero, red.op),
+                    red.op,
                 )
-            _streaming_push(tree, v, load, p.depth)
+            _streaming_push(tree, v, load, p.depth, red.op)
         warp_acc = tree[0]
 
         if const_expr(wpr > 1):
@@ -393,7 +436,7 @@ def _make_two_partial(in_dt, acc, out_dt, N: int, vec_size: int, p: InnerTreePar
             merged = zero
             if lane < Int32(wpr):
                 merged = warp_writes[lane]
-            warp_acc = _warp_butterfly(merged)
+            warp_acc = _warp_butterfly(merged, red.op)
 
         if lane == Int32(0):
             if warp_id == Int32(0):
@@ -417,7 +460,7 @@ def _make_two_partial(in_dt, acc, out_dt, N: int, vec_size: int, p: InnerTreePar
     return _launch
 
 
-def _make_two_accum(acc, out_dt, num_batches: int):
+def _make_two_accum(acc, out_dt, num_batches: int, red: _Reduction):
     @cute.kernel
     def _kernel(mPartials: cute.Tensor, mOut: cute.Tensor, num_outputs: Int32):
         tx, _, _ = cute.arch.thread_idx()
@@ -433,7 +476,7 @@ def _make_two_accum(acc, out_dt, num_batches: int):
             # cute.compile blow up. Linear accumulation order matches the CUDA
             # kernel regardless of unroll.
             for b in cutlass.range(1, num_batches):
-                s = s + mPartials[base + b]
+                s = red.op(s, mPartials[base + b])
             mOut[row] = out_dt(s)
 
     @cute.jit
@@ -473,13 +516,15 @@ def _fake_1d_contig(dt):
 
 
 @instrumented_cutedsl_cache(
-    "aten::sum",
-    key_fn=lambda torch_dtype, N: f"multirow {torch_dtype} N={N}",
+    lambda red, *a, **k: f"aten::{red.name}",
+    key_fn=lambda red, torch_dtype, N: f"{red.name} multirow {torch_dtype} N={N}",
 )
-def _compile_multirow(torch_dtype: torch.dtype, N: int):
+def _compile_multirow(red: _Reduction, torch_dtype: torch.dtype, N: int):
     in_dt = _TORCH_TO_CUTE[torch_dtype]
     acc = _acc_for(in_dt)
-    launcher = _make_multirow(in_dt, acc, in_dt, N, _vec_size(torch_dtype.itemsize))
+    launcher = _make_multirow(
+        in_dt, acc, in_dt, N, _vec_size(torch_dtype.itemsize), red
+    )
     return cute.compile(
         launcher,
         _fake_2d(in_dt, N),
@@ -492,12 +537,13 @@ def _compile_multirow(torch_dtype: torch.dtype, N: int):
 
 
 @instrumented_cutedsl_cache(
-    "aten::sum",
-    key_fn=lambda torch_dtype, N, num_warps, _bte, num_batches, *_rest: (
-        f"looped {torch_dtype} N={N} warps={num_warps} batches={num_batches}"
+    lambda red, *a, **k: f"aten::{red.name}",
+    key_fn=lambda red, torch_dtype, N, num_warps, _bte, num_batches, *_rest: (
+        f"{red.name} looped {torch_dtype} N={N} warps={num_warps} batches={num_batches}"
     ),
 )
 def _compile_looped(
+    red: _Reduction,
     torch_dtype: torch.dtype,
     N: int,
     num_warps: int,
@@ -517,7 +563,9 @@ def _compile_looped(
         rows_per_block,
         effective_loads,
     )
-    launcher = _make_looped(in_dt, acc, in_dt, N, _vec_size(torch_dtype.itemsize), p)
+    launcher = _make_looped(
+        in_dt, acc, in_dt, N, _vec_size(torch_dtype.itemsize), p, red
+    )
     return cute.compile(
         launcher,
         _fake_2d(in_dt, N),
@@ -530,12 +578,14 @@ def _compile_looped(
 
 
 @instrumented_cutedsl_cache(
-    "aten::sum",
-    key_fn=lambda torch_dtype, N, num_warps, _bte, num_batches, *_rest: (
-        f"two_partial {torch_dtype} N={N} warps={num_warps} batches={num_batches}"
+    lambda red, *a, **k: f"aten::{red.name}",
+    key_fn=lambda red, torch_dtype, N, num_warps, _bte, num_batches, *_rest: (
+        f"{red.name} two_partial {torch_dtype} N={N} "
+        f"warps={num_warps} batches={num_batches}"
     ),
 )
 def _compile_two_partial(
+    red: _Reduction,
     torch_dtype: torch.dtype,
     N: int,
     num_warps: int,
@@ -554,7 +604,9 @@ def _compile_two_partial(
         1,
         effective_loads,
     )
-    launcher = _make_two_partial(in_dt, acc, acc, N, _vec_size(torch_dtype.itemsize), p)
+    launcher = _make_two_partial(
+        in_dt, acc, acc, N, _vec_size(torch_dtype.itemsize), p, red
+    )
     return cute.compile(
         launcher,
         _fake_2d(in_dt, N),
@@ -566,15 +618,15 @@ def _compile_two_partial(
 
 
 @instrumented_cutedsl_cache(
-    "aten::sum",
-    key_fn=lambda torch_dtype, num_batches: (
-        f"two_accum {torch_dtype} batches={num_batches}"
+    lambda red, *a, **k: f"aten::{red.name}",
+    key_fn=lambda red, torch_dtype, num_batches: (
+        f"{red.name} two_accum {torch_dtype} batches={num_batches}"
     ),
 )
-def _compile_two_accum(torch_dtype: torch.dtype, num_batches: int):
+def _compile_two_accum(red: _Reduction, torch_dtype: torch.dtype, num_batches: int):
     out_dt = _TORCH_TO_CUTE[torch_dtype]
     acc = _acc_for(out_dt)
-    launcher = _make_two_accum(acc, out_dt, num_batches)
+    launcher = _make_two_accum(acc, out_dt, num_batches, red)
     return cute.compile(
         launcher,
         _fake_1d_contig(acc),
@@ -586,8 +638,11 @@ def _compile_two_accum(torch_dtype: torch.dtype, num_batches: int):
     )
 
 
-def inner_tree_sum_into(out: torch.Tensor, src: torch.Tensor) -> None:
-    """Compute ``out[r] = sum(src[r, :])`` for every row ``r``.
+def _inner_tree_reduce_into(
+    out: torch.Tensor, src: torch.Tensor, red: _Reduction
+) -> None:
+    """Compute ``out[r] = reduce(src[r, :])`` for every row ``r`` in the
+    inner-tree order, where ``reduce`` is ``red`` (``sum`` or ``prod``).
 
     ``src`` is a 2D ``(M, N)`` view with inner-dim stride 1 (outer row stride
     may differ from N); ``out`` is a 1D ``(M,)`` view (its stride may differ
@@ -599,7 +654,7 @@ def inner_tree_sum_into(out: torch.Tensor, src: torch.Tensor) -> None:
     vec_size = _vec_size(dtype.itemsize)
 
     if n <= vec_size * _K_MULTIROW_MAX_LOADS:
-        compiled = _compile_multirow(dtype, n)
+        compiled = _compile_multirow(red, dtype, n)
         grid = _ceil_div(m, _MULTIROW_THREADS)
         compiled(src, out, m, grid)
         return
@@ -607,6 +662,7 @@ def inner_tree_sum_into(out: torch.Tensor, src: torch.Tensor) -> None:
     p = compute_inner_tree_params(n, m, vec_size)
     if p.num_batches <= _K_TWO_KERNEL_THRESHOLD:
         compiled = _compile_looped(
+            red,
             dtype,
             n,
             p.num_warps,
@@ -624,6 +680,7 @@ def inner_tree_sum_into(out: torch.Tensor, src: torch.Tensor) -> None:
         m * p.num_batches, dtype=_ACC_TORCH_DTYPE[dtype], device=src.device
     )
     c1 = _compile_two_partial(
+        red,
         dtype,
         n,
         p.num_warps,
@@ -633,5 +690,15 @@ def inner_tree_sum_into(out: torch.Tensor, src: torch.Tensor) -> None:
         p.effective_loads,
     )
     c1(src, partials, m * p.num_batches)
-    c2 = _compile_two_accum(dtype, p.num_batches)
+    c2 = _compile_two_accum(red, dtype, p.num_batches)
     c2(partials, out, m, _ceil_div(m, _ACCUM_THREADS))
+
+
+def inner_tree_sum_into(out: torch.Tensor, src: torch.Tensor) -> None:
+    """Row-wise inner-tree ``sum`` (see ``_inner_tree_reduce_into``)."""
+    _inner_tree_reduce_into(out, src, _SUM)
+
+
+def inner_tree_prod_into(out: torch.Tensor, src: torch.Tensor) -> None:
+    """Row-wise inner-tree ``prod`` (see ``_inner_tree_reduce_into``)."""
+    _inner_tree_reduce_into(out, src, _PROD)
