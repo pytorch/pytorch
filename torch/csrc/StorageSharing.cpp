@@ -4,10 +4,12 @@
 #endif
 #include <structmember.h>
 
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/core/CPUAllocator.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Device.h>
+#include <torch/csrc/DeviceIPCTypes.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
@@ -393,6 +395,7 @@ static PyObject* THPStorage_releaseIPCCounter(
         sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
         nullptr);
     *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
+    // NOLINTNEXTLINE(bugprone-empty-catch)
   } catch (c10::Error&) {
     // Already warned inside of producer process
   }
@@ -532,6 +535,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
               sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
               nullptr);
           *(static_cast<int64_t*>(sptr.get()) + ctx->ref_counter_offset) -= 1;
+          // NOLINTNEXTLINE(bugprone-empty-catch)
         } catch (c10::Error&) {
           // Already warned inside of producer process
         }
@@ -633,6 +637,282 @@ static PyObject* THPStorage_isShared(PyObject* self, PyObject* noargs) {
   }
 }
 
+static PyObject* THPStorage_shareDevice(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
+  const auto& storage = THPStorage_Unpack(self);
+  TORCH_CHECK(
+      at::isPrivateUse1HooksRegistered(),
+      "_share_device_: PrivateUse1 hooks are not registered. "
+      "Call RegisterPrivateUse1HooksInterface first.");
+  const auto& hooks = at::detail::getPrivateUse1Hooks();
+  TORCH_CHECK(
+      hooks.supportsIpc(),
+      "_share_device_: the registered PrivateUse1 device does not support IPC.");
+  c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
+  // Block re-sharing of a storage that was itself received via IPC.
+  // The underlying mapped memory belongs to another process; sharing it
+  // onward is not supported. The caller should clone() the tensor first.
+  TORCH_CHECK(
+      !storage_impl->received_via_ipc(),
+      "Attempted to send a PrivateUse1 tensor received from another process; "
+      "this is not currently supported. Consider cloning before sending.");
+
+  THPObjectPtr tuple(PyTuple_New(8));
+  THPObjectPtr device(THPUtils_packInt32(storage.device().index()));
+  THPObjectPtr _handle(Py_NewRef(Py_None));
+  THPObjectPtr size_bytes(THPUtils_packUInt64(storage.nbytes()));
+  THPObjectPtr _offset_bytes(THPUtils_packInt32(0));
+  THPObjectPtr _ref_counter(Py_NewRef(Py_None));
+  THPObjectPtr _ref_counter_offset(THPUtils_packInt32(0));
+  THPObjectPtr _event_handle(Py_NewRef(Py_None));
+  THPObjectPtr _event_sync_required(PyBool_FromLong(0));
+
+  if (storage.data()) {
+    // The vendor is responsible for any stream synchronisation needed before
+    // the handle can be safely transferred.  We call getIpcMemHandle and let
+    // the implementation decide when to sync.
+    auto mem_handle = hooks.getIpcMemHandle(storage.mutable_data());
+    _handle = PyBytes_FromStringAndSize(
+        mem_handle.handle.c_str(),
+        static_cast<Py_ssize_t>(mem_handle.handle.size()));
+    _offset_bytes =
+        PyLong_FromSsize_t(static_cast<Py_ssize_t>(mem_handle.offset));
+
+    // Wrap the storage data pointer in a ref-counted DataPtr so that we can
+    // track when all consumers have released the allocation.
+    // See Note [CUDA IPC Refcounting implementation explained] for the
+    // analogous CUDA description; the device path uses the same OS mechanism.
+    at::DataPtr sent_data_ptr = torch::GetNewRefCountedSentDataForDevice(
+        storage.mutable_data(), storage.device());
+    auto old_data_ptr = storage.set_data_ptr(std::move(sent_data_ptr));
+    auto sent_data = static_cast<torch::DeviceIPCSentData*>(
+        storage.data_ptr().get_context());
+    sent_data->set_original_ptr(std::move(old_data_ptr));
+    _ref_counter = PyBytes_FromString((sent_data->handle()).c_str());
+    _ref_counter_offset = THPUtils_packUInt64(sent_data->offset());
+
+    // Only fetch an event handle when the device requires event-based sync.
+    // Devices that set requiresEventSync() == false rely on the CPU-side
+    // stream_synchronize performed by the vendor inside getIpcMemHandle.
+    bool needs_event_sync = hooks.requiresEventSync();
+    if (needs_event_sync) {
+      std::string event_bytes = hooks.getIpcEventHandle();
+      _event_handle = PyBytes_FromStringAndSize(
+          event_bytes.c_str(), static_cast<Py_ssize_t>(event_bytes.size()));
+    } else {
+      _event_handle = PyBytes_FromStringAndSize("", 0);
+    }
+    _event_sync_required = PyBool_FromLong(needs_event_sync ? 1 : 0);
+  }
+
+  if (!tuple || !device || !_handle || !size_bytes || !_offset_bytes ||
+      !_ref_counter || !_ref_counter_offset || !_event_handle ||
+      !_event_sync_required) {
+    return nullptr;
+  }
+  PyTuple_SET_ITEM(tuple.get(), 0, device.release());
+  PyTuple_SET_ITEM(tuple.get(), 1, _handle.release());
+  PyTuple_SET_ITEM(tuple.get(), 2, size_bytes.release());
+  PyTuple_SET_ITEM(tuple.get(), 3, _offset_bytes.release());
+  PyTuple_SET_ITEM(tuple.get(), 4, _ref_counter.release());
+  PyTuple_SET_ITEM(tuple.get(), 5, _ref_counter_offset.release());
+  PyTuple_SET_ITEM(tuple.get(), 6, _event_handle.release());
+  PyTuple_SET_ITEM(tuple.get(), 7, _event_sync_required.release());
+  return tuple.release();
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_newSharedDevice(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      at::isPrivateUse1HooksRegistered(),
+      "_new_shared_device: PrivateUse1 hooks are not registered.");
+  const auto& hooks = at::detail::getPrivateUse1Hooks();
+
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 8, "tuple of 8 items expected");
+  PyObject* _device = PyTuple_GET_ITEM(args, 0);
+  PyObject* _handle = PyTuple_GET_ITEM(args, 1);
+  PyObject* _size_bytes = PyTuple_GET_ITEM(args, 2);
+  PyObject* _offset_bytes = PyTuple_GET_ITEM(args, 3);
+  PyObject* _ref_counter = PyTuple_GET_ITEM(args, 4);
+  PyObject* _ref_counter_offset = PyTuple_GET_ITEM(args, 5);
+  PyObject* _event_handle = PyTuple_GET_ITEM(args, 6);
+  PyObject* _event_sync_required = PyTuple_GET_ITEM(args, 7);
+
+  if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size_bytes) &&
+        PyBytes_Check(_handle) && PyBytes_Check(_ref_counter) &&
+        PyBytes_Check(_event_handle) && THPUtils_checkLong(_offset_bytes) &&
+        THPUtils_checkLong(_ref_counter_offset) &&
+        PyBool_Check(_event_sync_required))) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "_new_shared_device",
+        1,
+        "(int device, bytes handle, int storage_size_bytes, "
+        "int storage_offset_bytes, bytes ref_counter, "
+        "int ref_counter_offset, bytes event_handle, "
+        "bool event_sync_required)");
+    return nullptr;
+  }
+
+  size_t storage_size = THPUtils_unpackUInt64(_size_bytes) / sizeof(uint8_t);
+  ptrdiff_t storage_offset_bytes =
+      static_cast<ptrdiff_t>(THPUtils_unpackLong(_offset_bytes));
+  const auto device_index = c10::checked_convert<c10::DeviceIndex>(
+      THPUtils_unpackLong(_device), "c10::DeviceIndex");
+
+  // If the producer recorded an event, wait on it before reading to ensure
+  // the producer has finished writing to the shared memory region.
+  // We pass stream_id=0 (the default stream) because PrivateUse1HooksInterface
+  // does not expose a getCurrentStream hook. Vendor implementations of
+  // waitIpcEvent that need the actual current stream should look it up
+  // internally using their device-specific API rather than relying on the
+  // passed stream argument.
+  if (PyObject_IsTrue(_event_sync_required)) {
+    char* event_buf = nullptr;
+    Py_ssize_t event_size = 0;
+    TORCH_CHECK(
+        PyBytes_AsStringAndSize(_event_handle, &event_buf, &event_size) != -1,
+        "_new_shared_device: failed to decode event handle bytes");
+    std::string event_bytes(event_buf, event_size);
+    c10::Stream current_stream = c10::Stream::unpack3(
+        0,
+        static_cast<c10::DeviceIndex>(device_index),
+        c10::DeviceType::PrivateUse1);
+    hooks.waitIpcEvent(event_bytes, current_stream);
+  }
+
+  // Open the IPC handle.  The vendor returns a DataPtr whose custom deleter
+  // unmaps the shared region when the last reference is released.
+  char* handle_buf = nullptr;
+  Py_ssize_t handle_size = 0;
+  TORCH_CHECK(
+      PyBytes_AsStringAndSize(_handle, &handle_buf, &handle_size) != -1,
+      "_new_shared_device: failed to decode memory handle bytes");
+  std::string handle_str(handle_buf, handle_size);
+  c10::DataPtr ipc_data_ptr = hooks.openIpcMemHandle(handle_str);
+
+  // Apply the byte offset to locate the exact start of the storage within
+  // the larger mapped region returned by openIpcMemHandle.
+  void* base_ptr = ipc_data_ptr.get();
+  void* storage_ptr = static_cast<char*>(base_ptr) + storage_offset_bytes;
+
+  // Keep the mapped memory alive via shared_ptr with a custom deleter that
+  // holds the DataPtr alive until the mapped region is released.
+  auto dp_holder = std::make_shared<c10::DataPtr>(std::move(ipc_data_ptr));
+  std::shared_ptr<void> mapped_region(base_ptr, [dp_holder](void*) {});
+
+  std::string ref_counter_handle = PyBytes_AS_STRING(_ref_counter);
+  ptrdiff_t ref_counter_offset =
+      static_cast<ptrdiff_t>(THPUtils_unpackLong(_ref_counter_offset));
+
+  // Bundle everything the destructor needs to decrement the refcount and
+  // release the mapped memory.
+  struct DeviceIpcDeleterCtx {
+    std::string ref_counter_handle;
+    ptrdiff_t ref_counter_offset{};
+    c10::DeviceIndex device{-1};
+    torch::DeviceIPCReceivedData received_data;
+  };
+
+  auto ctx = std::make_unique<DeviceIpcDeleterCtx>();
+  ctx->ref_counter_handle = std::move(ref_counter_handle);
+  ctx->ref_counter_offset = ref_counter_offset;
+  ctx->device = device_index;
+  ctx->received_data.shared_ptr_ = std::move(mapped_region);
+
+  // Build the final DataPtr for the storage.
+  // The destructor:
+  //   1. Releases the vendor's mapped region (via received_data).
+  //   2. Decrements the producer's refcount slot so the producer can
+  //      eventually free the allocation once all consumers have released it.
+  c10::DataPtr data_ptr(
+      storage_ptr,
+      ctx.release(),
+      +[](void* ctx_) {
+        std::unique_ptr<DeviceIpcDeleterCtx> c(
+            static_cast<DeviceIpcDeleterCtx*>(ctx_));
+        // Release mapped memory.  The vendor's DataPtr deleter (set inside
+        // openIpcMemHandle) is responsible for synchronising any in-flight
+        // device work before unmapping.  This mirrors the CUDA path where
+        // CUDACachingAllocator performs an implicit stream sync on free.
+        c->received_data.shared_ptr_.reset();
+        // Decrement the producer's refcount slot.
+        // This is best-effort: if the producer has already terminated the
+        // shared memory file may be gone, which is expected and ignored.
+        int flags =
+            at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE;
+        try {
+          auto sptr = at::RefcountedMapAllocator::makeDataPtr(
+              c->ref_counter_handle.c_str(),
+              flags,
+              sizeof(int64_t) * torch::DEVICE_IPC_REF_COUNTER_FILE_SIZE,
+              nullptr);
+          *(static_cast<int64_t*>(sptr.get()) + c->ref_counter_offset) -= 1;
+          // NOLINTNEXTLINE(bugprone-empty-catch)
+        } catch (c10::Error&) {
+          // Producer process terminated before consumer released data.
+        }
+      },
+      at::Device(at::DeviceType::PrivateUse1, device_index));
+
+  auto base = c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      storage_size,
+      std::move(data_ptr),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
+
+  base->set_resizable(false);
+  // Mark this storage as received via IPC to prevent re-sharing.
+  base->set_received_via_ipc(true);
+
+  return THPStorage_NewWithStorage(THPStorageClass, std::move(base));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_releaseIPCCounterDevice(
+    PyObject* _unused,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 2, "tuple of 2 items expected");
+  PyObject* _ref_counter = PyTuple_GET_ITEM(args, 0);
+  PyObject* _ref_counter_offset = PyTuple_GET_ITEM(args, 1);
+  if (!(PyBytes_Check(_ref_counter) &&
+        THPUtils_checkLong(_ref_counter_offset))) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "_release_ipc_counter_device",
+        1,
+        "(bytes ref_counter, int ref_counter_offset)");
+    return nullptr;
+  }
+  // On a cache hit in rebuild_device_tensor() the consumer reuses an already-
+  // open storage and its destructor will NOT run for this send.  We must
+  // therefore decrement the producer's refcount slot immediately so that the
+  // count can eventually reach zero and the producer can free the allocation.
+  std::string ref_counter_handle = PyBytes_AS_STRING(_ref_counter);
+  ptrdiff_t ref_counter_offset =
+      static_cast<ptrdiff_t>(THPUtils_unpackLong(_ref_counter_offset));
+  int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE;
+  try {
+    auto sptr = at::RefcountedMapAllocator::makeDataPtr(
+        ref_counter_handle.c_str(),
+        flags,
+        sizeof(int64_t) * torch::DEVICE_IPC_REF_COUNTER_FILE_SIZE,
+        nullptr);
+    *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
+    // NOLINTNEXTLINE(bugprone-empty-catch)
+  } catch (c10::Error&) {
+    // Producer process terminated before consumer released data.
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStorage_sharingMethods[] = {
     {"_new_with_weak_ptr",
@@ -646,6 +926,15 @@ static PyMethodDef THPStorage_sharingMethods[] = {
      nullptr},
     {"_release_ipc_counter_cuda",
      THPStorage_releaseIPCCounter,
+     METH_VARARGS | METH_STATIC,
+     nullptr},
+    {"_share_device_", THPStorage_shareDevice, METH_NOARGS, nullptr},
+    {"_new_shared_device",
+     THPStorage_newSharedDevice,
+     METH_VARARGS | METH_STATIC,
+     nullptr},
+    {"_release_ipc_counter_device",
+     THPStorage_releaseIPCCounterDevice,
      METH_VARARGS | METH_STATIC,
      nullptr},
     {"_share_fd_cpu_", THPStorage_shareFd, METH_NOARGS, nullptr},
