@@ -1011,8 +1011,6 @@ class TestVarlenAttention(NNTestCase):
     ):
         """Direct cumulative lengths match the legacy per-sequence path."""
         _check_cudnn_varlen_supported(device)
-        if torch.backends.cudnn.version() < 92400:
-            raise unittest.SkipTest("direct cumulative lengths require cuDNN 9.24")
         torch.manual_seed(42)
         total, num_heads, head_dim = 512, 4, 64
         q = torch.randn(

@@ -351,17 +351,6 @@ constexpr int64_t kRequiredInt32Alignment =
     HasSetAlignment<fe::graph::Tensor_attributes> ? kInt32Alignment
                                                   : kLegacyTensorAlignment;
 
-// Direct cumulative lengths require support from both frontend and backend.
-bool supports_cumulative_sequence_lengths() {
-#if AT_CUDNN_HAS_CUMULATIVE_SEQUENCE_LENGTHS
-  return std::min(
-             fe::detail::get_compiled_version(),
-             fe::detail::get_backend_version()) >= 92400;
-#else
-  return false;
-#endif
-}
-
 void checkInt32Alignment(const Tensor& tensor, const char* name) {
   const auto address = reinterpret_cast<uintptr_t>(tensor.const_data_ptr());
   TORCH_CHECK(
@@ -1755,7 +1744,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
   if (!o.defined()) {
     alloc_with_matching_layout(q, o, {q.size(0), h_q, d_v});
   }
-  const auto sequence_length_mode = supports_cumulative_sequence_lengths() &&
+  const auto sequence_length_mode = AT_CUDNN_HAS_CUMULATIVE_SEQUENCE_LENGTHS &&
           !seqused_k.has_value() && dropout_probability == 0.0 &&
           q.stride(-3) > 0 && k.stride(-3) > 0 && v.stride(-3) > 0 &&
           o.stride(-3) > 0
