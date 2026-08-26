@@ -2049,6 +2049,44 @@ class TestCuptiAnnotationBackend(TestCase):
         self.assertEqual(node_ids["cupti"], node_ids["edge_walk"])
         self.assertEqual(len(node_ids["cupti"]), 4)
 
+    def test_backward_parity_with_edge_walk(self):
+        # Backward kernels are attributed by the hooks a scope installs on the autograd
+        # nodes its forward creates, which are backend-independent: both backends must
+        # produce the same annotations, including for a backward running inside a different
+        # scope, whose lexical annotation the forward region outranks.
+        def warm(x):
+            s = torch.cuda.Stream()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                for _ in range(3):
+                    torch.autograd.grad((x * 2).sin().sum(), x)
+            torch.cuda.current_stream().wait_stream(s)
+
+        def run(backend):
+            clear_kernel_annotations()
+            x = torch.randn(64, 64, device="cuda", requires_grad=True)
+            warm(x)
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(
+                g, enable_annotations=True, annotation_config={"backend": backend}
+            ):
+                with mark_kernels("fwd"):
+                    y = (x * 2).sin()
+                with mark_kernels({"name": "bwd_region", "lane": 1}):
+                    torch.autograd.grad(y.sum(), x)
+            return {
+                tools_id & 0xFFFFFFFF: entries
+                for tools_id, entries in self._annotations().items()
+            }
+
+        cupti = run("cupti")
+        self.assertEqual(cupti, run("edge_walk"))
+        # The forward scope owns its backward kernels even though another scope is open
+        # around the backward call; that scope's other keys still merge in.
+        self.assertIn(
+            [{"name": "fwd", "lane": 1, "autograd_phase": "backward"}], cupti.values()
+        )
+
     def test_scope_entered_before_stream_joins_capture(self):
         # The edge walk snapshots the CURRENT stream's capture state on scope entry, so a
         # scope entered while that stream is not yet capturing records nothing at all --
