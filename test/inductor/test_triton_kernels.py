@@ -3692,11 +3692,9 @@ class KernelTestsLibdeviceIntel(torch._inductor.test_case.TestCase):
 
 
 def make_mutation_test(fn):
-    @unittest.skipIf(
-        not HAS_GPU_DEVICE and not torch.mps.is_available(), "requires gpu"
-    )
+    @onlyAccelerator
     @requires_triton()
-    def test_fn(self):
+    def test_fn(self, device):
         from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
 
         kernel, inputs, tma_descriptor_metadata, outputs = fn()
@@ -3934,19 +3932,17 @@ class MutationTests(torch._inductor.test_case.TestCase):
             expected,
         )
 
-    @unittest.skipIf(
-        not HAS_GPU_DEVICE and not torch.mps.is_available(), "requires gpu"
-    )
+    @onlyAccelerator
     @requires_triton()
-    def test_triton_kernel_inference_mode(self):
+    def test_triton_kernel_inference_mode(self, device):
         def f(x, y, out):
             n_elements = x.numel()
             grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
             add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=4)
 
         with torch.inference_mode():
-            x = torch.ones(32, device=GPU_TYPE)
-            y = torch.ones(32, device=GPU_TYPE)
+            x = torch.ones(32, device=device)
+            y = torch.ones(32, device=device)
             out_ref = torch.zeros_like(x)
             out_test = torch.zeros_like(x)
             f(x, y, out_ref)
@@ -4564,11 +4560,9 @@ class MutationTests(torch._inductor.test_case.TestCase):
         not has_triton_tensor_descriptor_host_tma(),
         "requires TensorDescriptor API in Triton",
     )
-    @unittest.skipIf(
-        not HAS_GPU_DEVICE and not torch.mps.is_available(), "requires gpu"
-    )
+    @onlyAccelerator
     @requires_triton()
-    def test_descriptor_load_store_read_write_detection(self):
+    def test_descriptor_load_store_read_write_detection(self, device):
         """
         Regression test: tl.make_tensor_descriptor + desc.load()/desc.store()
         generates tt.descriptor_load/tt.descriptor_store ops in TTIR. These
@@ -6824,6 +6818,12 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     CustomOpTests,
+    globals(),
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    MutationTests,
     globals(),
     except_for=("cpu", "hpu"),
     allow_xpu=True,
