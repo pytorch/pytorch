@@ -32,15 +32,13 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
-
 BFLOAT16_AVAILABLE = torch.cuda.is_bf16_supported() or torch.xpu.is_bf16_supported()
 
 
 class Net(nn.Module):
-    def __init__(self, has_wrapping, sharding_strategy, mixed_precision=None):
+    def __init__(
+        self, has_wrapping, sharding_strategy, mixed_precision=None, *, device_type
+    ):
         # to ensure determinism
         torch.manual_seed(0)
         torch.get_device_module(device_type).manual_seed(0)
@@ -176,14 +174,15 @@ class TestCommunicationHooks(FSDPTest):
             if not submodule.check_is_root()
         ]
 
-    def _init_model(self, core, sharding_strategy, mixed_precision=None):
-        device = torch.device(device_type)
+    def _init_model(self, core, sharding_strategy, mixed_precision=None, *, device):
+        # Type-only device: each rank stays on the device bound by the
+        # framework, and the injected `device` carries the primary index.
         return FSDP(
             core,
             device_id=torch.accelerator.current_device_index(),
             sharding_strategy=sharding_strategy,
             mixed_precision=mixed_precision,
-        ).to(device)
+        ).to(torch.device(torch.device(device).type))
 
     @skip_if_lt_x_gpu(2)
     @parametrize("has_wrapping", [True, False])
@@ -207,9 +206,15 @@ class TestCommunicationHooks(FSDPTest):
         """
 
         # Initialize a model
+        device_type = torch.device(device).type
         fsdp_model_with_hook = self._init_model(
-            Net(has_wrapping=has_wrapping, sharding_strategy=sharding_strategy),
+            Net(
+                has_wrapping=has_wrapping,
+                sharding_strategy=sharding_strategy,
+                device_type=device_type,
+            ),
             sharding_strategy=sharding_strategy,
+            device=device,
         )
 
         # Check that by default, `_comm_hook` is None
@@ -258,8 +263,13 @@ class TestCommunicationHooks(FSDPTest):
         """
 
         fsdp_model_with_hook = self._init_model(
-            Net(has_wrapping=True, sharding_strategy=sharding_strategy),
+            Net(
+                has_wrapping=True,
+                sharding_strategy=sharding_strategy,
+                device_type=torch.device(device).type,
+            ),
             sharding_strategy=sharding_strategy,
+            device=device,
         )
         dummy_state = DummyState(process_group=None, noise=1234)
         dummy_hook = (
@@ -278,11 +288,14 @@ class TestCommunicationHooks(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_registering_hook_hybrid_strategy(self, device):
+        device_type = torch.device(device).type
         for sharding_strategy in (
             ShardingStrategy.HYBRID_SHARD,
             ShardingStrategy._HYBRID_SHARD_ZERO2,
         ):
-            model = Net(False, None, None).to(device=device_type)
+            model = Net(False, None, None, device_type=device_type).to(
+                device=device_type
+            )
             fsdp_model = FSDP(
                 model,
                 auto_wrap_policy=ModuleWrapPolicy({nn.Linear}),
@@ -318,8 +331,13 @@ class TestCommunicationHooks(FSDPTest):
         """
 
         fsdp_model_with_hook = self._init_model(
-            Net(has_wrapping=True, sharding_strategy=sharding_strategy),
+            Net(
+                has_wrapping=True,
+                sharding_strategy=sharding_strategy,
+                device_type=torch.device(device).type,
+            ),
             sharding_strategy=sharding_strategy,
+            device=device,
         )
         dummy_state = DummyState(process_group=None, noise=1234)
         dummy_hook = (
@@ -338,15 +356,21 @@ class TestCommunicationHooks(FSDPTest):
             fsdp_model_with_hook.register_comm_hook(dummy_state, dummy_hook)
 
     def _check_low_precision_hook(
-        self, state, hook, sharding_strategy, dtype, has_wrapping
+        self, state, hook, sharding_strategy, dtype, has_wrapping, device
     ):
+        device_type = torch.device(device).type
         # keep everything deterministic for input data
         torch.manual_seed(0)
         torch.get_device_module(device_type).manual_seed(0)
 
         fsdp_with_hook = self._init_model(
-            Net(has_wrapping=has_wrapping, sharding_strategy=sharding_strategy),
+            Net(
+                has_wrapping=has_wrapping,
+                sharding_strategy=sharding_strategy,
+                device_type=device_type,
+            ),
             sharding_strategy=sharding_strategy,
+            device=device,
         )
         fsdp_with_hook.register_comm_hook(state, hook)
 
@@ -356,9 +380,11 @@ class TestCommunicationHooks(FSDPTest):
                 has_wrapping=has_wrapping,
                 sharding_strategy=sharding_strategy,
                 mixed_precision=mp_only_grad,
+                device_type=device_type,
             ),
             sharding_strategy=sharding_strategy,
             mixed_precision=mp_only_grad,
+            device=device,
         )
 
         optim_hook = torch.optim.SGD(fsdp_with_hook.parameters(), lr=0.1)
@@ -401,7 +427,7 @@ class TestCommunicationHooks(FSDPTest):
         hook = default_hooks.fp16_compress_hook
 
         self._check_low_precision_hook(
-            state, hook, sharding_strategy, torch.float16, has_wrapping
+            state, hook, sharding_strategy, torch.float16, has_wrapping, device
         )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -427,7 +453,7 @@ class TestCommunicationHooks(FSDPTest):
         hook = default_hooks.bf16_compress_hook
 
         self._check_low_precision_hook(
-            state, hook, sharding_strategy, torch.bfloat16, has_wrapping
+            state, hook, sharding_strategy, torch.bfloat16, has_wrapping, device
         )
 
 
