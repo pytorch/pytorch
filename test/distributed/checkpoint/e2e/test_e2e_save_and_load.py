@@ -527,10 +527,6 @@ class TestCheckpointOrderingAndOverwrite(DTensorContinuousTestBase):
 class TestNoCPU(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @property
-    def backend(self):
-        return dist.get_default_backend_for_device(self.device_type)
-
     @skip_if_lt_x_gpu(NUM_DEVICES)
     @with_comms
     def test_no_cpu(self, device):
