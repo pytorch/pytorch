@@ -1702,7 +1702,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 y = 2 * x
                 return y.sum()
 
-            dist.set_timeout(timedelta(seconds=5), pg)
             counters.clear()
 
             x = torch.ones(4, device=device)
@@ -1717,6 +1716,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             w.wait()
             torch.accelerator.synchronize(device)
             torch._dynamo.reset()
+            dist.set_timeout(timedelta(seconds=5), pg)
 
             if self.rank == 0:
                 with fresh_cache():

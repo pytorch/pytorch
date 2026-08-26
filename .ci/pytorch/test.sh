@@ -9,17 +9,6 @@ set -ex -o pipefail
 # Suppress ANSI color escape sequences
 export TERM=vt100
 
-# Retry-policy A/B experiment (see unstable.yml). The test config name is the only
-# per-job channel available without changing the shared _linux-test.yml, so the
-# suffix is stripped back to the real config here: everything downstream then sees
-# the same TEST_CONFIG as the trunk arm we are comparing against, and the only
-# difference is the retry policy.
-if [[ "${TEST_CONFIG}" == *_retry_experiment ]]; then
-  export TEST_CONFIG="${TEST_CONFIG%_retry_experiment}"
-  export PYTORCH_NUM_PYTEST_RERUNS=0
-  export PYTORCH_NUM_PROCESS_RETRIES=1
-fi
-
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
@@ -2239,6 +2228,9 @@ test_executorch() {
 test_torchtitan() {
   install_torchao
   install_torchcomms
+  # muse_glimmer and kimi_k2_7 import torchvision at model-build time. Build it
+  # from the pinned commit rather than PyPI so it links the CI-built torch.
+  install_torchvision
 
   local torchtitan_commit
   torchtitan_commit=$(get_pinned_commit torchtitan)
