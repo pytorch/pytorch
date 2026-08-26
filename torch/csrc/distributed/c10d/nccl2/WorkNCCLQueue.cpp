@@ -25,7 +25,7 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked(
 
       if (status == WorkNCCL::WorkStatus::COMPLETED) {
         completed.push_back(work.state);
-        completed_input_tensors_.push(std::move(work.input_tensors));
+        completedInputTensors_.push(std::move(work.inputTensors));
         work_queue.pop();
         // Continue to the next element in the queue
       } else if (
@@ -99,17 +99,16 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
   // NOTE: finalize MUST return without holding references to any work object,
   // otherwise it may leak object and cause side effects.
   stream_work_queues_.clear();
-  std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>>
-      completed_input_tensors;
-  completed_input_tensors.swap(completed_input_tensors_);
+  std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>> completedInputTensors;
+  completedInputTensors.swap(completedInputTensors_);
   lock.unlock();
 
   for (const auto& state : completed) {
     state->notifyCompletion();
   }
-  while (!completed_input_tensors.empty()) {
-    completed_input_tensors.front()->clear();
-    completed_input_tensors.pop();
+  while (!completedInputTensors.empty()) {
+    completedInputTensors.front()->clear();
+    completedInputTensors.pop();
   }
   return status;
 }
@@ -117,16 +116,15 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
 void WorkNCCLQueue::enqueueWork(
     const c10::intrusive_ptr<WorkNCCL>& work,
     cudaStream_t stream) {
-  std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>>
-      completed_input_tensors;
+  std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>> completedInputTensors;
   {
     std::lock_guard<std::mutex> lock(work_queues_mutex_);
-    completed_input_tensors.swap(completed_input_tensors_);
-    stream_work_queues_[stream].push({work->state_, work->input_tensors_});
+    completedInputTensors.swap(completedInputTensors_);
+    stream_work_queues_[stream].push({work->state_, work->inputTensors_});
   }
-  while (!completed_input_tensors.empty()) {
-    completed_input_tensors.front()->clear();
-    completed_input_tensors.pop();
+  while (!completedInputTensors.empty()) {
+    completedInputTensors.front()->clear();
+    completedInputTensors.pop();
   }
 }
 
