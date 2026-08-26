@@ -16,6 +16,42 @@ torch._logging.set_logs(inductor_metrics=True)
 class TestCatMultiConsumer(TestCase):
     @torch._inductor.config.patch(fx_graph_cache=False)
     @requires_gpu()
+    def test_other_cat_input_is_not_external_consumer(self):
+        """A use feeding another input of the same cat is internal."""
+
+        def fn(x):
+            rotated = torch.sin(x)
+            concatenated = torch.cat((rotated, -rotated), dim=-1)
+            return torch.argmax(concatenated, dim=-1)
+
+        x = torch.randn(128, 64, device=GPU_TYPE)
+        compiled = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled, x)
+
+        self.assertEqual(result, fn(x))
+        self.assertNotIn("reinterpret_tensor", code)
+
+    @torch._inductor.config.patch(fx_graph_cache=False)
+    @requires_gpu()
+    def test_external_consumer_still_uses_concat_kernel(self):
+        """A consumer outside the cat inputs remains a multi-consumer."""
+
+        def fn(x):
+            rotated = torch.sin(x)
+            concatenated = torch.cat((rotated, -rotated), dim=-1)
+            return torch.argmax(concatenated, dim=-1), torch.cos(rotated)
+
+        x = torch.randn(128, 64, device=GPU_TYPE)
+        compiled = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled, x)
+        ref = fn(x)
+
+        self.assertEqual(result[0], ref[0])
+        self.assertEqual(result[1], ref[1])
+        self.assertIn("reinterpret_tensor", code)
+
+    @torch._inductor.config.patch(fx_graph_cache=False)
+    @requires_gpu()
     def test_cat_to_fp16(self):
         """Multi-consumer cat avoids duplicate computation."""
 
