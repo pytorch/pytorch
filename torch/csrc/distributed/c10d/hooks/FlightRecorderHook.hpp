@@ -112,7 +112,7 @@ class TORCH_API FlightRecorderHook
     std::chrono::milliseconds timeout{kBackendDefaultTimeout};
   };
 
-  // A recorded op whose collective the hook is still waiting on. work_key is
+  // A recorded op whose collective the hook is still waiting on. workKey is
   // empty between the pre-hook and the post-hook, and stays empty if the
   // backend threw in between -- such an entry is never retired, which is the
   // honest report: it was issued and never seen to finish.
@@ -120,7 +120,7 @@ class TORCH_API FlightRecorderHook
     FlightRecorder<c10::Event>::TraceIdentifier trace_id;
     FlightRecorder<c10::Event>* recorder = nullptr;
     HookOpName name = HookOpName::UNKNOWN;
-    std::optional<uint64_t> work_key;
+    std::optional<uint64_t> workKey;
   };
 
   FlightRecorderHook(

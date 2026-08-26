@@ -260,7 +260,7 @@ void ProcessGroupNCCL::runCompletionHooks(
     }
   }
   ::c10d::CompletionHookArgs args;
-  args.completion_key = completion_key;
+  args.completionKey = completion_key;
   args.duration_ms = duration_ms;
   for (const auto& hook : hooks) {
     try {
