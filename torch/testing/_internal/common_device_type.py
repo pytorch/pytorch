@@ -348,6 +348,7 @@ class Capability:
 
         flash_attention = "attention.flash_attention"
         mem_efficient_attention = "attention.mem_efficient_attention"
+        flex_attention = "attention.flex_attention"
 
 
 class DeviceTypeTestBase(TestCase):
@@ -852,6 +853,9 @@ class CPUTestBase(DeviceTypeTestBase):
             Capability.dtype.bf16: lambda: True,
             Capability.attention.flash_attention: lambda: True,
             Capability.attention.mem_efficient_attention: lambda: False,
+            Capability.attention.flex_attention: lambda: (
+                IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
+            ),
         }
 
 
@@ -879,8 +883,15 @@ class CUDATestBase(DeviceTypeTestBase):
         return {
             Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
             Capability.dtype.bf16: lambda: SM80OrLater,
-            Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
-            Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+            Capability.attention.flash_attention: lambda: (
+                PLATFORM_SUPPORTS_FLASH_ATTENTION
+            ),
+            Capability.attention.mem_efficient_attention: lambda: (
+                PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+            ),
+            Capability.attention.flex_attention: lambda: (
+                IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED
+            ),
         }
 
     @classmethod
@@ -983,6 +994,9 @@ class MPSTestBase(DeviceTypeTestBase):
             Capability.dtype.bf16: lambda: True,
             Capability.attention.flash_attention: lambda: False,
             Capability.attention.mem_efficient_attention: lambda: False,
+            Capability.attention.flex_attention: lambda: (
+                IS_FLEX_ATTENTION_MPS_PLATFORM_SUPPORTED
+            ),
         }
 
 
@@ -999,8 +1013,13 @@ class XPUTestBase(DeviceTypeTestBase):
         return {
             Capability.dtype.fp8: lambda: True,
             Capability.dtype.bf16: lambda: True,
-            Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+            Capability.attention.flash_attention: lambda: (
+                PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
+            ),
             Capability.attention.mem_efficient_attention: lambda: True,
+            Capability.attention.flex_attention: lambda: (
+                IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED
+            ),
         }
 
     @classmethod
