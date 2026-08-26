@@ -2050,7 +2050,8 @@ void run_cudnn_SDP_bprop_nestedtensor(
   }
   TORCH_INTERNAL_ASSERT(
       has_aligned_varlen_layout(dO_),
-      "cuDNN SDPA expected an aligned grad_output with unit embedding stride");
+      "cuDNN SDPA expected grad_output to have 16-byte-aligned storage and "
+      "non-broadcast strides, with a contiguous last dimension");
 
   auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
   auto seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
