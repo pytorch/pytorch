@@ -1,7 +1,7 @@
 ARG CUDA_VERSION=12.6
 ARG BASE_TARGET=cuda${CUDA_VERSION}
-ARG ROCM_IMAGE=rocm/dev-almalinux-8:6.3-complete
-FROM amd64/almalinux:8.10-20250519 as base
+ARG BASE_IMAGE=amd64/almalinux:8.10-20250519
+FROM ${BASE_IMAGE} as base
 
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
@@ -74,7 +74,10 @@ FROM cuda as cuda13.4
 RUN bash ./install_cuda.sh 13.4
 ENV DESIRED_CUDA=13.4
 
-FROM ${ROCM_IMAGE} as rocm_base
+FROM base as rocm_base
+ARG DEVTOOLSET_VERSION=13
+ARG PYTORCH_ROCM_ARCH
+ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 ARG DEVTOOLSET_VERSION=13
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
@@ -88,14 +91,17 @@ RUN git config --global --add safe.directory '*'
 # All rocm clang cfg files load the same rocm.cfg, make sure it points to the right toolchain.
 RUN echo "--gcc-toolchain=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr" >> /opt/rocm/llvm/bin/rocm.cfg
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
-
-FROM rocm_base as rocm
-ARG PYTORCH_ROCM_ARCH
-ARG DEVTOOLSET_VERSION=13
-ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 ADD ./common/install_mkl.sh install_mkl.sh
 RUN bash ./install_mkl.sh && rm install_mkl.sh
 ENV MKLROOT /opt/intel
+# torch's extensions link libatomic.so.1, which the plain AlmaLinux base lacks and
+# which no ROCm OS package pulls in on this path.
+RUN yum install -y libatomic
+
+FROM rocm_base as rocm
+ARG ROCM_VERSION
+ADD ./common/install_rocm.sh install_rocm.sh
+RUN bash ./install_rocm.sh && rm install_rocm.sh
 
 # Install MNIST test data
 FROM base as mnist
