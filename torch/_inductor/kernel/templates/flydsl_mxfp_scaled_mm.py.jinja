@@ -7,7 +7,7 @@ from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_mxfp_gfx950 i
     MXFPGemmParams,
 )
 from torch._inductor.runtime.flydsl_cache import (
-    ensure_flydsl_cache_dir,
+    configure_flydsl_cache_dir,
     run_cached_flydsl,
 )
 
@@ -88,7 +88,7 @@ def _temporary_env(updates):
     with _mxfp_init_lock:
         executor = _mxfp_executor
         if executor is None:
-            ensure_flydsl_cache_dir()
+            configure_flydsl_cache_dir()
             compile_args = (
                 _inductor_tensor_arg(mat1_u8),
                 _inductor_tensor_arg(mat2_nk_u8),

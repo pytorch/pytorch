@@ -56,7 +56,6 @@ from ..utils import (
     use_cpp_gemm_template,
     use_cutlass_template,
     use_decompose_k_choice,
-    use_flydsl_scaled_mm_template,
     use_flydsl_gemm_template,
     use_nv_universal_gemm_template,
     use_triton_blackwell_tma_template,
@@ -1147,7 +1146,7 @@ def get_flydsl_mxfp_template_kwargs(
     """Return shape-compatible configs for one gfx950 MXFP operand format."""
     from ..heuristics.template.flydsl import get_mxfp_gemm_configs_for_shape
 
-    if not use_flydsl_scaled_mm_template(layout):
+    if not use_flydsl_gemm_template(layout):
         return []
 
     nodes = (mat_a, mat_b, scale_a, scale_b)

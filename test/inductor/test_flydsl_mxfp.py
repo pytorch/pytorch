@@ -283,7 +283,7 @@ class TestFlyDSLMXFP8Metadata(TestCase):
             offset=0,
         )
 
-        with mock.patch.object(mm, "use_flydsl_scaled_mm_template", return_value=True):
+        with mock.patch.object(mm, "use_flydsl_gemm_template", return_value=True):
             configs = mm.get_flydsl_mxfp_template_kwargs(
                 "mxfp8", layout, a, b, scale_a[0], scale_b[0]
             )
