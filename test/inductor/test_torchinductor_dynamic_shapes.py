@@ -1399,7 +1399,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(cnt.frame_count, 4)
 
     def test_sort_dynamic_shape_with_check(self, device):
-        if not has_triton():
+        if device == "cpu":
 
             def check_count(n):
                 self.assertEqual(metrics.generated_kernel_count, 0)
