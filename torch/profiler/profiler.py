@@ -30,7 +30,7 @@ from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping
 
 
 __all__ = [
@@ -466,10 +466,26 @@ class _KinetoProfile:
                 self._monitor_window_id = self._cupti_profiler_observer.close_window()
         self.profiler.__exit__(None, None, None)
 
-    def export_chrome_trace(self, path: str, use_python_export: bool = False):
+    def export_chrome_trace(
+        self,
+        path: str,
+        use_python_export: bool = False,
+        cuda_graph_annotations: Mapping[int, Any] | None = None,
+        default_stream: int = 7,
+    ):
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
+
+        ``cuda_graph_annotations`` bakes CUDA-graph kernel annotations into the trace:
+        graphed work carries its annotation's fields in ``args`` and renders on the
+        lane the annotation names, while graphed work without an annotation renders on
+        ``default_stream``. Pass
+        :func:`torch.cuda.graph_annotations.get_kernel_annotations` to use what
+        :func:`~torch.cuda.graph_annotations.mark_kernels` recorded, or any mapping in
+        that shape -- a filtered or edited copy, or one unpickled from an earlier run.
+        Passing it implies ``use_python_export``, the export path able to inject (the
+        ``cupti_monitor`` backend does its own injection and ignores this argument).
         """
         if self.profiler is None:
             raise AssertionError(
@@ -510,9 +526,13 @@ class _KinetoProfile:
                 self._cupti_profiler_observer = None
                 self._monitor_window_id = None
             return
-        if use_python_export:
+        if use_python_export or cuda_graph_annotations is not None:
             self.profiler.export_chrome_trace(
-                path, self._trace_metadata, use_python_export=True
+                path,
+                self._trace_metadata,
+                use_python_export=True,
+                cuda_graph_annotations=cuda_graph_annotations,
+                default_stream=default_stream,
             )
         elif path.endswith(".gz"):
             with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:

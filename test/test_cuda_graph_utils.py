@@ -1757,52 +1757,6 @@ class TestAnnotationStore(TestCase):
             view[7] = [{"name": "b"}]  # type: ignore[index]
 
 
-# Pure trace-JSON logic, no CUDA needed. Pins the canonical annotation key
-# ("name") and reader tolerance for the two legacy pickle spellings: dicts
-# keyed "str" and bare unwrapped strings.
-class TestAnnotateTrace(TestCase):
-    @staticmethod
-    def _trace_with_kernel(graph_node_id):
-        return {
-            "traceEvents": [
-                {
-                    "ph": "X",
-                    "cat": "kernel",
-                    "name": "k",
-                    "pid": 0,
-                    "tid": 7,
-                    "ts": 100,
-                    "dur": 10,
-                    "args": {"graph node id": graph_node_id, "stream": 7},
-                }
-            ]
-        }
-
-    def _annotated_args(self, annotations):
-        from torch.cuda._annotate_cuda_graph_trace import annotate_trace
-
-        trace = self._trace_with_kernel(42)
-        count = annotate_trace(trace, annotations)
-        self.assertEqual(count, 1)
-        [event] = [e for e in trace["traceEvents"] if e.get("cat") == "kernel"]
-        return event["args"]
-
-    def test_canonical_name_key(self):
-        args = self._annotated_args({42: [{"name": "phase_a", "dtype": "bf16"}]})
-        self.assertEqual(args["name"], "phase_a")
-        self.assertEqual(args["dtype"], "bf16")
-
-    def test_legacy_str_key_maps_to_name(self):
-        args = self._annotated_args({42: [{"str": "phase_a"}]})
-        self.assertEqual(args["name"], "phase_a")
-        self.assertNotIn("str", args)
-
-    def test_legacy_bare_string_maps_to_name(self):
-        args = self._annotated_args({42: ["phase_a"]})
-        self.assertEqual(args["name"], "phase_a")
-        self.assertNotIn("annotation", args)
-
-
 # Every global lifecycle registry behaves the same way -- register / fan out / remove, with
 # per-hook errors swallowed so one consumer cannot break the step for another -- so the
 # contract is checked once per registry. The instantiate and destroy registries have their own

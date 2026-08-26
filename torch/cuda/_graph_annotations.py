@@ -12,8 +12,8 @@ current on scope entry, so that stream must already be participating in
 the capture. ``mark_stream`` handles this by starting ``mark_kernels``
 before switching to the target stream.
 
-The annotations can be pickled and later merged into a Chrome profiler
-trace using ``torch.cuda._annotate_cuda_graph_trace``.
+The annotations are baked into a Chrome profiler trace by
+``prof.export_chrome_trace(path, cuda_graph_annotations=get_kernel_annotations())``.
 
 Requires ``cuda.bindings`` package and a CUDA driver that supports
 ``cudaGraphNodeGetToolsId`` (CUDA >= 13.1 or appropriate cuda-compat).
@@ -1005,9 +1005,9 @@ class _AnnotationsView(Mapping[int, "list[Any]"]):
     one-element list.
 
     The store holds exactly one merged dict per node, but the public mapping has always
-    had list values -- and pickles of it are read back by
-    ``torch.cuda._annotate_cuda_graph_trace`` -- so the shape is kept. Wrapping on read
-    rather than storing lists is what makes "at most one annotation per node" explicit.
+    had list values and pickles of it are read back by out-of-tree consumers, so the
+    shape is kept. Wrapping on read rather than storing lists is what makes "at most one
+    annotation per node" explicit.
     """
 
     def __getitem__(self, tools_id: int) -> list[Any]:

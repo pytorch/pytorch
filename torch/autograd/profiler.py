@@ -545,17 +545,32 @@ class profile:
 
     table.__doc__ = EventList.table.__doc__
 
-    def export_chrome_trace(self, path, metadata=None, use_python_export=False):
+    def export_chrome_trace(
+        self,
+        path,
+        metadata=None,
+        use_python_export=False,
+        cuda_graph_annotations=None,
+        default_stream=7,
+    ):
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
         """
-        if use_python_export and kineto_available():
+        if (
+            use_python_export or cuda_graph_annotations is not None
+        ) and kineto_available():
             from torch.profiler._chrome_trace_export import (
                 export_chrome_trace as _export,
             )
 
-            _export(self.kineto_results, path, metadata)  # type: ignore[union-attr]
+            _export(  # type: ignore[union-attr]
+                self.kineto_results,
+                path,
+                metadata,
+                cuda_graph_annotations,
+                default_stream,
+            )
         elif kineto_available():
             self.kineto_results.save(path)  # type: ignore[union-attr]
         else:
