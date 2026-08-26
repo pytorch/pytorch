@@ -393,7 +393,16 @@ class TestCase(InductorTestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._stack = contextlib.ExitStack()
-        cls._stack.enter_context(
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._stack.close()
+        super().tearDownClass()
+
+    def setUp(self):
+        self._config_stack = contextlib.ExitStack()
+        self.addCleanup(self._config_stack.close)
+        self._config_stack.enter_context(
             config.patch(
                 {
                     "debug": True,
@@ -407,25 +416,71 @@ class TestCase(InductorTestCase):
                 }
             )
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._stack.close()
-        super().tearDownClass()
-
-    def setUp(self):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
         super().setUp()
         self._start = time.perf_counter()
 
     def tearDown(self):
-        super().tearDown()
-        torch._dynamo.reset()
-        if os.environ.get("ERROR_ON_SLOW") == "1":
-            elapsed = time.perf_counter() - self._start
-            if elapsed >= 120:
-                raise AssertionError(f"Test took too long: {elapsed:.1f}s >= 120s")
+        try:
+            super().tearDown()
+            torch._dynamo.reset()
+            if os.environ.get("ERROR_ON_SLOW") == "1":
+                elapsed = time.perf_counter() - self._start
+                if elapsed >= 120:
+                    raise AssertionError(f"Test took too long: {elapsed:.1f}s >= 120s")
+        finally:
+            self._config_stack.close()
+
+
+class TestInductorConfigLifetime(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @config.patch(
+        {
+            "implicit_fallbacks": True,
+            "triton.autotune_pointwise": True,
+        }
+    )
+    def test_class_setup_does_not_patch_inductor_config(self):
+        class CollectionTestCase(TestCase):
+            pass
+
+        try:
+            CollectionTestCase.setUpClass()
+            self.assertTrue(config.implicit_fallbacks)
+            self.assertTrue(config.triton.autotune_pointwise)
+        finally:
+            CollectionTestCase.tearDownClass()
+
+    @config.patch(
+        {
+            "implicit_fallbacks": True,
+            "triton.autotune_pointwise": True,
+        }
+    )
+    def test_manual_lifecycle_restores_inductor_config(self):
+        class ManualTestCase(TestCase):
+            def runTest(self):
+                pass
+
+        test = ManualTestCase()
+        test.setUpClass()
+        try:
+            test.setUp()
+            try:
+                self.assertFalse(config.implicit_fallbacks)
+                self.assertFalse(config.triton.autotune_pointwise)
+            finally:
+                test.tearDown()
+
+            self.assertTrue(config.implicit_fallbacks)
+            self.assertTrue(config.triton.autotune_pointwise)
+        finally:
+            try:
+                test.doCleanups()
+            finally:
+                test.tearDownClass()
 
 
 class ToTuple(torch.nn.Module):
