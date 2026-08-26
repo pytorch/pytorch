@@ -473,16 +473,15 @@ TEST(OptimTest, AddParameter_LBFGS) {
 TEST(OptimTest, AddParameter_Adagrad) {
   torch::manual_seed(0);
 
-  // Adagrad used to create its state only in the constructor, so a parameter
-  // that reached the optimizer later - appended to an existing group, or in a
-  // group added afterwards - tripped an internal assert in step().
+  // Adagrad used to build state only in its constructor, so a parameter added
+  // later tripped an internal assert in step().
   auto parameter = torch::randn({5, 5});
   auto appended = parameter.clone();
   auto in_new_group = parameter.clone();
 
-  // The group overrides initial_accumulator_value, so the test pins down which
-  // value the state created on first use is seeded from. Its lr is set
-  // explicitly so the comparison below does not depend on option inheritance.
+  // The group's initial_accumulator_value differs from the defaults, so the
+  // assertions below pin which of the two a late-added parameter is seeded
+  // from. lr is set explicitly so they do not also depend on option merging.
   std::vector<OptimizerParamGroup> param_groups;
   param_groups.emplace_back(
       std::vector<torch::Tensor>{parameter},
@@ -504,15 +503,9 @@ TEST(OptimTest, AddParameter_Adagrad) {
   ASSERT_TRUE(parameter.allclose(appended));
   ASSERT_TRUE(parameter.allclose(in_new_group));
 
-  // Both late arrivals are seeded from the optimizer defaults rather than from
-  // the group's initial_accumulator_value, matching the constructor and
-  // torch/optim/adagrad.py, which reads self.defaults in _init_group. This
-  // pins the current semantics; it is not a claim that they are the desirable
-  // ones.
   for (const auto& late : {appended, in_new_group}) {
-    // at() rather than operator[]: a missing key means the lazy init
-    // regressed, and operator[] would default-insert null and segfault here
-    // instead of reporting a failure.
+    // at(), not operator[]: on a missing key the latter default-inserts null
+    // and this would segfault rather than report a failure.
     auto& state = static_cast<AdagradParamState&>(
         *optimizer.state().at(late.unsafeGetTensorImpl()));
     ASSERT_EQ(state.step(), 1);
