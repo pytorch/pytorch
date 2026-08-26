@@ -2968,11 +2968,13 @@ class TestSDPACudaOnly(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_decode_disabled_on_affected_blackwell(self, device):
+        # See #193893 and #194927 for reasoning
+        # TODO: Remove this test when fixed and disable is no longer needed
         cudnn_version = torch.backends.cudnn.version() or 0
         device_capability = torch.cuda.get_device_capability()
         affected_arch = device_capability[0] in (10, 11)
-        if not (affected_arch and cudnn_version >= 91900):
-            self.skipTest("Requires cuDNN 9.19+ on SM 10.x or 11.x")
+        if not (affected_arch and (91900 <= cudnn_version < 92600)):
+            self.skipTest("Requires cuDNN 9.19-9.25 on SM 10.x or 11.x")
 
         query = torch.randn(2, 8, 1, 64, device=device, dtype=torch.float16)
         key = torch.randn(2, 8, 128, 64, device=device, dtype=torch.float16)

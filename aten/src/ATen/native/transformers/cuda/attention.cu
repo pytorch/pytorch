@@ -1010,7 +1010,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   const bool has_kv_cache = seqused_k.has_value() || block_table.has_value();
   TORCH_CHECK(
       is_nested || query.size(2) != 1 || !sdp::is_cudnn_attention_decode_disabled(),
-      "cuDNN SDPA decode is disabled for cuDNN versions 9.19+ on SM 10.x and 11.x.");
+      "cuDNN SDPA decode is disabled for cuDNN versions 9.19-9.25 on SM 10.x and 11.x.");
   TORCH_CHECK(
       query.scalar_type() == at::kHalf || query.scalar_type() == at::kBFloat16,
       "cuDNN attention only supports float16 and bfloat16, got ",
