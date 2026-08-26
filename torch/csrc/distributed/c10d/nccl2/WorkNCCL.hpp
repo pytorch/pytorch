@@ -64,6 +64,7 @@ class WorkNCCL : public c10d::Work {
   // c10d::Work overrides.
   bool isCompleted() override;
   bool isSuccess() const override;
+  std::exception_ptr exception() const override;
   bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
   void synchronize() override;
   std::vector<at::Tensor> result() override;
@@ -73,29 +74,19 @@ class WorkNCCL : public c10d::Work {
   uint64_t getSequencenumber() const override;
   uint64_t getCompletionKey() const override;
 
-  std::chrono::milliseconds getTimeout() const override {
-    return timeout_ms_;
-  }
-
-  WorkStatus status() const {
-    return status_.load(std::memory_order_acquire);
-  }
+  std::chrono::milliseconds getTimeout() const override;
+  WorkStatus status() const;
 
   // Output tensors for result()/getFuture(). Set by the backend after issuing.
   void setOutputs(std::vector<at::Tensor> outputs) {
     outputs_ = std::move(outputs);
   }
-  void setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children) {
-    children_ = std::move(children);
-  }
+  void setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children);
   // Per-process-group collective counter of the op this work tracks; set by
   // the backend's createWork().
-  void setSequenceNumber(uint64_t seq) {
-    seq_ = seq;
-  }
-  void setOwnedEphemeralTimeout(std::chrono::milliseconds timeout) {
-    owned_ephemeral_timeout_ = timeout;
-  }
+  void setSequenceNumber(uint64_t seq);
+  void setOwnedEphemeralTimeout(std::chrono::milliseconds timeout);
+  void setHostBlocking(bool host_blocking);
 
  protected:
   void recordStart(std::string_view coll_name);
@@ -106,10 +97,41 @@ class WorkNCCL : public c10d::Work {
   friend class WindowNCCL;
 
  private:
-  bool setTerminalStatus(WorkStatus status);
-  // Push successful completion out to the backend's completion hooks, with the
-  // device duration if this work was timed. Called by WorkNCCLQueue for each
-  // work it retires as COMPLETED, which is once per work.
+  struct Events;
+  struct State {
+    State(
+        ProcessGroupNCCL* comm,
+        cudaStream_t stream,
+        std::chrono::milliseconds timeout);
+
+    WorkStatus status() const;
+    std::exception_ptr exception() const;
+    bool setTerminalStatus(WorkStatus status);
+    WorkStatus checkStatus(
+        std::optional<std::chrono::milliseconds> timeout = std::nullopt);
+    void notifyCompletion();
+    float getDuration();
+
+    ProcessGroupNCCL* comm;
+    int64_t reconfigure_uuid;
+    bool blocking_wait;
+    at::cuda::CUDAStream stream;
+    std::chrono::steady_clock::time_point work_start_time;
+    std::chrono::milliseconds timeout;
+    uint64_t completion_key;
+    std::chrono::milliseconds owned_ephemeral_timeout{0};
+    std::atomic<bool> ephemeral_timeout_released{false};
+    bool timing_enabled;
+    uint64_t seq{0};
+    std::shared_ptr<Events> events;
+    std::mutex duration_mutex;
+    std::shared_ptr<Events> duration_start_events;
+    mutable std::mutex terminal_status_mutex;
+    std::atomic<WorkStatus> work_status{WorkStatus::NOT_STARTED};
+    std::exception_ptr work_exception;
+    c10::intrusive_ptr<c10::ivalue::Future> future_work_result;
+    bool host_blocking{false};
+  };
   void notifyCompletion();
   // Poll the CUDA events and advance status; used by the GC queue + watchdog.
   WorkStatus checkStatus(
@@ -119,38 +141,13 @@ class WorkNCCL : public c10d::Work {
   // semantics for CUDA work: order subsequent current-stream ops after this).
   void synchronizeInternal();
 
+  std::shared_ptr<State> state_;
   std::vector<at::Tensor> inputTensors_;
   at::Tensor inputTensor_;
   std::vector<at::Tensor> outputs_;
   std::vector<c10::intrusive_ptr<WorkNCCL>> children_;
-
-  ProcessGroupNCCL* comm_; // non-owning; see class comment
-  int64_t reconfigure_uuid_{-1};
-  bool blocking_wait_{false};
-  std::unique_ptr<at::cuda::CUDAEvent> start_event_;
-  std::unique_ptr<at::cuda::CUDAEvent> end_event_;
-  at::cuda::CUDAStream stream_;
-
-  std::chrono::steady_clock::time_point work_start_time_;
-  std::chrono::milliseconds timeout_ms_;
-  std::chrono::milliseconds owned_ephemeral_timeout_{0};
-  std::atomic<bool> ephemeral_timeout_released_{false};
-  // Whether the events above were created with CUDA timing enabled, i.e.
-  // whether getDuration() can be served for this work.
-  bool timing_enabled_{false};
-  uint64_t seq_{0};
-  uint64_t completion_key_;
-
-  std::mutex terminal_status_mutex_;
-  std::atomic<WorkStatus> status_{WorkStatus::NOT_STARTED};
   std::optional<at::RecordFunction> recordFunction_;
   c10::intrusive_ptr<c10::ivalue::Future> future_;
-  c10::intrusive_ptr<c10::ivalue::Future> future_work_result_;
-
-  // Set by the backend for a synchronous barrier: synchronizeInternal() then
-  // host-blocks the CPU thread (in addition to the stream-ordered wait) to
-  // mirror stock ProcessGroupNCCL, whose barrier host-blocks. See barrierImpl.
-  bool hostBlocking_{false};
 };
 
 class WorkNCCLQueue {
