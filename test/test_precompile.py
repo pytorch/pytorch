@@ -1837,6 +1837,31 @@ class TestPrecompile(TestCase):
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertEqual(loaded(x), _precompile_shadowed_global_entry(x))
 
+    def test_precompile_serving_does_not_mutate_the_artifact(self):
+        # CompilePackage appends to the entry's per-code records, so a
+        # serve-time recompile used to write its new backend id back into the
+        # artifact. The next install then resolved that id against the
+        # artifact's backends, which never had it. The first install consumes a
+        # prepared copy, so the corruption only surfaced on the third.
+        model = _PrecompileBreakingModule().eval()
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_attr_entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, torch.randn(3, 8))],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        # A new shape each round misses every captured variant, which is what
+        # makes the install recompile and mutate.
+        for rows in (3, 4, 5, 6):
+            with _maybe_scoped(loaded), torch.no_grad():
+                x = torch.randn(rows, 8)
+                self.assertEqual(loaded(model, x), _precompile_attr_entry(model, x))
+
     def test_precompile_public_result_types(self):
         # The public surface is the pair and the loader; the session types it
         # is built from are internal.
