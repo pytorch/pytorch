@@ -567,6 +567,20 @@ Tensor constant_pad_nd_mps(const Tensor& self, IntArrayRef pad, const Scalar& va
                     "It uses View Ops default implementation to run. This may have performance implications.");
     return at::native::constant_pad_nd(self, pad, value);
   }
+  // MPSGraph's constant pad silently writes the fill value in place of the input
+  // data once the two innermost dimensions reach 65536 elements, but only when
+  // the padding is inflated for inputs of rank > pad/2 + 1. The result has the
+  // right shape and a correct padded region, so nothing downstream detects it.
+  // Verified against MPSGraph directly, with no PyTorch involved.
+  const int64_t ndims = self.dim();
+  const int64_t padding_dim = static_cast<int64_t>(pad.size()) / 2;
+  if (ndims > padding_dim + 1 && ndims >= 2) {
+    const int64_t inner_extent = self.size(ndims - 1) * self.size(ndims - 2);
+    if (inner_extent >= 65536) {
+      return at::native::constant_pad_nd(self, pad, value);
+    }
+  }
+
   Tensor output = at::empty({0}, self.options());
   return mps::pad_out_template(
       output, self, pad, std::nullopt, MPSGraphPaddingModeConstant, value.toDouble(), __func__);

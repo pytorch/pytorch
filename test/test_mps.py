@@ -11948,6 +11948,19 @@ class TestPad(TestCaseMPS):
         # check the workaround for the right padding bug in Monterey
         helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
 
+    def test_constant_pad_large_inner_extent(self):
+        # MPSGraph's constant pad writes the fill value in place of the input
+        # once the two innermost dims reach 65536 elements, for ranks that take
+        # the inflated-padding path. 1023 vs 1024 brackets the threshold exactly.
+        for width, dtype in itertools.product([1023, 1024], [torch.float32, torch.float16]):
+            x_cpu = torch.randn(1, 1, 4, 64, width, dtype=dtype)
+            x_mps = x_cpu.detach().clone().to("mps")
+            pad = (0, 0, 0, 0, 2, 0)
+            self.assertEqual(
+                F.pad(x_cpu, pad), F.pad(x_mps, pad).cpu(),
+                msg=f"constant pad mismatch at H*W={64 * width}, dtype={dtype}",
+            )
+
     def test_constant_pad_nd_preserves_memory_format(self):
         nchw_tensor = torch.rand((1, 2, 5, 3))
         nchw_padded = torch.constant_pad_nd(nchw_tensor, [1, 2], 0.5)
