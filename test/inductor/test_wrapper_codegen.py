@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+from itertools import count
 from types import SimpleNamespace
 
 import sympy
@@ -381,6 +382,50 @@ int64_t s1 = arg0_1.sizes()[0];
 int64_t s0 = s1;""",
         )
         self.assertEqual(list(bound_vars), [canonical, raw])
+
+    def _new_int_array_wrapper(self):
+        wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
+        wrapper.int_array_id = count()
+        wrapper.declared_int_array_vars = OrderedSet()
+        wrapper.codegen_int_array_var_cache = {}
+        wrapper._int_array_writeline_targets = []
+        return wrapper
+
+    def test_int_array_declared_in_every_fresh_writeline_target(self):
+        # codegen_int_array_var emits no declaration on a cache hit, so a key that
+        # aliases a dead target hands back a name whose declaration went into a
+        # discarded buffer. Short-lived targets (per-callsite IndentedBuffers, as
+        # used by ReinterpretView.codegen_reference) make that reachable: CPython
+        # reuses the address of a freed object, in practice on the very next
+        # allocation.
+        wrapper = self._new_int_array_wrapper()
+        for _ in range(64):
+            buffer = IndentedBuffer()
+            var = wrapper.codegen_int_array_var("{2, 3}", buffer.writeline)
+            self.assertIn(f"{var}[] = {{2, 3}};", buffer.getvalue())
+            del buffer
+
+    def test_int_array_declared_once_per_live_writeline_target(self):
+        wrapper = self._new_int_array_wrapper()
+        buffer = IndentedBuffer()
+
+        first = wrapper.codegen_int_array_var("{2, 3}", buffer.writeline)
+        second = wrapper.codegen_int_array_var("{2, 3}", buffer.writeline)
+
+        self.assertEqual(first, second)
+        self.assertEqual(buffer.getvalue().count(f"{first}[] = {{2, 3}};"), 1)
+
+    def test_int_array_distinct_per_writeline_target(self):
+        wrapper = self._new_int_array_wrapper()
+        first_buffer = IndentedBuffer()
+        second_buffer = IndentedBuffer()
+
+        first = wrapper.codegen_int_array_var("{2, 3}", first_buffer.writeline)
+        second = wrapper.codegen_int_array_var("{2, 3}", second_buffer.writeline)
+
+        self.assertNotEqual(first, second)
+        self.assertIn(f"{first}[] = {{2, 3}};", first_buffer.getvalue())
+        self.assertIn(f"{second}[] = {{2, 3}};", second_buffer.getvalue())
 
 
 if __name__ == "__main__":
