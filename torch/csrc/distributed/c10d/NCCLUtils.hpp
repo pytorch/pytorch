@@ -3,7 +3,6 @@
 #ifdef USE_C10D_NCCL
 
 #include <sched.h>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 
@@ -70,10 +69,6 @@ static_assert(
 // `ncclDevComm`. See NCCLSymmetricMemory::get_peer_cft_handle.
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 2)
 #define NCCL_HAS_HOST_CFT_MODE
-#endif
-
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0) && !defined(USE_ROCM)
-#define NCCL_HAS_COLL_CONFIG
 #endif
 
 // Macro to throw on a non-successful NCCL return value.
@@ -194,84 +189,6 @@ static_assert(
   } while (0)
 
 namespace c10d {
-
-ncclResult_t ncclBroadcastWithConfig(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    int root,
-    ncclComm_t comm,
-    cudaStream_t stream,
-    uintptr_t config);
-
-ncclResult_t ncclBcastWithConfig(
-    void* buff,
-    size_t count,
-    ncclDataType_t datatype,
-    int root,
-    ncclComm_t comm,
-    cudaStream_t stream,
-    uintptr_t config);
-
-ncclResult_t ncclAllReduceWithConfig(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclRedOp_t op,
-    ncclComm_t comm,
-    cudaStream_t stream,
-    uintptr_t config);
-
-ncclResult_t ncclReduceWithConfig(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclRedOp_t op,
-    int root,
-    ncclComm_t comm,
-    cudaStream_t stream,
-    uintptr_t config);
-
-ncclResult_t ncclAllGatherWithConfig(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t sendcount,
-    ncclDataType_t datatype,
-    ncclComm_t comm,
-    cudaStream_t stream,
-    uintptr_t config);
-
-ncclResult_t ncclReduceScatterWithConfig(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t recvcount,
-    ncclDataType_t datatype,
-    ncclRedOp_t op,
-    ncclComm_t comm,
-    cudaStream_t stream,
-    uintptr_t config);
-
-ncclResult_t ncclAllToAllWithConfig(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclComm_t comm,
-    cudaStream_t stream,
-    uintptr_t config);
-
-ncclResult_t ncclGatherWithConfig(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    int root,
-    ncclComm_t comm,
-    cudaStream_t stream,
-    uintptr_t config);
 
 // NCCL type typing
 static std::map<at::ScalarType, ncclDataType_t> ncclDataType = {

@@ -3927,7 +3927,8 @@ def broadcast(
         async_op (bool, optional): Whether this op should be an async op
         group_src (int): Source rank on ``group``.  Must specify one of ``group_src``
             and ``src`` but not both.
-        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration.
+        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration for
+            the ``nccl2`` backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4026,7 +4027,8 @@ def all_reduce(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
-        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration.
+        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration for
+            the ``nccl2`` backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4160,7 +4162,8 @@ def all_reduce_coalesced(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (Optional[bool]): Whether this op should be an async op.
-        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration.
+        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration for
+            the ``nccl2`` backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4237,7 +4240,8 @@ def reduce(
         async_op (bool, optional): Whether this op should be an async op
         group_dst (int): Destination rank on ``group``.  Must specify one of ``group_dst``
             and ``dst`` but not both.
-        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration.
+        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration for
+            the ``nccl2`` backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -5189,7 +5193,8 @@ def all_gather(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
-        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration.
+        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration for
+            the ``nccl2`` backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -5310,7 +5315,8 @@ def all_gather_single(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
-        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration.
+        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration for
+            the ``nccl2`` backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -5494,7 +5500,8 @@ def all_gather_coalesced(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
-        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration.
+        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration for
+            the ``nccl2`` backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -5745,7 +5752,8 @@ def gather_single(
         async_op (bool, optional): Whether this op should be an async op
         group_dst (int, optional): Destination rank on ``group``. Invalid to
             specify both ``dst`` and ``group_dst``
-        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration.
+        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration for
+            the ``nccl2`` backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -6011,7 +6019,8 @@ def reduce_scatter(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
-        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration.
+        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration for
+            the ``nccl2`` backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -6108,7 +6117,8 @@ def reduce_scatter_single(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
-        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration.
+        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration for
+            the ``nccl2`` backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -6287,7 +6297,8 @@ def all_to_all_single(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
-        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration.
+        config (nccl4py.CollConfig, optional): Per-collective NCCL configuration for
+            the ``nccl2`` backend.
 
     Returns:
         Async work handle, if async_op is set to True.
