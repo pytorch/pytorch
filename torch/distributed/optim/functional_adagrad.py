@@ -61,7 +61,7 @@ class _FunctionalAdagrad:
         self.param_group = {"params": params}
 
         # TODO: no union or any types in TorchScript, make step a scalar tensor instead
-        # This is also needed by if we want to share_memory on the step across processes
+        # This is also needed if we want to share_memory on the step across processes
         for p in self.param_group["params"]:
             self.state[p] = {
                 "sum": torch.full_like(p.data, initial_accumulator_value),

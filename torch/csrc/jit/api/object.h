@@ -188,7 +188,7 @@ struct TORCH_API Object {
   Object deepcopy() const;
 
  private:
-  // mutable be we lazily initialize in module_object.
+  // mutable because we lazily initialize in module_object.
   mutable ObjectPtr _ivalue_;
 };
 

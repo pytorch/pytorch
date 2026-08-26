@@ -287,8 +287,7 @@ def _graph_dependency_flow_events(
 
 # Eager kernel/transfer launches (NOT cudaGraphLaunch). These 1:1 correlate to an eager GPU
 # op, so they drive the host-launch -> render-stage gpu_correlation link (event_id == corr).
-# Syncs are excluded -- they correlate to no kernel, so a link on them would point nowhere
-# pointing nowhere.
+# Syncs are excluded -- they correlate to no kernel, so a link on them would point nowhere.
 _RUNTIME_LAUNCH_NAMES = {
     "cudaLaunchKernel",
     "cudaLaunchCooperativeKernel",
