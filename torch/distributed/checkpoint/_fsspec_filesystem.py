@@ -1,9 +1,10 @@
 # Mypy will not try inferring the types of any 3rd party libraries installed.
 # mypy: ignore-errors
 
+import concurrent.futures
 import io
 import os
-import concurrent.futures
+import sys
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -62,6 +63,7 @@ class FileSystem(FileSystemBase):
         return os.path.join(path, suffix)
 
     def init_path(self, path: str | os.PathLike, **kwargs) -> str | os.PathLike:
+        # Disable fsspec internal caching by default to avoid redundant memory copies and high RAM usage during batched range reads.
         kwargs.setdefault("cache_type", "none")
         self.fs, _ = url_to_fs(path, **kwargs)
         return path
@@ -160,10 +162,16 @@ class FsspecReader(FileSystemReader):
         self,
         path: str | os.PathLike,
         max_batch_size: int = 64,
+        cpu_workers: int | None = None,
+        io_workers: int = 1,
         **kwargs,
     ) -> None:
         super().__init__(path)
         self.max_batch_size = max(1, max_batch_size)
+        self.cpu_workers = max(
+            1, cpu_workers if cpu_workers is not None else min(16, os.cpu_count() or 4)
+        )
+        self.io_workers = max(1, io_workers)
         self.fs = FileSystem()
         self.path = self.fs.init_path(path, **kwargs)
 
@@ -189,9 +197,6 @@ class FsspecReader(FileSystemReader):
                     ends.append(item_md.offset + item_md.length)
                 batches.append((paths, starts, ends, batch))
 
-            cpu_executor = concurrent.futures.ThreadPoolExecutor(max_workers=16)
-            io_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
-
             def fetch_batch(b):
                 bp, bs, be, br = b
                 chunks = self.fs.fs.cat_ranges(bp, bs, be, on_error="raise")
@@ -200,26 +205,39 @@ class FsspecReader(FileSystemReader):
             def process_chunk(req, chunk_data):
                 self._load_item(req, io.BytesIO(chunk_data), planner)
 
-            next_io = io_executor.submit(fetch_batch, batches[0])
+            with (
+                concurrent.futures.ThreadPoolExecutor(
+                    max_workers=self.cpu_workers
+                ) as cpu_executor,
+                concurrent.futures.ThreadPoolExecutor(
+                    max_workers=self.io_workers
+                ) as io_executor,
+            ):
+                try:
+                    next_io = io_executor.submit(fetch_batch, batches[0])
 
-            for idx, batch in enumerate(batches):
-                chunks, b_reqs = next_io.result()
+                    for idx, batch in enumerate(batches):
+                        chunks, b_reqs = next_io.result()
 
-                if idx + 1 < len(batches):
-                    next_io = io_executor.submit(fetch_batch, batches[idx + 1])
+                        if idx + 1 < len(batches):
+                            next_io = io_executor.submit(fetch_batch, batches[idx + 1])
 
-                futures = [
-                    cpu_executor.submit(process_chunk, req, chunk_data)
-                    for req, chunk_data in zip(b_reqs, chunks)
-                ]
-                for f in futures:
-                    f.result()
+                        futures = [
+                            cpu_executor.submit(process_chunk, req, chunk_data)
+                            for req, chunk_data in zip(b_reqs, chunks)
+                        ]
+                        for f in futures:
+                            f.result()
 
-                del chunks
-                del b_reqs
-
-            cpu_executor.shutdown(wait=False)
-            io_executor.shutdown(wait=False)
+                        del chunks
+                        del b_reqs
+                finally:
+                    if sys.version_info >= (3, 9):
+                        cpu_executor.shutdown(wait=True, cancel_futures=True)
+                        io_executor.shutdown(wait=True, cancel_futures=True)
+                    else:
+                        cpu_executor.shutdown(wait=True)
+                        io_executor.shutdown(wait=True)
 
             fut: Future[None] = Future()
             fut.set_result(None)
