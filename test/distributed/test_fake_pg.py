@@ -1042,35 +1042,51 @@ class TestFakePGUniformRanks(TestCase):
     def _init(self, rank, world_size):
         opts = FakeProcessGroup.Options()
         opts.simulate_uniform_ranks = True
-        backend = FakeProcessGroup._create_internal(
-            rank, world_size=world_size, options=opts
-        )
-        store = FakeStore()
-        # This default group does NOT carry simulate_uniform_ranks; it exists
-        # only so tearDown has something to destroy. Every test below drives
-        # the returned backend directly -- routing through dist.* here would
-        # silently exercise the non-uniform path.
         dist.init_process_group(
-            backend="fake", rank=rank, world_size=world_size, store=store
+            backend="fake",
+            rank=rank,
+            world_size=world_size,
+            store=FakeStore(),
+            pg_options=opts,
         )
-        return backend
+        return dist.distributed_c10d._get_default_group()._get_backend(
+            torch.device("cpu")
+        )
 
     def test_option_defaults_to_off(self):
         """Existing behavior must be untouched unless the flag is set."""
         self.assertFalse(FakeProcessGroup.Options().simulate_uniform_ranks)
 
+    def test_create_internal_uses_fresh_default_options(self):
+        first = FakeProcessGroup._create_internal(0, world_size=2)
+        second = FakeProcessGroup._create_internal(0, world_size=2)
+
+        self.assertIsNot(first.options, second.options)
+        first.options.simulate_uniform_ranks = True
+        self.assertFalse(second.options.simulate_uniform_ranks)
+
+    def test_create_internal_preserves_explicit_none_options(self):
+        backend = FakeProcessGroup._create_internal(0, world_size=2, options=None)
+
+        self.assertIsNone(backend.options)
+
     def test_new_group_inherits_uniform_rank_simulation(self):
-        opts = FakeProcessGroup.Options()
-        opts.simulate_uniform_ranks = True
-        dist.init_process_group(
-            backend="fake",
-            rank=0,
-            world_size=2,
-            store=FakeStore(),
-            pg_options=opts,
-        )
+        self._init(rank=0, world_size=2)
 
         process_group = dist.new_group(ranks=[0, 1])
+        self.assertIsInstance(process_group, dist.ProcessGroup)
+        backend = process_group._get_backend(torch.device("cpu"))
+        self.assertIsInstance(backend, FakeProcessGroup)
+        self.assertTrue(backend.options.simulate_uniform_ranks)
+
+    def test_split_group_inherits_uniform_rank_simulation(self):
+        self._init(rank=0, world_size=2)
+        parent = dist.distributed_c10d._get_default_group()
+
+        process_group = parent.split_group(
+            [0, 1], device_types=[torch.device("cpu")]
+        )
+
         self.assertIsInstance(process_group, dist.ProcessGroup)
         backend = process_group._get_backend(torch.device("cpu"))
         self.assertIsInstance(backend, FakeProcessGroup)
@@ -1146,42 +1162,63 @@ class TestFakePGUniformRanks(TestCase):
 
         self.assertEqual(tensor, torch.full((3,), 6.0))
 
-    def test_allreduce_bitwise_and_or_are_identity(self):
+    def test_allreduce_premul_sum_accepts_a_tensor_factor(self):
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.full((3,), 3.0)
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = dist.ReduceOp.PREMUL_SUM(torch.tensor(0.5))
+
+        pg.allreduce([tensor], opts).wait()
+
+        self.assertEqual(tensor, torch.full((3,), 6.0))
+
+    def test_allreduce_premul_sum_rejects_integral_tensors(self):
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.ones(3, dtype=torch.int64)
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = dist.ReduceOp.PREMUL_SUM(0.5)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "requires a floating point or complex tensor"
+        ):
+            pg.allreduce([tensor], opts)
+
+    def test_allreduce_premul_sum_requires_a_factor(self):
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.ones(3)
+        opts = dist.AllreduceOptions()
+        reduce_op = dist.ReduceOp(dist.ReduceOp.SUM)
+        reduce_op.op = dist.ReduceOp.PREMUL_SUM
+        opts.reduceOp = reduce_op
+
+        with self.assertRaisesRegex(RuntimeError, "without its scaling factor"):
+            pg.allreduce([tensor], opts)
+
+    @parametrize("op", [dist.ReduceOp.BAND, dist.ReduceOp.BOR])
+    def test_allreduce_bitwise_and_or_are_identity(self, op):
         """AND and OR are idempotent, so equal operands reduce to themselves."""
-        for op in (dist.ReduceOp.BAND, dist.ReduceOp.BOR):
-            with self.subTest(op=op):
-                pg = self._init(rank=0, world_size=4)
-                try:
-                    tensor = torch.tensor([0b1100, 0b1010], dtype=torch.int32)
-                    opts = dist.AllreduceOptions()
-                    opts.reduceOp = op
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.tensor([0b1100, 0b1010], dtype=torch.int32)
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = op
 
-                    pg.allreduce([tensor], opts).wait()
+        pg.allreduce([tensor], opts).wait()
 
-                    self.assertEqual(
-                        tensor, torch.tensor([0b1100, 0b1010], dtype=torch.int32)
-                    )
-                finally:
-                    # Without this, a failed assertion leaves the group up and
-                    # the next iteration's _init raises "already initialized",
-                    # masking the real diagnostic.
-                    dist.destroy_process_group()
+        self.assertEqual(tensor, torch.tensor([0b1100, 0b1010], dtype=torch.int32))
 
-    def test_allreduce_bitwise_xor_cancels_in_pairs(self):
+    @parametrize(
+        "world_size,expected", [(4, [0, 0]), (3, [0b1100, 0b1010])]
+    )
+    def test_allreduce_bitwise_xor_cancels_in_pairs(self, world_size, expected):
         """XOR over equal operands depends only on the parity of world_size."""
-        for world_size, expected in ((4, [0, 0]), (3, [0b1100, 0b1010])):
-            with self.subTest(world_size=world_size):
-                pg = self._init(rank=0, world_size=world_size)
-                try:
-                    tensor = torch.tensor([0b1100, 0b1010], dtype=torch.int32)
-                    opts = dist.AllreduceOptions()
-                    opts.reduceOp = dist.ReduceOp.BXOR
+        pg = self._init(rank=0, world_size=world_size)
+        tensor = torch.tensor([0b1100, 0b1010], dtype=torch.int32)
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = dist.ReduceOp.BXOR
 
-                    pg.allreduce([tensor], opts).wait()
+        pg.allreduce([tensor], opts).wait()
 
-                    self.assertEqual(tensor, torch.tensor(expected, dtype=torch.int32))
-                finally:
-                    dist.destroy_process_group()
+        self.assertEqual(tensor, torch.tensor(expected, dtype=torch.int32))
 
     def test_reduce_scatter_sum_scales_the_local_chunk(self):
         """Each rank keeps its own chunk, scaled by the number of ranks."""
@@ -1223,6 +1260,15 @@ class TestFakePGUniformRanks(TestCase):
         # the uniform contract that is our own split at index 1.
         for slot in recv.chunk(world_size):
             self.assertEqual(slot, torch.tensor([20.0, 21.0]))
+
+    def test_all_to_all_single_uses_equal_default_splits(self):
+        self._init(rank=1, world_size=2)
+        send = torch.tensor([10.0, 11.0, 20.0, 21.0])
+        recv = torch.empty_like(send)
+
+        dist.all_to_all_single(recv, send)
+
+        self.assertEqual(recv, torch.tensor([20.0, 21.0, 20.0, 21.0]))
 
     def test_all_to_all_single_fills_a_2d_buffer(self):
         """Split sizes count rows along dim 0, not elements.
@@ -1304,21 +1350,46 @@ class TestFakePGUniformRanks(TestCase):
 
         self.assertEqual(recv, torch.tensor([1.0, 2.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0]))
 
-    def test_reduce_writes_only_the_root(self):
+    def test_all_to_all_single_zero_fills_a_receive_only_rank(self):
+        self._init(rank=0, world_size=2)
+        send = torch.tensor([7.0])
+        recv = torch.full((2,), -1.0)
+
+        dist.all_to_all_single(
+            recv,
+            send,
+            output_split_sizes=[1, 1],
+            input_split_sizes=[0, 1],
+        )
+
+        self.assertEqual(recv, torch.zeros(2))
+
+    @parametrize("noncontiguous_buffer", ["input", "output"])
+    def test_alltoall_rejects_noncontiguous_tensors(self, noncontiguous_buffer):
+        pg = self._init(rank=0, world_size=1)
+        inputs = [torch.arange(4.0).reshape(2, 2)]
+        outputs = [torch.empty(2, 2)]
+        if noncontiguous_buffer == "input":
+            inputs[0] = inputs[0].t()
+        else:
+            outputs[0] = outputs[0].t()
+
+        with self.assertRaisesRegex(
+            RuntimeError, f"{noncontiguous_buffer} tensor must be contiguous"
+        ):
+            pg.alltoall(outputs, inputs)
+
+    @parametrize("rank,expected", [(0, 4.0), (1, 1.0)])
+    def test_reduce_writes_only_the_root(self, rank, expected):
         """Real backends leave every non-root tensor unspecified."""
-        for rank, expected in ((0, 4.0), (1, 1.0)):
-            with self.subTest(rank=rank):
-                pg = self._init(rank=rank, world_size=4)
-                try:
-                    tensor = torch.ones(3)
-                    opts = dist.ReduceOptions()
-                    opts.rootRank = 0
+        pg = self._init(rank=rank, world_size=4)
+        tensor = torch.ones(3)
+        opts = dist.ReduceOptions()
+        opts.rootRank = 0
 
-                    pg.reduce([tensor], opts).wait()
+        pg.reduce([tensor], opts).wait()
 
-                    self.assertEqual(tensor, torch.full((3,), expected))
-                finally:
-                    dist.destroy_process_group()
+        self.assertEqual(tensor, torch.full((3,), expected))
 
     def test_allreduce_coalesced_scales_every_tensor(self):
         """Each tensor in the batch is reduced independently."""
@@ -1351,26 +1422,22 @@ class TestFakePGUniformRanks(TestCase):
         self.assertEqual(outputs[0], torch.tensor([6.0, 8.0]))
         self.assertEqual(outputs[1], torch.tensor([12.0]))
 
-    def test_bool_sum_and_product_are_identity(self):
+    @parametrize("op", [dist.ReduceOp.SUM, dist.ReduceOp.PRODUCT])
+    def test_bool_sum_and_product_are_identity(self, op):
         """Bool has no in-place form of the scaling the other dtypes use.
 
         Under c10d's nonzero-is-true convention both reductions leave equal
         bools alone, so take that branch rather than raise where a real
         backend succeeds.
         """
-        for op in (dist.ReduceOp.SUM, dist.ReduceOp.PRODUCT):
-            with self.subTest(op=op):
-                pg = self._init(rank=0, world_size=4)
-                try:
-                    tensor = torch.tensor([True, False])
-                    opts = dist.AllreduceOptions()
-                    opts.reduceOp = op
+        pg = self._init(rank=0, world_size=4)
+        tensor = torch.tensor([True, False])
+        opts = dist.AllreduceOptions()
+        opts.reduceOp = op
 
-                    pg.allreduce([tensor], opts).wait()
+        pg.allreduce([tensor], opts).wait()
 
-                    self.assertEqual(tensor, torch.tensor([True, False]))
-                finally:
-                    dist.destroy_process_group()
+        self.assertEqual(tensor, torch.tensor([True, False]))
 
     def test_result_carries_the_reduced_tensor(self):
         """async_op callers read the output through Work.result()."""
@@ -1381,6 +1448,16 @@ class TestFakePGUniformRanks(TestCase):
         work.wait()
 
         self.assertEqual(work.result()[0], torch.full((2,), 2.0))
+
+    def test_get_future_carries_collective_output(self):
+        pg = self._init(rank=0, world_size=2)
+        output = torch.empty(4)
+
+        work = pg.all_gather_single(output, torch.tensor([3.0, 4.0]))
+
+        self.assertEqual(
+            work.get_future().value()[0], torch.tensor([3.0, 4.0, 3.0, 4.0])
+        )
 
     def test_result_still_raises_without_the_flag(self):
         """Work::result() errors by default and must keep doing so.
@@ -1397,6 +1474,7 @@ class TestFakePGUniformRanks(TestCase):
 
 
 instantiate_parametrized_tests(TestFakePG)
+instantiate_parametrized_tests(TestFakePGUniformRanks)
 
 if __name__ == "__main__":
     run_tests()

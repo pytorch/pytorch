@@ -16,8 +16,7 @@ class FakeWork : public Work {
 
   // `result` is the tensors the collective produced. Real backends resolve
   // their future to those tensors; callers using async_op=True read them via
-  // get_future().value(). An empty list means the collective recorded no
-  // output, which is the case for every path outside simulate_uniform_ranks.
+  // get_future().value().
   explicit FakeWork(std::vector<at::Tensor> result = {})
       : result_(std::move(result)) {}
 
@@ -33,15 +32,8 @@ class FakeWork : public Work {
     return true;
   }
 
-  // Real backends expose the output through both result() and getFuture();
-  // a caller using the former should not silently get nothing. Work::result()
-  // errors by default, so keep erring when nothing was recorded rather than
-  // turning a diagnosable failure into an empty list.
   std::vector<at::Tensor> result() override {
-    TORCH_CHECK(
-        !result_.empty(),
-        "FakeProcessGroup: this work recorded no output. result() is only "
-        "populated under simulate_uniform_ranks.");
+    TORCH_CHECK(!result_.empty(), "FakeWork: this work recorded no output.");
     return result_;
   }
 
@@ -138,25 +130,19 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> broadcast(
-      std::vector<at::Tensor>& /* tensors */,
+      std::vector<at::Tensor>& tensors,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) override {
     checkCollectiveError();
     // Identity under either contract: every rank already holds the value.
-    return c10::make_intrusive<FakeWork>();
+    return uniformRanks() ? c10::make_intrusive<FakeWork>(tensors)
+                          : c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override {
     checkCollectiveError();
-    if (uniformRanks()) {
-      at::AutoDispatchBelowAutograd guard;
-      for (auto& tensor : tensors) {
-        applyUniformReduction(tensor, opts.reduceOp);
-      }
-      return c10::make_intrusive<FakeWork>(tensors);
-    }
-    return c10::make_intrusive<FakeWork>();
+    return uniformReduceAll(tensors, opts.reduceOp);
   }
 
   c10::intrusive_ptr<Work> allreduce_sparse(
@@ -168,13 +154,8 @@ class FakeProcessGroup : public Backend {
           opts.reduceOp.op_ != ReduceOp::PRODUCT,
           "FakeProcessGroup: allreduce_sparse does not support PRODUCT under "
           "simulate_uniform_ranks.");
-      at::AutoDispatchBelowAutograd guard;
-      for (auto& tensor : tensors) {
-        applyUniformReduction(tensor, opts.reduceOp);
-      }
-      return c10::make_intrusive<FakeWork>(tensors);
     }
-    return c10::make_intrusive<FakeWork>();
+    return uniformReduceAll(tensors, opts.reduceOp);
   }
 
   c10::intrusive_ptr<Work> allreduce_coalesced(
@@ -182,14 +163,7 @@ class FakeProcessGroup : public Backend {
       const AllreduceCoalescedOptions& opts =
           AllreduceCoalescedOptions()) override {
     checkCollectiveError();
-    if (uniformRanks()) {
-      at::AutoDispatchBelowAutograd guard;
-      for (auto& tensor : tensors) {
-        applyUniformReduction(tensor, opts.reduceOp);
-      }
-      return c10::make_intrusive<FakeWork>(tensors);
-    }
-    return c10::make_intrusive<FakeWork>();
+    return uniformReduceAll(tensors, opts.reduceOp);
   }
 
   c10::intrusive_ptr<Work> reduce(
@@ -200,14 +174,10 @@ class FakeProcessGroup : public Backend {
     // leave every other rank's unspecified. Mirror that, so a caller that
     // wrongly reads a non-root result sees the same thing it would in
     // production instead of a value only this backend would produce.
-    if (uniformRanks() && rank_ == opts.rootRank) {
-      at::AutoDispatchBelowAutograd guard;
-      for (auto& tensor : tensors) {
-        applyUniformReduction(tensor, opts.reduceOp);
-      }
-      return c10::make_intrusive<FakeWork>(tensors);
+    if (rank_ != opts.rootRank) {
+      return c10::make_intrusive<FakeWork>();
     }
-    return c10::make_intrusive<FakeWork>();
+    return uniformReduceAll(tensors, opts.reduceOp);
   }
 
   // NOTE [FakeProcessGroup collective semantics]
@@ -226,7 +196,9 @@ class FakeProcessGroup : public Backend {
     for (auto& tensor : outputTensors[0]) {
       tensor.copy_(inputTensors[0]);
     }
-    return c10::make_intrusive<FakeWork>();
+    return uniformRanks()
+        ? c10::make_intrusive<FakeWork>(outputTensors[0])
+        : c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> all_gather_single(
@@ -243,7 +215,10 @@ class FakeProcessGroup : public Backend {
     for (auto& tensor : chunks) {
       tensor.copy_(inputBuffer);
     }
-    return c10::make_intrusive<FakeWork>();
+    return uniformRanks()
+        ? c10::make_intrusive<FakeWork>(
+              std::vector<at::Tensor>{outputBuffer})
+        : c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> allgather_coalesced(
@@ -264,6 +239,14 @@ class FakeProcessGroup : public Backend {
         outputTensorList[i].copy_(inputTensors[i]);
       }
     }
+    if (uniformRanks()) {
+      std::vector<at::Tensor> results;
+      for (const auto& outputTensorList : outputTensorLists) {
+        results.insert(
+            results.end(), outputTensorList.begin(), outputTensorList.end());
+      }
+      return c10::make_intrusive<FakeWork>(std::move(results));
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -280,7 +263,8 @@ class FakeProcessGroup : public Backend {
         chunk.copy_(inputs[i]);
       }
     }
-    return c10::make_intrusive<FakeWork>();
+    return uniformRanks() ? c10::make_intrusive<FakeWork>(outputs)
+                          : c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> gather(
@@ -300,6 +284,9 @@ class FakeProcessGroup : public Backend {
       at::AutoDispatchBelowAutograd guard;
       for (auto& tensor : outputTensors[0]) {
         tensor.copy_(inputTensors[0]);
+      }
+      if (uniformRanks()) {
+        return c10::make_intrusive<FakeWork>(outputTensors[0]);
       }
     } else {
       assertEmptyOutputTensorList(invalidArgument, outputTensors);
@@ -326,7 +313,9 @@ class FakeProcessGroup : public Backend {
     } else {
       assertEmptyInputTensorList(invalidArgument, inputTensors);
     }
-    return c10::make_intrusive<FakeWork>();
+    return uniformRanks() && rank_ == opts.rootRank
+        ? c10::make_intrusive<FakeWork>(outputTensors)
+        : c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> reduce_scatter(
@@ -429,17 +418,9 @@ class FakeProcessGroup : public Backend {
       // split at index rank_. Fill each output slot from it, which keeps the
       // split structure self-consistent and lets callers reshape the result.
       //
-      // A slot need not be the size of that segment. Strict uniformity would
-      // force the two to match, and rejecting the mismatch was tried: it
-      // breaks callers that declare asymmetric splits or a receive-only rank,
-      // which the direct fake-process-group tests cover and which the shapes
-      // here are meant to serve. The output shape the caller asked for is what
-      // it gets, so tile or truncate to fill it.
-      //
-      // Zero first: the slots should tile over the whole buffer, but a caller
-      // that reshapes the output must never read uninitialized memory if they
-      // do not, so this is a cheap backstop rather than an assumption.
-      flat_output.zero_();
+      // A slot need not be the size of that segment: a caller may declare
+      // asymmetric splits or a receive-only rank. The output shape the caller
+      // asked for is what it gets, so tile or truncate to fill it.
       auto mine = splitSegment(
           flat_input, inputSplitSizes, rank_, size_, rowSizeOf(inputBuffer));
       const auto outputRowSize = rowSizeOf(outputBuffer);
@@ -570,6 +551,21 @@ class FakeProcessGroup : public Backend {
   // except for PRODUCT, which sparse tensors do not support.
   bool uniformRanks() const {
     return options_ != nullptr && options_->simulate_uniform_ranks;
+  }
+
+  // Apply the uniform-rank reduction to every tensor in place, or no-op when
+  // the contract is off.
+  c10::intrusive_ptr<Work> uniformReduceAll(
+      std::vector<at::Tensor>& tensors,
+      const ReduceOp& reduceOp) const {
+    if (!uniformRanks()) {
+      return c10::make_intrusive<FakeWork>();
+    }
+    at::AutoDispatchBelowAutograd guard;
+    for (auto& tensor : tensors) {
+      applyUniformReduction(tensor, reduceOp);
+    }
+    return c10::make_intrusive<FakeWork>(tensors);
   }
 
   // Combine `size_` identical contributions in place. Every reduce op has a

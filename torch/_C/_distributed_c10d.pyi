@@ -830,7 +830,7 @@ class FakeProcessGroup(Backend):
     def _create_internal(
         rank: int,
         world_size: int,
-        options: FakeProcessGroup.Options = ...,
+        options: FakeProcessGroup.Options | None = ...,
     ) -> FakeProcessGroup: ...
     # getOptions() returns null when the group was built without options, and
     # callers (test_device_mesh) branch on that, so this must stay optional.
