@@ -60,11 +60,10 @@ variable_list AccumulateGrad_apply_functional_no_hooks_ivalue(
 
   // Functional Tensors insert an Error node to assert that backward is never
   // called
-  if (variable.grad_fn() &&
-      dynamic_cast<Error*>(variable.grad_fn().get()) == nullptr) {
-    throw std::logic_error(
-        "leaf variable has been moved into the graph interior");
-  }
+  TORCH_CHECK(
+      !variable.grad_fn() ||
+          dynamic_cast<Error*>(variable.grad_fn().get()) != nullptr,
+      "leaf variable has been moved into the graph interior");
 
   at::Tensor functional_grad;
   AccumulateGrad_apply_impl(
@@ -94,10 +93,9 @@ AccumulateGrad::AccumulateGrad(Variable variable_)
 
 // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
-  if (variable.grad_fn()) {
-    throw std::logic_error(
-        "leaf variable has been moved into the graph interior");
-  }
+  TORCH_CHECK(
+      !variable.grad_fn(),
+      "leaf variable has been moved into the graph interior");
 
   at::Tensor& variable_grad = variable.mutable_grad();
 

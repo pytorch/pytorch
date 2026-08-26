@@ -330,7 +330,7 @@ class InductorMeta(typing.TypedDict, total=False):
     native_matmul_persistent_rblock: int
     add_persistent_rblock: bool
     max_persistent_rblock: int
-    strict_sum_rblock: int
+    strict_reduction_rblock: int
     kernel_num_gb: float
     kernel_flop: int
 
@@ -348,6 +348,7 @@ class InductorMeta(typing.TypedDict, total=False):
     combo_tuning_groups: typing.Any
     combo_coordesc_field_order: list[str]
     combo_coordesc_field_limits: dict[str, int]
+    combo_coordesc_field_minimums: dict[str, int]
     combo_warp_stage_candidates: typing.Any
     extra_launcher_args: typing.Any
     fixed_grid: typing.Any
