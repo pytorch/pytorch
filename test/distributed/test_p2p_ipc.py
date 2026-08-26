@@ -3,6 +3,7 @@
 # To run:
 # python test/distributed/test_p2p_ipc.py
 
+import errno
 import os
 import unittest
 from contextlib import contextmanager
@@ -20,6 +21,19 @@ from torch.testing._internal.common_utils import (
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
+
+
+def _is_skippable_pidfd_error(error: str) -> bool:
+    if os.environ.get("TEST_CONFIG", "") == "h100-fabric":
+        return False
+
+    is_pidfd_error = any(syscall in error for syscall in ("pidfd_open", "pidfd_getfd"))
+    is_unsupported = "does not support the pidfd_" in error
+    is_permission_denied = any(
+        f"failed with errno {error_number} (" in error
+        for error_number in (errno.EPERM, errno.EACCES)
+    )
+    return is_pidfd_error and (is_unsupported or is_permission_denied)
 
 
 @contextmanager
@@ -57,12 +71,29 @@ class P2PIpcTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
+    def _assert_fabric_access(self) -> None:
+        local_fabric = None
+        if self.rank < 2:
+            try:
+                local_fabric = torch._C._cuda_getFabricAccess(self.rank)
+            except Exception as ex:
+                local_fabric = f"{type(ex).__name__}: {ex}"
+
+        fabric_access = [None for _ in range(self.world_size)]
+        torch.distributed.all_gather_object(fabric_access, local_fabric)
+        if fabric_access[:2] != [True, True]:
+            raise RuntimeError(
+                "h100-fabric must exercise FABRIC handles on the producer and "
+                f"consumer, but their fabric access results were {fabric_access[:2]}"
+            )
+
     def _test_p2p_ipc_impl(
         self,
         tensor_size: int = 2333,
         *,
         consumer_prealloc: bool = True,
         free_producer_segment: bool = False,
+        skip_unsupported_ipc: bool = False,
     ) -> None:
         """
         Core P2P IPC test implementation.
@@ -90,8 +121,20 @@ class P2PIpcTest(MultiProcContinuousTest):
                         decrements to exactly 0 on release and the producer can
                         reclaim the block (with multiple consumers it never
                         reaches 0).
+            skip_unsupported_ipc: Collectively skip when the sole consumer's
+                        environment cannot import POSIX handles.
         """
+        if skip_unsupported_ipc and not free_producer_segment:
+            raise AssertionError("skipping unsupported IPC requires a sole consumer")
+
         self._init_device(allocate=(self.rank == 0 or consumer_prealloc))
+        if skip_unsupported_ipc and os.environ.get("TEST_CONFIG", "") == "h100-fabric":
+            self._assert_fabric_access()
+
+        producer_allocated = 0
+        if skip_unsupported_ipc and self.rank == 0:
+            torch.cuda.empty_cache()
+            producer_allocated = torch.cuda.memory_allocated(self.device)
 
         # Freeing the shared segment needs exactly one consumer (see above).
         single_consumer = free_producer_segment
@@ -99,6 +142,7 @@ class P2PIpcTest(MultiProcContinuousTest):
 
         tensor = None
         tensor_meta = None
+        import_error = None
         if self.rank == 0:
             tensor = torch.randn(tensor_size, device=self.device)
             tensor_meta = reduce_tensor(tensor)
@@ -110,7 +154,32 @@ class P2PIpcTest(MultiProcContinuousTest):
                 func, args = recv_list[0]
                 args = list(args)
                 args[6] = self.rank
-                tensor = func(*args)
+                try:
+                    tensor = func(*args)
+                except Exception as ex:
+                    if not skip_unsupported_ipc:
+                        raise
+                    import_error = f"{type(ex).__name__}: {ex}"
+
+        if skip_unsupported_ipc:
+            import_result = [import_error]
+            torch.distributed.broadcast_object_list(import_result, src=1)
+            import_error = import_result[0]
+            if import_error is not None:
+                if not _is_skippable_pidfd_error(import_error):
+                    raise RuntimeError(
+                        f"CUDA IPC import failed on rank 1: {import_error}"
+                    )
+
+                if self.rank == 0:
+                    tensor_meta = None
+                    tensor = None
+                    torch.cuda.ipc_collect()
+                    torch.cuda.empty_cache()
+                    self.assertLessEqual(
+                        torch.cuda.memory_allocated(self.device), producer_allocated
+                    )
+                self.skipTest(f"expandable_segments IPC is unavailable: {import_error}")
 
         torch.distributed.barrier()
 
@@ -145,12 +214,6 @@ class P2PIpcTest(MultiProcContinuousTest):
         """Test P2P IPC with regular cudaMalloc allocations."""
         self._test_p2p_ipc_impl()
 
-    @unittest.skipUnless(
-        os.environ.get("TEST_CONFIG", "") == "h100-fabric",
-        "fabric handle IPC path only exercised on the fabric-capable h100-fabric CI config; "
-        "unconditionally skipped elsewhere (deadlocks on B200, see "
-        "https://github.com/pytorch/pytorch/issues/189879)",
-    )
     @unittest.skipIf(
         TEST_WITH_ROCM, "expandable_segments mode is not supported on ROCm"
     )
@@ -184,6 +247,7 @@ class P2PIpcTest(MultiProcContinuousTest):
                 tensor_size=2 * 1024 * 1024,
                 consumer_prealloc=False,
                 free_producer_segment=True,
+                skip_unsupported_ipc=True,
             )
 
     @classmethod

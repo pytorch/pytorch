@@ -411,6 +411,39 @@ Instead these mapping have to be done manually. The allocator now has an
 `enablePeerAccess` method to do this.
 */
 
+#ifndef _WIN32
+[[noreturn]] static void throwPidfdError(const char* syscall_name, int err) {
+  TORCH_CHECK(
+      err != ENOSYS,
+      "The kernel on this machine does not support the ",
+      syscall_name,
+      " syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
+      "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
+  TORCH_CHECK(
+      err != EPERM && err != EACCES,
+      syscall_name,
+      " failed with errno ",
+      err,
+      " (",
+      c10::utils::str_error(err),
+      ") while importing an IPC handle for CUDA tensors with expandable_segments:True. "
+      "A container security policy or restrictive kernel.yama.ptrace_scope setting may be denying access to the exporting process: run with "
+      "ptrace capability (e.g. docker run --cap-add=SYS_PTRACE) or expose "
+      "IMEX channels so fabric handles are used instead. Alternatively, set "
+      "expandable_segments:False via "
+      "torch._C._accelerator_setAllocatorSettings('expandable_segments:False') "
+      "for this allocation.");
+  TORCH_CHECK(
+      false,
+      syscall_name,
+      " failed with errno ",
+      err,
+      " (",
+      c10::utils::str_error(err),
+      ")");
+}
+#endif
+
 struct ExpandableSegment {
   ExpandableSegment(
       c10::DeviceIndex device,
@@ -784,11 +817,9 @@ struct ExpandableSegment {
           false, "IPC expandable segments are not supported on Windows");
 #else
       auto pidfd = syscall(SYS_pidfd_open, header.pid, 0);
-      TORCH_CHECK(
-          pidfd != -1 || errno != ENOSYS,
-          "The kernel on this machine does not support the pidfd_open syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
-          "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
-      TORCH_CHECK(pidfd != -1, "pidfd_open:", c10::utils::str_error(errno));
+      if (pidfd == -1) {
+        throwPidfdError("pidfd_open", errno);
+      }
       auto close_pidfd =
           c10::make_scope_exit([&pidfd]() { close(static_cast<int>(pidfd)); });
       for (auto i : c10::irange(header.num_handles)) {
@@ -797,12 +828,7 @@ struct ExpandableSegment {
         buf.read(reinterpret_cast<char*>(&fd), sizeof(int));
         auto myfd = syscall(SYS_pidfd_getfd, pidfd, fd, 0);
         if (myfd == -1) {
-          auto err = errno;
-          TORCH_CHECK(
-              err != ENOSYS,
-              "The kernel on this machine does not support the pidfd_getfd syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
-              "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
-          TORCH_CHECK(false, "pidfd_getfd: ", c10::utils::str_error(err));
+          throwPidfdError("pidfd_getfd", errno);
         }
         // close myfd on every path, including the import throwing below
         auto close_myfd =
