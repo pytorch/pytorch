@@ -3131,6 +3131,13 @@ class TestOptimRenewed(TestCase):
     def test_peak_memory_inplace(self, device, dtype, optim_info):
         """Peak memory budget: in-place rewrites must not exceed
         O(param + grad + state + 1 intermediate).
+
+        The tight assertion targets the specific path changed by the in-place
+        rewrite: the denom chain in the capturable branch. At N=1024, the
+        pre-patch code allocates one extra param-sized intermediate that the
+        in-place rewrite eliminates. The tight budget (2x param) catches this
+        because it excludes state bytes — which are already allocated before
+        measurement begins and would otherwise absorb the difference.
         """
         N = 1024
         optim_cls = optim_info.optim_cls
@@ -3161,6 +3168,25 @@ class TestOptimRenewed(TestCase):
                 budget,
                 f"Peak {peak - baseline} exceeds budget {budget} for {optim_cls.__name__}",
             )
+
+            # Tight assertion: catch regression of in-place rewrite.
+            # The rewrite eliminates one param-sized intermediate in the
+            # capturable denom chain (Adam/AdamW only). This assertion
+            # excludes state bytes (already allocated before measurement)
+            # to create a tight bound that would reject the pre-patch code.
+            if (
+                optim_cls.__name__ in ("Adam", "AdamW")
+                and kwargs.get("capturable")
+                and not kwargs.get("amsgrad")
+                and kwargs.get("weight_decay", 0) == 0
+            ):
+                tight_budget = param_bytes * 2  # param + grad + 1 intermediate
+                self.assertLessEqual(
+                    peak - baseline,
+                    tight_budget,
+                    f"Peak {peak - baseline} exceeds tight budget {tight_budget} "
+                    f"(regression of in-place rewrite) for {optim_cls.__name__}",
+                )
 
     def test_inplace_chain_correctness(self, device):
         """Verify shipped _single_tensor_* in-place rewrites match pre-patch oracles.
