@@ -28,7 +28,7 @@ class ObjMismatchError(Exception):
 class Importer(ABC):
     """Represents an environment to import modules from.
 
-    By default, you can figure out what module an object belongs by checking
+    By default, you can figure out what module an object belongs to by checking
     __module__ and importing the result using __import__ or importlib.import_module.
 
     torch.package introduces module importers other than the default one.

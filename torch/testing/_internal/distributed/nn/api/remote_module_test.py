@@ -518,7 +518,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
             self.assertFalse(attrs["is_device_map_set"])
             self.assertFalse(attrs["is_scriptable"])
 
-            # Test the installed methods on worker1's can be initiated by worker2 over RPC layer.
+            # Test the installed methods on worker1 can be initiated by worker2 over RPC layer.
             # NOTE: In practice a remote module should be directly stored on the worker that runs ``forward``` or ``forward_async``,
             # not have another worker to initiate forward over the RPC layer.
             args = (torch.ones(1), 2, "3")

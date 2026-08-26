@@ -246,7 +246,7 @@ constexpr auto half_support_literal =
     // MSVC's preprocessor (but not the standard compiler) has a bug
     // where it incorrectly tokenizes raw string literals, ending when it sees a
     // " this causes the #endif in this string literal to be treated as a
-    // preprocessor token which, in turn, cause sccache on windows CI to fail.
+    // preprocessor token which, in turn, causes sccache on windows CI to fail.
     // See https://godbolt.org/z/eVTIJq as an example.
     // This workaround uses string-pasting to separate the " and the #endif into
     // different strings

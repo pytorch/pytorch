@@ -9,7 +9,7 @@ namespace torch::jit {
  * class NameMangler
  *
  * Utility to mangle qualified names in order to make them unique. We use this
- * in various places where we to de-duplicate qualified names.
+ * in various places where we need to de-duplicate qualified names.
  */
 class TORCH_API NameMangler {
  public:

@@ -90,7 +90,7 @@ void applyUpgrader(mobile::Function* function, uint64_t operator_version) {
               static_cast<int>(operator_version) >= upgrader.min_version) {
             // If there exists a valid upgrader, change the instruction OP to
             // CALL, and the index will point to the according upgrader
-            // function. All upgrader function are available in
+            // function. All upgrader functions are available in
             // function->get_code().functions_. It's a vector of function
             // pointer and they are initialized in the same order as the global
             // vector kUpgraderBytecode.

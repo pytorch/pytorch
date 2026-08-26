@@ -52,7 +52,7 @@ class ConcreteModuleType;
 // 2. Querying: We use ConcreteModuleType as a source of truth for
 // ModuleValue::attr calls during method compilation.
 
-// Represents a concrete type during in the process for construction. We use
+// Represents a concrete type during the process for construction. We use
 // this to decide whether we can share types between modules.
 class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
  public:

@@ -5235,7 +5235,7 @@ class DistributedTest:
                 num_validated_iters=start_localSGD_iter,
             )
 
-            # When `subgroup` is None, it is equivalent to the subgroup on the each node.
+            # When `subgroup` is None, it is equivalent to the subgroup on each node.
             # For this single-node test environment, the intra-node process group is equivalent to
             # the global process group.
             if self.world_size == dist.get_world_size():

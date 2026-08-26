@@ -6,7 +6,7 @@ namespace torch::jit {
 
 using ModulePtr = c10::intrusive_ptr<c10::ivalue::Object>;
 
-// Given a graph with of a method which first argument is %self, lower it to a
+// Given a graph of a method which first argument is %self, lower it to a
 // graph where all attributes accesses are replaced with explicit inputs of the
 // graph (rather than results of prim::GetAttr executed on %self).
 //

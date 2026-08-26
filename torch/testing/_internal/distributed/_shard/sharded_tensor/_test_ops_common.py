@@ -84,7 +84,7 @@ def generate_local_weight_sharding_params_for_test(
     local_weight, sharded_dim, gpu_num, spec, rank
 ):
     """
-    Shard the local weight based the given spec, so we can compare against
+    Shard the local weight based on the given spec, so we can compare against
     the one from sharded tensor.
 
     Args:
