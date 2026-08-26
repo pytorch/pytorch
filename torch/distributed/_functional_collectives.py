@@ -656,22 +656,35 @@ torch.library.register_autograd(
 )
 
 
+def _reduce_op_type(op: str | ReduceOp):
+    """Normalize a reduce op to a lowercase str or a ReduceOp.RedOpType.
+
+    ReduceOp.SUM/AVG/MIN/MAX are RedOpType enum members, while
+    ReduceOp.PREMUL_SUM(factor) is a ReduceOp instance exposing `.op`.
+    """
+    if isinstance(op, str):
+        return op
+    return op.op if hasattr(op, "op") else op
+
+
 def _is_min_max(op: str | ReduceOp):
-    if isinstance(op, ReduceOp):
-        return op.op in (ReduceOp.MIN, ReduceOp.MAX)
-    return op in ("min", "max")
+    op = _reduce_op_type(op)
+    if isinstance(op, str):
+        return op in ("min", "max")
+    return op in (ReduceOp.MIN, ReduceOp.MAX)
 
 
 def _is_reduceop_supported(op: str | ReduceOp):
-    if isinstance(op, ReduceOp):
-        return op.op in (
-            ReduceOp.SUM,
-            ReduceOp.AVG,
-            ReduceOp.PREMUL_SUM,
-            ReduceOp.MAX,
-            ReduceOp.MIN,
-        )
-    return op in ("sum", "avg", "premul_sum", "max", "min")
+    op = _reduce_op_type(op)
+    if isinstance(op, str):
+        return op in ("sum", "avg", "premul_sum", "max", "min")
+    return op in (
+        ReduceOp.SUM,
+        ReduceOp.AVG,
+        ReduceOp.PREMUL_SUM,
+        ReduceOp.MIN,
+        ReduceOp.MAX,
+    )
 
 
 def all_reduce_backward(ctx, grad_output: torch.Tensor):
