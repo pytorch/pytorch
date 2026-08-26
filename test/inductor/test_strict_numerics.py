@@ -1,9 +1,12 @@
 # Owner(s): ["module: inductor"]
-"""Tests for strict inner-contiguous sum ordering."""
+"""Tests for strict inner-contiguous reduction ordering."""
 
 import os
 import unittest
-from unittest import mock
+
+
+# Native reductions register during import, so enable the rollout first.
+os.environ["PYTORCH_SUM_INNER_TREE"] = "1"
 
 import torch
 from torch._inductor import config, metrics
@@ -41,6 +44,12 @@ INNER_TREE_CALL = "reduction_ordering=tl.constexpr(tl.ReductionOrdering.INNER_TR
 
 SUM_VARIANTS = (
     ("autotune", (64, 256), 1, torch.float32, False, {"max_autotune": True}),
+)
+
+PROD_CASES = (
+    ("persistent_fp16", (64, 256), 1, torch.float16),
+    ("looped_fp32", (8, 12000), 1, torch.float32),
+    ("split_fp32", (8, 65536), 1, torch.float32),
 )
 
 DYNAMIC_CASES = (("plan_change", (512, 65537), {}),)
@@ -87,9 +96,6 @@ FUSION_CASES = (
 class StrictNumericsTest(TestCase):
     def setUp(self):
         super().setUp()
-        env_patch = mock.patch.dict(os.environ, {"PYTORCH_SUM_INNER_TREE": "1"})
-        env_patch.start()
-        self.addCleanup(env_patch.stop)
         torch.manual_seed(0)
 
     def _run(self, fn, *args, **cfg):
@@ -129,6 +135,39 @@ class StrictNumericsTest(TestCase):
             self.assertEqual(code.count(INNER_TREE_CALL), 1)
         else:
             self.assertEqual(code.count(INNER_TREE_CALL), 2)
+
+    def _make_prod_input(self, shape, dtype, device):
+        # Perturb each element by O(1)/n so the length-n product stays finite
+        # (no over/underflow) while remaining order-sensitive; prod shares the
+        # sum inner-tree order, only the combiner (*) and identity (1) differ.
+        m, n = shape
+        cols = torch.arange(n, device=device, dtype=torch.float32).reshape(1, n)
+        pattern = (cols % 2) * 2 - 1
+        if m > 1:
+            rows = torch.arange(m, device=device, dtype=torch.float32).reshape(m, 1)
+            pattern = pattern + ((rows % 5) - 2)
+        return (1.0 + pattern / n).to(dtype)
+
+    @parametrize("case", PROD_CASES, name_fn=lambda c: c[0])
+    def test_prod_bitwise(self, device, case):
+        name, shape, dim, dtype = case
+        x = self._make_prod_input(shape, dtype, device)
+
+        def fn(z):
+            return torch.prod(z, dim)
+
+        eager = fn(x)
+        result, code = self._run(fn, x)
+        self._assert_bitwise_equal(eager, result)
+        self.assertIn(INNER_TREE_CALL, code)
+        if name.startswith("split"):
+            self.assertEqual(code.count(INNER_TREE_CALL), 2)
+
+    def test_prod_out_of_scope_uses_default_order(self, device):
+        # A dtype-casting prod is out of scope -> falls back to the default order.
+        x = self._make_prod_input((64, 300), torch.float32, device)
+        _, code = self._run(lambda z: torch.prod(z, 1, dtype=torch.float64), x)
+        self.assertNotIn(INNER_TREE_CALL, code)
 
     @parametrize("case", SUM_VARIANTS, name_fn=lambda c: c[0])
     def test_sum_variants(self, device, case):
@@ -271,7 +310,7 @@ class StrictNumericsTest(TestCase):
         return fn, args, result_index, cfg, expected_metrics, kernel_count
 
     @parametrize("kind", FUSION_CASES)
-    def test_fusion_preserves_strict_sum(self, device, kind):
+    def test_fusion_preserves_strict_reduction(self, device, kind):
         fn, args, index, cfg, expected_metrics, kernel_count = self._make_fusion_case(
             kind, device
         )
@@ -292,7 +331,7 @@ class StrictNumericsTest(TestCase):
         elif kind == "multi_output":
             self.assertEqual(eager[0], result[0])
 
-    def test_combo_kernel_preserves_strict_sum_blocks(self, device):
+    def test_combo_kernel_preserves_strict_reduction_blocks(self, device):
         args = (
             torch.randn(8, 12000, device=device),
             torch.randn(8, 12000, device=device),
@@ -316,7 +355,7 @@ class StrictNumericsTest(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "requires TMA support")
     @parametrize("kind", ("multirow", "split"))
-    def test_tma_preserves_strict_sum(self, device, kind):
+    def test_tma_preserves_strict_reduction(self, device, kind):
         if kind == "multirow":
             x = torch.randn(64, 5, device=device)
         else:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sympy
 from sympy import S
+from sympy.core.relational import Relational
 
 from torch._prims_common import BoolLike, FloatLike, IntLike
 
@@ -775,24 +776,19 @@ def is_accessor_node(node: torch.fx.Node) -> bool:
 
 def canonicalize_bool_expr(expr: _T) -> _T:
     """
-    Canonicalize a boolean expression by transforming it into a lt / le
-    inequality and moving all the non-constant terms to the rhs.
-    We canonicalize And / Ors / Not via cnf and then canonicalize their subexpr
-    recursively
+    Canonicalize supported boolean expressions recursively. Ge/Gt relations are
+    rewritten as Le/Lt, and relations with arithmetic operands are normalized by
+    subtraction. Relations with boolean operands are canonicalized structurally
+    without arithmetic. And / Or / Not expressions are first converted to CNF.
     nb. sympy.Rel.canonical is not good enough https://github.com/sympy/sympy/issues/25924
 
     Args:
-        expr (sympy.Expr): Expression to canonicalize
+        expr: Expression to canonicalize
     """
-    # Canonicalise an inequality by transforming it into a lt / le
-    # inequality and moving all the non-constant terms to the rhs
-    # We canonicalise And / Ors / Not via cnf
     # nb. Relational.canonical in sympy is broken
     # https://github.com/sympy/sympy/issues/25924
 
-    if not isinstance(
-        expr, (sympy.Rel, sympy.And, sympy.Or, sympy.Not, sympy.Eq, sympy.Ne)
-    ):
+    if not isinstance(expr, (Relational, sympy.And, sympy.Or, sympy.Not)):
         return expr
 
     if isinstance(expr, (sympy.And, sympy.Or, sympy.Not)):
@@ -857,22 +853,31 @@ def _sympy_from_args(
 
 def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     """
-    After canonicalization, we are guaranteed to have eliminated Ge/Gt relations
-    (rewriting them to Le/Lt, respectively).
+    After canonicalization, supported relations have Ge/Gt rewritten to Le/Lt.
+    Relations with arithmetic operands are additionally normalized by subtraction.
     """
     if isinstance(expr, (sympy.And, sympy.Or)):
         return type(expr)(*map(canonicalize_bool_expr, expr.args))
 
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
-    t: type[Any]
+    t: type[Relational]
     if isinstance(expr, tuple(opposite.keys())):
-        rhs = expr.lhs - expr.rhs  # type: ignore[attr-defined]
+        lhs, rhs = expr.rhs, expr.lhs  # type: ignore[attr-defined]
         t = opposite[type(expr)]  # type: ignore[index]
     else:
         if not isinstance(expr, (sympy.Lt, sympy.Le, sympy.Eq, sympy.Ne)):
             raise AssertionError(f"Expected Lt/Le/Eq/Ne, got {type(expr)}")
-        rhs = expr.rhs - expr.lhs
+        lhs, rhs = expr.lhs, expr.rhs
         t = type(expr)
+
+    if not (isinstance(lhs, sympy.Expr) and isinstance(rhs, sympy.Expr)):
+        return t(
+            canonicalize_bool_expr(lhs),
+            canonicalize_bool_expr(rhs),
+            evaluate=False,
+        )
+
+    rhs = rhs - lhs
 
     def is_neg(t: sympy.Expr) -> bool:
         return (t.is_Number and t.is_negative) or (
@@ -3023,20 +3028,50 @@ class _ShapeGuardCppPrinter(_ShapeGuardPrinter, CppPrinter):
         return CppPrinter.doprint(self, expr)
 
 
+# ShapeEnv mints symbols with these prefixes. The rest of prefix_str belongs to
+# inductor (tmp0, i0, x0, ...) and never appears in a printed ShapeEnv expression,
+# so those names keep falling through to the eval globals.
+_SHAPE_ENV_SYMBOL_PREFIXES: tuple[str, ...] = tuple(
+    prefix_str[t]
+    for t in (SymT.SIZE, SymT.UNBACKED_INT, SymT.FLOAT, SymT.UNBACKED_FLOAT)
+)
+
+
+def _looks_like_shape_symbol(name: str) -> bool:
+    """True for a name shaped like a ShapeEnv symbol: s17, u3, zf1, zuf0."""
+    return any(
+        name.startswith(prefix) and name[len(prefix) :].isdigit()
+        for prefix in _SHAPE_ENV_SYMBOL_PREFIXES
+    )
+
+
 class _SymExprLocals(dict):  # type: ignore[type-arg]
     """eval() locals for a printed sympy expression.
 
     Builds a SymNode only for the symbols an expression actually names.
     """
 
-    def __init__(self, shape_env: ShapeEnv) -> None:
+    def __init__(self, shape_env: ShapeEnv, code: str) -> None:
         super().__init__()
         self._shape_env = shape_env
+        self._code = code
 
     def __missing__(self, name: str) -> SymInt | SymFloat:
         shape_env = self._shape_env
         symbol = shape_env.name_to_symbol.get(name)
         if symbol is None:
+            # KeyError is how LOAD_NAME falls through to the eval globals, which is
+            # what resolves names like math and torch. A name shaped like a symbol
+            # can only be a symbol though, and falling through surfaces it as a
+            # context-free NameError from inside eval. name_to_symbol is a
+            # hand-maintained index across every mint site, so a site that forgets
+            # to register is reachable by omission; say so instead.
+            if _looks_like_shape_symbol(name):
+                raise AssertionError(
+                    f"{name} is shaped like a ShapeEnv symbol but is absent from "
+                    f"name_to_symbol, so it cannot be rebuilt. Whichever site "
+                    f"minted it must record it there. Deserializing: {self._code}"
+                )
             raise KeyError(name)
         is_float = symbol_is_type(symbol, (SymT.FLOAT, SymT.UNBACKED_FLOAT))
         pytype: type = float if is_float else int
@@ -4194,6 +4229,22 @@ class ShapeEnv:
         # SymNode.expr
         self._replacements_version_counter = 0
 
+        # Note [symbolic op memo]
+        # Symbolic binary arithmetic is overwhelmingly repetitive: deriving
+        # numel and contiguity for every fake tensor recomputes the same
+        # products and comparisons over and over: on one model over 99% of a
+        # few hundred thousand ops were repeats of about two thousand distinct
+        # computations. Memoize on
+        # (op, lhs expr, rhs expr, replacement version); the version keeps a hit
+        # valid only while replacements have not moved.
+        #
+        # What is cached is the result sympy expression. Every call site still
+        # builds its own SymNode around it, and must: see the comment in
+        # SymNode's binary_magic_impl for why two sites cannot share one. Under
+        # proxy tracing binary_magic_impl returns before it reaches this cache,
+        # so nothing being traced is served from here.
+        self._symop_cache: dict[Any, Any] = {}
+
         # Each time divisible is changed this should be set to True, this is set in _update_version_counter.
         self._resimplify_floor_div_axioms = True
 
@@ -4393,6 +4444,7 @@ class ShapeEnv:
             "var_to_range_sloc",
             "replacements_slocs",
             "_replacements_version_counter",
+            "_symop_cache",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "specialization_stacks",
@@ -6749,7 +6801,7 @@ class ShapeEnv:
                 if any(
                     is_dim(source)
                     for s in expr.free_symbols
-                    for source in symbol_to_source[s]
+                    for source in symbol_to_source.get(s, ())
                 ):
                     if self.dim_constraints is None:
                         raise AssertionError("dim_constraints must not be None")
@@ -6766,7 +6818,14 @@ class ShapeEnv:
                 # a constraint
                 if not is_trivial and len(expr.free_symbols) == 1:
                     symbol = next(iter(expr.free_symbols))
-                    source = symbol_to_source[symbol][0]
+                    # Subclasses opting out of outer size/stride tracking leave their
+                    # outer dims out of symbol_to_source; fall back as _print_Symbol does.
+                    sources = symbol_to_source.get(symbol) or self.var_to_sources.get(
+                        symbol
+                    )
+                    if not sources:
+                        return
+                    source = sources[0]
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
@@ -7099,7 +7158,7 @@ class ShapeEnv:
         """
         To be used by compile_fx to deserialize symexprs
         """
-        return eval(code, SYMPY_INTERP, _SymExprLocals(self))
+        return eval(code, SYMPY_INTERP, _SymExprLocals(self, code))
 
     def evaluate_guards_expression(self, code: str, args: Sequence[object]) -> bool:
         """
@@ -7858,7 +7917,10 @@ class ShapeEnv:
             desc = "Could not guard on data-dependent expression"
             size_oblivious_result_msg = (
                 "consider using data-dependent friendly APIs such as "
-                "guard_or_false, guard_or_true and statically_known_true."
+                "guard_or_false, guard_or_true and statically_known_true. "
+                "If this was caused by Python `not` on a symbolic boolean, "
+                "use torch.sym_not() or an equivalent comparison instead; "
+                "Python `not` cannot be overloaded outside Dynamo bytecode tracing."
             )
 
         # If the ShapesSpec/ParamsSpec dynamic-shapes API is in use, this DDE is
