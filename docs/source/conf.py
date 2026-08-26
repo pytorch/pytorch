@@ -650,7 +650,6 @@ coverage_ignore_functions = [
     "rebuild_tensor",
     "rebuild_typed_storage",
     "rebuild_typed_storage_child",
-    "reduce_event",
     "reduce_storage",
     "reduce_tensor",
     "reduce_typed_storage",
