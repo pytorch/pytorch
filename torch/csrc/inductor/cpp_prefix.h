@@ -360,6 +360,9 @@ inline at::vec::VecMask<float, 1> min_masked_reduce(
 // comparisons inside at::vec::minimum/maximum treat the two zeros as equal,
 // which can drop the sign bit of the result.
 //
+// These are emitted only when torch._inductor.config.cpp.strict_signed_zero
+// is enabled; the default keeps the previous compare-based behavior.
+//
 // For floating point types, a == b with differing bit patterns happens only
 // for +/- zero, and when the bit patterns are identical the bitwise fixup is
 // a no-op, so a plain equality mask suffices here. NaN lanes compare unequal
