@@ -74,6 +74,12 @@ class VendoredDenseGemmEFCOperator(PersistentDenseGemmEFCOperator):
         if group <= 1 or group > max_group:
             return Status.fail("Dense EFC local reduction group exceeds its tile")
         if (
+            axis == 1
+            and group > GEMM_REDUCTION_FRAGMENT_WIDTH
+            and reduction.reduction_type == "mean"
+        ):
+            return Status.fail("Dense EFC cross-fragment mean is unsupported")
+        if (
             reduction.feeds_main
             and axis == 0
             and self.cta_tile_n > GEMM_REDUCTION_FRAGMENT_WIDTH
