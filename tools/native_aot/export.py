@@ -393,13 +393,37 @@ def _collect_jobs(ops_filter, out_root: str, archs):
                     # and without it `--arch sm100a` matched no declaration and
                     # exported nothing at exit 0 -- a typo that looked like success.
                     decl.cc_of(layout_arch)
-                    if layout_arch not in decl.archs_of(d):
-                        skipped.setdefault(did, []).append(layout_arch)
-                        declared[did] = tuple(decl.archs_of(d))
+                    claims = decl.archs_of(d)
+                    if layout_arch not in claims:
+                        # Claiming this CAPABILITY under another spelling is always a
+                        # mistake, so it is reported HERE, per arch. The misses
+                        # collected below are suppressed once the declaration ships
+                        # for any arch, which hid exactly this case: the matched
+                        # arches embed and pass the post-relink check while every
+                        # device of the missed capability falls back to aten, with
+                        # nothing in the build log.
+                        other = _claimed_spelling(layout_arch, claims)
+                        if other:
+                            print(
+                                f"{did}: declares kernels but none for this build -- "
+                                f"requested {layout_arch}, and the declaration's "
+                                f"ARCHS ({' '.join(claims)}) names that capability "
+                                f"only as {other}, so this op falls back to aten on "
+                                f"{layout_arch} hardware. The spellings must match "
+                                f"exactly."
+                            )
+                        else:
+                            skipped.setdefault(did, []).append(layout_arch)
+                            declared[did] = claims
                         continue
                 else:
                     claimed = _claimed_spelling(layout_arch, decl.archs_of(d))
                     if claimed is None:
+                        # The explicit path's miss, on the automatic path: without
+                        # this an on-device run that ships nothing for the local
+                        # device says only `exported 0 kernels`, naming no op.
+                        skipped.setdefault(did, []).append(layout_arch)
+                        declared[did] = decl.archs_of(d)
                         continue
                     layout_arch = claimed
                 out_dir = os.path.join(out_root, layout_arch, did)
@@ -470,9 +494,9 @@ def _check_no_orphan_artifacts(out_dir: str, specs) -> None:
     hand-delete of the directory, which --force could not clear either -- this scan
     runs before that flag is read.
 
-    An entire directory of them, with nothing committed: not an interrupt in a
-    live grid but a partial copy or a hand-edit, so the tree cannot be read at
-    all. Fatal.
+    Reported whether or not anything else in the directory committed: keying it on
+    "did some point commit" left the FIRST export of a tree fatal, which is the
+    shape every interrupted new arch has, and diagnosed it as a partial copy.
 
     Artifacts whose sidecar records a spec no longer in the grid: dropping a point
     from kernel_precompile_grid() generates no job for it and nothing prunes it.
@@ -494,17 +518,12 @@ def _check_no_orphan_artifacts(out_dir: str, specs) -> None:
     )
     if orphans:
         listed = f"{', '.join(orphans[:4])}{', ...' if len(orphans) > 4 else ''}"
-        if not claimed:
-            raise RuntimeError(
-                f"{out_dir}: kernel artifacts with no sidecar ({listed}). "
-                f"The sidecar is written last and this directory holds none, so it "
-                f"is a partial copy or a hand-edited export, not an interrupted one; "
-                f"{_CLEAN_HINT.format(d=out_dir)}."
-            )
         print(
             f"{out_dir}: {len(orphans)} artifact(s) no sidecar claims ({listed}); an "
-            f"export died before committing them. Not linked -- a re-export of that "
-            f"point overwrites them, or delete the directory to reclaim the disk."
+            f"export died before committing them, or they were copied in by hand. "
+            f"Nothing links an artifact no sidecar names, so the cost is disk: a "
+            f"re-export of that point overwrites it WHILE THE POINT IS STILL IN THE "
+            f"GRID, and otherwise {_CLEAN_HINT.format(d=out_dir)}."
         )
     live = [_json_normal(p) for p in specs]
 
@@ -521,10 +540,11 @@ def _check_no_orphan_artifacts(out_dir: str, specs) -> None:
     stale = sorted(fn for fn in names if fn.endswith(".json") and _is_stale(fn))
     if stale:
         raise RuntimeError(
-            f"{out_dir}: sidecars for spec points no longer in the grid "
-            f"({', '.join(stale[:4])}{', ...' if len(stale) > 4 else ''}). "
-            f"Their kernel objects would still be linked with no launcher "
-            f"referencing them; {_CLEAN_HINT.format(d=out_dir)}."
+            f"{out_dir}: {len(stale)} sidecar(s) for spec points no longer in the "
+            f"grid ({', '.join(stale[:4])}{', ...' if len(stale) > 4 else ''}). "
+            f"Generation emits one dispatch branch per sidecar and takes the spec "
+            f"from the sidecar itself, so these would ship a wired-up kernel for a "
+            f"point the grid no longer has; {_CLEAN_HINT.format(d=out_dir)}."
         )
 
 
@@ -666,17 +686,23 @@ def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
 # with no eligible entry exports nothing and stage 2 skips, printing why.
 #
 # Distinct from a declaration's ARCHS (what the KERNELS support, sm_90+);
-# this says what the standard build SHIPS. Both spellings of a CC are
-# listed because they are distinct nvcc targets used by different builds
-# for the same hardware -- "10.0a" (arch-conditional, needed by
-# tcgen05/wgmma) in b200-native-aot.yml, plain "10.0" elsewhere and in the
-# manywheel lists. Omitting either silently exports nothing there.
+# this says what the standard build SHIPS. Both spellings of a capability are
+# listed because they are distinct nvcc targets used by different builds for
+# the same hardware -- "10.0a" (arch-conditional, needed by tcgen05/wgmma) in
+# b200-native-aot.yml, plain "10.0" elsewhere and in the manywheel lists.
+# Omitting either silently exports nothing there.
 #
-# Both spellings of a capability are listed because they are distinct nvcc
-# targets used by different builds for the same hardware ("10.0a" in
-# b200-native-aot.yml, plain "10.0" in the manywheel lists), and omitting either
-# silently exports nothing there. sm_103 stays absent because no arch list we see
-# names 10.3, and adding it would only grow wheels.
+# WHICH capabilities, and what admitting one costs: every entry a build's arch
+# list names is another full set of compiled kernels inside its libtorch_cuda
+# (one duplicate arch measured 54 objects / 3.5 MiB), and past this filter the
+# DSL runtimes stop being optional -- build_stage2.should_run reads this tuple to
+# decide whether stage 2 runs at all, so a box whose GPU is listed here and whose
+# wheels are missing fails the build instead of skipping. Hopper is listed
+# because every release arch list names 9.0 and the default ARCHS already covers
+# it; no CI job exercises AOT kernels there yet (b200-native-aot.yml is the only
+# functional one), so its coverage is this suite plus that Blackwell job. sm_103
+# stays absent because no arch list we see names 10.3, and adding it would only
+# grow wheels.
 EXPORTABLE_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a")
 
 

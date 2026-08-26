@@ -42,7 +42,8 @@ Properties consumed by the driver scripts:
     libtorch_cuda. Empty for a kind that embeds its artifact in the
     generated source instead (Triton's cubin bytes); it must be a subset
     of ``artifact_exts``, which _assert_link_exts_are_exportable checks
-    at import.
+    at import -- along with the attribute being declared at all, since the
+    inherited default cannot be told from a deliberate empty.
   * ``launcher_includes``: per-kind includes for the generated .cpp.
   * ``kernel_includes(sidecar)``: per-kernel includes for that same file,
     for toolchains whose export writes a header (CuTeDSL's ABI struct).
@@ -66,7 +67,10 @@ import re
 class Toolchain:
     kind: str = ""
     artifact_exts: tuple[str, ...] = ()
-    link_exts: tuple[str, ...] = ()
+    # None means NOT DECLARED, which is refused: () is a real value (a kind whose
+    # launcher embeds the artifact instead of linking it), so inheriting a default
+    # must not be able to pass for that.
+    link_exts: tuple[str, ...] | None = None
     launcher_includes: tuple[str, ...] = ()
 
     # Torch build backends this kind can emit kernels for, as the names
@@ -322,7 +326,7 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
             # header raised UnicodeDecodeError under LC_ALL=C.
             with open(path, encoding="utf-8", errors="replace") as f:
                 header = f.read()
-        except OSError:
+        except FileNotFoundError:
             return
         header = self._ABI_COMMENT.sub(" ", header)
         prefix = sidecar["prefix"]
@@ -513,8 +517,19 @@ def _assert_link_exts_are_exportable(registry: dict[str, Toolchain]) -> None:
     Generation iterates artifact_exts and links `if ext in link_exts`, so an ext
     the kind cannot produce is silent: it contributes no link input, nothing
     passes --no-undefined, torch_cuda links green, and the first call fails on an
-    undefined symbol. Checked at import so a new toolchain cannot ship it."""
+    undefined symbol. Checked at import so a new toolchain cannot ship it.
+
+    Omitting link_exts entirely is the same silence, and the subset rule cannot see
+    it -- the inherited default is a subset of everything -- so it is refused
+    separately."""
     for tc in registry.values():
+        if tc.link_exts is None:
+            raise RuntimeError(
+                f"toolchain {tc.kind}: link_exts is not declared. Name the "
+                f"extensions that reach the linker, or () if this kind embeds its "
+                f"artifact in the generated source; inheriting the default would "
+                f"link nothing, which is the same as not shipping the kernels"
+            )
         extra = sorted(set(tc.link_exts) - set(tc.artifact_exts))
         if extra:
             raise RuntimeError(
