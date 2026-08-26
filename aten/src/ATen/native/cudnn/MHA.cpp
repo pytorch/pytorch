@@ -1785,9 +1785,16 @@ void run_cudnn_SDP_fprop_nestedtensor(
   }
   const fe::graph::Graph& mha_graph = *cache_it->second;
 
+  const bool shared_cum_seqlen = cum_seqlen_q.is_same(cum_seqlen_kv);
   auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
-  auto seqlen_kv =
-      seqused_k.has_value() ? seqused_k.value() : at::diff(cum_seqlen_kv, 1, 0);
+  Tensor seqlen_kv;
+  if (seqused_k.has_value()) {
+    seqlen_kv = seqused_k.value();
+  } else if (shared_cum_seqlen) {
+    seqlen_kv = seqlen_q;
+  } else {
+    seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
+  }
   check_ragged_offset_capacity(q, "query");
   check_ragged_offset_capacity(o, "out");
   if (!is_paged) {
@@ -1799,7 +1806,9 @@ void run_cudnn_SDP_fprop_nestedtensor(
       ragged_offset(cum_seqlen_q, o.stride(-3), rag_q_off, q.stride(-3));
   Tensor rag_k_off, rag_v_off;
   if (!is_paged) {
-    rag_k_off = cum_seqlen_kv.mul(k.stride(-3));
+    rag_k_off = shared_cum_seqlen && k.stride(-3) == q.stride(-3)
+        ? rag_q_off
+        : cum_seqlen_kv.mul(k.stride(-3));
     rag_v_off =
         ragged_offset(cum_seqlen_kv, v.stride(-3), rag_k_off, k.stride(-3));
   }
@@ -2053,8 +2062,9 @@ void run_cudnn_SDP_bprop_nestedtensor(
       "cuDNN SDPA expected grad_output to have 16-byte-aligned storage and "
       "non-broadcast strides, with a contiguous last dimension");
 
+  const bool shared_cum_seqlen = cum_seqlen_q.is_same(cum_seqlen_kv);
   auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
-  auto seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
+  auto seqlen_kv = shared_cum_seqlen ? seqlen_q : at::diff(cum_seqlen_kv, 1, 0);
   check_ragged_offset_capacity(q, "query");
   check_ragged_offset_capacity(k, "key");
   check_ragged_offset_capacity(v, "value");
@@ -2066,7 +2076,9 @@ void run_cudnn_SDP_bprop_nestedtensor(
   const int64_t q_token_stride = q.stride(-3);
   const int64_t kv_token_stride = k.stride(-3);
   auto rag_q_off = cum_seqlen_q.mul(q_token_stride);
-  auto rag_k_off = cum_seqlen_kv.mul(kv_token_stride);
+  auto rag_k_off = shared_cum_seqlen && kv_token_stride == q_token_stride
+      ? rag_q_off
+      : cum_seqlen_kv.mul(kv_token_stride);
   auto rag_v_off =
       ragged_offset(cum_seqlen_kv, v.stride(-3), rag_k_off, kv_token_stride);
   auto rag_o_off =
