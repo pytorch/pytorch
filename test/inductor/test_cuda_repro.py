@@ -48,13 +48,18 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
+    subtest,
     TEST_CUDA,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_XPU,
     xfailIfROCm,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU, IS_BIG_GPU
+from torch.testing._internal.inductor_utils import (
+    HAS_GPU,
+    IS_BIG_GPU,
+    requires_block_ptr,
+)
 
 
 if TEST_WITH_ROCM:
@@ -2346,7 +2351,10 @@ class CudaReproTests(TestCase):
         self.assertIn("reduction_hint=ReductionHint.INNER", persistent_code)
         self.assertNotIn("for roffset", persistent_code)
 
-    @parametrize("use_block_ptr", [False, True])
+    @parametrize(
+        "use_block_ptr",
+        [subtest(False), subtest(True, decorators=[requires_block_ptr])],
+    )
     @parametrize("dynamic_batch", [False, True])
     @config.patch(
         {
@@ -2752,7 +2760,16 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             if mark_dynamic:
                 torch._dynamo.mark_dynamic(inp, 0)
             foo_c = torch.compile(foo)
-            torch.testing.assert_allclose(foo(inp), foo_c(inp))
+            torch.testing.assert_close(
+                foo(inp),
+                foo_c(inp),
+                rtol=0,
+                atol=0,
+                equal_nan=True,
+                check_device=True,
+                check_dtype=False,
+                check_stride=False,
+            )
 
     @skipCUDAIf(
         not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"

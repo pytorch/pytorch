@@ -1,6 +1,5 @@
 #include <torch/csrc/TypeInfo.h>
 
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -17,8 +16,7 @@
 static PyObject* THPFInfo_New(const at::ScalarType& type) {
   auto finfo = &THPFInfoType;
   auto self = THPObjectPtr{finfo->tp_alloc(finfo, 0)};
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
   self_->type = c10::toRealValueType(type);
   return self.release();
@@ -27,8 +25,7 @@ static PyObject* THPFInfo_New(const at::ScalarType& type) {
 static PyObject* THPIInfo_New(const at::ScalarType& type) {
   auto iinfo = &THPIInfoType;
   auto self = THPObjectPtr{iinfo->tp_alloc(iinfo, 0)};
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
   self_->type = type;
   return self.release();
@@ -116,18 +113,7 @@ static PyObject* THPDTypeInfo_compare(
 }
 
 static Py_hash_t THPDTypeInfo_hash(THPDTypeInfo* self) {
-  const auto dtype_hash = PyObject_Hash(
-      reinterpret_cast<PyObject*>(torch::getTHPDtype(self->type)));
-  if (dtype_hash == -1) {
-    return -1;
-  }
-  const auto type_hash =
-      PyObject_Hash(reinterpret_cast<PyObject*>(Py_TYPE(self)));
-  if (type_hash == -1) {
-    return -1;
-  }
-  const auto hash = dtype_hash ^ type_hash;
-  return hash == -1 ? -2 : hash;
+  return static_cast<Py_hash_t>(self->type) ^ 0x345678;
 }
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void* /*unused*/) {
@@ -420,10 +406,6 @@ PyTypeObject THPIInfoType = {
 };
 
 void THPDTypeInfo_init(PyObject* module) {
-  if (PyModule_AddType(module, &THPFInfoType) < 0) {
-    throw python_error();
-  }
-  if (PyModule_AddType(module, &THPIInfoType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPFInfoType) >= 0);
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPIInfoType) >= 0);
 }
