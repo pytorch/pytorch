@@ -621,7 +621,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather(
     std::vector<at::Tensor>& inputTensors,
     const ::c10d::GatherOptions& opts) {
   TORCH_CHECK(
-      opts.config == 0,
+      !opts.config.has_value(),
       "Per-collective NCCL configuration is only supported by gather_single");
   TORCH_CHECK(inputTensors.size() == 1, "Only single input tensor supported");
   if (getRank() == opts.rootRank) {
@@ -782,7 +782,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall_base(
     return work;
   }
   TORCH_CHECK(
-      opts.config == 0,
+      !opts.config.has_value(),
       "Per-collective NCCL configuration requires equal all_to_all split sizes");
   auto work = all_to_all_v_single(
       outputBuffer,
@@ -800,7 +800,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& inputTensors,
     const ::c10d::AllToAllOptions& opts) {
   TORCH_CHECK(
-      opts.config == 0,
+      !opts.config.has_value(),
       "Per-collective NCCL configuration is not supported for list all_to_all");
   TORCH_CHECK(!inputTensors.empty(), "alltoall requires input tensors");
   ++sequence_number_;

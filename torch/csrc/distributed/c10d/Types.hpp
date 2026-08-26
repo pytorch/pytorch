@@ -125,12 +125,32 @@ TORCH_API bool isComplexViewAsRealAllowed(const ReduceOp& reduceOp);
 
 constexpr auto kUnsetTimeout = std::chrono::milliseconds(-1);
 
+struct TORCH_API CollectiveConfig final : torch::CustomClassHolder {
+  CollectiveConfig(const void* data, c10::IValue owner)
+      : data_(data), owner_(std::move(owner)) {}
+
+  const void* data() const {
+    return data_;
+  }
+
+  const c10::IValue& owner() const {
+    return owner_;
+  }
+
+ private:
+  const void* data_;
+  c10::IValue owner_;
+};
+
+using CollectiveConfigPtr = c10::intrusive_ptr<CollectiveConfig>;
+using OptionalCollectiveConfig = std::optional<CollectiveConfigPtr>;
+
 struct BroadcastOptions {
   int64_t rootRank = 0;
   int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
-  uintptr_t config = 0;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct AllreduceOptions {
@@ -138,7 +158,7 @@ struct AllreduceOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
   std::optional<at::Tensor> sparseIndices = std::nullopt;
-  uintptr_t config = 0;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct AllreduceCoalescedOptions : AllreduceOptions {};
@@ -149,20 +169,20 @@ struct ReduceOptions {
   int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
-  uintptr_t config = 0;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct AllgatherOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
-  uintptr_t config = 0;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct GatherOptions {
   int64_t rootRank = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
-  uintptr_t config = 0;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct ScatterOptions {
@@ -175,13 +195,13 @@ struct ReduceScatterOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
-  uintptr_t config = 0;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct AllToAllOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
-  uintptr_t config = 0;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct BarrierOptions {

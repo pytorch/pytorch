@@ -342,7 +342,8 @@ class TestPyBackend(TestCase):
             torch.empty_like(tensor), tensor, group=group, config=config
         )
         for call in backend.calls:
-            self.assertEqual(call[-1].config, 1234)
+            self.assertIsInstance(call[-1].config, LowLevelConfig)
+            self.assertEqual(call[-1].config.ptr, 1234)
 
         with self.assertRaisesRegex(TypeError, "nccl4py CollConfig"):
             dist.all_reduce(torch.zeros(2), group=group, config=object())

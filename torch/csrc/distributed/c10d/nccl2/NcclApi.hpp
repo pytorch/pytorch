@@ -148,7 +148,7 @@ class NcclApi {
       int root,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) = 0;
+      const void* config = nullptr) = 0;
 
   [[nodiscard]] virtual ncclResult_t bcast(
       void* buff,
@@ -157,7 +157,7 @@ class NcclApi {
       int root,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) = 0;
+      const void* config = nullptr) = 0;
 
   [[nodiscard]] virtual ncclResult_t allReduce(
       const void* sendbuff,
@@ -167,7 +167,7 @@ class NcclApi {
       ncclRedOp_t op,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) = 0;
+      const void* config = nullptr) = 0;
 
   [[nodiscard]] virtual ncclResult_t reduce(
       const void* sendbuff,
@@ -178,7 +178,7 @@ class NcclApi {
       int root,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) = 0;
+      const void* config = nullptr) = 0;
 
   [[nodiscard]] virtual ncclResult_t allGather(
       const void* sendbuff,
@@ -187,7 +187,7 @@ class NcclApi {
       ncclDataType_t datatype,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) = 0;
+      const void* config = nullptr) = 0;
 
   [[nodiscard]] virtual ncclResult_t reduceScatter(
       const void* sendbuff,
@@ -197,7 +197,7 @@ class NcclApi {
       ncclRedOp_t op,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) = 0;
+      const void* config = nullptr) = 0;
 
   [[nodiscard]] virtual ncclResult_t allToAll(
       const void* sendbuff,
@@ -206,7 +206,7 @@ class NcclApi {
       ncclDataType_t datatype,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) = 0;
+      const void* config = nullptr) = 0;
 
   [[nodiscard]] virtual ncclResult_t gather(
       const void* sendbuff,
@@ -216,7 +216,7 @@ class NcclApi {
       int root,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) = 0;
+      const void* config = nullptr) = 0;
 
   // Group operations
   [[nodiscard]] virtual ncclResult_t groupStart() = 0;
@@ -415,7 +415,7 @@ class DefaultNcclApi : public NcclApi {
       int root,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) override;
+      const void* config = nullptr) override;
 
   [[nodiscard]] ncclResult_t bcast(
       void* buff,
@@ -424,7 +424,7 @@ class DefaultNcclApi : public NcclApi {
       int root,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) override;
+      const void* config = nullptr) override;
 
   [[nodiscard]] ncclResult_t allReduce(
       const void* sendbuff,
@@ -434,7 +434,7 @@ class DefaultNcclApi : public NcclApi {
       ncclRedOp_t op,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) override;
+      const void* config = nullptr) override;
 
   [[nodiscard]] ncclResult_t reduce(
       const void* sendbuff,
@@ -445,7 +445,7 @@ class DefaultNcclApi : public NcclApi {
       int root,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) override;
+      const void* config = nullptr) override;
 
   [[nodiscard]] ncclResult_t allGather(
       const void* sendbuff,
@@ -454,7 +454,7 @@ class DefaultNcclApi : public NcclApi {
       ncclDataType_t datatype,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) override;
+      const void* config = nullptr) override;
 
   [[nodiscard]] ncclResult_t reduceScatter(
       const void* sendbuff,
@@ -464,7 +464,7 @@ class DefaultNcclApi : public NcclApi {
       ncclRedOp_t op,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) override;
+      const void* config = nullptr) override;
 
   [[nodiscard]] ncclResult_t allToAll(
       const void* sendbuff,
@@ -473,7 +473,7 @@ class DefaultNcclApi : public NcclApi {
       ncclDataType_t datatype,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) override;
+      const void* config = nullptr) override;
 
   [[nodiscard]] ncclResult_t gather(
       const void* sendbuff,
@@ -483,7 +483,7 @@ class DefaultNcclApi : public NcclApi {
       int root,
       ncclComm_t comm,
       cudaStream_t stream,
-      uintptr_t config = 0) override;
+      const void* config = nullptr) override;
 
   // Group operations
   [[nodiscard]] ncclResult_t groupStart() override;

@@ -510,52 +510,52 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       int root,
       bool async_op,
       std::chrono::milliseconds timeout,
-      uintptr_t config = 0);
+      const OptionalCollectiveConfig& config = std::nullopt);
   c10::intrusive_ptr<WorkNCCL> all_reduce(
       at::Tensor& tensor,
       const ::c10d::ReduceOp& op,
       bool async_op,
       std::chrono::milliseconds timeout,
-      uintptr_t config = 0);
+      const OptionalCollectiveConfig& config = std::nullopt);
   c10::intrusive_ptr<WorkNCCL> reduceImpl(
       const at::Tensor& tensor,
       int root,
       const ::c10d::ReduceOp& op,
       bool async_op,
       std::chrono::milliseconds timeout,
-      uintptr_t config = 0);
+      const OptionalCollectiveConfig& config = std::nullopt);
   c10::intrusive_ptr<WorkNCCL> all_gather(
       const std::vector<at::Tensor>& tensor_list,
       const at::Tensor& tensor,
       bool async_op,
       std::chrono::milliseconds timeout,
-      uintptr_t config = 0);
+      const OptionalCollectiveConfig& config = std::nullopt);
   c10::intrusive_ptr<WorkNCCL> allGatherSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       bool async_op,
       std::chrono::milliseconds timeout,
-      uintptr_t config = 0);
+      const OptionalCollectiveConfig& config = std::nullopt);
   c10::intrusive_ptr<WorkNCCL> reduce_scatter(
       at::Tensor& output,
       const std::vector<at::Tensor>& input_list,
       const ::c10d::ReduceOp& op,
       bool async_op,
       std::chrono::milliseconds timeout,
-      uintptr_t config = 0);
+      const OptionalCollectiveConfig& config = std::nullopt);
   c10::intrusive_ptr<WorkNCCL> reduceScatterSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       const ::c10d::ReduceOp& op,
       bool async_op,
       std::chrono::milliseconds timeout,
-      uintptr_t config = 0);
+      const OptionalCollectiveConfig& config = std::nullopt);
   c10::intrusive_ptr<WorkNCCL> allToAllSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       bool async_op,
       std::chrono::milliseconds timeout,
-      uintptr_t config = 0);
+      const OptionalCollectiveConfig& config = std::nullopt);
   c10::intrusive_ptr<WorkNCCL> all_to_all_v_single(
       at::Tensor& output,
       const at::Tensor& input,
@@ -583,7 +583,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       int root,
       bool async_op,
       std::chrono::milliseconds timeout,
-      uintptr_t config = 0);
+      const OptionalCollectiveConfig& config = std::nullopt);
 
   // Resolve a c10d per-op timeout (kUnsetTimeout -> communicator default).
   std::chrono::milliseconds operationTimeout(

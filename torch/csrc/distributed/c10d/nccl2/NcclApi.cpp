@@ -13,10 +13,10 @@ namespace c10d::nccl2 {
 
 namespace {
 
-void checkCollConfigSupport(uintptr_t config) {
+void checkCollConfigSupport(const void* config) {
 #if NCCL_VERSION_CODE < NCCL_VERSION(2, 31, 0) || defined(USE_ROCM)
   TORCH_CHECK(
-      config == 0,
+      config == nullptr,
       "Per-collective NCCL configuration requires NCCL 2.31 or later");
 #else
   std::ignore = config;
@@ -24,9 +24,8 @@ void checkCollConfigSupport(uintptr_t config) {
 }
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0) && !defined(USE_ROCM)
-const ncclCollConfig_t* getCollConfig(uintptr_t config) {
-  // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  return reinterpret_cast<const ncclCollConfig_t*>(config);
+const ncclCollConfig_t* getCollConfig(const void* config) {
+  return static_cast<const ncclCollConfig_t*>(config);
 }
 #endif
 
@@ -224,9 +223,9 @@ ncclResult_t DefaultNcclApi::broadcast(
     int root,
     ncclComm_t comm,
     cudaStream_t stream,
-    uintptr_t config) {
+    const void* config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  if (config == 0) {
+  if (config == nullptr) {
     return ncclBroadcast(
         sendbuff, recvbuff, count, datatype, root, comm, stream);
   }
@@ -253,9 +252,9 @@ ncclResult_t DefaultNcclApi::bcast(
     int root,
     ncclComm_t comm,
     cudaStream_t stream,
-    uintptr_t config) {
+    const void* config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  if (config == 0) {
+  if (config == nullptr) {
     return ncclBcast(buff, count, datatype, root, comm, stream);
   }
   checkCollConfigSupport(config);
@@ -275,9 +274,9 @@ ncclResult_t DefaultNcclApi::allReduce(
     ncclRedOp_t op,
     ncclComm_t comm,
     cudaStream_t stream,
-    uintptr_t config) {
+    const void* config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  if (config == 0) {
+  if (config == nullptr) {
     return ncclAllReduce(sendbuff, recvbuff, count, datatype, op, comm, stream);
   }
   checkCollConfigSupport(config);
@@ -305,9 +304,9 @@ ncclResult_t DefaultNcclApi::reduce(
     int root,
     ncclComm_t comm,
     cudaStream_t stream,
-    uintptr_t config) {
+    const void* config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  if (config == 0) {
+  if (config == nullptr) {
     return ncclReduce(
         sendbuff, recvbuff, count, datatype, op, root, comm, stream);
   }
@@ -335,9 +334,9 @@ ncclResult_t DefaultNcclApi::allGather(
     ncclDataType_t datatype,
     ncclComm_t comm,
     cudaStream_t stream,
-    uintptr_t config) {
+    const void* config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  if (config == 0) {
+  if (config == nullptr) {
     return ncclAllGather(sendbuff, recvbuff, sendcount, datatype, comm, stream);
   }
   checkCollConfigSupport(config);
@@ -363,9 +362,9 @@ ncclResult_t DefaultNcclApi::reduceScatter(
     ncclRedOp_t op,
     ncclComm_t comm,
     cudaStream_t stream,
-    uintptr_t config) {
+    const void* config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  if (config == 0) {
+  if (config == nullptr) {
     return ncclReduceScatter(
         sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
   }
@@ -392,10 +391,10 @@ ncclResult_t DefaultNcclApi::allToAll(
     ncclDataType_t datatype,
     ncclComm_t comm,
     cudaStream_t stream,
-    uintptr_t config) {
+    const void* config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
-  if (config == 0) {
+  if (config == nullptr) {
     return ncclAlltoAll(sendbuff, recvbuff, count, datatype, comm, stream);
   }
   checkCollConfigSupport(config);
@@ -422,10 +421,10 @@ ncclResult_t DefaultNcclApi::gather(
     int root,
     ncclComm_t comm,
     cudaStream_t stream,
-    uintptr_t config) {
+    const void* config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3) && !defined(USE_ROCM)
-  if (config == 0) {
+  if (config == nullptr) {
     return ncclGather(sendbuff, recvbuff, count, datatype, root, comm, stream);
   }
   checkCollConfigSupport(config);

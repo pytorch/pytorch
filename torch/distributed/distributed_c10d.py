@@ -3881,12 +3881,12 @@ def _is_fp8(tensor: torch.Tensor) -> bool:
     )
 
 
-def _nccl_coll_config_ptr(config: object | None) -> tuple[int, object | None]:
+def _nccl_coll_config(config: object | None) -> object | None:
     if config is None:
-        return 0, None
+        return None
     try:
-        ptr = config.ptr  # type: ignore[attr-defined]
         owner = config
+        ptr = owner.ptr  # type: ignore[attr-defined]
     except AttributeError:
         try:
             owner = config._to_lowpp()  # type: ignore[attr-defined]
@@ -3899,7 +3899,7 @@ def _nccl_coll_config_ptr(config: object | None) -> tuple[int, object | None]:
         raise TypeError("config.ptr must be an integer") from exc
     if ptr <= 0:
         raise ValueError("config.ptr must be positive")
-    return ptr, owner
+    return owner
 
 
 @_exception_logger
@@ -3959,8 +3959,8 @@ def broadcast(
     opts.rootRank = group_src
     opts.rootTensor = 0
     opts.asyncOp = async_op
-    config_ref = _nccl_coll_config_ptr(config)
-    opts.config = config_ref[0]
+    config_ref = _nccl_coll_config(config)
+    opts.config = config_ref
     sm90_or_more = not (
         tensor.is_cuda and torch.cuda.get_device_capability(tensor.device)[0] >= 9
     )
@@ -4090,13 +4090,13 @@ def all_reduce(
     opts = AllreduceOptions()
     opts.reduceOp = op
     opts.asyncOp = async_op
-    config_ref = _nccl_coll_config_ptr(config)
-    opts.config = config_ref[0]
+    config_ref = _nccl_coll_config(config)
+    opts.config = config_ref
     if group is None:
         group = _get_default_group()
 
     if group in _world.pg_coalesce_state:
-        if config_ref[1] is not None:
+        if config_ref is not None:
             raise NotImplementedError(
                 "per-collective NCCL configuration is not supported with coalescing"
             )
@@ -4198,8 +4198,8 @@ def all_reduce_coalesced(
     opts = AllreduceCoalescedOptions()
     opts.reduceOp = op
     opts.asyncOp = async_op
-    config_ref = _nccl_coll_config_ptr(config)
-    opts.config = config_ref[0]
+    config_ref = _nccl_coll_config(config)
+    opts.config = config_ref
     group = group or _get_default_group()
     work = group.allreduce_coalesced(tensors, opts)
 
@@ -4273,8 +4273,8 @@ def reduce(
     opts.reduceOp = op
     opts.rootRank = group_dst
     opts.asyncOp = async_op
-    config_ref = _nccl_coll_config_ptr(config)
-    opts.config = config_ref[0]
+    config_ref = _nccl_coll_config(config)
+    opts.config = config_ref
     work = group.reduce([tensor], opts)
     if async_op:
         return work
@@ -5270,8 +5270,8 @@ def all_gather(
     group = group or _get_default_group()
     opts = AllgatherOptions()
     opts.asyncOp = async_op
-    config_ref = _nccl_coll_config_ptr(config)
-    opts.config = config_ref[0]
+    config_ref = _nccl_coll_config(config)
+    opts.config = config_ref
     work = group.allgather(  # pyrefly: ignore[missing-attribute]
         [tensor_list], [tensor], opts
     )
@@ -5380,13 +5380,13 @@ def all_gather_single(
 
     opts = AllgatherOptions()
     opts.asyncOp = async_op
-    config_ref = _nccl_coll_config_ptr(config)
-    opts.config = config_ref[0]
+    config_ref = _nccl_coll_config(config)
+    opts.config = config_ref
 
     group = group or _get_default_group()
 
     if group in _world.pg_coalesce_state:
-        if config_ref[1] is not None:
+        if config_ref is not None:
             raise NotImplementedError(
                 "per-collective NCCL configuration is not supported with coalescing"
             )
@@ -5578,8 +5578,8 @@ def all_gather_coalesced(
     group = group or _get_default_group()
     opts = AllgatherOptions()
     opts.asyncOp = async_op
-    config_ref = _nccl_coll_config_ptr(config)
-    opts.config = config_ref[0]
+    config_ref = _nccl_coll_config(config)
+    opts.config = config_ref
     work = group.allgather_coalesced(output_tensor_lists, input_tensor_list, opts)
 
     if async_op:
@@ -5812,8 +5812,8 @@ def gather_single(
     opts = GatherOptions()
     opts.rootRank = group_dst
     opts.asyncOp = async_op
-    config_ref = _nccl_coll_config_ptr(config)
-    opts.config = config_ref[0]
+    config_ref = _nccl_coll_config(config)
+    opts.config = config_ref
     work = group.gather_single(output_tensor, tensor, opts)
 
     if async_op:
@@ -6050,8 +6050,8 @@ def reduce_scatter(
     opts = ReduceScatterOptions()
     opts.reduceOp = op
     opts.asyncOp = async_op
-    config_ref = _nccl_coll_config_ptr(config)
-    opts.config = config_ref[0]
+    config_ref = _nccl_coll_config(config)
+    opts.config = config_ref
 
     group = group or _get_default_group()
     work = group.reduce_scatter([output], [input_list], opts)
@@ -6178,15 +6178,15 @@ def reduce_scatter_single(
     opts = ReduceScatterOptions()
     opts.reduceOp = op
     opts.asyncOp = async_op
-    config_ref = _nccl_coll_config_ptr(config)
-    opts.config = config_ref[0]
+    config_ref = _nccl_coll_config(config)
+    opts.config = config_ref
 
     group = group or _get_default_group()
 
     # Check if we are in coalescing context
     # If we are, do not issue single operation, just append a collective representation
     if group in _world.pg_coalesce_state:
-        if config_ref[1] is not None:
+        if config_ref is not None:
             raise NotImplementedError(
                 "per-collective NCCL configuration is not supported with coalescing"
             )
@@ -6394,8 +6394,8 @@ def all_to_all_single(
 
     opts = AllToAllOptions()
     opts.asyncOp = async_op
-    config_ref = _nccl_coll_config_ptr(config)
-    opts.config = config_ref[0]
+    config_ref = _nccl_coll_config(config)
+    opts.config = config_ref
     _check_single_tensor(output, "output")
     _check_single_tensor(input, "input")
     _ensure_all_tensors_same_dtype(output, input)
