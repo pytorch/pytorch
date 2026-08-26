@@ -27,15 +27,15 @@ from torch.testing._internal.common_device_type import (
     skipIf,
 )
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     IS_ARM64,
     IS_FBCODE,
     MI350_ARCH,
+    TEST_CUDA_MEM_LEAK_CHECK,
+    TEST_WITH_ASAN,
+    HardwareClassification,
     parametrize,
     serialTest,
     skipIfRocmArch,
-    TEST_CUDA_MEM_LEAK_CHECK,
-    TEST_WITH_ASAN,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
