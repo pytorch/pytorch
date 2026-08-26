@@ -362,7 +362,6 @@ def _preload_cuda_deps(err: OSError | None = None, required: bool = True) -> Non
         ("cuda_runtime", "libcudart.so.*[0-9]"),
         ("cuda_cupti", "libcupti.so.*[0-9]"),
         ("cufft", "libcufft.so.*[0-9]"),
-        ("curand", "libcurand.so.*[0-9]"),
         ("nvjitlink", "libnvJitLink.so.*[0-9]"),
         ("cusparse", "libcusparse.so.*[0-9]"),
         ("cusparselt", "libcusparseLt.so.*[0-9]"),
