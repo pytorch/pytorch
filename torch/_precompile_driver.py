@@ -486,14 +486,27 @@ def _build_multigraph_forward():
     # One namespace for the whole artifact. Every name the transformed bytecode
     # can reach lives here: the compiled subgraphs, Dynamo's synthetic import
     # aliases, the plain globals it read, and the resume dispatchers bound
-    # below. It is this module's own dict, never the user's.
-    ns = globals()
+    # below. It is the artifact's, never the user's module dict.
+    #
+    # A COPY of this module's globals rather than the dict itself. The rendered
+    # inductor source was exec'd into this module and brought its own names with
+    # it -- `device` among them -- and binding the frames to the live dict would
+    # let those shadow a user global of the same name, which their guards were
+    # written against, so every variant would miss. The kernels keep resolving
+    # through the real module dict via their own __globals__, so seeding a copy
+    # separates the two without moving anything out from under them.
+    ns = dict(globals())
     # Seed from the module each frame was compiled in: its bytecode reads that
     # module's globals by name, and its guards were written against them. This
     # is a READ -- the artifact binds its own names here, never in the user's
     # module, so loading mutates nothing and there is nothing to unload. The
     # values are therefore as of load time; a global rebound afterwards is not
     # seen, which for a frozen artifact is the intended reading.
+    #
+    # The user's value wins over the artifact's own, but the FIRST frame's
+    # module wins among several, which is the flattening this one namespace has
+    # always done.
+    _seeded = set()
     for _frame in frames:
         _module = _sys.modules.get(_frame["python_module"])
         if _module is None:
@@ -503,7 +516,9 @@ def _build_multigraph_forward():
                 _module = None
         if _module is not None:
             for _k, _v in vars(_module).items():
-                ns.setdefault(_k, _v)
+                if _k not in _seeded:
+                    _seeded.add(_k)
+                    ns[_k] = _v
     # The artifact's own names win over anything seeded above.
     for _backend_id, _artifact in backends.items():
         ns[_backend_id] = torch._dynamo.disable(_artifact.after_deserialization())
