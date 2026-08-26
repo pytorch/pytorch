@@ -3,7 +3,6 @@
 """End-to-end nested-reduction behavior and kernel-form tests."""
 
 import re
-from collections.abc import Callable
 
 import torch
 import torch._inductor.config as inductor_config
@@ -2644,7 +2643,7 @@ class _InternalsBase:
         num_deallocs: int | None = None,
         min_xblock: int | None = None,
         min_rblock: int | None = None,
-        extra_checks: FileCheck | Callable[[str], None] | None = None,
+        extra_checks: FileCheck | None = None,
     ) -> None:
         wrapper_code, kernel_code = capture(
             *capture_args,
@@ -2677,10 +2676,7 @@ class _InternalsBase:
             min_rblock=min_rblock,
         )
         if extra_checks is not None:
-            if callable(extra_checks):
-                extra_checks(kernel_code)
-            else:
-                extra_checks.run(kernel_code)
+            extra_checks.run(kernel_code)
 
     def test_layernorm_block_amax_kernel_form(self):
         self.assert_single_kernel_form(
@@ -2864,23 +2860,21 @@ class _InternalsBase:
     @skipIfRocm
     @skipIfXpu(msg="MXFP8 inline asm requires CUDA")
     def test_rmsnorm_mxfp8_scale_swizzle_kernel_form(self):
-        if is_nvidia_sm100_or_later():
+        if is_nvidia_sm100_or_later(GPU_TYPE):
             # SM100+ lowers cvt_e8m0_rceil to the PTX instruction; assert it is
             # emitted exactly once.
             extra_checks = FileCheck().check_count(
                 "cvt.rp.satfinite.ue8m0x2.f32", 1, exactly=True
             )
         else:
-            # Non-SM100 devices (XPU, older CUDA, ROCm, CPU) use the software
-            # fallback: assert the PTX instruction is absent across the whole
-            # kernel and the mantissa mask (0x7FFFFF = 8388607) is emitted.
-            # A FileCheck().check_not(...).check(...) would only assert absence
-            # in the prefix up to the next match (a cvt.rp.satfinite emitted
-            # after the mask would go undetected), so use a callable for a
-            # whole-source assertNotIn.
-            def extra_checks(kernel_code):
-                self.assertNotIn("cvt.rp.satfinite", kernel_code)
-                self.assertIn("8388607", kernel_code)
+            # Non-SM100 GPUs use the software fallback: assert the PTX
+            # instruction is absent on both sides of the mantissa mask.
+            extra_checks = (
+                FileCheck()
+                .check_not("cvt.rp.satfinite")
+                .check("8388607")
+                .check_not("cvt.rp.satfinite")
+            )
 
         self.assert_single_kernel_form(
             _capture_rmsnorm_mxfp8_scale_swizzle_sources,

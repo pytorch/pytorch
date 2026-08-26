@@ -2069,14 +2069,11 @@ def using_b200() -> bool:
 def is_nvidia_sm100_or_later(device: torch.types.Device | None = None) -> bool:
     """Return true for NVIDIA CUDA devices with compute capability SM100+.
 
-    Accepts an int, str, or torch.device (the full device is passed through to
-    ``torch.cuda.get_device_capability`` rather than just its index, so an
-    indexless ``torch.device("cuda")`` is not silently resolved to the current
-    device at the call site).  Non-CUDA devices are never SM100+.
+    Accepts an int, str, or torch.device. Non-CUDA devices are never SM100+.
     """
     if not torch.cuda.is_available() or torch.version.hip is not None:
         return False
-    if device is not None:
+    if device is not None and not isinstance(device, int):
         device = torch.device(device)
         if device.type != "cuda":
             return False

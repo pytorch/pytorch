@@ -379,9 +379,7 @@ def _cvt_e8m0_rceil_aten(inp: Tensor) -> Tensor:
     Accepts float32, float16, or bfloat16 (upcasted to float32 internally).
 
     This is the eager reference for the cvt_e8m0_rceil Inductor prim; the
-    software fallback in lowering.cvt_e8m0_rceil_lowering and the non-SM100
-    e8m0_rceil_log2 replacement in misc_patterns.py both mirror it. Keep all
-    three in sync.
+    software fallback in lowering.cvt_e8m0_rceil_lowering mirrors it.
     """
     if inp.dtype not in (torch.float32, torch.float16, torch.bfloat16):
         raise ValueError(

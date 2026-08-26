@@ -9705,10 +9705,8 @@ def cvt_e8m0_rceil_lowering(inp):
 
     # Software fallback (e.g. XPU, older CUDA, ROCm, CPU): e8m0 is the biased
     # exponent (bias 127) with ceiling rounding; inf/nan saturate to the max
-    # finite value 254. Bit manipulation on the float32 bits, matching the
-    # eager reference _cvt_e8m0_rceil_aten and the non-SM100 log2 replacement
-    # in misc_patterns.py; keep all three in sync (the clamp to 254 is the
-    # authoritative satfinite bound, not the 255 the SM100 pattern matches).
+    # finite value 254. Bit manipulation on the float32 bits matches the eager
+    # reference _cvt_e8m0_rceil_aten.
     inp_bits = to_dtype_bitcast(inp, torch.int32)
     biased_exp = bitwise_right_shift(inp_bits, 23)
     biased_exp = bitwise_and(biased_exp, 0xFF)
