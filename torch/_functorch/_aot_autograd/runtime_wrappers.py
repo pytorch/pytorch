@@ -253,11 +253,15 @@ def _replay_input_mutation(orig: torch.Tensor, updated: torch.Tensor) -> None:
     guards it -- a graph traced against an ordinary tensor can be handed one
     of these later, which for a serialized artifact means a different process.
     """
+    # Exactly IN_CUSTOM_FUNCTION, not merely "not DEFAULT": a view made under
+    # no_grad or inference mode, or a multi-output-node view, still takes a
+    # tracked copy_, and writing those invisibly would skip the version bump
+    # that autograd relies on to catch a genuinely stale use.
     # pybind11 hands back a fresh enum object each call, so this cannot be `is`.
     if (
         orig._is_view()
         and torch._C._autograd._get_creation_meta(orig)
-        != torch._C._autograd.CreationMeta.DEFAULT
+        == torch._C._autograd.CreationMeta.IN_CUSTOM_FUNCTION
     ):
         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
             orig.copy_(updated)
