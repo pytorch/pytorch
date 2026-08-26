@@ -2020,34 +2020,72 @@ class TestCuptiAnnotationBackend(TestCase):
         return dict(get_kernel_annotations())
 
     def test_parity_with_edge_walk(self):
-        # Both backends must attribute the same nodes for a plain single-stream scope, and
-        # key them the same way: the node ids must match, and every key must be rekeyed to
-        # that capture's exec graph id (what lets an annotation join a trace's "graph node
-        # id"). Comparing keys rather than just counts is what catches the CUPTI handler
-        # recording into a different id space.
+        # Both backends must attribute the same nodes the same way, and key them the same
+        # way: the node ids must match, and every key must be rekeyed to that capture's exec
+        # graph id (what lets an annotation join a trace's "graph node id"). Comparing keys
+        # rather than just counts is what catches the CUPTI handler recording into a
+        # different id space. The backward pass is part of the comparison because it is
+        # attributed by a different mechanism -- hooks the scope installs on the autograd
+        # nodes its forward creates -- that both backends share.
         from cuda.bindings import runtime as cuda_runtime
 
-        node_ids = {}
+        def warm(x):
+            s = torch.cuda.Stream()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                for _ in range(3):
+                    torch.autograd.grad((x * 2).sin().sum(), x)
+            torch.cuda.current_stream().wait_stream(s)
+
+        by_backend = {}
         for backend in ("edge_walk", "cupti"):
             clear_kernel_annotations()
-            x = self._warm(torch.randn(64, 64, device="cuda"))
+            x = torch.randn(64, 64, device="cuda", requires_grad=True)
+            warm(x)
             g = torch.cuda.CUDAGraph()
             with torch.cuda.graph(
                 g, enable_annotations=True, annotation_config={"backend": backend}
             ):
                 with mark_kernels("phase"):
-                    for _ in range(4):
-                        x = x + 1
+                    y = (x * 2).sin()
+                with mark_kernels({"name": "bwd_region", "lane": 1}):
+                    torch.autograd.grad(y.sum(), x)
             exec_graph_id = _check_cuda_bindings(
                 cuda_runtime.cudaGraphExecGetId(g.raw_cuda_graph_exec())
             )
             annotations = self._annotations()
-            for tools_id, entries in annotations.items():
-                self.assertEqual(entries, [{"name": "phase"}])
+            for tools_id in annotations:
                 self.assertEqual(tools_id >> 32, exec_graph_id)
-            node_ids[backend] = {tools_id & 0xFFFFFFFF for tools_id in annotations}
-        self.assertEqual(node_ids["cupti"], node_ids["edge_walk"])
-        self.assertEqual(len(node_ids["cupti"]), 4)
+            by_backend[backend] = {
+                tools_id & 0xFFFFFFFF: entries
+                for tools_id, entries in annotations.items()
+            }
+        self.assertEqual(by_backend["cupti"], by_backend["edge_walk"])
+
+        # Which annotations were recorded at all, normalized over how many kernels each op
+        # decomposes into: the scope's own kernels, the backward kernels of the autograd
+        # nodes it created -- carrying the forward region even though a different scope is
+        # open around the backward call, whose other keys still merge in -- and the kernels
+        # that belong to that scope alone (the loss and the gradient seed).
+        distinct = {
+            frozenset(entry.items())
+            for entries in by_backend["cupti"].values()
+            for entry in entries
+        }
+        self.assertEqual(
+            distinct,
+            {
+                frozenset({"name": "phase"}.items()),
+                frozenset({"name": "bwd_region", "lane": 1}.items()),
+                frozenset(
+                    {
+                        "name": "phase",
+                        "lane": 1,
+                        "autograd_phase": "backward",
+                    }.items()
+                ),
+            },
+        )
 
     def test_scope_entered_before_stream_joins_capture(self):
         # The edge walk snapshots the CURRENT stream's capture state on scope entry, so a
