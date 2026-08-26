@@ -364,7 +364,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelRun(
     AtenTensorHandle* output_handles);
 
 // Replace AOTInductorModel's constant map. Note it doesn't handle concurrency
-// so be sure to handle ordering if AOTInductorModelRun is ran concurrently.
+// so be sure to handle ordering if AOTInductorModelRun is run concurrently.
 AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle);

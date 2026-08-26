@@ -93,7 +93,7 @@ class DepthFirstGraphNodeIterator {
     }
   }
 
-  // Moves to the next adjacent node or up in to the parent if that is not
+  // Moves to the next adjacent node or up into the parent if that is not
   // possible.
   void move_next() {
     if (current_ == nullptr) {

@@ -321,6 +321,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.device_codegen = get_device_op_overrides(self.device)
         self._included_extra_headers: OrderedSet[str] = OrderedSet()
         self.codegen_int_array_var_cache = {}
+        # codegen_int_array_var_cache keys on id() of the writeline target. CPython
+        # reuses the address of a freed object, so a short-lived target (a per-callsite
+        # IndentedBuffer) can collide with a dead one and produce a spurious cache hit,
+        # which returns a var name whose declaration was written into the dead buffer.
+        # Pin the targets for the lifetime of codegen so their ids stay unique.
+        self._int_array_writeline_targets: list[Any] = []
         self.needs_vec_isa = self.device == "cpu"
 
     @contextlib.contextmanager
@@ -2405,16 +2411,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
     ) -> str:
         # Use id(graph) for caching to avoid circular references
         # Bound methods have transient IDs, so we use the ID of the bound object instead.
-        writeline_id = (
-            id(writeline.__self__) if hasattr(writeline, "__self__") else id(writeline)
+        writeline_target = (
+            writeline.__self__ if hasattr(writeline, "__self__") else writeline
         )
         cache_key = (
             int_array,
-            writeline_id,
+            id(writeline_target),
             known_statically,
             id(graph) if graph else None,
         )
         if cache_key not in self.codegen_int_array_var_cache:
+            # A cache hit emits no declaration, so the key must not alias a dead
+            # target; see _int_array_writeline_targets.
+            self._int_array_writeline_targets.append(writeline_target)
             self.codegen_int_array_var_cache[cache_key] = (
                 self._codegen_int_array_var_impl(int_array, writeline, known_statically)
             )
@@ -3062,14 +3071,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 expr = arg.node.expr if isinstance(arg, torch.SymInt) else arg
                 new_int_args.append(cexpr(expr))
             elif isinstance(arg_type, torch.NumberType):
-                # Scalar of type int
-                if not isinstance(arg, (int, float, bool)):
-                    raise AssertionError(
-                        f"expected arg to be int, float, or bool, got {type(arg)}"
-                    )
-                # Only treat int Scalar as dynamic
-                if isinstance(arg, int):
-                    new_int_args.append(str(arg))
+                # A symbolic scalar (SymInt) bound to a Scalar slot is a dynamic int64
+                # runtime arg, mirroring the SymIntType branch above. The host proxy
+                # executor's NumberType case accepts the resulting as_sym_int tag.
+                if isinstance(arg, torch.SymInt):
+                    new_int_args.append(cexpr(arg.node.expr))
+                else:
+                    # Scalar of type int
+                    if not isinstance(arg, (int, float, bool)):
+                        raise AssertionError(
+                            f"expected arg to be int, float, or bool, got {type(arg)}"
+                        )
+                    # Only treat int Scalar as dynamic. `bool` is an int subclass
+                    # but is serialized as_bool and prefilled statically, so it
+                    # must not be counted here.
+                    if type(arg) is int:
+                        new_int_args.append(str(arg))
             elif isinstance(arg, ir.TorchBindObject):
                 # torchbind objects are loaded in proxy executor
                 pass
@@ -3127,7 +3144,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
                     )
 
-        for arg, arg_type in zip(raw_args, arg_types):
+        # serialize_inputs (which produced V.extern_kernel_nodes[-1]) omits unprovided
+        # kwarg-only default args, and the host proxy executor prefills those statically
+        # rather than consuming them as runtime (dynamic) args. raw_args still carries their
+        # default values (appended via ordered_kwargs), so counting them into new_int_args /
+        # new_tensor_args here would desync num_ints/num_tensors from what the host consumes
+        # ("Mismatch between ints consumed and num_ints" at runtime). Skip exactly those --
+        # kwarg-only schema args whose name was not serialized.
+        serialized_input_names = OrderedSet(
+            [inp.name for inp in V.extern_kernel_nodes[-1].node.inputs]
+        )
+        for arg, arg_type, schema_arg in zip(raw_args, arg_types, schema.arguments):
+            if schema_arg.kwarg_only and schema_arg.name not in serialized_input_names:
+                continue
             if arg is not None:
                 if isinstance(arg_type, torch.OptionalType):
                     fill_args(arg, arg_type.getElementType())
