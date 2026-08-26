@@ -2058,9 +2058,11 @@ void run_cudnn_SDP_bprop_nestedtensor(
     Tensor& dV,
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset) {
-  // do nothing if we got 0-element tensors
   if (!q.numel() || !k.numel() || !v.numel() || !o.numel() || !dO.numel() ||
       !softmaxstats.numel()) {
+    dQ.zero_();
+    dK.zero_();
+    dV.zero_();
     return;
   }
   TORCH_CHECK(
