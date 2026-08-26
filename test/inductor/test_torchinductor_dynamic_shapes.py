@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyCPU,
     skipIf,
 )
 from torch.testing._internal.common_utils import (
@@ -159,7 +160,7 @@ class DynamicShapesOpTests:
 if HAS_CPU:
 
     class DynamicShapesCpuTests(DynamicShapesOpTests, TestCase):
-        hw_classification = HardwareClassification.CPU
+        hw_classification = HardwareClassification.GENERIC
         common = check_model
         device = "cpu"
 
@@ -1070,7 +1071,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
                 cfn = self.compile_fn(fn, fullgraph=True)
                 self.assertEqual(fn(x), cfn(x))
 
-    @skipIf(not HAS_CPU, "Requires CPU")
+    @onlyCPU
     def test_arithmetic_constant_folding(self, device):
         def test(fn):
             cfn = self.compile_fn(fn)
@@ -1093,7 +1094,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
         test(div)
 
-    @skipIf(not HAS_CPU, "Requires CPU")
+    @onlyCPU
     def test_sub_constant_folding(self, device):
         def sub(x):
             return x - torch.zeros(3)
