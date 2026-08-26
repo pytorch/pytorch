@@ -41,6 +41,23 @@ class ErrorHandler:
         """
         return os.environ.get("TORCHELASTIC_ERROR_FILE", None)
 
+    # Qualified name of the ``@record``-decorated entrypoint function, set via
+    # ``set_entrypoint_fn_name`` before ``initialize``/``record_exception`` run.
+    # Kept as handler state (rather than a method argument) so overriding
+    # ``initialize``/``record_exception`` does not require a signature change,
+    # preserving backward compatibility for this public extension point.
+    _fn_name: str | None = None
+
+    def set_entrypoint_fn_name(self, fn_name: str | None) -> None:
+        """
+        Record the qualified name of the ``@record``-decorated entrypoint fn.
+
+        Called by ``@record`` before ``initialize()`` so subclasses can attribute
+        errors to the originating function via ``self._fn_name`` without changing
+        the ``initialize``/``record_exception`` signatures.
+        """
+        self._fn_name = fn_name
+
     def initialize(self) -> None:
         """
         Call prior to running code that we wish to capture errors/exceptions.
@@ -72,7 +89,14 @@ class ErrorHandler:
 
         If the error file cannot be determined, then logs the content
         that would have been written to the error file.
+
+        ``self._fn_name`` (the qualified name of the ``@record``-decorated
+        entrypoint function, if set via ``set_entrypoint_fn_name``) is logged but
+        not written to the error file; subclasses may override this method to
+        record it in their own format.
         """
+        if self._fn_name:
+            logger.debug("recording exception from entrypoint fn: %s", self._fn_name)
         file = self._get_error_file_path()
         if file:
             data = {
