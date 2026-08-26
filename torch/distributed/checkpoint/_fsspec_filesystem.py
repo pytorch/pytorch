@@ -3,11 +3,13 @@
 
 import io
 import os
+import concurrent.futures
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from torch.futures import Future
 from fsspec.core import url_to_fs
 
 from torch.distributed.checkpoint._extension import StreamTransformExtension
@@ -17,6 +19,7 @@ from torch.distributed.checkpoint.filesystem import (
     FileSystemWriter,
     SerializationFormat,
 )
+from torch.distributed.checkpoint.planner import LoadPlan, LoadPlanner
 
 
 if TYPE_CHECKING:
@@ -59,6 +62,7 @@ class FileSystem(FileSystemBase):
         return os.path.join(path, suffix)
 
     def init_path(self, path: str | os.PathLike, **kwargs) -> str | os.PathLike:
+        kwargs.setdefault("cache_type", "none")
         self.fs, _ = url_to_fs(path, **kwargs)
         return path
 
@@ -152,10 +156,76 @@ class FsspecWriter(FileSystemWriter):
 
 
 class FsspecReader(FileSystemReader):
-    def __init__(self, path: str | os.PathLike, **kwargs) -> None:
+    def __init__(
+        self,
+        path: str | os.PathLike,
+        max_batch_size: int = 64,
+        **kwargs,
+    ) -> None:
         super().__init__(path)
+        self.max_batch_size = max(1, max_batch_size)
         self.fs = FileSystem()
         self.path = self.fs.init_path(path, **kwargs)
+
+    def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
+        reqs = plan.items
+        if not reqs:
+            fut: Future[None] = Future()
+            fut.set_result(None)
+            return fut
+
+        # If the underlying fsspec filesystem supports cat_ranges, use batched range reading
+        if self.fs and self.fs.fs and hasattr(self.fs.fs, "cat_ranges"):
+            batches = []
+            for i in range(0, len(reqs), self.max_batch_size):
+                batch = reqs[i : i + self.max_batch_size]
+                paths = []
+                starts = []
+                ends = []
+                for req in batch:
+                    item_md = self.storage_data[req.storage_index]
+                    paths.append(self.fs.concat_path(self.path, item_md.relative_path))
+                    starts.append(item_md.offset)
+                    ends.append(item_md.offset + item_md.length)
+                batches.append((paths, starts, ends, batch))
+
+            cpu_executor = concurrent.futures.ThreadPoolExecutor(max_workers=16)
+            io_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+            def fetch_batch(b):
+                bp, bs, be, br = b
+                chunks = self.fs.fs.cat_ranges(bp, bs, be, on_error="raise")
+                return chunks, br
+
+            def process_chunk(req, chunk_data):
+                self._load_item(req, io.BytesIO(chunk_data), planner)
+
+            next_io = io_executor.submit(fetch_batch, batches[0])
+
+            for idx, batch in enumerate(batches):
+                chunks, b_reqs = next_io.result()
+
+                if idx + 1 < len(batches):
+                    next_io = io_executor.submit(fetch_batch, batches[idx + 1])
+
+                futures = [
+                    cpu_executor.submit(process_chunk, req, chunk_data)
+                    for req, chunk_data in zip(b_reqs, chunks)
+                ]
+                for f in futures:
+                    f.result()
+
+                del chunks
+                del b_reqs
+
+            cpu_executor.shutdown(wait=False)
+            io_executor.shutdown(wait=False)
+
+            fut: Future[None] = Future()
+            fut.set_result(None)
+            return fut
+
+        return super().read_data(plan, planner)
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:

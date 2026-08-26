@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import io
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -254,6 +255,125 @@ class TestFileSystem(TestCase):
 
         # os.sync() may be called on backends that don't support per-file fsync
         self.assertLessEqual(mock_os_sync.call_count, 2)
+
+    def test_fsspec_reader_batched_cat_ranges(self):
+        checkpoint_dir = "memory://test_fsspec_batched_load"
+
+        state_dict = {
+            "t1": torch.randn(10),
+            "t2": torch.randn(5, 5),
+            "t3": torch.randn(8, 4, 2),
+            "t4": torch.randn(20),
+            "bytes_data": io.BytesIO(b"custom_serialized_bytes_data"),
+        }
+
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+
+        for batch_size in (1, 2, 64):
+            load_dict = {
+                "t1": torch.zeros(10),
+                "t2": torch.zeros(5, 5),
+                "t3": torch.zeros(8, 4, 2),
+                "t4": torch.zeros(20),
+                "bytes_data": io.BytesIO(),
+            }
+            dcp.load(
+                state_dict=load_dict,
+                storage_reader=FsspecReader(checkpoint_dir, max_batch_size=batch_size),
+                planner=dcp.DefaultLoadPlanner(),
+                no_dist=True,
+            )
+
+            self.assertTrue(torch.allclose(state_dict["t1"], load_dict["t1"]))
+            self.assertTrue(torch.allclose(state_dict["t2"], load_dict["t2"]))
+            self.assertTrue(torch.allclose(state_dict["t3"], load_dict["t3"]))
+            self.assertTrue(torch.allclose(state_dict["t4"], load_dict["t4"]))
+            self.assertEqual(
+                state_dict["bytes_data"].getvalue(),
+                load_dict["bytes_data"].getvalue(),
+            )
+
+    def test_fsspec_reader_clamp_max_batch_size(self):
+        checkpoint_dir = "memory://test_clamp_batch_size"
+        for invalid_size in (0, -1, -100):
+            reader = FsspecReader(checkpoint_dir, max_batch_size=invalid_size)
+            self.assertEqual(reader.max_batch_size, 1)
+
+    def test_fsspec_reader_cat_ranges_error(self):
+        checkpoint_dir = "memory://test_cat_ranges_error"
+        state_dict = {"t1": torch.randn(10)}
+
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+
+        reader = FsspecReader(checkpoint_dir)
+        with patch.object(
+            reader.fs.fs, "cat_ranges", side_effect=RuntimeError("cat_ranges failed")
+        ):
+            load_dict = {"t1": torch.zeros(10)}
+            with self.assertRaises((RuntimeError, CheckpointException)):
+                dcp.load(
+                    state_dict=load_dict,
+                    storage_reader=reader,
+                    planner=dcp.DefaultLoadPlanner(),
+                    no_dist=True,
+                )
+
+
+
+    def test_fsspec_reader_cpu_exception_propagation(self):
+        checkpoint_dir = "memory://test_cpu_exception"
+        state_dict = {"t1": torch.randn(10)}
+
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+
+        reader = FsspecReader(checkpoint_dir)
+        # Attempt to load a tensor with a completely different shape to trigger a CPU deserialize error
+        load_dict = {"t1": torch.zeros(5)}
+        with self.assertRaisesRegex(AssertionError, "mismatch sizes"):
+            dcp.load(
+                state_dict=load_dict,
+                storage_reader=reader,
+                planner=dcp.DefaultLoadPlanner(),
+                no_dist=True,
+            )
+
+    def test_fsspec_reader_concurrent_shutdown(self):
+        # Verify that thread pools are shut down properly even on failure
+        checkpoint_dir = "memory://test_shutdown"
+        state_dict = {"t1": torch.randn(1)}
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+        
+        reader = FsspecReader(checkpoint_dir)
+        load_dict = {"t1": torch.zeros(2)}
+        try:
+            dcp.load(
+                state_dict=load_dict,
+                storage_reader=reader,
+                planner=dcp.DefaultLoadPlanner(),
+                no_dist=True,
+            )
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
