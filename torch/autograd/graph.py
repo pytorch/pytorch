@@ -404,11 +404,11 @@ class save_on_cpu(saved_tensors_hooks):
         >>> # all intermediary tensors are released (deleted) after the call to backward
     """
 
-   def __init__(self, pin_memory: bool = False, device_type: Optional[str] = None) -> None:
+    def __init__(self, pin_memory: bool = False, device_type: Optional[str] = None) -> None:
         if device_type is None:
             accelerator = torch.accelerator.current_accelerator()
-            device_type = accelerator.type
-        device_module = getattr(torch, device_type)
+            device_type = accelerator.type if accelerator is not None else "cuda"
+        device_module = getattr(torch, device_type, torch.cuda)
 
         def pack_to_cpu(tensor: torch.Tensor) -> tuple[torch.device, torch.Tensor]:
             if not pin_memory:
