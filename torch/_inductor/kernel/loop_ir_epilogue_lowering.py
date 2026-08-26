@@ -534,17 +534,3 @@ def _synthetic_reductions_ir(
                     seen.add(id(reduction.source))
                     reductions.append(reduction)
     return tuple(reductions)
-
-
-def is_direct_bool_gt_zero_ir(store: GemmEpilogueIRStore, source_name: str) -> bool:
-    """Match a direct comparison of one lowered buffer load against zero."""
-    expr = _strip_conversions(store.value)
-    if not isinstance(expr, GemmEpilogueIRExpression) or expr.op not in ("gt", "ge"):
-        return False
-    lhs, rhs = map(_strip_conversions, expr.args[:2])
-    return (
-        isinstance(lhs, GemmEpilogueIRExpression)
-        and lhs.op == "load"
-        and lhs.args[0] == source_name
-        and _constant_value(rhs) == 0
-    )
