@@ -789,8 +789,13 @@ def init_device_reg() -> None:
         register_interface_for_device(f"xpu:{i}", XpuInterface)
 
     register_interface_for_device("mtia", MtiaInterface)
-    for i in range(torch.mtia.device_count()):
-        register_interface_for_device(f"mtia:{i}", MtiaInterface)
+    # device_count() latches at::detail::getMTIAHooks() into a process-lifetime
+    # static on first call. Skip it when no MTIAHooks impl is registered yet
+    # (e.g. a JIT-built extension registers later, in a test's setUpClass) so
+    # that later registration is not permanently shadowed by the fallback hooks.
+    if torch.mtia._is_compiled():
+        for i in range(torch.mtia.device_count()):
+            register_interface_for_device(f"mtia:{i}", MtiaInterface)
 
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
