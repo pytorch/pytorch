@@ -11,7 +11,12 @@ import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipMPS,
+)
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import HAS_MPS, HAS_TRITON
 
 
 try:
@@ -28,7 +33,7 @@ class _TestHighwaySelfGating(torch.nn.Module):
         self,
         d_model: int,
         size: int,
-        device="cuda",
+        device,
     ) -> None:
         super().__init__()
         self.size = size
@@ -55,7 +60,7 @@ class _TestHighwaySelfGating(torch.nn.Module):
 
 
 class MyModule(torch.nn.Module):
-    def __init__(self, z: int, has_bias: bool, device="cuda") -> None:
+    def __init__(self, z: int, has_bias: bool, device) -> None:
         super().__init__()
         self.z = z
         self.device = device
@@ -321,7 +326,7 @@ class _TestDropout(torch.nn.Module):
         return (dropout, dropout_1, dropout_2, dropout_3, dropout_4)
 
 
-class TestGroupBatchFusion(TestCase):
+class _FusionCompareBase(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
             return False
@@ -350,7 +355,11 @@ class TestGroupBatchFusion(TestCase):
             self.compare_dict_tensors(ref_grad, res_grad, rtol=rtol, atol=atol)
         )
 
-    @requires_gpu()
+
+class TestGroupBatchFusionAccelerator(_FusionCompareBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
@@ -358,12 +367,12 @@ class TestGroupBatchFusion(TestCase):
             "group_linear": {"require_fbgemm": True},
         },
     )
-    def test_group_linear_fusion(self):
+    def test_group_linear_fusion(self, device):
         z = 10
         for has_bias in [True, False]:
             counters.clear()
-            module = MyModule(z, has_bias).to(GPU_TYPE)
-            input = [torch.randn(z, z, device=GPU_TYPE)]
+            module = MyModule(z, has_bias).to(device)
+            input = [torch.randn(z, z, device=device)]
             traced = torch.compile(module)
             ref = module(*input)
             res = traced(*input)
@@ -382,7 +391,7 @@ class TestGroupBatchFusion(TestCase):
             )
             counters.clear()
 
-    @requires_gpu()
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
@@ -390,10 +399,10 @@ class TestGroupBatchFusion(TestCase):
             "group_linear": {"require_fbgemm": True},
         },
     )
-    def test_group_linear_fusion_different_shapes(self):
+    def test_group_linear_fusion_different_shapes(self, device):
         counters.clear()
-        module = MyModule2().eval().to(GPU_TYPE)
-        input = [torch.rand(4, 24, device=GPU_TYPE)]
+        module = MyModule2().eval().to(device)
+        input = [torch.rand(4, 24, device=device)]
         traced = torch.compile(module)
         ref = module(*input)
         res = traced(*input)
@@ -416,18 +425,18 @@ class TestGroupBatchFusion(TestCase):
         )
         counters.clear()
 
-    @requires_gpu()
-    @unittest.skipIf(GPU_TYPE == "mps", "welford_reduce is yet not implemented for MPS")
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
+    @skipMPS
     @torch._inductor.config.patch(
         pre_grad_fusion_options={"batch_layernorm": {}},
         post_grad_fusion_options={},
     )
-    def test_batch_layer_norm_fusion(self):
+    def test_batch_layer_norm_fusion(self, device):
         for has_weight in [True, False]:
             for has_bias in [True, False]:
                 counters.clear()
-                module = MyModule3(GPU_TYPE, has_weight, has_bias).to(GPU_TYPE)
-                input = [torch.randn(2, 5, 50, device=GPU_TYPE)]
+                module = MyModule3(device, has_weight, has_bias).to(device)
+                input = [torch.randn(2, 5, 50, device=device)]
                 traced = torch.compile(module)
                 ref = module(*input)
                 res = traced(*input)
@@ -439,17 +448,17 @@ class TestGroupBatchFusion(TestCase):
                 self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
                 counters.clear()
 
-    @requires_gpu()
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={"batch_linear_lhs": {}},
         post_grad_fusion_options={},
     )
-    def test_batch_linear_lhs_fusion(self):
+    def test_batch_linear_lhs_fusion(self, device):
         z = 10
         for has_bias in [True, False]:
             counters.clear()
-            module = MyModule4(z, GPU_TYPE, has_bias)
-            input = [torch.randn(20, z, device=GPU_TYPE)]
+            module = MyModule4(z, device, has_bias)
+            input = [torch.randn(20, z, device=device)]
             traced = torch.compile(module)
             ref = module(*input)
             res = traced(*input)
@@ -461,8 +470,8 @@ class TestGroupBatchFusion(TestCase):
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
 
-    @requires_gpu()
-    def test_as_strided_storage_offset_after_mm_fusion(self):
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
+    def test_as_strided_storage_offset_after_mm_fusion(self, device):
         """
         Post-grad batch linear fusion rewrites parallel mm nodes into a
         batched bmm followed by select views. The select outputs preserve the
@@ -550,8 +559,8 @@ class TestGroupBatchFusion(TestCase):
                 return torch.bmm(q, k), k, v
 
         torch.manual_seed(42)
-        model = QKVModel().to(GPU_TYPE).eval()
-        x = torch.randn(1, 8, 64, device=GPU_TYPE)
+        model = QKVModel().to(device).eval()
+        x = torch.randn(1, 8, 64, device=device)
 
         torch._dynamo.reset()
         with torch.no_grad():
@@ -566,12 +575,12 @@ class TestGroupBatchFusion(TestCase):
         for ref_t, res_t in zip(ref, res):
             self.assertEqual(ref_t, res_t, rtol=1e-3, atol=1e-3)
 
-    @requires_gpu()
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={"batch_linear_lhs": {}},
         post_grad_fusion_options={},
     )
-    def test_batch_linear_lhs_fusion_nn_linear_inlined(self):
+    def test_batch_linear_lhs_fusion_nn_linear_inlined(self, device):
         # Same shape pattern as test_batch_linear_lhs_fusion, but the linears
         # are produced through nn.Linear modules. Dynamo inlines those to
         # torch._C._nn.linear, which the upstream matcher used to miss.
@@ -590,8 +599,8 @@ class TestGroupBatchFusion(TestCase):
         z, n = 10, 10
         for has_bias in [True, False]:
             counters.clear()
-            module = M(z, n, has_bias).to(GPU_TYPE)
-            input = [torch.randn(20, z, device=GPU_TYPE)]
+            module = M(z, n, has_bias).to(device)
+            input = [torch.randn(20, z, device=device)]
             traced = torch.compile(module)
             ref = module(*input)
             res = traced(*input)
@@ -603,16 +612,16 @@ class TestGroupBatchFusion(TestCase):
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
 
-    @requires_gpu()
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={"batch_linear": {}},
         post_grad_fusion_options={},
     )
-    def test_batch_linear_pre_grad_fusion(self):
+    def test_batch_linear_pre_grad_fusion(self, device):
         for has_bias in [True, False]:
             counters.clear()
-            module = MyModule5(GPU_TYPE, has_bias)
-            input = [torch.randn(50, 500, device=GPU_TYPE)]
+            module = MyModule5(device, has_bias)
+            input = [torch.randn(50, 500, device=device)]
             traced = torch.compile(module)
             ref = module(*input)
             res = traced(*input)
@@ -624,7 +633,7 @@ class TestGroupBatchFusion(TestCase):
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
 
-    @requires_gpu()
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "batch_relu": {},
@@ -637,10 +646,10 @@ class TestGroupBatchFusion(TestCase):
             "batch_aten_div": {},
         },
     )
-    def test_pointwise_op_fusion(self):
+    def test_pointwise_op_fusion(self, device):
         counters.clear()
-        module = _TestPointwiseOps(GPU_TYPE)
-        input = [torch.randn(50, 1000, requires_grad=True, device=GPU_TYPE)]
+        module = _TestPointwiseOps(device)
+        input = [torch.randn(50, 1000, requires_grad=True, device=device)]
         traced = torch.compile(module)
         ref = module(*input)
         res = traced(*input)
@@ -657,7 +666,7 @@ class TestGroupBatchFusion(TestCase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_gpu()
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -667,10 +676,10 @@ class TestGroupBatchFusion(TestCase):
             "unbind_stack_aten_pass": {},
         },
     )
-    def test_pointwise_op_fusion_post_grad(self):
+    def test_pointwise_op_fusion_post_grad(self, device):
         counters.clear()
-        module = _TestPointwiseOpsPostGrad(GPU_TYPE)
-        input = [torch.randn(50, 1000, requires_grad=True, device=GPU_TYPE)]
+        module = _TestPointwiseOpsPostGrad(device)
+        input = [torch.randn(50, 1000, requires_grad=True, device=device)]
         traced = torch.compile(module)
         ref = module(*input)
         res = traced(*input)
@@ -685,7 +694,7 @@ class TestGroupBatchFusion(TestCase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_gpu()
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
@@ -701,13 +710,13 @@ class TestGroupBatchFusion(TestCase):
             "unbind_stack_aten_pass": {},
         },
     )
-    def test_gate_fusion_post_grad(self):
+    def test_gate_fusion_post_grad(self, device):
         counters.clear()
         size = 20
-        module = _TestHighwaySelfGating(d_model=10, size=size, device=GPU_TYPE)
+        module = _TestHighwaySelfGating(d_model=10, size=size, device=device)
         input = [
             [
-                torch.randn(10, 10, requires_grad=True, device=GPU_TYPE)
+                torch.randn(10, 10, requires_grad=True, device=device)
                 for i in range(size)
             ]
         ]
@@ -727,7 +736,7 @@ class TestGroupBatchFusion(TestCase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_gpu()
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "normalization_pass": {},
@@ -739,12 +748,12 @@ class TestGroupBatchFusion(TestCase):
         },
         post_grad_fusion_options={},
     )
-    def test_math_op_fusion(self):
+    def test_math_op_fusion(self, device):
         counters.clear()
-        module = _TestMathOps(GPU_TYPE)
+        module = _TestMathOps(device)
         input = [
             torch.tensor(
-                [float("nan"), float("inf"), -float("inf"), 3.14], device=GPU_TYPE
+                [float("nan"), float("inf"), -float("inf"), 3.14], device=device
             )
         ]
         traced = torch.compile(module)
@@ -759,6 +768,63 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["unbind_stack_pass"], 2)
         self.assertTrue(torch.allclose(ref, res))
         counters.clear()
+
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+            "batch_dropout": {},
+        }
+    )
+    def test_batch_dropout_pre_grad_fusion(self, device):
+        counters.clear()
+        module = _TestDropout(device)
+        input = [torch.randn(10, 100, requires_grad=True, device=device)]
+        traced = torch.compile(module)
+        module(*input)
+        traced(*input)
+        self.assertEqual(counters["inductor"]["normalization_pass"], 1)
+        self.assertEqual(counters["inductor"]["batch_dropout"], 1)
+        counters.clear()
+
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
+    def test_predispatch_device_aware_batch_linear_lhs(self, device):
+        # Verify that the predispatch path (_run_pre_dispatch_passes) routes
+        # through _resolve_pre_grad_fusion_options and applies device filtering.
+        # The default config has devices=("xpu",) which was previously bypassed
+        # in the predispatch path (review #181854#issuecomment-4705071437).
+        # This test uses devices=(device,) to confirm the wrapper closure
+        # correctly resolves and filters fusion options.
+        z = 10
+        module = MyModule4(z, device, has_bias=True)
+        input = [torch.randn(20, z, device=device)]
+
+        counters.clear()
+        with torch._inductor.config.patch(
+            is_predispatch=True,
+            pre_grad_fusion_options={
+                "batch_linear_lhs": {"devices": (device,), "min_fuse_set_size": 2},
+            },
+        ):
+            traced = torch.compile(module, fullgraph=True)
+            ref = module(*input)
+            res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertGreater(
+            counters["inductor"]["batch_linear_lhs"],
+            0,
+            "batch_linear_lhs should fire in predispatch mode when devices match",
+        )
+        self.assertEqual(ref, res)
+        ref.sum().backward()
+        res.sum().backward()
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+
+class TestGroupBatchFusionGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @config.patch(
         is_predispatch=True,
@@ -776,125 +842,6 @@ class TestGroupBatchFusion(TestCase):
         x = torch.randn(8)
         self.assertEqual(fn(x), torch.compile(fn, fullgraph=True)(x))
         self.assertEqual(counters["inductor"]["batch_clamp"], 2)
-        counters.clear()
-
-    @requires_gpu()
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "normalization_pass": {},
-            "batch_dropout": {},
-        }
-    )
-    def test_batch_dropout_pre_grad_fusion(self):
-        counters.clear()
-        module = _TestDropout(GPU_TYPE)
-        input = [torch.randn(10, 100, requires_grad=True, device=GPU_TYPE)]
-        traced = torch.compile(module)
-        module(*input)
-        traced(*input)
-        self.assertEqual(counters["inductor"]["normalization_pass"], 1)
-        self.assertEqual(counters["inductor"]["batch_dropout"], 1)
-        counters.clear()
-
-    @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
-        },
-    )
-    def test_xpu_batch_linear_lhs(self):
-        # batch_linear_lhs is disabled by default; enabling it for XPU via mock
-        # config must make the fusion fire on XPU tensors.
-        default_options = config.pre_grad_fusion_options
-        self.assertIn("batch_linear_lhs", default_options)
-        self.assertEqual(default_options["batch_linear_lhs"]["devices"], ("xpu",))
-        z = 10
-        for has_bias in [True, False]:
-            orig_fusion_options = dict(config.pre_grad_fusion_options)
-            counters.clear()
-            module = MyModule4(z, "xpu", has_bias)
-            input = [torch.randn(20, z, device="xpu")]
-            traced = torch.compile(module)
-            ref = module(*input)
-            res = traced(*input)
-            self.compare_pred(module, traced, input)
-            self.assertGreater(counters["inductor"]["batch_linear_lhs"], 0)
-            self.assertEqual(ref, res)
-            ref.sum().backward()
-            res.sum().backward()
-            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
-            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
-            self.assertEqual(
-                orig_fusion_options,
-                dict(config.pre_grad_fusion_options),
-                "config.pre_grad_fusion_options should not be mutated",
-            )
-            counters.clear()
-
-    @requires_gpu()
-    @torch._inductor.config.patch(
-        is_predispatch=True,
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {"devices": (GPU_TYPE,), "min_fuse_set_size": 2},
-        },
-    )
-    def test_predispatch_device_aware_batch_linear_lhs(self):
-        # Verify that the predispatch path (_run_pre_dispatch_passes) routes
-        # through _resolve_pre_grad_fusion_options and applies device filtering.
-        # The default config has devices=("xpu",) which was previously bypassed
-        # in the predispatch path (review #181854#issuecomment-4705071437).
-        # This test uses devices=(GPU_TYPE,) to confirm the wrapper closure
-        # correctly resolves and filters fusion options.
-        z = 10
-        module = MyModule4(z, GPU_TYPE, has_bias=True)
-        input = [torch.randn(20, z, device=GPU_TYPE)]
-
-        counters.clear()
-        traced = torch.compile(module, fullgraph=True)
-        ref = module(*input)
-        res = traced(*input)
-        self.compare_pred(module, traced, input)
-        self.assertGreater(
-            counters["inductor"]["batch_linear_lhs"],
-            0,
-            "batch_linear_lhs should fire in predispatch mode when devices match GPU_TYPE",
-        )
-        self.assertEqual(ref, res)
-        ref.sum().backward()
-        res.sum().backward()
-        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
-        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
-        counters.clear()
-
-    @torch._inductor.config.patch(
-        is_predispatch=True,
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {"min_fuse_set_size": 2},
-        },
-    )
-    def test_predispatch_cpu_device_agnostic_batch_linear_lhs(self):
-        # Verify that the predispatch path correctly enables batch_linear_lhs
-        # when no "devices" key is present (user explicitly opts in).
-        # This test runs on CPU so it can be verified in local dev without GPU.
-        z = 10
-        module = MyModule4(z, "cpu", has_bias=True)
-        input = [torch.randn(20, z, device="cpu")]
-
-        counters.clear()
-        traced = torch.compile(module, fullgraph=True)
-        ref = module(*input)
-        res = traced(*input)
-        self.compare_pred(module, traced, input)
-        self.assertGreater(
-            counters["inductor"]["batch_linear_lhs"],
-            0,
-            "batch_linear_lhs should fire in predispatch mode when no devices key restricts it",
-        )
-        self.assertEqual(ref, res)
-        ref.sum().backward()
-        res.sum().backward()
-        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
-        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
     def test_batch_linear_lhs_skips_tensor_subclass_weights(self):
@@ -915,7 +862,7 @@ class TestGroupBatchFusion(TestCase):
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 if func == torch.ops.aten.cat.default:
                     raise AssertionError(
-                        "aten.cat called on _SubclassWeight — "
+                        "aten.cat called on _SubclassWeight \u2014 "
                         "batch_linear_lhs should have been skipped"
                     )
                 return func(*args, **(kwargs or {}))
@@ -943,6 +890,80 @@ class TestGroupBatchFusion(TestCase):
         )
 
 
+class TestGroupBatchFusionXpu(_FusionCompareBase):
+    hw_classification = HardwareClassification.XPU
+
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
+        },
+    )
+    def test_xpu_batch_linear_lhs(self, device):
+        # batch_linear_lhs is disabled by default; enabling it for XPU via mock
+        # config must make the fusion fire on XPU tensors.
+        default_options = config.pre_grad_fusion_options
+        self.assertIn("batch_linear_lhs", default_options)
+        self.assertEqual(default_options["batch_linear_lhs"]["devices"], ("xpu",))
+        z = 10
+        for has_bias in [True, False]:
+            orig_fusion_options = dict(config.pre_grad_fusion_options)
+            counters.clear()
+            module = MyModule4(z, device, has_bias)
+            input = [torch.randn(20, z, device=device)]
+            traced = torch.compile(module)
+            ref = module(*input)
+            res = traced(*input)
+            self.compare_pred(module, traced, input)
+            self.assertGreater(counters["inductor"]["batch_linear_lhs"], 0)
+            self.assertEqual(ref, res)
+            ref.sum().backward()
+            res.sum().backward()
+            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            self.assertEqual(
+                orig_fusion_options,
+                dict(config.pre_grad_fusion_options),
+                "config.pre_grad_fusion_options should not be mutated",
+            )
+            counters.clear()
+
+
+class TestGroupBatchFusionCpu(_FusionCompareBase):
+    hw_classification = HardwareClassification.CPU
+
+    @torch._inductor.config.patch(
+        is_predispatch=True,
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"min_fuse_set_size": 2},
+        },
+    )
+    def test_predispatch_cpu_device_agnostic_batch_linear_lhs(self, device):
+        # Verify that the predispatch path correctly enables batch_linear_lhs
+        # when no "devices" key is present (user explicitly opts in).
+        # This test runs on CPU so it can be verified in local dev without GPU.
+        z = 10
+        module = MyModule4(z, device, has_bias=True)
+        input = [torch.randn(20, z, device=device)]
+
+        counters.clear()
+        traced = torch.compile(module, fullgraph=True)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertGreater(
+            counters["inductor"]["batch_linear_lhs"],
+            0,
+            "batch_linear_lhs should fire in predispatch mode when no devices key restricts it",
+        )
+        self.assertEqual(ref, res)
+        ref.sum().backward()
+        res.sum().backward()
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+
 class _TestBMMFusionModule(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -960,16 +981,18 @@ class _TestBMMFusionModule(torch.nn.Module):
         return output
 
 
-@requires_gpu()
-@torch._inductor.config.patch(
-    post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
-)
 class TestPostGradBatchLinearFusion(TestCase):
-    def test_batch_linear_post_grad_fusion(self):
-        pt1_module = _TestBMMFusionModule().to(GPU_TYPE)
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
+    )
+    def test_batch_linear_post_grad_fusion(self, device):
+        pt1_module = _TestBMMFusionModule().to(device)
         inputs = []
         for _ in range(10):
-            inputs.append(torch.randn(10, 10).to(GPU_TYPE))
+            inputs.append(torch.randn(10, 10).to(device))
         eager_output = pt1_module(inputs)
         pt2_module = torch.compile(pt1_module)
         pt2_output = pt2_module(inputs)
@@ -981,6 +1004,8 @@ class TestPostGradBatchLinearFusion(TestCase):
 
 
 class TestFindIndependentSubsetGreedy(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Helper function to build a Graph from a data description.
     def build_graph(self, desc):
         # desc: {
@@ -1635,7 +1660,9 @@ class CatLinearTwoUserMod(torch.nn.Module):
     pre_grad_fusion_options={"cat_linear": {}},
     post_grad_fusion_options={},
 )
-class TestCatLinearFusion(TestCase):
+class TestCatLinearFusionGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _fires(self, module, parts, traffic_floor=0):
         # unit-test tensors never reach the real 512 MiB floor, so unless a test
         # is exercising the floor, drop it to 0 and let the shape gates decide.
@@ -1774,74 +1801,6 @@ class TestCatLinearFusion(TestCase):
         parts = [torch.randn(4, 16), torch.randn(4, 16)]
         self.assertEqual(self._fires(m, parts), 0)
 
-    @requires_gpu()
-    def test_cat_linear_numerics(self):
-        from unittest import mock
-
-        from torch._inductor.fx_passes import group_batch_fusion as gbf
-
-        for has_bias in [True, False]:
-            counters.clear()
-            torch._dynamo.reset()
-            module = CatLinearMod(
-                [176, 176], 64, has_bias=has_bias, device=GPU_TYPE
-            ).to(torch.bfloat16)
-            parts = [
-                torch.randn(64, 176, device=GPU_TYPE, dtype=torch.bfloat16),
-                torch.randn(64, 176, device=GPU_TYPE, dtype=torch.bfloat16),
-            ]
-            ref = module(parts)
-            with mock.patch.object(gbf, "CAT_LINEAR_CAT_TRAFFIC_FLOOR_BYTES", 0):
-                res = torch.compile(module)(parts)
-            self.assertEqual(counters["inductor"]["cat_linear"], 1)
-            self.assertEqual(ref, res, rtol=1.6e-2, atol=1e-2)
-            counters.clear()
-
-    @requires_gpu()
-    def test_cat_linear_numerics_backward(self):
-        # forward is not enough: the rewrite has to keep the backward correct too.
-        # grads reach the shared weight through the differentiable slices (one
-        # slice per piece), and the bias grad flows only through out_0 since bias
-        # rides on the first piece. Compare W.grad, bias.grad, and the per-part
-        # input grads eager-vs-compiled at the same bf16 tol as the fwd test.
-        from unittest import mock
-
-        from torch._inductor.fx_passes import group_batch_fusion as gbf
-
-        for has_bias in [True, False]:
-            counters.clear()
-            torch._dynamo.reset()
-            module = CatLinearMod(
-                [176, 176], 64, has_bias=has_bias, device=GPU_TYPE
-            ).to(torch.bfloat16)
-            base = [
-                torch.randn(64, 176, device=GPU_TYPE, dtype=torch.bfloat16),
-                torch.randn(64, 176, device=GPU_TYPE, dtype=torch.bfloat16),
-            ]
-
-            def run(compiled):
-                module.zero_grad(set_to_none=True)
-                parts = [p.detach().clone().requires_grad_(True) for p in base]
-                fn = torch.compile(module) if compiled else module
-                fn(parts).sum().backward()
-                return (
-                    module.lin.weight.grad.detach().clone(),
-                    module.lin.bias.grad.detach().clone() if has_bias else None,
-                    [p.grad.detach().clone() for p in parts],
-                )
-
-            w_ref, b_ref, in_ref = run(False)
-            with mock.patch.object(gbf, "CAT_LINEAR_CAT_TRAFFIC_FLOOR_BYTES", 0):
-                w_res, b_res, in_res = run(True)
-
-            self.assertEqual(counters["inductor"]["cat_linear"], 1)
-            self.assertEqual(w_ref, w_res, rtol=1.6e-2, atol=1e-2)
-            if has_bias:
-                self.assertEqual(b_ref, b_res, rtol=1.6e-2, atol=1e-2)
-            for gr, gs in zip(in_ref, in_res):
-                self.assertEqual(gr, gs, rtol=1.6e-2, atol=1e-2)
-            counters.clear()
-
     def test_cat_linear_numerics_cpu(self):
         from unittest import mock
 
@@ -1898,6 +1857,113 @@ class TestCatLinearFusion(TestCase):
             for gr, gs in zip(in_ref, in_res):
                 self.assertEqual(gr, gs)
             counters.clear()
+
+
+class TestCatLinearFusionAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={"cat_linear": {}},
+        post_grad_fusion_options={},
+    )
+    def test_cat_linear_numerics(self, device):
+        from unittest import mock
+
+        from torch._inductor.fx_passes import group_batch_fusion as gbf
+
+        for has_bias in [True, False]:
+            counters.clear()
+            torch._dynamo.reset()
+            module = CatLinearMod([176, 176], 64, has_bias=has_bias, device=device).to(
+                torch.bfloat16
+            )
+            parts = [
+                torch.randn(64, 176, device=device, dtype=torch.bfloat16),
+                torch.randn(64, 176, device=device, dtype=torch.bfloat16),
+            ]
+            ref = module(parts)
+            with mock.patch.object(gbf, "CAT_LINEAR_CAT_TRAFFIC_FLOOR_BYTES", 0):
+                res = torch.compile(module)(parts)
+            self.assertEqual(counters["inductor"]["cat_linear"], 1)
+            self.assertEqual(ref, res, rtol=1.6e-2, atol=1e-2)
+            counters.clear()
+
+    @unittest.skipIf(not (HAS_MPS or HAS_TRITON), "requires triton or MPS")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={"cat_linear": {}},
+        post_grad_fusion_options={},
+    )
+    def test_cat_linear_numerics_backward(self, device):
+        # forward is not enough: the rewrite has to keep the backward correct too.
+        # grads reach the shared weight through the differentiable slices (one
+        # slice per piece), and the bias grad flows only through out_0 since bias
+        # rides on the first piece. Compare W.grad, bias.grad, and the per-part
+        # input grads eager-vs-compiled at the same bf16 tol as the fwd test.
+        from unittest import mock
+
+        from torch._inductor.fx_passes import group_batch_fusion as gbf
+
+        for has_bias in [True, False]:
+            counters.clear()
+            torch._dynamo.reset()
+            module = CatLinearMod([176, 176], 64, has_bias=has_bias, device=device).to(
+                torch.bfloat16
+            )
+            base = [
+                torch.randn(64, 176, device=device, dtype=torch.bfloat16),
+                torch.randn(64, 176, device=device, dtype=torch.bfloat16),
+            ]
+
+            def run(compiled):
+                module.zero_grad(set_to_none=True)
+                parts = [p.detach().clone().requires_grad_(True) for p in base]
+                fn = torch.compile(module) if compiled else module
+                fn(parts).sum().backward()
+                return (
+                    module.lin.weight.grad.detach().clone(),
+                    module.lin.bias.grad.detach().clone() if has_bias else None,
+                    [p.grad.detach().clone() for p in parts],
+                )
+
+            w_ref, b_ref, in_ref = run(False)
+            with mock.patch.object(gbf, "CAT_LINEAR_CAT_TRAFFIC_FLOOR_BYTES", 0):
+                w_res, b_res, in_res = run(True)
+
+            self.assertEqual(counters["inductor"]["cat_linear"], 1)
+            self.assertEqual(w_ref, w_res, rtol=1.6e-2, atol=1e-2)
+            if has_bias:
+                self.assertEqual(b_ref, b_res, rtol=1.6e-2, atol=1e-2)
+            for gr, gs in zip(in_ref, in_res):
+                self.assertEqual(gr, gs, rtol=1.6e-2, atol=1e-2)
+            counters.clear()
+
+
+instantiate_device_type_tests(
+    TestGroupBatchFusionAccelerator,
+    globals(),
+    except_for="cpu",
+    allow_mps=True,
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestGroupBatchFusionXpu, globals(), only_for="xpu", allow_xpu=True
+)
+instantiate_device_type_tests(TestGroupBatchFusionCpu, globals(), only_for="cpu")
+instantiate_device_type_tests(
+    TestPostGradBatchLinearFusion,
+    globals(),
+    except_for="cpu",
+    allow_mps=True,
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestCatLinearFusionAccelerator,
+    globals(),
+    except_for="cpu",
+    allow_mps=True,
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
