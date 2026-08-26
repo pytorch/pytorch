@@ -23,6 +23,10 @@ __all__ = ["varlen_attn", "varlen_attn_out", "AuxRequest"]
 # Custom op schemas do not support enum arguments, so pass SDPBackend values as ints.
 _FLASH_ATTENTION_BACKEND = SDPBackend.FLASH_ATTENTION.value
 _CUDNN_ATTENTION_BACKEND = SDPBackend.CUDNN_ATTENTION.value
+_CUDNN_SM100_FORWARD_LARGE_HEAD_DIMS = frozenset(
+    {(192, 128), (192, 192), (256, 128), (256, 256)}
+)
+_CUDNN_SM100_BACKWARD_LARGE_HEAD_DIMS = frozenset({(192, 128)})
 
 
 def _normalize_window_size(window_size: list[int] | None) -> list[int]:
@@ -51,17 +55,38 @@ def _get_sdp_priority_order() -> list[int]:
 
 @lru_cache(maxsize=8)
 @torch.compiler.assume_constant_result
+def _cudnn_version_and_major_capability(device_index: int) -> tuple[int | None, int]:
+    """Cache cuDNN and device capability queries used by backend selection."""
+    return torch.backends.cudnn.version(), torch.cuda.get_device_capability(
+        device_index
+    )[0]
+
+
+@lru_cache(maxsize=8)
+@torch.compiler.assume_constant_result
 def _should_use_cudnn(device_index: int) -> bool:
     """Cache device capability check to avoid repeated CUDA calls."""
     if torch.version.hip is not None:
         return False
-    cudnn_version = torch.backends.cudnn.version()
-    if cudnn_version is None or cudnn_version < 91800:
-        return False
-    major_cap = torch.cuda.get_device_capability(device_index)[0]
-    if major_cap == 9 or major_cap == 10:
+    cudnn_version, major_cap = _cudnn_version_and_major_capability(device_index)
+    return cudnn_version is not None and cudnn_version >= 91800 and major_cap in (9, 10)
+
+
+def _cudnn_supports_head_dims(
+    query: torch.Tensor, value: torch.Tensor, needs_backward: bool
+) -> bool:
+    """Return whether cuDNN supports this varlen head-dimension combination."""
+    dims = (query.shape[-1], value.shape[-1])
+    if dims[0] <= 128 and dims[1] <= 128:
         return True
-    return False
+    if not query.is_cuda:
+        return False
+    cudnn_version, major_cap = _cudnn_version_and_major_capability(query.device.index)
+    if cudnn_version is None or major_cap != 10:
+        return False
+    if not needs_backward:
+        return cudnn_version >= 92400 and dims in _CUDNN_SM100_FORWARD_LARGE_HEAD_DIMS
+    return cudnn_version >= 91900 and dims in _CUDNN_SM100_BACKWARD_LARGE_HEAD_DIMS
 
 
 def _cudnn_rejection_reasons(
@@ -89,8 +114,13 @@ def _cudnn_rejection_reasons(
         reasons.append("query dtype must be float16 or bfloat16")
     if query.shape[-1] % 8 != 0 or value.shape[-1] % 8 != 0:
         reasons.append("query and value head dimensions must be divisible by 8")
-    if query.shape[-1] > 128 or value.shape[-1] > 128:
-        reasons.append("head dimensions must be at most 128")
+    needs_backward = any(tensor.requires_grad for tensor in (query, key, value))
+    if not _cudnn_supports_head_dims(query, value, needs_backward):
+        phase = "backward" if needs_backward else "forward"
+        reasons.append(
+            f"query/value head dimensions {(query.shape[-1], value.shape[-1])} "
+            f"are unsupported for cuDNN varlen {phase}"
+        )
     if window_size == [-1, 0]:
         if cu_seq_q is not cu_seq_k:
             reasons.append(
