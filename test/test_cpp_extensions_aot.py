@@ -48,12 +48,12 @@ except ImportError as e:
 
 # cpu and mps use the ATen-dispatched .cpp extension (device-agnostic ops);
 # cuda and xpu use backend-specific kernel extensions from setup.py.
-_SIGMOID_ADD_BACKENDS = (
-    ("cpu", "torch_test_cpp_extension.cpp"),
-    ("mps", "torch_test_cpp_extension.cpp"),
-    ("cuda", "torch_test_cpp_extension.cuda"),
-    ("xpu", "torch_test_cpp_extension.sycl"),
-)
+_SIGMOID_ADD_BACKENDS = {
+    "cpu": "torch_test_cpp_extension.cpp",
+    "mps": "torch_test_cpp_extension.cpp",
+    "cuda": "torch_test_cpp_extension.cuda",
+    "xpu": "torch_test_cpp_extension.sycl",
+}
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -97,18 +97,13 @@ class TestCppExtensionAOT(common.TestCase):
         expected_tensor_grad = torch.ones([4, 4], dtype=torch.double).mm(weights.t())
         self.assertEqual(tensor.grad, expected_tensor_grad)
 
-    @parametrize("device_type,module_name", list(_SIGMOID_ADD_BACKENDS))
-    def test_sigmoid_add_extension(self, device_type, module_name):
-        if device_type != "cpu":
-            device_mod = getattr(torch, device_type, None)
-            if device_mod is None:
-                msg = f"{device_type} backend is not compiled into this PyTorch build"
-                raise RuntimeError(msg)
-            is_available = getattr(device_mod, "is_available", None)
-            if is_available is not None and not is_available():
-                raise unittest.SkipTest(f"{device_type} not available")
-            if device_type == "xpu" and os.getenv("USE_NINJA", "0") == "0":
-                raise unittest.SkipTest("sycl extension requires ninja to build")
+    @parametrize("device_type", list(_SIGMOID_ADD_BACKENDS))
+    def test_sigmoid_add_extension(self, device_type):
+        module_name = _SIGMOID_ADD_BACKENDS[device_type]
+        if not torch.get_device_module(device_type).is_available():
+            raise unittest.SkipTest(f"{device_type} not available")
+        if device_type == "xpu" and os.getenv("USE_NINJA", "0") == "0":
+            raise unittest.SkipTest("sycl extension requires ninja to build")
         ext = importlib.import_module(module_name)
         x = torch.zeros(100, device=device_type, dtype=torch.float32)
         y = torch.zeros(100, device=device_type, dtype=torch.float32)
