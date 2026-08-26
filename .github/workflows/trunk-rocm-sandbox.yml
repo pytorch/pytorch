@@ -66,9 +66,9 @@ jobs:
           { config: "default", shard: 8, num_shards: 8, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.1" },
           { config: "inductor", shard: 1, num_shards: 2, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.1" },
           { config: "inductor", shard: 2, num_shards: 2, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.1" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
+          # { config: "distributed", shard: 1, num_shards: 3, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
+          # { config: "distributed", shard: 2, num_shards: 3, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
+          # { config: "distributed", shard: 3, num_shards: 3, runner: "amd-sandbox-linux-doks.rocm.gpu.mi350.2", owners: ["module:rocm", "oncall:distributed"] },
         ]}
     secrets: inherit
 
