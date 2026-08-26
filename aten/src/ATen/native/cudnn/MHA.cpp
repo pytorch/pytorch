@@ -214,7 +214,7 @@ static void check_cudnn_sdpa_execution(fe::error_t err) {
 void check_cudnn_sdpa_decode(int64_t s_q) {
   TORCH_CHECK(
       s_q != 1 || !sdp::is_cudnn_attention_decode_disabled(),
-      "cuDNN SDPA decode is disabled for cuDNN versions 9.19-9.25 on SM 10.x and 11.x.");
+      "cuDNN SDPA decode is disabled for cuDNN versions 9.19-9.25.0 (except 9.24.1) on SM 10.x and 11.x.");
 }
 
 // Whether we will use ragged offsets in the dense (non-nested) path

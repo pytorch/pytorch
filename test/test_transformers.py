@@ -2973,8 +2973,10 @@ class TestSDPACudaOnly(NNTestCase):
         cudnn_version = torch.backends.cudnn.version() or 0
         device_capability = torch.cuda.get_device_capability()
         affected_arch = device_capability[0] in (10, 11)
-        if not (affected_arch and (91900 <= cudnn_version < 92600)):
-            self.skipTest("Requires cuDNN 9.19-9.25 on SM 10.x or 11.x")
+        # cuDNN versions 9.19-9.25.0 (except 9.24.1) on SM 10.x and 11.x are disabled
+        # This check also allows possible future 9.24 patch versions without a rewrite
+        if not (affected_arch and (91900 <= cudnn_version <= 92500) and not (92400 < cudnn_version < 92500)):
+            self.skipTest("Requires cuDNN 9.19-9.25.0 (except 9.24.1) on SM 10.x or 11.x")
 
         query = torch.randn(2, 8, 1, 64, device=device, dtype=torch.float16)
         key = torch.randn(2, 8, 128, 64, device=device, dtype=torch.float16)

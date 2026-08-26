@@ -715,7 +715,7 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
           dprops->major,
           ".",
           dprops->minor,
-          " for cuDNN versions 9.19-9.25");
+          " for cuDNN versions 9.19-9.25.0 (except 9.24.1)");
     }
     return false;
   }
@@ -1013,7 +1013,9 @@ bool is_cudnn_attention_decode_disabled() {
   static const std::vector<bool> disabled_by_device = [] {
     const auto cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
     std::vector<bool> disabled(at::cuda::device_count());
-    if (cudnn_version < 91900 || cudnn_version >= 92600) {
+    // cuDNN versions 9.19-9.25.0 (except 9.24.1) on SM 10.x and 11.x are disabled
+    // This check also allows possible future 9.24 patch versions without a rewrite
+    if (cudnn_version < 91900 || cudnn_version > 92500 || (cudnn_version > 92400 && cudnn_version < 92500)) {
       return disabled;
     }
     for (const auto device : c10::irange(at::cuda::device_count())) {
