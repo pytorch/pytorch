@@ -33,22 +33,22 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     IS_ARM64,
     IS_CI,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
-    isRocmArchAnyOf,
     MI200_ARCH,
+    TEST_MKL,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+    HardwareClassification,
+    isRocmArchAnyOf,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
-    TEST_MKL,
-    TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     HAS_CPU,
@@ -1386,7 +1386,7 @@ class TestInductorOpInfo(TestCase):
         )
         if (
             TEST_WITH_ROCM
-            and device_type == self.device_type
+            and device_type != "cpu"
             and op_name == "addmm"
             and dtype is f16
             and isRocmArchAnyOf(MI200_ARCH)
@@ -1532,11 +1532,11 @@ class TestInductorOpInfo(TestCase):
                             adjusted_kwargs.update(
                                 copy_to_gpu=False,
                             )
-                            if device_type == self.device_type:
+                            if device_type != "cpu":
                                 adjusted_kwargs["reference_in_float"] = False
 
                         # skip checking gradient on CPU for now
-                        if device_type == self.device_type:
+                        if device_type != "cpu":
                             # Only check gradients if there are input tensors requiring gradients
                             has_grad_inputs = any(
                                 getattr(x, "requires_grad", False)
@@ -1560,7 +1560,7 @@ class TestInductorOpInfo(TestCase):
                         # XPU has additional layout optimizations that change strides differently from eager mode.
                         if exact_stride and self.device_type == "xpu":
                             exact_stride = op_name not in inductor_skip_exact_stride_xpu
-                        if device_type == self.device_type:
+                        if device_type != "cpu":
                             self.check_model_gpu(
                                 fn,
                                 args,
