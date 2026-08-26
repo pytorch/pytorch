@@ -277,7 +277,7 @@ struct TransposeTilePad {
                                               : 1;   // 4 B: 33 words
 };
 
-template <typename T>
+template <typename T, bool kGridStride>
 __global__ void transpose_copy_tiled_kernel(
     const T* __restrict__ src, T* __restrict__ dst,
     int64_t width, int64_t height) {
@@ -287,7 +287,8 @@ __global__ void transpose_copy_tiled_kernel(
   // tile rows with a grid-stride loop instead of mapping them 1:1 to blocks.
   const int64_t tiles_y = (height + kTransposeTile - 1) / kTransposeTile;
 
-  for (int64_t by = blockIdx.y; by < tiles_y; by += gridDim.y) {
+  int64_t by = blockIdx.y;
+  do {
     int64_t x = static_cast<int64_t>(blockIdx.x) * kTransposeTile + threadIdx.x;
     int64_t y = by * kTransposeTile + threadIdx.y;
 
@@ -306,8 +307,24 @@ __global__ void transpose_copy_tiled_kernel(
         dst[(y + j) * height + x] = tile[threadIdx.x][threadIdx.y + j];
       }
     }
+    // With a single pass there is no next iteration to guard
+    if (!kGridStride) break;
     // Required before the next iteration overwrites the tile.
     __syncthreads();
+    by += gridDim.y;
+  } while (by < tiles_y);
+}
+
+template <typename T>
+void launch_tiled_transpose(bool needs_stride, dim3 grid, dim3 block,
+                            cudaStream_t stream, const void* sp, void* dp,
+                            int64_t w, int64_t h) {
+  if (needs_stride) {
+    transpose_copy_tiled_kernel<T, true><<<grid, block, 0, stream>>>(
+        reinterpret_cast<const T*>(sp), reinterpret_cast<T*>(dp), w, h);
+  } else {
+    transpose_copy_tiled_kernel<T, false><<<grid, block, 0, stream>>>(
+        reinterpret_cast<const T*>(sp), reinterpret_cast<T*>(dp), w, h);
   }
 }
 
@@ -337,23 +354,21 @@ bool maybe_tiled_transpose_copy(TensorIterator& iter) {
   const int64_t tiles_x = (w + kTransposeTile - 1) / kTransposeTile;
   const int64_t tiles_y = (h + kTransposeTile - 1) / kTransposeTile;
   dim3 block(kTransposeTile, kTransposeRows);
+  const bool needs_stride = tiles_y > kMaxGridY;
   dim3 grid((unsigned)tiles_x,
-            (unsigned)(tiles_y < kMaxGridY ? tiles_y : kMaxGridY));
+            (unsigned)(needs_stride ? kMaxGridY : tiles_y));
   auto stream = at::cuda::getCurrentCUDAStream();
   const void* sp = iter.tensor(1).const_data_ptr();
   void* dp = iter.tensor(0).mutable_data_ptr();
 
   switch (es) {
-    case 1: transpose_copy_tiled_kernel<uint8_t><<<grid, block, 0, stream>>>(
-              reinterpret_cast<const uint8_t*>(sp), reinterpret_cast<uint8_t*>(dp), w, h); break;
-    case 2: transpose_copy_tiled_kernel<uint16_t><<<grid, block, 0, stream>>>(
-              reinterpret_cast<const uint16_t*>(sp), reinterpret_cast<uint16_t*>(dp), w, h); break;
-    case 4: transpose_copy_tiled_kernel<uint32_t><<<grid, block, 0, stream>>>(
-              reinterpret_cast<const uint32_t*>(sp), reinterpret_cast<uint32_t*>(dp), w, h); break;
-    case 8: transpose_copy_tiled_kernel<uint64_t><<<grid, block, 0, stream>>>(
-              reinterpret_cast<const uint64_t*>(sp), reinterpret_cast<uint64_t*>(dp), w, h); break;
+    case 1: launch_tiled_transpose<uint8_t>(needs_stride, grid, block, stream, sp, dp, w, h); break;
+    case 2: launch_tiled_transpose<uint16_t>(needs_stride, grid, block, stream, sp, dp, w, h); break;
+    case 4: launch_tiled_transpose<uint32_t>(needs_stride, grid, block, stream, sp, dp, w, h); break;
+    case 8: launch_tiled_transpose<uint64_t>(needs_stride, grid, block, stream, sp, dp, w, h); break;
     default: return false;
   }
+
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return true;
 }
