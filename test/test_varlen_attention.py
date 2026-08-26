@@ -1004,6 +1004,62 @@ class TestVarlenAttention(NNTestCase):
         self.assertEqual(actual, expected)
 
     @skipIfRocm
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("different_kv_stride", [False, True])
+    def test_cudnn_varlen_cumulative_sequence_lengths(
+        self, device, dtype, different_kv_stride
+    ):
+        """Direct cumulative lengths match the legacy per-sequence path."""
+        _check_cudnn_varlen_supported(device)
+        if torch.backends.cudnn.version() < 92400:
+            raise unittest.SkipTest("direct cumulative lengths require cuDNN 9.24")
+        torch.manual_seed(42)
+        total, num_heads, head_dim = 512, 4, 64
+        q = torch.randn(
+            total, num_heads, head_dim, device=device, dtype=dtype
+        ).requires_grad_()
+
+        def make_kv():
+            shape = (total, num_heads, head_dim + 8) if different_kv_stride else q.shape
+            tensor = torch.randn(shape, device=device, dtype=dtype)
+            return tensor[..., :head_dim].requires_grad_()
+
+        k, v = make_kv(), make_kv()
+        cu_seq_q = torch.tensor([-1, 0, 192, total], device=device, dtype=torch.int32)[
+            1:
+        ]
+        cu_seq_k = torch.tensor([-1, 0, 256, total], device=device, dtype=torch.int32)[
+            1:
+        ]
+        self.assertNotEqual(cu_seq_q.data_ptr() % 16, 0)
+        self.assertNotEqual(cu_seq_k.data_ptr() % 16, 0)
+
+        def run(seqused_k):
+            with torch.no_grad(), sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+                return varlen_attn(
+                    q,
+                    k,
+                    v,
+                    cu_seq_q,
+                    cu_seq_k,
+                    320,
+                    256,
+                    seqused_k=seqused_k,
+                    return_aux=AuxRequest(lse=True),
+                )
+
+        direct = run(None)
+        legacy = run(torch.diff(cu_seq_k))
+        direct_again = run(None)
+        self.assertEqual(direct, legacy)
+        self.assertEqual(direct_again, direct)
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            out = varlen_attn(q, k, v, cu_seq_q, cu_seq_k, 320, 256)
+            grads = torch.autograd.grad(out, (q, k, v), torch.randn_like(out))
+        for grad in grads:
+            self.assertTrue(torch.isfinite(grad).all())
+
+    @skipIfRocm
     @parametrize("tensor_idx", [0, 1, 2])
     def test_cudnn_varlen_unaligned_input_raises(self, device, tensor_idx):
         """Reject varlen inputs whose row strides are not 16-byte aligned.

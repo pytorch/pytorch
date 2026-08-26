@@ -177,6 +177,12 @@ void run_cudnn_SDP_bprop_nestedtensor(
 #include <cstdint>
 #include <iostream>
 
+#if CUDNN_FRONTEND_VERSION >= 12500 && CUDNN_VERSION >= 92400
+#define AT_CUDNN_HAS_CUMULATIVE_SEQUENCE_LENGTHS 1
+#else
+#define AT_CUDNN_HAS_CUMULATIVE_SEQUENCE_LENGTHS 0
+#endif
+
 namespace at::native {
 
 namespace fe = cudnn_frontend;
@@ -316,6 +322,7 @@ struct MHAParams {
   bool use_ragged;
   bool is_paged;
   bool is_nested;
+  bool use_cu_seqlen;
 };
 
 namespace {
@@ -338,6 +345,17 @@ constexpr int64_t kLegacyTensorAlignment = 16;
 constexpr int64_t kRequiredInt32Alignment =
     HasSetAlignment<fe::graph::Tensor_attributes> ? kInt32Alignment
                                                   : kLegacyTensorAlignment;
+
+// Direct cumulative lengths require support from both frontend and backend.
+bool supports_cumulative_sequence_lengths() {
+#if AT_CUDNN_HAS_CUMULATIVE_SEQUENCE_LENGTHS
+  return std::min(
+             fe::detail::get_compiled_version(),
+             fe::detail::get_backend_version()) >= 92400;
+#else
+  return false;
+#endif
+}
 
 void checkInt32Alignment(const Tensor& tensor, const char* name) {
   const auto address = reinterpret_cast<uintptr_t>(tensor.const_data_ptr());
@@ -383,7 +401,8 @@ void setMHAParams(
     bool is_causal,
     bool return_softmaxstats,
     bool is_nested,
-    const std::optional<Tensor>& page_table) {
+    const std::optional<Tensor>& page_table,
+    bool use_cu_seqlen) {
   memset(&params, 0, sizeof(MHAParams));
   params.device_id = at::cuda::current_device();
   params.dataType = fe::DataType_t::HALF;
@@ -402,6 +421,7 @@ void setMHAParams(
   params.has_attn_bias = attn_bias.has_value();
   params.is_paged = page_table.has_value();
   params.is_nested = is_nested;
+  params.use_cu_seqlen = use_cu_seqlen;
   // Paged K/V remain 4D page pools in the nested path.
   const uint8_t q_rank = (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested);
   const uint8_t kv_rank = params.is_paged ? MAX_MHA_DIM : q_rank;
@@ -487,7 +507,8 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
       bool is_causal,
       bool return_softmaxstats,
       bool is_nested,
-      const std::optional<Tensor>& page_table = std::nullopt) {
+      const std::optional<Tensor>& page_table = std::nullopt,
+      bool use_cu_seqlen = false) {
     setMHAParams(
         this->pod,
         b,
@@ -507,7 +528,8 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
         is_causal,
         return_softmaxstats,
         is_nested,
-        page_table);
+        page_table,
+        use_cu_seqlen);
   }
 };
 
@@ -588,6 +610,8 @@ enum UIDS {
   DV,
   SEQ_LEN_Q,
   SEQ_LEN_KV,
+  CU_SEQ_LEN_Q,
+  CU_SEQ_LEN_KV,
   RAG_Q_OFF,
   RAG_K_OFF,
   RAG_V_OFF,
@@ -870,6 +894,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
     const Tensor& cum_seqlen_q,
     const Tensor& cum_seqlen_kv,
     const std::optional<Tensor>& page_table,
+    bool use_cu_seqlen,
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
@@ -899,18 +924,16 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
                             .set_stride({1, 1, 1, 1})
                             .set_is_pass_by_value(true)
                             .set_data_type(fe::DataType_t::FLOAT));
-  auto sequence_length_tensor = [&](UIDS uid, const char* name) {
+  auto index_tensor = [&](UIDS uid, const char* name, int64_t size) {
     auto attributes = fe::graph::Tensor_attributes();
     attributes.set_uid(uid)
         .set_name(name)
-        .set_dim({b, 1, 1, 1})
+        .set_dim({size, 1, 1, 1})
         .set_stride({1, 1, 1, 1})
         .set_data_type(fe::DataType_t::INT32);
     setAlignmentIfSupported(attributes, kInt32Alignment);
     return mha_graph->tensor(attributes);
   };
-  auto SEQ_LEN_Q_ = sequence_length_tensor(SEQ_LEN_Q, "Seq_q");
-  auto SEQ_LEN_KV_ = sequence_length_tensor(SEQ_LEN_KV, "Seq_kv");
 
   auto scaled_dot_product_flash_attention_options =
       fe::graph::SDPA_attributes()
@@ -922,9 +945,21 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
 #endif
           .set_causal_mask(is_causal)
           .set_attn_scale(attn_scale)
-          .set_seq_len_q(SEQ_LEN_Q_)
-          .set_seq_len_kv(SEQ_LEN_KV_)
           .set_padding_mask(true);
+#if AT_CUDNN_HAS_CUMULATIVE_SEQUENCE_LENGTHS
+  if (use_cu_seqlen) {
+    auto CU_SEQ_LEN_Q_ = index_tensor(CU_SEQ_LEN_Q, "Cu_seq_q", b + 1);
+    auto CU_SEQ_LEN_KV_ = index_tensor(CU_SEQ_LEN_KV, "Cu_seq_kv", b + 1);
+    scaled_dot_product_flash_attention_options.set_cu_seq_len_q(CU_SEQ_LEN_Q_)
+        .set_cu_seq_len_kv(CU_SEQ_LEN_KV_)
+        .set_implementation(fe::AttentionImplementation_t::UNIFIED);
+  }
+#endif
+  if (!use_cu_seqlen) {
+    scaled_dot_product_flash_attention_options
+        .set_seq_len_q(index_tensor(SEQ_LEN_Q, "Seq_q", b))
+        .set_seq_len_kv(index_tensor(SEQ_LEN_KV, "Seq_kv", b));
+  }
   if (dropout_probability != 0.0f) {
     auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
                                       .set_uid(SEED)
@@ -1012,37 +1047,31 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
                               .set_dim(attn_bias.value().sizes().vec())
                               .set_stride(attn_bias.value().strides().vec())));
   }
-  auto RAG_Q_OFF_ =
-      mha_graph->tensor(fe::graph::Tensor_attributes()
-                            .set_uid(RAG_Q_OFF)
-                            .set_name("cum_seq_q")
-                            .set_dim({b + 1, 1, 1, 1})
-                            .set_stride({1, 1, 1, 1})
-                            .set_data_type(fe::DataType_t::INT32));
-  auto RAG_O_OFF_ =
-      mha_graph->tensor(fe::graph::Tensor_attributes()
-                            .set_uid(RAG_O_OFF)
-                            .set_name("cum_seq_o")
-                            .set_dim({b + 1, 1, 1, 1})
-                            .set_stride({1, 1, 1, 1})
-                            .set_data_type(fe::DataType_t::INT32));
+  auto ragged_offset_tensor = [&](UIDS uid, const char* name) {
+    auto attributes = fe::graph::Tensor_attributes();
+    attributes.set_uid(uid)
+        .set_name(name)
+        .set_dim({b + 1, 1, 1, 1})
+        .set_stride({1, 1, 1, 1})
+        .set_data_type(fe::DataType_t::INT32);
+    setAlignmentIfSupported(attributes, kInt32Alignment);
+    return mha_graph->tensor(attributes);
+  };
+  auto RAG_Q_OFF_ = ragged_offset_tensor(RAG_Q_OFF, "cum_seq_q");
+  auto RAG_O_OFF_ = ragged_offset_tensor(RAG_O_OFF, "cum_seq_o");
   Q_->set_ragged_offset(RAG_Q_OFF_);
   if (!is_paged) {
-    K_->set_ragged_offset(
-        mha_graph->tensor(fe::graph::Tensor_attributes()
-                              .set_uid(RAG_K_OFF)
-                              .set_name("cum_seq_k")
-                              .set_dim({b + 1, 1, 1, 1})
-                              .set_stride({1, 1, 1, 1})
-                              .set_data_type(fe::DataType_t::INT32)));
-    V_->set_ragged_offset(
-        mha_graph->tensor(fe::graph::Tensor_attributes()
-                              .set_uid(RAG_V_OFF)
-                              .set_name("cum_seq_v")
-                              .set_dim({b + 1, 1, 1, 1})
-                              .set_stride({1, 1, 1, 1})
-                              .set_data_type(fe::DataType_t::INT32)));
+    K_->set_ragged_offset(ragged_offset_tensor(RAG_K_OFF, "cum_seq_k"));
+    V_->set_ragged_offset(ragged_offset_tensor(RAG_V_OFF, "cum_seq_v"));
   }
+#if AT_CUDNN_HAS_CUMULATIVE_SEQUENCE_LENGTHS
+  if (use_cu_seqlen) {
+    TORCH_INTERNAL_ASSERT(!is_paged);
+    Q_->set_ragged_offset_multiplier(q.stride(-3));
+    K_->set_ragged_offset_multiplier(k.stride(-3));
+    V_->set_ragged_offset_multiplier(v.stride(-3));
+  }
+#endif
   auto [O_, Stats] =
       mha_graph->sdpa(Q_, K_, V_, scaled_dot_product_flash_attention_options);
   O_->set_output(true)
@@ -1050,20 +1079,19 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
       .set_dim({b, h_q, s_q, d_v})
       .set_stride(thd_to_bhsd_strides(o));
   O_->set_ragged_offset(RAG_O_OFF_);
+#if AT_CUDNN_HAS_CUMULATIVE_SEQUENCE_LENGTHS
+  if (use_cu_seqlen) {
+    O_->set_ragged_offset_multiplier(o.stride(-3));
+  }
+#endif
   if (Stats) {
-    auto RAG_STATS_OFF =
-        mha_graph->tensor(fe::graph::Tensor_attributes()
-                              .set_uid(RAG_LSE_OFF)
-                              .set_name("cum_seq_stats")
-                              .set_dim({b + 1, 1, 1, 1})
-                              .set_stride({1, 1, 1, 1})
-                              .set_data_type(fe::DataType_t::INT32));
     Stats->set_output(true)
         .set_uid(LSE)
         .set_data_type(fe::DataType_t::FLOAT)
         .set_dim({b, h_q, s_q, 1})
         .set_stride(thd_to_bhsd_strides(softmaxstats));
-    Stats->set_ragged_offset(RAG_STATS_OFF);
+    Stats->set_ragged_offset(
+        ragged_offset_tensor(RAG_LSE_OFF, "cum_seq_stats"));
   }
   AT_CUDNN_FRONTEND_CHECK(mha_graph->validate());
   AT_CUDNN_FRONTEND_CHECK(mha_graph->build_operation_graph(handle));
@@ -1721,6 +1749,10 @@ void run_cudnn_SDP_fprop_nestedtensor(
   if (!o.defined()) {
     alloc_with_matching_layout(q, o, {q.size(0), h_q, d_v});
   }
+  const bool use_cu_seqlen = supports_cumulative_sequence_lengths() &&
+      !seqused_k.has_value() && dropout_probability == 0.0 &&
+      q.stride(-3) > 0 && k.stride(-3) > 0 && v.stride(-3) > 0 &&
+      o.stride(-3) > 0;
 
   if (return_softmaxstats && !softmaxstats.defined()) {
     // cuDNN wants T, H, 1, but torch/FA convention is H, T
@@ -1751,7 +1783,8 @@ void run_cudnn_SDP_fprop_nestedtensor(
       is_causal,
       return_softmaxstats,
       true,
-      page_table);
+      page_table,
+      use_cu_seqlen);
 
   MHAGraphCache& cache = getMHAGraphCache_();
   auto cache_it = cache.find(key);
@@ -1772,6 +1805,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
         cum_seqlen_q,
         cum_seqlen_kv,
         page_table,
+        use_cu_seqlen,
         q,
         k,
         v,
@@ -1785,49 +1819,59 @@ void run_cudnn_SDP_fprop_nestedtensor(
   }
   const fe::graph::Graph& mha_graph = *cache_it->second;
 
-  const bool shared_cum_seqlen = cum_seqlen_q.is_same(cum_seqlen_kv);
-  auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
-  Tensor seqlen_kv;
-  if (seqused_k.has_value()) {
-    seqlen_kv = seqused_k.value();
-  } else if (shared_cum_seqlen) {
-    seqlen_kv = seqlen_q;
-  } else {
-    seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
-  }
   check_ragged_offset_capacity(q, "query");
   check_ragged_offset_capacity(o, "out");
   if (!is_paged) {
     check_ragged_offset_capacity(k, "key");
     check_ragged_offset_capacity(v, "value");
   }
-  auto rag_q_off = cum_seqlen_q.mul(q.stride(-3));
-  auto rag_o_off =
-      ragged_offset(cum_seqlen_q, o.stride(-3), rag_q_off, q.stride(-3));
-  Tensor rag_k_off, rag_v_off;
-  if (!is_paged) {
-    rag_k_off = shared_cum_seqlen && k.stride(-3) == q.stride(-3)
-        ? rag_q_off
-        : cum_seqlen_kv.mul(k.stride(-3));
-    rag_v_off =
-        ragged_offset(cum_seqlen_kv, v.stride(-3), rag_k_off, k.stride(-3));
-  }
   std::unordered_map<int64_t, void*> variant_pack = {
       {Q, q.mutable_data_ptr()},
       {K, k.mutable_data_ptr()},
       {V, v.mutable_data_ptr()},
       {SCALE, &scaling_factor},
-      {O, o.mutable_data_ptr()},
-      {RAG_Q_OFF, rag_q_off.mutable_data_ptr()},
-      {RAG_O_OFF, rag_o_off.mutable_data_ptr()},
-      {SEQ_LEN_Q, seqlen_q.mutable_data_ptr()},
-      {SEQ_LEN_KV, seqlen_kv.mutable_data_ptr()}};
+      {O, o.mutable_data_ptr()}};
+  Tensor seqlen_q, seqlen_kv, rag_q_off, rag_k_off, rag_v_off, rag_o_off;
+#if AT_CUDNN_HAS_CUMULATIVE_SEQUENCE_LENGTHS
+  if (use_cu_seqlen) {
+    variant_pack[CU_SEQ_LEN_Q] = cum_seqlen_q.mutable_data_ptr();
+    variant_pack[CU_SEQ_LEN_KV] = cum_seqlen_kv.mutable_data_ptr();
+    variant_pack[RAG_Q_OFF] = cum_seqlen_q.mutable_data_ptr();
+    variant_pack[RAG_O_OFF] = cum_seqlen_q.mutable_data_ptr();
+    variant_pack[RAG_K_OFF] = cum_seqlen_kv.mutable_data_ptr();
+    variant_pack[RAG_V_OFF] = cum_seqlen_kv.mutable_data_ptr();
+  }
+#endif
+  if (!use_cu_seqlen) {
+    const bool shared_cum_seqlen = cum_seqlen_q.is_same(cum_seqlen_kv);
+    seqlen_q = at::diff(cum_seqlen_q, 1, 0);
+    if (seqused_k.has_value()) {
+      seqlen_kv = seqused_k.value();
+    } else if (shared_cum_seqlen) {
+      seqlen_kv = seqlen_q;
+    } else {
+      seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
+    }
+    rag_q_off = cum_seqlen_q.mul(q.stride(-3));
+    rag_o_off =
+        ragged_offset(cum_seqlen_q, o.stride(-3), rag_q_off, q.stride(-3));
+    variant_pack[RAG_Q_OFF] = rag_q_off.mutable_data_ptr();
+    variant_pack[RAG_O_OFF] = rag_o_off.mutable_data_ptr();
+    variant_pack[SEQ_LEN_Q] = seqlen_q.mutable_data_ptr();
+    variant_pack[SEQ_LEN_KV] = seqlen_kv.mutable_data_ptr();
+    if (!is_paged) {
+      rag_k_off = shared_cum_seqlen && k.stride(-3) == q.stride(-3)
+          ? rag_q_off
+          : cum_seqlen_kv.mul(k.stride(-3));
+      rag_v_off =
+          ragged_offset(cum_seqlen_kv, v.stride(-3), rag_k_off, k.stride(-3));
+      variant_pack[RAG_K_OFF] = rag_k_off.mutable_data_ptr();
+      variant_pack[RAG_V_OFF] = rag_v_off.mutable_data_ptr();
+    }
+  }
   if (is_paged) {
     variant_pack[PAGE_TABLE_K] = page_table.value().mutable_data_ptr();
     variant_pack[PAGE_TABLE_V] = page_table.value().mutable_data_ptr();
-  } else {
-    variant_pack[RAG_K_OFF] = rag_k_off.mutable_data_ptr();
-    variant_pack[RAG_V_OFF] = rag_v_off.mutable_data_ptr();
   }
   if (return_softmaxstats) {
     TORCH_INTERNAL_ASSERT(
