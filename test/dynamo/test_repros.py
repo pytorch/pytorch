@@ -4575,6 +4575,33 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             if isinstance(backend, CompileCounter):
                 self.assertEqual(backend.frame_count, 2)  # graph breaks
 
+    def test_grad_attr_does_not_poison_the_interned_none(self):
+        # Reading a tensor's .grad labels the RESULT with an AttrSource, and when
+        # there is a pending `p.grad = None` store that result is the
+        # VariableTracker side_effects is holding -- which for None is a
+        # process-wide interned ConstantVariable. Writing a source onto it left
+        # every LATER compile in the process reconstructing a local from THIS
+        # frame, and dying in create_load with "self missing".
+        class Holder:
+            def __init__(self, model):
+                self.model = model
+
+            def step(self, x, t):
+                for p in self.model.parameters():
+                    p.grad = None
+                torch.nn.functional.mse_loss(self.model(x), t).backward()
+
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+        with torch._dynamo.config.patch(trace_autograd_ops=True):
+            step = Holder(torch.nn.Linear(4, 3)).step
+            torch.compile(step, backend="eager", fullgraph=True)(x, t)
+
+        def later(m, xx):
+            return m(xx), None
+
+        opt = torch.compile(later, backend="eager", fullgraph=True)
+        self.assertIsNone(opt(torch.nn.Linear(4, 3), x)[1])
+
     def test_dynamic_shapes_double_not_equal(self):
         # https://github.com/pytorch/pytorch/issues/113393
         def fn(x):
