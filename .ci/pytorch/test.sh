@@ -217,6 +217,8 @@ if [[ -z "${OMP_NUM_THREADS:-}" ]] && [[ -n "${USE_ARC:-}" ]]; then
   export OMP_NUM_THREADS
 fi
 
+echo "OMP_NUM_THREADS before setting $OMP_NUM_THREADS"
+
 export LANG=C.UTF-8
 
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
@@ -225,13 +227,14 @@ if [[ -d "${HF_CACHE}" && "$TEST_CONFIG" != "onnx" ]]; then
   export HF_HOME="${HF_CACHE}"
 fi
 
-# if [[ "$TEST_CONFIG" == 'default' ]]; then
-#   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-#     export HIP_VISIBLE_DEVICES=0
-#   else
-#     export CUDA_VISIBLE_DEVICES=0
-#   fi
-# fi
+if [[ "$TEST_CONFIG" == 'default' ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export OMP_NUM_THREADS=16
+  fi
+fi
+
+echo "OMP_NUM_THREADS after setting $OMP_NUM_THREADS"
+
 
 if [[ "$TEST_CONFIG" == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export HIP_VISIBLE_DEVICES=0,1,2,3

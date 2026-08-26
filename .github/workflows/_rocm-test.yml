@@ -84,7 +84,7 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     container:
-      image: "ghcr.io/pytorch/ci-image:pytorch-linux-jammy-rocm-n-py3-95a5a72bd3e88a2e273735fc9183f4c9e15824dc"  # zizmor: ignore[unpinned-images]
+      image: "ghcr.io/pytorch/ci-image:pytorch-linux-jammy-rocm-n-py3-5e310b5c515ec85a74bbd294b4244dcfb885f5e4"  # zizmor: ignore[unpinned-images]
 
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
