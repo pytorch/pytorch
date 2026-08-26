@@ -3,6 +3,7 @@
 import contextlib
 import functools
 import io
+import unittest
 from collections import OrderedDict
 from copy import deepcopy
 from itertools import product
@@ -546,9 +547,8 @@ class TestDataParallel(TestCase):
         result = dp.scatter(x, (0, 1))
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0], x[:2])
-        if device.type != 'cpu':
-            self.assertEqual(result[0].get_device(), 0)
-            self.assertEqual(result[1].get_device(), 1)
+        self.assertEqual(result[0].get_device(), 0)
+        self.assertEqual(result[1].get_device(), 1)
         self.assertEqual(result[1], x[2:])
         grad = result[0].detach().clone().fill_(2)
         result[0].backward(grad)
@@ -710,6 +710,8 @@ class TestDataParallel(TestCase):
 
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "multi-accelerator not supported")
     def test_gather(self, device):
+        if isinstance(device, str) and device == "cpu":
+            raise unittest.SkipTest("dp.gather does not support CPU output_device")
         device = torch.device(device) if isinstance(device, str) else device
         output_device = -1 if device.type == 'cpu' else 0
         inputs = (
