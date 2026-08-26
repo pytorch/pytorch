@@ -19790,6 +19790,23 @@ if RUN_GPU or HAS_MPS:
         device = GPU_TYPE
 
         @requires_cuda_and_triton
+        def test_atan2_signed_zero(self):
+            # Regression for https://github.com/pytorch/pytorch/issues/185696
+            # Triton's fneg drops the sign of -0.0, so atan2(x, -x) returned 0
+            # instead of +/-pi when x was a signed zero.
+            tiny = 5.960464477539063e-08
+
+            def fn(x):
+                return torch.atan2(x, -x)
+
+            for dtype in (torch.float16, torch.bfloat16, torch.float32):
+                with self.subTest(dtype=dtype):
+                    x = torch.tensor(
+                        [0.0, tiny, -tiny], device=self.device, dtype=dtype
+                    )
+                    self.common(fn, (x,), check_lowp=False)
+
+        @requires_cuda_and_triton
         def test_noncontiguous_reshape_cat_backward(self):
             # Cross the 1024-element padding threshold with a non-aligned width.
             width = 342
