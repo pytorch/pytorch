@@ -578,18 +578,17 @@ else:
                 ranks = list(range(get_world_size()))
                 ranks_match_default = ranks == pg_ranks_by_dim.flatten().tolist()
                 if not preserve_rank_order or ranks_match_default:
-                    # Append default pg to first dim groups if compatible
-                    # with `self._device_type`. Otherwise, create new pg.
-                    dim_group = (
-                        new_group(
+                    if (
+                        torch.cuda.is_available()
+                        and get_backend(default_group) == "gloo"
+                    ):
+                        dim_group = new_group(
                             backend=backend,
                             ranks=ranks,
                             group_desc="mesh_default",
                         )
-                        if torch.cuda.is_available()
-                        and get_backend(default_group) == "gloo"
-                        else default_group
-                    )
+                    else:
+                        dim_group = default_group
                     return dim_group.group_name  # type: ignore[union-attr]
 
             # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
