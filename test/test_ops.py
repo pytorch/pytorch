@@ -19,6 +19,10 @@ from torch._prims.context import TorchRefsMode
 from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch._subclasses.fake_utils import outputs_alias_inputs
+from torch.fx.experimental.symbolic_shapes import (
+    constrain_range,
+    ShapeEnv as SymbolicShapeEnv,
+)
 from torch.testing import make_tensor
 from torch.testing._internal import composite_compliance, opinfo
 from torch.testing._internal.common_cuda import with_tf32_off
@@ -2275,6 +2279,14 @@ class TestCompositeCompliance(TestCase):
 class TestMathBits(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    def _symbolic_meta(self, dtype):
+        shape_env = SymbolicShapeEnv()
+        size = shape_env.create_unbacked_symint()
+        constrain_range(size, min=1, max=10)
+        result = torch.empty_strided((size, 7), (7, 1), dtype=dtype, device="meta")
+        self.assertIsInstance(result.shape[0], torch.SymInt)
+        return result
+
     @onlyCPU
     def test_prims_as_strided_conjugate(self, device):
         x = torch.randn(4, dtype=torch.cfloat, device=device).conj()
@@ -2283,6 +2295,22 @@ class TestMathBits(TestCase):
         self.assertTrue(result.is_conj())
         self.assertEqual(result, x.view(2, 2))
 
+        base = self._symbolic_meta(torch.cfloat)
+        torch._C._set_conj(base, True)
+        view = torch.ops.prims.as_strided(
+            base,
+            (base.shape[1], base.shape[0]),
+            (1, base.stride(0)),
+            0,
+        )
+        with torch.autograd.forward_ad.dual_level():
+            dual = torch.autograd.forward_ad.make_dual(view.clone(), view.clone())
+            view.copy_(dual)
+            tangent = torch.autograd.forward_ad.unpack_dual(view).tangent
+
+        self.assertTrue(tangent.is_conj())
+        self.assertEqual(tangent.shape, view.shape)
+
     @onlyCPU
     def test_prims_as_strided_negative(self, device):
         x = torch._neg_view(torch.arange(4, dtype=torch.float, device=device))
@@ -2290,6 +2318,22 @@ class TestMathBits(TestCase):
 
         self.assertTrue(result.is_neg())
         self.assertEqual(result, x.view(2, 2))
+
+        base = self._symbolic_meta(torch.float)
+        torch._C._set_neg(base, True)
+        view = torch.ops.prims.as_strided(
+            base,
+            (base.shape[1], base.shape[0]),
+            (1, base.stride(0)),
+            0,
+        )
+        with torch.autograd.forward_ad.dual_level():
+            dual = torch.autograd.forward_ad.make_dual(base.clone(), base.clone())
+            base.copy_(dual)
+            tangent = torch.autograd.forward_ad.unpack_dual(view).tangent
+
+        self.assertTrue(tangent.is_neg())
+        self.assertEqual(tangent.shape, view.shape)
 
     # Tests that
     # 1. The operator's output for physically conjugated/negated tensors and conjugate/negative view tensors
