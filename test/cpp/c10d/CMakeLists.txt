@@ -57,6 +57,10 @@ else()
   endif()
 endif()
 
+if(NOT WIN32 AND NOT USE_ROCM)
+  c10d_add_test(SymmetricMemoryUtilsTest.cpp LINK_LIBRARIES torch_cpu gtest_main INSTALL_TEST ${INSTALL_TEST})
+endif()
+
 if(USE_CUDA)
   if(USE_GLOO AND USE_C10D_GLOO)
     c10d_add_test(ProcessGroupGlooTest.cpp LINK_LIBRARIES torch_cpu c10d_cuda_test gtest_main INSTALL_TEST ${INSTALL_TEST})
