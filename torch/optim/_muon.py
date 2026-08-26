@@ -52,7 +52,7 @@ def _zeropower_via_newtonschulz(
     if len(ns_coefficients) != 3:
         raise ValueError("Coefficients must be a tuple of exactly 3 values")
     a, b, c = ns_coefficients
-    ortho_grad = grad.bfloat16()
+    ortho_grad = grad.to(dtype=torch.bfloat16, copy=True)
     if grad.size(0) > grad.size(1):
         ortho_grad = ortho_grad.T
     # Ensure spectral norm is at most 1

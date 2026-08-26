@@ -1,15 +1,11 @@
 #include <vector>
 
 #include <ATen/core/ATen_fwd.h>
-#include <ATen/core/interned_strings.h>
-#include <ATen/native/ConvUtils.h>
 #include <ATen/native/mkldnn/xpu/Conv.h>
 #include <ATen/native/mkldnn/xpu/FusionUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/utils/ParamUtils.h>
-#include <ATen/ops/full.h>
-#include <ATen/ops/neg.h>
-#include <c10/core/Scalar.h>
+#include <ATen/ops/empty.h>
 #include <c10/util/Exception.h>
 #include <torch/library.h>
 #include <optional>
