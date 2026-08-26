@@ -294,7 +294,7 @@ struct MHAParams {
 namespace {
 
 template <typename T>
-concept HasSetAlignment = requires(T & attributes, int64_t alignment) {
+concept HasSetAlignment = requires(T& attributes, int64_t alignment) {
   attributes.set_alignment(alignment);
 };
 
