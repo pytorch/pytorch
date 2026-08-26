@@ -1295,7 +1295,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             ):
                 return polyfill(data, newline=newline)
 
-        torch._dynamo.substitute_in_graph(binascii.b2a_base64)(wrapper)
+        wrapped = torch._dynamo.substitute_in_graph(binascii.b2a_base64)(wrapper)
 
         cnts = torch._dynamo.testing.CompileCounter()
         fn = binascii.b2a_base64
@@ -1310,7 +1310,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         counters.clear()
 
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = wrapper
+        fn = wrapped
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         out = fn(b"abc")
         opt_out = opt_fn(b"abc")
