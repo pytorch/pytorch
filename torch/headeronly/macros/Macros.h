@@ -606,23 +606,15 @@ constexpr auto rocm_assert_concat() {
   return msg;
 }
 
+// __host__ __device__: hipcc's device pass still type-checks host-only call
+// sites (e.g. MemoryAccess.cuh LoadWithCast ctors). Host runtime uses #else
+// __assert_fail; this body is not emitted for host codegen.
 template <unsigned N>
-__device__ inline __attribute__((always_inline, flatten)) void
-rocm_assert_one_shot_device(const char (&msg)[N], unsigned length) {
+__host__ __device__ inline __attribute__((always_inline, flatten)) void
+rocm_assert_one_shot(const char (&msg)[N], unsigned length) {
   auto d = __ockl_fprintf_stderr_begin();
   __ockl_fprintf_append_string_n(d, msg, length, 1);
   __builtin_trap();
-}
-
-// Thin __host__ __device__ forwarder required: hipcc's device pass still
-// type-checks host-only call sites (e.g. MemoryAccess.cuh LoadWithCast ctors
-// that call host TensorIteratorBase APIs). A __device__-only helper fails with
-// "call to __device__ function from __host__ function". Host runtime uses the
-// #else __assert_fail macro; this wrapper is not emitted for host codegen.
-template <unsigned N>
-__host__ __device__ inline __attribute__((always_inline)) void
-rocm_assert_one_shot(const char (&msg)[N], unsigned length) {
-  rocm_assert_one_shot_device(msg, length);
 }
 } // namespace torch::headeronly::detail
 
