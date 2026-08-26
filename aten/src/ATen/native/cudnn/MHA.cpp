@@ -1,5 +1,4 @@
 #include <limits>
-#include <numeric>
 
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
@@ -607,32 +606,6 @@ enum UIDS {
 std::vector<int64_t> thd_to_bhsd_strides(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(tensor.dim() == 3);
   return {INT_MAX, tensor.stride(1), tensor.stride(0), tensor.stride(2)};
-}
-
-// Allocate a dense output in the query's dimension order, mirroring
-// _empty_with_matching_layout in torch/nn/attention/_utils.py (used by the
-// varlen custom-op fake) and the Flash varlen forward's empty_like(q).
-Tensor empty_with_matching_layout(const Tensor& tensor, IntArrayRef shape) {
-  if (tensor.sizes().equals(shape)) {
-    return at::empty_like(tensor);
-  }
-  const int64_t dims = tensor.dim();
-  std::vector<int64_t> order(dims);
-  std::iota(order.begin(), order.end(), 0);
-  std::stable_sort(order.begin(), order.end(), [&](int64_t a, int64_t b) {
-    const auto stride_key = [&](int64_t dim) {
-      const auto stride = tensor.stride(dim);
-      return stride ? stride : std::numeric_limits<int64_t>::max();
-    };
-    return stride_key(a) < stride_key(b);
-  });
-  std::vector<int64_t> strides(dims);
-  int64_t stride = 1;
-  for (const auto dim : order) {
-    strides[dim] = stride;
-    stride *= shape[dim];
-  }
-  return at::empty_strided(shape, strides, tensor.options());
 }
 
 // Ragged offsets are declared int32 to cuDNN, so the largest offset
@@ -1723,7 +1696,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
   // tensors; empty KV attends to nothing, so o is zero and the LSE is -inf.
   if (!q.numel() || !k.numel() || !v.numel()) {
     if (!o.defined()) {
-      o = empty_with_matching_layout(q, {q.size(0), h_q, d_v});
+      alloc_with_matching_layout(q, o, {q.size(0), h_q, d_v});
       o.zero_();
     }
     if (return_softmaxstats && !softmaxstats.defined()) {
@@ -1746,7 +1719,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
   }
 
   if (!o.defined()) {
-    o = empty_with_matching_layout(q, {q.size(0), h_q, d_v});
+    alloc_with_matching_layout(q, o, {q.size(0), h_q, d_v});
   }
 
   if (return_softmaxstats && !softmaxstats.defined()) {
