@@ -645,6 +645,79 @@ struct alignas(4) complex<BFloat16> {
 
 } // namespace c10
 
+// std functions
+//
+// The implementation of these functions also follow the design of C++20
+namespace std {
+
+template <typename T>
+constexpr T real(const c10::complex<T>& z) {
+  return z.real();
+}
+
+template <typename T>
+constexpr T imag(const c10::complex<T>& z) {
+  return z.imag();
+}
+
+template <typename T>
+C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  return thrust::abs(static_cast<thrust::complex<T>>(z));
+#else
+  return std::abs(static_cast<std::complex<T>>(z));
+#endif
+}
+
+template <typename T>
+C10_HOST_DEVICE T arg(const c10::complex<T>& z) {
+  return std::atan2(std::imag(z), std::real(z));
+}
+
+template <typename T>
+constexpr T norm(const c10::complex<T>& z) {
+  return z.real() * z.real() + z.imag() * z.imag();
+}
+
+// For std::conj, there are other versions of it:
+//   constexpr std::complex<float> conj( float z );
+//   template< class DoubleOrInteger >
+//   constexpr std::complex<double> conj( DoubleOrInteger z );
+//   constexpr std::complex<long double> conj( long double z );
+// These are not implemented
+// TODO(@zasdfgbnm): implement them as c10::conj
+template <typename T>
+constexpr c10::complex<T> conj(const c10::complex<T>& z) {
+  return c10::complex<T>(z.real(), -z.imag());
+}
+
+// Exponential function for c10::complex. This is needed (in addition to
+// the six overloads above) by torch/headeronly/util/Math.h's exp2_impl for
+// complex scalar types. The remaining complex math functions (log, pow,
+// trig/hyperbolic functions, etc.) still live in c10/util/complex_math.h,
+// since some of their implementations are gated behind a C10_API-declared
+// fallback for certain platform standard libraries (see complex_math.h's
+// `_detail::sqrt`/`_detail::acos`), which is not header-only-safe.
+template <typename T>
+C10_HOST_DEVICE inline c10::complex<T> exp(const c10::complex<T>& x) {
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  return static_cast<c10::complex<T>>(
+      thrust::exp(static_cast<thrust::complex<T>>(x)));
+#else
+  return static_cast<c10::complex<T>>(
+      std::exp(static_cast<std::complex<T>>(x)));
+#endif
+}
+
+// Thrust does not have complex --> complex version of thrust::proj,
+// so this function is not implemented at c10 right now.
+// TODO(@zasdfgbnm): implement it by ourselves
+
+// There is no c10 version of std::polar, because std::polar always
+// returns std::complex. Use c10::polar instead;
+
+} // namespace std
+
 HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::complex;
 using c10::operator+;

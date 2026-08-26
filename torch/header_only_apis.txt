@@ -6,8 +6,11 @@
 # torch/headeronly/util/shim_utils.h
 TORCH_ERROR_CODE_CHECK
 
-# c10/util/TypeCast.h
+# torch/headeronly/util/TypeCast.h
 convert
+checked_convert
+unsafe_wrapping_convert
+report_overflow
 
 # torch/headeronly/util/bit_cast.h
 bit_cast
@@ -230,3 +233,110 @@ HeaderOnlyGenericPackedTensorAccessor
 # C10_DEFINE_DEPRECATED_USING functionalities are expressed at compile
 # time that have no effect to runtime. Therefore, these macros are not
 # tested under test/.
+
+# torch/headeronly/util/MathConstants.h
+frac_1_sqrt_pi
+frac_1_pi
+frac_sqrt_3
+frac_sqrt_2
+golden_ratio
+log_10_e
+log_2_e
+euler
+ln_10
+ln_2
+sqrt_3
+sqrt_2
+pi
+e
+
+# torch/headeronly/util/copysign.h
+copysign
+
+# torch/headeronly/util/Load.h
+load
+
+# torch/headeronly/util/BFloat16-math.h
+is_reduced_floating_point_v
+is_reduced_floating_point
+
+# torch/headeronly/util/irange.h
+integer_range
+irange
+
+# torch/headeronly/util/overflows.h
+overflows
+
+# torch/headeronly/util/AccumulateType.h
+acc_type_device
+AccumulateTypeDevice
+AccumulateType
+acc_type
+
+# torch/headeronly/util/jiterator_macros.h
+# jiterator_also_stringify_as, jiterator_code, and JITERATOR_HOST_DEVICE are
+# CPU-only no-ops (they only additionally generate a device code string when
+# compiling for CUDA), so their effect is exercised transitively through
+# calc_i0e below.
+
+# torch/headeronly/cpu/vec/zmath.h
+zabs
+angle_impl
+real_impl
+imag_impl
+conj_impl
+ceil_impl
+sgn_impl
+floor_impl
+round_impl
+trunc_impl
+max_impl
+min_impl
+
+# torch/headeronly/util/Math.h
+# chbevl, polevl, ratevl, abs_impl, getHermitianLimit,
+# chebyshev_coefficients_i0e_A, chebyshev_coefficients_i0e_B,
+# chebyshev_coefficients_i1e_A, chebyshev_coefficients_i1e_B,
+# lanczos_sum_expg_scaled, erfcx_y100, and the _igam(c)_helper_* family are
+# internal Cephes-derived helpers exercised transitively through the public
+# functions below.
+calc_erfinv
+zeta
+trigamma
+calc_digamma
+calc_polygamma
+calc_igammac
+calc_igamma
+calc_gcd
+exp2_impl
+calc_i0e
+calc_i0
+calc_i1e
+calc_i1
+calc_ndtri
+calc_log_ndtr
+calc_erfcx
+airy_ai_forward
+bessel_j0_forward
+bessel_j1_forward
+bessel_y0_forward
+bessel_y1_forward
+chebyshev_polynomial_t_forward
+chebyshev_polynomial_u_forward
+chebyshev_polynomial_v_forward
+chebyshev_polynomial_w_forward
+hermite_polynomial_h_forward
+hermite_polynomial_he_forward
+laguerre_polynomial_l_forward
+legendre_polynomial_p_forward
+modified_bessel_i0_forward
+modified_bessel_i1_forward
+modified_bessel_k0_forward
+modified_bessel_k1_forward
+scaled_modified_bessel_k0_forward
+scaled_modified_bessel_k1_forward
+shifted_chebyshev_polynomial_t_forward
+shifted_chebyshev_polynomial_u_forward
+shifted_chebyshev_polynomial_v_forward
+shifted_chebyshev_polynomial_w_forward
+spherical_bessel_j0_forward
