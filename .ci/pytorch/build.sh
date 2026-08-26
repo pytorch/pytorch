@@ -110,6 +110,7 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
   export USE_MKLDNN=0
 
   export SLEEF_TARGET_EXEC_USE_QEMU=ON
+
   # Restrict chown to the workspace and the cross-compile sysroot/venv we
   # actually write into. The workspace path differs by runner: EC2 docker
   # mounts it at /var/lib/jenkins/workspace and GITHUB_WORKSPACE points at
@@ -122,6 +123,20 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
       sudo chown -R jenkins "$dir"
     fi
   done
+
+  # Must follow the chown above: the crossenv is root-owned in the image, and the
+  # cross interpreter cannot read cross/pyvenv.cfg until it is handed to jenkins.
+  #
+  # The crossenv is provisioned for the setup.py era, so the scikit-build-core
+  # front end and backend are missing from it. build, scikit-build-core,
+  # packaging and six are pure Python and come from PyPI. numpy needs a riscv64
+  # wheel, which the RISE project index carries; 1.26.4 matches the Python 3.12
+  # pin in .ci/docker/requirements-ci.txt and is the newest one published there
+  # under a plain linux_riscv64 tag, so it does not depend on crossenv resolving
+  # manylinux glibc tags for the target. Pinning also keeps pip from resolving a
+  # newer numpy that only PyPI has, which would cross-build numpy from an sdist.
+  python -mpip install --extra-index-url https://pypi.riseproject.dev/simple \
+      build "scikit-build-core>=1.0" packaging six numpy==1.26.4
 
 elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export USE_CUDA=0
