@@ -136,6 +136,8 @@ scaled_mm_device_tma_main_loop_scaling_template = TritonTemplate(
 flydsl_mxfp_scaled_mm_template = FlyDSLTemplate(
     name="scaled_mm_mxfp_flydsl",
     source=load_kernel_template("flydsl_mxfp_scaled_mm"),
+)
+
 flydsl_mm_template = FlyDSLTemplate(
     name="mm_flydsl",
     source=load_kernel_template("flydsl_mm"),

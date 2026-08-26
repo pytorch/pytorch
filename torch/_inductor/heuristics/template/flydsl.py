@@ -29,6 +29,15 @@ class FlyDSLMXFPConfig:
 
 
 class FlyDSLMXFPConfigDict(TypedDict):
+    TILE_M: int
+    TILE_N: int
+    TILE_K: int
+    STAGES: int
+    BLOCK_M_WARPS: int
+    BLOCK_N_WARPS: int
+    GROUP_M: int
+    LDS_SCALE: int
+
 
 @dataclass(frozen=True)
 class FlyDSLGemmConfig:
@@ -50,7 +59,7 @@ class FlyDSLGemmConfigDict(TypedDict):
     BLOCK_M_WARPS: int
     BLOCK_N_WARPS: int
     GROUP_M: int
-    LDS_SCALE: int
+    USE_HALF_TILE_INTERLEAVED: bool
 
 
 FlyDSLMXFPConfigArgs = tuple[int, int, int, int, int, int, int, int]
@@ -154,7 +163,15 @@ def _check_mxfp_gemm_config(
 
     mxfp_gemm_derived(
         mxfp_format,
-    USE_HALF_TILE_INTERLEAVED: bool
+        block_m=int(gemm_config["TILE_M"]),
+        block_n=int(gemm_config["TILE_N"]),
+        block_k=int(gemm_config["TILE_K"]),
+        stages=int(gemm_config["STAGES"]),
+        m_waves=int(gemm_config["BLOCK_M_WARPS"]),
+        n_waves=int(gemm_config["BLOCK_N_WARPS"]),
+        group_m=int(gemm_config["GROUP_M"]),
+        lds_scale_req=int(gemm_config.get("LDS_SCALE", 0)),
+    )
 
 
 FlyDSLGemmConfigArgs = tuple[int, int, int, int, int, int, int]
@@ -175,7 +192,9 @@ def _make_gemm_param(gemm_config: dict[str, int | bool]):
         m_waves=int(gemm_config["BLOCK_M_WARPS"]),
         n_waves=int(gemm_config["BLOCK_N_WARPS"]),
         group_m=int(gemm_config["GROUP_M"]),
-        lds_scale_req=int(gemm_config.get("LDS_SCALE", 0)),
+        use_half_tile_interleaved=bool(
+            gemm_config.get("USE_HALF_TILE_INTERLEAVED", False)
+        ),
     )
 
 
@@ -194,9 +213,8 @@ def is_mxfp_config_valid_for_shape(
     return (
         make_mxfp_param_and_validate(
             mxfp_format, m, n, k, out_dtype, gemm_config
-        use_half_tile_interleaved=bool(
-            gemm_config.get("USE_HALF_TILE_INTERLEAVED", False)
-        ),
+        )
+        is not None
     )
 
 
@@ -277,6 +295,10 @@ def get_exhaustive_mxfp_gemm_configs(
                 mxfp_format,
                 gemm_config,
                 error,
+            )
+    return valid_configs
+
+
 @functools.cache
 def get_exhaustive_gemm_configs() -> list[FlyDSLGemmConfig]:
     """
@@ -333,6 +355,19 @@ def get_default_mxfp_gemm_configs(
 
 
 def get_mxfp_gemm_configs(mxfp_format: MXFPFormat) -> list[dict[str, int]]:
+    if (
+        config.flydsl_enable_autotuning
+        and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+    ):
+        configs = get_exhaustive_mxfp_gemm_configs(mxfp_format)
+    else:
+        configs = get_default_mxfp_gemm_configs(mxfp_format)
+    if not configs:
+        log.warning("No valid FlyDSL %s GEMM configuration is available", mxfp_format)
+        return []
+    return [asdict(gemm_config) for gemm_config in configs]
+
+
 @functools.cache
 def get_default_gemm_configs() -> list[FlyDSLGemmConfig]:
     """
@@ -403,11 +438,13 @@ def get_gemm_configs() -> list[dict[str, int | bool]]:
         config.flydsl_enable_autotuning
         and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
     ):
-        configs = get_exhaustive_mxfp_gemm_configs(mxfp_format)
+        configs = get_exhaustive_gemm_configs()
     else:
-        configs = get_default_mxfp_gemm_configs(mxfp_format)
+        configs = get_default_gemm_configs()
+        if not config.flydsl_enable_autotuning:
+            configs = [c for c in configs if c == FlyDSLGemmConfig()]
     if not configs:
-        log.warning("No valid FlyDSL %s GEMM configuration is available", mxfp_format)
+        log.warning("No valid FlyDSL GEMM configuration is available")
         return []
     return [asdict(gemm_config) for gemm_config in configs]
 
@@ -427,12 +464,3 @@ def get_mxfp_gemm_configs_for_shape(
         return configs
     baseline = asdict(_BASELINE_CONFIG[mxfp_format])
     return [baseline] if baseline in configs else configs[:1]
-        configs = get_exhaustive_gemm_configs()
-    else:
-        configs = get_default_gemm_configs()
-        if not config.flydsl_enable_autotuning:
-            configs = [c for c in configs if c == FlyDSLGemmConfig()]
-    if not configs:
-        log.warning("No valid FlyDSL GEMM configuration is available")
-        return []
-    return [asdict(gemm_config) for gemm_config in configs]
