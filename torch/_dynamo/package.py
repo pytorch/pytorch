@@ -281,15 +281,24 @@ def _scan_sys_modules_for_file(filename: str) -> str | None:
     keeps a stale miss, and ``del sys.modules[m]; import m`` -- the ordinary
     force-reimport idiom -- is exactly that. sys.modules exposes no mutation
     counter to use instead. A stale MISS costs this file's checksum, so a later
-    edit to it is not caught at load. A stale HIT is never revalidated at all
-    and is worse: delete the module without re-importing and ``add_code``
-    raises KeyError on the dead name. Both predate the memo; worth knowing when
-    hunting a checksum that should have fired.
+    edit to it is not caught at load; worth knowing when hunting a checksum that
+    should have fired.
+
+    A cached HIT is revalidated against sys.modules before it is returned, for
+    the cost of one dict lookup rather than the scan the memo exists to avoid.
+    Trusting it instead made ``del sys.modules[m]`` -- with no re-import, so the
+    ABA check above cannot see it -- hand back a dead name that ``add_code``
+    then raised KeyError on.
     """
     generation = len(sys.modules)
     cached = _MODULE_KEY_BY_FILE.get(filename)
-    if cached is not None and (cached[1] is not None or cached[0] == generation):
-        return cached[1]
+    if cached is not None:
+        cached_generation, cached_key = cached
+        if cached_key is None:
+            if cached_generation == generation:
+                return None
+        elif getattr(sys.modules.get(cached_key), "__file__", None) == filename:
+            return cached_key
     found = None
     for key, candidate in list(sys.modules.items()):
         if getattr(candidate, "__file__", None) == filename:

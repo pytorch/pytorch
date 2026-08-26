@@ -5,6 +5,7 @@ import copy
 import enum
 import functools
 import gc
+import importlib
 import inspect
 import io
 import os
@@ -1861,6 +1862,30 @@ class TestPrecompile(TestCase):
             with _maybe_scoped(loaded), torch.no_grad():
                 x = torch.randn(rows, 8)
                 self.assertEqual(loaded(model, x), _precompile_attr_entry(model, x))
+
+    def test_precompile_stale_module_memo_is_revalidated(self):
+        # The filename -> module memo caches a hit outright, and its ABA check
+        # on len(sys.modules) cannot see a plain delete. Handing back the dead
+        # name made add_code raise KeyError on it.
+        from torch._dynamo.package import _scan_sys_modules_for_file, SourceInfo
+
+        name = "_precompile_stale_memo_probe"
+        source = "def probe(t):\n    return t + 1\n"
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, name + ".py")
+            with open(path, "w") as f:
+                f.write(source)
+            sys.path.insert(0, d)
+            try:
+                module = importlib.import_module(name)
+                self.assertEqual(_scan_sys_modules_for_file(module.__file__), name)
+                del sys.modules[name]
+                self.assertIsNone(_scan_sys_modules_for_file(module.__file__))
+                # No KeyError: an unresolvable module contributes no source.
+                SourceInfo(inlined_sources=set()).add_code(module.probe.__code__)
+            finally:
+                sys.path.remove(d)
+                sys.modules.pop(name, None)
 
     def test_precompile_public_result_types(self):
         # The public surface is the pair and the loader; the session types it
