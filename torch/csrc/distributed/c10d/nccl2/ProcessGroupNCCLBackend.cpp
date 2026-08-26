@@ -136,10 +136,18 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     auto nonblocking = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");
     options_c10d_->config.blocking = nonblocking.value_or(false) ? 0 : 1;
   }
+#if defined(USE_ROCM)
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 30, 4)
+  TORCH_CHECK(
+      !options_c10d_->enable_reconfigure,
+      "nccl2 reconfigure requires RCCL 2.30.4 or later");
+#endif
+#else
 #if NCCL_VERSION_CODE < NCCL_VERSION(2, 28, 0)
   TORCH_CHECK(
       !options_c10d_->enable_reconfigure,
       "nccl2 reconfigure requires NCCL 2.28 or later");
+#endif
 #endif
 }
 
