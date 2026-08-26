@@ -540,7 +540,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             if node.target is inductor_prims.prepare_softmax_online
         )
         self.assertIn(prepare_softmax, analysis.matches)
-        self.assertEqual(analysis.matches[prepare_softmax].reduction_type, "generated")
+        self.assertEqual(analysis.matches[prepare_softmax].reduction_type, "sum")
 
     def test_epilogue_graph_normalizes_selected_fx_nodes(self):
         import operator
@@ -2354,7 +2354,10 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             FlexGemmOutputLocalReducePlan,
             FlexGemmOutputPlan,
         )
-        from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
+        from torch._inductor.kernel.gemm_epilogue import (
+            GEMM_REDUCTION_IDENTITY_SOURCE,
+            GemmReductionPlan,
+        )
 
         graph = torch.fx.Graph()
         output = graph.placeholder("output")
@@ -2383,12 +2386,27 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
                 group=8,
                 axis=0,
                 reduction_type="max",
-                source_type="identity",
+                source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
                 primary_output="output",
                 feeds_main=True,
                 feed_output="output",
             ),
         )
+
+        generated = FlexGemmOutputPlan(
+            output,
+            local_reduce=FlexGemmOutputLocalReducePlan(
+                FlexGemmLocalReduceMatch(
+                    value_node=reduced,
+                    geometry=FlexGemmLocalReduceGeometry(8, 0),
+                ),
+                store=FlexGemmLocalReduceStore(node=reduced, aux_index=0),
+            ),
+        )
+        generated_plan = generated.reduction_plan
+        self.assertIsNotNone(generated_plan)
+        self.assertEqual(generated_plan.reduction_type, "sum")
+        self.assertEqual(generated_plan.source_fn, GEMM_REDUCTION_IDENTITY_SOURCE)
 
     def test_ordered_outputs_restore_local_reduce_position(self):
         from torch._inductor.kernel.flex_gemm.lowering import flex_gemm_ordered_outputs

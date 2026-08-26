@@ -147,7 +147,7 @@ if TYPE_CHECKING:
     from .codegen.cutlass.template import CUTLASSTemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
-    from .kernel.gemm_epilogue import GemmReductionPlan
+    from .kernel.gemm_epilogue import GemmEpiloguePlan, GemmReductionPlan
     from .utils import IndentedBuffer
 
 else:
@@ -6737,11 +6737,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self,
         out_node: Any,
         hint_override: int | None = None,
-        epilogue_fn_code: str | None = None,
-        epilogue_is_cutedsl: bool = False,
-        epilogue_reads: list[str] | None = None,
-        epilogue_writes: list[str] | None = None,
-        epilogue_var_renames: dict[str, Any] | None = None,
+        epilogue: GemmEpiloguePlan | None = None,
         local_reduce: GemmReductionPlan | None = None,
     ) -> tuple[Any, Any]:
         """
@@ -6751,10 +6747,6 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         - kernel: NVUniversalGemmKernel object with call_kernel() method
         - render: function that returns source code string
         """
-        if epilogue_fn_code is not None:
-            if epilogue_var_renames is None:
-                raise AssertionError("epilogue_fn_code requires epilogue_var_renames")
-
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernel,
         )
@@ -6789,11 +6781,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             scale_type_b=self.scale_type_b,
             swizzle_type_a=self.swizzle_type_a,
             swizzle_type_b=self.swizzle_type_b,
-            epilogue_fn_code=epilogue_fn_code,
-            epilogue_is_cutedsl=epilogue_is_cutedsl,
-            epilogue_reads=epilogue_reads,
-            epilogue_writes=epilogue_writes,
-            epilogue_var_renames=epilogue_var_renames,
+            epilogue=epilogue,
             local_reduce=local_reduce,
             swap_ab=self.swap_ab,
             bias_node=bias_node,

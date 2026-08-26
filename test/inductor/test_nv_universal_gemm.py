@@ -846,11 +846,8 @@ class TestNVUniversalGemmHeuristics(TestCase):
         from torch._inductor.kernel.gemm_epilogue import GemmReductionPlan
 
         capabilities = DENSE_GEMM_REDUCTION_CAPABILITIES
-        self.assertTrue(capabilities.supports("sum", "square", "variance"))
-        self.assertFalse(capabilities.supports("sum", "square", "unsupported"))
-        self.assertTrue(capabilities.supports("max", "abs_scale"))
-        self.assertFalse(capabilities.supports("sum", "unsupported"))
-        self.assertFalse(capabilities.supports("unsupported", "identity"))
+        self.assertTrue(capabilities.supports("max"))
+        self.assertFalse(capabilities.supports("unsupported"))
 
         from torch._inductor.codegen.nv_universal_gemm import GemmVariant
 
@@ -859,10 +856,13 @@ class TestNVUniversalGemmHeuristics(TestCase):
             group=4,
             axis=1,
             reduction_type="sum",
-            source_type="identity",
+            source_fn="def source(value):\n    return value",
             primary_output="out",
         )
         self.assertTrue(GemmVariant.GEMM.supports_reduction(plan))
+        non_power_of_two = dataclasses.replace(plan, group=3)
+        self.assertFalse(GemmVariant.GEMM.supports_reduction(non_power_of_two))
+        self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(non_power_of_two))
         wide_consumer = dataclasses.replace(
             plan,
             group=64,
@@ -875,19 +875,11 @@ class TestNVUniversalGemmHeuristics(TestCase):
         unsupported = dataclasses.replace(plan, reduction_type="unsupported")
         self.assertFalse(GemmVariant.GEMM.supports_reduction(unsupported))
         self.assertTrue(GemmVariant.SCALED_GEMM.supports_reduction(plan))
-        logsumexp = dataclasses.replace(
-            plan, reduction_type="max", reduction_algorithm="logsumexp"
+        generated_source = dataclasses.replace(
+            plan, source_fn="def source(value):\n    return value * value"
         )
-        self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(logsumexp))
-        variance = dataclasses.replace(plan, reduction_algorithm="variance")
-        self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(variance))
-        online_softmax = dataclasses.replace(plan, reduction_algorithm="online_softmax")
-        self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(online_softmax))
-        self.assertFalse(
-            GemmVariant.SCALED_GEMM.supports_reduction(
-                dataclasses.replace(online_softmax, feeds_main=True)
-            )
-        )
+        self.assertTrue(GemmVariant.GEMM.supports_reduction(generated_source))
+        self.assertTrue(GemmVariant.SCALED_GEMM.supports_reduction(generated_source))
         secondary = dataclasses.replace(plan, secondary_feed_output="secondary")
         self.assertFalse(GemmVariant.GEMM.supports_reduction(secondary))
         self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(secondary))
@@ -916,53 +908,22 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertFalse(GemmVariant.SCALED_GEMM.supports_reduction(unsupported))
         self.assertFalse(GemmVariant.GROUPED_GEMM.supports_reduction(plan))
 
-    def test_grouped_reduction_conversion_contract(self):
+    def test_grouped_reduction_ir_preserves_primitive_and_source(self):
         from torch._inductor.kernel.loop_ir_epilogue_lowering import (
             GemmEpilogueIRExpression as Expr,
             GemmEpilogueIRStore,
-            grouped_reduction_ir,
-        )
-
-        load = Expr("load", ("gemm", 0, None))
-
-        def classify(value):
-            square = Expr("mul", (value, value))
-            reduction = Expr("reduction", (torch.float32, torch.float32, "sum", square))
-            return grouped_reduction_ir(
-                GemmEpilogueIRStore(0, reduction), "gemm", 4, torch.bfloat16
-            )
-
-        fp32 = Expr("to_dtype", (load, torch.float32))
-        self.assertEqual(classify(fp32), ("sum", "square"))
-        fp16_then_fp32 = Expr(
-            "to_dtype", (Expr("to_dtype", (load, torch.float16)), torch.float32)
-        )
-        self.assertIsNone(classify(fp16_then_fp32))
-        bitcast = Expr("to_dtype_bitcast", (load, torch.bfloat16, torch.bfloat16))
-        self.assertIsNone(classify(Expr("to_dtype", (bitcast, torch.float32))))
-
-    def test_grouped_reduction_ir_normalizes_loop_representation(self):
-        from torch._inductor.kernel.gemm_epilogue import GemmReductionConfig
-        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
-            GemmEpilogueIRAnalysis,
-            GemmEpilogueIRExpression as Expr,
-            GemmEpilogueIRStore,
+            grouped_reduction_pattern_ir,
         )
 
         load = Expr("load", ("gemm", 0, None))
         reduction = Expr("reduction", (torch.float32, torch.float32, "sum", load))
-        analysis = GemmEpilogueIRAnalysis({"out": GemmEpilogueIRStore(0, reduction)})
-
-        self.assertEqual(
-            analysis.grouped_reduction("out", "gemm", 4, 1, torch.float32),
-            GemmReductionConfig(
-                output_name="out",
-                group=4,
-                axis=1,
-                reduction_type="sum",
-                source_type="identity",
-            ),
+        pattern = grouped_reduction_pattern_ir(
+            GemmEpilogueIRStore(0, reduction), "gemm", 4, torch.float32
         )
+        self.assertIsNotNone(pattern)
+        reduction_type, source = pattern
+        self.assertEqual(reduction_type, "sum")
+        self.assertIs(source, load)
 
     def test_dense_reduction_uses_generated_callback_contract(self):
         import dataclasses
@@ -973,7 +934,10 @@ class TestNVUniversalGemmHeuristics(TestCase):
             BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES,
             DENSE_GEMM_REDUCTION_CAPABILITIES,
         )
-        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+        from torch._inductor.kernel.gemm_epilogue import (
+            GemmReductionArguments,
+            GemmReductionPlan,
+        )
         from torch._inductor.kernel.gemm_epilogue_codegen import (
             GemmReductionCompileConfig,
         )
@@ -982,26 +946,19 @@ class TestNVUniversalGemmHeuristics(TestCase):
             group=8,
             axis=1,
             reduction_type="sum",
-            source_type="square",
-            reduction_algorithm="variance",
+            source_fn="def source(value):\n    return value * value",
             feeds_main=True,
             finalizer_fn=("def finalize(value, group):\n    return value / group"),
         )
         config = GemmReductionCompileConfig.from_args(args, cute)
 
         self.assertEqual(
-            config.constexprs()[:5],
-            (8, 1, "sum", "variance", True),
+            config.constexprs()[:4],
+            (8, 1, True, False),
         )
-        self.assertNotIn("square", config.constexprs())
         self.assertEqual(config.reduction.source(3.0), 9.0)
         self.assertEqual(config.reduction.finalize(16.0, 8), 2.0)
-        self.assertTrue(
-            DENSE_GEMM_REDUCTION_CAPABILITIES.supports("sum", "square", "variance")
-        )
-        self.assertFalse(
-            DENSE_GEMM_REDUCTION_CAPABILITIES.supports("variance_affine:1:0", "square")
-        )
+        self.assertTrue(DENSE_GEMM_REDUCTION_CAPABILITIES.supports("sum"))
         secondary = dataclasses.replace(
             args,
             feeds_main=False,
@@ -1016,11 +973,60 @@ class TestNVUniversalGemmHeuristics(TestCase):
             BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES.supports_contract(secondary)
         )
 
+        generated_args = GemmReductionArguments(
+            group=4,
+            axis=1,
+            reduction_type=None,
+            source_fn=None,
+            tensor_epilogue_returns_local_reduce=True,
+        )
+        generated_config = GemmReductionCompileConfig.from_args(generated_args, cute)
+        self.assertEqual(generated_config.constexprs()[:4], (4, 1, False, True))
+        self.assertIsNone(generated_config.reduction.reduce_op)
+        generated_plan = GemmReductionPlan(
+            reduction_output="reduction",
+            primary_output="output",
+            group=4,
+            axis=1,
+            reduction_type=None,
+            source_fn=None,
+            tensor_epilogue_returns_local_reduce=True,
+        )
+        self.assertTrue(
+            DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(generated_plan)
+        )
+        self.assertTrue(
+            BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES.supports_contract(generated_plan)
+        )
+        physical_generated_plan = GemmReductionPlan(
+            reduction_output="reduction",
+            primary_output="output",
+            group=64,
+            axis=1,
+            reduction_type=None,
+            source_fn=None,
+            combine_fn="def combine(lhs, rhs):\n    return lhs + rhs",
+            finalizer_fn="def finalize(value, group):\n    return value / group",
+            tensor_epilogue_returns_local_reduce=True,
+        )
+        self.assertTrue(
+            DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(physical_generated_plan)
+        )
+        self.assertTrue(
+            BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES.supports_contract(
+                physical_generated_plan
+            )
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot use physical reduction inputs"
+        ):
+            dataclasses.replace(generated_plan, reduction_type="sum")
+
     def test_grouped_reduction_rejects_ambiguous_composite(self):
         from torch._inductor.kernel.loop_ir_epilogue_lowering import (
             GemmEpilogueIRExpression as Expr,
             GemmEpilogueIRStore,
-            grouped_reduction_ir,
+            grouped_reduction_pattern_ir,
         )
 
         summed = Expr(
@@ -1032,7 +1038,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             (torch.float32, torch.float32, "max", Expr("load", ("gemm", 0, None))),
         )
         store = GemmEpilogueIRStore(0, Expr("add", (summed, maximum)))
-        self.assertIsNone(grouped_reduction_ir(store, "gemm", 4, torch.float32))
+        self.assertIsNone(grouped_reduction_pattern_ir(store, "gemm", 4, torch.float32))
 
     def test_epilogue_ir_preserves_empty_tuple_argument(self):
         from torch._inductor.kernel.loop_ir_epilogue_lowering import (
@@ -1080,7 +1086,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             group=8,
             axis=0,
             reduction_type="max",
-            source_type="abs",
+            source_fn="def source(value):\n    return abs(value)",
             primary_output="out",
             feeds_main=True,
         )
@@ -1090,12 +1096,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
         self.assertEqual(from_plan.reduction_type, plan.reduction_type)
 
         specialization = _local_reduce_specialization({"local_reduce": base})
-        for field, value in (
-            ("group", 8),
-            ("axis", 0),
-            ("feeds_main", True),
-            ("reduction_algorithm", "variance"),
-        ):
+        for field, value in (("group", 8), ("axis", 0), ("feeds_main", True)):
             variant = dataclasses.replace(base, **{field: value})
             self.assertNotEqual(
                 specialization,
@@ -1137,8 +1138,8 @@ class TestNVUniversalGemmHeuristics(TestCase):
             group=4,
             axis=1,
             reduction_type="sum",
-            reduction_algorithm="default",
             feeds_main=True,
+            tensor_epilogue_returns_local_reduce=False,
         )
         config = gemm_epilogue_codegen.GemmReductionCompileConfig(
             args=args,
@@ -1148,8 +1149,15 @@ class TestNVUniversalGemmHeuristics(TestCase):
         )
 
         self.assertIs(config.args, args)
-        common = (4, 1, "sum", "default", True)
-        primary = ("reduce", "init", "combine", "source", "finalize", "consumer")
+        common = (4, 1, True, False)
+        primary = (
+            "reduce",
+            "init",
+            "combine",
+            "source",
+            "finalize",
+            "consumer",
+        )
         self.assertEqual(
             config.constexprs(),
             (*common, *primary, "secondary_consumer"),
@@ -1163,40 +1171,12 @@ class TestNVUniversalGemmHeuristics(TestCase):
             group=4,
             axis=1,
             reduction_type="sum",
-            source_type="identity",
+            source_fn="def source(value):\n    return value",
             primary_output="output",
             feed_output="aux",
             secondary_feed_output="output",
         )
         self.assertEqual(plan.auxiliary_outputs, ("aux",))
-
-    def test_reduction_pattern_near_misses(self):
-        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
-            GemmEpilogueIRExpression as Expr,
-            GemmEpilogueIRStore,
-            is_absmax_normalize_ir,
-            is_logsumexp_ir,
-            is_softmax_ir,
-        )
-
-        load = Expr("load", ("gemm", 0, None))
-        scale = Expr("load", ("scale", 0, None))
-        one = Expr("constant", (1.0, torch.float32))
-        near_softmax = Expr("truediv", (Expr("exp", (load,)), Expr("add", (load, one))))
-        near_absmax = Expr(
-            "mul", (load, Expr("reciprocal", (Expr("add", (scale, one)),)))
-        )
-        near_logsumexp = Expr(
-            "add", (Expr("log", (Expr("exp", (load,)),)), Expr("maximum", (load, one)))
-        )
-
-        self.assertFalse(is_softmax_ir(GemmEpilogueIRStore(0, near_softmax), "gemm", 4))
-        self.assertFalse(
-            is_absmax_normalize_ir(GemmEpilogueIRStore(0, near_absmax), "gemm", "scale")
-        )
-        self.assertFalse(
-            is_logsumexp_ir(GemmEpilogueIRStore(0, near_logsumexp), "gemm", 4)
-        )
 
     def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
         """Create a mock kernel with the given tile/cluster configuration."""
@@ -1479,7 +1459,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, epilogue_fused = self._compile_and_check(fn, a, b)
         self.assertIn("EpilogueArguments", code)
-        self.assertNotIn("CuTeDSLEpilogueArguments", code)
+        self.assertIn("CuTeDSLEpilogueArguments", code)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
         self.assertTrue(epilogue_fused)
         self.assertIn("out_ptr1", code)
@@ -1862,7 +1842,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
         self.assertIn("output=", code)
-        self.assertIn("source_type='square'", code)
+        self.assertNotIn("_LOCAL_REDUCE_SOURCE_FN_SRC", code)
+        self.assertIn("tensor_epilogue_returns_local_reduce=True", code)
+        self.assertIn(" * ", code)
 
     @config.patch(emulate_precision_casts=True)
     def test_scaled_mm_grouped_reduce_rejects_intermediate_fp16(self):
