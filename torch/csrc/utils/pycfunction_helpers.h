@@ -3,7 +3,7 @@
 #include <c10/macros/Macros.h>
 #include <torch/csrc/utils/python_compat.h>
 
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
 
 inline PyCFunction castPyCFunctionWithKeywords(PyCFunctionWithKeywords func) {
   C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wcast-function-type")

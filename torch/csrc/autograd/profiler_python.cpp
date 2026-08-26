@@ -11,7 +11,8 @@
 #include <utility>
 #include <vector>
 
-#include <Python.h>
+#include <torch/csrc/utils/PythonWrapper.h>
+
 #include <frameobject.h>
 
 #include <ATen/core/TensorBase.h>
