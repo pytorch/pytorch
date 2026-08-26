@@ -16,6 +16,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, ir, metrics
 from torch._inductor.codegen.simd import MemoryCoalescing, SIMDScheduling
 from torch._inductor.codegen.triton import TritonScheduling
+from torch._inductor.dependencies import MemoryDep
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
 from torch._inductor.scheduler import (
@@ -445,46 +446,58 @@ class ImplDetailTest(MockSchedulerTest):
             z2 + 49 * z1 + 2401 * ModularIndexing(z3, 1, 64),
         )
 
-    def test_broadcast_orders_allow_mixed_identity_children(self):
-        scale = ir.TensorBox.create(
-            ir.Buffer(
-                name="scale",
-                layout=ir.FixedLayout(
-                    torch.device(GPU_TYPE), torch.float32, [6, 7], [7, 1]
-                ),
+    def test_find_reduction_broadcast_orders(self):
+        def make_node(ranges, indexed_dims, *, indirect=False):
+            index_vars = tuple(sympy_index_symbol(f"d{i}") for i in range(len(ranges)))
+            index = (
+                sympy_index_symbol("tmp0")
+                if indirect
+                else 7 * index_vars[indexed_dims[0]] + index_vars[indexed_dims[1]]
             )
-        )
-        load_scale = scale.make_loader()
-
-        def make_node(ranges, indexed_dims):
-            def inner_fn(index):
-                return load_scale([index[indexed_dims[0]], index[indexed_dims[1]]]) * 2
-
-            buf = ir.Pointwise.create(
-                device=torch.device(GPU_TYPE),
-                dtype=torch.float32,
-                inner_fn=inner_fn,
-                ranges=ranges,
+            dep = MemoryDep(
+                "scale",
+                index,
+                index_vars,
+                tuple(ranges),
             )
-            buf.realize()
-            computed = buf.data.data
-            computed.decide_layout()
-            return SchedulerNode(V.graph.scheduler, computed)
+            node = object.__new__(SchedulerNode)
+            node._body = mock.Mock()
+            node._sizes = (ranges, ())
+            node.read_writes = mock.Mock(
+                reads=OrderedSet([dep]), range_vars=list(index_vars)
+            )
+            return node
 
         ordered = make_node([6, 7, 16, 16], (0, 1))
         interleaved = make_node([6, 16, 7, 16], (0, 2))
         reduction = mock.Mock()
         reduction.get_buffer_names.return_value = OrderedSet(["scale"])
 
-        scheduler = Scheduler.__new__(Scheduler)
         self.assertEqual(
-            scheduler._pointwise_reduction_broadcast_orders(
+            Scheduler._find_reduction_broadcast_orders(
                 reduction,
                 [ordered, interleaved],
                 sympy.Integer(42),
                 sympy.Integer(256),
             ),
             [(0, 1, 2, 3), (0, 2, 1, 3)],
+        )
+        self.assertIsNone(
+            Scheduler._find_reduction_broadcast_orders(
+                reduction,
+                [make_node([6, 16, 7, 16], (0, 2), indirect=True)],
+                sympy.Integer(42),
+                sympy.Integer(256),
+            )
+        )
+        ordered._body = None
+        self.assertIsNone(
+            Scheduler._find_reduction_broadcast_orders(
+                reduction,
+                [ordered],
+                sympy.Integer(42),
+                sympy.Integer(256),
+            )
         )
 
     def test_weighted_cost_penalizes_uncoalesced(self):
@@ -1015,7 +1028,7 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(1, metrics.generated_kernel_count)
 
     @staticmethod
-    def _square_block_broadcast(x):
+    def _square_block_broadcast(x, transpose_scale=False):
         block_size = 16
         rows, cols = x.shape
         blocks = (
@@ -1029,7 +1042,8 @@ class LoopOrderingTest(TestCase):
             .contiguous()
         )
         scale = blocks.abs().amax(dim=(-2, -1), keepdim=True).clamp(min=1e-6)
-        quantized = blocks / scale
+        divisor = scale.transpose(0, 1) if transpose_scale else scale
+        quantized = blocks / divisor
         output = quantized.permute(0, 2, 1, 3).contiguous().reshape(rows, cols)
         return output, scale.squeeze(-1).squeeze(-1)
 
@@ -1059,18 +1073,13 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(self._square_block_broadcast, x)
         self.assertEqual(2, metrics.generated_kernel_count)
 
+    def test_square_block_broadcast_rejects_transposed_reduction_output(self):
+        x = torch.randn(6 * 16, 6 * 16, device=GPU_TYPE)
+        self.do_acc_test(self._square_block_broadcast, x, True)
+        self.assertEqual(2, metrics.generated_kernel_count)
+
     @inductor_config.patch(force_disable_caches=True)
     def test_square_block_broadcast_reindex_rollback(self):
-        block_size = 16
-
-        def f(x):
-            blocks = (
-                x.reshape(6, block_size, 7, block_size).permute(0, 2, 1, 3).contiguous()
-            )
-            scale = blocks.abs().amax(dim=(-2, -1), keepdim=True).clamp(min=1e-6)
-            output = (blocks / scale).permute(0, 2, 1, 3).contiguous()
-            return output, scale
-
         original_restore = _LoopStateSnapshot.restore
         restored = []
 
@@ -1080,7 +1089,7 @@ class LoopOrderingTest(TestCase):
                 self.assertEqual(state, sn.snapshot_loop_state())
             restored.append(True)
 
-        x = torch.randn(6 * block_size, 7 * block_size, device=GPU_TYPE)
+        x = torch.randn(6 * 16, 7 * 16, device=GPU_TYPE)
         with (
             mock.patch.object(
                 Scheduler,
@@ -1089,7 +1098,7 @@ class LoopOrderingTest(TestCase):
             ),
             mock.patch.object(_LoopStateSnapshot, "restore", record_restore),
         ):
-            self.do_acc_test(f, x)
+            self.do_acc_test(self._square_block_broadcast, x)
         self.assertTrue(restored)
         self.assertEqual(2, metrics.generated_kernel_count)
 

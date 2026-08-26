@@ -8447,35 +8447,33 @@ class Scheduler:
                 pw_access_bytes * extra_numel + pw_numel_hint - 1
             ) // pw_numel_hint
 
-        broadcast_orders = (
-            None
-            if needs_expansion or not config.loop_ordering_after_fusion
-            else self._pointwise_reduction_broadcast_orders(
-                reduction_node, snodes, red_numel, red_rnumel
-            )
-        )
-        # Check reordered ranges without mutating the loops measured below.
-        candidate_ranges = (
-            [
-                (tuple(sn._sizes[0][i] for i in order), sn._sizes[1])
-                for sn, order in zip(snodes, broadcast_orders, strict=True)
-            ]
-            if broadcast_orders is not None
-            else [sn.get_ranges() for sn in snodes]
-        )
-
-        if not all(
-            SIMDKernel.is_compatible((red_numel, pw_rnumel), ranges)
-            for ranges in candidate_ranges
-        ):
-            return False
-
+        target_iter_sizes = (red_numel, pw_rnumel)
         # Nothing to reindex if the pointwise already uses the reduction split.
-        target_iter_sizes = (red_numel, red_rnumel)
         if not needs_expansion and all(
             tuple(sn._sizes[0]) == target_iter_sizes for sn in snodes
         ):
             return False
+
+        broadcast_orders = None
+        # Only search for a broadcast reorder when the existing path cannot
+        # reindex the pointwise ranges as-is.
+        if not all(
+            SIMDKernel.is_compatible(target_iter_sizes, sn.get_ranges())
+            for sn in snodes
+        ):
+            if needs_expansion or not config.loop_ordering_after_fusion:
+                return False
+            broadcast_orders = self._find_reduction_broadcast_orders(
+                reduction_node, snodes, red_numel, red_rnumel
+            )
+            if broadcast_orders is None or not all(
+                SIMDKernel.is_compatible(
+                    target_iter_sizes,
+                    (tuple(sn._sizes[0][i] for i in order), sn._sizes[1]),
+                )
+                for sn, order in zip(snodes, broadcast_orders, strict=True)
+            ):
+                return False
 
         # Measure each node's memory access before mutating any loops, so the
         # coalescing guard below can compare against the un-reindexed kernels.
@@ -8509,13 +8507,13 @@ class Scheduler:
                 ):
                     expand_dim = len(iter_sizes) - 1
                 else:
-                    sn.apply_loop_reindexing([red_numel, pw_rnumel])
+                    sn.apply_loop_reindexing(target_iter_sizes)
                     expand_dim = 1
                 sn.expand_dimension_for_pointwise_node_with_masked_stores(
                     expand_dim, red_rnumel
                 )
-            elif tuple(sn._sizes[0]) != (red_numel, red_rnumel):
-                sn.apply_loop_reindexing([red_numel, red_rnumel])
+            elif tuple(sn._sizes[0]) != target_iter_sizes:
+                sn.apply_loop_reindexing(target_iter_sizes)
 
         if isinstance(pw_node, FusedSchedulerNode):
             pw_node.group = snodes[0].group
@@ -8678,14 +8676,18 @@ class Scheduler:
             counters["inductor"]["masked_expansion_reindex_attempts"] += 1
         return True
 
-    def _pointwise_reduction_broadcast_orders(
-        self,
+    @staticmethod
+    def _find_reduction_broadcast_orders(
         reduction_node: BaseSchedulerNode,
         snodes: Sequence[SchedulerNode],
         red_numel: sympy.Expr,
         red_rnumel: sympy.Expr,
     ) -> list[tuple[int, ...]] | None:
-        """Stably group reduction-output dimensions before broadcast dimensions."""
+        """Find loop orders that group reduction-output dimensions before broadcasts.
+
+        Return None unless every pointwise child has one direct reduction-output
+        read and the reordered iteration shapes agree.
+        """
         reduction_outputs = reduction_node.get_buffer_names()
         orders: list[tuple[int, ...]] = []
         for sn in snodes:
@@ -8703,21 +8705,19 @@ class Scheduler:
                 return None
 
             dep = reads[0]
-            dep_vars = dep.var_names
-            # Normalization can merge variables, invalidating positional mapping.
-            if len(dep_vars) > num_iter_dims or not all(
-                V.graph.sizevars.statically_known_equals(size, iter_sizes[i])
-                for i, size in enumerate(dep.size)
-            ):
+            if dep.is_indirect():
+                return None
+            loop_vars = sn.read_writes.range_vars
+            if loop_vars is None or len(loop_vars) != num_iter_dims:
                 return None
             indexed = tuple(
-                i for i, var in enumerate(dep_vars) if var in dep.index.free_symbols
+                i for i, var in enumerate(loop_vars) if var in dep.index.free_symbols
             )
             broadcast = tuple(i for i in range(num_iter_dims) if i not in indexed)
             if not indexed or not broadcast:
                 return None
             if not V.graph.sizevars.statically_known_equals(
-                sympy_product(iter_sizes[i] for i in indexed), red_numel
+                dep.get_numel(), red_numel
             ) or not V.graph.sizevars.statically_known_equals(
                 sympy_product(iter_sizes[i] for i in broadcast), red_rnumel
             ):
