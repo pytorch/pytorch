@@ -46,14 +46,14 @@ from __future__ import annotations
 import importlib.metadata
 import threading
 import warnings
-from collections import defaultdict
+from collections.abc import Mapping
 from contextlib import contextmanager
 from logging import getLogger
 from typing import Any, NamedTuple, TYPE_CHECKING, TypeAlias
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable, Iterator
 
 import torch
 from torch.cuda._utils import (
@@ -159,7 +159,7 @@ def record_node_annotation(tools_id: int, annotation: dict[str, Any]) -> None:
     The CUPTI backend's entry point into the same store the edge walk fills, so both
     backends are remapped to exec-graph ids by ``remap_to_exec_graph`` identically. Not a
     public API."""
-    _kernel_annotations[tools_id].append(annotation)
+    _merge_annotation(tools_id, annotation)
 
 
 def _graph_id(graph: Any) -> int:
@@ -360,8 +360,36 @@ def _collect_descendants(
     return descendants
 
 
-# toolsId -> list of annotation objects.
-_kernel_annotations: defaultdict[int, list[Any]] = defaultdict(list)
+# toolsId -> the node's merged annotation. Exactly one dict per node: every writer goes
+# through _merge_annotation, and a node is only written more than once when scopes overlap
+# on it, which is precisely what the merge resolves.
+_kernel_annotations: dict[int, dict[str, Any]] = {}
+
+
+def _merge_annotation(tools_id: int, annotation: Any) -> None:
+    """Merge one scope's annotation into a node's entry; the first write wins per key.
+
+    First-wins is what makes nested scopes resolve inner-first: scopes are recorded in
+    completion order, so the innermost scope containing a node reaches it first and keeps
+    the keys it shares with its enclosing scopes, while their extra keys still come
+    through. Non-dict annotations are normalized to ``{"name": ...}``; ``mark_kernels``
+    already does that for strings, but the store is written by other callers too.
+    """
+    incoming = annotation if isinstance(annotation, dict) else {"name": annotation}
+    entry = _kernel_annotations.get(tools_id)
+    if entry is None:
+        _kernel_annotations[tools_id] = dict(incoming)
+        return
+    for key, value in incoming.items():
+        entry.setdefault(key, value)
+
+
+def annotation_for(tools_id: int) -> dict[str, Any] | None:
+    """The merged annotation recorded for one graph node, or ``None``. The in-process
+    accessor behind the profiler's graph annotation resolver, handing out the stored dict
+    rather than the list-wrapped public view. Not a public API."""
+    return _kernel_annotations.get(tools_id)
+
 
 # Node types we annotate (kernels, memcpys, memsets, batch mem ops, event
 # record/wait nodes, and host nodes), as driver node-type enums. Event and host
@@ -852,24 +880,11 @@ def resolve_pending_annotations() -> None:
         return
 
     try:
-        per_tools_id: defaultdict[int, list[Any]] = defaultdict(list)
+        # _pending_scopes is in scope-completion order (innermost first) and
+        # _merge_annotation is first-wins, so this applies the documented precedence.
         for annotation, tools_ids in _pending_scopes:
             for tools_id in tools_ids:
-                per_tools_id[tools_id].append(annotation)
-
-        for tools_id, ann_list in per_tools_id.items():
-            if len(ann_list) == 1:
-                _kernel_annotations[tools_id].append(ann_list[0])
-                continue
-
-            merged: dict[str, Any] = {}
-            for annotation in ann_list:
-                if isinstance(annotation, dict):
-                    for key, value in annotation.items():
-                        merged.setdefault(key, value)
-                else:
-                    merged.setdefault("name", annotation)
-            _kernel_annotations[tools_id].append(merged)
+                _merge_annotation(tools_id, annotation)
     except Exception:
         logger.exception("resolve_pending_annotations failed")
     finally:
@@ -924,29 +939,27 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
 
 
 def _rekey_annotations(
-    annotations: dict[int, list[Any]],
+    annotations: dict[int, dict[str, Any]],
     capture_graph_id: int,
     exec_graph_id: int,
-) -> dict[int, list[Any]]:
+) -> dict[int, dict[str, Any]]:
     """Rekey one graph's annotations from its capture id to its exec id.
 
     A toolsId packs the graph id in the upper 32 bits and the node id in the
     lower 32. Only entries whose upper bits match ``capture_graph_id`` are
     rewritten to ``exec_graph_id``; entries from other graphs (already remapped
-    to their own exec ids, or pending their own remap) are kept as-is. When two
-    capture-side ids collide on the same rekeyed id their lists are merged.
+    to their own exec ids, or pending their own remap) are kept as-is. The
+    rewritten keys cannot collide with anything: they share their upper bits and
+    differ in node id, and the driver mints graph and exec ids from one counter
+    that it does not reuse, so no other entry is keyed on a freshly minted exec id.
     """
-    remapped: dict[int, list[Any]] = {}
-    for tools_id, ann_list in annotations.items():
+    remapped: dict[int, dict[str, Any]] = {}
+    for tools_id, annotation in annotations.items():
         if tools_id >> 32 != capture_graph_id:
-            remapped[tools_id] = ann_list
+            remapped[tools_id] = annotation
             continue
         node_id = tools_id & 0xFFFFFFFF
-        new_tools_id = (exec_graph_id << 32) | node_id
-        if new_tools_id in remapped:
-            remapped[new_tools_id].extend(ann_list)
-        else:
-            remapped[new_tools_id] = list(ann_list)
+        remapped[(exec_graph_id << 32) | node_id] = annotation
     return remapped
 
 
@@ -960,22 +973,49 @@ def resolve_and_remap(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     remap_to_exec_graph(torch_cuda_graph)
 
 
+class _AnnotationsView(Mapping[int, "list[Any]"]):
+    """Read-only view of the annotation store, presenting each node's annotation as a
+    one-element list.
+
+    The store holds exactly one merged dict per node, but the public mapping has always
+    had list values -- and pickles of it are read back by
+    ``torch.cuda._annotate_cuda_graph_trace`` -- so the shape is kept. Wrapping on read
+    rather than storing lists is what makes "at most one annotation per node" explicit.
+    """
+
+    def __getitem__(self, tools_id: int) -> list[Any]:
+        return [_kernel_annotations[tools_id]]
+
+    def __iter__(self) -> Iterator[int]:
+        return iter(_kernel_annotations)
+
+    def __len__(self) -> int:
+        return len(_kernel_annotations)
+
+    def __repr__(self) -> str:
+        return repr(dict(self))
+
+
+_annotations_view = _AnnotationsView()
+
+
 def get_kernel_annotations() -> Mapping[int, list[Any]]:
     r"""get_kernel_annotations() -> Mapping[int, list]
 
     Return the live registry of recorded kernel annotations.
 
     Keys are opaque integers matching the ``graph node id`` field that
-    CUPTI-based profilers attach to kernel events; values are the lists of
-    annotation dicts recorded for that node. The registry accumulates
-    across captures and is global to the process.
+    CUPTI-based profilers attach to kernel events; values are one-element
+    lists holding the annotation dict recorded for that node -- annotations
+    from overlapping scopes are merged into that single dict. The registry
+    accumulates across captures and is global to the process.
 
     The returned mapping is a **live view**: it is updated in place when a
     graph is instantiated (annotation keys are rekeyed to the executable
     graph's ids), so a reference obtained early stays current. Keys are
     valid for joining against a profiler trace once the corresponding
-    graphs have been instantiated. Treat the mapping as read-only; snapshot
-    it with ``dict(...)`` if isolation is needed.
+    graphs have been instantiated. The mapping is read-only; snapshot it
+    with ``dict(...)`` if isolation is needed.
 
     .. warning::
         This API is in prototype and may change in future releases.
@@ -987,7 +1027,7 @@ def get_kernel_annotations() -> Mapping[int, list[Any]]:
         >>> with open("annotations.pkl", "wb") as f:
         ...     pickle.dump(dict(annotations), f)
     """
-    return _kernel_annotations
+    return _annotations_view
 
 
 def clear_kernel_annotations() -> None:
@@ -1075,7 +1115,11 @@ def mark_stream(stream: torch.cuda.Stream, annotation: str | dict[str, Any]):
         if isinstance(annotation, str):
             annotation = {"name": annotation}
         if isinstance(annotation, dict):
-            annotation["stream"] = _get_stream_id(stream)
+            # Copy rather than write through: the annotation is stored by reference, so an
+            # in-place "stream" would leak back to the caller and, when one dict is reused
+            # across mark_stream calls (a comms wrapper marking a lane per process group),
+            # retag every region already recorded with it to the last lane written.
+            annotation = {**annotation, "stream": _get_stream_id(stream)}
         with mark_kernels(annotation):
             with torch.cuda.stream(stream):
                 yield
