@@ -669,6 +669,24 @@ class OutputGraphCommon(OutputGraphGuardsState):
         raise NotImplementedError
 
 
+def is_noop_graph(gm: torch.fx.GraphModule) -> bool:
+    """True if the graph runs nothing and returns nothing.
+
+    Weaker than OutputGraph.is_empty_graph, which wants no nodes at all: a graph
+    that only holds an empty output node computes nothing either.
+    """
+    if count_calls(gm.graph) != 0:
+        return False
+    for node in gm.graph.find_nodes(op="output"):
+        if pytree.tree_leaves(node.args) != []:
+            return False
+    return True
+
+
+def noop_graph_call(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
+    return ()
+
+
 class OutputGraph(OutputGraphCommon):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -1581,7 +1599,7 @@ class OutputGraph(OutputGraphCommon):
         return name
 
     def register_static_attr_and_return_proxy(
-        self, attr_prefix: str, attr_value: Any
+        self, attr_prefix: str, attr_value: object
     ) -> fx.Proxy:
         # Check if the module already exists, if it does, return the already
         # added proxy. This is important for executorch tests.
@@ -2989,8 +3007,17 @@ class OutputGraph(OutputGraphCommon):
                     example_inputs[idx].fake_device = snapshot.fake_device  # type: ignore[union-attr]
 
             gm.graph.lint()
-            with self.restore_global_state():
-                compiled_fn = self.call_user_compiler(gm, example_inputs)
+            if is_noop_graph(gm):
+                # The graph can still be empty here even though the early check
+                # in this function passed: we decided to compile because there
+                # were outputs, and pruning then established that every one of
+                # them is an input or a constant that codegen emits directly.
+                # Handing that to the backend costs a metadata pass, a joint
+                # trace and a cache miss for a function with nothing in it.
+                compiled_fn = noop_graph_call
+            else:
+                with self.restore_global_state():
+                    compiled_fn = self.call_user_compiler(gm, example_inputs)
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
@@ -3533,7 +3560,7 @@ class OutputGraph(OutputGraphCommon):
                 types.FunctionType(code, f_globals, name),
             )
 
-    def install_global_unsafe(self, name: str, value: Any) -> None:
+    def install_global_unsafe(self, name: str, value: object) -> None:
         """
         WARNING: prefer the safer `install_global_by_id/install_global`.
         torch.compile instances should be independent of each other;
@@ -3546,7 +3573,7 @@ class OutputGraph(OutputGraphCommon):
         self.installed_globals.add(name)
         self.cleanups.append(CleanupHook.create(self.global_scope, name, value))
 
-    def install_global_by_id(self, prefix: str, value: Any) -> str:
+    def install_global_by_id(self, prefix: str, value: object) -> str:
         """
         Installs a global if it hasn't been installed already.
         This is determined by (prefix, id(value)) pair.
@@ -3561,7 +3588,7 @@ class OutputGraph(OutputGraphCommon):
         self.install_global_unsafe(name, value)
         return name
 
-    def install_global(self, prefix: str, value: Any) -> str:
+    def install_global(self, prefix: str, value: object) -> str:
         """
         Installs a global, generating a unique name for it.
 

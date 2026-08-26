@@ -319,6 +319,21 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
             V.kernel.store_buffer_names.discard(local_buffer_name)
         return res
 
+    def masked_store(self, name, index, value, mask):
+        # CppKernel has no masked_store, so this is unreachable today; localize
+        # anyway so it cannot write the global buffer if that ever changes.
+        local_buffer_name, local_buffer_index = self.localize(name, index)
+        res = self._inner.masked_store(
+            local_buffer_name, local_buffer_index, value, mask
+        )
+        if (
+            self.global_to_local
+            and name in self.global_to_local
+            and isinstance(V.kernel, Kernel)
+        ):
+            V.kernel.store_buffer_names.discard(local_buffer_name)
+        return res
+
     def store_reduction(self, name, index, value):
         # pyrefly: ignore [bad-argument-count]
         return self._inner.store_reduction(*self.localize(name, index), value)

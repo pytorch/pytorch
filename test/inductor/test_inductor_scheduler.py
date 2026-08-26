@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 from unittest import skipIf
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import sympy
 
@@ -11,28 +11,39 @@ import torch._inductor.ir as ir
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
+from torch._inductor.choices import InductorChoices
+from torch._inductor.codegen.common import BackendFeature
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
+from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
+    _LoopMutationTracker,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     NestedReduction,
     Scheduler,
+    SchedulerNode,
 )
 from torch._inductor.sizevars import SizeVarAllocator
-from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
+from torch._inductor.utils import (
+    fresh_inductor_cache,
+    run_and_get_code,
+    snode_args_kwargs,
+)
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
+    skipCPUIf,
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     parametrize,
     run_tests,
     TestCase,
@@ -987,6 +998,597 @@ class TestScheduler(TestCase):
         with inductor_config.patch(deterministic=True):
             check_realizes()
 
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    @parametrize("op", ["select_scatter", "index_put"])
+    # Both settings are pinned so the test can only pass via graph_fanout:
+    # deterministic mode makes expand realize src on its own, and the read
+    # threshold decides whether src counts as expensive at all.
+    @inductor_config.patch(deterministic=False, realize_reads_threshold=4)
+    def test_scatter_realizes_expensive_src(self, op):
+        def src(a, b, c, d, e):
+            return a[..., 1] * b[..., 0] + c[..., 1] * d[..., 0] + e[..., 2]
+
+        if op == "select_scatter":
+
+            def fn(base, *args):
+                return torch.select_scatter(base, src(*args), dim=2, index=1)
+        else:
+
+            def fn(base, *args):
+                index = torch.arange(base.shape[0], device=base.device)
+                base.index_put_((index,), src(*args))
+                return base
+
+        device = "cuda"
+        torch.manual_seed(0)
+        base_size = (32, 32, 26) if op == "select_scatter" else (26, 32, 32)
+        base = torch.rand(base_size, dtype=torch.float32, device=device)
+        args = [
+            torch.rand((32, 32, 26), dtype=torch.float32, device=device)
+            for _ in range(5)
+        ]
+        expected = fn(base.clone(), *args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with DeterministicGuard(False), fresh_inductor_cache():
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            actual = compiled(base.clone(), *args)
+
+        self.assertEqual(expected, actual)
+        # src must not be inlined into the scatter loop, which would recompute it
+        # once per element of the broadcast dim.
+        self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    @parametrize(
+        "extra_cols,with_residual,expected_kernels",
+        ((1, False, 1), (1, True, 2), (16, False, 2)),
+    )
+    def test_cat_reduction_slice_fusion(
+        self, device, extra_cols, with_residual, expected_kernels
+    ):
+        def fn(x, bias, extra, residual):
+            scores = x[None] * 0.125 + bias
+            appended = extra.view(1, 8, 1, extra_cols).expand(1, 8, 32, extra_cols)
+            values = torch.cat((scores, appended), dim=-1)
+            shifted = (values - values.max(dim=-1, keepdim=True).values).float()
+            shifted = shifted - shifted.amax(dim=-1, keepdim=True)
+            exp = shifted.exp()
+            probs = exp / exp.sum(dim=-1, keepdim=True)
+            result = probs.bfloat16()[..., :32].clone().view(8, 32, 32)
+            return result + residual if with_residual else result
+
+        x = torch.randn(8, 32, 32, device=device, dtype=torch.bfloat16)
+        bias = torch.randn(1, 1, 32, 32, device=device, dtype=torch.bfloat16)
+        extra = torch.randn(8, extra_cols, device=device, dtype=torch.bfloat16)
+        residual = torch.randn_like(x)
+        expected = fn(x, bias, extra, residual)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with fresh_inductor_cache():
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), x, bias, extra, residual
+            )
+
+        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
+        self.assertEqual(metrics.generated_kernel_count, expected_kernels)
+        if expected_kernels == 1 and device == "cuda":
+            source = "\n".join(code)
+            self.assertEqual(source.count("tl.load("), 3)
+            self.assertEqual(source.count("libdevice.exp("), 1)
+            load_lines = [line for line in source.splitlines() if "tl.load(" in line]
+            data_loads = [
+                line for line in load_lines if "in_ptr0" in line or "in_ptr1" in line
+            ]
+            self.assertEqual(len(data_loads), 2)
+            self.assertTrue(all("r0_mask" not in line for line in data_loads))
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    @parametrize(
+        "shared_bytes_multiple,min_shared_fraction,expect_fusion",
+        ((0, 0.0, True), (10_000, 0.0, False)),
+    )
+    def test_masked_expansion_shared_read_gate(
+        self,
+        device,
+        shared_bytes_multiple,
+        min_shared_fraction,
+        expect_fusion,
+    ):
+        fn, args = self._masked_expansion_fn(device, 1)
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(
+                masked_expansion_shared_bytes_multiple=shared_bytes_multiple,
+                masked_expansion_min_shared_fraction=min_shared_fraction,
+            ),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*args)
+
+        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
+        self.assertEqual(metrics.generated_kernel_count, 1 if expect_fusion else 2)
+        fired = counters["inductor"]["masked_expansion_reindex_attempts"]
+        self.assertEqual(bool(fired), expect_fusion)
+
+    def _masked_expansion_fn(self, device, extra_cols):
+        def fn(x, bias, extra):
+            scores = x[None] * 0.125 + bias
+            batch = x.shape[0]
+            runtime_extra_cols = extra.shape[-1]
+            appended = extra.view(1, batch, 1, runtime_extra_cols).expand(
+                1, batch, 32, runtime_extra_cols
+            )
+            values = torch.cat((scores, appended), dim=-1)
+            shifted = (values - values.max(dim=-1, keepdim=True).values).float()
+            shifted = shifted - shifted.amax(dim=-1, keepdim=True)
+            exp = shifted.exp()
+            probs = exp / exp.sum(dim=-1, keepdim=True)
+            return probs.bfloat16()[..., :32].clone().view(batch, 32, 32)
+
+        x = torch.randn(8, 32, 32, device=device, dtype=torch.bfloat16)
+        bias = torch.randn(1, 1, 32, 32, device=device, dtype=torch.bfloat16)
+        extra = torch.randn(8, extra_cols, device=device, dtype=torch.bfloat16)
+        return fn, (x, bias, extra)
+
+    def _masked_expansion_with_residual_fn(self, device, residual_cols, reverse):
+        base_fn, base_args = self._masked_expansion_fn(device, 1)
+
+        def fn(x, bias, extra, residual):
+            residual = residual.flip(-1) if reverse else residual
+            return base_fn(x, bias, extra) + residual[..., :32]
+
+        residual = torch.randn(
+            8, 32, residual_cols, device=device, dtype=torch.bfloat16
+        )
+        return fn, (*base_args, residual)
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    def test_masked_expansion_stores_are_masked(self, device):
+        """
+        The whole transform is only sound because the expanded tail iterations
+        do not write. Assert the emitted store actually carries a tail mask
+        rather than inferring it from the kernel count.
+        """
+        fn, args = self._masked_expansion_fn(device, 1)
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with fresh_inductor_cache():
+            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+
+        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        self.assertTrue(counters["inductor"]["masked_expansion_reindex_attempts"])
+
+        source = "\n".join(code)
+        self.assertEqual(source.count("tl.load("), 3)
+        store_lines = [ln for ln in source.splitlines() if "tl.store(" in ln]
+        self.assertTrue(store_lines)
+        definitions = {
+            line.strip().split(" = ", 1)[0]: line
+            for line in source.splitlines()
+            if " = " in line
+        }
+
+        def is_reduction_index(expr):
+            if expr.startswith("r0_") and expr[3:].isdigit():
+                return True
+            definition = definitions.get(expr, "")
+            if " = " not in definition or ").to(" not in definition:
+                return False
+            converted = definition.split(" = ", 1)[1]
+            base = converted.split(").to(", 1)[0]
+            if not base.startswith("("):
+                return False
+            base = base[1:]
+            return base.startswith("r0_") and base[3:].isdigit()
+
+        for line in store_lines:
+            predicate = line.rsplit(",", 1)[-1].rstrip(")\n ")
+            tail_masks = []
+            for term in predicate.split("&"):
+                term = term.strip()
+                comparison = definitions.get(term, "")
+                if not term.startswith("tmp") or "<" not in comparison:
+                    continue
+                lhs = comparison.split(" = ", 1)[1].rsplit("<", 1)[0].strip()
+                rhs = comparison.rsplit("<", 1)[-1].strip()
+                if is_reduction_index(lhs) and (
+                    rhs == "32" or ", 32," in definitions.get(rhs, "")
+                ):
+                    tail_masks.append(term)
+            self.assertTrue(tail_masks, msg=f"store lacks tail mask: {line}")
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    def test_masked_expansion_requires_backend_feature(self, device):
+        fn, args = self._masked_expansion_fn(device, 1)
+        expected = fn(*args)
+        expanded = False
+        original_expand = (
+            SchedulerNode.expand_dimension_for_pointwise_node_with_masked_stores
+        )
+        original_has_feature = GraphLowering.has_feature
+
+        def record_expand(node, *args, **kwargs):
+            nonlocal expanded
+            expanded = True
+            return original_expand(node, *args, **kwargs)
+
+        def without_masked_store(graph, device, feature):
+            if feature is BackendFeature.MASKED_STORE:
+                return False
+            return original_has_feature(graph, device, feature)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with (
+            fresh_inductor_cache(),
+            patch.object(GraphLowering, "has_feature", without_masked_store),
+            patch.object(
+                SchedulerNode,
+                "expand_dimension_for_pointwise_node_with_masked_stores",
+                record_expand,
+            ),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*args)
+
+        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
+        self.assertFalse(expanded)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    @parametrize("max_ratio,expect_fusion", ((0.0, False), (0.5, True)))
+    def test_masked_expansion_ratio_cap(self, device, max_ratio, expect_fusion):
+        fn, args = self._masked_expansion_fn(device, 1)
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(masked_expansion_max_ratio=max_ratio),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*args)
+
+        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
+        fired = counters["inductor"]["masked_expansion_reindex_attempts"]
+        self.assertEqual(bool(fired), expect_fusion)
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    def test_masked_expansion_dynamic_reduction_range(self, device):
+        fn, args = self._masked_expansion_fn(device, 2)
+        torch._dynamo.mark_dynamic(args[2], 1)
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with fresh_inductor_cache():
+            compiled = torch.compile(fn, fullgraph=True)
+            actual = compiled(*args)
+
+            args2 = (
+                args[0],
+                args[1],
+                torch.randn(8, 3, device=device, dtype=torch.bfloat16),
+            )
+            expected2 = fn(*args2)
+            actual2 = compiled(*args2)
+            self.assertEqual(counters["stats"]["unique_graphs"], 1)
+            self.assertEqual(metrics.generated_kernel_count, 1)
+
+            args3 = (
+                args[0],
+                args[1],
+                torch.randn(8, 4, device=device, dtype=torch.bfloat16),
+            )
+            expected3 = fn(*args3)
+            actual3 = compiled(*args3)
+            self.assertEqual(counters["stats"]["unique_graphs"], 2)
+            self.assertEqual(metrics.generated_kernel_count, 3)
+
+            args4 = (
+                args[0],
+                args[1],
+                torch.randn(8, 3, device=device, dtype=torch.bfloat16),
+            )
+            expected4 = fn(*args4)
+            actual4 = compiled(*args4)
+
+        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
+        self.assertEqual(expected2, actual2, atol=5e-3, rtol=2e-2)
+        self.assertEqual(expected3, actual3, atol=5e-3, rtol=2e-2)
+        self.assertEqual(expected4, actual4, atol=5e-3, rtol=2e-2)
+        self.assertTrue(counters["inductor"]["masked_expansion_reindex_attempts"])
+        self.assertEqual(counters["stats"]["unique_graphs"], 2)
+        self.assertEqual(metrics.generated_kernel_count, 3)
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    def test_masked_expansion_dynamic_ratio_boundary(self, device):
+        fn, args = self._masked_expansion_fn(device, 3)
+        torch._dynamo.mark_dynamic(args[2], 1)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(masked_expansion_max_ratio=3 / 32),
+        ):
+            compiled = torch.compile(fn, fullgraph=True)
+            actual = compiled(*args)
+            self.assertEqual(fn(*args), actual, atol=5e-3, rtol=2e-2)
+            self.assertEqual(counters["stats"]["unique_graphs"], 1)
+            self.assertEqual(metrics.generated_kernel_count, 1)
+
+            args2 = (
+                args[0],
+                args[1],
+                torch.randn(8, 2, device=device, dtype=torch.bfloat16),
+            )
+            actual2 = compiled(*args2)
+            self.assertEqual(fn(*args2), actual2, atol=5e-3, rtol=2e-2)
+            self.assertEqual(counters["stats"]["unique_graphs"], 1)
+            self.assertEqual(metrics.generated_kernel_count, 1)
+
+            args3 = (
+                args[0],
+                args[1],
+                torch.randn(8, 4, device=device, dtype=torch.bfloat16),
+            )
+            actual3 = compiled(*args3)
+
+        self.assertEqual(fn(*args3), actual3, atol=5e-3, rtol=2e-2)
+        self.assertEqual(counters["stats"]["unique_graphs"], 2)
+        self.assertEqual(metrics.generated_kernel_count, 3)
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    def test_rejected_masked_expansion_does_not_install_ratio_guard(self, device):
+        class RejectMaskedExpansion(InductorChoices):
+            def __init__(self):
+                self.rejected = False
+
+            def can_fuse_vertical(self, scheduler, node1, node2, shared_data_score):
+                if any(
+                    isinstance(sn, SchedulerNode) and sn._body.has_op("masked_store")
+                    for sn in node2.get_nodes()
+                ):
+                    self.rejected = True
+                    return False
+                return True
+
+        fn, args = self._masked_expansion_fn(device, 2)
+        torch._dynamo.mark_dynamic(args[2], 1)
+        choices = RejectMaskedExpansion()
+        expanded_nodes = []
+        rollback_checks = []
+        original_expand = (
+            SchedulerNode.expand_dimension_for_pointwise_node_with_masked_stores
+        )
+        original_finish = _LoopMutationTracker.finish
+
+        def record_finish(tracker, *, rollback):
+            state = tracker.state
+            result = original_finish(tracker, rollback=rollback)
+            if rollback and state is not None:
+                for node, expected in state.scheduler_node_states.items():
+                    if node in expanded_nodes:
+                        rollback_checks.append(node.snapshot_loop_state() == expected)
+            return result
+
+        def record_expand(node, *args, **kwargs):
+            expanded_nodes.append(node)
+            return original_expand(node, *args, **kwargs)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with (
+            fresh_inductor_cache(),
+            V.set_choices_handler(choices),
+            patch.object(_LoopMutationTracker, "finish", record_finish),
+            patch.object(
+                SchedulerNode,
+                "expand_dimension_for_pointwise_node_with_masked_stores",
+                record_expand,
+            ),
+        ):
+            compiled = torch.compile(fn, fullgraph=True)
+            actual = compiled(*args)
+            args2 = (
+                args[0],
+                args[1],
+                torch.randn(8, 4, device=device, dtype=torch.bfloat16),
+            )
+            actual2 = compiled(*args2)
+
+        self.assertEqual(fn(*args), actual, atol=5e-3, rtol=2e-2)
+        self.assertEqual(fn(*args2), actual2, atol=5e-3, rtol=2e-2)
+        self.assertTrue(choices.rejected)
+        self.assertTrue(expanded_nodes)
+        self.assertTrue(
+            all(not node._body.has_op("masked_store") for node in expanded_nodes)
+        )
+        self.assertTrue(rollback_checks)
+        self.assertTrue(all(rollback_checks))
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    def test_failed_masked_expansion_ratio_guard_rolls_back(self, device):
+        fn, args = self._masked_expansion_fn(device, 2)
+        torch._dynamo.mark_dynamic(args[2], 1)
+        original_try_reindex = Scheduler._try_reindex_pointwise_for_reduction
+        original_guard_or_false = SizeVarAllocator.guard_or_false
+        original_expand = (
+            SchedulerNode.expand_dimension_for_pointwise_node_with_masked_stores
+        )
+        pending_guards = []
+        expanded_nodes = []
+        rollback_checks = []
+        rejected_guard = False
+        original_finish = _LoopMutationTracker.finish
+
+        def capture_guards(scheduler, node1, node2, **kwargs):
+            result = original_try_reindex(scheduler, node1, node2, **kwargs)
+            guards = kwargs.get("pending_runtime_guards")
+            if guards:
+                pending_guards.extend(guards)
+            return result
+
+        def record_finish(tracker, *, rollback):
+            state = tracker.state
+            result = original_finish(tracker, rollback=rollback)
+            if rollback and state is not None:
+                for node, expected in state.scheduler_node_states.items():
+                    if node in expanded_nodes:
+                        rollback_checks.append(node.snapshot_loop_state() == expected)
+            return result
+
+        def reject_ratio_guard(sizevars, expr):
+            nonlocal rejected_guard
+            if any(expr == guard for guard in pending_guards):
+                rejected_guard = True
+                return False
+            return original_guard_or_false(sizevars, expr)
+
+        def record_expand(node, *args, **kwargs):
+            expanded_nodes.append(node)
+            return original_expand(node, *args, **kwargs)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with (
+            fresh_inductor_cache(),
+            patch.object(
+                Scheduler,
+                "_try_reindex_pointwise_for_reduction",
+                capture_guards,
+            ),
+            patch.object(SizeVarAllocator, "guard_or_false", reject_ratio_guard),
+            patch.object(_LoopMutationTracker, "finish", record_finish),
+            patch.object(
+                SchedulerNode,
+                "expand_dimension_for_pointwise_node_with_masked_stores",
+                record_expand,
+            ),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*args)
+
+        self.assertEqual(fn(*args), actual, atol=5e-3, rtol=2e-2)
+        self.assertTrue(rejected_guard)
+        self.assertTrue(expanded_nodes)
+        self.assertTrue(
+            all(not node._body.has_op("masked_store") for node in expanded_nodes)
+        )
+        self.assertTrue(rollback_checks)
+        self.assertTrue(all(rollback_checks))
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    def test_masked_expansion_dynamic_outer_range(self, device):
+        fn, args = self._masked_expansion_with_residual_fn(
+            device, residual_cols=33, reverse=False
+        )
+        torch._dynamo.mark_dynamic(args[0], 0)
+        torch._dynamo.mark_dynamic(args[2], 0)
+        torch._dynamo.mark_dynamic(args[3], 0)
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(
+                masked_expansion_shared_bytes_multiple=0,
+                masked_expansion_min_shared_fraction=0.0,
+            ),
+        ):
+            compiled = torch.compile(fn, fullgraph=True)
+            actual = compiled(*args)
+            args2 = (
+                torch.randn(12, 32, 32, device=device, dtype=torch.bfloat16),
+                args[1],
+                torch.randn(12, 1, device=device, dtype=torch.bfloat16),
+                torch.randn(12, 32, 33, device=device, dtype=torch.bfloat16),
+            )
+            expected2 = fn(*args2)
+            actual2 = compiled(*args2)
+
+        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
+        self.assertEqual(expected2, actual2, atol=5e-3, rtol=2e-2)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        self.assertTrue(counters["inductor"]["masked_expansion_reindex_attempts"])
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    def test_masked_expansion_rejects_reverse_tail_read(self, device):
+        fn, args = self._masked_expansion_with_residual_fn(
+            device, residual_cols=32, reverse=True
+        )
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(
+                masked_expansion_shared_bytes_multiple=0,
+                masked_expansion_min_shared_fraction=0.0,
+            ),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*args)
+
+        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+        self.assertEqual(counters["inductor"]["masked_expansion_reindex_attempts"], 0)
+
+    @xfailIfNoAcceleratorTriton
+    @skipCPUIf(True, "requires accelerator Triton")
+    def test_masked_expansion_degenerate_range_is_noop(self, device):
+        """
+        When the pointwise already spans the reduction's extent there is no tail,
+        so the masked path must not run and no _load_mask penalty is paid.
+        """
+        fn, args = self._masked_expansion_fn(device, 32)
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        counters.clear()
+        with fresh_inductor_cache():
+            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+
+        self.assertEqual(expected, actual, atol=5e-3, rtol=2e-2)
+        self.assertEqual(counters["inductor"]["masked_expansion_reindex_attempts"], 0)
+        self.assertNotIn("_load_mask", "\n".join(code))
 
 class TestScoreFusionMemory(TestCase):
     """

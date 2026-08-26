@@ -1331,6 +1331,17 @@ class HalideKernel(SIMDKernel):
             raise NotImplementedError(f"store mode={mode}")
         self.body.writeline(DeferredLine(name, line))
 
+    def masked_store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mask: CSEVariable,
+    ) -> None:
+        # store() above ignores self._load_mask, so the SIMDKernel
+        # implementation would silently write the masked-off elements.
+        raise NotImplementedError("halide: masked_store")
+
     def reduction(
         self,
         dtype: torch.dtype,

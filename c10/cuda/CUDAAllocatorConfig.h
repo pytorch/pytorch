@@ -6,6 +6,13 @@
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
+#include <c10/util/flat_hash_map.h>
+
+#include <algorithm>
+#include <limits>
+#include <mutex>
+#include <optional>
+#include <string>
 
 namespace c10::cuda::CUDACachingAllocator {
 
@@ -13,6 +20,39 @@ enum class Expandable_Segments_Handle_Type : int {
   UNSPECIFIED = 0,
   POSIX_FD = 1,
   FABRIC_HANDLE = 2,
+};
+
+// A per-segment virtual-address reserve size, expressed either as a fraction of
+// a device's total memory (e.g. 0.5) or as an absolute number of GiB (config
+// suffix 'G', e.g. 40G). Resolved to an absolute byte count against a device's
+// total memory.
+struct ExpandableSegmentReserveSpec {
+  bool is_fraction = true;
+  double value = 0.0;
+
+  size_t resolveBytes(size_t total_global_mem) const {
+    double bytes = is_fraction ? value * static_cast<double>(total_global_mem)
+                               : value * static_cast<double>(size_t{1} << 30);
+    // Saturate before narrowing: converting a double that exceeds SIZE_MAX to
+    // size_t is undefined behavior, and a pathological config value (e.g.
+    // expandable_segments_reserve:1e20G) can produce such a double.
+    // clamp_reserve_bytes() bounds the reserve to the full reserve, so a
+    // saturated value here can never reach numSegments().
+    if (bytes >= static_cast<double>(std::numeric_limits<size_t>::max())) {
+      return std::numeric_limits<size_t>::max();
+    }
+    return static_cast<size_t>(bytes);
+  }
+};
+
+// A consistent snapshot of the reserve decision for a class, read under a
+// single lock so a concurrent config re-parse cannot compose an inconsistent
+// view.
+struct ExpandableSegmentReserveDecision {
+  // nullopt => no override configured; caller keeps the full historical
+  // reserve.
+  std::optional<size_t> reserve_bytes;
+  bool class_known = false; // the class had an explicit per-class entry
 };
 
 // Environment config parser
@@ -64,6 +104,63 @@ class C10_CUDA_API CUDAAllocatorConfig {
 
   static double per_process_memory_fraction() {
     return instance().m_per_process_memory_fraction;
+  }
+
+  // Single-lock snapshot of the reserve decision for reserve_class, so the
+  // segment-creation path composes (reserve, class_known) consistently even if
+  // setAllocatorSettings() re-parses concurrently.
+  static ExpandableSegmentReserveDecision expandable_segments_reserve_decision(
+      const std::string& reserve_class,
+      size_t total_global_mem) {
+    auto& self = instance();
+    std::lock_guard<std::mutex> lock(self.m_reserve_mutex);
+    ExpandableSegmentReserveDecision d;
+    auto it = self.m_expandable_segments_reserve_by_class.find(reserve_class);
+    if (it != self.m_expandable_segments_reserve_by_class.end()) {
+      d.reserve_bytes = it->second.resolveBytes(total_global_mem);
+      d.class_known = true;
+    } else if (self.m_expandable_segments_reserve_set) {
+      d.reserve_bytes =
+          self.m_expandable_segments_reserve.resolveBytes(total_global_mem);
+    }
+    return d;
+  }
+
+  // Final per-segment reserve for a decision snapshot, given the device's full
+  // historical reserve (9/8 of total memory). Returns full_reserve unchanged
+  // when no override is configured, so the untagged path is byte-for-byte
+  // identical. Otherwise the configured reserve is capped at full_reserve: no
+  // single allocation can exceed physical memory, so a larger reservation is
+  // never needed, and the cap also keeps a saturated reserve (a pathological
+  // expandable_segments_reserve) from overflowing numSegments(). Pure, so it is
+  // unit-testable without a device.
+  static size_t clamp_reserve_bytes(
+      const ExpandableSegmentReserveDecision& decision,
+      size_t full_reserve) {
+    if (!decision.reserve_bytes.has_value()) {
+      return full_reserve;
+    }
+    return std::min(*decision.reserve_bytes, full_reserve);
+  }
+
+  // Registers a code-side default reserve for a class, letting serving layers
+  // opt their stream classes into a downsized reserve by default. Prefer the
+  // setDefaultExpandableSegmentReserveFractionForClass() free function over
+  // calling this directly. Precedence is resolved at call time: this is a no-op
+  // if a global reserve (expandable_segments_reserve) has been set, or if
+  // reserve_class already has an explicit per-class entry. Call only after
+  // config is parsed (touching instance() forces that); a later runtime
+  // re-parse that sets only a global reserve does not retroactively remove an
+  // already-seeded default.
+  static void set_default_reserve_for_class(
+      const std::string& reserve_class,
+      ExpandableSegmentReserveSpec spec) {
+    auto& self = instance();
+    std::lock_guard<std::mutex> lock(self.m_reserve_mutex);
+    if (self.m_expandable_segments_reserve_set) {
+      return;
+    }
+    self.m_expandable_segments_reserve_by_class.emplace(reserve_class, spec);
   }
 
   // When enabled, throws OOM error before calling cudaMalloc if the allocation
@@ -171,7 +268,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
         "pinned_num_register_threads",
         "per_process_memory_fraction",
         "pinned_free_catch_all",
-        "throw_on_cudamalloc_oom"};
+        "throw_on_cudamalloc_oom",
+        "expandable_segments_reserve",
+        "expandable_segments_reserve_by_class"};
     return keys;
   }
 
@@ -205,6 +304,17 @@ class C10_CUDA_API CUDAAllocatorConfig {
   size_t parseThrowOnCudaMallocOom(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
+  size_t parseExpandableSegmentsReserve(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
+  size_t parseExpandableSegmentsReserveByClass(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
+  // Parses a reserve value ("<fraction>" or "<n>G"). Returns nullopt on a
+  // malformed or non-positive value (logged, non-fatal) so callers keep
+  // defaults.
+  static std::optional<ExpandableSegmentReserveSpec> parseReserveSpec(
+      const std::string& token);
 
   std::atomic<size_t> m_pinned_num_register_threads{1};
   std::atomic<size_t> m_pinned_reserve_segment_size_mb{0};
@@ -221,6 +331,22 @@ class C10_CUDA_API CUDAAllocatorConfig {
   // When true, throw OOM error before calling cudaMalloc if allocation would
   // fail
   std::atomic<bool> m_throw_on_cudamalloc_oom{false};
+  // Per-stream expandable-segment reserve config. Parsed once at init (like the
+  // rest of PYTORCH_CUDA_ALLOC_CONF); read on the segment-creation path.
+  // Default reserve, applied to untagged streams and to classes with no
+  // override. 1.125 mirrors the historical "1 1/8" reserve that the
+  // ExpandableSegment ctor computes as (total + total/8); it is only consulted
+  // when explicitly set via config, so the untagged path stays byte-for-byte
+  // identical when unset.
+  ExpandableSegmentReserveSpec m_expandable_segments_reserve{
+      /*is_fraction=*/true,
+      1.125};
+  bool m_expandable_segments_reserve_set{false};
+  ska::flat_hash_map<std::string, ExpandableSegmentReserveSpec>
+      m_expandable_segments_reserve_by_class;
+  // Guards the reserve fields above: they are read on the segment-creation path
+  // and can be rewritten at runtime by a setAllocatorSettings() re-parse.
+  std::mutex m_reserve_mutex;
 };
 
 // Keep this for backwards compatibility

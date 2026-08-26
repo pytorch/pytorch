@@ -25,7 +25,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-from .. import config, cpp_builder, ir
+from .. import config, ir
 from ..ir import ExternKernel
 from ..utils import (
     _align,
@@ -321,6 +321,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.device_codegen = get_device_op_overrides(self.device)
         self._included_extra_headers: OrderedSet[str] = OrderedSet()
         self.codegen_int_array_var_cache = {}
+        # codegen_int_array_var_cache keys on id() of the writeline target. CPython
+        # reuses the address of a freed object, so a short-lived target (a per-callsite
+        # IndentedBuffer) can collide with a dead one and produce a spurious cache hit,
+        # which returns a var name whose declaration was written into the dead buffer.
+        # Pin the targets for the lifetime of codegen so their ids stay unique.
+        self._int_array_writeline_targets: list[Any] = []
         self.needs_vec_isa = self.device == "cpu"
 
     @contextlib.contextmanager
@@ -405,12 +411,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if force_mutable or c_type.endswith("*"):
             return f"{array_expr}.data()"
 
-        # MSVC does not support implicitly converting a const iterator to a const
-        # pointer, so use data() and cast to keep const qualification.
-        if cpp_builder.is_msvc_cl():
-            return f"static_cast<const {c_type}*>({array_expr}.data())"
-
-        return f"{array_expr}.cbegin()"
+        return f"static_cast<const {c_type}*>({array_expr}.data())"
 
     def _generate_kernel_call_helper(
         self,
@@ -896,7 +897,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         self.prefix.writeline_aot(
                             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type({name}, &{name}_device_type));"
                         )
-                        device_type_str = str(tensor_device.type)
+                        device_type_str = tensor_device.type
                         self.prefix.splice_aot(f"""
                                 int32_t {name}_expected_device_type = {expected_device_type};
                                 if ({name}_expected_device_type != {name}_device_type) {{
@@ -2038,6 +2039,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         return reduce
 
+    def _generate_scatter_fallback_args(self, inputs: Sequence[Any]) -> list[str]:
+        return [str(x) for x in inputs]
+
     def _generate_scatter_fallback(
         self,
         output,
@@ -2056,22 +2060,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
         cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
-        inputs_wrapped = [str(x) for x in inputs]
+        # str(output) ensures that CppWrapperCpuArrayRef borrows the output tensor
+        args_wrapped = self._generate_scatter_fallback_args((str(output), *inputs))
         # Wrap in AOTI_TORCH_ERROR_CODE_CHECK so a shim failure
         # surfaces instead of being silently swallowed.
-        line = f"{cpp_kernel_name}({output}, {','.join(inputs_wrapped)}"
+        line = f"{cpp_kernel_name}({','.join(args_wrapped)}"
 
         if python_kernel_name.startswith("aten.scatter_reduce"):
             line += f", {','.join(kwargs)}"
-        else:
-            if src_is_tensor:
-                if reduce:
-                    line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
-            else:
-                if reduce is not None:
-                    raise AssertionError(
-                        "Expect reduce to be None for aten.scatter_ with scalar src"
-                    )
+        elif src_is_tensor:
+            if reduce:
+                line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
+        elif reduce is not None:
+            raise AssertionError(
+                "Expect reduce to be None for aten.scatter_ with scalar src"
+            )
         line += ")"
         self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({line});")
 
@@ -2368,7 +2371,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             raise AssertionError(device.type + " not found in DEVICE_TO_ATEN")
         device_str = DEVICE_TO_ATEN[device.type][5:].lower()  # remove "at::k"
         self.used_cached_devices.add(device_str)
-        return f"cached_torch_device_type_{device_str}, {device.index if device.index else 0}"
+        return f"cached_torch_device_type_{device_str}, {device.index or 0}"
 
     def codegen_device_idx(self, device, device_id):
         device_id = device_id.strip()
@@ -2408,16 +2411,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
     ) -> str:
         # Use id(graph) for caching to avoid circular references
         # Bound methods have transient IDs, so we use the ID of the bound object instead.
-        writeline_id = (
-            id(writeline.__self__) if hasattr(writeline, "__self__") else id(writeline)
+        writeline_target = (
+            writeline.__self__ if hasattr(writeline, "__self__") else writeline
         )
         cache_key = (
             int_array,
-            writeline_id,
+            id(writeline_target),
             known_statically,
             id(graph) if graph else None,
         )
         if cache_key not in self.codegen_int_array_var_cache:
+            # A cache hit emits no declaration, so the key must not alias a dead
+            # target; see _int_array_writeline_targets.
+            self._int_array_writeline_targets.append(writeline_target)
             self.codegen_int_array_var_cache[cache_key] = (
                 self._codegen_int_array_var_impl(int_array, writeline, known_statically)
             )
@@ -3065,14 +3071,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 expr = arg.node.expr if isinstance(arg, torch.SymInt) else arg
                 new_int_args.append(cexpr(expr))
             elif isinstance(arg_type, torch.NumberType):
-                # Scalar of type int
-                if not isinstance(arg, (int, float, bool)):
-                    raise AssertionError(
-                        f"expected arg to be int, float, or bool, got {type(arg)}"
-                    )
-                # Only treat int Scalar as dynamic
-                if isinstance(arg, int):
-                    new_int_args.append(str(arg))
+                # A symbolic scalar (SymInt) bound to a Scalar slot is a dynamic int64
+                # runtime arg, mirroring the SymIntType branch above. The host proxy
+                # executor's NumberType case accepts the resulting as_sym_int tag.
+                if isinstance(arg, torch.SymInt):
+                    new_int_args.append(cexpr(arg.node.expr))
+                else:
+                    # Scalar of type int
+                    if not isinstance(arg, (int, float, bool)):
+                        raise AssertionError(
+                            f"expected arg to be int, float, or bool, got {type(arg)}"
+                        )
+                    # Only treat int Scalar as dynamic. `bool` is an int subclass
+                    # but is serialized as_bool and prefilled statically, so it
+                    # must not be counted here.
+                    if type(arg) is int:
+                        new_int_args.append(str(arg))
             elif isinstance(arg, ir.TorchBindObject):
                 # torchbind objects are loaded in proxy executor
                 pass
