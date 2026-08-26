@@ -492,6 +492,7 @@ class TestNVUniversalGemm(TestCase):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             _create_gemm_arguments,
         )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
 
         m, n, k = 128, 128, 512
         packed_k = k // 2
@@ -523,9 +524,11 @@ class TestNVUniversalGemm(TestCase):
             swizzle_mode_a=swizzle,
             scale_mode_b=mode,
             swizzle_mode_b=swizzle,
-            local_reduce_out=reduce_out,
-            local_reduce_group=group,
-            local_reduce_axis=1,
+            local_reduce=GemmReductionArguments(
+                output=reduce_out,
+                group=group,
+                axis=1,
+            ),
         )
         kernel = next(
             candidate
@@ -812,7 +815,65 @@ class TestNVUniversalGemmHeuristics(TestCase):
 
         self.assertEqual(
             analysis.grouped_reduction("out", "gemm", 4, 1, torch.float32),
-            GemmReductionConfig("out", 4, 1, "sum", "identity"),
+            GemmReductionConfig(
+                output_name="out",
+                group=4,
+                axis=1,
+                reduction_type="sum",
+                source_type="identity",
+            ),
+        )
+
+    def test_dense_reduction_uses_generated_callback_contract(self):
+        import dataclasses
+
+        import cutlass.cute as cute
+
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
+            BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES,
+            DENSE_GEMM_REDUCTION_CAPABILITIES,
+        )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+        from torch._inductor.kernel.gemm_epilogue_codegen import (
+            GemmReductionCompileConfig,
+        )
+
+        args = GemmReductionArguments(
+            group=8,
+            axis=1,
+            reduction_type="sum",
+            source_type="square",
+            reduction_algorithm="variance",
+            feeds_main=True,
+            finalizer_fn=("def finalize(value, group):\n    return value / group"),
+        )
+        config = GemmReductionCompileConfig.from_args(args, cute)
+
+        self.assertEqual(
+            config.constexprs()[:5],
+            (8, 1, "sum", "variance", True),
+        )
+        self.assertNotIn("square", config.constexprs())
+        self.assertEqual(config.reduction.source(3.0), 9.0)
+        self.assertEqual(config.reduction.finalize(16.0, 8), 2.0)
+        self.assertTrue(
+            DENSE_GEMM_REDUCTION_CAPABILITIES.supports("sum", "square", "variance")
+        )
+        self.assertFalse(
+            DENSE_GEMM_REDUCTION_CAPABILITIES.supports("variance_affine:1:0", "square")
+        )
+        secondary = dataclasses.replace(
+            args,
+            feeds_main=False,
+            secondary_feed_output="secondary",
+            secondary_consumer_fn=(
+                "def consume(accumulator, primary, secondary):\n"
+                "    return accumulator > 0.0"
+            ),
+        )
+        self.assertTrue(DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(secondary))
+        self.assertFalse(
+            BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES.supports_contract(secondary)
         )
 
     def test_grouped_reduction_rejects_ambiguous_composite(self):
@@ -1433,14 +1494,14 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self.assertIn("'local_reduce_out'", code)
+        self.assertIn("output=", code)
 
         if case == (1, "sum", 32):
             if not has_triton_reduction_ordering():
                 self.skipTest("requires INNER_TREE Triton")
             with config.patch({"numerics": "strict"}):
                 _, strict_code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
-            self.assertNotIn("'local_reduce_out'", strict_code)
+            self.assertNotIn("'local_reduce': GemmReductionArguments", strict_code)
             self.assertIn("ReductionOrdering.INNER_TREE", strict_code)
 
     def test_scaled_mm_grouped_reduce_source_fusion(self):
@@ -1476,8 +1537,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self.assertIn("'local_reduce_out'", code)
-        self.assertIn("'local_reduce_source': 'square'", code)
+        self.assertIn("output=", code)
+        self.assertIn("source_type='square'", code)
 
     @config.patch(emulate_precision_casts=True)
     def test_scaled_mm_grouped_reduce_rejects_intermediate_fp16(self):
@@ -1511,7 +1572,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertNotIn("'local_reduce_out'", code)
+        self.assertNotIn("'local_reduce': GemmReductionArguments", code)
 
     def test_scaled_mm_grouped_reduce_feeds_main(self):
         m, n, k, group = 128, 128, 512, 4
@@ -1545,7 +1606,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertIn("'local_reduce_feeds_main': True", code)
+        self.assertIn("feeds_main=True", code)
 
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one

@@ -329,6 +329,51 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
 
     @parametrize(
+        "reduction_type,op_name,init_val",
+        (
+            ("sum", "ADD", 0.0),
+            ("prod", "MUL", 1.0),
+            ("max", "MAX", float("-inf")),
+            ("min", "MIN", float("inf")),
+        ),
+    )
+    def test_materialize_tensorssa_reduction_reuses_descriptor(
+        self, reduction_type, op_name, init_val
+    ):
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            tensorssa_reduction,
+        )
+        from torch._inductor.kernel import gemm_epilogue_codegen
+
+        descriptor = tensorssa_reduction(reduction_type)
+        reduction_ops = SimpleNamespace(
+            ADD=object(), MUL=object(), MAX=object(), MIN=object()
+        )
+        cute = SimpleNamespace(ReductionOp=reduction_ops)
+        combine = object()
+        with mock.patch.object(
+            gemm_epilogue_codegen,
+            "materialize_epilogue_function",
+            side_effect=(combine, lambda: init_val),
+        ) as materialize:
+            reduction = gemm_epilogue_codegen.materialize_tensorssa_reduction(
+                reduction_type, cute
+            )
+
+        self.assertIs(reduction.reduce_op, getattr(reduction_ops, op_name))
+        self.assertEqual(reduction.init_val, init_val)
+        self.assertIs(reduction.combine, combine)
+        self.assertEqual(
+            [call.args[0] for call in materialize.call_args_list],
+            [
+                f"def combine(lhs, rhs):\n    return {descriptor.combine_expr}",
+                f"def init():\n    return {descriptor.init_val}",
+            ],
+        )
+        for call in materialize.call_args_list:
+            self.assertIs(call.args[1], cute)
+
+    @parametrize(
         "case",
         (
             (
