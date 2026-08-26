@@ -114,7 +114,9 @@ def _cudnn_rejection_reasons(
         reasons.append("query dtype must be float16 or bfloat16")
     if query.shape[-1] % 8 != 0 or value.shape[-1] % 8 != 0:
         reasons.append("query and value head dimensions must be divisible by 8")
-    needs_backward = any(tensor.requires_grad for tensor in (query, key, value))
+    needs_backward = torch.is_grad_enabled() and any(
+        tensor.requires_grad for tensor in (query, key, value)
+    )
     if not _cudnn_supports_head_dims(query, value, needs_backward):
         phase = "backward" if needs_backward else "forward"
         reasons.append(

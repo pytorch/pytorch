@@ -1141,8 +1141,9 @@ class TestVarlenAttention(NNTestCase):
     ):
         """Select only large head-dimension combinations supported by cuDNN."""
         _check_cudnn_varlen_supported(device)
+        cudnn_version = torch.backends.cudnn.version() or 0
         required_version = 91900 if requires_backward else 92400
-        supported = supported and torch.backends.cudnn.version() >= required_version
+        is_supported = supported and cudnn_version >= required_version
         torch.manual_seed(42)
         seq_len, num_heads = 256, 2
         q = torch.randn(
@@ -1154,26 +1155,27 @@ class TestVarlenAttention(NNTestCase):
         ).requires_grad_(requires_backward)
         cu_seq = torch.tensor([0, seq_len], device=device, dtype=torch.int32)
 
-        if not supported:
-            contexts = (
-                (nullcontext(), torch.no_grad())
-                if requires_backward
-                else (nullcontext(),)
-            )
-            for context in contexts:
-                with context, sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
-                    with self.assertRaisesRegex(
-                        RuntimeError, "unsupported for cuDNN varlen"
-                    ):
-                        varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
-            return
-
         q_ref, k_ref, v_ref = (
             tensor.detach().double().requires_grad_(requires_backward)
             for tensor in (q, k, v)
         )
         scores = torch.einsum("thd,shd->hts", q_ref, k_ref) / math.sqrt(qk_dim)
         expected = torch.einsum("hts,shd->thd", scores.softmax(-1), v_ref)
+
+        if not is_supported:
+            with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+                with self.assertRaisesRegex(
+                    RuntimeError, "unsupported for cuDNN varlen"
+                ):
+                    varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+                if requires_backward and cudnn_version >= 92400:
+                    with torch.no_grad():
+                        out = varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+                    self.assertEqual(
+                        out.float(), expected.float(), atol=2e-2, rtol=2e-2
+                    )
+            return
+
         grad_out = torch.randn_like(v)
         if requires_backward:
             expected_grads = torch.autograd.grad(
