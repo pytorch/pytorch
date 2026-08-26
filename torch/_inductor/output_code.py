@@ -879,16 +879,9 @@ class CompiledFxGraph(OutputCode):
         if graph_kwargs["is_backward"] is None:
             raise AssertionError("graph_kwargs['is_backward'] must not be None")
         is_backward = graph_kwargs["is_backward"]
-        # A backward-only opt-out is serialized with this FX graph so
-        # AOTAutograd cache hits do not reuse the forward-derived decision.
-        cudagraphs_post_compile_override = self.fx_kwargs.get(
-            "cudagraphs_post_compile_override"
-        )
-        if cudagraphs_post_compile_override is not None:
-            if cudagraphs_post_compile_override:
-                raise AssertionError(
-                    "cudagraphs_post_compile_override only supports False"
-                )
+        # This backward-only opt-out is serialized with the FX graph so cache
+        # hits do not reuse the forward-derived decision.
+        if is_backward and self.fx_kwargs.get("disable_backward_cudagraphs", False):
             graph_cudagraphs = BoxedBool(False)
         else:
             if graph_kwargs["cudagraphs"] is None:
