@@ -992,7 +992,7 @@ def substitute_in_graph(
                 f"already handled by {polyfill_handlers[original_fn]}"
             )
 
-        # Need to wrap the function because we may cannot assign __torch_dynamo_polyfill__ to a
+        # Need to wrap the function because we may not be able to assign __torch_dynamo_polyfill__ to a
         # C++ function.
         @functools.wraps(traceable_fn)
         def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
@@ -1737,7 +1737,7 @@ def override_cudagraphs(
     return CudagraphOverrideContextManager(fwd=fwd, bwd=bwd)
 
 
-def override_optimization_hint(x: Any, val: int) -> None:
+def override_optimization_hint(x: object, val: int) -> None:
     """Override the optimization hint for a scalar unbacked symbol.
 
     When the compiler or runtime needs a non-guarding integer hint for an
