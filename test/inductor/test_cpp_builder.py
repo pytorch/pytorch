@@ -1,8 +1,8 @@
 # Owner(s): ["oncall: cpu inductor"]
 
 from torch._dynamo.device_interface import (
-    DeviceInterface,
     device_interfaces,
+    DeviceInterface,
     register_interface_for_device,
 )
 from torch._inductor.cpp_builder import get_cpp_torch_device_options

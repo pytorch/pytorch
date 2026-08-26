@@ -2171,9 +2171,9 @@ def get_cpp_torch_device_options(
     _validate_cpp_stdlib(cpp_stdlib, device_type, aot_mode)
 
     try:
-        device_options = get_interface_for_device(
-            device_type
-        ).get_cpp_device_options(aot_mode, compile_only)
+        device_options = get_interface_for_device(device_type).get_cpp_device_options(
+            aot_mode, compile_only
+        )
     except NotImplementedError:
         device_options = None
     if device_options is not None:

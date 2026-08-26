@@ -46,15 +46,18 @@ class DeviceInterface:
     @staticmethod
     def get_cpp_device_options(
         aot_mode: bool, compile_only: bool
-    ) -> tuple[
-        list[str],
-        list[str],
-        list[str],
-        list[str],
-        list[str],
-        list[str],
-        list[str],
-    ] | None:
+    ) -> (
+        tuple[
+            list[str],
+            list[str],
+            list[str],
+            list[str],
+            list[str],
+            list[str],
+            list[str],
+        ]
+        | None
+    ):
         """Return device-specific C++ build options, if the backend provides them.
 
         Out-of-tree backends may override this to return
