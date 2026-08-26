@@ -86,11 +86,15 @@ class TestCodegenMutationEpilogue(TestCase):
             1,
             "Expected mutation_epilogue codegen artifact to be emitted",
         )
-        self.assertIn("copy_", captured[0])
+        # The write-back goes through _replay_input_mutation rather than a bare
+        # copy_: a view created inside a custom autograd Function has to be
+        # written under no_grad with its version counter preserved, which the
+        # helper decides from the creation meta at runtime.
+        self.assertIn("_replay_input_mutation", captured[0])
 
     def test_multiple_data_mutations(self):
         """
-        Multiple inputs mutated. Codegen should emit a copy_() per mutated
+        Multiple inputs mutated. Codegen should emit one write-back per mutated
         input, with non-mutated inputs skipped entirely.
         """
         with self._capture_codegen_source("mutation_epilogue") as captured:
@@ -118,7 +122,7 @@ class TestCodegenMutationEpilogue(TestCase):
             1,
             "Expected mutation_epilogue codegen artifact to be emitted",
         )
-        self.assertIn("copy_", captured[0])
+        self.assertIn("_replay_input_mutation", captured[0])
 
     def test_leaf_mutation_under_no_grad(self):
         """
@@ -200,7 +204,7 @@ class TestCodegenMutationEpilogue(TestCase):
 
         self.assertEqual(len(captured), 1)
         self.assertIn("as_strided_", captured[0])
-        self.assertIn("copy_", captured[0])
+        self.assertIn("_replay_input_mutation", captured[0])
 
     def test_no_mutation_no_epilogue(self):
         """
