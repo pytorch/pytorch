@@ -1202,6 +1202,19 @@ def helper(x):
             def get_current_device_or_throw():
                 return torch.device("cuda")
 
+        props = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=1,
+            cc=80,
+            major=8,
+        )
+        decorator_value_src = "'''x''' " + '""""""'
+        raw_src = "".join(noinline_helper_for_codegen.raw_src).replace(
+            '["x"]', f"[{decorator_value_src}]"
+        )
+        self.assertIn(decorator_value_src, raw_src)
+
         wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
         wrapper.user_defined_kernel_cache = {}
         captured = {}
@@ -1210,16 +1223,11 @@ def helper(x):
             captured["body"] = body
 
         wrapper.define_kernel = define_kernel
-        props = DeviceProperties(
-            type="cuda",
-            index=0,
-            multi_processor_count=1,
-            cc=80,
-            major=8,
-        )
         with (
+            inductor_config.patch("cpp_wrapper", True),
             V.set_graph_handler(FakeGraph()),
             patch.object(DeviceProperties, "create", return_value=props),
+            patch.object(noinline_helper_for_codegen, "raw_src", raw_src),
         ):
             wrapper.define_user_defined_triton_kernel(
                 noinline_helper_for_codegen,
@@ -1232,10 +1240,15 @@ def helper(x):
                 launch_kwargs=(),
             )
 
-        self.assertIn("@triton.jit(", captured["body"])
-        self.assertIn("noinline=True", captured["body"])
-        self.assertIn("debug=True", captured["body"])
-        self.assertIn('do_not_specialize=["x"]', captured["body"])
+        nested_src = f'wrapper_src = r"""{captured["body"]}"""'
+        compile(nested_src, "<test-nested-root-decorator>", "exec")
+        wrapper_src = ast.literal_eval(ast.parse(nested_src).body[0].value)
+        call = ast.parse(wrapper_src).body[0].value
+        kernel_source = ast.literal_eval(call.args[1])
+        self.assertIn("@triton.jit(", kernel_source)
+        self.assertIn("noinline=True", kernel_source)
+        self.assertIn("debug=True", kernel_source)
+        self.assertIn(decorator_value_src, kernel_source)
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
     def test_user_defined_triton_kernel_preserves_jit_decorator(self):
@@ -1297,6 +1310,7 @@ def helper(x):
             user_defined_triton_kernel_transitive_closure_source_code(
                 root_for_global_option_jit_helper
             )
+
     @unittest.skipUnless(
         HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
         "requires CPU or GPU Triton",

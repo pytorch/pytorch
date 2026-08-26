@@ -3854,13 +3854,16 @@ class PythonWrapperCodegen(CodeGen):
             )
             """
         )
-        compile_wrapper.splice(_triton_jit_decorator_from_source(kernel), strip=True)
+        root_decorator = _triton_jit_decorator_from_source(kernel)
         kernel_src = user_defined_triton_kernel_transitive_closure_source_code(
             kernel, epilogue_fusion
         )
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
+        # The root decorator and kernel source share the same enclosing literals,
+        # so escape them together. Helper decorators are already part of kernel_src.
+        kernel_src = f"{root_decorator}\n{kernel_src}"
         kernel_src = _escape_triton_kernel_source_for_wrapper(kernel_src)
         compile_wrapper.splice(kernel_src)
 
