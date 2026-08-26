@@ -224,7 +224,7 @@ class AveragedModel(Module):
         >>> # xdoctest: +SKIP("undefined variables")
         >>> # Compute exponential moving averages of the weights and buffers
         >>> ema_model = torch.optim.swa_utils.AveragedModel(model,
-        >>>             torch.optim.swa_utils.get_ema_multi_avg_fn(0.9), use_buffers=True)
+        >>>             multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(0.9), use_buffers=True)
 
     .. note::
         When using SWA/EMA with models containing Batch Normalization you may
