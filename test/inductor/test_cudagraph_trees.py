@@ -1170,8 +1170,9 @@ if HAS_CUDA_AND_TRITON:
 
             run(False)
             run(True)
+            run(True)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
@@ -1200,7 +1201,6 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
             torch._dynamo.reset()
-            torch._inductor.cudagraph_trees.reset_cudagraph_trees()
             for _ in range(3):
                 torch.compiler.cudagraph_mark_step_begin()
                 run()

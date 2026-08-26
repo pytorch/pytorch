@@ -3622,6 +3622,40 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(c1, c2)
         self.assertEqual(c1, c3)
 
+    def test_disable_backward_cudagraphs_omitted_when_unset(self):
+        gm = torch.fx.symbolic_trace(lambda tangents_1: (tangents_1,))
+        compiler_config_extra = compile_fx.create_compiler_config_extra(gm)
+        captured_kwargs = {}
+
+        def capture_compile_kwargs(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            return object()
+
+        with patch.object(
+            compile_fx, "wrap_compiler_debug", return_value=capture_compile_kwargs
+        ):
+            compile_fx.compile_fx_backward(gm, [torch.ones(1)], compiler_config_extra)
+
+        self.assertNotIn("disable_backward_cudagraphs", captured_kwargs)
+        self.assertNotIn(
+            "disable_backward_cudagraphs",
+            autograd_cache.create_fx_config(compiler_config_extra),
+        )
+
+        compiler_config_extra = dataclasses.replace(
+            compiler_config_extra,
+            disable_backward_cudagraphs=True,
+        )
+        captured_kwargs.clear()
+        with patch.object(
+            compile_fx, "wrap_compiler_debug", return_value=capture_compile_kwargs
+        ):
+            compile_fx.compile_fx_backward(gm, [torch.ones(1)], compiler_config_extra)
+        self.assertIs(captured_kwargs["disable_backward_cudagraphs"], True)
+
+        fx_config = autograd_cache.create_fx_config(compiler_config_extra)
+        self.assertIs(fx_config["disable_backward_cudagraphs"], True)
+
     def test_to_cacheable_strips_runtime_only_fields(self):
         config = self.default_config()
         config = dataclasses.replace(
