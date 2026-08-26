@@ -27,6 +27,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -48,6 +49,8 @@ if torch.get_default_dtype() is not torch.float32:
 #   like torch.scatter and torch.gather.
 
 class TestScatterGather(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("dtype", [torch.float32, torch.float64, torch.bfloat16, torch.float16])
     def test_scatter_expanded_index(self, dtype):
         device = "cpu"
@@ -151,6 +154,8 @@ class TestScatterGather(TestCase):
 
 
 class TestScatterGatherDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Fills an index tensor with valid indices
     def _fill_indices(self, idx, dim, dim_size, elems_per_row, m, n, o, unique_indices=True):
         for i in range(1 if dim == 0 else m):
@@ -760,6 +765,8 @@ class TestScatterAddOverrideConds(TestCase):
     covered by TestScatterAddOverrideCorrectness, which is deliberately
     not arch-gated."""
 
+    hw_classification = HardwareClassification.CUDA
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -940,6 +947,8 @@ class TestScatterAddOverrideConds(TestCase):
 class TestScatterAddOverrideCorrectness(TestCase):
     """End-to-end: torch.scatter_add vs a naive reference on shapes the
     conds accept (TMA-eligible and vec-scatter-only)."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @classmethod
     def setUpClass(cls):
