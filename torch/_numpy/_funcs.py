@@ -1,3 +1,4 @@
+import functools
 import inspect
 import itertools
 from collections.abc import Callable
@@ -37,6 +38,15 @@ for name, func in itertools.chain(
     elif name == "einsum":
         # normalized manually
         decorated = func
+    elif name == "arange":
+        # The impl signature cannot tell arange(4) from arange(start=4).
+        @functools.wraps(func)
+        def arange(*args, _impl=func, **kwargs):
+            if not args and "start" in kwargs and "stop" not in kwargs:
+                raise TypeError("arange() requires stop to be specified.")
+            return _impl(*args, **kwargs)
+
+        decorated = normalizer(arange)
     else:
         decorated = normalizer(func)
 
