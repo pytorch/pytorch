@@ -10,9 +10,13 @@
 # CUDA inner-tree kernel produced -- the CuTeDSL kernel reproduces them
 # bit-for-bit, which is the contract for this op.
 
-import contextlib
 import os
 import unittest
+from unittest import mock
+
+
+# Native reductions register during import, so enable the rollout first.
+os.environ["PYTORCH_SUM_INNER_TREE"] = "1"
 
 import torch
 from torch.testing._internal.common_cuda import (
@@ -198,18 +202,6 @@ class TestSumCuteDSLOverride(TestCase):
         "float64": torch.float64,
     }
 
-    @contextlib.contextmanager
-    def _inner_tree_flag(self):
-        old_value = os.environ.get("PYTORCH_SUM_INNER_TREE")
-        os.environ["PYTORCH_SUM_INNER_TREE"] = "1"
-        try:
-            yield
-        finally:
-            if old_value is None:
-                os.environ.pop("PYTORCH_SUM_INNER_TREE", None)
-            else:
-                os.environ["PYTORCH_SUM_INNER_TREE"] = old_value
-
     def _make_input(self, m, n, dtype):
         compute_dtype = torch.float64 if dtype == torch.float64 else torch.float32
         cols = torch.arange(n, device="cuda", dtype=compute_dtype)
@@ -238,36 +230,30 @@ class TestSumCuteDSLOverride(TestCase):
 
     def test_cond_accepts_covered_shapes(self):
         impl = _cutedsl_impl()
-        with self._inner_tree_flag():
-            for dtype in (torch.float32, torch.float64):
-                x = torch.randn(128, 8192, device="cuda", dtype=dtype)
-                self.assertTrue(impl._cond(x, [1]))
-                # Strided outer input (contiguous reduced dim) is still covered.
-                strided = torch.randn(256, 8192, device="cuda", dtype=dtype)[::2]
-                self.assertTrue(impl._cond(strided, [1]))
+        for dtype in (torch.float32, torch.float64):
+            x = torch.randn(128, 8192, device="cuda", dtype=dtype)
+            self.assertTrue(impl._cond(x, [1]))
+            # Strided outer input (contiguous reduced dim) is still covered.
+            strided = torch.randn(256, 8192, device="cuda", dtype=dtype)[::2]
+            self.assertTrue(impl._cond(strided, [1]))
 
     def test_cond_rejects_unsupported(self):
         impl = _cutedsl_impl()
         x = torch.randn(128, 8192, device="cuda", dtype=torch.float32)
-        # No flag -> reject.
-        self.assertFalse(impl._cond(x, [1]))
-        with self._inner_tree_flag():
-            # Multi-dim and full reductions are out of scope.
-            self.assertFalse(impl._cond(x, [0, 1]))
-            self.assertFalse(impl._cond(x, None))
-            # dtype-casting sum is out of scope.
-            self.assertFalse(impl._cond(x, [1], dtype=torch.float64))
-            # Non-contiguous reduced dim.
-            self.assertFalse(impl._cond(x[:, ::2], [1]))
-            # Integer / complex dtypes fall through to aten.
-            self.assertFalse(
-                impl._cond(torch.ones(17, 8192, device="cuda", dtype=torch.int64), [1])
-            )
-            self.assertFalse(
-                impl._cond(
-                    torch.ones(17, 8192, device="cuda", dtype=torch.complex64), [1]
-                )
-            )
+        # Multi-dim and full reductions are out of scope.
+        self.assertFalse(impl._cond(x, [0, 1]))
+        self.assertFalse(impl._cond(x, None))
+        # dtype-casting sum is out of scope.
+        self.assertFalse(impl._cond(x, [1], dtype=torch.float64))
+        # Non-contiguous reduced dim.
+        self.assertFalse(impl._cond(x[:, ::2], [1]))
+        # Integer / complex dtypes fall through to aten.
+        self.assertFalse(
+            impl._cond(torch.ones(17, 8192, device="cuda", dtype=torch.int64), [1])
+        )
+        self.assertFalse(
+            impl._cond(torch.ones(17, 8192, device="cuda", dtype=torch.complex64), [1])
+        )
 
     # --- correctness ---
 
@@ -276,8 +262,7 @@ class TestSumCuteDSLOverride(TestCase):
         x = self._make_order_sensitive_input(128, 8192, dtype)
         with torch.backends.python_native.cutedsl.disabled():
             ref = x.sum(dim=1)
-        with self._inner_tree_flag():
-            got = x.sum(dim=1)
+        got = x.sum(dim=1)
         self.assertEqual(got, ref)
 
     def test_override_out_variant(self):
@@ -285,30 +270,26 @@ class TestSumCuteDSLOverride(TestCase):
         with torch.backends.python_native.cutedsl.disabled():
             ref = x.sum(dim=1)
         out = torch.empty(128, device="cuda", dtype=torch.float32)
-        with self._inner_tree_flag():
-            torch.sum(x, dim=1, out=out)
+        torch.sum(x, dim=1, out=out)
         self.assertEqual(out, ref)
 
     def test_strided_outer_input(self):
         base = torch.ones(256, 32, device="cuda", dtype=torch.float32)
         base[1::2, :] = 5
         x = base[::2, :]
-        with self._inner_tree_flag():
-            result = x.sum(dim=1)
+        result = x.sum(dim=1)
         self.assertEqual(result, torch.full((128,), 32, device="cuda", dtype=x.dtype))
 
     def test_looped_kernel_partial_last_block(self):
         x = torch.ones(129, 256, device="cuda", dtype=torch.float32)
-        with self._inner_tree_flag():
-            result = x.sum(dim=1)
+        result = x.sum(dim=1)
         self.assertEqual(result, torch.full((129,), 256, device="cuda", dtype=x.dtype))
 
     @parametrize("dtype", [torch.int64, torch.complex64])
     def test_integer_and_complex_fall_through(self, dtype):
         # CuTeDSL declines integer/complex; the call must fall through to aten.
         x = torch.ones(17, 8192, device="cuda", dtype=dtype)
-        with self._inner_tree_flag():
-            result = x.sum(dim=1)
+        result = x.sum(dim=1)
         self.assertEqual(result, torch.full((17,), 8192, device="cuda", dtype=dtype))
 
     # --- bitwise equivalence ---
@@ -319,8 +300,7 @@ class TestSumCuteDSLOverride(TestCase):
     )
     def test_cross_warp_order_sensitive_hash_sm100(self):
         x = self._make_order_sensitive_input(17, 8192, torch.float32)
-        with self._inner_tree_flag():
-            result = x.sum(dim=1)
+        result = x.sum(dim=1)
         self.assertEqual(self._sha(result), "75d8b1a702344e90")
 
     @skipIfRocm
@@ -331,8 +311,7 @@ class TestSumCuteDSLOverride(TestCase):
             for m, n in self._SHAPES:
                 with self.subTest(dtype_name=dtype_name, m=m, n=n):
                     x = self._make_input(m, n, dtype)
-                    with self._inner_tree_flag():
-                        result = self._eager_sum(x)
+                    result = self._eager_sum(x)
                     sha = self._sha(result)
                     expected = self._EXPECTED[(dtype_name, m, n)]
                     self.assertEqual(
@@ -340,6 +319,112 @@ class TestSumCuteDSLOverride(TestCase):
                         expected,
                         f"{dtype_name} m={m} n={n}: got {sha}, expected {expected}",
                     )
+
+    # --- prod (shares the inner-tree geometry/eligibility with sum) ---
+
+    def _make_prod_input(self, m, n, dtype):
+        # Perturb each element by O(1)/n so the length-``n`` product stays
+        # bounded (~e^O(1)) for any ``n`` -- otherwise a per-row factor raised
+        # to the n-th power overflows and fp reorder error swamps the tolerance.
+        # Still order-sensitive (alternating sign + per-row shift).
+        compute_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+        cols = torch.arange(n, device="cuda", dtype=compute_dtype).reshape(1, n)
+        pattern = (cols % 2) * 2 - 1  # +/-1 alternating
+        if m > 1:
+            rows = torch.arange(m, device="cuda", dtype=compute_dtype).reshape(m, 1)
+            pattern = pattern + ((rows % 5) - 2)  # per-row shift in [-2, 2]
+        return (1.0 + pattern / n).to(dtype)
+
+    @parametrize("dtype", [torch.float32, torch.float64])
+    def test_prod_override_matches_aten(self, dtype):
+        # A length-n product accumulates ~n*eps of rounding, so inner-tree and
+        # ATen (different orders) diverge by that much -- both track the fp64
+        # truth equally well, so use a product-appropriate tolerance.
+        rtol, atol = (2e-3, 2e-3) if dtype == torch.float32 else (1e-9, 1e-12)
+        # Covers the multirow, looped, and two-kernel prod paths.
+        for m, n in [(128, 32), (128, 8192), (8, 200000)]:
+            with self.subTest(m=m, n=n):
+                x = self._make_prod_input(m, n, dtype)
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = x.prod(dim=1)
+                got = x.prod(dim=1)
+                self.assertEqual(got, ref, rtol=rtol, atol=atol)
+
+    def test_prod_override_engaged(self):
+        # Proves the CuTeDSL prod override actually executes: its inner-tree
+        # order differs bit-for-bit from ATen's default order for an
+        # order-sensitive input. If the override silently fell through to ATen,
+        # ``got`` would equal ``ref`` and this fails -- guarding the dispatch.
+        x = self._make_prod_input(128, 8192, torch.float32)
+        with torch.backends.python_native.cutedsl.disabled():
+            ref = x.prod(dim=1)
+        got = x.prod(dim=1)
+        self.assertFalse(torch.equal(got, ref))
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_prod_low_precision_matches_aten(self, dtype):
+        # 0.75 and 1.25 are exactly representable in fp16/bf16; a sparse set of
+        # them keeps the length-n product bounded and non-1.0 (a near-1 input
+        # collapses to 1.0 at low precision, giving a vacuous test). fp16/bf16
+        # are functionally supported but not part of the bitwise contract, so
+        # compare to ATen with a low-precision tolerance. Covers the multirow,
+        # looped, and two-kernel paths.
+        from torch._native.ops.reductions import inner_tree_kernel
+
+        for m, n in [(64, 32), (8, 4096), (8, 65536)]:
+            with self.subTest(m=m, n=n):
+                x = torch.ones(m, n, device="cuda", dtype=dtype)
+                idx = torch.linspace(0, n - 1, 8, dtype=torch.long)
+                x[:, idx[0::2]] = 0.75
+                x[:, idx[1::2]] = 1.25
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = x.prod(dim=1)
+                with (
+                    mock.patch.object(
+                        inner_tree_kernel,
+                        "inner_tree_prod_into",
+                        wraps=inner_tree_kernel.inner_tree_prod_into,
+                    ) as prod_into,
+                ):
+                    got = x.prod(dim=1)
+                # Proves fp16/bf16 route through the CuTeDSL override, not a
+                # silent ATen fall-through (which a tolerance compare misses).
+                self.assertEqual(prod_into.call_count, 1)
+                self.assertEqual(got, ref, rtol=2e-2, atol=2e-2)
+
+    def test_prod_override_out_variant(self):
+        x = self._make_prod_input(128, 8192, torch.float32)
+        ref = x.prod(dim=1)
+        out = torch.empty(128, device="cuda", dtype=torch.float32)
+        torch.prod(x, dim=1, out=out)
+        # The out= path runs the same kernel as the functional path.
+        self.assertEqual(out, ref, rtol=0, atol=0)
+
+    def test_prod_strided_outer_input(self):
+        # Ragged tails must pad with the multiplicative identity (1), not 0;
+        # otherwise every row collapses to 0.
+        base = torch.ones(256, 32, device="cuda", dtype=torch.float32)
+        base[1::2, :] = 5
+        x = base[::2, :]
+        result = x.prod(dim=1)
+        self.assertEqual(result, torch.ones(128, device="cuda", dtype=x.dtype))
+
+    def test_prod_looped_partial_last_block(self):
+        x = torch.ones(129, 256, device="cuda", dtype=torch.float32)
+        result = x.prod(dim=1)
+        self.assertEqual(result, torch.ones(129, device="cuda", dtype=x.dtype))
+
+    def test_prod_deterministic(self):
+        x = self._make_prod_input(64, 12000, torch.float32)
+        first = x.prod(dim=1)
+        second = x.prod(dim=1)
+        self.assertEqual(first, second, rtol=0, atol=0)
+
+    @parametrize("dtype", [torch.int64, torch.complex64])
+    def test_prod_integer_and_complex_fall_through(self, dtype):
+        x = torch.ones(17, 8192, device="cuda", dtype=dtype)
+        result = x.prod(dim=1)
+        self.assertEqual(result, torch.ones(17, device="cuda", dtype=dtype))
 
 
 instantiate_parametrized_tests(TestSumCuteDSLOverride)

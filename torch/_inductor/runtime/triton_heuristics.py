@@ -839,7 +839,7 @@ class CachingAutotuner(KernelInterface):
         """Whether ``_dynamic_scale_rblock`` should attempt occupancy-
         driven rblock halving for this autotuner.
         """
-        if "strict_sum_rblock" in self.inductor_meta:
+        if "strict_reduction_rblock" in self.inductor_meta:
             # Strict numerics: don't scale/tune R0_BLOCK for reductions (it shifts the order).
             return False
         return _could_dynamic_scale_rblock(
@@ -2283,7 +2283,7 @@ class CachingAutotuner(KernelInterface):
         # Deterministic mode (and strict numerics) forbid tuning RBLOCK / num_warps for
         # reductions because those knobs shift numerics.
         if (
-            self.deterministic_mode or "strict_sum_rblock" in self.inductor_meta
+            self.deterministic_mode or "strict_reduction_rblock" in self.inductor_meta
         ) and self.heuristic_type in (
             HeuristicType.REDUCTION,
             HeuristicType.PERSISTENT_REDUCTION,
@@ -2641,6 +2641,8 @@ class CachingAutotuner(KernelInterface):
             # kernel.function is None; the fast launcher binds a single device's
             # function pointer, so fall back to the per-device static launcher.
             if getattr(kernel, "device_agnostic", False):
+                return None
+            if getattr(kernel, "global_scratch_size", 0):
                 return None
             cu_function = kernel.function
             num_warps = kernel.num_warps
@@ -3428,16 +3430,13 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
 
 def _find_names(obj):
     import gc
-    import inspect
 
-    frame = inspect.currentframe()
-    while frame is not None:
-        # On CPython <= 3.12 this access materializes the frame's locals
-        # dict so gc.get_referrers below can find obj inside it. On 3.13+
-        # f_locals is a fresh write-through proxy (PEP 667) and this loop
-        # is a no-op, so function-local names are not discoverable there.
-        _ = frame.f_locals
-        frame = frame.f_back
+    # Only namespace dicts are searched. Wrapper codegen binds kernels in the
+    # generated module's globals, so that is where the real name comes from.
+    # Walking the stack to expose frame locals as well only adds incidental
+    # binding names (`obj` here, `self` in the caller), never the codegen name,
+    # and it kept an unbound kernel from falling back to
+    # inductor_meta["kernel_name"].
     obj_names = []
     for referrer in gc.get_referrers(obj):
         if isinstance(referrer, dict):
@@ -4184,6 +4183,55 @@ def _update_combo_kernel_kwargs(
         kwargs[suffixed_key if suffixed_key in block_arg_names else key] = value
 
 
+def _combo_coordesc_min_block_sizes(
+    combo_meta: dict[str, Any], subkernel_idx: int
+) -> dict[str, int]:
+    sub_meta = combo_meta.get(f"inductor_meta_{subkernel_idx}", {})
+    minimums = (
+        dict(sub_meta.get("tma_min_block_sizes") or {})
+        if sub_meta.get("uses_tma")
+        else {}
+    )
+    for key, meta_key in (("XBLOCK", "min_xblock"), ("R0_BLOCK", "min_rblock")):
+        if (minimum := sub_meta.get(meta_key)) is not None:
+            minimums[key] = max(minimums.get(key, 1), minimum)
+    return minimums
+
+
+def _combo_coordesc_meta(
+    combo_meta: dict[str, Any], block_config: dict[str, int]
+) -> tuple[list[str], dict[str, int], dict[str, int]]:
+    """Suffixed per-subkernel block fields (XBLOCK_0, XBLOCK_1, ...) and their
+    min/max sizes so coordinate descent can tune a compile-time stitched combo's
+    blocks. Heaviest sub-kernels first, matching the runtime per-subkernel builder
+    (largest dominates runtime, gets tuned while the budget is freshest).
+    """
+    order = sorted(
+        range(combo_meta["num_kernels"]),
+        key=lambda i: -functools.reduce(
+            operator.mul, combo_meta[f"size_hints_{i}"].values()
+        ),
+    )
+    field_order: list[str] = []
+    field_limits: dict[str, int] = {}
+    field_minimums: dict[str, int] = {}
+    block_arg_names = OrderedSet(combo_meta.get("block_arg_names", ()))
+    for i in order:
+        size_hints_i = combo_meta[f"size_hints_{i}"]
+        min_block_sizes = _combo_coordesc_min_block_sizes(combo_meta, i)
+        for key in block_config:
+            if key not in block_arg_names or key.rsplit("_", 1)[-1] != str(i):
+                continue
+            field_order.append(key)
+            block_key = key.rsplit("_", 1)[0]
+            prefix = block_key.removesuffix("BLOCK").lower()
+            if (max_block := TRITON_MAX_BLOCK.get(prefix.upper())) is not None:
+                field_limits[key] = min(max_block, size_hints_i.get(prefix, max_block))
+            if block_key in min_block_sizes:
+                field_minimums[key] = min_block_sizes[block_key]
+    return field_order, field_limits, field_minimums
+
+
 def _handle_combo_kernel_per_subkernel_blocks(
     size_hints: dict[str, int],
     inductor_meta: InductorMeta,
@@ -4225,6 +4273,14 @@ def _handle_combo_kernel_per_subkernel_blocks(
         if "stitched_launch_candidates" in combo_meta:
             launch_candidates = combo_meta["stitched_launch_candidates"]
             block_config = combo_meta.get("default_config") or {}
+            # Blocks are args here (not baked), so coordinate descent can refine
+            # the per-subkernel block sizes on top of the compile-time winners.
+            field_order, field_limits, field_minimums = _combo_coordesc_meta(
+                combo_meta, block_config
+            )
+            inductor_meta["combo_coordesc_field_order"] = field_order
+            inductor_meta["combo_coordesc_field_limits"] = field_limits
+            inductor_meta["combo_coordesc_field_minimums"] = field_minimums
             return [
                 triton.Config({**block_config, **kwargs}, num_warps=nw, num_stages=ns)
                 for kwargs, nw, ns in launch_candidates
@@ -4253,6 +4309,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
     all_num_stages: list[int] = []
     unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
     combo_coordesc_field_limits: dict[str, int] = {}
+    combo_coordesc_field_minimums: dict[str, int] = {}
     block_arg_names = OrderedSet(combo_meta.get("block_arg_names", ()))
 
     # Group sub-kernels with identical config kwargs to skip redundant tuning.
@@ -4261,6 +4318,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
     for i in range(num_kernels):
         subkernel_heuristic = combo_meta[f"heuristic_{i}"]
         size_hints_i = combo_meta[f"size_hints_{i}"]
+        min_block_sizes_i = _combo_coordesc_min_block_sizes(combo_meta, i)
         # Per-sub-kernel inductor_meta passthrough packed by combo_grid_meta()
         # via TritonKernel.inductor_meta_per_kernel(). Forward into
         # inductor_meta_i so pointwise()/_reduction_configs()/_persistent_reduction_configs()
@@ -4329,6 +4387,8 @@ def _handle_combo_kernel_per_subkernel_blocks(
                     TRITON_MAX_BLOCK[prefix.upper()],
                     size_hints_i[prefix],
                 )
+            if key in min_block_sizes_i:
+                combo_coordesc_field_minimums[combined_key] = min_block_sizes_i[key]
 
         all_num_warps.append(cfg.num_warps)
         all_num_stages.append(cfg.num_stages)
@@ -4363,6 +4423,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
         field for group in combo_tuning_groups for field in group["coordesc_fields"]
     ]
     inductor_meta["combo_coordesc_field_limits"] = combo_coordesc_field_limits
+    inductor_meta["combo_coordesc_field_minimums"] = combo_coordesc_field_minimums
     # Candidates for num_warps/num_stages re-tuning after block sizes are finalized
     inductor_meta["combo_warp_stage_candidates"] = list(unique_warp_stage_pairs)
 
@@ -4638,7 +4699,7 @@ def _reduction_configs(
         triton_meta=triton_meta,
         num_dynamic=num_dynamic,
     )
-    r0 = inductor_meta.get("strict_sum_rblock")
+    r0 = inductor_meta.get("strict_reduction_rblock")
     if r0 is not None:
         configs = copy.deepcopy(configs)
         for triton_config in configs:
@@ -4808,12 +4869,12 @@ def reduction(
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
-    strict_rblock = inductor_meta.get("strict_sum_rblock")
+    strict_rblock = inductor_meta.get("strict_reduction_rblock")
     if strict_rblock is not None and any(
         triton_config.kwargs.get("R0_BLOCK", strict_rblock) != strict_rblock
         for triton_config in configs
     ):
-        raise AssertionError("strict sum requires its planned R0_BLOCK")
+        raise AssertionError("strict reduction requires its planned R0_BLOCK")
 
     if return_configs:
         return configs

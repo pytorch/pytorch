@@ -802,7 +802,7 @@ static PyObject* c_call_callback(
     PyObject* const* args,
     size_t nargsf,
     PyObject* kwnames) {
-  // The logic of this function is based on sys_defile_call_or_return defined
+  // The logic of this function is based on sys_profile_call_or_return defined
   // in https://github.com/python/cpython/blob/v3.12.5/Python/legacy_tracing.c
 
   PyThreadState* tstate = PyThreadState_GET();

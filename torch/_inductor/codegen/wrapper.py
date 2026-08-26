@@ -10,8 +10,8 @@ import inspect
 import logging
 import operator
 import os
-import random
 import re
+import secrets
 import tempfile
 from collections.abc import Callable
 from enum import Enum
@@ -1132,7 +1132,13 @@ class AllocateLine(MemoryPlanningLine):
                 f"{dtype}, "
                 f"{device_arg}, "
                 f'group_name="{group_name}", '
-                f"alloc_id={random.randint(0, 2**64 - 1)})"
+                # alloc_id keys a process-global persistent-allocation map
+                # (SymmetricMemory.cpp) that outlives the graph and rejects
+                # same-id allocations of differing size. Draw from secrets, not
+                # the global random module, which is frequently reseeded (e.g.
+                # TestCase.setUp calls random.seed()) and would yield colliding
+                # ids across graphs.
+                f"alloc_id={secrets.randbits(64)})"
             )
         else:
             raise NotImplementedError(
@@ -3616,6 +3622,7 @@ class PythonWrapperCodegen(CodeGen):
             size_dtype=None,  # try to infer based on symints
             indices=arg_indices,
             argdefs=[ArgName(x) for x in kernel.arg_names],
+            use_fp64_for_python_float=False,
         )
         device = V.graph.get_current_device_or_throw()
         device_props = DeviceProperties.create(device)

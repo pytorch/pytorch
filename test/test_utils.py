@@ -34,7 +34,6 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
-    skipIfRocmVersionAtLeast,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
 )
@@ -782,8 +781,6 @@ class TestAssert(TestCase):
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
 class TestStandaloneCPPJIT(TestCase):
-    # The standalone binary cannot resolve librocprofiler-sdk.so.1 in CI.
-    @skipIfRocmVersionAtLeast([7, 14])
     def test_load_standalone(self):
         build_dir = tempfile.mkdtemp()
         try:
@@ -972,6 +969,47 @@ class TestCppExtensionUtils(TestCase):
 
 
 class TestTraceback(TestCase):
+    @staticmethod
+    @torch._dynamo.disable
+    def _context_decorator_traceback_frame_names():
+        @torch.no_grad()
+        def decorated():
+            raise RuntimeError("test")
+
+        try:
+            decorated()
+        except RuntimeError as e:
+            return [frame.name for frame in traceback.extract_tb(e.__traceback__)]
+        else:
+            raise AssertionError("Expected RuntimeError")
+
+    def test_context_decorator_traceback_frame_name(self):
+        frame_names = self._context_decorator_traceback_frame_names()
+        self.assertIn("no_grad", frame_names)
+        self.assertNotIn("decorate_context", frame_names)
+
+    @staticmethod
+    @torch._dynamo.disable
+    def _context_decorator_generator_traceback_frame_names():
+        @torch.no_grad()
+        def decorated_generator():
+            yield None
+            raise RuntimeError("test")
+
+        gen = decorated_generator()
+        next(gen)
+        try:
+            next(gen)
+        except RuntimeError as e:
+            return [frame.name for frame in traceback.extract_tb(e.__traceback__)]
+        else:
+            raise AssertionError("Expected RuntimeError")
+
+    def test_context_decorator_generator_traceback_frame_name(self):
+        frame_names = self._context_decorator_generator_traceback_frame_names()
+        self.assertIn("no_grad", frame_names)
+        self.assertNotIn("generator_context", frame_names)
+
     def test_basic(self):
         source = """\
 def f(x):

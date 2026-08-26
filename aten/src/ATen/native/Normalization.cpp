@@ -864,6 +864,18 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const std:
   const Tensor& running_mean = running_mean_opt.value_or(Tensor());
   const Tensor& running_var = running_var_opt.value_or(Tensor());
 
+  // Eval mode normalizes with the running statistics; without them the kernel
+  // dereferences undefined tensors below. Reject here with the same message
+  // the impl-index wrapper uses rather than crashing (#194014).
+  if (!train) {
+    TORCH_CHECK_VALUE(
+        running_mean.defined(),
+        "running_mean must be defined in evaluation mode");
+    TORCH_CHECK_VALUE(
+        running_var.defined(),
+        "running_var must be defined in evaluation mode");
+  }
+
   checkBackend("batch_norm_cpu", {self, weight, bias, running_mean, running_var}, Backend::CPU);
 
   // Prepare output tensor
