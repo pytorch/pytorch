@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 import functools
 import unittest
+from unittest import mock
 
 import torch
 import torch.nn.functional as F
@@ -969,6 +970,70 @@ class TestFlopCounter(TestCase):
         mod = torch.nn.Linear(2, 2)
         with self.assertWarnsRegex(UserWarning, "not needed"):
             FlopCounterMode(mod)
+
+    def _run_with_missing_triton(self, backend_name, is_triton_capable):
+        # Simulates `except ImportError: _JITFunction = NoneType` having
+        # already run, plus a PrivateUse1 backend registered as `backend_name`
+        # whose DeviceInterface.is_triton_capable() returns `is_triton_capable`.
+        # `NotImplementedError` (no DeviceInterface registered at all) is
+        # simulated by passing `is_triton_capable=None`.
+        fake_log = mock.MagicMock()
+        fake_interface = mock.MagicMock()
+        if is_triton_capable is None:
+            fake_get_interface = mock.MagicMock(side_effect=NotImplementedError)
+        else:
+            fake_interface.is_triton_capable.return_value = is_triton_capable
+            fake_get_interface = mock.MagicMock(return_value=fake_interface)
+        with (
+            mock.patch.object(torch.utils.flop_counter, "_JITFunction", type(None)),
+            mock.patch.object(torch.utils.flop_counter, "log", fake_log),
+            mock.patch.object(
+                torch._C, "_get_privateuse1_backend_name", return_value=backend_name
+            ),
+            mock.patch(
+                "torch._dynamo.device_interface.get_interface_for_device",
+                fake_get_interface,
+            ),
+        ):
+            FlopCounterMode()
+        return fake_log, fake_get_interface
+
+    def test_privateuse1_triton_warning_when_capable(self):
+        fake_log, fake_get_interface = self._run_with_missing_triton(
+            "npu", is_triton_capable=True
+        )
+        fake_get_interface.assert_called_once_with("npu")
+        fake_log.warning.assert_called_once_with(
+            "triton not found; flop counting will not work for triton kernels"
+        )
+
+    def test_privateuse1_no_warning_when_not_triton_capable(self):
+        fake_log, fake_get_interface = self._run_with_missing_triton(
+            "npu", is_triton_capable=False
+        )
+        fake_get_interface.assert_called_once_with("npu")
+        fake_log.warning.assert_not_called()
+
+    def test_privateuse1_warns_when_backend_has_no_device_interface(self):
+        # Backend renamed itself but never registered a DeviceInterface:
+        # get_interface_for_device() raises NotImplementedError, and we
+        # conservatively warn since we can't ask the backend directly.
+        fake_log, fake_get_interface = self._run_with_missing_triton(
+            "npu", is_triton_capable=None
+        )
+        fake_get_interface.assert_called_once_with("npu")
+        fake_log.warning.assert_called_once_with(
+            "triton not found; flop counting will not work for triton kernels"
+        )
+
+    def test_no_privateuse1_backend_no_warning(self):
+        # "privateuseone" is the sentinel for "no PrivateUse1 backend
+        # registered" -- must not even consult a DeviceInterface.
+        fake_log, fake_get_interface = self._run_with_missing_triton(
+            "privateuseone", is_triton_capable=True
+        )
+        fake_get_interface.assert_not_called()
+        fake_log.warning.assert_not_called()
 
     def test_custom_op(self):
         from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
