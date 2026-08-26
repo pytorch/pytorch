@@ -34,7 +34,7 @@ namespace c10d::symmetric_memory {
 
 // A set of exchange methods with prefix "CUDASymmetricMemory"
 static StoreExchange storeExchange = StoreExchange("CUDASymmetricMemory");
-static constexpr auto kMulticastStoreExchangeTimeout =
+static constexpr auto kStoreExchangeTimeout =
     std::chrono::milliseconds(60000);
 
 AllocationRef::AllocationRef(
@@ -667,7 +667,7 @@ static void init_multicast_for_block(
           rank,
           world_size,
           mc_exported_handle,
-          kMulticastStoreExchangeTimeout);
+          kStoreExchangeTimeout);
     } catch (const c10::Error& e) {
       if (rank == 0 && mc_handle != 0) {
         warn_cuda_driver_error(
@@ -678,7 +678,7 @@ static void init_multicast_for_block(
       TORCH_CHECK(
           false,
           "SymmetricMemory: failed to exchange multicast handle through store within ",
-          kMulticastStoreExchangeTimeout.count(),
+          kStoreExchangeTimeout.count(),
           " ms. ",
           e.what_without_backtrace());
     }
@@ -760,7 +760,7 @@ check_all:
   std::vector<bool> rank_successes;
   try {
     rank_successes = storeExchange.all_gather(
-        store, rank, world_size, success_end, kMulticastStoreExchangeTimeout);
+        store, rank, world_size, success_end, kStoreExchangeTimeout);
   } catch (const c10::Error& e) {
     if constexpr (!use_fabric_handle) {
       close(recv_handle);
@@ -769,7 +769,7 @@ check_all:
     TORCH_CHECK(
         false,
         "SymmetricMemory: failed to exchange multicast success flags through store within ",
-        kMulticastStoreExchangeTimeout.count(),
+        kStoreExchangeTimeout.count(),
         " ms. ",
         e.what_without_backtrace());
   }
