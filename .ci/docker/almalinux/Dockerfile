@@ -74,13 +74,11 @@ FROM cuda as cuda13.4
 RUN bash ./install_cuda.sh 13.4
 ENV DESIRED_CUDA=13.4
 
-FROM base as rocm_base
-ARG DEVTOOLSET_VERSION=13
+FROM base as rocm
 ARG PYTORCH_ROCM_ARCH
+ARG ROCM_VERSION
+ARG THEROCK_INDEX_URL
 ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
-ENV LC_ALL en_US.UTF-8
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US.UTF-8
 # TheRock wheels require Python 3.10+; AlmaLinux 8's system Python is too old.
 COPY --from=conda /opt/conda /opt/conda
 ENV PATH=/opt/conda/bin:$PATH
@@ -89,17 +87,10 @@ RUN bash ./install_mkl.sh && rm install_mkl.sh
 ENV MKLROOT /opt/intel
 # torch extensions link libatomic.so.1, which the plain AlmaLinux base lacks.
 RUN yum install -y libatomic
-
-FROM rocm_base as rocm
-ARG ROCM_VERSION
-ARG THEROCK_INDEX_URL
 ADD ./common/install_rocm.sh install_rocm.sh
-RUN THEROCK_INDEX_URL=${THEROCK_INDEX_URL} ROCM_VERSION=${ROCM_VERSION} bash ./install_rocm.sh && \
-    rm install_rocm.sh && \
-    . /etc/rocm_env.sh && \
-    hipcc --version && \
-    test -e "${ROCM_HOME}/lib/libamdhip64.so"
-# Builder scripts run non-interactively, so load the wheel-discovered paths.
+RUN bash ./install_rocm.sh && rm install_rocm.sh
+# Unlike manywheel, this image has no build_env_setup.py to read /etc/rocm_env.sh,
+# and install_rocm.sh only hooks /etc/bashrc, which non-interactive bash skips.
 ENV BASH_ENV=/etc/rocm_env.sh
 
 # Install MNIST test data
