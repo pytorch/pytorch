@@ -269,10 +269,11 @@ def _snapshot(device=None, augment_with_fx_traces: bool = False):
     acc = torch.accelerator.current_accelerator()
     device_type = acc.type if acc is not None else "cuda"
     device_module = getattr(torch, device_type)
-    if not hasattr(getattr(device_module, "memory", device_module), "_snapshot"):
+    snapshot_module = getattr(device_module, "memory", device_module)
+    if not hasattr(snapshot_module, "_snapshot"):
         raise NotImplementedError(
             f"_snapshot is not implemented for the '{device_type}' accelerator"
         )
-    return device_module.memory._snapshot(
+    return snapshot_module._snapshot(
         device, augment_with_fx_traces=augment_with_fx_traces
     )
