@@ -68,7 +68,7 @@ class MatchState(Enum):
     - COLLECTIVE_TYPE_MISMATCH: The types of the collective operations differ.
     - SIZE_OR_SYNTAX_MISMATCH: There is a mismatch in input/output sizes or violation of collective syntax.
     - COLLECTIVE_STATE_MISMATCH:
-        The states of the collective not same, such as one finished while another just started or scheduled.
+        The states of the collective are not the same, such as one finished while another just started or scheduled.
     - COLLECTIVE_DTYPE_MISMATCH: The data types of the collective input/output differ.
     - UNDECIDED:
         The match status is ambiguous or cannot be determined, e.g., we might need to check all ranks for alltoall_base.

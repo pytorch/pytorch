@@ -188,7 +188,7 @@ class _ChunkContext:
     """Per-call state for the chunked loop, built once via ``build``.
     Methods hide dtype/device/acc_policy dispatch behind single math ops;
     dispatch-free per-iter math is inlined into the loop body. Buffers
-    dispatch decided are not needed are rank-matching empty tensors
+    that dispatch decided are not needed are rank-matching empty tensors
     (``when=False`` in ``_make_*``) so the dataclass surface stays uniform.
     """
 

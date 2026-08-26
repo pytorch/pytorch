@@ -535,7 +535,7 @@ at::vec::VecMask<int64_t, NI> inline get_mask_for_argmin_argmax(
   using i_t = at::vec::VecMask<int64_t, NI>;
   i_t vmask_itype = vmask.template cast<int64_t, NI>();
   // use itype here since there is vec impl for operator~ for itype
-  // while there may not vec impl for vtype
+  // while there may not be vec impl for vtype
   v_t isnan_a = a.value.isnan();
   i_t isnan_a_itype = isnan_a.template cast<int64_t, NI>();
   v_t isnan_b = value.isnan();
