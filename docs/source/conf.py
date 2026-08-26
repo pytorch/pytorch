@@ -657,6 +657,8 @@ coverage_ignore_functions = [
     "reduce_tensor",
     "reduce_typed_storage",
     "reduce_typed_storage_child",
+    "register_ipc_storage_check",
+    "register_ipc_tensor_reducer",
     "storage_from_cache",
     # torch.multiprocessing.spawn
     "start_processes",
