@@ -9,6 +9,7 @@ import sympy
 
 import torch
 from torch._dynamo.source import ConstantSource
+from torch._inductor import config
 from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import texpr
@@ -20,16 +21,15 @@ from torch._inductor.sizevars import (
     SizeVarAllocator,
     stride_at_vec_range,
 )
-from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_kernels, run_and_get_triton_code
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
 )
-from torch.testing import FileCheck
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
