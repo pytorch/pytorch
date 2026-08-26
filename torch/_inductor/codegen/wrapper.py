@@ -370,6 +370,56 @@ def user_defined_kernel_grid_fn_code(
     return fn_name, output.getvalue()
 
 
+def _is_triton_jit_decorator(
+    decorator: ast.expr,
+    global_symbols: dict[str, Any],
+    triton_jit: Any,
+) -> bool:
+    if isinstance(decorator, ast.Call):
+        decorator = decorator.func
+    if isinstance(decorator, ast.Name):
+        return global_symbols.get(decorator.id) is triton_jit
+    if isinstance(decorator, ast.Attribute):
+        base = decorator.value
+        return (
+            decorator.attr == "jit"
+            and isinstance(base, ast.Name)
+            and getattr(global_symbols.get(base.id), "jit", None) is triton_jit
+        )
+    # Nested attribute paths cannot be resolved from function globals, so their
+    # options are not preserved by the bare @triton.jit fallback.
+    return False
+
+
+def _check_triton_jit_decorator_literals(
+    decorator: ast.Call,
+    symbol: Any,
+) -> None:
+    nonliteral_options = []
+    for index, arg in enumerate(decorator.args):
+        try:
+            ast.literal_eval(arg)
+        except (TypeError, ValueError):
+            nonliteral_options.append(f"positional option {index}")
+    for keyword in decorator.keywords:
+        if keyword.arg is None:
+            nonliteral_options.append("**options")
+            continue
+        try:
+            ast.literal_eval(keyword.value)
+        except (TypeError, ValueError):
+            nonliteral_options.append(f"{keyword.arg}=")
+    if nonliteral_options:
+        # Dropping these options would silently change kernel semantics,
+        # including when this source is collected for a cache key.
+        options = ", ".join(nonliteral_options)
+        raise RuntimeError(
+            f"{getattr(symbol, '__name__', symbol)}: @triton.jit decorator options "
+            "must be Python literals for Inductor codegen; "
+            f"non-literal options are not supported: {options}"
+        )
+
+
 def _triton_jit_decorator_from_source(symbol) -> str:
     raw_src = getattr(symbol, "raw_src", None)
     if raw_src:
@@ -382,53 +432,10 @@ def _triton_jit_decorator_from_source(symbol) -> str:
             fn_def = ast.parse(src).body[0]
             if isinstance(fn_def, ast.FunctionDef):
                 global_symbols = getattr(getattr(symbol, "fn", None), "__globals__", {})
-
-                def is_triton_jit(decorator: ast.expr) -> bool:
-                    if isinstance(decorator, ast.Call):
-                        decorator = decorator.func
-                    if isinstance(decorator, ast.Name):
-                        return global_symbols.get(decorator.id) is triton.jit
-                    if isinstance(decorator, ast.Attribute):
-                        base = decorator.value
-                        return (
-                            decorator.attr == "jit"
-                            and isinstance(base, ast.Name)
-                            and getattr(global_symbols.get(base.id), "jit", None)
-                            is triton.jit
-                        )
-                    return False
-
-                def check_triton_jit_decorator_literals(
-                    decorator: ast.Call,
-                ) -> None:
-                    nonliteral_options = []
-                    for index, arg in enumerate(decorator.args):
-                        try:
-                            ast.literal_eval(arg)
-                        except (TypeError, ValueError):
-                            nonliteral_options.append(f"positional option {index}")
-                    for keyword in decorator.keywords:
-                        if keyword.arg is None:
-                            nonliteral_options.append("**options")
-                            continue
-                        try:
-                            ast.literal_eval(keyword.value)
-                        except (TypeError, ValueError):
-                            nonliteral_options.append(f"{keyword.arg}=")
-                    if nonliteral_options:
-                        # Dropping these options would silently change kernel semantics,
-                        # including when this source is collected for a cache key.
-                        options = ", ".join(nonliteral_options)
-                        raise RuntimeError(
-                            f"{symbol.__name__}: @triton.jit decorator options "
-                            "must be Python literals for Inductor codegen; "
-                            f"non-literal options are not supported: {options}"
-                        )
-
                 for decorator in fn_def.decorator_list:
-                    if is_triton_jit(decorator):
+                    if _is_triton_jit_decorator(decorator, global_symbols, triton.jit):
                         if isinstance(decorator, ast.Call):
-                            check_triton_jit_decorator_literals(decorator)
+                            _check_triton_jit_decorator_literals(decorator, symbol)
                             decorator_src = ast.get_source_segment(src, decorator)
                             func_src = ast.get_source_segment(src, decorator.func)
                             if decorator_src and func_src:
@@ -452,6 +459,9 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     kernel_src = kernel.src
     if epilogue_fusion:
         kernel_src = epilogue_fusion[1]
+    # This source feeds both generated code and cache keys. Always use the
+    # original kernel's decorator because epilogue fusion replaces only its body.
+    compile_wrapper.splice(_triton_jit_decorator_from_source(kernel), strip=True)
     compile_wrapper.splice(kernel_src, strip=True)
 
     # Also include any possible kernel being called indirectly
@@ -3865,16 +3875,12 @@ class PythonWrapperCodegen(CodeGen):
             )
             """
         )
-        root_decorator = _triton_jit_decorator_from_source(kernel)
         kernel_src = user_defined_triton_kernel_transitive_closure_source_code(
             kernel, epilogue_fusion
         )
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
-        # The root decorator and kernel source share the same enclosing literals,
-        # so escape them together. Helper decorators are already part of kernel_src.
-        kernel_src = f"{root_decorator}\n{kernel_src}"
         kernel_src = _escape_triton_kernel_source_for_wrapper(kernel_src)
         compile_wrapper.splice(kernel_src)
 

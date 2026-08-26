@@ -1175,6 +1175,10 @@ def helper(x):
         "requires CPU or GPU Triton",
     )
     def test_user_defined_triton_kernel_preserves_root_jit_decorator(self):
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
         decorator_value_src = "'''n_elements''' " + '""""""'
         decorator_src = (
             "@triton.jit(noinline=True, debug=True, "
@@ -1184,6 +1188,18 @@ def helper(x):
             "@triton.jit", decorator_src, 1
         )
         self.assertIn(decorator_value_src, raw_src)
+
+        bare_source = user_defined_triton_kernel_transitive_closure_source_code(
+            root_decorator_for_codegen
+        )
+        with patch.object(root_decorator_for_codegen, "raw_src", raw_src):
+            decorated_source = (
+                user_defined_triton_kernel_transitive_closure_source_code(
+                    root_decorator_for_codegen
+                )
+            )
+        self.assertNotEqual(bare_source, decorated_source)
+        self.assertIn(decorator_value_src, decorated_source)
 
         def fn(x):
             out = torch.empty_like(x)
