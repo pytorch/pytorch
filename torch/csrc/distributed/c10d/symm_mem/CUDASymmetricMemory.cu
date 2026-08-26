@@ -537,6 +537,33 @@ void validate_rendezvous_requests(
   }
 }
 
+static void validate_posix_fd_single_host(
+    const std::vector<RendezvousRequest>& reqs,
+    int world_size) {
+  std::set<std::string> hostnames;
+  for (const auto& req : reqs) {
+    hostnames.insert(std::string(req.hostname));
+  }
+  if (hostnames.size() <= 1) {
+    return;
+  }
+
+  std::ostringstream oss;
+  oss << "CUDASymmetricMemory::rendezvous: "
+      << "POSIX FD handle exchange only supports ranks on the same host, "
+      << "but this group spans multiple hosts. "
+      << "CUDA fabric handle support is required for multi-host CUDA "
+      << "symmetric memory. Per-rank info: ";
+  for (int r = 0; r < world_size; ++r) {
+    if (r > 0) {
+      oss << ", ";
+    }
+    oss << "rank " << r << " (host: " << reqs[r].hostname
+        << ", device: " << reqs[r].device_idx << ')';
+  }
+  TORCH_CHECK(false, std::move(oss).str());
+}
+
 // All ranks must be in the same NVLink domain (same clique_id). Detect
 // mismatches early before the import fails with an opaque CUDA error.
 static void validate_nvlink_fabric_support(
@@ -862,6 +889,9 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       : storeExchange.all_gather(store, rank, world_size, local_req);
   validate_nvlink_fabric_support(reqs, world_size);
   validate_rendezvous_requests(reqs, world_size);
+  if constexpr (!use_fabric_handle) {
+    validate_posix_fd_single_host(reqs, world_size);
+  }
 
   std::vector<int> pids(world_size);
   for (int r = 0; r < world_size; ++r) {
