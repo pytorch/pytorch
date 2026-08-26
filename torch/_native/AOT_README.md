@@ -1512,11 +1512,12 @@ What the standard build actually exports is narrower than the default `ARCHS`:
 ```python
 # tools/native_aot/export.py
 # Arch allow-list for the AUTOMATIC export path: which entries of the main
-# build's TORCH_CUDA_ARCH_LIST are ELIGIBLE for AOT kernels. Blackwell only,
-# for now. A filter, never a build list -- it cannot cause an export, only
-# permit one, and an explicit `--arch` bypasses it entirely.
-# ... (see the file for the full rationale)
-EXPORTABLE_ARCHES = ("sm_100", "sm_100a")
+# build's TORCH_CUDA_ARCH_LIST are ELIGIBLE for AOT kernels. A filter, never
+# a build list -- it cannot cause an export, only permit one, and an explicit
+# `--arch` bypasses it entirely.
+# ... (see the file for the full rationale, including what admitting a
+# capability costs)
+EXPORTABLE_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a")
 ```
 
 Both spellings of the same compute capability are listed because they are
@@ -1526,11 +1527,13 @@ hardware: `10.0a` (arch-conditional, what `tcgen05`/`wgmma` need) in
 job and in the shipped manywheel lists. Omitting either would make those builds
 silently export nothing.
 
-So on a Hopper builder with `TORCH_CUDA_ARCH_LIST=9.0a`, export prints "nothing
-to export" and stage 2 skips: no artifacts, no error, stock aten and JIT
-behavior. On-device export (unset `TORCH_CUDA_ARCH_LIST` plus a local GPU) is
-not filtered by `EXPORTABLE_ARCHES`, so a local Hopper dev build can still export for
-its own device.
+Hopper is in the list, so a builder with `TORCH_CUDA_ARCH_LIST=9.0a` exports
+for it -- and past this filter the DSL runtimes are required, so such a build
+FAILS rather than skipping when they are missing. A list naming only arches
+outside the tuple (say `8.6`) still prints "nothing to export" and stage 2 skips:
+no artifacts, no error, stock aten and JIT behavior. On-device export (unset
+`TORCH_CUDA_ARCH_LIST` plus a local GPU) is filtered by the same tuple, since
+build_stage2 reads it to decide whether stage 2 runs at all.
 
 Multi-arch export (`--arch sm_90a sm_100a`) nests artifacts under
 `<out-dir>/<arch>/<decl_id>/`, which the one-level CMake globs do **not** pick
@@ -1585,9 +1588,9 @@ It skips (printing why, leaving a normal artifacts-free build) when:
     toolchain class rather than by editing this gate
   * CUDA older than _MIN_CUDA_MAJOR (13), or a CUDA version that cannot
     be determined from the CMake cache or the installed torch
-  * TORCH_CUDA_ARCH_LIST contains no exportable arch (Blackwell only,
-    for now -- see export.EXPORTABLE_ARCHES); on-device export runs when
-    arch list is unset and a supported GPU is present
+  * TORCH_CUDA_ARCH_LIST contains no exportable arch (see
+    export.EXPORTABLE_ARCHES); on-device export runs when the arch list is
+    unset and a supported GPU is present
 ```
 
 The CUDA 13 floor is a cost decision, not a capability one: CUDA 12 builds top
@@ -1755,11 +1758,12 @@ plus the need for stock-aten references in tests.
   reason.
 * **`ATEN_OP` must resolve to exactly one structured group.** Ambiguous base
   names are a hard codegen error, not a silent pick.
-* **Blackwell-only export in the standard build.** `EXPORTABLE_ARCHES` is
-  `("sm_100", "sm_100a")`. Other arches in
-  `TORCH_CUDA_ARCH_LIST` are skipped, not failed, so those builds ship without
-  artifacts. On-device export is unrestricted, so a local sm_90 build can export
-  for itself; the default `ARCHS` already covers sm_90.
+* **Only Hopper and Blackwell export in the standard build.**
+  `EXPORTABLE_ARCHES` is `("sm_90", "sm_90a", "sm_100", "sm_100a")`. Other arches
+  in `TORCH_CUDA_ARCH_LIST` are skipped, not failed, so those builds ship without
+  artifacts. No CI job exercises AOT kernels on Hopper yet -- only
+  `b200-native-aot.yml` runs them -- so Hopper's coverage is the tools suite plus
+  the Blackwell job.
 * **Multi-arch artifact trees are not linked.** The embedded CMake globs are one
   level deep; a multi-arch export nests per-arch directories they do not walk.
 * **DSL runtimes are not standard torch build dependencies.** `nvidia_cutlass_dsl`
