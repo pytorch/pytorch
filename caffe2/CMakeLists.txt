@@ -1,3 +1,12 @@
+# CMake build instrumentation wraps all custom commands with ctest
+# --instrument. ATen codegen custom_command in this directory generates
+# a long command that causes ctest to fail with "Argument list too long".
+# Setting RULE_LAUNCH_CUSTOM to empty prevents custom commands in this
+# directory from being wrapped.
+if(USE_CMAKE_INSTRUMENTATION)
+  set_property(DIRECTORY PROPERTY RULE_LAUNCH_CUSTOM "")
+endif()
+
 # ---[ Generate and install header and cpp files
 include(../cmake/Codegen.cmake)
 
@@ -764,6 +773,7 @@ if(USE_MPS)
   list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_mps.cpp)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_mps.mm)
+  list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/mps/shim_common.cpp)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_runner/model_container_runner_mps.cpp)
   if(CAN_COMPILE_METAL)
       file(TOUCH ${CMAKE_BINARY_DIR}/caffe2/aten/src/ATen/metallib_dummy.cpp)
@@ -1094,6 +1104,7 @@ elseif(USE_CUDA)
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemoryKernels.cu"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
     )
     # Add torch_cpu as a dependency to ensure ATen headers are available
@@ -1558,6 +1569,7 @@ if(USE_ROCM)
           "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
           "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/rocshmem_extension.cu"
           "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp"
+          "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemoryKernels.cu"
           "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
         )
         set_source_files_properties(${TORCH_ROCSHMEM_SRCS} PROPERTIES LANGUAGE HIP)
@@ -1780,6 +1792,12 @@ endif()
 if(USE_XPU)
   target_link_libraries(torch PUBLIC torch_xpu_library)
 endif()
+
+torch_optimize_layout_if_enabled(torch_cpu)
+if(USE_CUDA)
+  torch_optimize_layout_if_enabled(torch_cuda)
+endif()
+torch_optimize_layout_if_enabled(torch)
 
 if(PRINT_CMAKE_DEBUG_INFO)
   print_target_properties(torch)
@@ -2170,6 +2188,17 @@ if(MSVC)
     FILE(RELATIVE_PATH tmp_path "${PROJECT_SOURCE_DIR}" "${tmp}")
     SET(tmp_path "../${tmp_path}")
     set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-Xcompiler /Zc:lambda")
+  endforeach()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  # CUTLASS defines unused host helpers in generated kernels. Keep the warning,
+  # but do not promote this third-party diagnostic to an error.
+  foreach(tmp ${MEM_EFF_ATTENTION_CUDA_SOURCES})
+    if(tmp MATCHES "/mem_eff_attention/kernels/")
+      FILE(RELATIVE_PATH tmp_path "${PROJECT_SOURCE_DIR}" "${tmp}")
+      SET(tmp_path "../${tmp_path}")
+      set_source_files_properties(
+        ${tmp_path} PROPERTIES COMPILE_OPTIONS "-Xcompiler=-Wno-error=unused-function")
+    endif()
   endforeach()
 endif()
 endif()

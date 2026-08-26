@@ -67,7 +67,7 @@ from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
-from .sets import SetVariable
+from .sets import FrozensetVariable, SetVariable
 
 
 if TYPE_CHECKING:
@@ -249,7 +249,7 @@ def find_mismatched_vars(
     elif isinstance(var, ConstDictVariable):
         for value in var.items.values():
             mismatched_vars.update(find_mismatched_vars(value, types, allow_none))
-    elif isinstance(var, SetVariable):
+    elif isinstance(var, (SetVariable, FrozensetVariable)):
         for key in var.items:
             mismatched_vars.update(find_mismatched_vars(key.vt, types, allow_none))
     else:
@@ -4352,7 +4352,14 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # TODO (tmanlaibaatar) support pytree here
         for arg in unpacked_sequence:
             if isinstance(
-                arg, (ListVariable, TupleVariable, ConstDictVariable, SetVariable)
+                arg,
+                (
+                    ListVariable,
+                    TupleVariable,
+                    ConstDictVariable,
+                    SetVariable,
+                    FrozensetVariable,
+                ),
             ):
                 unimplemented(
                     gb_type="strict_mode: improper args",
