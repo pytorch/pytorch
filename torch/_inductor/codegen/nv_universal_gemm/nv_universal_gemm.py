@@ -817,6 +817,17 @@ def _add_nv_gemm_choices_impl(
         efc_kernels = []
     if bias_node is not None:
         non_efc_kernels = []
+    if output_scale_node is not None:
+        from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel import (
+            VendoredDenseBlockScaledGemmKernel,
+        )
+
+        non_efc_kernels = [
+            kernel
+            for kernel in non_efc_kernels
+            if kernel.metadata.operator_class is VendoredDenseBlockScaledGemmKernel
+        ]
+        efc_kernels = []
     if not non_efc_kernels and not efc_kernels:
         log.debug("No compatible %s kernels found", variant.op_name)
         return
@@ -866,19 +877,11 @@ def _add_nv_gemm_choices_impl(
 
     num_added = 0
     for kernel, supports_epilogue_fusion in all_kernels:
-        if (
-            output_scale_node is not None
-            and kernel.metadata.operator_class.__name__
-            != "VendoredDenseBlockScaledGemmKernel"
-        ):
-            continue
         # The vendored block-scaled kernel has a dedicated runtime alpha
         # argument. Advertise fusion so a pure scalar multiply can select that
         # path without requiring the heavier generic EFC kernel.
-        supports_epilogue_fusion = supports_epilogue_fusion or (
-            variant == GemmVariant.SCALED_GEMM
-            and kernel.metadata.operator_class.__name__
-            == "VendoredDenseBlockScaledGemmKernel"
+        supports_epilogue_fusion = (
+            supports_epilogue_fusion or output_scale_node is not None
         )
         name = f"{variant.op_name}_{next(NVUniversalGemmCaller.index_counter)}"
         workspace_size = kernel.get_workspace_size(args).size_bytes
