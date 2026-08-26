@@ -196,9 +196,8 @@ class FakeProcessGroup : public Backend {
     for (auto& tensor : outputTensors[0]) {
       tensor.copy_(inputTensors[0]);
     }
-    return uniformRanks()
-        ? c10::make_intrusive<FakeWork>(outputTensors[0])
-        : c10::make_intrusive<FakeWork>();
+    return uniformRanks() ? c10::make_intrusive<FakeWork>(outputTensors[0])
+                          : c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> all_gather_single(
@@ -216,8 +215,7 @@ class FakeProcessGroup : public Backend {
       tensor.copy_(inputBuffer);
     }
     return uniformRanks()
-        ? c10::make_intrusive<FakeWork>(
-              std::vector<at::Tensor>{outputBuffer})
+        ? c10::make_intrusive<FakeWork>(std::vector<at::Tensor>{outputBuffer})
         : c10::make_intrusive<FakeWork>();
   }
 

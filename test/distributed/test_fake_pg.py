@@ -1083,9 +1083,7 @@ class TestFakePGUniformRanks(TestCase):
         self._init(rank=0, world_size=2)
         parent = dist.distributed_c10d._get_default_group()
 
-        process_group = parent.split_group(
-            [0, 1], device_types=[torch.device("cpu")]
-        )
+        process_group = parent.split_group([0, 1], device_types=[torch.device("cpu")])
 
         self.assertIsInstance(process_group, dist.ProcessGroup)
         backend = process_group._get_backend(torch.device("cpu"))
@@ -1206,9 +1204,7 @@ class TestFakePGUniformRanks(TestCase):
 
         self.assertEqual(tensor, torch.tensor([0b1100, 0b1010], dtype=torch.int32))
 
-    @parametrize(
-        "world_size,expected", [(4, [0, 0]), (3, [0b1100, 0b1010])]
-    )
+    @parametrize("world_size,expected", [(4, [0, 0]), (3, [0b1100, 0b1010])])
     def test_allreduce_bitwise_xor_cancels_in_pairs(self, world_size, expected):
         """XOR over equal operands depends only on the parity of world_size."""
         pg = self._init(rank=0, world_size=world_size)
