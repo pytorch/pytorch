@@ -556,51 +556,53 @@ __host__ __device__
 #else
 #if defined(USE_ROCM) && defined(__HIP_DEVICE_COMPILE__)
 namespace torch::headeronly::detail {
-// OCKL treats is_last=1 append as printf format; double '%' for literal output.
-// Worst-case escaped size is 2 * N - 1 (each source byte may become two).
+// Compile-time string fragment for CUDA_KERNEL_ASSERT message pieces.
 template <unsigned N>
-constexpr auto rocm_assert_escape_format(const char (&s)[N]) {
-  struct {
-    char data[2 * N - 1];
-    unsigned length;
-  } out{};
-  unsigned j = 0;
-  for (unsigned i = 0; i < N - 1; ++i) {
-    if (s[i] == '%') {
-      out.data[j++] = '%';
+struct RoCmAssertLit {
+  char data[N]{};
+  constexpr RoCmAssertLit(const char (&s)[N]) {
+    for (unsigned i = 0; i < N; ++i) {
+      data[i] = s[i];
     }
-    out.data[j++] = s[i];
   }
-  out.data[j] = '\0';
-  out.length = j + 1;
-  return out;
-}
+  static constexpr unsigned size() {
+    return N;
+  }
+  constexpr unsigned percent() const {
+    unsigned count = 0;
+    for (unsigned i = 0; i < N - 1; ++i) {
+      if (data[i] == '%') {
+        ++count;
+      }
+    }
+    return count;
+  }
+};
 
-// Merge prefix + __func__ + suffix at the macro call site (not via helper
-// params).
-template <
-    unsigned N1,
-    unsigned N2,
-    unsigned N3,
-    unsigned Out = N1 + N2 + N3 - 2>
-constexpr auto rocm_assert_concat(
-    const char (&a)[N1],
-    const char (&b)[N2],
-    const char (&c)[N3]) {
+// OCKL is_last=1 treats the append as printf format; escape '%'. Size the
+// buffer as Out + NumPercent.
+template <RoCmAssertLit A, RoCmAssertLit B, RoCmAssertLit C>
+constexpr auto rocm_assert_concat() {
+  constexpr unsigned out = A.size() + B.size() + C.size() - 2;
+  constexpr unsigned pct = A.percent() + B.percent() + C.percent();
   struct {
-    char data[Out];
+    char data[out + pct];
+    unsigned length;
   } msg{};
-  unsigned i = 0;
-  for (unsigned j = 0; j < N1 - 1; ++j) {
-    msg.data[i++] = a[j];
-  }
-  for (unsigned j = 0; j < N2 - 1; ++j) {
-    msg.data[i++] = b[j];
-  }
-  for (unsigned j = 0; j < N3; ++j) {
-    msg.data[i++] = c[j];
-  }
-  return rocm_assert_escape_format(msg.data);
+  unsigned j = 0;
+  auto append = [&](const char* s, unsigned n) {
+    for (unsigned k = 0; k < n; ++k) {
+      if (s[k] == '%') {
+        msg.data[j++] = '%';
+      }
+      msg.data[j++] = s[k];
+    }
+  };
+  append(A.data, A.size() - 1);
+  append(B.data, B.size() - 1);
+  append(C.data, C.size());
+  msg.length = j;
+  return msg;
 }
 
 template <unsigned N>
@@ -625,15 +627,18 @@ __host__ __device__ inline void rocm_assert_one_shot(
 }
 } // namespace torch::headeronly::detail
 
-#define CUDA_KERNEL_ASSERT(cond)                              \
-  if C10_UNLIKELY (!(cond)) {                                 \
-    static constexpr auto _rocm_assert_msg =                  \
-        ::torch::headeronly::detail::rocm_assert_concat(      \
-            __FILE__ ":" C10_STRINGIZE(__LINE__) ": ",        \
-            __func__,                                         \
-            ": Device-side assertion `" #cond "' failed.\n"); \
-    ::torch::headeronly::detail::rocm_assert_one_shot(        \
-        _rocm_assert_msg.data, _rocm_assert_msg.length);      \
+#define ROCM_ASSERT_LIT(s) ::torch::headeronly::detail::RoCmAssertLit(s)
+
+#define CUDA_KERNEL_ASSERT(cond)                                        \
+  if C10_UNLIKELY (!(cond)) {                                           \
+    static constexpr auto _rocm_assert_msg =                            \
+        ::torch::headeronly::detail::rocm_assert_concat<                \
+            ROCM_ASSERT_LIT(__FILE__ ":" C10_STRINGIZE(__LINE__) ": "), \
+            ROCM_ASSERT_LIT(__func__),                                  \
+            ROCM_ASSERT_LIT(": Device-side assertion `" #cond           \
+                            "' failed.\n")>();                          \
+    ::torch::headeronly::detail::rocm_assert_one_shot(                  \
+        _rocm_assert_msg.data, _rocm_assert_msg.length);                \
   }
 #else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
