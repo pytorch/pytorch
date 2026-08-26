@@ -121,28 +121,28 @@ class WorkNCCL : public c10d::Work {
     float getDuration();
 
     ProcessGroupNCCL* comm;
-    int64_t reconfigure_uuid;
-    bool blocking_wait;
+    int64_t reconfigureUuid;
+    bool blockingWait;
     at::cuda::CUDAStream stream;
-    std::chrono::steady_clock::time_point work_start_time;
+    std::chrono::steady_clock::time_point workStartTime;
     std::chrono::milliseconds timeout;
-    uint64_t completion_key;
-    std::chrono::milliseconds owned_ephemeral_timeout{0};
-    std::atomic<bool> ephemeral_timeout_released{false};
-    bool timing_enabled;
+    uint64_t completionKey;
+    std::chrono::milliseconds ownedEphemeralTimeout{0};
+    std::atomic<bool> ephemeralTimeoutReleased{false};
+    bool timingEnabled;
     uint64_t seq{0};
     std::shared_ptr<Events> events;
-    std::mutex duration_mutex;
-    std::shared_ptr<Events> duration_start_events;
-    mutable std::mutex terminal_status_mutex;
-    std::atomic<WorkStatus> work_status{WorkStatus::NOT_STARTED};
-    std::exception_ptr work_exception;
-    c10::intrusive_ptr<c10::ivalue::Future> future_work_result;
-    bool host_blocking{false};
+    std::mutex durationMutex;
+    std::shared_ptr<Events> durationStartEvents;
+    mutable std::mutex terminalStatusMutex;
+    std::atomic<WorkStatus> workStatus{WorkStatus::NOT_STARTED};
+    std::exception_ptr workException;
+    c10::intrusive_ptr<c10::ivalue::Future> futureWorkResult;
+    bool hostBlocking{false};
   };
   struct TrackedWork {
     std::shared_ptr<State> state;
-    std::shared_ptr<InputTensorShelf> input_tensors;
+    std::shared_ptr<InputTensorShelf> inputTensors;
   };
 
   // Poll the CUDA events and advance status; used by the GC queue + watchdog.
@@ -154,7 +154,7 @@ class WorkNCCL : public c10d::Work {
   void synchronizeInternal();
 
   std::shared_ptr<State> state_;
-  std::shared_ptr<InputTensorShelf> input_tensors_;
+  std::shared_ptr<InputTensorShelf> inputTensors_;
   std::vector<at::Tensor> outputs_;
   std::optional<at::RecordFunction> recordFunction_;
   c10::intrusive_ptr<c10::ivalue::Future> future_;
@@ -180,7 +180,7 @@ class WorkNCCLQueue {
   std::unordered_map<cudaStream_t, std::queue<WorkNCCL::TrackedWork>>
       stream_work_queues_;
   std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>>
-      completed_input_tensors_;
+      completedInputTensors_;
   std::mutex work_queues_mutex_;
 };
 
