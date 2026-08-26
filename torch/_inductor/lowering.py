@@ -2832,6 +2832,7 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
     if t.is_sparse:
         return True
 
+    # Keep these checks here because they are specific to Inductor/Triton.
     if not is_triton_fp8_dtype_supported(t.dtype, t.device):
         from .codegen.triton_utils import use_uint8_triton_storage_for_cuda_fp8
 
@@ -2858,10 +2859,6 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
             return False
         if node.target == prims.convert_element_type.default:
             if t.dtype == torch.float8_e4m3fn:
-                # Preserve the existing precursor behavior. Its decoder
-                # constructs E4M3FN NaNs from explicit signed bit patterns,
-                # and direct integral casts retain eager-compatible results.
-                # FNUZ's unique 0x80 NaN does not have that property.
                 return False
             dst_dtype = (
                 node.args[1] if len(node.args) >= 2 else node.kwargs.get("dtype")

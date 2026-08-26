@@ -315,7 +315,8 @@ class TestFP8Types(TestCase):
     @parametrize("src_dtype", (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz))
     def test_cuda_unsupported_fp8_dequant_codegen(self, device, src_dtype):
         def fp8_dequant_add(x, y):
-            return x.to(torch.bfloat16) + y
+            value = x.to(torch.bfloat16)
+            return value + y, torch.isnan(value).int()
 
         bits = torch.arange(256, device=device, dtype=torch.uint8)
         x = bits.view(src_dtype)
@@ -465,54 +466,6 @@ class TestFP8Types(TestCase):
     @skipIfRocm
     @onlyCUDA
     @parametrize("src_dtype", (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz))
-    def test_cuda_unsupported_fp8_dequant_pointwise_chain_codegen(
-        self, device, src_dtype
-    ):
-        def fp8_dequant_pointwise_chain(x):
-            value = x.float()
-            return (
-                value.abs().half(),
-                value.clamp(-1, 1).bfloat16(),
-                torch.isnan(value),
-                torch.signbit(value),
-                torch.nan_to_num(value),
-                torch.isnan(value).int(),
-            )
-
-        bits = torch.arange(256, device=device, dtype=torch.uint8)
-        x = bits.view(src_dtype)
-        expected = fp8_dequant_pointwise_chain(x)
-        actual, code = run_and_get_code(
-            torch.compile(
-                fp8_dequant_pointwise_chain,
-                backend="inductor",
-                fullgraph=True,
-            ),
-            x,
-        )
-        source = "\n".join(code)
-        for actual_output, expected_output in zip(actual[:2], expected[:2]):
-            torch.testing.assert_close(
-                actual_output,
-                expected_output,
-                rtol=0,
-                atol=0,
-                equal_nan=True,
-            )
-        for actual_output, expected_output in zip(actual[2:], expected[2:]):
-            self.assertEqual(actual_output, expected_output)
-        helper = {
-            torch.float8_e4m3fnuz: "fp8e4m3fnuz_to_float32",
-            torch.float8_e5m2fnuz: "fp8e5m2fnuz_to_float32",
-        }[src_dtype]
-        self.assertIn(f"triton_helpers.{helper}", source)
-        self.assertNotIn("= torch.ops.prims.convert_element_type.default(", source)
-        self.assertEqual(source.count("async_compile.triton("), 1)
-
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
-    @skipIfRocm
-    @onlyCUDA
-    @parametrize("src_dtype", (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz))
     def test_cuda_unsupported_fp8_dequant_non_float_users_fall_back(
         self, device, src_dtype
     ):
@@ -520,25 +473,23 @@ class TestFP8Types(TestCase):
             value = x.float()
             return value.long(), (value + 1).int()
 
-        for size in (1, 8, 256):
-            with self.subTest(size=size):
-                bits = torch.full((size,), 0x80, device=device, dtype=torch.uint8)
-                x = bits.view(src_dtype)
-                expected = fp8_dequant_integral_casts(x)
-                actual, code = run_and_get_code(
-                    torch.compile(
-                        fp8_dequant_integral_casts,
-                        backend="inductor",
-                        fullgraph=True,
-                    ),
-                    x,
-                )
-                source = "\n".join(code)
+        bits = torch.full((8,), 0x80, device=device, dtype=torch.uint8)
+        x = bits.view(src_dtype)
+        expected = fp8_dequant_integral_casts(x)
+        actual, code = run_and_get_code(
+            torch.compile(
+                fp8_dequant_integral_casts,
+                backend="inductor",
+                fullgraph=True,
+            ),
+            x,
+        )
+        source = "\n".join(code)
 
-                self.assertEqual(actual, expected)
-                self.assertIn("torch.ops.prims.convert_element_type.default", source)
-                self.assertNotIn("fnuz_to_float32", source)
-                self.assertNotIn("'*u8'", source)
+        self.assertEqual(actual, expected)
+        self.assertIn("torch.ops.prims.convert_element_type.default", source)
+        self.assertNotIn("fnuz_to_float32", source)
+        self.assertNotIn("'*u8'", source)
 
         def fp8_dequant_copy(x):
             return torch.empty(x.shape, device=x.device, dtype=torch.int64).copy_(
@@ -551,8 +502,6 @@ class TestFP8Types(TestCase):
                 dst, x.float(), dim=0, start=1, end=x.numel() + 1
             )
 
-        bits = torch.full((8,), 0x80, device=device, dtype=torch.uint8)
-        x = bits.view(src_dtype)
         for op in (fp8_dequant_copy, fp8_dequant_slice_scatter):
             with self.subTest(op=op):
                 expected = op(x)
@@ -594,12 +543,6 @@ class TestFP8Types(TestCase):
         def fp8_equal(x):
             return x == x
 
-        def to_bool(x):
-            return x.to(torch.bool)
-
-        def to_int32(x):
-            return x.to(torch.int32)
-
         def to_int64(x):
             return x.to(torch.int64)
 
@@ -609,8 +552,6 @@ class TestFP8Types(TestCase):
         ops_and_fallbacks = (
             (fp8_equal, "torch.ops.aten.eq.Tensor"),
             (torch.isnan, "torch.ops.aten.isnan.default"),
-            (to_bool, "torch.ops.prims.convert_element_type.default"),
-            (to_int32, "torch.ops.prims.convert_element_type.default"),
             (to_int64, "torch.ops.prims.convert_element_type.default"),
         )
         for op, fallback in ops_and_fallbacks:

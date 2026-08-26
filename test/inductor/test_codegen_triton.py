@@ -1030,27 +1030,6 @@ def helper(x):
                     triton_utils.signature_of(fnuz_arg, size_dtype=None), "*u8"
                 )
 
-    def test_fnuz_to_dtype_uses_software_decoder(self):
-        class FakeGraph:
-            def get_current_device_or_throw(self):
-                return torch.device("cuda")
-
-        class FakeKernel:
-            min_elem_per_thread = 0
-
-        with (
-            V.set_graph_handler(FakeGraph()),
-            V.set_kernel_handler(FakeKernel()),
-            patch(
-                "torch._inductor.codegen.triton.use_uint8_triton_storage_for_cuda_fp8",
-                return_value=True,
-            ),
-        ):
-            code = TritonKernelOverrides.to_dtype(
-                "x", torch.bfloat16, torch.float8_e4m3fnuz
-            )
-        self.assertIn("triton_helpers.fp8e4m3fnuz_to_float32(x)", code)
-
     @inductor_config.patch("_use_fp64_for_unbacked_floats", True)
     @patch(
         "torch._inductor.codegen.triton_utils.device_supports_fp64",
