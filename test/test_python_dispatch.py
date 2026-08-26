@@ -26,11 +26,13 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     first_sample,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -106,6 +108,8 @@ class _ClassmethodUnflattenWrapper(_TraceableWrapperSubclassTestBase):
 
 
 class TestDispatcherPythonBindings(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_call_boxed(self) -> None:
         sin = torch._C._dispatch_find_schema_or_throw("aten::sin", "")
         x = torch.randn(3)
@@ -114,6 +118,7 @@ class TestDispatcherPythonBindings(TestCase):
 
 
 class TestPythonRegistration(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     test_ns = "_test_python_registration"
 
     def tearDown(self):
@@ -745,6 +750,14 @@ class TestPythonRegistration(TestCase):
             # default behavior should have been restored
             self.assertEqual(torch.mm(a, b).dtype, torch.bfloat16)
 
+
+instantiate_parametrized_tests(TestPythonRegistration)
+
+
+@unittest.skipUnless(TEST_CUDA and not TEST_WITH_ROCM, "CUDA-only tests")
+class TestPythonRegistrationCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_override_cuda_with_jiterator(self) -> None:
         def override_where_cuda() -> None:
             # Example 1: Invert the behavior of where's condition input
@@ -869,16 +882,15 @@ class TestPythonRegistration(TestCase):
             # behavior restored after deregistration
             self.assertEqual(x_cuda + y_cuda, x_cpu + y_cpu)
 
-        if torch.cuda.is_available() and not TEST_WITH_ROCM:
-            override_where_cuda()
-            override_gelu_cuda()
-            override_exp_cuda()
-            override_add_cuda()
-
-instantiate_parametrized_tests(TestPythonRegistration)
+        override_where_cuda()
+        override_gelu_cuda()
+        override_exp_cuda()
+        override_add_cuda()
 
 
 class TestPythonDispatch(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self) -> None:
         with capture_logs() as logs:
             x = LoggingTensor(torch.tensor([3.0]), requires_grad=True)
@@ -2791,6 +2803,8 @@ def forward(self, x_1):
 
 
 class TestPythonDispatcher(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self):
         x = torch.randn(2, requires_grad=True)
         r = torch._C._EnablePythonDispatcher()
@@ -2805,7 +2819,9 @@ class TestPythonDispatcher(TestCase):
         self.assertEqual(expected_shape, python_disp_shape)
 
 
-class TestWrapperSubclassAliasing(TestCase):
+class TestWrapperSubclassAliasingDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_wrapper_subclass_aliasing(self, op, args, kwargs):
         def to_subclass(t: torch.Tensor):
             return TwoTensor(t, t.clone())
@@ -2925,7 +2941,9 @@ class TestWrapperSubclassAliasing(TestCase):
             self._test_wrapper_subclass_aliasing(torch.ops.aten.fft_fft2, args, kwargs)
 
 
-instantiate_device_type_tests(TestWrapperSubclassAliasing, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestWrapperSubclassAliasingDevice, globals(), allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
