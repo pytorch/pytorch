@@ -1009,6 +1009,7 @@ class TestVarlenAttention(NNTestCase):
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_cudnn_varlen_unaligned_grad_out(self, device, dtype):
         """Unaligned grad_output row strides are contiguified, not crashed on."""
+        _check_cudnn_varlen_supported(device)
         torch.manual_seed(42)
         seq_len, num_heads, head_dim = 256, 2, 8
         tensors = [
