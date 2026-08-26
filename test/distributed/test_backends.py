@@ -24,10 +24,6 @@ class TestMiscCollectiveUtils(TestCase):
         """
         Test device to backend mapping
         """
-        device_type = torch.device(device).type
-        if device_type not in dist.Backend.default_device_backend_map:
-            self.skipTest(f"No default backend registered for {device_type}")
-
         backend = dist.get_default_backend_for_device(device)
         self.assertIn(backend, dist.Backend.backend_list)
 
@@ -35,14 +31,10 @@ class TestMiscCollectiveUtils(TestCase):
         """
         Test create process group
         """
-        device_type = torch.device(device).type
-        if device_type not in dist.Backend.default_device_backend_map:
-            self.skipTest(f"No default backend registered for {device_type}")
-
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "29500"
 
-        backend = dist.get_default_backend_for_device(device_type)
+        backend = dist.get_default_backend_for_device(device)
         dist.init_process_group(
             backend=backend, rank=0, world_size=1, init_method="env://"
         )
