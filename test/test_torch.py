@@ -5613,6 +5613,8 @@ class TestTorchDeviceType(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
+    @dtypesIfCPU(torch.float, torch.double, torch.bfloat16)
+    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
     def test_grad_scaling_unscale(self, device, dtype):
         device = torch.device(device)
         device0 = "cuda:0" if device.type == "cuda" else "cpu"

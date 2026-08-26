@@ -52,7 +52,9 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
   // Acts on scaled_grad in place.
   auto iter = TensorIterator::unary_op(scaled_grad, scaled_grad);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    at::ScalarType::Half,
+    at::ScalarType::BFloat16,
     iter.dtype(),
     "_amp_non_finite_check_and_unscale_cuda",
     [&iter, &found_inf, &inv_scale] {
@@ -147,7 +149,9 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
     }
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    at::ScalarType::Half,
+    at::ScalarType::BFloat16,
     tensor_lists[0][0].scalar_type(),
     "_amp_foreach_non_finite_check_and_unscale_cuda",
     [&tensor_lists, &found_inf, &inv_scale] {
