@@ -35,6 +35,10 @@ def set_watchdog_timeout(timeout: float | timedelta | None) -> None:
     duration. Stream operations (e.g. put_signal, wait_signal) are guarded by
     a stream watchdog timer.
 
+    The stream watchdog is skipped during CUDA graph capture: its deadline
+    would be anchored at capture time rather than replay time, and the recorded
+    event would be baked into the graph. The CPU watchdog is unaffected.
+
     Pass ``None`` to disable the watchdog.
 
     Args:
@@ -51,6 +55,18 @@ def get_watchdog_timeout() -> float | timedelta | None:
     ``None`` if no watchdog is configured.
     """
     return _watchdog_timeout
+
+
+def _stream_is_capturing() -> bool:
+    # The stream watchdog is not supported under CUDA graph capture: its
+    # deadline is anchored when it is registered (capture time), not when the
+    # captured op actually runs (replay time), so it would false-fire, and the
+    # recorded event would be baked into the graph. Skip registration while
+    # capturing.
+    return (
+        torch.accelerator.is_available()
+        and torch.accelerator.current_stream().is_capturing()
+    )
 
 
 _group_name_to_store: dict[str, c10d.Store] = {}
@@ -2563,7 +2579,7 @@ def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
     # TODO: other backends' dispatch goes here
     else:
         raise ValueError(f"put_signal: unsupported backend: {backend}")
-    if _watchdog_timeout is not None:
+    if _watchdog_timeout is not None and not _stream_is_capturing():
         from torch.distributed._watchdog import stream_timeout
 
         stream_timeout(_watchdog_timeout)
@@ -2587,7 +2603,7 @@ def wait_signal(hdl: _SymmetricMemory, peer: int) -> None:
     # TODO: other backends' dispatch goes here
     else:
         raise ValueError(f"wait_signal: unsupported backend: {backend}")
-    if _watchdog_timeout is not None:
+    if _watchdog_timeout is not None and not _stream_is_capturing():
         from torch.distributed._watchdog import stream_timeout
 
         stream_timeout(_watchdog_timeout)

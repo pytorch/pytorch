@@ -2584,6 +2584,23 @@ class SymmMemWatchdogUnitTest(TestCase):
             symm_mem.put_signal(MagicMock(), hdl, 0)
             mock_stream_timeout.assert_not_called()
 
+    @patch(
+        "torch.distributed._symmetric_memory._stream_is_capturing", return_value=True
+    )
+    @patch("torch.distributed._symmetric_memory.get_backend", return_value="NCCL")
+    @patch("torch.ops.symm_mem.nccl_put_signal")
+    def test_put_signal_skips_stream_timeout_during_capture(
+        self,
+        mock_nccl_put: MagicMock,
+        mock_get_backend: MagicMock,
+        mock_capturing: MagicMock,
+    ) -> None:
+        symm_mem.set_watchdog_timeout(30.0)
+        with patch("torch.distributed._watchdog.stream_timeout") as mock_stream_timeout:
+            hdl = MagicMock(spec=[])
+            symm_mem.put_signal(MagicMock(), hdl, 0)
+            mock_stream_timeout.assert_not_called()
+
     # -- wait_signal --
 
     @patch("torch.distributed._symmetric_memory.get_backend", return_value="NCCL")
@@ -2603,6 +2620,24 @@ class SymmMemWatchdogUnitTest(TestCase):
     def test_wait_signal_no_timeout_by_default(
         self, mock_nccl_wait: MagicMock, mock_get_backend: MagicMock
     ) -> None:
+        with patch("torch.distributed._watchdog.stream_timeout") as mock_stream_timeout:
+            hdl = MagicMock(spec=[])
+            hdl.device = "cuda:0"
+            symm_mem.wait_signal(hdl, 0)
+            mock_stream_timeout.assert_not_called()
+
+    @patch(
+        "torch.distributed._symmetric_memory._stream_is_capturing", return_value=True
+    )
+    @patch("torch.distributed._symmetric_memory.get_backend", return_value="NCCL")
+    @patch("torch.ops.symm_mem.nccl_wait_signal")
+    def test_wait_signal_skips_stream_timeout_during_capture(
+        self,
+        mock_nccl_wait: MagicMock,
+        mock_get_backend: MagicMock,
+        mock_capturing: MagicMock,
+    ) -> None:
+        symm_mem.set_watchdog_timeout(30.0)
         with patch("torch.distributed._watchdog.stream_timeout") as mock_stream_timeout:
             hdl = MagicMock(spec=[])
             hdl.device = "cuda:0"
