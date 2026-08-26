@@ -21,22 +21,56 @@ class DataPtr;
 /**
  * Note [Flags defining the behavior of events]
  *
- * PYTORCH_DEFAULT and BACKEND_DEFAULT are valid for all backends. The
- * BACKEND_DEFAULT is what a particular backend would select if no
- * flags were given. PYTORCH_DEFAULT is the PyTorch's framework default
- * choice for events on that backend, which may not be the same.
+ * EventFlag is a bitmask where each bit controls one feature:
+ *   bit 0 (0x1): enable timing
+ *   bit 1 (0x2): CPU-blocking synchronize
+ *   bit 2 (0x4): IPC-shareable (interprocess)
+ *   bits 3-7:    reserved (used internally by legacy sentinel values)
+ *   PYTORCH_DEFAULT (0x0): no timing, no blocking, no interprocess
  *
- * The mapping of PYTORCH_DEFAULT and BACKEND_DEFAULT is done by each
- * backend implementation.
+ * BACKEND_DEFAULT (0x81), and INVALID (0xFF) are legacy sentinels preserved for
+ * backward compatibility. New code should compose bit flags directly, e.g.:
+ *
+ *   EventFlag::TIMING
+ *   EventFlag::TIMING | EventFlag::BLOCKING
+ *   EventFlag::BLOCKING | EventFlag::INTERPROCESS
+ *
+ * Backends that do not support a flag should ignore the corresponding bit.
  */
-enum class EventFlag {
-  // Disable timing
-  PYTORCH_DEFAULT,
-  // Enable timing
-  BACKEND_DEFAULT,
-  // FOR TESTING ONLY
-  INVALID
+enum class EventFlag : uint8_t {
+  // Legacy sentinels -- BC preserved
+  BACKEND_DEFAULT [[deprecated("Use EventFlag::TIMING instead")]] =
+      0x81, // legacy CUDA default; bit 0 (TIMING) set, bit 7 set
+  // to distinguish from new bitmask values
+  INVALID [[deprecated("Not a valid EventFlag value")]] =
+      0xFF, // sentinel for testing; not a valid flag
+
+  // Bit flags -- combine with operator|.
+  PYTORCH_DEFAULT = 0x0, // no timing, no blocking, no interprocess
+  TIMING = 0x1, // enable timing
+  BLOCKING = 0x2, // CPU blocks in synchronize()
+  INTERPROCESS = 0x4, // event is IPC-shareable
 };
+
+constexpr EventFlag operator|(EventFlag a, EventFlag b) {
+  return static_cast<EventFlag>(
+      static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+}
+constexpr bool operator&(EventFlag a, EventFlag b) {
+  return static_cast<uint8_t>(a) & static_cast<uint8_t>(b);
+}
+// OOT backends may compare a flag against BACKEND_DEFAULT to detect timing.
+// Use bitwise-AND so new-style flags (e.g. TIMING | BLOCKING) still match.
+// TODO: remove BACKEND_DEFAULT and this operator== once all OOT backends
+// have migrated to explicit bitmask flags.
+constexpr bool operator==(EventFlag a, EventFlag b) {
+  // Use raw value 0x81 to avoid triggering the BACKEND_DEFAULT deprecation
+  // warning in our own implementation.
+  if (static_cast<uint8_t>(a) != 0x81u && static_cast<uint8_t>(b) != 0x81u) {
+    return static_cast<uint8_t>(a) == static_cast<uint8_t>(b);
+  }
+  return a & b;
+}
 
 namespace impl {
 
