@@ -1113,9 +1113,7 @@ print(mem_after_first, torch.cuda.memory_allocated())
         output = subprocess.check_output(
             [sys.executable, "-c", test_script], env=env, text=True
         )
-        mem_after_first, mem_after_realloc = (
-            int(value) for value in output.split()
-        )
+        mem_after_first, mem_after_realloc = (int(value) for value in output.split())
         self.assertGreater(mem_after_realloc, mem_after_first)
 
     @setBlasBackendsToDefaultFinally
