@@ -2174,7 +2174,7 @@ class FakeTensorMode(TorchDispatchMode):
             and metadata.layout == torch.strided
             and statically_known_true(metadata.storage_offset == 0)
             and all(
-                _same_int_expr(actual, expected)
+                _same_int_expr(cast(IntLikeType, actual), expected)
                 for actual, expected in zip(
                     metadata.stride,
                     make_contiguous_strides_for(output.shape),
