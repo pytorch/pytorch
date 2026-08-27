@@ -3636,26 +3636,26 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         ):
             compile_fx.compile_fx_backward(gm, [torch.ones(1)], compiler_config_extra)
 
-        self.assertNotIn("disable_backward_cudagraphs", captured_kwargs)
+        self.assertNotIn("cudagraphs_bwd_override", captured_kwargs)
         self.assertNotIn("cudagraph_partition_only_regions", captured_kwargs)
         self.assertNotIn(
-            "disable_backward_cudagraphs",
+            "cudagraphs_bwd_override",
             autograd_cache.create_fx_config(compiler_config_extra),
         )
 
         compiler_config_extra = dataclasses.replace(
             compiler_config_extra,
-            disable_backward_cudagraphs=True,
+            cudagraphs_bwd_override=False,
         )
         captured_kwargs.clear()
         with patch.object(
             compile_fx, "wrap_compiler_debug", return_value=capture_compile_kwargs
         ):
             compile_fx.compile_fx_backward(gm, [torch.ones(1)], compiler_config_extra)
-        self.assertIs(captured_kwargs["disable_backward_cudagraphs"], True)
+        self.assertIs(captured_kwargs["cudagraphs_bwd_override"], False)
 
         fx_config = autograd_cache.create_fx_config(compiler_config_extra)
-        self.assertIs(fx_config["disable_backward_cudagraphs"], True)
+        self.assertIs(fx_config["cudagraphs_bwd_override"], False)
 
     def test_to_cacheable_strips_runtime_only_fields(self):
         config = self.default_config()

@@ -879,14 +879,15 @@ class CompiledFxGraph(OutputCode):
         if graph_kwargs["is_backward"] is None:
             raise AssertionError("graph_kwargs['is_backward'] must not be None")
         is_backward = graph_kwargs["is_backward"]
-        # This backward-only opt-out is serialized with the FX graph so cache
-        # hits do not reuse the forward-derived decision.
-        if is_backward and self.fx_kwargs.get("disable_backward_cudagraphs", False):
-            graph_cudagraphs = BoxedBool(False)
+        # The backward override is serialized with the FX graph so cache hits
+        # do not reuse the forward-derived decision.
+        cudagraphs_bwd_override = self.fx_kwargs.get("cudagraphs_bwd_override")
+        if is_backward and cudagraphs_bwd_override is not None:
+            cudagraphs = BoxedBool(cudagraphs_bwd_override)
         else:
             if graph_kwargs["cudagraphs"] is None:
                 raise AssertionError("graph_kwargs['cudagraphs'] must not be None")
-            graph_cudagraphs = graph_kwargs["cudagraphs"]
+            cudagraphs = graph_kwargs["cudagraphs"]
 
         # When a CUDAGraphPolicy is set and it says not to wrap this
         # inner CompiledFxGraph (e.g. because wrapping happens at the
@@ -896,9 +897,9 @@ class CompiledFxGraph(OutputCode):
         policy = config.cudagraph_policy
         if policy is not None and not policy.should_wrap(self):
             counters["inductor"]["cudagraph_skips"] += 1
-            BoxedBool.disable(graph_cudagraphs)
+            BoxedBool.disable(cudagraphs)
 
-        if graph_cudagraphs:
+        if cudagraphs:
             # It's possible that cudagraphs is enabled, but was disabled
             # during a previous compilation we're loading from the cache.
             # If so, we need to disable it on this new process too.
@@ -909,7 +910,7 @@ class CompiledFxGraph(OutputCode):
                     )
                 else:
                     counters["inductor"]["cudagraph_skips"] += 1
-                BoxedBool.disable(graph_cudagraphs)
+                BoxedBool.disable(cudagraphs)
             else:
                 if is_backward:
                     if "boxed_forward_device_index" not in graph_kwargs:
@@ -929,13 +930,13 @@ class CompiledFxGraph(OutputCode):
                 if config.graph_partition and policy is None:
                     # With graph_partition=True, we skip some cudagraph checks
                     # if it's supported with partition, so we use
-                    # cudagraph_partition_post_compile. When a CUDAGraphPolicy
-                    # is active, use cudagraph_post_compile instead so the
+                    # cudagraph_partition_post_compile.  When a CUDAGraphPolicy
+                    # is active, we use cudagraph_post_compile instead so the
                     # policy controls wrapping via policy.cudagraphify().
                     cudagraph_partition_post_compile(
                         example_inputs,
                         self,
-                        graph_cudagraphs,
+                        cudagraphs,
                         constants.unwrap(self),
                         boxed_forward_device_index,
                     )
@@ -943,15 +944,15 @@ class CompiledFxGraph(OutputCode):
                     cudagraph_post_compile(
                         example_inputs,
                         self,
-                        graph_cudagraphs,
+                        cudagraphs,
                         constants.unwrap(self),
                         boxed_forward_device_index,
                     )
         inputs_to_check = self.inputs_to_check
-        # graph_cudagraphs could have been disabled by the earlier conditions,
+        # cudagraphs could have been disabled from the earlier conditions
         # so we still need to realign inputs if that happens
         maybe_realign_inputs(
-            graph_cudagraphs,
+            cudagraphs,
             self,
             inputs_to_check,
             self.mutated_input_idxs,
