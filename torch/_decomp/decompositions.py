@@ -3363,7 +3363,7 @@ def index_add_(
 
 
 @register_decomposition(aten.index_add)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_add(
     x: TensorLike,
     dim: int,
@@ -3468,7 +3468,7 @@ def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 
 
 @register_decomposition(aten.index_copy)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return _index_copy(x, dim, index, tensor, inplace=False)
 
@@ -4282,7 +4282,7 @@ def select_one_layer_lstm_function(input, hx, params):
         * ``torch._C._get_mkldnn_enabled()`` returns ``True``.
         * All the input args are on CPU.
         * The dtypes of args are either torch.float or torch.bfloat16.
-        * Inference.
+        * Grad mode is disabled or no inputs require gradients.
         * ``has_projections`` returns ``False``.
 
     Args:
@@ -4309,7 +4309,7 @@ def select_one_layer_lstm_function(input, hx, params):
             if dtype not in [torch.float, torch.bfloat16]:
                 return False
 
-        if input.requires_grad:
+        if torch.is_grad_enabled() and any(t.requires_grad for t in tensors):
             return False
 
         has_projections = hx[0].size(2) != hx[1].size(2)
