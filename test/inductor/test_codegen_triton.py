@@ -1171,24 +1171,16 @@ def helper(x):
         code_str = " ".join(code)
         self.assertNotIn("tt.pointer_range", code_str)
 
-    @unittest.skipUnless(
-        HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
-        "requires CPU or GPU Triton",
-    )
-    def test_user_defined_triton_kernel_preserves_root_jit_decorator(self):
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_uses_bare_root_jit_decorator(self):
         from torch._inductor.codegen.wrapper import (
             user_defined_triton_kernel_transitive_closure_source_code,
         )
 
-        decorator_value_src = "'''n_elements''' " + '""""""'
-        decorator_src = (
-            "@triton.jit(noinline=True, debug=True, "
-            f"do_not_specialize=[{decorator_value_src}])"
-        )
+        decorator_src = "@triton.jit(noinline=True, debug=True)"
         raw_src = "".join(root_decorator_for_codegen.raw_src).replace(
             "@triton.jit", decorator_src, 1
         )
-        self.assertIn(decorator_value_src, raw_src)
 
         bare_source = user_defined_triton_kernel_transitive_closure_source_code(
             root_decorator_for_codegen
@@ -1199,25 +1191,10 @@ def helper(x):
                     root_decorator_for_codegen
                 )
             )
-        self.assertNotEqual(bare_source, decorated_source)
-        self.assertIn(decorator_value_src, decorated_source)
-
-        def fn(x):
-            out = torch.empty_like(x)
-            n_elements = x.numel()
-            root_decorator_for_codegen[(1,)](x, out, n_elements, BLOCK_SIZE=128)
-            return out
-
-        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
-        x = torch.randn(64, device=device)
-        with patch.object(root_decorator_for_codegen, "raw_src", raw_src):
-            _, code = run_and_get_code(torch.compile(fn), x)
-
-        code_str = "\n".join(code)
-        self.assertIn("@triton.jit(", code_str)
-        self.assertIn("noinline=True", code_str)
-        self.assertIn("debug=True", code_str)
-        self.assertIn("do_not_specialize=", code_str)
+        self.assertEqual(bare_source, decorated_source)
+        self.assertIn("@triton.jit\ndef root_decorator_for_codegen", decorated_source)
+        self.assertNotIn("noinline=True", decorated_source)
+        self.assertNotIn("debug=True", decorated_source)
 
     @unittest.skipUnless(
         HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),

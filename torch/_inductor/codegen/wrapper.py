@@ -460,9 +460,9 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     kernel_src = kernel.src
     if epilogue_fusion:
         kernel_src = epilogue_fusion[1]
-    # This source feeds both generated code and cache keys. Always use the
-    # original kernel's decorator because epilogue fusion replaces only its body.
-    compile_wrapper.splice(_triton_jit_decorator_from_source(kernel), strip=True)
+    # Inductor supplies entry-point specialization and compiler options directly,
+    # so the root JITFunction's decorator options are not consumed on this path.
+    compile_wrapper.writeline("@triton.jit")
     compile_wrapper.splice(kernel_src, strip=True)
 
     # Also include any possible kernel being called indirectly
