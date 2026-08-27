@@ -66,8 +66,64 @@ _NV_CONFIGS = [
 ]
 
 
-def grouped_mm_configs():
+# Xe needs a different shape of config than the NV set above: the accumulator
+# must stay in registers (BLOCK_M * BLOCK_N / threads), which favours many warps
+# and rules out 256x256 below 32 warps, and the k-loop wants a small BLOCK_K
+# with deep pipelining rather than the NV BLOCK_K >= 64 with 3-4 stages. The
+# performance landscape is jagged (a BLOCK_K step from 16 to 32 at fixed stages
+# can cost 2.5x), so this is an explicitly measured list, not a generated grid.
+_XPU_CONFIGS = [
+    Config(
+        {
+            "BLOCK_M": block_size_m,
+            "BLOCK_N": block_size_n,
+            "BLOCK_K": block_size_k,
+            "NUM_CONSUMER_GROUPS": 1,
+        },
+        num_stages=num_stages,
+        num_warps=num_warps,
+    )
+    for block_size_m, block_size_n, block_size_k, num_stages, num_warps in [
+        (128, 256, 16, 5, 32),
+        (128, 256, 16, 4, 32),
+        (128, 256, 16, 4, 16),
+        (64, 256, 16, 5, 32),
+        (256, 256, 16, 2, 32),
+        (128, 256, 32, 2, 16),
+        (128, 128, 64, 2, 16),
+        (64, 128, 64, 2, 16),
+        # Small BLOCK_M so that tiny m_avg still has a choice after pruning.
+        (32, 256, 16, 4, 16),
+        (16, 256, 16, 4, 16),
+    ]
+]
+
+
+def grouped_mm_configs(device_type: str = "cuda"):
+    if device_type == "xpu":
+        return _XPU_CONFIGS
     return _NV_CONFIGS
+
+
+# Share of last-level cache the live A rows may claim. The remainder has to hold
+# the B column block that the m walk re-reads on every tile, so this cannot be 1.
+_LLC_A_SHARE = 0.8
+
+
+def cache_blocking_group_m(device, block_m, block_n, k, itemsize):
+    """How many m-tiles to sweep across all of N before advancing in M.
+
+    The template splits M first, which makes an A tile's reuse distance a whole
+    group slab (m_size x k): once that slab outgrows last-level cache, each of
+    the N / BLOCK_N passes re-reads all of A from memory instead of hitting.
+    Grouping caps the live A rows at GROUP_M * BLOCK_M. When the slab already
+    fits, this comes out at or above the group's m-tile count and the swizzle
+    degenerates to the plain M-major order, so it costs nothing on shapes that
+    were never re-streaming.
+    """
+    llc = torch.get_device_module(device.type).get_device_properties(device)
+    a_budget = _LLC_A_SHARE * llc.last_level_cache_size - block_n * k * itemsize
+    return max(1, int(a_budget // (block_m * k * itemsize)))
 
 
 def early_config_prune(g, m, dtsize, configs, named_args):
@@ -144,6 +200,8 @@ cutedsl_grouped_mm_template = CuteDSLTemplate(
 
 
 def has_grouped_mm_triton_support() -> bool:
+    if torch.xpu._is_compiled():
+        return True
     if not torch.cuda.is_available():
         return False
     if torch.version.hip:
@@ -313,11 +371,21 @@ def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
 
     end_hint = V.graph.sizevars.optimization_hint(end)
     noffs_hint = V.graph.sizevars.optimization_hint(offs_box.get_size()[0])
-    offs = torch.arange(1, noffs_hint + 1, dtype=torch.float32) * (
-        end_hint / noffs_hint
-    )
+    # An even split gives every group the same size and puts every group
+    # boundary on a tile boundary, which is the kernel's best case rather than a
+    # representative one: real MoE routing is ragged, so a group spans one more
+    # partially-masked tile than the even split suggests. Ranking configs on the
+    # even split therefore picks configs that only win when m/g happens to be a
+    # multiple of BLOCK_M. Spread the groups unevenly instead, with a fixed seed
+    # so the generated offsets stay stable across runs and across the cache.
+    gen = torch.Generator().manual_seed(0)
+    weights = torch.rand(noffs_hint, generator=gen) * 0.5 + 0.75
+    offs = weights.cumsum(0) / weights.sum() * end_hint
     offs[:-1] = (offs[:-1] / alignment).round() * alignment
     offs[-1] = end_hint
+    # Rounding can push a boundary past its successor (or past end) when the
+    # groups are small; offsets must stay non-decreasing.
+    offs = offs.clamp(max=end_hint).cummax(0).values
     return offs.to(dtype=offs_box.get_dtype(), device=offs_box.get_device())
 
 
@@ -457,8 +525,23 @@ def _tuned_grouped_mm_common(
         }
 
         for config in early_config_prune(
-            g, m, mat_a.dtype.itemsize, grouped_mm_configs(), kwargs
+            g,
+            m,
+            mat_a.dtype.itemsize,
+            grouped_mm_configs(layout.device.type),
+            kwargs,
         ):
+            swizzle = {}
+            if layout.device.type == "xpu":
+                group_m = cache_blocking_group_m(
+                    layout.device,
+                    config.kwargs["BLOCK_M"],
+                    config.kwargs["BLOCK_N"],
+                    V.graph.sizevars.optimization_hint(k),
+                    mat_a.dtype.itemsize,
+                )
+                if group_m > 1:
+                    swizzle["GROUP_M"] = group_m
             kernel_template.maybe_append_choice(
                 choices,
                 input_nodes=input_nodes,
@@ -467,8 +550,8 @@ def _tuned_grouped_mm_common(
                 num_warps=config.num_warps,
                 **kwargs,
                 **config.kwargs,
+                **swizzle,
             )
-
     if use_blackwell_cutedsl_grouped_mm(
         mat_a, mat_b, layout, a_is_2d, b_is_2d, offs, bias, scale_result
     ):
