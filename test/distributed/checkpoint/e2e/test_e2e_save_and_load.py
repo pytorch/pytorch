@@ -77,8 +77,8 @@ class TestDummyModel(torch.nn.Module):
 
 
 class TestStatefulObj:
-    def __init__(self) -> None:
-        self.data = torch.rand(10, 10)
+    def __init__(self, data) -> None:
+        self.data = data
 
     def state_dict(self):
         return {"data": self.data}
@@ -266,7 +266,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         dist_model, dist_optim = self._create_model(device, compile, model_type)
         _, original_train_state = _train(dist_model, dist_optim, train_steps=2)
 
-        original_stateful_obj = TestStatefulObj()  # tests arbitrary saving/loading
+        original_stateful_obj = TestStatefulObj(torch.rand(10, 10, device=device))  # tests arbitrary saving/loading
         sd = {
             "model": dist_model,
             "optimizer": dist_optim,
@@ -318,7 +318,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         else:
             DCP.save(sd, checkpoint_id=self.temp_dir)
 
-        loaded_stateful_obj = TestStatefulObj()
+        loaded_stateful_obj = TestStatefulObj(torch.rand(10, 10, device=device))
         loaded_train_state = TestTrainState()
         dist_model, dist_optim = self._create_model(device, compile, model_type)
 
@@ -346,48 +346,6 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         self._verify_msd(model_sd, dist_msd)
         self._verify_osd_by_load(model, optim, self._optim(model), dist_osd)
 
-    @with_temp_dir
-    def test_stateful_and_non_stateful_loads(self, device) -> None:
-        class StateDict(dict):
-            def __init__(self):
-                self.set_sd_item_called = False
-
-            def __setitem__(self, item, value):
-                self.set_sd_item_called = True
-                super().__setitem__(item, value)
-
-        class Foo(Stateful):
-            def __init__(self):
-                self.load_state_dict_called = False
-
-            def state_dict(self):
-                return {}
-
-            def load_state_dict(self, state_dict):
-                self.load_state_dict_called = True
-
-        stateful_foo = Foo()
-        sd = StateDict()
-        sd["foo"] = stateful_foo
-        sd.set_sd_item_called = False
-
-        DCP.save(sd, checkpoint_id=self.temp_dir)
-        DCP.load(sd, checkpoint_id=self.temp_dir)
-
-        # Validate that the stateful object was loaded in-place
-        self.assertTrue(stateful_foo.load_state_dict_called)
-        # Validate that the stateful object was NOT replaced in the state dict
-        self.assertFalse(sd.set_sd_item_called)
-
-        sd = StateDict()
-        sd["foo"] = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
-        sd.set_sd_item_called = False
-
-        DCP.save(sd, checkpoint_id=self.temp_dir)
-        DCP.load(sd, checkpoint_id=self.temp_dir)
-
-        # Validate that the non-stateful state dict was replaced with the loaded state dict
-        self.assertTrue(sd.set_sd_item_called)
 
     @skip_if_lt_x_gpu(4)
     @with_comms
@@ -398,7 +356,6 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         """
 
         world_size = self.world_size
-        device_type = torch.device(device).type
 
         class Foo:
             def state_dict(self):
@@ -406,11 +363,11 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
             def load_state_dict(self, state_dict):
                 tl = [
-                    torch.ones(2, dtype=torch.int64, device=device_type)
+                    torch.ones(2, dtype=torch.int64, device=device)
                     for _ in range(world_size)
                 ]
                 t = (
-                    torch.arange(2, dtype=torch.int64, device=device_type)
+                    torch.arange(2, dtype=torch.int64, device=device)
                     + 1
                     + 2 * dist.get_rank()
                 )
@@ -422,7 +379,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
             def load_state_dict(self, state_dict):
                 tensor = (
-                    torch.arange(2, dtype=torch.int64, device=device_type)
+                    torch.arange(2, dtype=torch.int64, device=device)
                     + 1
                     + 2 * dist.get_rank()
                 )
@@ -442,12 +399,6 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         DCP.save(sd, checkpoint_id=self.temp_dir)
         DCP.load(sd, checkpoint_id=self.temp_dir)
 
-    @with_temp_dir
-    def test_no_dist(self, device):
-        # since comm's are not initialized in this method, `no_dist`
-        # is assumed False
-        DCP.save({}, checkpoint_id=self.temp_dir)
-        DCP.load({}, checkpoint_id=self.temp_dir)
 
     @skip_if_lt_x_gpu(4)
     @with_comms
@@ -488,38 +439,17 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
                     loaded_optim_state[k][optim_key], v[optim_key], offload_to_cpu=True
                 )
 
-    @skip_if_lt_x_gpu(4)
-    @with_comms
-    @with_temp_dir
-    def test_overwrite(self, device):
-        t1, t2 = torch.randn(10), torch.randn(10)
-        DCP.save({"random": t1}, checkpoint_id=self.temp_dir)
-        DCP.save(
-            {"random": t2},
-            storage_writer=DCP.FileSystemWriter(self.temp_dir, overwrite=True),
-        )
-
-        sd = {"random": torch.zeros(10)}
-        DCP.load(sd, checkpoint_id=self.temp_dir)
-
-        self.assertTrue(torch.allclose(sd["random"], t2))
-
-        with self.assertRaisesRegex(
-            CheckpointException, ".*Checkpoint already exists.*"
-        ):
-            DCP.save(
-                {"random": t2},
-                storage_writer=DCP.FileSystemWriter(self.temp_dir, overwrite=False),
-            )
 
 
 class TestNoCPU(DTensorTestBase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.GENERIC
+
+    @property
+    def backend(self):
+        return "nccl"
 
     @with_comms
-    def test_no_cpu(self, device):
-        if torch.device(device).type == "cpu":
-            self.skipTest("test_no_cpu requires a non-CPU device")
+    def test_no_cpu(self):
         with self.assertRaisesRegex(
             AssertionError, r"A CPU backend must be enabled for async save;.*?"
         ):
@@ -569,18 +499,83 @@ class TestInitStateDict(DTensorTestBase):
         self.assertEqual(msd, get_model_state_dict(model_2))
         self.assertEqual(osd, get_optimizer_state_dict(model_2, optim_2))
         self.assertEqual(optim_2.param_groups[0]["lr"], 0.1)
+    @with_temp_dir
+    def test_stateful_and_non_stateful_loads(self) -> None:
+        class StateDict(dict):
+            def __init__(self):
+                self.set_sd_item_called = False
+
+            def __setitem__(self, item, value):
+                self.set_sd_item_called = True
+                super().__setitem__(item, value)
+
+        class Foo(Stateful):
+            def __init__(self):
+                self.load_state_dict_called = False
+
+            def state_dict(self):
+                return {}
+
+            def load_state_dict(self, state_dict):
+                self.load_state_dict_called = True
+
+        stateful_foo = Foo()
+        sd = StateDict()
+        sd["foo"] = stateful_foo
+        sd.set_sd_item_called = False
+
+        DCP.save(sd, checkpoint_id=self.temp_dir)
+        DCP.load(sd, checkpoint_id=self.temp_dir)
+
+        # Validate that the stateful object was loaded in-place
+        self.assertTrue(stateful_foo.load_state_dict_called)
+        # Validate that the stateful object was NOT replaced in the state dict
+        self.assertFalse(sd.set_sd_item_called)
+
+        sd = StateDict()
+        sd["foo"] = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
+        sd.set_sd_item_called = False
+
+        DCP.save(sd, checkpoint_id=self.temp_dir)
+        DCP.load(sd, checkpoint_id=self.temp_dir)
+
+        # Validate that the non-stateful state dict was replaced with the loaded state dict
+        self.assertTrue(sd.set_sd_item_called)
+
+    @with_temp_dir
+    def test_no_dist(self):
+        # since comm's are not initialized in this method, `no_dist`
+        # is assumed False
+        DCP.save({}, checkpoint_id=self.temp_dir)
+        DCP.load({}, checkpoint_id=self.temp_dir)
+
+    @with_temp_dir
+    def test_overwrite(self):
+        t1, t2 = torch.randn(10), torch.randn(10)
+        DCP.save({"random": t1}, checkpoint_id=self.temp_dir)
+        DCP.save(
+            {"random": t2},
+            storage_writer=DCP.FileSystemWriter(self.temp_dir, overwrite=True),
+        )
+
+        sd = {"random": torch.zeros(10)}
+        DCP.load(sd, checkpoint_id=self.temp_dir)
+
+        self.assertTrue(torch.allclose(sd["random"], t2))
+
+        with self.assertRaisesRegex(
+            CheckpointException, ".*Checkpoint already exists.*"
+        ):
+            DCP.save(
+                {"random": t2},
+                storage_writer=DCP.FileSystemWriter(self.temp_dir, overwrite=False),
+            )
 
 
-instantiate_device_type_tests(
-    TestNoCPU,
-    globals(),
-    except_for=("cpu",),
-)
 
 instantiate_device_type_tests(
     TestE2ESaveAndLoad,
     globals(),
-    except_for=("cpu",),
 )
 if __name__ == "__main__":
     run_tests()
