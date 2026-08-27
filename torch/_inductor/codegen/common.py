@@ -5,6 +5,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import importlib
 import itertools
 import logging
 import math
@@ -14,6 +15,7 @@ import re
 import tempfile
 import threading
 from abc import ABC, abstractmethod
+from contextvars import ContextVar
 from enum import auto, Enum
 from itertools import chain
 from textwrap import dedent
@@ -313,6 +315,7 @@ class DeviceCodegen:
     wrapper_codegen: WrapperConstructor
     cpp_wrapper_codegen: WrapperConstructor | None = None
     fx_wrapper_codegen: WrapperConstructor | None = None
+    compile_options: dict[str, str] = dataclasses.field(default_factory=dict)
 
 
 KernelArgType = WorkspaceArg | TensorArg | SizeArg | TMADescriptorArg | ConstexprArg
@@ -480,14 +483,8 @@ def register_backend_for_device(
     device_fx_wrapper_codegen: WrapperConstructor | None = None,
     device_custom_pass: CustomGraphModulePass | None = None,
     device_custom_config: ConfigModule | None = None,
+    device_compile_options: dict[str, str] | None = None,
 ) -> None:
-    device_codegens[device] = DeviceCodegen(
-        device_scheduling,
-        device_wrapper_codegen,
-        device_cpp_wrapper_codegen,
-        device_fx_wrapper_codegen,
-    )
-    custom_backend_passes[device] = device_custom_pass
     if device_custom_config:
         if not (
             isinstance(device_custom_config, ConfigModule)
@@ -496,6 +493,38 @@ def register_backend_for_device(
             raise AssertionError(
                 f"{device_custom_config=} cannot be the same as the default inductor config {config=}"
             )
+    compile_options: dict[str, str] = {}
+    if device_compile_options:
+        if device_custom_config is None:
+            raise AssertionError(
+                f"compile options for {device=} require a device_custom_config"
+            )
+        for name, key in device_compile_options.items():
+            normalized = name.replace("-", "_")
+            if normalized in config._config:  # type: ignore[attr-defined]
+                raise AssertionError(
+                    f"compile option {normalized!r} shadows torch._inductor.config"
+                )
+            if key not in device_custom_config._config:
+                raise RuntimeError(
+                    f"compile option target {device_custom_config.__name__}.{key}"
+                    " does not exist"
+                )
+            for other_device, other in device_codegens.items():
+                if other_device != device and normalized in other.compile_options:
+                    raise RuntimeError(
+                        f"compile option {normalized!r} is already claimed by"
+                        f" device {other_device!r}"
+                    )
+            compile_options[normalized] = key
+    device_codegens[device] = DeviceCodegen(
+        device_scheduling,
+        device_wrapper_codegen,
+        device_cpp_wrapper_codegen,
+        device_fx_wrapper_codegen,
+        compile_options,
+    )
+    custom_backend_passes[device] = device_custom_pass
     custom_backend_codegen_configs[device] = device_custom_config
 
 
@@ -579,6 +608,72 @@ def get_custom_backend_config_for_device(device: str) -> ConfigModule | None:
 
 # Prevents a hook that re-enters init_backend_registration from firing itself again.
 _privateuse1_backend_init_in_progress = False
+
+
+# Backend-owned options share the device_custom_config cache-key integration.
+# Track only explicitly routed values for replay in compile_fx_ext workers.
+_active_routed: ContextVar[tuple[dict[str, dict[str, Any]], ...]] = ContextVar(
+    "codegen.common.active_routed", default=()
+)
+
+
+def get_compile_option_owner(name: str) -> tuple[ConfigModule, str] | None:
+    name = name.replace("-", "_")
+    for device, codegen in list(device_codegens.items()):
+        key = codegen.compile_options.get(name)
+        owner = custom_backend_codegen_configs.get(device)
+        if key is not None and owner is not None:
+            return owner, key
+    return None
+
+
+def patch_compile_options(
+    config_patches: dict[str, Any] | None,
+) -> contextlib._GeneratorContextManager[None]:
+    """Patch core and backend options; decorators replay patches on each call."""
+    # the checker cannot see that install_config_module made config a ConfigModule
+    core_config = cast(ConfigModule, config)
+    grouped: dict[ConfigModule, dict[str, Any]] = {}
+    for name, value in (config_patches or {}).items():
+        owner, key = get_compile_option_owner(name) or (core_config, name)
+        grouped.setdefault(owner, {})[key] = value
+    routed = {
+        owner.__name__: values
+        for owner, values in grouped.items()
+        if owner is not core_config
+    }
+
+    # Resolve owners now so delayed backward compilation keeps its bindings.
+    @contextlib.contextmanager
+    def patch() -> Iterator[None]:
+        with contextlib.ExitStack() as stack:
+            for owner, values in grouped.items():
+                stack.enter_context(owner.patch(values))
+            token = _active_routed.set((*_active_routed.get(), routed))
+            try:
+                yield
+            finally:
+                _active_routed.reset(token)
+
+    return patch()
+
+
+def snapshot_routed_options() -> dict[str, dict[str, Any]]:
+    """Return explicitly routed values, with nested patches taking precedence."""
+    merged: dict[str, dict[str, Any]] = {}
+    for entry in _active_routed.get():
+        for module_name, options in entry.items():
+            merged.setdefault(module_name, {}).update(options)
+    return merged
+
+
+@contextlib.contextmanager
+def patch_routed_options(snapshots: dict[str, dict[str, Any]]) -> Iterator[None]:
+    """Import backend config modules and replay the parent's routed values."""
+    with contextlib.ExitStack() as stack:
+        for module_name, values in snapshots.items():
+            stack.enter_context(importlib.import_module(module_name).patch(values))
+        yield
 
 
 @functools.cache

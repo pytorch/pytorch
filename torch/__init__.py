@@ -2882,23 +2882,27 @@ class _TorchCompileInductorWrapper:
             return
 
         from torch._inductor import config
-
-        current_config: dict[str, _Any] = config.get_config_copy()
+        from torch._inductor.codegen.common import get_compile_option_owner
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
-            if attr_name not in current_config:
+            owner_config, target_key = get_compile_option_owner(attr_name) or (
+                config,
+                attr_name,
+            )
+            if target_key not in owner_config._config:  # type: ignore[attr-defined]
                 raise RuntimeError(
-                    f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
+                    f"Unexpected optimization option {key}, known options are "
+                    f"{list(config.get_config_copy())}"
                 )
-            attr_type = config.get_type(attr_name)  # type: ignore[attr-defined]
+            attr_type = owner_config.get_type(target_key)  # type: ignore[attr-defined]
             # Subscriptable generic types don't support isinstance so skip the type
             # check. There doesn't seem to be a good way of checking membership without
             # 3rd party libraries.
             if _get_origin(attr_type) is None:
                 if not isinstance(val, attr_type):
                     val_type_str = type(val).__name__
-                    expected_type_str = type(current_config[attr_name]).__name__
+                    expected_type_str = type(getattr(owner_config, target_key)).__name__
                     raise RuntimeError(
                         f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
                     )
