@@ -25,7 +25,12 @@ from torch.testing._internal.common_utils import (
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_WITH_ROCM, decorateIf, recover_orig_fp32_precision, skipIfXpu
 )
-from torch.testing._internal.common_cuda import has_device_side_assert
+from torch.testing._internal.common_cuda import (
+    has_device_side_assert,
+    tf32_enabled,
+    tf32_off,
+    tf32_on,
+)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
@@ -50,8 +55,38 @@ class TestTesting(TestCase):
             torch.set_float32_matmul_precision("high")
 
         set_tf32()
-        self.assertEqual(torch.get_float32_matmul_precision(), "highest")
         self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+        self.assertEqual(torch.get_float32_matmul_precision(), "highest")
+
+    @onlyCPU
+    @parametrize("context_name", ("tf32_on", "tf32_enabled"))
+    @recover_orig_fp32_precision
+    def test_tf32_on_contexts_keep_precision_state_in_sync(self, context_name):
+        torch.set_float32_matmul_precision("highest")
+        context = tf32_on(self) if context_name == "tf32_on" else tf32_enabled()
+
+        with context:
+            self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
+            self.assertEqual(torch.get_float32_matmul_precision(), "high")
+            self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
+
+        self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+        self.assertEqual(torch.get_float32_matmul_precision(), "highest")
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
+
+    @onlyCPU
+    @recover_orig_fp32_precision
+    def test_tf32_off_keeps_precision_state_in_sync(self):
+        torch.set_float32_matmul_precision("high")
+
+        with tf32_off():
+            self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
+            self.assertEqual(torch.get_float32_matmul_precision(), "highest")
+            self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
+
+        self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
+        self.assertEqual(torch.get_float32_matmul_precision(), "high")
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
 
     # Ensure that assertEqual handles numpy arrays properly
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half))

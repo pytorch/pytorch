@@ -103,7 +103,7 @@ def _use_bmm_shared_a(mat1, mat2, layout) -> bool:
     return True
 
 
-def _bmm_shared_a_configs(dtype):
+def _bmm_shared_a_configs(dtype, device_type):
     """Hand-tuned config space for the shared-A template.
 
     BLOCK_Q batches share one A tile and are laid side by side in the dot, so
@@ -111,7 +111,12 @@ def _bmm_shared_a_configs(dtype):
     BLOCK_M x BLOCK_N x BLOCK_Q floats; the bound below keeps that in registers.
     """
     acc = acc_type(dtype)
-    allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
+    if device_type == "cuda":
+        allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
+    elif device_type == "xpu":
+        allow_tf32 = torch.backends.mkldnn.matmul.fp32_precision == "tf32"
+    else:
+        raise AssertionError(f"unsupported device type: {device_type}")
 
     for block_m, block_n, block_k, block_q, warps, stages in itertools.product(
         (64, 128), (32, 64), (32, 64), (2, 4, 8), (4, 8), (1, 2, 3)
@@ -322,7 +327,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             n,
             k,
         )
-        for config in _bmm_shared_a_configs(mat1.get_dtype()):
+        for config in _bmm_shared_a_configs(
+            mat1.get_dtype(), mat1.get_device().type
+        ):
             bmm_shared_a_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
