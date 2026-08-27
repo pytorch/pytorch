@@ -6,12 +6,13 @@ import functools
 import threading
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS
 from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
 import os
 import unittest
+import warnings
 
 
 CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
@@ -152,50 +153,16 @@ def CDNA2OrLater():
 def gfx_arch_supports_opportunistic_fastatomics():
     return evaluate_gfx_arch_within(["gfx942", "gfx950"])
 
-def evaluate_platform_supports_flash_attention():
-    if TEST_WITH_ROCM:
-        # NOTE: gfx1250 is omitted until flash-attention artifacts ship for it.
-        # The AOTriton path needs the gfx1250 GPU image from AOTriton 0.12.1b,
-        # which is wired up by PR #188242 (which also adds gfx1250 to this list);
-        # this gate-only PR leaves it out so the two changes do not conflict
-        # (see cmake/External/aotriton.cmake). The CK FAv3/AITER codegen is
-        # separately not yet wired for gfx1250
-        # (see aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/CMakeLists.txt).
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
-        if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
-            arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
-        return evaluate_gfx_arch_within(arch_list)
-    if TEST_CUDA:
-        return not IS_WINDOWS and SM80OrLater
-    if TEST_XPU:
-        return True
-    return False
+def evaluate_platform_supports_cudnn_attention():
+    return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
+
+PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_cudnn_attention())
 
 def evaluate_platform_supports_ck_sdpa():
     if TEST_WITH_ROCM:
         return torch.backends.cuda.is_ck_sdpa_available()
     else:
         return False
-
-def evaluate_platform_supports_efficient_attention():
-    if TEST_WITH_ROCM:
-        # NOTE: gfx1250 is omitted until mem-efficient-attention artifacts ship
-        # for it. The AOTriton gfx1250 image (from AOTriton 0.12.1b) is wired up
-        # by PR #188242, which also adds gfx1250 here; this gate-only PR leaves
-        # it out to avoid conflicting with that change. The CK FAv3/AITER codegen
-        # is separately not yet wired for gfx1250.
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
-        if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
-            arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
-        return evaluate_gfx_arch_within(arch_list)
-    if TEST_CUDA:
-        return True
-    if TEST_XPU:
-        return True
-    return False
-
-def evaluate_platform_supports_cudnn_attention():
-    return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
 
 def evaluate_platform_supports_green_context():
     from torch.cuda.green_contexts import _ensure_supported
@@ -205,48 +172,9 @@ def evaluate_platform_supports_green_context():
     except RuntimeError:
         return False
 
-PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
-PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())
-PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_cudnn_attention())
-# This condition always evaluates to PLATFORM_SUPPORTS_MEM_EFF_ATTENTION but for logical clarity we keep it separate
-PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION or
-                                                  PLATFORM_SUPPORTS_CUDNN_ATTENTION or
-                                                  PLATFORM_SUPPORTS_MEM_EFF_ATTENTION)
-
-PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
+PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
 PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_sdpa())
-
-
-def evaluate_platform_supports_bf16():
-    if torch.version.cuda:
-        return SM80OrLater
-    elif torch.version.hip:
-        return True
-    elif TEST_XPU:
-        return True
-    return False
-
-
-def evaluate_platform_supports_bf16_atomics():
-    if torch.version.cuda:
-        return SM80OrLater
-    elif torch.version.hip:
-        return ROCM_VERSION >= (8, 0)
-    return False
-
-
-def evaluate_platform_supports_half_atomics():
-    if torch.version.hip:
-        return ROCM_VERSION >= (8, 0)
-    return True
-
-
-PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: evaluate_platform_supports_bf16())
-PLATFORM_SUPPORTS_BF16_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_bf16_atomics())
-PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_half_atomics())
-
-PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
 def evaluate_platform_supports_workqueue_config():
     from torch.cuda.green_contexts import _ensure_supported, _ensure_workqueue_supported
@@ -258,61 +186,6 @@ def evaluate_platform_supports_workqueue_config():
         return False
 
 PLATFORM_SUPPORTS_WORKQUEUE_CONFIG: bool = LazyVal(lambda: evaluate_platform_supports_workqueue_config())
-
-def evaluate_platform_supports_fp8():
-    if torch.cuda.is_available():
-        if torch.version.hip:
-            archs = ['gfx94']
-            if ROCM_VERSION >= (6, 5):
-                # OCP fp8 (e4m3fn/e5m2) in scaled_mm requires ROCm 6.5+; see
-                # the ROCM_VERSION checks in aten/src/ATen/native/cuda/ScaledBlas.cpp.
-                # gfx120 and gfx95 only support OCP, so gate them on 6.5.
-                archs.extend(['gfx95', 'gfx120'])
-            if ROCM_VERSION >= (7, 14):
-                archs.append('gfx1250')
-            for arch in archs:
-                if arch in torch.cuda.get_device_properties(0).gcnArchName:
-                    return True
-            return False
-        else:
-            return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
-    if torch.xpu.is_available():
-        return True
-    # As CPU supports FP8 and is always available, return True.
-    return True
-
-def evaluate_platform_supports_fp8_grouped_gemm():
-    if torch.cuda.is_available():
-        if torch.version.hip:
-            if "USE_MSLK" not in torch.__config__.show():
-                return False
-            # gfx1250 omitted: MSLK only builds gfx942/gfx950 kernels (see the arch
-            # filter in aten/src/ATen/CMakeLists.txt). Add gfx1250 here once MSLK does.
-            archs = ['gfx942', 'gfx950']
-            for arch in archs:
-                if arch in torch.cuda.get_device_properties(0).gcnArchName:
-                    return True
-        else:
-            return SM90OrLater and not SM100OrLater
-    return False
-
-def evaluate_platform_supports_mx_gemm():
-    if torch.cuda.is_available():
-        if torch.version.hip:
-            if ROCM_VERSION >= (7, 0):
-                gcn_name = torch.cuda.get_device_properties(0).gcnArchName
-                return 'gfx950' in gcn_name or ('gfx1250' in gcn_name and ROCM_VERSION >= (7, 14))
-        else:
-            return SM100OrLater
-    if torch.xpu.is_available():
-        return True
-    return False
-
-def evaluate_platform_supports_mxfp8_grouped_gemm():
-    if torch.cuda.is_available() and not torch.version.hip:
-        built_with_mslk = "USE_MSLK" in torch.__config__.show()
-        return built_with_mslk and IS_SM100
-    return False
 
 def hipsparselt_supported_archs():
     # Keep in sync with hipSparseLtSupportedArchs() in
@@ -326,24 +199,6 @@ def hipsparselt_supported_archs():
 
 def evaluate_platform_supports_hipsparselt():
     return bool(torch.version.hip) and evaluate_gfx_arch_within(hipsparselt_supported_archs())
-
-def evaluate_platform_supports_fp8_sparse():
-    if torch.cuda.is_available():
-        if torch.version.hip:
-            return evaluate_platform_supports_hipsparselt()
-        else:
-            return (
-                (SM90OrLater or torch.cuda.get_device_capability() == (8, 9))
-                and torch.backends.cusparselt.is_available()
-                and torch.backends.cusparselt.version() >= 602
-            )
-    return False
-
-PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
-PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
-PLATFORM_SUPPORTS_FP8_SPARSE: bool = LazyVal(lambda: evaluate_platform_supports_fp8_sparse())
-PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
-PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
 
 if TEST_NUMBA:
     try:
@@ -659,6 +514,49 @@ requires_triton_ptxas_compat = unittest.skipIf(not torch.version.xpu
                                                and torch.version.hip is None
                                                and _get_torch_cuda_version() < TRITON_PTXAS_VERSION,
                                                "Requires CUDA {}.{} to match Tritons ptxas version".format(*TRITON_PTXAS_VERSION))
+
+# These platform-capability symbols were moved to
+# torch.testing._internal.common_gpu. Re-export them here for backward
+# compatibility, warning that the common_cuda location is deprecated.
+_MOVED_TO_COMMON_GPU = frozenset({
+    "evaluate_platform_supports_flash_attention",
+    "evaluate_platform_supports_efficient_attention",
+    "evaluate_platform_supports_fp8",
+    "evaluate_platform_supports_bf16",
+    "evaluate_platform_supports_bf16_atomics",
+    "evaluate_platform_supports_half_atomics",
+    "evaluate_platform_supports_fp8_grouped_gemm",
+    "evaluate_platform_supports_mx_gemm",
+    "evaluate_platform_supports_mxfp8_grouped_gemm",
+    "evaluate_platform_supports_fp8_sparse",
+    "PLATFORM_SUPPORTS_FLASH_ATTENTION",
+    "PLATFORM_SUPPORTS_MEM_EFF_ATTENTION",
+    "PLATFORM_SUPPORTS_FUSED_ATTENTION",
+    "PLATFORM_SUPPORTS_FUSED_SDPA",
+    "PLATFORM_SUPPORTS_FP8",
+    "PLATFORM_SUPPORTS_BF16",
+    "PLATFORM_SUPPORTS_BF16_ATOMICS",
+    "PLATFORM_SUPPORTS_HALF_ATOMICS",
+    "PLATFORM_SUPPORTS_MX_GEMM",
+    "PLATFORM_SUPPORTS_FP8_GROUPED_GEMM",
+    "PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM",
+    "PLATFORM_SUPPORTS_FP8_SPARSE",
+})
+
+
+def __getattr__(name):
+    if name in _MOVED_TO_COMMON_GPU:
+        from torch.testing._internal import common_gpu
+        warnings.warn(
+            f"'{name}' has moved from torch.testing._internal.common_cuda to "
+            f"torch.testing._internal.common_gpu. Importing it from common_cuda "
+            f"is deprecated and will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return getattr(common_gpu, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # Importing this module should NOT eagerly initialize CUDA
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:
