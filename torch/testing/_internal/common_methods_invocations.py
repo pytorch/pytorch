@@ -11993,7 +11993,7 @@ op_db: list[OpInfo] = [
             ),
            ),
     OpInfo('arange',
-           dtypes=all_types_and(torch.bfloat16, torch.float16),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
            supports_out=True,
            supports_autograd=False,
