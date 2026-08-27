@@ -12133,6 +12133,91 @@ class TestLinalgMPS(TestCaseMPS):
             with self.assertRaisesRegex(RuntimeError, message):
                 operation()
 
+    @parametrize(
+        "case,a_shape,a_layout,b_shape,b_layout,dtype,offset_values,backward,scale",
+        [
+            ("2d_2d_bm16_nt", (24, 33), "n", (33, 69), "t", torch.float32, [0, 17, 17, 33], True, 1.0),
+            ("2d_3d_bm32_tn", (50, 19), "t", (2, 19, 67), "n", torch.float16, [0, 50], True, 1.0),
+            ("3d_2d_large_stride_fallback", None, None, (16, 17), "t", torch.bfloat16, [17], False, 1.0),
+            ("3d_3d_bmm", (2, 7, 11), "n", (2, 11, 5), "t", torch.float32, None, True, 1.0),
+            ("2d_2d_k0", (5, 0), "n", (0, 7), "n", torch.float32, [0, 0], False, 1.0),
+            ("2d_3d_empty", (0, 8), "n", (2, 8, 7), "n", torch.float32, [0, 0], False, 1.0),
+            # BM switches at 24/25 and 48/49; the BN boundary is N=1024 with 32 MiB of weights.
+            ("2d_3d_bm32_bn128_nn", (25, 8192), "n", (1, 8192, 1024), "n", torch.float32, [1], False, 1 / math.sqrt(8192)),
+            ("3d_2d_bm64_bn256_tt", (2, 49, 8192), "t", (8192, 1024), "t", torch.float32, [0, 257], True, 1 / math.sqrt(8192)),
+        ],
+        name_fn=lambda case, *_: case,
+    )
+    def test_grouped_mm_kernel_paths(
+        self, device, case, a_shape, a_layout, b_shape, b_layout, dtype, offset_values, backward, scale
+    ):
+        def make_matrix(shape, layout, dtype, scale=1.0):
+            rows, cols = shape[-2:]
+            batch = shape[:-2]
+            alignment = 16 // dtype.itemsize
+            if layout == "n":
+                padded = max(alignment, math.ceil(cols / alignment) * alignment)
+                result = torch.randn(*batch, rows, padded, device=device, dtype=dtype)[..., :cols]
+            else:
+                padded = max(alignment, math.ceil(rows / alignment) * alignment)
+                result = torch.randn(*batch, cols, padded, device=device, dtype=dtype).transpose(-2, -1)[..., :rows, :]
+            result.mul_(scale)
+            return result
+
+        def reference(a, b, offsets):
+            if a.dim() == 3 and b.dim() == 3:
+                return torch.bmm(a, b)
+            ends = offsets.tolist()
+            start = 0
+            parts = []
+            if a.dim() == 2 and b.dim() == 2:
+                for end in ends:
+                    parts.append(a[:, start:end] @ b[start:end])
+                    start = end
+                return torch.stack(parts)
+            if a.dim() == 2:
+                for group, end in enumerate(ends):
+                    parts.append(a[start:end] @ b[group])
+                    start = end
+                return torch.cat(parts)
+            for group, end in enumerate(ends):
+                parts.append(a[group] @ b[:, start:end])
+                start = end
+            return torch.cat(parts, dim=1)
+
+        if case == "3d_2d_large_stride_fallback":
+            if MACOS_VERSION < 14.0:
+                self.skipTest("MPS bfloat16 requires macOS 14+")
+            # A size-one row rejects MPP by raw stride without a large allocation;
+            # its accessible offsets still fit the u32 fallback.
+            storage = torch.randn(16, device=device, dtype=torch.bfloat16)
+            a = torch.as_strided(storage, (1, 1, 16), (16, 1 << 32, 1))
+        else:
+            a = make_matrix(a_shape, a_layout, dtype, scale)
+        b = make_matrix(b_shape, b_layout, dtype)
+        offsets = None if offset_values is None else torch.tensor(offset_values, dtype=torch.int32)
+
+        a = a.detach().requires_grad_(backward)
+        b = b.detach().requires_grad_(backward)
+        offs_mps = offsets.to(device) if offsets is not None else None
+        actual = F.grouped_mm(a, b, offs=offs_mps, out_dtype=a.dtype)
+        a_ref = a.detach().cpu().float().requires_grad_(backward)
+        b_ref = b.detach().cpu().float().requires_grad_(backward)
+        expected = reference(a_ref, b_ref, offsets)
+        if offsets is not None:
+            covered = offsets[-1].item()
+            if a.dim() == 2 and b.dim() == 3:
+                actual = actual[:covered]
+            elif a.dim() == 3 and b.dim() == 2:
+                actual = actual[:, :covered]
+        tol = {torch.float32: 2e-4, torch.float16: 2e-2, torch.bfloat16: 6e-2}[a.dtype]
+        self.assertEqual(actual.detach().cpu().float(), expected.detach().to(a.dtype).float(), atol=tol, rtol=tol)
+        if backward:
+            actual.sum().backward()
+            expected.sum().backward()
+            self.assertEqual(a.grad.cpu().float(), a_ref.grad.to(a.dtype).float(), atol=tol, rtol=tol)
+            self.assertEqual(b.grad.cpu().float(), b_ref.grad.to(b.dtype).float(), atol=tol, rtol=tol)
+
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
         dtype = t.dtype
         numpy_dtype = dtype
