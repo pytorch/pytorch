@@ -4054,6 +4054,134 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(x.grad, (x.cos() - x.sin()) * 2.0)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @parametrize(
+        "op_factory, opname",
+        [
+            subtest((torch.library.custom_op, "custom"), name="custom_op"),
+            subtest((torch.library.triton_op, "triton"), name="triton_op"),
+        ],
+    )
+    def test_register_autograd_noncontiguous_grads_coerced(self, op_factory, opname):
+        # https://github.com/pytorch/pytorch/issues/194719
+        @op_factory(f"_torch_testing::noncontig_grads_{opname}", mutates_args=())
+        def f(x: Tensor) -> tuple[Tensor, Tensor]:
+            return 2 * x, 3 * x
+
+        observed = []
+
+        def backward(ctx, grad_y, grad_z):
+            observed.append((grad_y.is_contiguous(), grad_z.is_contiguous()))
+            return 2 * grad_y + 3 * grad_z
+
+        f.register_autograd(backward)
+
+        x = torch.randn(2, 3, requires_grad=True)
+        y, z = f(x)
+        out = torch.cat([y, z], dim=-1)
+        grad_out = torch.randn_like(out)
+        out.backward(grad_out)
+        self.assertEqual(observed, [(True, True)])
+        self.assertEqual(x.grad, 2 * grad_out[:, :3] + 3 * grad_out[:, 3:])
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_grads_coerced_channels_last(self):
+        @torch.library.custom_op("_torch_testing::channels_last_grads", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            return (2 * x).contiguous(memory_format=torch.channels_last)
+
+        observed = []
+
+        def backward(ctx, grad):
+            observed.append(grad.is_contiguous(memory_format=torch.channels_last))
+            return 2 * grad
+
+        f.register_autograd(backward)
+
+        x = torch.randn(2, 3, 4, 5, requires_grad=True)
+        # row-major contiguous grad gets coerced to the output's channels-last
+        # memory format
+        f(x).backward(torch.ones(2, 3, 4, 5))
+        # zero-stride expanded grad from sum() also gets coerced
+        f(x).sum().backward()
+        self.assertEqual(observed, [True, True])
+        self.assertEqual(x.grad, torch.full_like(x, 4.0))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_none_grads_passthrough(self):
+        @torch.library.custom_op(
+            "_torch_testing::unmaterialized_grads", mutates_args=()
+        )
+        def f(x: Tensor) -> tuple[Tensor, Tensor]:
+            return x.sin(), x.cos()
+
+        observed = []
+
+        def setup_context(ctx, inputs, output):
+            ctx.set_materialize_grads(False)
+
+        def backward(ctx, grad_y, grad_z):
+            observed.append((grad_y.is_contiguous(), grad_z))
+            return grad_y
+
+        f.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        y, _ = f(x)
+        grad_y = torch.randn(6)[::2]
+        y.backward(grad_y)
+        self.assertEqual(observed, [(True, None)])
+        self.assertEqual(x.grad, grad_y)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_tensorlist_return_noncontiguous_grads(self):
+        @torch.library.custom_op(
+            "_torch_testing::tensorlist_noncontig_grads", mutates_args=()
+        )
+        def f(x: Tensor) -> list[Tensor]:
+            return [2 * x, 3 * x]
+
+        observed = []
+
+        def backward(ctx, grad_outputs):
+            observed.append([g.is_contiguous() for g in grad_outputs])
+            return 2 * grad_outputs[0] + 3 * grad_outputs[1]
+
+        f.register_autograd(backward)
+
+        x = torch.randn(2, 3, requires_grad=True)
+        y0, y1 = f(x)
+        out = torch.cat([y0, y1], dim=-1)
+        grad_out = torch.randn_like(out)
+        out.backward(grad_out)
+        self.assertEqual(observed, [[True, True]])
+        self.assertEqual(x.grad, 2 * grad_out[:, :3] + 3 * grad_out[:, 3:])
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_nonstandard_layout_grads_passthrough(self):
+        @torch.library.custom_op(
+            "_torch_testing::nonstandard_layout_grads", mutates_args=()
+        )
+        def f(x: Tensor) -> Tensor:
+            return (2 * x).t().contiguous().t()
+
+        observed = []
+
+        def backward(ctx, grad):
+            observed.append(grad.stride())
+            return 2 * grad
+
+        f.register_autograd(backward)
+
+        # the output is not contiguous in any standard memory format, so the
+        # grad is passed through with its original strides
+        x = torch.randn(2, 3, requires_grad=True)
+        y = f(x)
+        grad_y = torch.randn(2, 6)[:, ::2]
+        y.backward(grad_y)
+        self.assertEqual(observed, [(6, 2)])
+        self.assertEqual(x.grad, 2 * grad_y)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema(self):
         @torch.library.custom_op(
             "_torch_testing::add",

@@ -4,7 +4,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+import torch
 from torch import _C, _ops, autograd, Tensor
+from torch._prims_common import is_contiguous_for_memory_format
 from torch.utils import _pytree
 
 from . import utils
@@ -13,6 +15,45 @@ from . import utils
 class InfoProtocol(Protocol):
     _backward_fn: Callable | None
     _setup_context_fn: Callable | None
+
+
+# Note [Custom op backward grad layout]
+# The autograd engine may pass grads with arbitrary strides (e.g. torch.cat's
+# backward produces non-contiguous narrow views of the upstream grad). Custom
+# op backward formulas are typically opaque kernels that assume grads have the
+# same layout as the corresponding forward outputs, so when an output is
+# contiguous in some standard memory format, we coerce its grad to that memory
+# format before invoking the user backward. Grads for outputs with
+# non-standard layouts are passed through unchanged; this matches AOTAutograd,
+# which assumes tangents have the same strides as the corresponding forward
+# outputs (see Note [Tangents memory format]).
+# Contiguity is checked with false_if_dde=True so unbacked symbolic shapes
+# never raise: an output whose contiguity is undecidable records no memory
+# format (its grad passes through), and a grad whose contiguity is undecidable
+# is coerced via Tensor.contiguous, which is unbacked-safe and copies in that
+# case.
+_STANDARD_MEMORY_FORMATS = (
+    torch.contiguous_format,
+    torch.channels_last,
+    torch.channels_last_3d,
+)
+
+
+def _grad_memory_format(out: Any) -> torch.memory_format | None:
+    if not isinstance(out, Tensor) or out.layout != torch.strided:
+        return None
+    for fmt in _STANDARD_MEMORY_FORMATS:
+        if is_contiguous_for_memory_format(out, memory_format=fmt, false_if_dde=True):
+            return fmt
+    return None
+
+
+def _coerce_grad(grad: Any, fmt: torch.memory_format | None) -> Any:
+    if fmt is None or not isinstance(grad, Tensor) or grad.layout != torch.strided:
+        return grad
+    if is_contiguous_for_memory_format(grad, memory_format=fmt, false_if_dde=True):
+        return grad
+    return grad.contiguous(memory_format=fmt)
 
 
 @dataclasses.dataclass
@@ -70,10 +111,20 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
                     )
                 else:
                     info._setup_context_fn(ctx=ctx, inputs=args, output=result)
+            if hasattr(ctx, "_pt_grad_memory_formats"):
+                raise RuntimeError(
+                    "Please don't set ctx._pt_grad_memory_formats; PyTorch uses it "
+                    "to store info"
+                )
+            ctx._pt_grad_memory_formats = _pytree.tree_map(
+                _grad_memory_format, result if isinstance(result, tuple) else (result,)
+            )
             return result
 
     def backward(ctx, *grads):
         if info._backward_fn:
+            # See Note [Custom op backward grad layout]
+            grads = _pytree.tree_map(_coerce_grad, grads, ctx._pt_grad_memory_formats)
             try:
                 prev_needs_input_grad = ctx.needs_input_grad
                 ctx.needs_input_grad = prev_needs_input_grad[:-1]
