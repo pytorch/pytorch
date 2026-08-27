@@ -45,7 +45,7 @@ fp16_ieee_to_fp32_value
 # torch/headeronly/util/HeaderOnlyArrayRef.h
 HeaderOnlyArrayRef
 
-# c10/util/complex.h, torch/headeronly/util/complex.h
+# c10/util/complex.h
 complex
 
 # torch/headeronly/util/complex_utils.h
@@ -64,11 +64,11 @@ fastSpecializedAtomicAdd
 _isnan
 _isinf
 
-# ATen/core/PhiloxRNGEngine.h
+# aten/src/ATen/core/PhiloxRNGEngine.h
 Philox4_32
 randn
 
-# torch/headeronly/Metaprogramming.h
+# torch/headeronly/util/Metaprogramming.h
 infer_function_traits_t
 make_function_traits_t
 tuple_elements
@@ -76,29 +76,23 @@ tuple_map
 tuple_slice
 tuple_take
 
-# torch/headeronly/TypeList.h
+# torch/headeronly/util/TypeList.h
 # false_t => tested through from_tuple_t and various other APIs
 all
 concat_t
 contains
-count_if
 drop_if_nonempty_t
 drop_t
-filter_t
-find_if
 from_tuple_t
 head_t
 head_with_default_t
-map_t
-map_types_to_values
-reverse_t
 size
 take_t
 to_tuple_t
 true_for_any_type
 typelist
 
-# torch/headeronly/TypeTraits.h
+# torch/headeronly/util/TypeTraits.h
 is_equality_comparable
 is_function_type
 is_hashable
@@ -106,7 +100,7 @@ is_instantiation_of
 is_stateless_lambda
 is_type_condition
 
-# ATen/cpu/vec/vec.h
+# aten/src/ATen/cpu/vec/vec.h
 Vectorized
 clamp_min
 convert
