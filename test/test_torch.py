@@ -6575,6 +6575,10 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "same nbytes"):
             x.untyped_storage()._swap_data_ptr_(y.untyped_storage())
 
+    @unittest.skipIf(
+        TEST_WITH_ROCM and TEST_WITH_TORCHDYNAMO,
+        "out-of-range clamp bounds do not hold on ROCm with Dynamo",
+    )
     @dtypes(
         torch.uint8,
         torch.int8,
