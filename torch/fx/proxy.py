@@ -186,7 +186,7 @@ def _register_stack_trace_anchor(fn: Callable[..., Any]) -> None:
 class TracerBase:
     graph: Graph
     record_stack_traces: bool = False
-    # When record_stack_traces is True, only reocrd stack traces
+    # When record_stack_traces is True, only record stack traces
     # with forward function names.
     # This helps when we want stack trace back to model code
     _record_forward_stack_traces_only: bool = False
