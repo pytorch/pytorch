@@ -61,6 +61,7 @@ from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_leaves, tree_map
 
+
 try:
     try:
         from .test_torchinductor import check_model, check_model_gpu
@@ -308,6 +309,7 @@ intentionally_not_handled = {
 # This is only fixed when this config is set
 # We should eventually always turn it on
 import torch._functorch.config as functorch_config
+
 
 if not functorch_config.view_replay_for_aliased_outputs:
     intentionally_not_handled['("as_strided", "partial_views")'] = {
@@ -1368,9 +1370,7 @@ class TestInductorOpInfo(TestCase):
             in inductor_expected_failures_single_sample[device_type].get(op_name, set())
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
-        ].get(
-            op_name, set()
-        ):
+        ].get(op_name, set()):
             test_expect = ExpectedTestResult.XFAILURE
         else:
             test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
