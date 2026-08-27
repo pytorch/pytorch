@@ -276,14 +276,13 @@ C10_HOST_DEVICE To convert(From f) {
   return static_cast_with_inter_type<To, From>::apply(f);
 }
 
-// Define separately (C10_NOINLINE) to avoid being inlined and prevent
-// code-size bloat.
+// Define with C10_NOINLINE to prevent code-size bloat.
 [[noreturn]] C10_NOINLINE inline void report_overflow(const char* name) {
   STD_TORCH_CHECK(
       false,
       "value cannot be converted to type ",
       name,
-      " without overflow"); // rather than domain_error (issue 33562)
+      " without overflow"); // runtime_error rather than domain_error (#33562)
 }
 
 template <typename To, typename From>
@@ -317,7 +316,6 @@ using torch::headeronly::convert;
 using torch::headeronly::maybe_bool;
 using torch::headeronly::maybe_real;
 using torch::headeronly::needs_real;
-using torch::headeronly::report_overflow;
 using torch::headeronly::static_cast_with_inter_type;
 using torch::headeronly::unchecked_cast_to_int;
 using torch::headeronly::unsafe_wrapping_convert;
