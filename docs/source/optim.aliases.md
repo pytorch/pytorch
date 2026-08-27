@@ -2,12 +2,10 @@
 
 Most optimizer classes are available both from ``torch.optim`` and from the
 nested module in which they are defined. For example, ``torch.optim.Adam`` and
-``torch.optim.adam.Adam`` refer to the same class. Most functional optimizer
-APIs, such as ``torch.optim.adam.adam``, are available from the nested modules,
-except for ``Muon`` and ``Adafactor`` which are available from the top-level
-direction like ``torch.optim.muon`` and ``torch.optim.adafactor``.
-
-See :ref:`functional-optimizer-api` for all supported paths and usage guidance.
+``torch.optim.adam.Adam`` refer to the same class. Existing functional APIs in
+the nested optimizer modules remain available as aliases. New code should use
+the canonical :mod:`torch.optim.functional` namespace; see
+:ref:`functional-optimizer-api` for usage guidance.
 
 ```{eval-rst}
 .. automodule:: torch.optim.adadelta

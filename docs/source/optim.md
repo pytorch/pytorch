@@ -144,37 +144,25 @@ When using these functional optimizer APIs, the caller has full control and
 responsibility for creating and retaining state, filtering parameters without
 gradients from every list consistently, and saving and restoring that state.
 
-Most public functional optimizer APIs are located in their respective
-optimizer's module, such as {func}`torch.optim.adamw.adamw`. Since Adafactor and
-Muon are implemented in private modules, their functional APIs are exposed
-directly from {mod}`torch.optim`.
+The public functional optimizer APIs are exposed uniformly from
+{mod}`torch.optim.functional`:
 
 | Optimizer | Functional API |
 | --- | --- |
-| {class}`Adadelta` | {func}`torch.optim.adadelta.adadelta` |
-| {class}`Adafactor` | {func}`torch.optim.adafactor` |
-| {class}`Adagrad` | {func}`torch.optim.adagrad.adagrad` |
-| {class}`Adam` | {func}`torch.optim.adam.adam` |
-| {class}`Adamax` | {func}`torch.optim.adamax.adamax` |
-| {class}`AdamW` | {func}`torch.optim.adamw.adamw` |
-| {class}`ASGD` | {func}`torch.optim.asgd.asgd` |
-| {class}`Muon` | {func}`torch.optim.muon` |
-| {class}`NAdam` | {func}`torch.optim.nadam.nadam` |
-| {class}`RAdam` | {func}`torch.optim.radam.radam` |
-| {class}`RMSprop` | {func}`torch.optim.rmsprop.rmsprop` |
-| {class}`Rprop` | {func}`torch.optim.rprop.rprop` |
-| {class}`SGD` | {func}`torch.optim.sgd.sgd` |
-| {class}`SparseAdam` | {func}`torch.optim.sparse_adam.sparse_adam` |
-
-```{eval-rst}
-.. currentmodule:: torch.optim
-.. autosummary::
-   :toctree: generated
-   :nosignatures:
-
-    adafactor
-    muon
-```
+| {class}`Adadelta` | {func}`torch.optim.functional.adadelta` |
+| {class}`Adafactor` | {func}`torch.optim.functional.adafactor` |
+| {class}`Adagrad` | {func}`torch.optim.functional.adagrad` |
+| {class}`Adam` | {func}`torch.optim.functional.adam` |
+| {class}`Adamax` | {func}`torch.optim.functional.adamax` |
+| {class}`AdamW` | {func}`torch.optim.functional.adamw` |
+| {class}`ASGD` | {func}`torch.optim.functional.asgd` |
+| {class}`Muon` | {func}`torch.optim.functional.muon` |
+| {class}`NAdam` | {func}`torch.optim.functional.nadam` |
+| {class}`RAdam` | {func}`torch.optim.functional.radam` |
+| {class}`RMSprop` | {func}`torch.optim.functional.rmsprop` |
+| {class}`Rprop` | {func}`torch.optim.functional.rprop` |
+| {class}`SGD` | {func}`torch.optim.functional.sgd` |
+| {class}`SparseAdam` | {func}`torch.optim.functional.sparse_adam` |
 
 {class}`LBFGS` does not currently expose a functional API. Its update is
 coupled to repeated closure evaluations and optional line-search orchestration,
@@ -199,7 +187,7 @@ backward:
 
 ```python
 import torch
-from torch.optim.adamw import adamw
+from torch.optim.functional import adamw
 
 model = torch.nn.Linear(16, 4, device="cuda", dtype=torch.float32)
 params = list(model.parameters())
@@ -213,6 +201,7 @@ state = [
 ]
 
 
+@torch.no_grad()
 def functional_adamw_step():
     active = [
         (p, p_state)
@@ -222,23 +211,22 @@ def functional_adamw_step():
     if not active:
         return
 
-    with torch.no_grad():
-        adamw(
-            params=[p for p, _ in active],
-            grads=[p.grad for p, _ in active],
-            exp_avgs=[p_state["exp_avg"] for _, p_state in active],
-            exp_avg_sqs=[p_state["exp_avg_sq"] for _, p_state in active],
-            max_exp_avg_sqs=[],
-            state_steps=[p_state["step"] for _, p_state in active],
-            fused=True,
-            amsgrad=False,
-            beta1=0.9,
-            beta2=0.999,
-            lr=1e-3,
-            weight_decay=1e-2,
-            eps=1e-8,
-            maximize=False,
-        )
+    adamw(
+        params=[p for p, _ in active],
+        grads=[p.grad for p, _ in active],
+        exp_avgs=[p_state["exp_avg"] for _, p_state in active],
+        exp_avg_sqs=[p_state["exp_avg_sq"] for _, p_state in active],
+        max_exp_avg_sqs=[],
+        state_steps=[p_state["step"] for _, p_state in active],
+        fused=True,
+        amsgrad=False,
+        beta1=0.9,
+        beta2=0.999,
+        lr=1e-3,
+        weight_decay=1e-2,
+        eps=1e-8,
+        maximize=False,
+    )
 
 
 inputs = torch.randn(8, 16, device="cuda")
@@ -291,8 +279,12 @@ optimizer API instead when customization requires directly controlling
 optimizer-state tensors or supplying gradients separately from parameter
 ``.grad`` attributes.
 
-The following example records information outside the optimizer before and
-after each update. The returned handles can remove the hooks when they are no
+Profiler traces contain many low-level operator events, so a custom
+{func}`~torch.profiler.record_function` range gives the complete optimizer
+update a stable, application-level label that is easy to find and compare in
+the trace. Hooks add this instrumentation without modifying the training loop
+or optimizer implementation. The active ranges are tracked outside the
+optimizer, and the returned handles can remove the hooks when they are no
 longer needed.
 
 ```python
@@ -300,25 +292,30 @@ import torch
 
 parameter = torch.nn.Parameter(torch.tensor(2.0))
 optimizer = torch.optim.SGD([parameter], lr=0.01)
-events = []
+active_ranges = {}
 
 
-def record_before_step(optimizer, args, kwargs):
-    events.append(("before", optimizer.param_groups[0]["lr"]))
+def begin_optimizer_step(optimizer, args, kwargs):
+    profile_range = torch.profiler.record_function("optimizer.step")
+    profile_range.__enter__()
+    active_ranges[optimizer] = profile_range
 
 
-def record_after_step(optimizer, args, kwargs):
-    events.append(("after", optimizer.param_groups[0]["lr"]))
+def end_optimizer_step(optimizer, args, kwargs):
+    active_ranges.pop(optimizer).__exit__(None, None, None)
 
 
-pre_handle = optimizer.register_step_pre_hook(record_before_step)
-post_handle = optimizer.register_step_post_hook(record_after_step)
+pre_handle = optimizer.register_step_pre_hook(begin_optimizer_step)
+post_handle = optimizer.register_step_post_hook(end_optimizer_step)
 
-parameter.grad = torch.tensor(0.1)
-optimizer.step()
+with torch.profiler.profile() as profile:
+    parameter.grad = torch.tensor(0.1)
+    optimizer.step()
 
 pre_handle.remove()
 post_handle.remove()
+
+print(profile.key_averages().table())
 ```
 
 Use {func}`torch.optim.optimizer.register_optimizer_step_pre_hook` and
@@ -899,4 +896,5 @@ for tracking purposes -->
     :hidden:
 
     optim.aliases.md
+    optim.functional.md
 ```
