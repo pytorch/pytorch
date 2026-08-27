@@ -28,6 +28,7 @@ from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import (
+    _CanonicalSetMetadata,
     AOTAutogradCache,
     AOTAutogradCachePickler,
     autograd_cache_key,
@@ -4095,6 +4096,60 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             r"AOTAutogradCachePicklerTests.test_pickle_entry_strict_mode_raises.<locals>.<lambda>",
         ):
             AOTAutogradCache._pickle_entry(entry, remote=False)
+
+    def test_stabilize_set_deterministic_order(self):
+        """set/frozenset must produce a deterministic canonical form with
+        container type preserved, so cache keys are stable across processes
+        and set/frozenset don't collide."""
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = AOTAutogradCachePickler(gm)
+
+        dtype_set = {"float32", "bfloat16", "float16", "int8", "uint8"}
+        result = pickler._stabilize_tensor_subclass_metadata(dtype_set)
+        expected_elements = tuple(sorted(pickle.dumps(x) for x in dtype_set))
+        self.assertEqual(
+            result,
+            _CanonicalSetMetadata(container_type=set, elements=expected_elements),
+        )
+
+        # frozenset preserves its own type
+        result_fs = pickler._stabilize_tensor_subclass_metadata(frozenset(dtype_set))
+        self.assertEqual(
+            result_fs,
+            _CanonicalSetMetadata(container_type=frozenset, elements=expected_elements),
+        )
+
+        # set and frozenset must NOT collide
+        self.assertNotEqual(result, result_fs)
+
+    def test_stabilize_set_in_dict_deterministic(self):
+        """set nested inside metadata returned by __tensor_flatten__
+        must be converted to a canonical form."""
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = AOTAutogradCachePickler(gm)
+
+        metadata = {
+            "ragged_idx": 1,
+            "allowed_ops": {"add", "mul", "sub"},
+        }
+        result = pickler._stabilize_tensor_subclass_metadata(metadata)
+        expected_ops = tuple(sorted(pickle.dumps(x) for x in metadata["allowed_ops"]))
+        self.assertEqual(
+            result["allowed_ops"],
+            _CanonicalSetMetadata(container_type=set, elements=expected_ops),
+        )
+        self.assertEqual(result["ragged_idx"], 1)
+
+    def test_stabilize_nested_frozenset_in_set(self):
+        """frozenset elements inside a set must be recursively stabilized."""
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = AOTAutogradCachePickler(gm)
+
+        nested = {frozenset({"a", "b"}), frozenset({"c"})}
+        result = pickler._stabilize_tensor_subclass_metadata(nested)
+        self.assertIsInstance(result, _CanonicalSetMetadata)
+        self.assertEqual(result.container_type, set)
+        self.assertEqual(result.elements, tuple(sorted(result.elements)))
 
     @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4091")
     @requires_gpu_and_triton
