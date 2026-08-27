@@ -481,7 +481,9 @@ void initDynamoBindings(PyObject* torch) {
           &CacheEntry::update_diff_guard_root_manager);
 
   py::class_<PrecompileEntry>(m, "_PrecompileEntry")
-      .def_readonly("guard_manager", &PrecompileEntry::guard_manager);
+      .def_readonly("guard_manager", &PrecompileEntry::guard_manager)
+      .def_readonly(
+          "isolate_recompiles_id", &PrecompileEntry::isolate_recompiles_id);
 
   py::class_<ExtraState>(m, "_ExtraState")
       .def("invalidate", &ExtraState::invalidate);
@@ -500,6 +502,96 @@ void initDynamoBindings(PyObject* torch) {
       }))
       .def_readwrite("cur_action", &FrameExecStrategy::cur_action)
       .def_readwrite("recursive_action", &FrameExecStrategy::recursive_action);
+
+  m.def("get_code_exec_strategy", [](py::handle code) {
+    if (!PyCode_Check(code.ptr())) {
+      throw py::type_error("expected a code object");
+    }
+    ExtraState* extra =
+        get_extra_state(reinterpret_cast<PyCodeObject*>(code.ptr()));
+    return extra == nullptr
+        ? FrameExecStrategy{FrameAction::DEFAULT, FrameAction::DEFAULT}
+        : extra_state_get_exec_strategy(extra);
+  });
+
+  m.def(
+      "get_code_region_exec_strategy",
+      [](py::handle code, int64_t isolate_recompiles_id) {
+        if (!PyCode_Check(code.ptr())) {
+          throw py::type_error("expected a code object");
+        }
+        ExtraState* extra =
+            get_extra_state(reinterpret_cast<PyCodeObject*>(code.ptr()));
+        return extra == nullptr
+            ? FrameExecStrategy{FrameAction::DEFAULT, FrameAction::DEFAULT}
+            : extra_state_get_region_exec_strategy(
+                  extra, isolate_recompiles_id);
+      });
+
+  m.def(
+      "set_code_region_exec_strategy",
+      [](py::handle code,
+         int64_t isolate_recompiles_id,
+         FrameExecStrategy strategy) {
+        if (!PyCode_Check(code.ptr())) {
+          throw py::type_error("expected a code object");
+        }
+        PyCodeObject* code_obj = reinterpret_cast<PyCodeObject*>(code.ptr());
+        ExtraState* extra = get_extra_state(code_obj);
+        if (extra == nullptr) {
+          extra = init_and_set_extra_state(code_obj);
+        }
+        extra_state_set_region_exec_strategy(
+            extra, isolate_recompiles_id, strategy);
+      });
+
+  m.def("get_code_exec_strategy_token", [](py::handle code) -> py::tuple {
+    if (!PyCode_Check(code.ptr())) {
+      throw py::type_error("expected a code object");
+    }
+    ExtraState* extra =
+        get_extra_state(reinterpret_cast<PyCodeObject*>(code.ptr()));
+    if (extra == nullptr) {
+      return py::make_tuple(
+          FrameExecStrategy{FrameAction::DEFAULT, FrameAction::DEFAULT},
+          uint64_t{0});
+    }
+    FrameExecStrategy strategy;
+    uint64_t generation = extra_state_get_exec_strategy_token(extra, &strategy);
+    return py::make_tuple(strategy, generation);
+  });
+
+  m.def(
+      "set_code_exec_strategy_with_token",
+      [](py::handle code, FrameExecStrategy strategy) -> py::tuple {
+        if (!PyCode_Check(code.ptr())) {
+          throw py::type_error("expected a code object");
+        }
+        PyCodeObject* code_obj = reinterpret_cast<PyCodeObject*>(code.ptr());
+        ExtraState* extra = get_extra_state(code_obj);
+        if (extra == nullptr) {
+          extra = init_and_set_extra_state(code_obj);
+        }
+        FrameExecStrategy prior;
+        uint64_t generation =
+            extra_state_set_exec_strategy_with_token(extra, strategy, &prior);
+        return py::make_tuple(prior, generation);
+      });
+
+  m.def(
+      "compare_and_set_code_exec_strategy",
+      [](py::handle code,
+         uint64_t expected_generation,
+         FrameExecStrategy strategy) {
+        if (!PyCode_Check(code.ptr())) {
+          throw py::type_error("expected a code object");
+        }
+        ExtraState* extra =
+            get_extra_state(reinterpret_cast<PyCodeObject*>(code.ptr()));
+        return extra != nullptr &&
+            extra_state_compare_and_set_exec_strategy(
+                   extra, expected_generation, strategy);
+      });
 
   m.def("set_c_recursion_limit", &dynamo_set_c_recursion_limit);
   m.def("get_c_recursion_limit", &dynamo_get_c_recursion_limit);
@@ -528,10 +620,29 @@ void initDynamoBindings(PyObject* torch) {
 
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
   m.def("_get_cache_entries_for_region", &_get_cache_entries_for_region);
+  m.def("_clear_cache_entries_for_region", &_clear_cache_entries_for_region);
   m.def("_get_total_cache_entry_count", &_get_total_cache_entry_count);
   m.def("_reset_precompile_entries", &_reset_precompile_entries);
-  m.def("_load_precompile_entry", &_load_precompile_entry);
+  m.def(
+      "_reset_precompile_entries_for_region",
+      &_reset_precompile_entries_for_region);
+  m.def(
+      "_reset_precompile_entries_for_owner",
+      &_reset_precompile_entries_for_owner,
+      py::arg("code_obj"),
+      py::arg("isolate_recompiles_id"),
+      py::arg("owner"));
+  m.def(
+      "_load_precompile_entry",
+      &_load_precompile_entry,
+      py::arg("code_obj"),
+      py::arg("guard_manager"),
+      py::arg("dynamo_code"),
+      py::arg("isolate_recompiles_id") = -1,
+      py::arg("owner") = py::none());
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
+  m.def("_has_precompile_entries", &_has_precompile_entries);
+  m.def("_enable_precompile_cache_keys", &enable_precompile_cache_keys);
   m.def("_set_lru_cache", &_set_lru_cache);
   m.def(
       "_get_frame_value_stack_with_depth", &_get_frame_value_stack_with_depth);
