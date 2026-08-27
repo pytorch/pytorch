@@ -193,33 +193,33 @@ class ReplicateTestNoXPU(MultiProcContinuousTest):
         a, b = torch.randn(2, 2, device=device), torch.randn(2, 2, device=device)
         model(a, kwarg=b).sum().backward()
 
-@unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179854")
-@skip_if_lt_x_gpu(2)
-def test_replicate_ignore_module(self, device):
-    # Seed ensures diff input and thus different local grads across ranks.
-    torch.manual_seed(self.rank)
-    model = Net().to(device)
-    replicate(model, ignored_modules=[model.fc1])
-    # CPU input ensures that replicate can move input to GPU as DDP does.
-    inp = torch.randn(5, 2, device=device) * (self.rank + 1)
-    out = model(inp) * 10
-    out.sum().backward()
-    # FC1 grads should not be synchronized, FC2 and 3 should be.
-    fc1_grad = model.fc1.weight.grad
-    tensor_list = [torch.zeros_like(fc1_grad) for _ in range(dist.get_world_size())]
-    dist.all_gather(tensor_list, fc1_grad)
-    grad, rest = tensor_list[0], tensor_list[1:]
-    for g in rest:
-        self.assertNotEqual(grad, g)
-
-    for dp_grad in [model.fc2.weight.grad, model.fc3.weight.grad]:
-        tensor_list = [
-            torch.zeros_like(dp_grad) for _ in range(dist.get_world_size())
-        ]
-        dist.all_gather(tensor_list, dp_grad)
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179854")
+    @skip_if_lt_x_gpu(2)
+    def test_replicate_ignore_module(self, device):
+        # Seed ensures diff input and thus different local grads across ranks.
+        torch.manual_seed(self.rank)
+        model = Net().to(device)
+        replicate(model, ignored_modules=[model.fc1])
+        # CPU input ensures that replicate can move input to GPU as DDP does.
+        inp = torch.randn(5, 2, device=device) * (self.rank + 1)
+        out = model(inp) * 10
+        out.sum().backward()
+        # FC1 grads should not be synchronized, FC2 and 3 should be.
+        fc1_grad = model.fc1.weight.grad
+        tensor_list = [torch.zeros_like(fc1_grad) for _ in range(dist.get_world_size())]
+        dist.all_gather(tensor_list, fc1_grad)
         grad, rest = tensor_list[0], tensor_list[1:]
         for g in rest:
-          self.assertEqual(grad, g)
+            self.assertNotEqual(grad, g)
+
+        for dp_grad in [model.fc2.weight.grad, model.fc3.weight.grad]:
+            tensor_list = [
+                torch.zeros_like(dp_grad) for _ in range(dist.get_world_size())
+            ]
+            dist.all_gather(tensor_list, dp_grad)
+            grad, rest = tensor_list[0], tensor_list[1:]
+            for g in rest:
+                self.assertEqual(grad, g)
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179746")
     @skip_if_lt_x_gpu(2)
@@ -247,7 +247,6 @@ def test_replicate_ignore_module(self, device):
         model_cuda2(torch.randn(2, 2, device=device))
         replicate_ddp_weakref = replicate.state(model_cuda2)._ddp_weakref()
         self.assertEqual([0], replicate_ddp_weakref.device_ids)
-
 
 class ReplicateFullyShardInit(ReplicateTest):
     hw_classification = HardwareClassification.ACCELERATOR
