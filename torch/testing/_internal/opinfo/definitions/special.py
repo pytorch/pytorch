@@ -252,6 +252,7 @@ op_db: list[OpInfo] = [
     ),
     BinaryUfuncInfo(
         "special.xlog1py",
+        ref=scipy.special.xlog1py if TEST_SCIPY else None,
         aten_name="special_xlog1py",
         dtypes=all_types_and(
             torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types

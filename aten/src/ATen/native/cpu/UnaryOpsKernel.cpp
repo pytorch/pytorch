@@ -543,9 +543,7 @@ void rsqrt_kernel(TensorIteratorBase& iter) {
 }
 
 // -x * log(x) is already NaN for a NaN x, so keying the first blend on x < 0
-// rather than x > 0 leaves those lanes alone and saves a third blend. The zero
-// blend then covers -0, where the product is NaN rather than the zero the
-// scalar form returns.
+// (not x > 0) leaves those lanes alone and saves a third blend.
 template <typename scalar_t>
 inline Vectorized<scalar_t> entr_vec(const Vectorized<scalar_t>& x) {
   using vec_t = Vectorized<scalar_t>;
@@ -573,8 +571,7 @@ static void entr_kernel(TensorIteratorBase& iter) {
             return static_cast<scalar_t>(-INFINITY);
           },
           [](Vectorized<scalar_t> x) {
-            // Unpack once and run the whole body in float, rather than letting
-            // every Vectorized16 operation round-trip its operand separately.
+            // Unpack once so the whole body runs in float, avoiding per-op round-trips.
             auto [x0, x1] = convert_to_float<scalar_t>(x);
             return convert_from_float<scalar_t>(entr_vec(x0), entr_vec(x1));
           });

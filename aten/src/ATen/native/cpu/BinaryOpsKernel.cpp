@@ -1285,12 +1285,10 @@ void copysign_kernel(TensorIteratorBase& iter) {
       });
 }
 
-// x * log(y) is already NaN for a NaN y, so the zero branch is the only one
-// needing a blend, and it must not claim the lanes where the scalar form would
-// have returned on a NaN y first. An ordered compare is false exactly for NaN,
-// so y == y is that test, and cheaper than negating isnan().
+// x * log(y) is already NaN for a NaN y, so the zero blend must not override
+// that; y == y is a cheaper NaN test here than negating isnan().
 template <typename scalar_t>
-inline Vectorized<scalar_t> xlogy_vec(
+inline Vectorized<scalar_t> mul_log_vec(
     const Vectorized<scalar_t>& x,
     const Vectorized<scalar_t>& y,
     const Vectorized<scalar_t>& log_y) {
@@ -1316,13 +1314,12 @@ void xlogy_kernel(TensorIteratorBase& iter) {
             return x0 * std::log(y0);
           },
           [](Vectorized<scalar_t> x, Vectorized<scalar_t> y) {
-            // Unpack once and run the whole body in float, rather than letting
-            // every Vectorized16 operation round-trip its operands separately.
+            // Unpack once so the whole body runs in float, avoiding per-op round-trips.
             auto [x0, x1] = convert_to_float<scalar_t>(x);
             auto [y0, y1] = convert_to_float<scalar_t>(y);
             return convert_from_float<scalar_t>(
-                xlogy_vec(x0, y0, y0.log()),
-                xlogy_vec(x1, y1, y1.log()));
+                mul_log_vec(x0, y0, y0.log()),
+                mul_log_vec(x1, y1, y1.log()));
           });
     });
   } else {
@@ -1339,7 +1336,7 @@ void xlogy_kernel(TensorIteratorBase& iter) {
             return x * std::log(y);
           },
           [](Vectorized<scalar_t> x, Vectorized<scalar_t> y) {
-            return xlogy_vec(x, y, y.log());
+            return mul_log_vec(x, y, y.log());
           });
     });
   }
@@ -1363,13 +1360,12 @@ void xlog1py_kernel(TensorIteratorBase& iter) {
             return x0 * std::log1p(y0);
           },
           [](Vectorized<scalar_t> x, Vectorized<scalar_t> y) {
-            // Unpack once and run the whole body in float, rather than letting
-            // every Vectorized16 operation round-trip its operands separately.
+            // Unpack once so the whole body runs in float, avoiding per-op round-trips.
             auto [x0, x1] = convert_to_float<scalar_t>(x);
             auto [y0, y1] = convert_to_float<scalar_t>(y);
             return convert_from_float<scalar_t>(
-                xlogy_vec(x0, y0, y0.log1p()),
-                xlogy_vec(x1, y1, y1.log1p()));
+                mul_log_vec(x0, y0, y0.log1p()),
+                mul_log_vec(x1, y1, y1.log1p()));
           });
     });
   } else {
@@ -1386,7 +1382,7 @@ void xlog1py_kernel(TensorIteratorBase& iter) {
             return x * std::log1p(y);
           },
           [](Vectorized<scalar_t> x, Vectorized<scalar_t> y) {
-            return xlogy_vec(x, y, y.log1p());
+            return mul_log_vec(x, y, y.log1p());
           });
     });
   }
