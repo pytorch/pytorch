@@ -374,8 +374,34 @@ def initialize_cuda_context_rng():
 
 _tf32_off_lock = threading.Lock()
 _tf32_off_depth = 0
-_tf32_off_saved_precision = None
+_tf32_off_cublas_ctx = None
 _tf32_off_cudnn_ctx = None
+
+
+@contextlib.contextmanager
+def _tf32_cublas(enabled):
+    old_matmul_precision = torch.get_float32_matmul_precision()
+    # The legacy setter cannot reproduce exact per-backend values such as
+    # "none", so preserve those independently.
+    old_cuda_precision = torch.backends.cuda.matmul.fp32_precision
+    old_mkldnn_precision = torch.backends.mkldnn.matmul.fp32_precision
+    try:
+        if enabled:
+            if old_matmul_precision == "highest":
+                torch.set_float32_matmul_precision("high")
+                torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn_precision
+            torch.backends.cuda.matmul.fp32_precision = "tf32"
+        elif old_matmul_precision == "highest":
+            torch.backends.cuda.matmul.fp32_precision = "ieee"
+        else:
+            torch.set_float32_matmul_precision("highest")
+        yield
+    finally:
+        # Restore the legacy value first because its setter overwrites both
+        # per-backend matmul precision values.
+        torch.set_float32_matmul_precision(old_matmul_precision)
+        torch.backends.cuda.matmul.fp32_precision = old_cuda_precision
+        torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn_precision
 
 
 @contextlib.contextmanager
@@ -385,14 +411,11 @@ def tf32_off():
     # rank thread over the same process-global flags, so per-entry
     # save/restore can interleave and leak a modified state past the last
     # exit, which the TestCase fp32 precision leak detector then flags.
-    global _tf32_off_depth, _tf32_off_saved_precision, _tf32_off_cudnn_ctx
+    global _tf32_off_depth, _tf32_off_cublas_ctx, _tf32_off_cudnn_ctx
     with _tf32_off_lock:
         if _tf32_off_depth == 0:
-            # Snapshot fp32_precision (a string), not allow_tf32 (a bool):
-            # writing allow_tf32 back can't reproduce the "none" default (it
-            # yields "ieee"), which the leak detector would flag on ROCm.
-            _tf32_off_saved_precision = torch.backends.cuda.matmul.fp32_precision
-            torch.backends.cuda.matmul.allow_tf32 = False
+            _tf32_off_cublas_ctx = _tf32_cublas(False)
+            _tf32_off_cublas_ctx.__enter__()
             _tf32_off_cudnn_ctx = torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False)
             _tf32_off_cudnn_ctx.__enter__()
         _tf32_off_depth += 1
@@ -404,21 +427,21 @@ def tf32_off():
             if _tf32_off_depth == 0:
                 _tf32_off_cudnn_ctx.__exit__(None, None, None)
                 _tf32_off_cudnn_ctx = None
-                torch.backends.cuda.matmul.fp32_precision = _tf32_off_saved_precision
-                _tf32_off_saved_precision = None
+                _tf32_off_cublas_ctx.__exit__(None, None, None)
+                _tf32_off_cublas_ctx = None
 
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
     old_precision = self.precision
     try:
-        torch.backends.cuda.matmul.allow_tf32 = True
         self.precision = tf32_precision
-        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
-            yield
+        with _tf32_cublas(True):
+            with torch.backends.cudnn.flags(
+                enabled=None, benchmark=None, deterministic=None, allow_tf32=True
+            ):
+                yield
     finally:
-        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
         self.precision = old_precision
 
 
@@ -428,15 +451,10 @@ def tf32_enabled():
     Context manager to temporarily enable TF32 for CUDA operations.
     Restores the previous TF32 state after exiting the context.
     """
-    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
-    try:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        with torch.backends.cudnn.flags(
-            enabled=None, benchmark=None, deterministic=None, allow_tf32=True
-        ):
-            yield
-    finally:
-        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
+    with _tf32_cublas(True), torch.backends.cudnn.flags(
+        enabled=None, benchmark=None, deterministic=None, allow_tf32=True
+    ):
+        yield
 
 
 # This is a wrapper that wraps a test to run this test twice, one with

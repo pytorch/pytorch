@@ -34,7 +34,7 @@ class CKTemplate(ROCmTemplate):
         CK exposes this via {a,b}_compute_dtype on op (None == strict compute
         matching the element type). Some F32 instances ship with `TF32` here.
         """
-        if torch.backends.cuda.matmul.allow_tf32:
+        if torch.backends.cuda.matmul.fp32_precision == "tf32":
             return False
         return (
             getattr(op, "a_compute_dtype", None) == "TF32"

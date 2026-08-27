@@ -4108,7 +4108,7 @@ class TestCase(expecttest.TestCase):
                 f"changed from {self._prev_torch_function_state} to {tf_state}"
             )
 
-        # Detect leaked mutations to the six fp32 precision flags. Tests that
+        # Detect leaked mutations to fp32 precision state. Tests that
         # legitimately mutate these globals must restore them themselves (e.g.
         # via recover_orig_fp32_precision or setUpClass/tearDownClass).
         # Escape hatch: PYTORCH_DISABLE_FP32_PRECISION_LEAK_CHECK=1 disables
@@ -4117,7 +4117,14 @@ class TestCase(expecttest.TestCase):
             hasattr(self, '_prev_fp32_precision')
             and os.environ.get('PYTORCH_DISABLE_FP32_PRECISION_LEAK_CHECK') != '1'
         ):
-            current = _snapshot_fp32_precision()
+            try:
+                current = _snapshot_fp32_precision()
+            except RuntimeError as exc:
+                _restore_fp32_precision(self._prev_fp32_precision)
+                raise AssertionError(
+                    "fp32 precision flag leak detected: legacy and new API "
+                    "state became inconsistent"
+                ) from exc
             if current != self._prev_fp32_precision:
                 _restore_fp32_precision(self._prev_fp32_precision)
                 specs = _fp32_precision_flag_specs()
@@ -6562,6 +6569,11 @@ def scoped_load_inline(func):
 # leak detector pick it up automatically.
 def _fp32_precision_flag_specs():
     return (
+        # This must be restored first because its setter also updates the CUDA
+        # and MKLDNN matmul precision values.
+        ("torch.get_float32_matmul_precision()",
+            torch.get_float32_matmul_precision,
+            torch.set_float32_matmul_precision),
         ("torch.backends.cuda.matmul.fp32_precision",
             lambda: torch.backends.cuda.matmul.fp32_precision,
             lambda v: setattr(torch.backends.cuda.matmul, "fp32_precision", v)),
