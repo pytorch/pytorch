@@ -1466,7 +1466,7 @@ class DequeVariable(BaseListVariable):
         maxlen_val = self.maxlen.as_python_constant()
         if maxlen_val is not None:
             # maxlen == 0 must empty the deque; items[-0:] would keep everything.
-            items = items[-maxlen_val:] if maxlen_val else items[:0]
+            items = items[-maxlen_val:] if maxlen_val != 0 else items[:0]
         super().__init__(items, **kwargs)
         # Mirrors CPython deque->state: bumped on every structural mutation so
         # deque iterators can detect mutation during iteration.
@@ -1665,7 +1665,7 @@ class DequeVariable(BaseListVariable):
             # so fall through to items[:0] in that case.
             self.items[:] = (
                 self.items[-maxlen:]
-                if side == "right" and maxlen
+                if side == "right" and maxlen != 0
                 else self.items[:maxlen]
             )
 
