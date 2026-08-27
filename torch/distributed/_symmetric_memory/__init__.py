@@ -1702,7 +1702,11 @@ def _maybe_convert_scalar_types_to_dtypes(
     `ScalarType[]`, it is converted to a list of scalar type enum values. This
     function converts it back to a list of `torch.dtype`s.
     """
-    # Order defined in https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
+    # Values are the c10::ScalarType enumerators, whose numbering is part of the
+    # serialization format and so is append-only. Keep this in step with
+    # AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS in
+    # torch/headeronly/core/ScalarType.h; the indices there are written in a
+    # trailing comment on each line.
     _SCALAR_TYPE_TO_DTYPE = {
         0: torch.uint8,
         1: torch.int8,
@@ -1720,10 +1724,20 @@ def _maybe_convert_scalar_types_to_dtypes(
         13: torch.quint8,
         14: torch.qint32,
         15: torch.bfloat16,
-        16: torch.float8_e5m2,
-        17: torch.float8_e4m3fn,
-        18: torch.float8_e5m2fnuz,
-        19: torch.float8_e4m3fnuz,
+        16: torch.quint4x2,
+        17: torch.quint2x4,
+        18: torch.bits1x8,
+        19: torch.bits2x4,
+        20: torch.bits4x2,
+        21: torch.bits8,
+        22: torch.bits16,
+        23: torch.float8_e5m2,
+        24: torch.float8_e4m3fn,
+        25: torch.float8_e5m2fnuz,
+        26: torch.float8_e4m3fnuz,
+        27: torch.uint16,
+        28: torch.uint32,
+        29: torch.uint64,
     }
     if any(not isinstance(x, (type(None), int)) for x in scalar_types):
         return scalar_types
