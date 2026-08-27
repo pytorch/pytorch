@@ -1409,6 +1409,7 @@ class SymmMemCftHandleTest(MultiProcessTestCase):
             hdl.get_multimem_cft_handle()
 
 
+@requires_cuda_p2p_access()
 class NCCLSymmMemWatchdogTest(MultiProcContinuousTest):
     """Test watchdog integration with real NCCL symmetric memory ops."""
 
