@@ -551,8 +551,8 @@ static PyObject* view_func_impl(
           out = view_func(new_base);
         }
       } else {
-        out = new_base.as_strided(
-            self.sizes(), self.strides(), self.storage_offset());
+        out = new_base.as_strided_symint(
+            self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());
       }
     }
   }
