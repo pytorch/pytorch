@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     _DYNAMO_BACKEND_SOURCES: tuple[str, ...] = ()
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
     _DYNAMO_STATE: str = ""
+    TRAINING: bool = False
 
     # The compiled/captured graph's entry point, emitted before the driver.
     def call(flat_inputs: list[object]) -> list[object]: ...
@@ -382,6 +383,7 @@ def _build_dynamo_forward():
     """
     import base64
     import importlib
+    import inspect
     import pickle
     import sys
     import types
@@ -394,7 +396,9 @@ def _build_dynamo_forward():
     )
 
     if tuple(_DYNAMO_PYTHON_VERSION) != sys.version_info[:2]:
-        raise ValueError(
+        from torch._precompile import PrecompileError
+
+        raise PrecompileError(
             "precompile artifact was produced on Python "
             f"{_DYNAMO_PYTHON_VERSION[0]}.{_DYNAMO_PYTHON_VERSION[1]}, but is "
             f"being loaded on Python {sys.version_info[0]}.{sys.version_info[1]}."
@@ -402,15 +406,6 @@ def _build_dynamo_forward():
 
     state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
     namespace = globals()
-    module = sys.modules.get(state["python_module"])
-    if module is None:
-        try:
-            module = importlib.import_module(state["python_module"])
-        except ImportError:
-            module = None
-    if module is not None:
-        for name, value in vars(module).items():
-            namespace.setdefault(name, value)
     for alias, module_name in state["import_sources"].items():
         namespace[alias] = importlib.import_module(module_name)
 
@@ -460,19 +455,21 @@ def _build_dynamo_forward():
             function.__kwdefaults__ = dict(kwdefaults)
         variants.append((manager, function))
 
-    arg_names = target.co_varnames[: target.co_argcount]
+    target_function = types.FunctionType(
+        target, namespace, target.co_name, defaults, closure
+    )
+    if kwdefaults:
+        target_function.__kwdefaults__ = dict(kwdefaults)
+    signature = inspect.signature(target_function)
 
     def forward(*args):
-        local_scope = dict(zip(arg_names, args))
-        if defaults:
-            for name, value in zip(arg_names[-len(defaults) :], defaults):
-                local_scope.setdefault(name, value)
-        if kwdefaults:
-            for name, value in kwdefaults.items():
-                local_scope.setdefault(name, value)
-        for manager, function in variants:
-            if manager.check(local_scope):
-                return function(*args)
+        bound = signature.bind(*args)
+        bound.apply_defaults()
+        local_scope = dict(bound.arguments)
+        with torch.set_grad_enabled(TRAINING):
+            for manager, function in variants:
+                if manager.check(local_scope):
+                    return function(*args)
         from torch._precompile import PrecompileError
 
         raise PrecompileError(

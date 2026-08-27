@@ -43,12 +43,15 @@ artifact with `torch.compiler.precompile.load`; since no weights are baked in, y
 the model again at runtime. The optional `tracer="dynamo"` path accepts several example
 tuples and retains the guarded recompilations they trigger, including automatically
 dynamic graphs. It retains guards derived from explicit inputs and treats the Python
-environment as invariant between capture and runtime. Initial support is for Python
-functions with tensor/scalar arguments; graph breaks, closures, and `nn.Module` arguments
-are not supported yet. With `training=True` and the Inductor backend, Dynamo graphs
+environment as an unchecked invariant between capture and runtime; changing that
+environment can silently run a specialization captured for the old state. Initial
+support is for Python functions with positional tensor/scalar arguments and containers
+of those values; graph breaks, closures, and `nn.Module` arguments are not supported yet.
+With `training=True` and the Inductor backend, Dynamo graphs
 include readable compiled forward and backward code, so served outputs retain a
 `grad_fn` and can be passed to `backward()`. This training mode works across captured
-recompilations. See the {ref}`API reference <torch.compiler_api>` for details.
+recompilations and rejects output-tangent patterns not observed during capture. See the
+{ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}
 `torch.compile` may not support recently released major versions of Python.
