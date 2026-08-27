@@ -7,6 +7,7 @@ import inspect
 import multiprocessing as mp
 import os
 import pickle
+import sys
 import tempfile
 import unittest
 from collections import namedtuple
@@ -840,17 +841,22 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             ((torch.randn(3, 4), torch.randn(3, 4)), {})
         )
 
+        expected_content = inspect.getsource(sys.modules[__name__])
+
+        def check_source_info(source_info: SourceInfo) -> None:
+            self.assertIsInstance(source_info, SourceInfo)
+            self.assertEqual(len(source_info.inlined_sources), 2)
+            for source in source_info.inlined_sources:
+                self.assertEqual(source.module, __name__)
+                self.assertEqual(source.content, expected_content)
+
         source_info = compiled_fn.source_info()
-        self.assertIsInstance(source_info, SourceInfo)
-        self.assertEqual(len(source_info.inlined_sources), 2)
-        self.assertEqual(next(iter(source_info.inlined_sources)).module, __name__)
+        check_source_info(source_info)
+        self.assertNotIn(expected_content.encode(), pickle.dumps(source_info))
         compiled_fn.save_compiled_function(self.path())
         with open(self.path(), "rb") as f:
             compiled_fn = torch.compiler.load_compiled_function(f)
-        source_info = compiled_fn.source_info()
-        self.assertIsInstance(source_info, SourceInfo)
-        self.assertEqual(len(source_info.inlined_sources), 2)
-        self.assertEqual(next(iter(source_info.inlined_sources)).module, __name__)
+        check_source_info(compiled_fn.source_info())
 
     def test_regional_inductor_backend(self):
         import torch.fx.traceback as fx_traceback
