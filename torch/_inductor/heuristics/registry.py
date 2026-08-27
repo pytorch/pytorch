@@ -11,6 +11,7 @@ Both share one underlying registry dict and cascading fallback lookup.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import logging
 from typing import Any, TYPE_CHECKING
 
@@ -26,6 +27,18 @@ _HEURISTIC_REGISTRY: dict[tuple[str | None, ...], Any] = {}
 # This intentionally covers both template and codegen entries.
 _TEMPLATE_HEURISTIC_REGISTRY = _HEURISTIC_REGISTRY
 _HEURISTIC_CACHE: dict[tuple[str | None, ...], Any] = {}
+
+# Explicit mapping from codegen heuristic name to its defining module.
+# This avoids relying on parent-package import side effects:
+# under Cinder lazy imports, `import torch._inductor.heuristics.triton_codegen`
+# may cache the parent without realizing child imports.
+# By eagerly importing the concrete submodule we guarantee registration.
+# Keep in sync with `torch/_inductor/heuristics/triton_codegen/__init__.py`
+# — add a new entry here whenever a new heuristic module is added there.
+_CODEGEN_HEURISTIC_MODULES = {
+    "pointwise": "torch._inductor.heuristics.triton_codegen.pointwise",
+    "reduction": "torch._inductor.heuristics.triton_codegen.reduction",
+}
 
 log = logging.getLogger(__name__)
 
@@ -201,10 +214,22 @@ def get_codegen_heuristic(name: str, device_type: str) -> CodegenConfigHeuristic
     heuristic_class = _lookup(name, device_type, None)
 
     if heuristic_class is None:
-        # Lazily import codegen heuristics to trigger registration
-        import torch._inductor.heuristics.triton_codegen  # noqa: F401
+        if (module_name := _CODEGEN_HEURISTIC_MODULES.get(name)) is not None:
+            importlib.import_module(module_name)
+            heuristic_class = _lookup(name, device_type, None)
 
-        heuristic_class = _lookup(name, device_type, None)
+        if heuristic_class is None:
+            # Fallback for future/out-of-tree heuristics: try importing the parent
+            # package which itself imports all known submodules in its __init__.py.
+            # This preserves the old behavior for names not in the explicit map.
+            try:
+                importlib.import_module("torch._inductor.heuristics.triton_codegen")
+            except Exception:
+                log.debug(
+                    "Failed fallback import of torch._inductor.heuristics.triton_codegen",
+                    exc_info=True,
+                )
+            heuristic_class = _lookup(name, device_type, None)
 
     if heuristic_class is None:
         raise ValueError(
