@@ -1692,12 +1692,13 @@ class TestExperimentDevice(TestCase):
                 kwargs={},
                 keep_inference_input_mutations=True,
             )
+            device_name = torch.device(device).type
             self.assertExpectedInline(
                 str(joint_with_descriptors.graph_module.code).strip(),
                 f"""\
 def forward(self, arg0_1):
-    arange_2 = torch.ops.aten.arange.start(0, 64, device = device(type='{device}', index=0), pin_memory = False)
-    arange_3 = torch.ops.aten.arange.start(0, 64, device = device(type='{device}', index=0), pin_memory = False)
+    arange_2 = torch.ops.aten.arange.start(0, 64, device = device(type='{device_name}', index=0), pin_memory = False)
+    arange_3 = torch.ops.aten.arange.start(0, 64, device = device(type='{device_name}', index=0), pin_memory = False)
     add = torch.ops.aten.add.Tensor(arange_3, 4);  arange_3 = None
     view = torch.ops.aten.view.default(arange_2, [64, 1]);  arange_2 = None
     ge = torch.ops.aten.ge.Tensor(view, add);  view = add = None
@@ -1728,19 +1729,19 @@ def forward(self, arg0_1):
     _to_copy_6 = torch.ops.aten._to_copy.default(sum_3, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_3 = None
     _to_copy_7 = torch.ops.aten._to_copy.default(getitem_3, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_3 = None
     new_zeros = torch.ops.aten.new_zeros.default(_to_copy_4, [1, 1, 1, 2], dtype = torch.int32, pin_memory = False)
-    arange_4 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='{device}', index=0), pin_memory = False)
+    arange_4 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='{device_name}', index=0), pin_memory = False)
     unsqueeze_2 = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
-    arange_5 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='{device}', index=0), pin_memory = False)
+    arange_5 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='{device_name}', index=0), pin_memory = False)
     unsqueeze_3 = torch.ops.aten.unsqueeze.default(_to_copy_3, 3)
     lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_3);  arange_5 = unsqueeze_3 = None
-    scalar_tensor = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='{device}', index=0))
+    scalar_tensor = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='{device_name}', index=0))
     where = torch.ops.aten.where.self(lt_1, _to_copy_4, scalar_tensor);  lt_1 = scalar_tensor = None
     new_ones = torch.ops.aten.new_ones.default(new_zeros, [1, 1], pin_memory = False)
-    arange_6 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='{device}', index=0))
+    arange_6 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='{device_name}', index=0))
     unsqueeze_4 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
     unsqueeze_5 = torch.ops.aten.unsqueeze.default(unsqueeze_4, -1);  unsqueeze_4 = None
     view_2 = torch.ops.aten.view.default(new_ones, [1, 1, 1, 1]);  new_ones = None
-    arange_7 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='{device}', index=0))
+    arange_7 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='{device_name}', index=0))
     unsqueeze_6 = torch.ops.aten.unsqueeze.default(arange_7, -1);  arange_7 = None
     unsqueeze_7 = torch.ops.aten.unsqueeze.default(unsqueeze_6, -1);  unsqueeze_6 = None
     unsqueeze_8 = torch.ops.aten.unsqueeze.default(unsqueeze_7, -1);  unsqueeze_7 = None
@@ -1753,19 +1754,19 @@ def forward(self, arg0_1):
     _to_copy_8 = torch.ops.aten._to_copy.default(sum_4, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_4 = None
     _to_copy_9 = torch.ops.aten._to_copy.default(getitem_5, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_5 = None
     new_zeros_1 = torch.ops.aten.new_zeros.default(_to_copy_7, [1, 1, 1, 2], dtype = torch.int32, pin_memory = False)
-    arange_8 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='{device}', index=0), pin_memory = False)
+    arange_8 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='{device_name}', index=0), pin_memory = False)
     unsqueeze_9 = torch.ops.aten.unsqueeze.default(arange_8, -1);  arange_8 = None
-    arange_9 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='{device}', index=0), pin_memory = False)
+    arange_9 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='{device_name}', index=0), pin_memory = False)
     unsqueeze_10 = torch.ops.aten.unsqueeze.default(_to_copy_6, 3)
     lt_2 = torch.ops.aten.lt.Tensor(arange_9, unsqueeze_10);  arange_9 = unsqueeze_10 = None
-    scalar_tensor_1 = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='{device}', index=0))
+    scalar_tensor_1 = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='{device_name}', index=0))
     where_1 = torch.ops.aten.where.self(lt_2, _to_copy_7, scalar_tensor_1);  lt_2 = scalar_tensor_1 = None
     new_ones_1 = torch.ops.aten.new_ones.default(new_zeros_1, [1, 1], pin_memory = False)
-    arange_10 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='{device}', index=0))
+    arange_10 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='{device_name}', index=0))
     unsqueeze_11 = torch.ops.aten.unsqueeze.default(arange_10, -1);  arange_10 = None
     unsqueeze_12 = torch.ops.aten.unsqueeze.default(unsqueeze_11, -1);  unsqueeze_11 = None
     view_3 = torch.ops.aten.view.default(new_ones_1, [1, 1, 1, 1]);  new_ones_1 = None
-    arange_11 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='{device}', index=0))
+    arange_11 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='{device_name}', index=0))
     unsqueeze_13 = torch.ops.aten.unsqueeze.default(arange_11, -1);  arange_11 = None
     unsqueeze_14 = torch.ops.aten.unsqueeze.default(unsqueeze_13, -1);  unsqueeze_13 = None
     unsqueeze_15 = torch.ops.aten.unsqueeze.default(unsqueeze_14, -1);  unsqueeze_14 = None
@@ -1886,7 +1887,9 @@ def forward(self, arg0_1):
 
 
 instantiate_device_type_tests(TestExperimentCPU, globals(), only_for="cpu")
-instantiate_device_type_tests(TestExperimentDevice, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestExperimentDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
