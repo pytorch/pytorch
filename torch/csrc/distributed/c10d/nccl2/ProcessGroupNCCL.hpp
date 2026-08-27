@@ -603,7 +603,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // registered does not pay for a duration measurement nobody reads.
   bool hasCompletionHooks();
   void runCompletionHooks(
-      const ::c10d::Work* work,
+      uint64_t completion_key,
       std::optional<float> duration_ms);
 
   void attachMemoryHook();
