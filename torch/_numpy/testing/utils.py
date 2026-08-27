@@ -19,7 +19,7 @@ from functools import wraps
 from io import StringIO
 from tempfile import mkdtemp, mkstemp
 from types import FunctionType, ModuleType
-from typing import cast, TYPE_CHECKING
+from typing import cast, overload, ParamSpec, TYPE_CHECKING, TypeVar
 from warnings import WarningMessage
 
 import torch._numpy as np
@@ -46,6 +46,10 @@ if TYPE_CHECKING:
 
     # Concrete numpy ndarray type (avoids the implicit-any of a bare `ndarray`).
     _NDArray = _np.ndarray[tuple[int, ...], _np.dtype[_np.generic]]
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 __all__ = [
@@ -1632,6 +1636,17 @@ def _assert_warns_context(
             raise AssertionError("No warning raised" + name_str)
 
 
+@overload
+def assert_warns(
+    warning_class: type[Warning],
+) -> contextlib.AbstractContextManager[None]: ...
+@overload
+def assert_warns(
+    warning_class: type[Warning],
+    func: Callable[_P, _R],
+    *args: _P.args,
+    **kwargs: _P.kwargs,
+) -> _R: ...
 def assert_warns(
     warning_class: type[Warning], *args: object, **kwargs: object
 ) -> object:
@@ -1699,6 +1714,12 @@ def _assert_no_warnings_context(name: str | None = None) -> Iterator[None]:
             raise AssertionError(f"Got warnings{name_str}: {l}")
 
 
+@overload
+def assert_no_warnings() -> contextlib.AbstractContextManager[None]: ...
+@overload
+def assert_no_warnings(
+    func: Callable[_P, _R], *args: _P.args, **kwargs: _P.kwargs
+) -> _R: ...
 def assert_no_warnings(*args: object, **kwargs: object) -> object:
     """
     Fail if the given callable produces any warnings.
@@ -1904,15 +1925,18 @@ class IgnoreException(Exception):
 
 
 @contextlib.contextmanager
-def tempdir(*args: object, **kwargs: object) -> Iterator[str]:
+def tempdir(
+    suffix: str | None = None,
+    prefix: str | None = None,
+    dir: str | os.PathLike[str] | None = None,
+) -> Iterator[str]:
     """Context manager to provide a temporary test folder.
 
     All arguments are passed as this to the underlying tempfile.mkdtemp
     function.
 
     """
-    # pyrefly: ignore[no-matching-overload]  # thin passthrough of arbitrary args
-    tmpdir = mkdtemp(*args, **kwargs)
+    tmpdir = mkdtemp(suffix, prefix, dir)
     try:
         yield tmpdir
     finally:
@@ -1920,7 +1944,12 @@ def tempdir(*args: object, **kwargs: object) -> Iterator[str]:
 
 
 @contextlib.contextmanager
-def temppath(*args: object, **kwargs: object) -> Iterator[str]:
+def temppath(
+    suffix: str | None = None,
+    prefix: str | None = None,
+    dir: str | os.PathLike[str] | None = None,
+    text: bool = False,
+) -> Iterator[str]:
     """Context manager for temporary files.
 
     Context manager that returns the path to a closed temporary file. Its
@@ -1933,8 +1962,7 @@ def temppath(*args: object, **kwargs: object) -> Iterator[str]:
     can be opened again.
 
     """
-    # pyrefly: ignore[no-matching-overload]  # thin passthrough of arbitrary args
-    fd, path = mkstemp(*args, **kwargs)
+    fd, path = mkstemp(suffix, prefix, dir, text)
     os.close(fd)
     try:
         yield path
@@ -2354,14 +2382,14 @@ class suppress_warnings:
         else:
             self._orig_showmsg(use_warnmsg)
 
-    def __call__(self, func: Callable[..., object]) -> Callable[..., object]:
+    def __call__(self, func: Callable[_P, _R]) -> Callable[_P, _R]:
         """
         Function decorator to apply certain suppressions to a whole
         function.
         """
 
         @wraps(func)
-        def new_func(*args: object, **kwargs: object) -> object:
+        def new_func(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             with self:
                 return func(*args, **kwargs)
 
@@ -2421,6 +2449,12 @@ def _assert_no_gc_cycles_context(name: str | None = None) -> Iterator[None]:
         )
 
 
+@overload
+def assert_no_gc_cycles() -> contextlib.AbstractContextManager[None]: ...
+@overload
+def assert_no_gc_cycles(
+    func: Callable[_P, _R], *args: _P.args, **kwargs: _P.kwargs
+) -> None: ...
 def assert_no_gc_cycles(*args: object, **kwargs: object) -> object:
     """
     Fail if the given callable produces any reference cycles.
@@ -2474,13 +2508,16 @@ def break_cycles() -> None:
         gc.collect()
 
 
-def requires_memory(free_bytes: int) -> Callable[[Callable[..., object]], object]:
+def requires_memory(free_bytes: int) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Decorator to skip a test if not enough memory is available"""
     import pytest  # pyrefly: ignore[missing-import]
 
-    def decorator(func: Callable[..., object]) -> object:
+    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
+        # The except branch ends in pytest.xfail(), which is NoReturn; pytest is
+        # not resolvable here, so the fall-through looks like a missing return.
         @wraps(func)
-        def wrapper(*a: object, **kw: object) -> object:
+        # pyrefly: ignore[bad-return]
+        def wrapper(*a: _P.args, **kw: _P.kwargs) -> _R:
             msg = check_free_memory(free_bytes)
             if msg is not None:
                 pytest.skip(msg)
@@ -2586,7 +2623,7 @@ def _get_mem_available() -> int | None:
     return None
 
 
-def _no_tracing(func: Callable[..., object]) -> Callable[..., object]:
+def _no_tracing(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     Decorator to temporarily turn off tracing for the duration of a test.
     Needed in tests that check refcounting, otherwise the tracing itself
@@ -2597,7 +2634,7 @@ def _no_tracing(func: Callable[..., object]) -> Callable[..., object]:
     else:
 
         @wraps(func)
-        def wrapper(*args: object, **kwargs: object) -> object:
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             original_trace = sys.gettrace()
             try:
                 sys.settrace(None)
