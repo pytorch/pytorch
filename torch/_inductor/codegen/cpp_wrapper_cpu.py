@@ -3779,6 +3779,14 @@ if (!custom_op_wrapper) {
         dispatch_lines.writeline("{")
 
         with dispatch_lines.indent():
+            enable_kernel_profile = (
+                config.cpp.enable_kernel_profile and sys.platform in ["linux", "win32"]
+            )
+            if enable_kernel_profile:
+                kernel_name = op_overload._schema.name.replace("::", "_")
+                dispatch_lines.writeline(
+                    f'RAIIAtenRecordFunctionHandle record_{kernel_name}_("{op_overload._schema.name}", nullptr);'
+                )
             tmp_var_number = count()
 
             def parse_arg(arg_type: torch.JitType, codegen_arg: str) -> str:
@@ -4223,6 +4231,17 @@ if (!custom_op_wrapper) {
                 for output_arg in output_args  # type: ignore[arg-type]
                 if output_arg is not None
             ]
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
+        if enable_kernel_profile:
+            safe_name = python_kernel_name.replace(".", "_")
+            lines = (
+                f'RAIIAtenRecordFunctionHandle record_{safe_name}_("{python_kernel_name}", nullptr);\n'
+                + lines
+            )
+
         scope_gil_acquire = self.generate_scoped_gil_acquire(
             declarations_before_scope, lines
         )
@@ -4257,6 +4276,16 @@ if (!custom_op_wrapper) {
         )
 
         extern_kernel_node_index = len(V.extern_kernel_nodes) - 1
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
+        if enable_kernel_profile:
+            kernel_name = str(op_overload).replace(".", "_")
+            self.writeline("{")
+            self.writeline(
+                f'RAIIAtenRecordFunctionHandle record_{kernel_name}_("{op_overload}", nullptr);'
+            )
         self.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_proxy_executor_call_function(proxy_executor, "
             f"{extern_kernel_node_index}, "
@@ -4265,6 +4294,8 @@ if (!custom_op_wrapper) {
             f"{len(tensor_call_args)}, "
             f"{tensor_call_str}));"
         )
+        if enable_kernel_profile:
+            self.writeline("}")
 
     def codegen_runtime_lookup_tensor_call_args(
         self, tensor_call_args: Sequence[str]
