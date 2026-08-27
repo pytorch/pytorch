@@ -996,6 +996,7 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
 
 class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
+    cudagraphs_bwd_override: bool | None
     static_input_idxs: Sequence[int]
     is_backward: bool
     graph_id: int | None
@@ -2971,10 +2972,13 @@ def compile_fx_backward(
 
         fixed = count_tangents(gm)
 
-        # Check if cudagraphs should be overridden for backward via annotation
+        # Apply the backward override and preserve it in the serialized FX kwargs.
         cudagraphs = compiler_config_extra.cudagraphs
-        if compiler_config_extra.cudagraphs_bwd_override is not None:
-            cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
+        cudagraph_kwargs: _CompileFxKwargs = {}
+        cudagraphs_bwd_override = compiler_config_extra.cudagraphs_bwd_override
+        if cudagraphs_bwd_override is not None:
+            cudagraphs = BoxedBool(cudagraphs_bwd_override)
+            cudagraph_kwargs["cudagraphs_bwd_override"] = cudagraphs_bwd_override
 
         # Static backward inputs (see Note: [static_input_idxs semantics])
         # are the saved tensors, minus two over-approximations of the
@@ -3013,6 +3017,7 @@ def compile_fx_backward(
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
                 boxed_forward_device_index=compiler_config_extra.forward_device,
+                **cudagraph_kwargs,
             )
 
 

@@ -1420,6 +1420,70 @@ if HAS_CUDA_AND_TRITON:
             if self.get_manager() is not None:
                 raise AssertionError
 
+        @torch._functorch.config.patch("enable_autograd_cache", True)
+        @torch._inductor.config.patch("fx_graph_cache", True)
+        @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        @torch._dynamo.config.patch("specialize_float", True)
+        def test_cudagraph_backward_override_affects_aot_cache_key(self):
+            """Verify backward cudagraph annotations distinguish AOT cache entries."""
+            counters.clear()
+            AOTAutogradCache.clear()
+            FxGraphCache.clear()
+
+            def fn(x):
+                return torch.sin(x).sum()
+
+            def run(annotated):
+                torch._dynamo.reset()
+                x = torch.randn(10, 4, device="cuda", requires_grad=True)
+                if annotated:
+                    with torch._dynamo.override_cudagraphs(bwd=False):
+                        result = torch.compile(fn, fullgraph=True)(x)
+                else:
+                    result = torch.compile(fn, fullgraph=True)(x)
+                result.backward()
+
+            run(False)
+            run(True)
+            run(True)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+        @torch._functorch.config.patch("enable_autograd_cache", True)
+        @torch._inductor.config.patch("fx_graph_cache", True)
+        @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        @torch._dynamo.config.patch("specialize_float", True)
+        def test_cudagraph_backward_override_aot_cache_hit(self):
+            """Verify a warm load preserves a backward cudagraph opt-out."""
+            counters.clear()
+            AOTAutogradCache.clear()
+            FxGraphCache.clear()
+
+            @torch._dynamo.override_cudagraphs(bwd=False)
+            def fn(x):
+                return torch.sin(x).sum()
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+
+            def run():
+                x = torch.randn(10, 4, device="cuda", requires_grad=True)
+                result = opt_fn(x)
+                result.backward()
+                self.assertEqual(result, fn(x))
+
+            run()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            torch._dynamo.reset()
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                run()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertIsNotNone(self.get_manager())
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
