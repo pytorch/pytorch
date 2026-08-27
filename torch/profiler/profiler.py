@@ -133,10 +133,12 @@ class _ProfilerExtensionConfig(ABC):
 
 @dataclass
 class PerformanceMetricsConfig(_ProfilerExtensionConfig):
-    """Configure hardware metric collection.
+    """Configure hardware performance-counter metric collection.
+
+    This configuration collects hardware counters.
 
     Args:
-        metric_names (list[str]): Backend-specific metric names to collect.
+        metric_names (list[str]): Backend-specific hardware metric names to collect.
         device_id (int, optional): CUDA only. Device on which to collect
             CUPTI PM samples.
     """
@@ -153,14 +155,14 @@ class PerformanceMetricsConfig(_ProfilerExtensionConfig):
 
 @dataclass
 class ProfilerActivityConfig:
-    """Configure an activity group and its associated profilers.
+    """Configure collection for an activity group.
 
     Args:
-        activity_types (list[str], optional): Fine-grained Kineto activity
-            types to collect. ``None`` collects the group's default activity
-            types, while an empty list collects none.
-        profiler_configs (list): Additional profiler configurations, such as
-            :class:`PerformanceMetricsConfig`, associated with this activity group.
+        activity_types (list[str], optional): Fine-grained activity types to
+            collect. ``None`` collects the group's default activity types,
+            while an empty list collects none.
+        profiler_configs (list): Additional profiler configurations associated
+            with this activity group, such as :class:`PerformanceMetricsConfig`.
     """
 
     activity_types: list[str] | None = None
