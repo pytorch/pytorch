@@ -95,7 +95,10 @@ from .schemas import (
     SubclassMeta,
     ViewAndMutationMeta,
 )
-from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
+from .subclass_utils import (
+    compute_inner_mutated_inp_indices_from_subclass_meta,
+    requires_subclass_dispatch,
+)
 from .utils import (
     contain_metadata_mutation_ops,
     get_default_generator,
@@ -288,13 +291,20 @@ def aot_stage1_graph_capture(
         if isinstance(module, torch.fx.GraphModule)
         for node in module.graph.nodes
     )
-    # Synthetic-base wrappers close over real example views, and Dynamo has already
-    # specialized Python autograd.Function backward subgraphs. Neither can be replayed
-    # with literal None tangents; use the structural backward specializer instead.
+    # Synthetic-base wrappers close over real example views, effect tokens contain
+    # trace-local tensors, tensor subclasses require their original dispatch setup,
+    # and Dynamo has already specialized Python autograd.Function backward subgraphs.
+    # These cases must use structural specialization or the existing materialization
+    # fallback because the forward cannot safely be rerun to retrace the joint graph.
     can_retrace_backward = (
         not any(
             isinstance(wrapper, AOTSyntheticBaseWrapper) and wrapper.needs_post_compile
             for wrapper in wrappers
+        )
+        and not aot_state.fw_metadata.tokens
+        and not requires_subclass_dispatch(
+            aot_state.flat_args,  # pyrefly: ignore[bad-argument-type]
+            aot_state.fw_metadata,
         )
         and not has_dynamo_autograd_function
     )

@@ -2758,9 +2758,152 @@ _GradOutputPrototypeType = (
 )
 
 
+class KeptTangentInfo(typing.NamedTuple):
+    """Runtime-safe metadata for tangent slots retained by the backward prologue."""
+
+    grad_out_idx: tuple[int, ...]
+    dtype: tuple[torch.dtype | None, ...]
+    num_mutated_inputs: int
+    num_outputs: int
+    num_intermediate_bases: int
+    output_type: tuple[str, ...]
+    output_requires_grad: tuple[bool, ...]
+    output_requires_grad_for_backward: tuple[bool, ...]
+
+
+def _kept_tangent_info(fw_metadata: ViewAndMutationMeta) -> KeptTangentInfo:
+    grad_out_idx = tuple(_grad_output_surviving_indices(fw_metadata))
+    tangent_dtypes = getattr(fw_metadata, "traced_tangent_dtypes", None) or []
+    if len(tangent_dtypes) != len(grad_out_idx):
+        tangent_dtypes = [None] * len(grad_out_idx)
+    return KeptTangentInfo(
+        grad_out_idx=grad_out_idx,
+        dtype=tuple(tangent_dtypes),
+        num_mutated_inputs=fw_metadata.num_mutated_inp_runtime_indices,
+        num_outputs=fw_metadata.num_outputs,
+        num_intermediate_bases=fw_metadata.num_intermediate_bases,
+        output_type=tuple(info.output_type.name for info in fw_metadata.output_info),
+        output_requires_grad=tuple(
+            info.requires_grad for info in fw_metadata.output_info
+        ),
+        output_requires_grad_for_backward=tuple(
+            info.requires_grad_for_backward for info in fw_metadata.output_info
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class _MaterializedFlatTangent:
     values: tuple[torch.Tensor | CustomClassBase, ...]
+
+
+def _non_tensor_tangent_error(
+    x: Any,
+    tangent_idx: int,
+    tangent_desc: Any | None,
+    compile_id_str: str | None,
+    tangent_stack_trace: str | None,
+    kept_tangent_info: KeptTangentInfo,
+) -> RuntimeError:
+    from .descriptors import IntermediateBaseAOTOutput, PlainAOTOutput, TangentAOTInput
+
+    out_idx: int | None = None
+    via_base = False
+    if isinstance(tangent_desc, TangentAOTInput):
+        out = tangent_desc.output
+        if isinstance(out, IntermediateBaseAOTOutput):
+            via_base = True
+            out = out.base_of
+        if isinstance(out, PlainAOTOutput):
+            out_idx = out.idx
+
+    lines = [
+        f"  tangent index         : {tangent_idx}",
+        f"  received              : {x!r:.200} (type {type(x).__name__}, expected a Tensor)",
+        f"  tangent descriptor    : {tangent_desc!r}",
+    ]
+    if isinstance(tangent_desc, TangentAOTInput):
+        lines.append(f"  descriptor expression : {tangent_desc.expr()}")
+
+    dtype: torch.dtype | None = None
+    if tangent_idx < len(kept_tangent_info.grad_out_idx):
+        info = kept_tangent_info
+        dtype = info.dtype[tangent_idx]
+        grad_out_idx = info.grad_out_idx[tangent_idx]
+        total = info.num_mutated_inputs + info.num_outputs + info.num_intermediate_bases
+        if grad_out_idx < info.num_mutated_inputs:
+            what = "the updated value of a mutated forward input"
+        elif grad_out_idx < info.num_mutated_inputs + info.num_outputs:
+            what = f"user forward output {grad_out_idx - info.num_mutated_inputs}"
+        else:
+            nth = grad_out_idx - info.num_mutated_inputs - info.num_outputs
+            what = f"intermediate base {nth} (not a user output)"
+        lines.append(
+            f"  grad_output slot      : {grad_out_idx} of {total} slots returned "
+            "by the compiled autograd.Function"
+        )
+        lines.append(f"  that slot holds       : {what}")
+        if out_idx is not None and out_idx < len(info.output_type):
+            suffix = " (the output this intermediate base backs)" if via_base else ""
+            lines.append(f"  user output index     : {out_idx}{suffix}")
+            lines.append(
+                f"  its OutputType        : OutputType.{info.output_type[out_idx]}"
+            )
+            lines.append(
+                f"  its requires_grad     : {info.output_requires_grad[out_idx]} "
+                f"(requires_grad_for_backward="
+                f"{info.output_requires_grad_for_backward[out_idx]})"
+            )
+        if dtype is not None:
+            lines.append(f"  its dtype             : {dtype}")
+    elif out_idx is not None:
+        lines.append(f"  user output index     : {out_idx}")
+
+    if dtype is None:
+        reason = "any of (1), (2) or (3): no dtype was recorded for this slot."
+    elif not (dtype.is_floating_point or dtype.is_complex):
+        reason = f"""(1).
+{dtype} is not a differentiable dtype, so autograd never recorded gradient
+metadata for this output, yet AOTAutograd recorded that same output as needing a
+tangent."""
+    else:
+        reason = """(2) or (3), since the dtype above is differentiable.
+AOTAutograd marks every returned slot whose recorded requires_grad is False, and
+marking is keyed on TensorImpl, so a backend returning the same tensor object in
+two returned slots marks both. Inductor lowers aten.detach to a no-op and folds
+h * 1 / h + 0 away, which is how one object can end up in two slots."""
+
+    graph_hint = (
+        f"\nThis error occurred in compiled graph [{compile_id_str}]."
+        if compile_id_str is not None
+        else ""
+    )
+    stack_hint = (
+        f"\nThe forward output was created here:\n{tangent_stack_trace}"
+        if tangent_stack_trace is not None
+        else ""
+    )
+    body = "\n".join(lines)
+    return RuntimeError(
+        f"""
+The compiled backward was handed a non-Tensor for a tangent it requires.
+
+{body}
+
+Autograd hands back None rather than a zero tangent only for a returned slot it
+recorded no gradient metadata for, which is exactly three cases: (1) the output
+has a non-differentiable dtype, (2) the output was marked via
+ctx.mark_non_differentiable, or (3) the forward returned a non-Tensor in that
+slot. AOTAutograd's forward epilogue sets ctx._materialize_non_diff_grads =
+False, so nothing fills the slot back in.
+
+This slot is case {reason}
+
+The backward requires this tangent, so none of the three is something your model
+can ask for: this is a bug in AOTAutograd or in the backend. Please report it
+with this message.
+{graph_hint}{stack_hint}"""
+    )
 
 
 def _grad_output_tensor_prototype(
@@ -3130,6 +3273,7 @@ def _process_runtime_or_materialized_tangent(
     tangent_desc: Any,
     compile_id_str: str | None,
     tangent_stack_trace: str | None,
+    kept_tangent_info: KeptTangentInfo | None = None,
 ) -> list[Any]:
     if isinstance(tangent, _MaterializedFlatTangent):
         return list(tangent.values)
@@ -3140,6 +3284,7 @@ def _process_runtime_or_materialized_tangent(
         tangent_desc,
         compile_id_str,
         tangent_stack_trace,
+        kept_tangent_info,
     )[1]
 
 
@@ -3188,6 +3333,8 @@ def _materialize_missing_tangent_args(
     if not undefined_grad_out_indices_set:
         return
 
+    kept_tangent_info = _kept_tangent_info(fw_metadata)
+
     placeholders = bw_module.graph.find_nodes(op="placeholder")
     tangent_placeholders = [node for node in placeholders if _is_grad_tangent(node)]
     placeholder_positions = {node: i for i, node in enumerate(placeholders)}
@@ -3212,20 +3359,26 @@ def _materialize_missing_tangent_args(
         if grad_out_idx not in undefined_grad_out_indices_set:
             curr_flat_idx += arg_count
             continue
-        if grad_out_idx >= len(grad_output_prototypes):
-            curr_flat_idx += arg_count
-            continue
-
-        prototype = grad_output_prototypes[grad_out_idx]
-        if prototype is None:
-            curr_flat_idx += arg_count
-            continue
-
         tangent_stack_trace = (
             fw_metadata.tangent_source_stack_traces[tangent_idx]
             if fw_metadata.tangent_source_stack_traces
             else None
         )
+        prototype = (
+            grad_output_prototypes[grad_out_idx]
+            if grad_out_idx < len(grad_output_prototypes)
+            else None
+        )
+        if prototype is None:
+            raise _non_tensor_tangent_error(
+                None,
+                tangent_idx,
+                fw_metadata.traced_tangents_descs[tangent_idx],
+                fw_metadata.compile_id_str,
+                tangent_stack_trace,
+                kept_tangent_info,
+            )
+
         if isinstance(tangent_meta, SubclassCreationMeta):
             flat_tangents = list(
                 _flat_zeros_like_tangent_prototype(
@@ -3243,6 +3396,7 @@ def _materialize_missing_tangent_args(
                 fw_metadata.traced_tangents_descs[tangent_idx],
                 fw_metadata.compile_id_str,
                 tangent_stack_trace,
+                kept_tangent_info,
             )
         if len(flat_tangents) != arg_count:
             raise AssertionError(
@@ -4110,9 +4264,9 @@ class _AutogradBackwardCompiler:
                         bw_module,
                         placeholder_list,
                     )
-                if specialized is None and not any(
-                    isinstance(meta, SubclassCreationMeta)
-                    for meta in self.fw_metadata.subclass_tangent_meta
+                if (
+                    specialized is None
+                    and self.aot_config.precompile_backend_id is not None
                 ):
                     raise RuntimeError(
                         "AOTAutograd could not compile the observed undefined-output "
@@ -4128,6 +4282,11 @@ class _AutogradBackwardCompiler:
                     all_args,
                 )
             if specialized is None:
+                if self.aot_config.precompile_backend_id is not None:
+                    raise RuntimeError(
+                        "AOTAutograd could not compile the observed undefined-output "
+                        "tangent pattern."
+                    )
                 _materialize_missing_tangent_args(
                     all_args,
                     bw_module,
@@ -4282,6 +4441,7 @@ def _codegen_backward_prologue(
     )
     all_surviving = _grad_output_surviving_indices(fw_metadata)
     num_flat_bw_args_with_grads = len(all_surviving)
+    kept_tangent_info = _kept_tangent_info(fw_metadata)
 
     buf = PySourceBuilder(
         "_backward_prologue",
@@ -4373,6 +4533,7 @@ def _codegen_backward_prologue(
             _tangent_descs_=fw_metadata.traced_tangents_descs,
             _compile_id_=fw_metadata.compile_id_str,
             _stack_traces_=fw_metadata.tangent_source_stack_traces or (),
+            _kept_tangent_info_=kept_tangent_info,
         )
 
         if has_subclass:
@@ -4395,9 +4556,12 @@ def _codegen_backward_prologue(
             buf.writeline(
                 "_fpt = list(_chain_("
                 "_process_materialized_tangent_(t, m, idx, desc, _compile_id_, "
-                "_stack_traces_[idx] if _stack_traces_ else None) "
-                "for idx, (t, m, desc) in enumerate("
-                "zip(_tangents, _tangent_metas_, _tangent_descs_))))"
+                "_stack_traces_[idx] if _stack_traces_ else None, "
+                "_kept_tangent_info_ if grad_idx not in "
+                "skip_materialize_grad_output_indices else None) "
+                "for idx, (t, m, desc, grad_idx) in enumerate("
+                "zip(_tangents, _tangent_metas_, _tangent_descs_, "
+                "_materialize_grad_output_indices_))))"
             )
 
             if codegen_unwrap_fn is not None:
@@ -4414,7 +4578,10 @@ def _codegen_backward_prologue(
                 buf.writeline(
                     "all_args[_i] = _process_tangent_(all_args[_i], "
                     "_tangent_metas_[j], j, _tangent_descs_[j], _compile_id_, "
-                    "_stack_traces_[j] if _stack_traces_ else None)[0]"
+                    "_stack_traces_[j] if _stack_traces_ else None, "
+                    "_kept_tangent_info_ if "
+                    "_materialize_grad_output_indices_[j] not in "
+                    "skip_materialize_grad_output_indices else None)[0]"
                 )
 
         if has_mutations_in_bw:
@@ -5055,7 +5222,22 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         tangent_desc: Any | None = None,
         compile_id_str: str | None = None,
         tangent_stack_trace: str | None = None,
+        kept_tangent_info: KeptTangentInfo | None = None,
     ) -> tuple[Any, list[Any]]:
+        if (
+            not isinstance(x, torch.Tensor)
+            and tangent_idx is not None
+            and kept_tangent_info is not None
+        ):
+            raise _non_tensor_tangent_error(
+                x,
+                tangent_idx,
+                tangent_desc,
+                compile_id_str,
+                tangent_stack_trace,
+                kept_tangent_info,
+            )
+
         if x is None:
             return x, [None] * _tangent_meta_arg_count(meta)
 

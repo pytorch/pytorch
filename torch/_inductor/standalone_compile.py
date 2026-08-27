@@ -612,7 +612,42 @@ class NoRunnableInductorModuleError(RuntimeError):
     """
 
 
-def _runnable_source(compiled_graph: OutputCode) -> str:
+def _passthrough_source(gm: GraphModule) -> str | None:
+    placeholders = {
+        node: index
+        for index, node in enumerate(gm.graph.nodes)
+        if node.op == "placeholder"
+    }
+    output = next((node for node in gm.graph.nodes if node.op == "output"), None)
+    if output is None or any(
+        node.op not in ("placeholder", "output") for node in gm.graph.nodes
+    ):
+        return None
+
+    def render(value: Any) -> str:
+        if isinstance(value, torch.fx.Node):
+            if value not in placeholders:
+                raise KeyError(value)
+            return f"args[{placeholders[value]}]"
+        if isinstance(value, tuple):
+            values = ", ".join(render(item) for item in value)
+            return f"({values},)" if len(value) == 1 else f"({values})"
+        if isinstance(value, list):
+            return f"[{', '.join(render(item) for item in value)}]"
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return repr(value)
+        raise TypeError
+
+    try:
+        result = render(output.args[0])
+    except (KeyError, TypeError):
+        return None
+    return f"def call(args):\n    return {result}\n"
+
+
+def _runnable_source(
+    compiled_graph: OutputCode, gm: GraphModule, *, allow_passthrough: bool = False
+) -> str:
     """Return the Inductor output-module source for a compiled inner graph.
 
     ``compile_fx_inner`` returns a ``CompiledFxGraph`` that carries the wrapper-module
@@ -621,6 +656,8 @@ def _runnable_source(compiled_graph: OutputCode) -> str:
     surface as ``NoRunnableInductorModuleError``.
     """
     source = getattr(compiled_graph, "source_code", None)
+    if not source and allow_passthrough:
+        source = _passthrough_source(gm)
     if not source:
         raise NoRunnableInductorModuleError(
             "the compiled graph produced no runnable Inductor output module: it has no "
@@ -873,7 +910,7 @@ def compile_to_python(
         # back channels-last saved activations -- and this is the only channel
         # for that, since the caller cannot see the CompiledFxGraph.
         output_strides.extend(getattr(compiled_graph, "output_strides", None) or [])
-    inner_python = _runnable_source(compiled_graph)
+    inner_python = _runnable_source(compiled_graph, gm, allow_passthrough=is_backward)
     cache = _acceleration_cache_bytes(artifacts)
     return inner_python, cache
 

@@ -33,11 +33,7 @@ also stored as opaque inline data.
 With ``tracer="dynamo", training=True``, captured graphs remain differentiable on both
 backends. Inductor artifacts contain AOTAutograd's forward and backward as readable
 source. The served output retains its ``grad_fn`` and a later ``backward()`` executes
-the captured backward, including across captured recompilations and graph breaks. Each
-example's real backward records which differentiable outputs have undefined tangents;
-the artifact contains one backward specialization per observed pattern and rejects an
-unseen pattern instead of passing ``None`` to an Inductor tensor input. If the examples
-only run forwards, only the all-tangents-present backward is covered.
+the captured backward, including across captured recompilations and graph breaks.
 
 ``precompile`` returns an executable ``python_code`` string plus a companion
 integrity-tagged ``cache``. Make-fx artifacts are self-contained. Dynamo artifacts may
@@ -2644,6 +2640,27 @@ def _precompile_dynamo(
             "capture local variables."
         )
 
+    def contains_tensor(value: object, seen: set[int]) -> bool:
+        if isinstance(value, torch.Tensor):
+            return True
+        value_id = id(value)
+        if value_id in seen:
+            return False
+        seen.add(value_id)
+        if isinstance(value, dict):
+            return any(
+                contains_tensor(item, seen) for pair in value.items() for item in pair
+            )
+        if isinstance(value, (tuple, list, set, frozenset)):
+            return any(contains_tensor(item, seen) for item in value)
+        return False
+
+    if contains_tensor((target.__defaults__, target.__kwdefaults__), set()):
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot serialize tensor-valued function "
+            "defaults; pass every tensor as an explicit example input."
+        )
+
     def is_literal(value: object) -> bool:
         if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):
             return True
@@ -2696,6 +2713,47 @@ def _precompile_dynamo(
             if isinstance(const, CodeType):
                 names.update(loaded_global_names(const))
         return names
+
+    explicit_input_ids = {
+        id(value)
+        for example in examples
+        for value in pytree.tree_leaves((example.args, example.kwargs))
+        if not isinstance(value, (type(None), bool, int, float, complex, str, bytes))
+    }
+
+    def reaches_explicit_input(value: object, seen: set[int]) -> bool:
+        value_id = id(value)
+        if value_id in explicit_input_ids:
+            return True
+        if value_id in seen:
+            return False
+        seen.add(value_id)
+        if isinstance(value, dict):
+            return any(
+                reaches_explicit_input(item, seen)
+                for pair in value.items()
+                for item in pair
+            )
+        if isinstance(value, (tuple, list, set, frozenset)):
+            return any(reaches_explicit_input(item, seen) for item in value)
+        if isinstance(
+            value, (types.FunctionType, types.ModuleType, type, torch.Tensor)
+        ) or not hasattr(value, "__dict__"):
+            return False
+        return any(reaches_explicit_input(item, seen) for item in vars(value).values())
+
+    aliased_globals = [
+        name
+        for name in loaded_global_names(target.__code__)
+        if name in target.__globals__
+        and reaches_explicit_input(target.__globals__[name], set())
+    ]
+    if aliased_globals:
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot preserve an input-derived identity "
+            "relation to the Python environment; pass the value only as an input. "
+            f"Aliased global: {aliased_globals[0]!r}."
+        )
 
     def mutates_globals(code: CodeType) -> bool:
         if any(
@@ -2783,6 +2841,10 @@ def _precompile_dynamo(
     contract_dropped_guards: set[tuple[str, str]] = set()
     capture_errors: list[str] = []
     truncated: set[str] = set()
+    generated_prefixes = ("__compiled_fn_", "__builtins_dict___", "__import_")
+    existing_generated_globals = {
+        name for name in target.__globals__ if name.startswith(generated_prefixes)
+    }
     try:
         accumulated_limit = max(
             torch._dynamo.config.accumulated_recompile_limit, recompile_limit
@@ -2795,10 +2857,7 @@ def _precompile_dynamo(
                 trace_autograd_ops=training,
             )
         )
-        functorch_options = {
-            "bundled_autograd_cache": True,
-            "bypass_autograd_cache_key": True,
-        }
+        functorch_options = {"bundled_autograd_cache": True}
         if training:
             functorch_options["force_non_lazy_backward_lowering"] = True
         capture_stack.enter_context(functorch_config.patch(**functorch_options))
@@ -2963,6 +3022,10 @@ def _precompile_dynamo(
                 for tensor, grad in saved_grads.values():
                     tensor.grad = grad
 
+        for compiled_backend in package.cached_backends.values():
+            if isinstance(compiled_backend, _DynamoPythonBackend):
+                compiled_backend.finalize_training()
+
         cache_entry = package.cache_entry()
         code_entries = cache_entry.codes
         module_hint = (
@@ -3012,7 +3075,6 @@ def _precompile_dynamo(
                     "precompile tracer='dynamo' encountered a graph that could not be "
                     "represented as standalone Python source."
                 )
-            compiled_backend.finalize_training()
             compiled_backends.append(compiled_backend)
 
         code_states: list[_DynamoCodeState] = []
@@ -3276,6 +3338,12 @@ def _precompile_dynamo(
 
                     for code in package.region_codes():
                         _clear_cache_entries_for_region(code, region)
+                for name in list(target.__globals__):
+                    if (
+                        name.startswith(generated_prefixes)
+                        and name not in existing_generated_globals
+                    ):
+                        target.__globals__.pop(name, None)
                 pgo_state.clear()
             finally:
                 _DYNAMO_COMPILE_LOCK.release()
@@ -3771,12 +3839,7 @@ class _PrecompileApi:
         Inductor graphs carry readable AOTAutograd forward and backward source bridged
         by an emitted ``torch.autograd.Function``; eager graphs replay their captured
         differentiable operations. The input tensors that require gradients must do so
-        in every example and at runtime. Each example's actual backward also records its
-        output-tangent presence pattern. Inductor compiles and serializes one backward
-        variant per observed pattern, preserving undefined gradients without presenting
-        ``None`` as a kernel tensor input. A runtime pattern not covered by the examples
-        raises :class:`PrecompileError` rather than compiling at serve time. If the
-        examples only run forwards, only the all-tangents-present backward is covered.
+        in every example and at runtime.
 
         With ``tracer="dynamo"``, shape variation across ``example_inputs`` uses
         Dynamo's ordinary automatic dynamic-shape policy: for example, a static first
