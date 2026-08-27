@@ -145,7 +145,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 //  - thrust::complex only support float and double
 
 template <typename T>
-struct alignas(sizeof(T) * 2) complex {
+struct C10_EXPORT alignas(sizeof(T) * 2) complex {
   using value_type = T;
 
   T real_ = T(0);
@@ -541,7 +541,7 @@ C10_HOST_DEVICE complex<T> polar(const T& r, const T& theta = T()) {
 }
 
 template <>
-struct alignas(4) complex<Half> {
+struct C10_EXPORT alignas(4) complex<Half> {
   Half real_;
   Half imag_;
 
@@ -710,27 +710,3 @@ C10_CLANG_DIAGNOSTIC_POP()
 // utilities for complex types
 #include <torch/headeronly/util/complex_utils.h> // IWYU pragma: keep
 #undef C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H
-
-namespace c10 {
-using ::torch::headeronly::complex;
-using ::torch::headeronly::operator!=;
-using ::torch::headeronly::operator+;
-using ::torch::headeronly::operator-;
-using ::torch::headeronly::operator*;
-using ::torch::headeronly::operator/;
-using ::torch::headeronly::operator<<;
-using ::torch::headeronly::operator>>;
-using ::torch::headeronly::operator+=;
-using ::torch::headeronly::operator-=;
-using ::torch::headeronly::operator*=;
-using ::torch::headeronly::operator/=;
-using ::torch::headeronly::operator==;
-using ::torch::headeronly::is_complex;
-using ::torch::headeronly::polar;
-using ::torch::headeronly::scalar_value_type;
-
-namespace complex_literals {
-using ::torch::headeronly::complex_literals::operator""_if;
-using ::torch::headeronly::complex_literals::operator""_id;
-} // namespace complex_literals
-} // namespace c10
