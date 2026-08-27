@@ -325,6 +325,16 @@ device_codegens: dict[str, DeviceCodegen] = {}
 
 
 class DeviceOpOverrides:
+    def uses_gpu_cpp_wrapper(self) -> bool:
+        """Explicitly opt into the CUDA/XPU-style C++ wrapper two-pass path.
+
+        Using, registering, or inheriting from a CppWrapperGpu-style class does
+        not imply this capability. MPS and MTIA use GPU-style wrapper classes
+        but do not require the CUDA/XPU lazy-autotune JIT+AOT path solely for
+        that reason.
+        """
+        return False
+
     def import_get_raw_stream_as(self, name: str) -> str:
         raise NotImplementedError
 
@@ -703,6 +713,12 @@ def get_device_op_overrides(device: str) -> DeviceOpOverrides:
         raise AssertionError(type(device))
     _initialize_device_op_overrides()
     return device_op_overrides_dict[device]
+
+
+def _uses_gpu_cpp_wrapper(device: str) -> bool:
+    _initialize_device_op_overrides()
+    overrides = device_op_overrides_dict.get(device)
+    return overrides is not None and overrides.uses_gpu_cpp_wrapper()
 
 
 DTYPE_TO_COMPUTATION_DTYPE: dict[torch.dtype, torch.dtype] = {
@@ -1244,6 +1260,8 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         is_pure: bool = True,
         pack: int = 1,
         input_dtypes: tuple[torch.dtype, ...] | None = None,
+        output_dtypes: tuple[torch.dtype, ...] | None = None,
+        output_index: int = 0,
     ) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: inline_asm_elementwise only implemented for Triton backend"
@@ -1688,7 +1706,7 @@ class KernelArgs:
         )
 
     @staticmethod
-    def _buffer_is_marked_removed(name: Any) -> bool:
+    def _buffer_is_marked_removed(name: object) -> bool:
         # this function is needed by MTIA
         return isinstance(name, RemovedArg)
 
@@ -2134,6 +2152,13 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
 
     def get(self, cache_key: str) -> CSEVariableType:
         return self._cache[self.augment_key(cache_key)]
+
+    def contains_value(self, value: CSEVariableType) -> bool:
+        return (
+            value in self._cache.values()
+            or value in self.store_cache.values()
+            or value in self.reduction_cache.values()
+        )
 
     def generate(
         self,

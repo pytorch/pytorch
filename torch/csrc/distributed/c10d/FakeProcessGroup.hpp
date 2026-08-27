@@ -331,35 +331,27 @@ class FakeProcessGroup : public Backend {
     checkCollectiveError();
     c10d::checkSplitSizes(inputSplitSizes, inputBuffer, size_);
     c10d::checkSplitSizes(outputSplitSizes, outputBuffer, size_);
+    TORCH_CHECK(
+        inputBuffer.is_contiguous(inputBuffer.suggest_memory_format()),
+        "Input tensor must be contiguous");
+    TORCH_CHECK(
+        outputBuffer.is_contiguous(outputBuffer.suggest_memory_format()),
+        "Output tensor must be contiguous");
     // See note in _allgather_base above.
     at::AutoDispatchBelowAutograd guard;
-    if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
-      outputBuffer.copy_(inputBuffer);
-    } else {
-      // Approximation: rank j's inputSplitSizes are unavailable here, so
-      // each output slot is filled by repeating inputBuffer[0:slot]. The
-      // values are deterministic but arbitrary; do not assert on them.
-      int64_t out_offset = 0;
-      auto in_size = inputBuffer.size(0);
-      for (int j = 0; j < size_; ++j) {
-        int64_t remaining = outputSplitSizes[j];
-        if (remaining > 0) {
-          TORCH_CHECK(
-              in_size > 0,
-              "alltoall_base: inputBuffer is empty but outputSplitSizes[",
-              j,
-              "] > 0");
-        }
-        int64_t dst = out_offset;
-        while (remaining > 0) {
-          auto chunk = std::min(remaining, in_size);
-          outputBuffer.narrow(0, dst, chunk)
-              .copy_(inputBuffer.narrow(0, 0, chunk));
-          dst += chunk;
-          remaining -= chunk;
-        }
-        out_offset += outputSplitSizes[j];
-      }
+    // Approximation: inputs from other ranks are unavailable here, so copy as
+    // much of the local input as fits and zero the remainder.
+    auto flat_input = inputBuffer.as_strided(
+        {inputBuffer.numel()}, {1}, inputBuffer.storage_offset());
+    auto flat_output =
+        outputBuffer
+            .as_strided(
+                {outputBuffer.numel()}, {1}, outputBuffer.storage_offset())
+            .zero_();
+    auto copy_size = std::min(flat_input.numel(), flat_output.numel());
+    if (copy_size > 0) {
+      flat_output.narrow(0, 0, copy_size)
+          .copy_(flat_input.narrow(0, 0, copy_size));
     }
     return c10::make_intrusive<FakeWork>();
   }
