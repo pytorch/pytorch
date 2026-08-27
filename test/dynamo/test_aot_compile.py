@@ -2,6 +2,7 @@
 
 import contextlib
 import copy
+import dataclasses
 import functools
 import inspect
 import multiprocessing as mp
@@ -832,7 +833,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             self.assertEqual(expected, actual)
 
     def test_aot_compile_source_info(self):
-        from torch._dynamo.package import SourceInfo
+        from torch._dynamo.package import InlinedSource, SourceInfo
 
         def fn(x, y):
             return MY_LAMBDA(x) + y
@@ -842,6 +843,16 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         )
 
         expected_content = inspect.getsource(sys.modules[__name__])
+        source_fields = {field.name for field in dataclasses.fields(InlinedSource)}
+        self.assertIn("content", source_fields)
+        constructed_source = InlinedSource(
+            module=__name__,
+            firstlineno=fn.__code__.co_firstlineno,
+            lastlineno=fn.__code__.co_firstlineno + 2,
+            checksum="checksum",
+            content=expected_content,
+        )
+        self.assertEqual(constructed_source.content, expected_content)
 
         def check_source_info(source_info: SourceInfo) -> None:
             self.assertIsInstance(source_info, SourceInfo)
@@ -849,10 +860,11 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             for source in source_info.inlined_sources:
                 self.assertEqual(source.module, __name__)
                 self.assertEqual(source.content, expected_content)
+                self.assertNotIn(expected_content, vars(source).values())
 
         source_info = compiled_fn.source_info()
         check_source_info(source_info)
-        self.assertNotIn(expected_content.encode(), pickle.dumps(source_info))
+        self.assertIn(expected_content.encode(), pickle.dumps(source_info))
         compiled_fn.save_compiled_function(self.path())
         with open(self.path(), "rb") as f:
             compiled_fn = torch.compiler.load_compiled_function(f)
