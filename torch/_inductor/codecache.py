@@ -84,6 +84,7 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
     run_asm_build_object,
 )
+from torch._higher_order_ops.effects import is_cacheable_effectful_op
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, pick_vec_isa
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
@@ -1064,34 +1065,21 @@ class CacheabilityValidator:
         if self.fx_kwargs is not None:
             self._check_cache_key_object(self.fx_kwargs)
 
-    @staticmethod
-    def _is_cacheable_effectful_op(op: Any) -> bool:
-        if isinstance(op, torch._ops.OpOverload):
-            return op._name == "aten::_linalg_check_errors"
-        if isinstance(op, torch._ops.OpOverloadPacket):
-            return op._qualified_op_name == "aten::_linalg_check_errors"
-        if isinstance(op, str):
-            return op == "aten::_linalg_check_errors"
-        return False
-
     def validate_graph(self, include_constants: bool) -> None:
         for module in self.gm.modules():
             if not isinstance(module, torch.fx.GraphModule):
                 continue
             for node in module.graph.nodes:
-                if (
-                    isinstance(node.target, torch._ops.HigherOrderOperator)
-                    and not node.target.cacheable()
-                ):
-                    if (
+                if isinstance(node.target, torch._ops.HigherOrderOperator):
+                    is_cacheable_hop = node.target.cacheable() or (
                         node.target is torch.ops.higher_order.with_effects
                         and len(node.args) >= 2
-                        and self._is_cacheable_effectful_op(node.args[1])
-                    ):
-                        continue
-                    self.bypass(
-                        f"Can't cache HigherOrderOperator: {node.target.name()}"
+                        and is_cacheable_effectful_op(node.args[1])
                     )
+                    if not is_cacheable_hop:
+                        self.bypass(
+                            f"Can't cache HigherOrderOperator: {node.target.name()}"
+                        )
                 # TODO: this check is broken in two ways:
                 # 1. FX uses "get_attr" (with underscore), not "getattr"
                 # 2. It only checks for ScriptObject, not FakeScriptObject

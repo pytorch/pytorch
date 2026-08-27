@@ -3863,6 +3863,13 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(
             torch._dynamo.utils._torch_numpy_callable_cache_key(not_torch_numpy)
         )
+        cache_info = (
+            torch._dynamo.utils._torch_numpy_callable_cache_key_by_id.cache_info()
+        )
+        self.assertEqual(
+            cache_info.currsize,
+            0,
+        )
 
     def test_with_effects_linalg_check_errors_cacheable(self):
         graph = torch.fx.Graph()
@@ -3875,8 +3882,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                 torch.ops.aten._linalg_check_errors.default,
                 info,
                 "cholesky",
-                False,
             ),
+            {"is_matrix": False},
         )
         graph.output(out)
         gm = torch.fx.GraphModule({}, graph)
@@ -3902,13 +3909,6 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             BypassAOTAutogradCache, "Unsupported call_function target"
         ):
             check_cacheable(gm)
-        cache_info = (
-            torch._dynamo.utils._torch_numpy_callable_cache_key_by_id.cache_info()
-        )
-        self.assertEqual(
-            cache_info.currsize,
-            0,
-        )
 
     def test_numpy_wrapper_accepts_torch_numpy_alias_target(self):
         import torch._numpy as tnp
