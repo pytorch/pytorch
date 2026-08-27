@@ -337,7 +337,12 @@ class NbIntTests(TestCase):
         self.assertIn(
             "value cannot be converted to type int64_t without overflow", result
         )
-        self.assertEqual(result, eager_result)
+        # Eager now raises c10::Error, and under TORCH_SHOW_CPP_STACKTRACES the
+        # translator reports what() rather than what_without_backtrace(),
+        # appending a C++ backtrace; run_test.py sets that flag when it retries a
+        # single test. Only eager is trimmed - the compiled `result` is a literal
+        # Dynamo synthesizes, so it must stay one line.
+        self.assertEqual(result, eager_result.splitlines()[0])
 
     def test_tensor_dunder_int(self):
         def fn(x):

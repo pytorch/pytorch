@@ -2548,7 +2548,7 @@ StmtPtr SimplifierUnderContext::mutate(const ForPtr& v) {
 
   // save bounds info before this for-stmt
   //
-  // The same variable could have appeared in a if-stmt which the for-stmt is
+  // The same variable could have appeared in an if-stmt which the for-stmt is
   // nested inside, and we need to restore its bounds info after the for-stmt.
   //
   // An example,
@@ -2612,7 +2612,7 @@ StmtPtr SimplifierUnderContext::mutate(const ForPtr& v) {
     }
 
     if (block->nstmts() == 1) {
-      // if the stmt in the loop body is a if-stmt, try to move the branching
+      // if the stmt in the loop body is an if-stmt, try to move the branching
       // out of the loop
       if (auto cond = to<Cond>(block->front())) {
         StmtPtr reordered = handleForCondReordering(v, cond);

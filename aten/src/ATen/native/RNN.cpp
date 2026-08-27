@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/List.h>
+#include <ATen/Config.h>
 #include <ATen/Context.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/mps/MPSDevice.h>
@@ -15,7 +16,6 @@
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
-#include <ATen/Config.h>
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/Utils.h>
 #endif
