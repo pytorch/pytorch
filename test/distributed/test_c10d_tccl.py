@@ -305,6 +305,103 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
     def test_barrier(self):
         c10d.barrier()  # no data; should not raise
 
+    # ---- reduce (rooted reduction) --------------------------------------------
+    # Reduce lands on every rank (all-reduce), but only the root is guaranteed -
+    # assert there. fill -> SUM = ws(ws+1)/2, MAX = ws.
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.int64, torch.bool])
+    @parametrize("op", ["SUM", "MAX"])
+    def test_reduce_to_root(self, dtype, op):
+        root = self.world_size - 1
+        t = self._full(dtype)
+        c10d.reduce(t, dst=root, op=getattr(c10d.ReduceOp, op))
+        if self.rank == root:
+            if dtype == torch.bool:
+                # SUM/MAX = OR -> True
+                self._assert(t, True, dtype)
+            else:
+                ws = self.world_size
+                self._assert(t, ws * (ws + 1) // 2 if op == "SUM" else ws, dtype)
+
+    @parametrize("dtype", FLOAT_DTYPES)
+    def test_reduce_avg(self, dtype):
+        t = self._full(dtype)
+        c10d.reduce(t, dst=0, op=c10d.ReduceOp.AVG)
+        if self.rank == 0:
+            self._assert(t, (self.world_size + 1) / 2.0, dtype)
+
+    @parametrize("dtype", [torch.float32, torch.int64])
+    def test_reduce_product(self, dtype):
+        root = self.world_size - 1
+        t = self._full(dtype)
+        c10d.reduce(t, dst=root, op=c10d.ReduceOp.PRODUCT)
+        if self.rank == root:
+            expected = 1
+            for k in range(1, self.world_size + 1):
+                expected *= k
+            self._assert(t, expected, dtype)
+
+    # ---- gather (root collects every rank's tensor) ---------------------------
+    # Byte-copy -> any dtype. Root slot k == fill(k). Mesh-only; ring rejects it.
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.int64, torch.complex64])
+    def test_gather(self, dtype):
+        if _ring_topology():
+            self.skipTest("gather is mesh-only; ring rejects it "
+                          "(see ProcessGroupTcclContractTest)")
+        ws, r, dev, n = self.world_size, self.rank, self.device, 1024
+        inp = self._full(dtype, n=n)
+        if r == 0:
+            out = [torch.empty(n, dtype=dtype, device=dev) for _ in range(ws)]
+            c10d.gather(inp, gather_list=out, dst=0)
+            for k in range(ws):
+                exp = torch.full((n,), _fill_value(k, dtype), dtype=dtype, device=dev)
+                self.assertEqual(out[k], exp, **_tol(dtype))
+        else:
+            c10d.gather(inp, gather_list=None, dst=0)
+
+    def test_gather_nonzero_root(self):
+        if _ring_topology():
+            self.skipTest("gather is mesh-only; ring rejects it")
+        ws, r, dev, n = self.world_size, self.rank, self.device, 1024
+        root = ws - 1
+        inp = self._full(torch.float32, n=n)
+        if r == root:
+            out = [torch.empty(n, dtype=torch.float32, device=dev) for _ in range(ws)]
+            c10d.gather(inp, gather_list=out, dst=root)
+            for k in range(ws):
+                self.assertEqual(out[k], torch.full((n,), float(k + 1), device=dev))
+        else:
+            c10d.gather(inp, gather_list=None, dst=root)
+
+    # ---- scatter (root distributes a per-rank slice) --------------------------
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.int64, torch.complex64])
+    def test_scatter(self, dtype):
+        if _ring_topology():
+            self.skipTest("scatter is mesh-only; ring rejects it "
+                          "(see ProcessGroupTcclContractTest)")
+        ws, r, dev, n = self.world_size, self.rank, self.device, 1024
+        out = torch.empty(n, dtype=dtype, device=dev)
+        if r == 0:
+            sl = [torch.full((n,), _fill_value(k, dtype), dtype=dtype, device=dev)
+                  for k in range(ws)]
+            c10d.scatter(out, scatter_list=sl, src=0)
+        else:
+            c10d.scatter(out, scatter_list=None, src=0)
+        self._assert(out, _fill_value(r, dtype), dtype)
+
+    def test_scatter_nonzero_root(self):
+        if _ring_topology():
+            self.skipTest("scatter is mesh-only; ring rejects it")
+        ws, r, dev, n = self.world_size, self.rank, self.device, 1024
+        root = ws - 1
+        out = torch.empty(n, dtype=torch.float32, device=dev)
+        if r == root:
+            sl = [torch.full((n,), float(k + 1), dtype=torch.float32, device=dev)
+                  for k in range(ws)]
+            c10d.scatter(out, scatter_list=sl, src=root)
+        else:
+            c10d.scatter(out, scatter_list=None, src=root)
+        self.assertEqual(out, torch.full((n,), float(r + 1), device=dev))
+
     # ---- reduce_scatter, tensor form (FSDP reduce_scatter_tensor ->
     #      _reduce_scatter_base). Forces BOTH ring and mesh; world_size <= 2 makes
     #      ring fall back to mesh (still correct). Same fill -> same expected value
@@ -529,13 +626,85 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
                              torch.full((1024,), float(r + 1), device=self.device))
 
     # ---- large allreduce: crosses the 512 KB mesh chunk boundary + (ws>2) the ring
-    #      auto-switch (fp32 >=8 MB). Tiny dtype-matrix cells never reach either. -----
+    #      auto-switch (fp32 >=1 MB). Tiny dtype-matrix cells never reach either. -----
     def test_allreduce_large_fp32(self):
         n = 3 * 1024 * 1024  # 12 MB fp32 -> ring at ws>2, many 512 KB chunks
         t = torch.full((n,), float(self.rank + 1), dtype=torch.float32, device=self.device)
         c10d.all_reduce(t, op=c10d.ReduceOp.SUM)
         ws = self.world_size
         self.assertEqual(t, torch.full((n,), float(ws * (ws + 1) // 2), device=self.device))
+
+    # ---- ragged / chunk-boundary sizes on the RING path ----
+    # N full 512 KB chunks + a 1-elem ODD tail: exercises the double-ring A/B
+    # half-split and the ragged last chunk. Ring is FORCED (ws<=2 falls back to
+    # mesh, still correct). fill = rank+1 -> SUM = ws(ws+1)/2, MAX = ws.
+    # 128*1024 fp32 elems = one 512 KB chunk.
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_allreduce_ring_ragged(self, dtype):
+        # bf16 also drives the native __bf16 reduce.
+        with _force_algo("ring"):
+            n = 6 * 128 * 1024 + 1
+            t = torch.full((n,), float(self.rank + 1), dtype=dtype, device=self.device)
+            c10d.all_reduce(t, op=c10d.ReduceOp.SUM)
+            self._assert(t, self.world_size * (self.world_size + 1) // 2, dtype)
+
+    def test_allreduce_ring_chunk_plus_one(self):
+        # Exactly one full 512 KB chunk + a 1-element second chunk: the depth-2
+        # pipeline must fill/drain a piece far smaller than kChunkSize.
+        with _force_algo("ring"):
+            n = 128 * 1024 + 1
+            t = torch.full((n,), float(self.rank + 1), dtype=torch.float32, device=self.device)
+            c10d.all_reduce(t, op=c10d.ReduceOp.SUM)
+            ws = self.world_size
+            self.assertEqual(t, torch.full((n,), float(ws * (ws + 1) // 2), device=self.device))
+
+    @parametrize("op", ["SUM", "MAX"])
+    def test_reduce_scatter_ring_ragged(self, op):
+        # bidir ring_reduce_scatter with an odd, non-chunk-aligned per-rank chunk.
+        with _force_algo("ring"):
+            ws = self.world_size
+            n = 3 * 128 * 1024 + 1
+            inp = torch.full((n * ws,), float(self.rank + 1), dtype=torch.float32, device=self.device)
+            out = torch.empty(n, dtype=torch.float32, device=self.device)
+            c10d.reduce_scatter_tensor(out, inp, op=getattr(c10d.ReduceOp, op))
+            want = ws * (ws + 1) // 2 if op == "SUM" else ws
+            self.assertEqual(out, torch.full((n,), float(want), device=self.device))
+
+    def test_allgather_ring_ragged(self):
+        # bidir ring_all_gather with an odd, non-chunk-aligned per-rank shard.
+        with _force_algo("ring"):
+            ws = self.world_size
+            n = 3 * 128 * 1024 + 1
+            inp = torch.full((n,), float(self.rank + 1), dtype=torch.float32, device=self.device)
+            out = torch.empty(n * ws, dtype=torch.float32, device=self.device)
+            c10d.all_gather_into_tensor(out, inp)
+            for r in range(ws):
+                self.assertEqual(out[r * n:(r + 1) * n],
+                                 torch.full((n,), float(r + 1), device=self.device))
+
+    def test_send_recv_ragged_multichunk(self):
+        # depth-2 pipelined p2p over an odd, non-chunk-aligned payload (rank 0 -> 1).
+        ws, r, dev = self.world_size, self.rank, self.device
+        if ws < 2:
+            self.skipTest("send/recv needs world_size >= 2")
+        n = 3 * 128 * 1024 + 1
+        if r == 0:
+            c10d.send(torch.full((n,), 3.0, dtype=torch.float32, device=dev), dst=1)
+        elif r == 1:
+            t = torch.empty(n, dtype=torch.float32, device=dev)
+            c10d.recv(t, src=0)
+            self.assertEqual(t, torch.full((n,), 3.0, device=dev))
+
+    def test_ring_mesh_agree_ragged(self):
+        # Cross-check: ragged all_reduce under ring and mesh must agree and equal
+        # the analytic SUM - guards the bidir-ring result against the mesh path.
+        ws, n = self.world_size, 3 * 128 * 1024 + 1
+        exp = torch.full((n,), float(ws * (ws + 1) // 2), device=self.device)
+        for algo in ("ring", "mesh"):
+            with _force_algo(algo):
+                t = torch.full((n,), float(self.rank + 1), dtype=torch.float32, device=self.device)
+                c10d.all_reduce(t, op=c10d.ReduceOp.SUM)
+                self.assertEqual(t, exp, msg=f"algo={algo}")
 
     # ---- TCCL_FORCE_ALGO knob: both ring and mesh produce correct results ------
     # (correctness holds regardless of the algo actually chosen; at ws<=2 ring
@@ -668,21 +837,15 @@ class ProcessGroupTcclContractTest(TcclTestBase):
             c10d.all_reduce(t, op=c10d.ReduceOp.SUM)
 
     def test_stubbed_collectives_raise(self):
-        # Out-of-scope collectives (reduce/scatter — not on the DDP/TP/FSDP/PP/MoE
-        # path) must raise a clean NotImplemented-style error, not crash. The stubs
-        # raise at dispatch before any communication, so every rank calling them
-        # symmetrically is safe.
+        # allreduce_coalesced is unimplemented and must raise a clean error at
+        # dispatch, not crash. Every rank raises symmetrically.
         t = torch.ones(8, device=self.device)
         with self.assertRaises(Exception):
-            c10d.reduce(t, dst=0, op=c10d.ReduceOp.SUM)
-        with self.assertRaises(Exception):
-            c10d.scatter(t, scatter_list=None, src=0)
+            c10d.all_reduce_coalesced([t], op=c10d.ReduceOp.SUM)
 
     # ---- ring topology: the two mesh-only capabilities must reject cleanly -----
-    # These run only when the launcher brought the group up as a ring (sparse
-    # cabling). Each reject is a synchronous TORCH_CHECK in the collective's
-    # dispatch (before any RDMA), so every rank raises symmetrically -> no
-    # rendezvous, no deadlock, and tearDown's barrier still lines the ranks up.
+    # Only when the group came up as a ring. Each reject is a synchronous
+    # TORCH_CHECK at dispatch (before any RDMA), so every rank raises symmetrically.
     def test_ring_uneven_alltoall_rejects(self):
         if not _ring_topology():
             self.skipTest("ring-only: uneven alltoall is valid on a mesh")
@@ -717,6 +880,30 @@ class ProcessGroupTcclContractTest(TcclTestBase):
         src = (r + 2) % ws
         with self.assertRaises(Exception):
             c10d.recv(torch.empty(64, device=dev), src=src)
+
+    # gather / scatter are mesh-only; a ring rejects them synchronously at dispatch.
+    def test_ring_gather_rejects(self):
+        if not _ring_topology():
+            self.skipTest("ring-only: gather is valid on a mesh")
+        ws, r, dev, n = self.world_size, self.rank, self.device, 256
+        inp = torch.full((n,), float(r + 1), device=dev)
+        with self.assertRaises(Exception):
+            if r == 0:
+                c10d.gather(inp, gather_list=[torch.empty(n, device=dev) for _ in range(ws)], dst=0)
+            else:
+                c10d.gather(inp, gather_list=None, dst=0)
+
+    def test_ring_scatter_rejects(self):
+        if not _ring_topology():
+            self.skipTest("ring-only: scatter is valid on a mesh")
+        ws, r, dev, n = self.world_size, self.rank, self.device, 256
+        out = torch.empty(n, device=dev)
+        with self.assertRaises(Exception):
+            if r == 0:
+                c10d.scatter(out, scatter_list=[torch.full((n,), float(k + 1), device=dev)
+                                                for k in range(ws)], src=0)
+            else:
+                c10d.scatter(out, scatter_list=None, src=0)
 
 
 instantiate_parametrized_tests(ProcessGroupTcclCorrectnessTest)
