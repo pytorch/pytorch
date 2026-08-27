@@ -867,9 +867,7 @@ def create_fx_config(
         boxed_forward_device_index = None
     else:
         forward_cudagraphs = compiler_config_extra.forward_cudagraphs
-        cudagraphs_post_compile_override = (
-            compiler_config_extra.backward_cudagraphs_post_compile_override
-        )
+        cudagraphs_post_compile_override = compiler_config_extra.cudagraphs_bwd_override
         boxed_forward_device_index = compiler_config_extra.forward_device_index
     fx_config: _CompileFxKwargs = {
         "cudagraphs": forward_cudagraphs,

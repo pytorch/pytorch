@@ -3645,7 +3645,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
         compiler_config_extra = dataclasses.replace(
             compiler_config_extra,
-            backward_cudagraphs_post_compile_override=False,
+            cudagraphs_bwd_override=False,
         )
         captured_kwargs.clear()
         with patch.object(

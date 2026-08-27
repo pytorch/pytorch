@@ -2899,9 +2899,6 @@ class CompilerConfigExtra:
     # Graph-local forward decision serialized for post_compile cache hits.
     # None means post_compile uses forward_cudagraphs.
     forward_cudagraphs_post_compile_override: bool | None
-    # Graph-local backward decision, when it differs from the shared forward
-    # decision due to an annotation or regional configuration.
-    backward_cudagraphs_post_compile_override: bool | None
     # Temporarily enable region-only graph partitioning when a forward region's
     # cudagraph preference differs from the top level.
     enable_forward_region_graph_partition: bool
@@ -2910,6 +2907,7 @@ class CompilerConfigExtra:
     forward_is_cudagraph_partitioned: BoxedBool
     graph_id: int
     forward_device_index: BoxedDeviceIndex
+    cudagraphs_bwd_override: bool | None = None
 
 
 def create_compiler_config_extra(
@@ -2927,7 +2925,7 @@ def create_compiler_config_extra(
     # the final determination if cudagraphs actually can be used or not.
     forward_cudagraphs = BoxedBool(config.triton.cudagraphs)
 
-    backward_cudagraphs_post_compile_override: bool | None = None
+    cudagraphs_bwd_override: bool | None = None
     cudagraph_annotation = (
         dynamo_graph_metadata.get("cudagraph_annotation")
         if dynamo_graph_metadata is not None
@@ -2948,8 +2946,7 @@ def create_compiler_config_extra(
 
     # Override cudagraphs BoxedBool based on override_cudagraphs annotation.
     # Disabling fwd disables bwd (copying activations isn't profitable),
-    # so backward_cudagraphs_post_compile_override is only needed for
-    # fwd=True / bwd=False.
+    # so cudagraphs_bwd_override is only needed for fwd=True / bwd=False.
     if cudagraph_annotation is not None:
         if (
             cudagraph_annotation.fwd is not None
@@ -2972,7 +2969,7 @@ def create_compiler_config_extra(
             and cudagraph_annotation.bwd is not None
             and not cudagraph_annotation.bwd
         ):
-            backward_cudagraphs_post_compile_override = cudagraph_annotation.bwd
+            cudagraphs_bwd_override = cudagraph_annotation.bwd
             log_cudagraph_skip_and_bump_counter(
                 "disabling cudagraphs for backward due to override_cudagraphs annotation"
             )
@@ -3027,9 +3024,7 @@ def create_compiler_config_extra(
         forward_cudagraphs=forward_cudagraphs,
         graph_id=graph_id,
         forward_device_index=forward_device_index,
-        backward_cudagraphs_post_compile_override=(
-            backward_cudagraphs_post_compile_override
-        ),
+        cudagraphs_bwd_override=cudagraphs_bwd_override,
         forward_is_cudagraph_partitioned=forward_is_cudagraph_partitioned,
         top_level_cudagraphs=top_level_cudagraphs,
         enable_forward_region_graph_partition=enable_forward_region_graph_partition,
@@ -3254,12 +3249,12 @@ def compile_fx_backward(
             backward_cudagraphs = BoxedBool(False)
             backward_cudagraphs_post_compile_override = False
         # Check if cudagraphs should be overridden for backward via annotation
-        if compiler_config_extra.backward_cudagraphs_post_compile_override is not None:
+        if compiler_config_extra.cudagraphs_bwd_override is not None:
             backward_cudagraphs = BoxedBool(
-                compiler_config_extra.backward_cudagraphs_post_compile_override
+                compiler_config_extra.cudagraphs_bwd_override
             )
             backward_cudagraphs_post_compile_override = (
-                compiler_config_extra.backward_cudagraphs_post_compile_override
+                compiler_config_extra.cudagraphs_bwd_override
             )
 
         # A nested region in the backward may opt into cudagraphs (via
