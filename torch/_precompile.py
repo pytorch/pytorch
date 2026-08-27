@@ -1146,6 +1146,11 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "BACKEND",
         "TRACER",
         "TRAINING",
+        "_DYNAMO_BACKENDS",
+        "_DYNAMO_BACKEND_IDS",
+        "_DYNAMO_PYTHON_VERSION",
+        "_DYNAMO_STATE",
+        "_DYNAMO_TORCH_VERSION",
         "SERVING_MODE",
         "UNREACHABLE_WITHOUT_INSTALL",
         *make_fx_metadata,
@@ -1165,7 +1170,13 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         if not isinstance(target, ast.Name):
             continue
         if target.id in wanted:
-            found[target.id] = ast.literal_eval(node.value)
+            try:
+                found[target.id] = ast.literal_eval(node.value)
+            except (SyntaxError, ValueError) as e:
+                raise PrecompileError(
+                    f"python_code has invalid calling-convention metadata "
+                    f"{target.id!r}."
+                ) from e
         else:
             # Not a metadata name we consume (the driver section emits only
             # function defs today, but a future artifact revision could add a
@@ -1186,12 +1197,57 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     required = {"BACKEND", "TRACER"}
     if tracer == "make_fx":
         required = {"BACKEND", *make_fx_metadata}
+    else:
+        required.update(
+            {
+                "TRAINING",
+                "_DYNAMO_BACKENDS",
+                "_DYNAMO_BACKEND_IDS",
+                "_DYNAMO_PYTHON_VERSION",
+                "_DYNAMO_STATE",
+                "_DYNAMO_TORCH_VERSION",
+            }
+        )
     missing = required - found.keys()
     if missing:
         raise PrecompileError(
             f"python_code is missing calling-convention metadata {sorted(missing)}; "
             "it does not look like a torch.compiler.precompile artifact."
         )
+    if tracer == "dynamo":
+        if type(found["TRAINING"]) is not bool:
+            raise PrecompileError(
+                "python_code has invalid calling-convention metadata 'TRAINING'."
+            )
+        backend_ids = found["_DYNAMO_BACKEND_IDS"]
+        if not (
+            isinstance(backend_ids, tuple)
+            and all(isinstance(item, str) for item in backend_ids)
+        ):
+            raise PrecompileError(
+                "python_code has invalid calling-convention metadata "
+                "'_DYNAMO_BACKEND_IDS'."
+            )
+        if found["_DYNAMO_BACKENDS"] != {}:
+            raise PrecompileError(
+                "python_code has invalid calling-convention metadata "
+                "'_DYNAMO_BACKENDS'."
+            )
+        python_version = found["_DYNAMO_PYTHON_VERSION"]
+        if not (
+            isinstance(python_version, tuple)
+            and len(python_version) == 2
+            and all(type(part) is int for part in python_version)
+        ):
+            raise PrecompileError(
+                "python_code has invalid calling-convention metadata "
+                "'_DYNAMO_PYTHON_VERSION'."
+            )
+        for name in ("_DYNAMO_STATE", "_DYNAMO_TORCH_VERSION"):
+            if not isinstance(found[name], str):
+                raise PrecompileError(
+                    f"python_code has invalid calling-convention metadata {name!r}."
+                )
     return found
 
 
@@ -1731,6 +1787,7 @@ def _build_dynamo_python_source(
         f"SERVING_MODE = {state.serving_mode!r}",
         f"UNREACHABLE_WITHOUT_INSTALL = {unreachable!r}",
         f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}",
+        f"_DYNAMO_TORCH_VERSION = {torch.__version__!r}",
         f"_DYNAMO_BACKEND_IDS = {tuple(backend_ids)!r}",
     ]
     namespaced_sources = namespace_module_names(
@@ -1799,6 +1856,46 @@ def _dynamo_cache_bytes(
 def _dynamo_input_contract(
     example_inputs: Sequence[ExampleInput],
 ) -> _DynamoInputContract | None:
+    def has_storage_alias(values: object) -> bool:
+        leaves = pytree.tree_leaves(values)
+        tensors = [leaf for leaf in leaves if isinstance(leaf, torch.Tensor)]
+        for leaf in leaves:
+            if isinstance(leaf, torch.nn.Module):
+                tensors.extend(leaf.parameters())
+                tensors.extend(leaf.buffers())
+        storage_ranges: dict[tuple[str, int | None], list[tuple[int, int]]] = {}
+        storage_ids: set[tuple[str, int | None, int]] = set()
+        seen_objects: set[int] = set()
+        for tensor in tensors:
+            object_id = id(tensor)
+            if object_id in seen_objects:
+                continue
+            seen_objects.add(object_id)
+            try:
+                storage = tensor.untyped_storage()
+                start = storage.data_ptr()
+                size = storage.nbytes()
+            except RuntimeError as e:
+                raise PrecompileError(
+                    "precompile tracer='dynamo' cannot verify storage aliasing for "
+                    "this tensor input."
+                ) from e
+            storage_key = (tensor.device.type, tensor.device.index, storage._cdata)
+            if storage_key in storage_ids:
+                return True
+            storage_ids.add(storage_key)
+            if start != 0 and size > 0:
+                storage_ranges.setdefault(
+                    (tensor.device.type, tensor.device.index), []
+                ).append((start, start + size))
+        for ranges in storage_ranges.values():
+            furthest_end = 0
+            for start, end in sorted(ranges):
+                if start < furthest_end:
+                    return True
+                furthest_end = max(furthest_end, end)
+        return False
+
     def module_signature(module: torch.nn.Module) -> tuple[object, ...]:
         tensors: list[tuple[str, str, torch.Tensor]] = [
             ("parameter", name, tensor)
@@ -1833,6 +1930,11 @@ def _dynamo_input_contract(
 
     groups: dict[str, list[list[object]]] = {}
     for example in example_inputs:
+        if has_storage_alias((example.args, example.kwargs)):
+            raise PrecompileError(
+                "precompile tracer='dynamo' does not support storage aliasing between "
+                "distinct tensor inputs."
+            )
         leaves, spec = pytree.tree_flatten((example.args, example.kwargs))
         try:
             serialized_spec = pytree.treespec_dumps(spec)
@@ -2060,6 +2162,23 @@ def _precompile_dynamo(
                 names.update(loaded_attribute_names(constant))
         return names
 
+    def mutates_globals(code: CodeType) -> bool:
+        if any(
+            instruction.opname in ("STORE_GLOBAL", "DELETE_GLOBAL")
+            for instruction in dis.get_instructions(code)
+        ):
+            return True
+        return any(
+            mutates_globals(const)
+            for const in code.co_consts
+            if isinstance(const, CodeType)
+        )
+
+    if mutates_globals(target.__code__):
+        raise PrecompileError(
+            "precompile tracer='dynamo' Python functions cannot mutate globals."
+        )
+
     def has_unmodeled_local_access(code: CodeType, local_name: str) -> bool:
         if local_name in code.co_cellvars:
             return True
@@ -2211,6 +2330,87 @@ def _precompile_dynamo(
             resolved = resolve_static_path(function.__globals__[path[0]], path[1:])
             values.append((".".join(path), *resolved))
         return values
+
+    def scan_imported_modules(function: types.FunctionType) -> bool:
+        instructions = list(dis.get_instructions(function.__code__))
+        for index, instruction in enumerate(instructions):
+            if instruction.opname != "IMPORT_NAME" or not isinstance(
+                instruction.argval, str
+            ):
+                continue
+            level = (
+                instructions[index - 2].argval
+                if index >= 2
+                and instructions[index - 2].opname == "LOAD_CONST"
+                and isinstance(instructions[index - 2].argval, int)
+                else 0
+            )
+            module_name = instruction.argval
+            if level:
+                package = function.__globals__.get("__package__")
+                if not isinstance(package, str):
+                    continue
+                try:
+                    module_name = importlib.util.resolve_name(
+                        "." * level + module_name, package
+                    )
+                except ImportError:
+                    continue
+            imported_module = sys.modules.get(module_name)
+            if imported_module is None:
+                raise NotImplementedError(
+                    "precompile tracer='dynamo' cannot analyze a locally imported "
+                    f"module that is not already loaded: {module_name!r}."
+                )
+            following = instructions[index + 1 :]
+            store = next(
+                (
+                    candidate
+                    for candidate in following
+                    if candidate.opname in ("STORE_DEREF", "STORE_FAST", "STORE_NAME")
+                    and isinstance(candidate.argval, str)
+                ),
+                None,
+            )
+            if store is None:
+                raise NotImplementedError(
+                    "precompile tracer='dynamo' cannot analyze a locally imported "
+                    "module used without a local binding."
+                )
+            paths = loaded_local_paths(function.__code__, store.argval)
+            if not paths:
+                raise NotImplementedError(
+                    "precompile tracer='dynamo' cannot analyze a locally imported "
+                    "module passed or aliased as a value; access its attributes directly."
+                )
+            for path in paths:
+                value, receiver, aliases_input, unresolved = resolve_static_path(
+                    imported_module, path
+                )
+                if aliases_input:
+                    return True
+                if unresolved:
+                    if receiver_reaches_input(value, set()):
+                        return True
+                    raise NotImplementedError(
+                        "precompile tracer='dynamo' cannot analyze dynamic attribute "
+                        "access through a locally imported module."
+                    )
+                if reaches_input(value, set(), receiver):
+                    return True
+        return False
+
+    import_scan_active: set[int] = set()
+
+    def imported_modules_reach_input(function: types.FunctionType) -> bool:
+        function_id = id(function)
+        if function_id in import_scan_active:
+            return False
+        import_scan_active.add(function_id)
+        try:
+            return scan_imported_modules(function)
+        finally:
+            import_scan_active.remove(function_id)
 
     def is_library_module(module_name: str | None) -> bool:
         root = (module_name or "").partition(".")[0]
@@ -2429,13 +2629,23 @@ def _precompile_dynamo(
                     )
                 continue
             if isinstance(value, types.FunctionType):
-                if dynamic_module_access_reaches_input(value):
-                    return True
+                if hasattr(value, "_torchdynamo_orig_callable"):
+                    continue
                 function_globals = value.__globals__
                 next_scope = function_globals
                 library_function = function_globals is not target.__globals__ and (
                     is_library_module(function_globals.get("__name__"))
                 )
+                if not may_enter_external and not library_function:
+                    continue
+                if not library_function and dynamic_module_access_reaches_input(value):
+                    return True
+                if not library_function and imported_modules_reach_input(value):
+                    return True
+                if not library_function and mutates_globals(value.__code__):
+                    raise PrecompileError(
+                        "precompile tracer='dynamo' Python functions cannot mutate globals."
+                    )
                 input_behavior_names.update(loaded_attribute_names(value.__code__))
                 next_may_enter_external = (
                     may_enter_external and not library_function
@@ -2504,6 +2714,10 @@ def _precompile_dynamo(
                         return True
                     if reachable_object_ids(library_values) & input_ids:
                         return True
+                    work.extend(
+                        (item, None, False, next_scope, False)
+                        for item in library_values
+                    )
                     continue
                 for (
                     _,
@@ -2655,7 +2869,24 @@ def _precompile_dynamo(
             )
         return False
 
+    if imported_modules_reach_input(target):
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot capture an explicit input that aliases "
+            "the Python environment through a locally imported module."
+        )
     target_references = referenced_globals(target)
+    default_ids = reachable_object_ids(defaults)
+    default_aliases = [
+        name
+        for name, value, _, _, _ in target_references
+        if reachable_object_ids([value]) & default_ids
+    ]
+    if default_aliases:
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot preserve identity between a function "
+            "default and the Python environment. Pass the value explicitly instead. "
+            f"Aliased global: {default_aliases[0]!r}."
+        )
     aliased_globals = [
         name
         for name, value, receiver, aliases_input, unresolved in target_references
@@ -2672,6 +2903,30 @@ def _precompile_dynamo(
             "the Python environment; pass the value only as an input. Aliased global: "
             f"{aliased_globals[0]!r}."
         )
+    input_values = [
+        value
+        for example in examples
+        for value in pytree.tree_leaves((example.args, example.kwargs))
+    ]
+    for value in input_values:
+        value_type = type(value)
+        if value_type.__module__ == "builtins" or value_type is torch.Tensor:
+            continue
+        for cls in value_type.__mro__:
+            if is_library_module(cls.__module__):
+                continue
+            for name, behavior in vars(cls).items():
+                if (
+                    name.startswith("__")
+                    and name.endswith("__")
+                    and name not in ("__del__", "__init__", "__new__")
+                    and reaches_input(behavior, set())
+                ):
+                    raise PrecompileError(
+                        "precompile tracer='dynamo' cannot preserve an input-derived "
+                        "identity relation between input behavior and the Python "
+                        "environment."
+                    )
     if dynamic_module_access_reaches_input(target):
         raise PrecompileError(
             "precompile tracer='dynamo' cannot preserve an input-derived identity "
@@ -2739,18 +2994,6 @@ def _precompile_dynamo(
             if resolved is value:
                 return module_name, path
         return None
-
-    def mutates_globals(code: CodeType) -> bool:
-        if any(
-            instruction.opname in ("STORE_GLOBAL", "DELETE_GLOBAL")
-            for instruction in dis.get_instructions(code)
-        ):
-            return True
-        return any(
-            mutates_globals(const)
-            for const in code.co_consts
-            if isinstance(const, CodeType)
-        )
 
     def disabled_function_state(
         global_name: str, function: Callable[..., object]
@@ -3701,6 +3944,20 @@ class _PrecompileApi:
         meta = _parse_artifact_metadata(python_code)
         backend = cast(str, meta["BACKEND"])
         tracer = cast(str, meta.get("TRACER", "make_fx"))
+        if tracer == "dynamo":
+            python_version = cast(tuple[int, int], meta["_DYNAMO_PYTHON_VERSION"])
+            if python_version != sys.version_info[:2]:
+                raise PrecompileError(
+                    "precompile artifact was produced on Python "
+                    f"{python_version[0]}.{python_version[1]}, but is being loaded on "
+                    f"Python {sys.version_info[0]}.{sys.version_info[1]}."
+                )
+            torch_version = cast(str, meta["_DYNAMO_TORCH_VERSION"])
+            if torch_version != torch.__version__:
+                raise PrecompileError(
+                    f"precompile artifact was produced by torch {torch_version}, but "
+                    f"is being loaded by torch {torch.__version__}."
+                )
 
         # weights_only=True is safe (plain str/int/bytes dict). The inner artifact bytes
         # are the inductor save_cache_artifacts bundle, used below to prime the kernel
