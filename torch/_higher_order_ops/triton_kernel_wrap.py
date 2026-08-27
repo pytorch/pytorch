@@ -1407,6 +1407,33 @@ def get_kernel(kernel_idx: int) -> "TritonKernelType":
     return kernel_side_table.get_kernel(kernel_idx)
 
 
+def _get_triton_dispatcher_metadata(kernel: Any) -> dict[str, Any] | None:
+    kernel_candidate = kernel
+    seen = set()
+    while kernel_candidate is not None:
+        kernel_id = id(kernel_candidate)
+        if kernel_id in seen:
+            break
+        seen.add(kernel_id)
+        metadata = getattr(kernel_candidate, "__triton_dispatcher_kernel__", None)
+        if isinstance(metadata, dict):
+            return metadata
+        kernel_candidate = getattr(kernel_candidate, "fn", None)
+    return None
+
+
+def _python_visible_arg_names(kernel: Any) -> list[str]:
+    arg_names = list(kernel.arg_names)
+    metadata = _get_triton_dispatcher_metadata(kernel)
+    if metadata is None:
+        return arg_names
+
+    implicit_arg_names = tuple(metadata.get("python_implicit_arg_names", ()))
+    if tuple(arg_names[: len(implicit_arg_names)]) == implicit_arg_names:
+        return arg_names[len(implicit_arg_names) :]
+    return arg_names
+
+
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_mutation_dense(
     *,
@@ -1485,7 +1512,7 @@ def triton_kernel_wrapper_mutation_dense(
     constant_args = constant_args.copy()
     launch_kwargs = () if launch_kwargs is None else launch_kwargs
     # pyrefly: ignore [missing-attribute]
-    for name in kernel.arg_names:
+    for name in _python_visible_arg_names(kernel):
         if name in launch_kwargs:
             # Preserve the original kwarg form for launch kwargs. Triton's
             # binder uses the kwarg to bind the kernel parameter, and
@@ -1599,6 +1626,31 @@ def get_mutated_tensors(
 ) -> list[str]:
     kernel = kernel_side_table.get_kernel(kernel_idx)
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
+    metadata = _get_triton_dispatcher_metadata(kernel)
+    if metadata is not None and "mutates_args" in metadata:
+        declared_mutations = metadata["mutates_args"]
+        visible_names = _python_visible_arg_names(kernel)
+        invalid_mutations = [
+            name for name in declared_mutations if name not in visible_names
+        ]
+        if invalid_mutations:
+            raise ValueError(
+                "mutates_args contains unknown dispatcher arguments: "
+                f"{invalid_mutations}"
+            )
+        for name in declared_mutations:
+            if name not in kwargs:
+                raise ValueError(
+                    f"mutates_args '{name}' not found in kwargs; "
+                    f"available keys: {sorted(kwargs.keys())}"
+                )
+            if not isinstance(kwargs.get(name), Tensor):
+                raise ValueError(
+                    f"mutates_args '{name}' expected Tensor but got "
+                    f"{type(kwargs.get(name)).__name__}"
+                )
+        return list(declared_mutations)
+
     tensor_accesses = identify_accessed_tensors(
         kernel, {**kwargs, **constant_args}, tma_descriptor_metadata
     )
@@ -2111,7 +2163,8 @@ class TritonHOPifier:
 
             iter_kernel = iter_kernel.fn
 
-        jit_arg_names = set(iter_kernel.arg_names)
+        user_arg_names = _python_visible_arg_names(iter_kernel)
+        jit_arg_names = set(user_arg_names)
 
         # Process the @triton.heuristics decorator:
         # - We know there is only 1 autotuner decorator here
@@ -2132,7 +2185,7 @@ class TritonHOPifier:
             # Copy the configs, we are going to be modifying them
             new_configs = copy.deepcopy(variable.kernel.configs)
 
-            named_args = dict(zip(variable.kernel.arg_names, args))
+            named_args = dict(zip(user_arg_names, args))
 
             # Iterate through all of the heuristics wrappers that come after the autotune wrapper
             iter_kernel = variable.kernel.fn
@@ -2290,7 +2343,7 @@ class TritonHOPifier:
             or variable.kernel.early_config_prune != default_early_config_prune
         ):
             # Prune the configs
-            named_args = dict(zip(variable.kernel.arg_names, args))
+            named_args = dict(zip(user_arg_names, args))
 
             # The source information is important here so the guards are installed correctly
 
@@ -2361,10 +2414,10 @@ class TritonHOPifier:
                     f"{config_conflicts!r}."
                 )
 
-        positional_arg_names = iter_kernel.arg_names[: len(args)]
-        if len(args) > len(iter_kernel.arg_names):
+        positional_arg_names = user_arg_names[: len(args)]
+        if len(args) > len(user_arg_names):
             self.raise_unsupported(
-                f"{iter_kernel.__name__}() takes {len(iter_kernel.arg_names)} "
+                f"{iter_kernel.__name__}() takes {len(user_arg_names)} "
                 f"positional arguments but {len(args)} were given"
             )
 
@@ -2380,7 +2433,7 @@ class TritonHOPifier:
         # kwargs are included here so Inductor can later recover their values
         # when materializing target-specific backend options.
 
-        combined_args_raw = {**dict(zip(iter_kernel.arg_names, args)), **kwargs}
+        combined_args_raw = {**dict(zip(user_arg_names, args)), **kwargs}
 
         # precompute the grid for the kernel
         configs = (

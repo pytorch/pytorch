@@ -18,7 +18,10 @@ import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from torch._dynamo import config as dynamo_config
 from torch._higher_order_ops.triton_kernel_wrap import (
+    _python_visible_arg_names,
     generate_ttir,
+    get_mutated_tensors,
+    kernel_side_table,
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
 )
@@ -241,6 +244,45 @@ class KernelTests(torch._inductor.test_case.TestCase):
             f"expected triton.compile options to include "
             f"{name}={expected_value!r}, got {options!r}",
         )
+
+    def test_dispatcher_metadata_controls_binding_and_mutation(self):
+        class FakeDispatcherKernel:
+            arg_names = [
+                "core_id",
+                "exe_grid",
+                "query",
+                "output",
+            ]
+            __triton_dispatcher_kernel__ = {
+                "python_implicit_arg_names": ("core_id", "exe_grid"),
+                "mutates_args": ("output",),
+            }
+
+        kernel = FakeDispatcherKernel()
+        self.addCleanup(kernel_side_table.reset_table)
+        kernel_side_table.reset_table()
+        kernel_idx = kernel_side_table.add_kernel(kernel)
+        constant_args_idx = kernel_side_table.add_constant_args({})
+        query = torch.empty(2)
+        output = torch.empty(2)
+
+        self.assertEqual(
+            _python_visible_arg_names(kernel),
+            ["query", "output"],
+        )
+        with mock.patch(
+            "torch._higher_order_ops.triton_kernel_wrap.identify_accessed_tensors"
+        ) as identify_accessed_tensors:
+            self.assertEqual(
+                get_mutated_tensors(
+                    kernel_idx,
+                    constant_args_idx,
+                    {"query": query, "output": output},
+                    {},
+                ),
+                ["output"],
+            )
+        identify_accessed_tensors.assert_not_called()
 
     @requires_gpu
     def test_triton_kernel_with_kernel_param(self):
