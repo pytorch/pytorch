@@ -1,6 +1,10 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -11,12 +15,26 @@ from torch.testing._internal.inductor_utils import requires_triton
 from torch.utils._triton import has_triton
 
 
+def _require_device_triton(device):
+    try:
+        device_interface = get_interface_for_device(torch.device(device).type)
+    except NotImplementedError as exc:
+        raise unittest.SkipTest(f"requires Triton support for {device}") from exc
+    if not device_interface.is_triton_capable(device):
+        raise unittest.SkipTest(f"requires Triton support for {device}")
+    try:
+        device_interface.raise_if_triton_unavailable(device)
+    except TritonUnavailableError as exc:
+        raise unittest.SkipTest(str(exc)) from exc
+
+
 class TestTritonSyntacticallyValid(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
     @requires_triton()
     def test_triton_sqrt(self, device):
+        _require_device_triton(device)
         # https://github.com/pytorch/pytorch/issues/142328
         import math
 
