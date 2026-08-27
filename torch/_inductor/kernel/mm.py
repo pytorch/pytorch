@@ -25,6 +25,7 @@ from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemm
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
+from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import (
     Buffer,
     ChoiceCaller,
@@ -400,7 +401,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
 
-    if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout):
+    if out_dtype is None and _use_small_mm_pointwise(m, k, n, layout.device.type):
         counters["inductor"]["decompose_mm_pointwise"] += 1
         mat1 = L.unsqueeze(mat1, -1)
         mat2 = L.unsqueeze(mat2, 0)
@@ -452,7 +453,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         # Triton will ever win.
         #
         # To be conservative we increase this threshold for N/M by 2.
-        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "exhaustive"
+        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"
         if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
             templates_to_use.append(mm_template)
 
@@ -1100,21 +1101,7 @@ def tuned_scaled_mm_v2(
     #   - any non-fp32 block scale
     # The eager op is called directly so it keeps its native v2 scale_b
     # convention, unlike the v1 aten__fp8_mm choice used on the supported path.
-    def check_supported_recipe(recipe: list[int]) -> bool:
-        disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])
-        return all(ScalingType(r) not in disallowed for r in recipe)
-
-    is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
-    supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
-        recipe_b
-    )
-    if (
-        any(s != 0 for s in swizzle_a)
-        or any(s != 0 for s in swizzle_b)
-        or not supported_recipe
-        or not is_single_level_scale
-        or scale_a[0].dtype != torch.float32
-    ):
+    def fallback():
         # contraction_dim is a non-optional int[] in the schema (default []);
         # this lowering defaults it to None, so coerce before the eager call.
         fallback_contraction_dim = [] if contraction_dim is None else contraction_dim
@@ -1132,6 +1119,37 @@ def tuned_scaled_mm_v2(
             fallback_contraction_dim,
             use_fast_accum,
         )
+
+    def check_supported_recipe(recipe: list[int]) -> bool:
+        disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])
+        return all(ScalingType(r) not in disallowed for r in recipe)
+
+    is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
+    supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
+        recipe_b
+    )
+    if (
+        any(s != 0 for s in swizzle_a)
+        or any(s != 0 for s in swizzle_b)
+        or not supported_recipe
+        or not is_single_level_scale
+        or scale_a[0].dtype != torch.float32
+    ):
+        return fallback()
+
+    # BlockWise128x128 cuBLAS scales pad the K-dim blocks to a multiple of 4.
+    # _normalize_blockwise_scale strips that pad, but only when K is statically
+    # known; with a dynamic K it cannot prove the cuBLAS layout and would hand
+    # the padded layout to the Triton template, which indexes it unpadded.
+    # Defer to the eager op, which handles the cuBLAS layout natively.
+    if (
+        ScalingType.BlockWise128x128
+        in (ScalingType(recipe_a[0]), ScalingType(recipe_b[0]))
+        and PythonWrapperCodegen.statically_known_int_or_none(mat_a.get_size()[1])
+        is None
+    ):
+        return fallback()
+
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
@@ -1159,12 +1177,13 @@ def tuned_scaled_mm_v2(
         ScalingType(recipe_b[0]),
     )
 
+    bias_real = realize_inputs(bias) if bias else None
+
     input_nodes: list[Any]
 
     if not bias:
         input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real]
     else:
-        bias_real = realize_inputs(bias)
         input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real, bias_real]
 
     # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
@@ -1367,12 +1386,13 @@ def tuned_scaled_mm(
 
     scale_a_real, scale_b_real = realize_inputs(scale_a, scale_b)
 
+    bias_real = realize_inputs(bias) if bias else None
+
     input_nodes: list[Any]
 
     if not bias:
         input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real]
     else:
-        bias_real = realize_inputs(bias)
         input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real, bias_real]
 
     # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
