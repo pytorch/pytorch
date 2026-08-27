@@ -85,12 +85,17 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       and never compiles a new variant. Graph breaks are not supported yet. Compiled graphs and
       kernels remain Python source; guard trees and transformed Dynamo bytecode are
       stored as opaque inline data because they have no Python-source representation.
+      Distinct tensor inputs must not share or overlap storage, and an explicit input
+      must not also be reachable through the Python environment. Statically visible
+      identity relations are rejected, as are Python functions that mutate globals.
       This initial path accepts a Python function with positional tensor/scalar arguments
       and containers of those values; closures and ``nn.Module`` arguments are not
       supported yet because their identity guards are not serializable. Function defaults
       must be recursive immutable literals; mutable or user-defined values must be passed
-      explicitly rather than used as defaults. Tensor-valued globals are also rejected
-      because every tensor must be an explicit input.
+      explicitly rather than used as defaults. Recursive literal globals are captured by
+      value, but a default cannot share identity with a global. Tensor-valued globals are
+      also rejected because every tensor must be an explicit input. Dynamo artifacts are
+      tied to the Python minor and torch version used to produce them.
 
       Pass ``training=True`` with ``tracer="dynamo"`` and ``backend="inductor"`` to
       capture differentiable graphs. Each compiled segment contains readable Inductor
