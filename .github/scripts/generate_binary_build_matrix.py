@@ -51,7 +51,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
 # CUDA versions without a Windows installer on the ossci-windows bucket yet.
 CUDA_ARCHES_NO_WINDOWS = ["13.4"]
 
-ROCM_ARCHES = ["7.2", "7.14"]
+ROCM_ARCHES = ["7.14", "10.0"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -102,6 +102,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     ),
     # dependency on latest patch version for (major, minor)
     "7.14": ("rocm[libraries,device-all]==7.14.*"),
+    "10.0": ("rocm[libraries,device-all]==10.0.*"),
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.0 | "
         "intel-cmplr-lib-ur==2026.1.0 | "
