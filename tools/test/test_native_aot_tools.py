@@ -351,21 +351,17 @@ class TestExportJobs(unittest.TestCase):
 
 
 class TestArch(unittest.TestCase):
-    def test_effective_arch_answers_identically_for_every_kind(self):
-        # The invariant the refusal above buys: with no --arch, resolution is
-        # device detection, which does not vary by kind -- so a tree can never
-        # disagree with its own sidecars. This is what a per-kind env var broke.
-        cutedsl = toolchains.get_toolchain("cutedsl")
-        no_env = toolchains.Toolchain()
-        self.assertIsNone(no_env.ARCH_ENV_VAR)
+    def test_effective_arch_cannot_vary_by_kind(self):
+        # The invariant the refusal below buys, and why the resolver takes no
+        # toolchain at all: with no --arch, resolution is device detection, which
+        # cannot vary by kind because nothing kind-specific is consulted. A
+        # per-kind answer is what let a tree disagree with its own sidecars.
+        self.assertNotIn("tc", export._effective_arch.__code__.co_varnames)
         with _no_ambient_arch(device="sm_100"):
-            self.assertEqual(export._effective_arch(None, cutedsl), "sm_100")
-            self.assertEqual(export._effective_arch(None, no_env), "sm_100")
             self.assertEqual(export._effective_arch(None), "sm_100")
-        # An explicit arch wins for every kind alike.
+        # An explicit arch wins, whatever a kind's variable says.
         with mock.patch.dict(os.environ, {"CUTE_DSL_ARCH": "sm_90a"}):
-            self.assertEqual(export._effective_arch("sm_100a", cutedsl), "sm_100a")
-            self.assertEqual(export._effective_arch("sm_100a", no_env), "sm_100a")
+            self.assertEqual(export._effective_arch("sm_100a"), "sm_100a")
 
     def test_arch_tag_is_short(self):
         # The tag lands in every exported C symbol, so its shape is part of
@@ -409,7 +405,7 @@ class TestArch(unittest.TestCase):
             for tc in (toolchains.get_toolchain("cutedsl"), _Other()):
                 with self.subTest(kind=tc.kind):
                     with self.assertRaisesRegex(RuntimeError, "CUTE_DSL_ARCH=sm_90a"):
-                        export._effective_arch(None, tc)
+                        export._effective_arch(None)
             # An explicit --arch is the way to say it, for every kind at once.
             self.assertEqual(export._effective_arch("sm_100a"), "sm_100a")
 
@@ -903,6 +899,19 @@ class TestSidecarIntegrity(unittest.TestCase):
 
 
 class TestLauncherGeneration(unittest.TestCase):
+    def test_read_only_inputs_take_const_data_ptr(self):
+        # read_only tensor args must go through const_data_ptr in every toolchain's
+        # launcher: a mutable data_ptr() materializes copy-on-write inputs on every
+        # call.
+        sc: dict = dict(SIDECAR)
+        sc["tensor_args"] = [
+            {"name": "mX", "dynamic_sizes": [0], "read_only": True},
+            {"name": "mOut", "dynamic_sizes": [0]},
+        ]
+        src = gen_aot_lib.gen_launcher(sc)
+        self.assertIn("mX_s.data = const_cast<void*>(mX.const_data_ptr());", src)
+        self.assertIn("mOut_s.data = mOut.mutable_data_ptr();", src)
+
     def test_marshalling_from_sidecar(self):
         src = gen_aot_lib.gen_launcher(SIDECAR)
         # Struct fill: one dynamic size per listed dim, in slot order.
@@ -1486,7 +1495,13 @@ class TestAbiValidation(unittest.TestCase):
             ),
         ):
             with self.subTest(case=label):
-                self._refuses(header, r"claims \d+ dynamic_\w+ slot")
+                # Each side named as its own: the sidecar's key and the header's
+                # member differ (dynamic_sizes against dynamic_shapes), and one
+                # message using a single name for both is what sent a reader looking
+                # for a sidecar key that does not exist.
+                self._refuses(
+                    header, r"sidecar's dynamic_(sizes|strides) claims \d+ slot"
+                )
 
     def test_a_missing_member_must_match_a_zero_claim(self):
         # The DSL omits the array entirely at zero slots, so absent means zero --
@@ -1645,8 +1660,9 @@ class TestAbiValidation(unittest.TestCase):
             "  int32_t dynamic_shapes[2];\n  int64_t dynamic_strides[2];\n"
             f"}} {p}_Tensor_mX_t;\n" + self._struct("mOut", shapes=2, strides=1),
             # The tag form IS readable now, so this refuses on the real problem --
-            # the header declares slots the sidecar claims none of.
-            r"claims 0 dynamic_\w+ slot",
+            # the header declares slots the sidecar claims none of, named as the
+            # SIDECAR's key (the header's own spelling is checked beside it).
+            r"sidecar's dynamic_\w+ claims 0 slot",
             tensor_args=_MX_NO_SLOTS,
         )
         # ...and where the declaration genuinely cannot be parsed, a zero claim is
@@ -1860,20 +1876,10 @@ class TestMultiCapabilitySelector(unittest.TestCase):
         self.assertNotIn("launch_fakeop_p__sm90a(", sm100_branch)
 
 
-class TestReadOnlyInputs(unittest.TestCase):
-    # read_only tensor args must go through const_data_ptr in every
-    # toolchain's launcher: a mutable data_ptr() materializes
-    # copy-on-write inputs on each call.
-
-    def test_cutedsl_launcher(self):
-        sc: dict = dict(SIDECAR)
-        sc["tensor_args"] = [
-            {"name": "mX", "dynamic_sizes": [0], "read_only": True},
-            {"name": "mOut", "dynamic_sizes": [0]},
-        ]
-        src = gen_aot_lib.gen_launcher(sc)
-        self.assertIn("mX_s.data = const_cast<void*>(mX.const_data_ptr());", src)
-        self.assertIn("mOut_s.data = mOut.mutable_data_ptr();", src)
+class TestSourceClosureAndRuntimes(unittest.TestCase):
+    # What makes an exported artifact stale: the files whose contents decide what
+    # it MEANS (the closure) and the compiler that built it (the runtimes), neither
+    # of which the artifact records itself.
 
     def test_closure_covers_shared_declaration_machinery(self):
         # The grid expander and the validating loader decide which spec
@@ -1899,7 +1905,20 @@ class TestReadOnlyInputs(unittest.TestCase):
         # gen_aot_lib.py only reads sidecars; build_stage2.py only decides
         # whether stage 2 runs and then relinks -- export.py reads the arch
         # list itself, so the driver passes it nothing kernel-affecting.
-        names = {os.path.basename(p) for p in export.source_closure()}
+        #
+        # Against FIXTURES in a patched _HERE, not the real directory: both
+        # consumers arrive in later commits of this stack, so asserting their
+        # absence from the tree as it stands passed with the filter doing nothing
+        # -- and would go on passing if the filter were deleted after they land.
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("export.py", "gen_aot_lib.py", "build_stage2.py"):
+                with open(os.path.join(d, name), "w") as f:
+                    f.write("# fixture\n")
+            with mock.patch.object(export, "_HERE", d):
+                names = {os.path.basename(p) for p in export.source_closure()}
+        # The exporter's own sources ARE hashed, which is what makes the two
+        # absences below mean the filter rather than an empty glob.
+        self.assertIn("export.py", names)
         for unwanted in ("gen_aot_lib.py", "build_stage2.py"):
             self.assertNotIn(unwanted, names)
 
