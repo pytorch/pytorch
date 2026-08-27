@@ -2604,7 +2604,7 @@ class TestDistributions(DistributionsTestCase):
 
     @expectedFailureMPS
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
+    @device_rng_seed(default=0, xpu=2)  # see Note [Randomized statistical tests]
     def test_logisticnormal_sample(self):
         means = map(np.asarray, [(-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)])
         covs = map(np.diag, [(0.1, 0.1), (1.0, 1.0), (10.0, 10.0)])
