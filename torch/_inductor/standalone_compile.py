@@ -31,6 +31,7 @@ from ._functionalize_collectives import (
     _functionalize_inplace_collectives,
     _unbox_process_group_torchbinds,
 )
+from .codegen.common import patch_compile_options
 
 
 if TYPE_CHECKING:
@@ -842,7 +843,7 @@ def compile_to_python(
     # CacheArtifactManager isolates the cache bundle ``_acceleration_cache_bytes`` returns.
     with (
         torch.no_grad(),
-        config.patch(config_patches),
+        patch_compile_options(config_patches),
         config.patch("triton.autotune_at_compile_time", True),
         tracing(TracingContext(fake_mode)),
         V.set_fake_mode(fake_mode),
