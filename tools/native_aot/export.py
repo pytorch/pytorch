@@ -216,9 +216,7 @@ def _arch_tag(arch: str) -> str:
     return arch.replace("_", "", 1)
 
 
-def _effective_arch(
-    arch: str | None, tc: toolchains.Toolchain | None = None
-) -> str | None:
+def _effective_arch(arch: str | None) -> str | None:
     """The arch the artifacts are really compiled for: the explicit one if
     given, else whatever a toolchain's own env var selects
     (Toolchain.ARCH_ENV_VAR, e.g. CUTE_DSL_ARCH), else the local device.
@@ -231,10 +229,11 @@ def _effective_arch(
     variable are told apart; comparing the raw --arch value left both at None and
     the second skipped every point.
 
-    ``tc`` is omitted when choosing a directory, before any builder (and so kind)
-    exists, and the variable is then taken from whichever registered kind declares
-    one -- only CuTeDSL today. Two kinds naming different variables have no single
-    answer, and picking one would make the directory depend on registry order."""
+    Takes no toolchain, and that is the invariant rather than an omission: once a
+    kind's arch variable is refused rather than honoured, resolution is --arch or
+    the device, neither of which varies by kind. A resolver that consulted one
+    could answer differently for two kinds in a single export, which is exactly how
+    a tree came to disagree with its own sidecars."""
     if arch:
         return arch
     # An arch variable with no --arch is REFUSED, not honoured: it is per-kind, so
@@ -249,13 +248,12 @@ def _effective_arch(
         if k.ARCH_ENV_VAR and os.getenv(k.ARCH_ENV_VAR)
     }
     if named:
-        example = sorted(named.items())[0][1]
+        listed = ", ".join(f"{k}={v}" for k, v in sorted(named.items()))
         raise RuntimeError(
-            "arch variable(s) "
-            + ", ".join(f"{k}={v}" for k, v in sorted(named.items()))
-            + " are set but --arch is not. They are per-toolchain, so they cannot "
-            "name the arch for every kind in one export; pass --arch "
-            f"(e.g. --arch {example}) to state it once."
+            f"{listed} {'is' if len(named) == 1 else 'are'} set but --arch is not. "
+            f"A toolchain's arch variable is per-kind, so it cannot name the arch "
+            f"for every kind in one export; pass --arch (e.g. --arch "
+            f"{named[min(named)]}) to state it once."
         )
     return _detected_arch()
 
@@ -310,7 +308,7 @@ def export_point(
     # Arch-qualifying the prefix is what lets several arches ship in one library:
     # every exported C symbol derives from it, so two arches sharing one are
     # duplicate definitions at link time.
-    effective_arch = _effective_arch(arch, tc)
+    effective_arch = _effective_arch(arch)
     if effective_arch:
         b["prefix"] = f"{b['prefix']}__{_arch_tag(effective_arch)}"
     prefix = b["prefix"]
@@ -610,8 +608,8 @@ def _job_needed(job, force: bool) -> bool:
     comparison guards the cases where the RECORDED arch differs from what this run
     resolves to: artifacts predating arch identity, and a tree carried between
     machines. Both must re-export, since the recorded arch is what the runtime gate
-    is built from. Compared through _effective_arch, so both sides resolve
-    --arch, the toolchain's env var and the local device identically."""
+    is built from. Compared through _effective_arch, so the recorded value and this
+    run's are resolved the same way -- --arch, else the local device."""
     if force:
         return True
     _, _, point, out_dir, arch = job
@@ -626,7 +624,7 @@ def _job_needed(job, force: bool) -> bool:
         if sc.get("version") != SIDECAR_VERSION or "kind" not in sc:
             return True
         tc = toolchains.get_toolchain(sc["kind"])
-        if sc.get("spec") == spec and sc.get("arch") == _effective_arch(arch, tc):
+        if sc.get("spec") == spec and sc.get("arch") == _effective_arch(arch):
             # The sidecar is the skip marker, but it is not proof the
             # artifacts it describes are still on disk: anything that
             # removes a .o/.h without its .json (a partial clean, an
@@ -699,8 +697,9 @@ def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
 # decide whether stage 2 runs at all, so a box whose GPU is listed here and whose
 # wheels are missing fails the build instead of skipping. Hopper is listed
 # because every release arch list names 9.0 and the default ARCHS already covers
-# it; no CI job exercises AOT kernels there yet (b200-native-aot.yml is the only
-# functional one), so its coverage is this suite plus that Blackwell job. sm_103
+# it; no CI job exercises AOT kernels there yet -- the one functional AOT job in
+# this stack runs on B200 and arrives with the first declaration -- so Hopper's
+# coverage is this suite plus that Blackwell job. sm_103
 # stays absent because no arch list we see names 10.3, and adding it would only
 # grow wheels.
 EXPORTABLE_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a")
