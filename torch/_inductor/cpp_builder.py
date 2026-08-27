@@ -414,25 +414,31 @@ def check_mingw_win32_flavor(compiler: str) -> str:
     return flavor
 
 
+@functools.cache
 def _get_rocm_clang_cl_windows() -> str:
     """
-    On Windows + ROCm, generated HIP host wrappers include ROCm headers that
-    use Clang-only syntax which MSVC cannot parse. Prefer the clang-cl shipped
-    in the ROCm SDK and fall back to clang-cl on PATH.
+    Locate the clang-cl shipped with the Windows ROCm SDK.
+
+    HIP host wrappers include headers with Clang-only syntax that MSVC cannot
+    parse. TheRock packages place LLVM under ``lib/llvm/bin`` on both Windows
+    and Linux, unlike traditional ROCm installations under ``llvm/bin``.
     """
-    try:
-        from torch.utils.cpp_extension import ROCM_HOME
-    except Exception:
-        ROCM_HOME = None
+    from torch.utils.cpp_extension import _join_rocm_home, ROCM_HOME
 
     if ROCM_HOME:
-        candidate = os.path.join(ROCM_HOME, "lib", "llvm", "bin", "clang-cl.exe")
+        candidate = _join_rocm_home("lib", "llvm", "bin", "clang-cl.exe")
         if os.path.exists(candidate):
             return candidate
+        log.warning(
+            "ROCm clang-cl was not found at %s; falling back to clang-cl on PATH",
+            candidate,
+        )
+    else:
+        log.warning("ROCM_HOME is not set; falling back to clang-cl on PATH")
     return "clang-cl"
 
 
-def get_cpp_compiler() -> str:
+def get_cpp_compiler(device_type: str | None = None) -> str:
     if (
         config.aot_inductor.cross_target_platform == "windows"
         and sys.platform != "win32"
@@ -444,14 +450,16 @@ def get_cpp_compiler() -> str:
         return compiler
 
     if _IS_WINDOWS:
-        default_compiler = (
-            _get_rocm_clang_cl_windows() if torch.version.hip is not None else "cl"
-        )
-        compiler = os.environ.get("CXX", default_compiler)
+        compiler = os.environ.get("CXX")
+        if compiler is None:
+            compiler = (
+                _get_rocm_clang_cl_windows()
+                if device_type == "cuda" and torch.version.hip is not None
+                else "cl"
+            )
         compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
-        if _is_msvc_cl(compiler):
-            check_msvc_cl_language_id(compiler)
+        check_msvc_cl_language_id(compiler)
     else:
         if config.is_fbcode():
             return build_paths.cc
@@ -2233,7 +2241,8 @@ def get_cpp_torch_device_options(
             else:
                 libraries += ["torch_hip"]
                 if _IS_WINDOWS:
-                    # The generated wrapper calls the HIP runtime API directly.
+                    # Windows import libraries do not transitively resolve the
+                    # HIP runtime symbols referenced by the generated wrapper.
                     libraries += ["amdhip64"]
             definitions.append(" __HIP_PLATFORM_AMD__")
             _transform_rocm_paths(libraries_dirs)
@@ -2335,6 +2344,8 @@ class CppTorchDeviceOptions(CppTorchOptions):
         # Validate before super().__init__, which runs the header setup that
         # would strip the default stdlib.
         _validate_cpp_stdlib(cpp_stdlib, device_type, aot_mode)
+        if not compiler:
+            compiler = get_cpp_compiler(device_type=device_type)
 
         super().__init__(
             vec_isa=vec_isa,
