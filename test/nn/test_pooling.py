@@ -1794,6 +1794,7 @@ torch.{device_type}.synchronize()
     @onlyAccelerator
     @largeTensorTest("18GB")
     @largeTensorTest("180GB", "cpu")
+    @expectedFailureMPS
     def test_pool3d_large_size_int64(self, device):
         # See https://github.com/pytorch/pytorch/issues/52822
         x = torch.randn(
