@@ -53,6 +53,7 @@ ALLOWED_EXCEPTION_TYPES = {
     "WorkerException": "torch/csrc/api/",
     "py::cast_error": "torch/csrc/jit/",  # caught by name in jit/python
     "py::error_already_set": "",  # a Python error is set; rethrowing preserves it
+    "MyException": "c10/test/",  # LeftRight_test, caught by EXPECT_THROW
     # Drives the unwinder's own control flow; caught by name in
     # fast_symbolizer.h and unwind.cpp.
     "UnwindError": "torch/csrc/profiler/",
@@ -358,7 +359,12 @@ def replacement_macro(path: str) -> str:
     posix = path.replace("\\", "/")
     if "torch/csrc/inductor/aoti_runtime/" in posix:
         return "AOTI_RUNTIME_CHECK"
-    if "torch/headeronly/" in posix or "torch/csrc/stable/" in posix:
+    if (
+        "torch/headeronly/" in posix
+        or "torch/csrc/stable/" in posix
+        # Installed, and deliberately depends on torch/headeronly only.
+        or posix.endswith("torch/csrc/utils/generated_serialization_types.h")
+    ):
         return "STD_TORCH_CHECK"
     return "TORCH_CHECK"
 
