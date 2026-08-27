@@ -8,7 +8,8 @@ import test_torchinductor
 
 import torch
 from torch._dynamo import config as dynamo_config
-from torch._dynamo.exc import InternalTorchDynamoError
+from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import InternalTorchDynamoError, TritonUnavailableError
 from torch._inductor import config as inductor_config, ir
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.sizevars import SizeVarAllocator
@@ -31,6 +32,23 @@ from torch.testing._internal.inductor_utils import requires_triton
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.printers import PythonPrinter
+
+
+class _TritonDeviceTestCase(InductorTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        device = cls.get_primary_device()
+        try:
+            device_interface = get_interface_for_device(torch.device(device).type)
+        except NotImplementedError as exc:
+            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
+        if not device_interface.is_triton_capable(device):
+            raise unittest.SkipTest(f"requires Triton support for {device}")
+        try:
+            device_interface.raise_if_triton_unavailable(device)
+        except TritonUnavailableError as exc:
+            raise unittest.SkipTest(str(exc)) from exc
 
 
 class UnbackedSymintsTritonTemplate:
@@ -1405,7 +1423,7 @@ class UnbackedSymintsCatTemplate:
 
 
 @requires_triton()
-class TestUnbackedSymints(InductorTestCase):
+class TestUnbackedSymints(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
 
@@ -1414,7 +1432,7 @@ class TestUnbackedSymintsDeviceLogic(InductorTestCase):
 
 
 @requires_triton()
-class TestUnbackedSymintsStandaloneCompile(InductorTestCase):
+class TestUnbackedSymintsStandaloneCompile(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.CUDA
 
 
