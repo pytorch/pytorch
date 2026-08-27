@@ -70,7 +70,7 @@ namespace detail {
 inline C10_HOST_DEVICE uint8_t fp8e5m2fnuz_from_fp32_value(float f) {
   /*
    * Binary representation of 65536.0f, which is the first value not
-   * representable (i.e. the first value which would overflow in to the sign
+   * representable (i.e. the first value which would overflow into the sign
    * bit, resulting in a NaN) in fp8e4m3fnuz range:
    * 1 00000 00 - fp8e5m2fnuz
    * 0 10001111 00000000000000000000000 - fp32

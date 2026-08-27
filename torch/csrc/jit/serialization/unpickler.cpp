@@ -467,7 +467,7 @@ PickleOpCode Unpickler::readInstruction() {
           start,
           ", but stack_ is iterated by two elements at a time");
       for (size_t i = start; i < stack_.size(); i += 2) {
-        dict.insert_or_assign(stack_[i], stack_[i + 1]);
+        dict.insert_or_assign(std::move(stack_[i]), std::move(stack_[i + 1]));
       }
       stack_.erase(
           stack_.begin() + static_cast<std::ptrdiff_t>(start), stack_.end());
@@ -489,7 +489,7 @@ PickleOpCode Unpickler::readInstruction() {
           start,
           ", but stack_ is iterated by two elements at a time");
       for (size_t i = start; i < stack_.size(); i += 2) {
-        dict.insert_or_assign(stack_[i], stack_[i + 1]);
+        dict.insert_or_assign(std::move(stack_[i]), std::move(stack_[i + 1]));
       }
       stack_.erase(
           stack_.begin() + static_cast<std::ptrdiff_t>(start), stack_.end());
@@ -649,7 +649,8 @@ PickleOpCode Unpickler::readInstruction() {
           "Parsing error: attempted out-of-bounds access while processing SETITEM opcode");
 
       auto dict = stack_.at(dict_pos).toGenericDict();
-      dict.insert_or_assign(stack_.at(key_pos), stack_.at(val_pos));
+      dict.insert_or_assign(
+          std::move(stack_.at(key_pos)), std::move(stack_.at(val_pos)));
       stack_.erase(
           stack_.begin() + static_cast<std::ptrdiff_t>(key_pos), stack_.end());
     } break;
@@ -1080,7 +1081,7 @@ void Unpickler::rebuildTensorFromTypeV2() {
     //   arguments to construct base tensor, Python State (as dict))
     auto args = pop(stack_).toTuple();
     size_t tup_idx = 0;
-    const auto args_elems = args->elements();
+    const auto& args_elems = args->elements();
     auto base_tensor_args = args_elems.at(tup_idx + 2).toTuple();
     auto py_state = args_elems.at(tup_idx + 3).toGenericDict();
     if (!py_state.empty()) {
@@ -1089,7 +1090,7 @@ void Unpickler::rebuildTensorFromTypeV2() {
     }
     // This calls the function to rebuild the
     // base tensor.
-    // Eg. `rebuildTensor`, `rebuildSpareTensor`.
+    // Eg. `rebuildTensor`, `rebuildSparseTensor`.
     stack_.emplace_back(base_tensor_args);
     globals_[curr_globals_idx + 1]();
     stack_.emplace_back(pop(stack_));
@@ -1100,7 +1101,7 @@ void Unpickler::rebuildParameter() {
   globals_.emplace_back([this] {
     auto args = pop(stack_).toTuple();
     size_t tup_idx = 0;
-    const auto args_elems = args->elements();
+    const auto& args_elems = args->elements();
     auto result = args_elems.at(tup_idx++).toTensor();
     auto requires_grad = args_elems.at(tup_idx++).toBool();
     result.requires_grad_(requires_grad);
