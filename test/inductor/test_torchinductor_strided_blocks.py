@@ -13,6 +13,8 @@ from unittest import mock
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.debug_utils import InputReader
+from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.triton import FixedTritonConfig
@@ -44,6 +46,25 @@ from torch.testing._internal.inductor_utils import (
     skip_windows_ci,
     TRITON_HAS_CPU,
 )
+
+
+class _TritonDeviceMixin:
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        device = cls.get_primary_device()
+        if not HAS_TRITON:
+            raise unittest.SkipTest(f"triton is required for {device}")
+        try:
+            device_interface = get_interface_for_device(torch.device(device).type)
+        except NotImplementedError as exc:
+            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
+        if not device_interface.is_triton_capable(device):
+            raise unittest.SkipTest(f"requires Triton support for {device}")
+        try:
+            device_interface.raise_if_triton_unavailable(device)
+        except TritonUnavailableError as exc:
+            raise unittest.SkipTest(str(exc)) from exc
 
 
 try:
@@ -1604,7 +1625,7 @@ class CommonTemplate:
 @unittest.skipIf(not HAS_TRITON, "requires triton GPU backend")
 @requires_block_ptr
 @config.patch("triton.use_block_ptr", True)
-class TritonBlockPointerTest(BlockDescriptorTestBase):
+class TritonBlockPointerTest(_TritonDeviceMixin, BlockDescriptorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
 
@@ -1629,7 +1650,7 @@ class TritonTensorDescriptorTestCPU(BlockDescriptorTestBase):
     # ROCm triton doesn't support/generate "tl.make_tensor_descriptor" which is exactly what this unit test is about
 )
 @config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
-class TritonTensorDescriptorTest(BlockDescriptorTestBase):
+class TritonTensorDescriptorTest(_TritonDeviceMixin, BlockDescriptorTestBase):
     hw_classification = HardwareClassification.CUDA
 
     block_descriptor_constructor_str = "tl.make_tensor_descriptor"
@@ -1769,7 +1790,7 @@ class TritonTensorDescriptorTest(BlockDescriptorTestBase):
 
 
 @unittest.skipIf(not HAS_TRITON, "requires triton")
-class TestTilingExtra(InductorTestCase):
+class TestTilingExtra(_TritonDeviceMixin, InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
@@ -2328,7 +2349,7 @@ class TestTilingExtra(InductorTestCase):
         "assume_aligned_inputs": True,
     }
 )
-class TritonHostSideTMATest(BlockDescriptorTestBase):
+class TritonHostSideTMATest(_TritonDeviceMixin, BlockDescriptorTestBase):
     """Run the full pointwise/reduction suite with host-side TMA.
     Block pointer count is skipped because host-side TMA creates
     descriptors in the launcher, not the kernel."""
@@ -2467,7 +2488,7 @@ class HostTMAHelperTest(InductorTestCase):
     or torch.version.hip,
     "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
 )
-class TritonHostSideTMAConfigTest(InductorTestCase):
+class TritonHostSideTMAConfigTest(_TritonDeviceMixin, InductorTestCase):
     hw_classification = HardwareClassification.CUDA
 
     @config.patch(
