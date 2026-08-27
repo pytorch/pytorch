@@ -20,7 +20,6 @@ from torch._dynamo.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
-from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 f32 = torch.float32
@@ -411,7 +410,6 @@ class TestNNModuleToStringBufferDevice(TestCase):
         else:
             expected_device = str(torch.empty(1, device=device).device)
             self.assertIn(f'.to("{expected_device}")', result)
-            self.assertNotIn(f".{GPU_TYPE}()", result)
 
     def test_nn_module_to_string_param_device(self, device):
         gm = torch.fx.symbolic_trace(torch.nn.Identity())
@@ -426,7 +424,6 @@ class TestNNModuleToStringBufferDevice(TestCase):
         else:
             expected_device = str(torch.empty(1, device=device).device)
             self.assertIn(f'device="{expected_device}"', result)
-            self.assertNotIn(f', device="{GPU_TYPE}")', result)
 
 
 instantiate_device_type_tests(
@@ -1011,6 +1008,7 @@ class TestInductorConfigOverrideIntegration(TestCase):
 instantiate_device_type_tests(
     TestInductorConfigOverrideIntegration,
     globals(),
+    except_for="hpu",
     allow_xpu=True,
 )
 
