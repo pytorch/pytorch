@@ -837,6 +837,19 @@ class VariableBuilder:
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
             if dup_guard:
                 self.install_guards(dup_guard)
+            elif (
+                side_effect_result.source is not None
+                and self.source != side_effect_result.source
+            ):
+                # Cross-scope aliases cannot share a relational guard manager.
+                # Pin each runtime source instead of silently dropping the relationship.
+                # ConstantSource values are embedded by Dynamo and cannot be guarded.
+                if not is_constant_source(self.source):
+                    self.install_guards(GuardBuilder.ID_MATCH)
+                if not is_constant_source(side_effect_result.source):
+                    install_guard(
+                        side_effect_result.source.make_guard(GuardBuilder.ID_MATCH)
+                    )
 
             if isinstance(value, torch.nn.Module) and isinstance(
                 side_effect_result, UnspecializedNNModuleVariable
@@ -1795,7 +1808,13 @@ class VariableBuilder:
             if isinstance(value, torch.amp.autocast_mode._UnmanagedAutocast):
                 return self.wrap_user_defined(value)
             else:
-                self.install_guards(GuardBuilder.ID_MATCH)
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                for field in ("device", "fast_dtype", "_enabled", "_cache_enabled"):
+                    install_guard(
+                        AttrSource(self.source, field).make_guard(
+                            GuardBuilder.EQUALS_MATCH
+                        )
+                    )
                 return AutocastModeVariable(
                     target_values=[
                         value.device,

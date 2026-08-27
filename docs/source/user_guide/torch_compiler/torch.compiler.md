@@ -41,26 +41,49 @@ the model(s) included in each tuple, e.g.
 a runnable Python source string plus an acceleration cache. Make-fx artifacts are
 self-contained. Dynamo artifacts may import modules referenced by transformed globals;
 installed artifacts also import the defining Python modules.
+For compatibility, positional arguments after the callable still describe one example
+call; they cannot be combined with `example_inputs`.
 Reload the artifact with `torch.compiler.precompile.load`; since no weights are baked in,
 you pass the model again at runtime. The optional `tracer="dynamo"` path accepts several
 example calls and retains the guarded recompilations they trigger, including
 automatically dynamic graphs. Use `torch.compiler.ExampleInput(args=..., kwargs=...)`
-for a call with keyword arguments. Its serialized guard records are minimized while
-preserving how every example dispatches. It retains guards derived from runtime inputs
-and treats the Python environment as an unchecked invariant between capture and runtime;
-changing it can silently run a specialization captured for the old state. Tensor,
-scalar, Python-container, and `nn.Module` arguments are supported. Graph breaks and
-closure-free `torch._dynamo.disable` functions are preserved; top-level closures and
-nested functions that capture locals are not yet supported. Function defaults must be
-recursive immutable literals; mutable or user-defined values must be passed explicitly.
-Tensor-valued globals are also rejected because every tensor must be an explicit input.
-Captured nested frames that cannot be reached by a source-only dispatcher use an
-isolated installed artifact; it installs lazily, can be scoped with `with`, and exposes
-`unload()`. With `training=True`,
-Dynamo/Inductor graphs include readable compiled forward and backward code, so served
-outputs retain a `grad_fn` and can be passed to `backward()`. This training mode works
-across captured recompilations and graph breaks. See the
-{ref}`API reference <torch.compiler_api>` for details.
+for a call with keyword arguments. Its serialized guard records are filtered while
+preserving how every example dispatches. The contract requires the Python environment,
+including globals and context-manager state, to remain semantically unchanged and allows
+recompilation-causing variation only through explicit inputs. Environment-only guards may
+therefore be omitted, while every portable input-derived guard is retained by default.
+Distinct tensor inputs must not share or overlap storage at capture or runtime.
+An explicit input must not also be reachable through globals or other environment state;
+dynamic native indirection that hides such an identity relation is unsupported. Dynamo
+input pytree structures must be serializable so runtime safety checks can be reconstructed.
+User-defined code must access Python module objects (`types.ModuleType`) through static
+attribute paths rather than pass or alias them. Python functions that assign or delete
+globals are rejected.
+Explicitly filtering an input guard is a risky drop and requires opting out of the default
+safety gate. Guards are rebuilt from frozen capture state and checked for predicate drift
+before the artifact is emitted. Breaking an unchecked environment assumption can silently
+miscompute. Tensor, scalar, Python-container, and `nn.Module` arguments are supported.
+Function defaults must be recursive immutable literals; mutable or user-defined values
+must be passed explicitly rather than used as defaults. Tensor-valued globals are also
+rejected when referenced by user-defined code because user-owned tensors must be explicit
+inputs. Graph breaks and closure-free
+`torch._dynamo.disable` functions are preserved; top-level closures and
+nested functions that capture locals are not yet supported. The eager backend also
+preserves higher-order graphs such as `torch.cond`, `torch.while_loop`, non-reentrant
+checkpointing, `vmap`, autocast, and grad-mode regions without symbolically retracing
+them at load. Captured nested frames that cannot be reached by a source-only dispatcher
+use an isolated installed artifact. Loading prepares its backends and guards, its first
+call installs them, and `unload()` removes them; it can also be scoped with `with`.
+An uncovered call raises instead of compiling a new variant, just as it does for a
+standalone artifact. With
+`training=True`, both eager and Inductor artifacts retain autograd history; Inductor
+graphs include readable compiled forward and backward code. Serving pins grad mode to
+this option: inference artifacts disable gradients even inside `torch.enable_grad()`,
+while training artifacts enable them even inside `torch.no_grad()`. This training mode
+works across captured recompilations and graph breaks. `PrecompileSummary` reports
+coverage and dropped guards, including which example first produced each frame variant,
+while the `require_*` options let callers reject incomplete or insufficiently guarded captures.
+See the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}
 `torch.compile` may not support recently released major versions of Python.

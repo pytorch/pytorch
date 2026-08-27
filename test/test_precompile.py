@@ -3,7 +3,12 @@ import contextvars
 import copy
 import cProfile
 import functools
+import hashlib
+import importlib
+import inspect
 import io
+import math
+import operator
 import os
 import pickle
 import subprocess
@@ -11,6 +16,7 @@ import sys
 import tempfile
 import textwrap
 import types
+import typing
 import unittest
 import weakref
 from collections import deque
@@ -19,6 +25,7 @@ import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo import graph_break as _precompile_dynamo_break_here
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
+from torch._dynamo.exc import PackageError
 from torch._precompile import PrecompileError
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -38,12 +45,8 @@ from torch.testing._internal.common_utils import (
 # A module-level (global) model + a function referencing it, to exercise the
 # constant-tensor guard against a baked global.
 _GLOBAL_TENSOR = torch.randn(3)
-_DYNAMO_INPUT_GLOBAL = torch.randn(3)
 _DYNAMO_TENSOR_DEFAULT = torch.randn(3)
 _DYNAMO_CONTAINER_IDENTITY = [1]
-_DYNAMO_LITERAL_DEFAULT = (123456789,)
-_DYNAMO_LITERAL_GLOBAL = "sentinel"
-_DYNAMO_MUTATED_GLOBAL = None
 
 
 def _precompile_dynamo_dynamic(x):
@@ -54,49 +57,291 @@ def _precompile_dynamo_torch_sin(x):
     return torch.sin(x)
 
 
-def _precompile_dynamo_local_import_identity(x):
-    import torch as imported_torch
-
-    return x + 1 if x is imported_torch._precompile_review_token else x - 1
+def _precompile_dynamo_global_tensor(x):
+    return x + _GLOBAL_TENSOR
 
 
-def _precompile_dynamo_nested_library_identity(x):
+def _precompile_dynamo_imported_module_identity(x):
+    import _precompile_identity_module
+
+    return x + 1 if x is _precompile_identity_module.TOKEN else x - 1
+
+
+def _precompile_dynamo_imported_callable_identity(x):
+    import _precompile_identity_module
+
+    return x + 1 if x is _precompile_identity_module.CALLABLE() else x - 1
+
+
+def _precompile_dynamo_imported_nested_callable_identity(x):
+    import _precompile_identity_module
+
+    return x + 1 if x is _precompile_identity_module.SUBMODULE.CALLABLE() else x - 1
+
+
+def _precompile_dynamo_imported_dynamic_identity(x):
+    import _precompile_identity_module
+
+    return x + 1 if x is _precompile_identity_module.DYNAMIC else x - 1
+
+
+def _precompile_dynamo_imported_module_alias_identity(x):
+    import torch as local_torch
+
+    alias = local_torch
+    return x + 1 if x is alias._precompile_identity_token else x - 1
+
+
+def _precompile_dynamo_dotted_import_identity(x):
+    import _precompile_identity_package.sub.mod as identity_module
+
+    return x + 1 if x is identity_module.TOKEN else x - 1
+
+
+_DYNAMO_UNRELATED_IMPORT_RECEIVER = types.SimpleNamespace(SECRET=3)
+
+
+def _precompile_dynamo_imported_unrelated_attribute(x):
+    import _precompile_identity_module
+
+    return (
+        x + _DYNAMO_UNRELATED_IMPORT_RECEIVER.SECRET + _precompile_identity_module.USED
+    )
+
+
+def _precompile_dynamo_import_shadowed_in_nested_scope(x):
+    import _precompile_identity_module
+
+    def helper(_precompile_identity_module, value):
+        return value + _precompile_identity_module.SECRET
+
+    return (
+        helper(_DYNAMO_UNRELATED_IMPORT_RECEIVER, x)
+        + _precompile_identity_module.USED * 0
+    )
+
+
+def _precompile_dynamo_library_object_identity(x):
+    return torch._precompile_reviewlib.helper(torch._precompile_reviewlib.HOLDER, x)
+
+
+def _precompile_dynamo_library_nested_helper_identity(x):
     return torch._precompile_reviewlib.outer(x)
 
 
-class _PrecompileDynamoInputGetitem:
-    def __getitem__(self, key):
-        return _DYNAMO_TENSOR_DEFAULT
+def _precompile_dynamo_library_container_helper_identity(x):
+    return torch._precompile_reviewlib.container_outer(x)
 
 
-def _precompile_dynamo_input_getitem_identity(holder, x):
-    return x + 1 if x is holder[0] else x - 1
+def _precompile_dynamo_library_partial_helper_identity(x):
+    return torch._precompile_reviewlib.partial_outer(x)
 
 
-def _precompile_dynamo_literal_global(x):
-    return x + 1, _DYNAMO_LITERAL_GLOBAL
+def _precompile_dynamo_library_callable_helper_identity(x):
+    return torch._precompile_reviewlib.callable_outer(x)
 
 
-def _precompile_dynamo_default_global_identity(x, marker=_DYNAMO_LITERAL_DEFAULT):
-    return x + 1 if marker is _DYNAMO_LITERAL_DEFAULT else x - 1
+def _precompile_dynamo_library_bound_partial_identity(x):
+    return torch._precompile_reviewlib.bound_partial_outer(x)
 
 
-def _precompile_dynamo_mutates_global(x):
-    global _DYNAMO_MUTATED_GLOBAL
-    _DYNAMO_MUTATED_GLOBAL = x
+def _precompile_dynamo_library_keyword_partial_identity(x):
+    return torch._precompile_reviewlib.keyword_partial_outer(x)
+
+
+def _precompile_dynamo_library_property_callable_identity(x):
+    return torch._precompile_reviewlib.property_callable_outer(x)
+
+
+def _precompile_dynamo_library_factory_identity(x):
+    return torch._precompile_reviewlib.factory_outer(x)
+
+
+def _precompile_dynamo_library_module_value_identity(x):
+    return torch._precompile_reviewlib.module_outer(x)
+
+
+def _precompile_dynamo_library_dynamic_module_identity(x):
+    return torch._precompile_reviewlib.dynamic_module_outer(x)
+
+
+def _precompile_dynamo_library_direct_method_identity(x):
+    return torch._precompile_reviewlib.direct_method_outer(x)
+
+
+def _precompile_dynamo_library_direct_property_identity(x):
+    return torch._precompile_reviewlib.direct_property_outer(x)
+
+
+def _precompile_dynamo_library_late_import_identity(x):
+    return torch._precompile_latelib.outer(x)
+
+
+def _precompile_dynamo_metadata_helper(x):
     return x + 1
 
 
-def _precompile_dynamo_global_tensor(x):
-    return x + _GLOBAL_TENSOR
+def _precompile_dynamo_calls_metadata_helper(x):
+    return _precompile_dynamo_metadata_helper(x)
+
+
+def _precompile_dynamo_construct_relu(x):
+    return torch.nn.ReLU()(x)
 
 
 def _precompile_dynamo_mse_loss(x, target):
     return torch.nn.functional.mse_loss(x, target)
 
 
-def _precompile_dynamo_input_global_identity(x):
-    return x + 1 if x is _DYNAMO_INPUT_GLOBAL else x - 1
+_DYNAMO_EXTERNAL_ALIAS_TOKEN = None
+
+
+def _precompile_dynamo_external_alias_template(x):
+    return x + 1 if x is _DYNAMO_EXTERNAL_ALIAS_TOKEN else x - 1
+
+
+_DYNAMO_EXTERNAL_ALIAS_MODULE = types.ModuleType("_dynamo_external_alias")
+_DYNAMO_EXTERNAL_ALIAS_MODULE._DYNAMO_EXTERNAL_ALIAS_TOKEN = _DYNAMO_TENSOR_DEFAULT
+_DYNAMO_EXTERNAL_ALIAS_MODULE.helper = types.FunctionType(
+    _precompile_dynamo_external_alias_template.__code__,
+    _DYNAMO_EXTERNAL_ALIAS_MODULE.__dict__,
+    "helper",
+)
+
+
+def _precompile_dynamo_external_wrapper_template(x):
+    return _DYNAMO_EXTERNAL_ALIAS_MODULE.helper(x)
+
+
+_DYNAMO_EXTERNAL_WRAPPER_MODULE = types.ModuleType("_dynamo_external_wrapper")
+_DYNAMO_EXTERNAL_WRAPPER_MODULE._DYNAMO_EXTERNAL_ALIAS_MODULE = (
+    _DYNAMO_EXTERNAL_ALIAS_MODULE
+)
+_DYNAMO_EXTERNAL_WRAPPER_MODULE.wrapper = types.FunctionType(
+    _precompile_dynamo_external_wrapper_template.__code__,
+    _DYNAMO_EXTERNAL_WRAPPER_MODULE.__dict__,
+    "wrapper",
+)
+
+
+def _precompile_dynamo_external_module_identity(x):
+    return _DYNAMO_EXTERNAL_WRAPPER_MODULE.wrapper(x)
+
+
+_precompile_box = []
+
+
+def _precompile_dynamo_torch_helper_template(x):
+    return x + 1 if x is _precompile_box[0] else x - 1
+
+
+def _precompile_dynamo_torch_helper_identity(x):
+    return torch._precompile_helper(x)
+
+
+def _precompile_dynamo_torch_module_helper_template(module, x):
+    return module.secret(x)
+
+
+def _precompile_dynamo_torch_module_getattr_template(module, x):
+    name = "secret"
+    return getattr(module, name)(x)
+
+
+def _precompile_dynamo_torch_module_helper_identity(module, x):
+    return torch._precompile_module_helper(module, x)
+
+
+def _precompile_dynamo_torch_callable_template(self, x):
+    return x + 1 if x is _precompile_box[0] else x - 1
+
+
+def _precompile_dynamo_torch_callable_identity(x):
+    return torch._precompile_callable(x)
+
+
+def _precompile_dynamo_torch_getitem_template(self, x):
+    return x + 1 if x is _precompile_box[0] else x - 1
+
+
+def _precompile_dynamo_torch_getitem_identity(x):
+    return torch._precompile_getitem[x]
+
+
+def _precompile_dynamo_torch_class_getitem_template(cls, x):
+    return x + 1 if x is _precompile_box[0] else x - 1
+
+
+def _precompile_dynamo_torch_class_getitem_identity(x):
+    return torch._precompile_generic[x]
+
+
+def _precompile_dynamo_torch_metaclass_getitem_template(cls, x):
+    return x + 1 if x is _precompile_box[0] else x - 1
+
+
+def _precompile_dynamo_torch_metaclass_getitem_identity(x):
+    return torch._precompile_meta_generic[x]
+
+
+class _PrecompileDynamoLibraryIndexerModule(torch.nn.Module):
+    def __init__(self, helper):
+        super().__init__()
+        self.helper = helper
+
+    def forward(self, x):
+        return self.helper[x]
+
+
+def _precompile_dynamo_function_metadata_helper():
+    return None
+
+
+_DYNAMO_FUNCTION_GLOBAL_ALIAS = _DYNAMO_TENSOR_DEFAULT
+_precompile_dynamo_function_metadata_helper.__annotations__["token"] = (
+    _DYNAMO_TENSOR_DEFAULT
+)
+_DYNAMO_FUNCTION_METADATA_HELPERS = [_precompile_dynamo_function_metadata_helper]
+
+
+def _precompile_dynamo_function_globals_identity(x):
+    token = _precompile_dynamo_function_metadata_helper.__globals__[
+        "_DYNAMO_FUNCTION_GLOBAL_ALIAS"
+    ]
+    return x + 1 if x is token else x - 1
+
+
+def _precompile_dynamo_function_annotations_identity(x):
+    token = _precompile_dynamo_function_metadata_helper.__annotations__["token"]
+    return x + 1 if x is token else x - 1
+
+
+def _precompile_dynamo_function_container_globals_identity(x):
+    token = _DYNAMO_FUNCTION_METADATA_HELPERS[0].__globals__[
+        "_DYNAMO_FUNCTION_GLOBAL_ALIAS"
+    ]
+    return x + 1 if x is token else x - 1
+
+
+def _precompile_dynamo_function_container_annotations_identity(x):
+    token = _DYNAMO_FUNCTION_METADATA_HELPERS[0].__annotations__["token"]
+    return x + 1 if x is token else x - 1
+
+
+def _precompile_dynamo_external_module_method_template(module, x):
+    return module.secret(x)
+
+
+_DYNAMO_EXTERNAL_MODULE_METHOD = types.ModuleType("_dynamo_external_module_method")
+_DYNAMO_EXTERNAL_MODULE_METHOD.invoke = types.FunctionType(
+    _precompile_dynamo_external_module_method_template.__code__,
+    _DYNAMO_EXTERNAL_MODULE_METHOD.__dict__,
+    "invoke",
+)
+
+
+def _precompile_dynamo_call_external_module_method(module, x):
+    return _DYNAMO_EXTERNAL_MODULE_METHOD.invoke(module, x)
 
 
 def _precompile_dynamo_tensor_default(x, bias=_DYNAMO_TENSOR_DEFAULT):
@@ -139,10 +384,15 @@ def _precompile_dynamo_identity_helper():
 
 
 _precompile_dynamo_identity_helper.value = _DYNAMO_TENSOR_DEFAULT
+_DYNAMO_IDENTITY_HELPERS = [_precompile_dynamo_identity_helper]
 
 
 def _precompile_dynamo_helper_attribute_identity(x):
     return x + 1 if x is _precompile_dynamo_identity_helper.value else x - 1
+
+
+def _precompile_dynamo_helper_container_attribute_identity(x):
+    return x + 1 if x is _DYNAMO_IDENTITY_HELPERS[0].value else x - 1
 
 
 class _PrecompileDynamoCustomDescriptor:
@@ -172,6 +422,93 @@ class _PrecompileDynamoSlottedIdentity:
 
 
 _DYNAMO_SLOTTED_IDENTITY = _PrecompileDynamoSlottedIdentity(_DYNAMO_TENSOR_DEFAULT)
+
+
+class _PrecompileDynamoModuleAttributeIdentity(torch.nn.Module):
+    def __init__(self, value):
+        super().__init__()
+        self.value = value
+
+
+def _precompile_dynamo_module_attribute_identity(module, x):
+    return x + 1 if module.value is _DYNAMO_TENSOR_DEFAULT else x - 1
+
+
+class _PrecompileDynamoModuleForwardGlobalIdentity(torch.nn.Module):
+    def forward(self, x):
+        return self.helper(x)
+
+    def helper(self, x):
+        return x + 1 if x is _DYNAMO_TENSOR_DEFAULT else x - 1
+
+
+class _PrecompileDynamoModuleMethodGlobalIdentity(torch.nn.Module):
+    def forward(self, x):
+        return x.sin()
+
+    def helper(self, x):
+        return x + 1 if x is _DYNAMO_TENSOR_DEFAULT else x - 1
+
+    def secret(self, x):
+        return x + 1 if x is _DYNAMO_TENSOR_DEFAULT else x - 1
+
+
+class _PrecompileDynamoModuleGetitemGlobalIdentity(torch.nn.Module):
+    def forward(self, x):
+        return x.sin()
+
+    def __getitem__(self, x):
+        return x + 1 if x is _DYNAMO_TENSOR_DEFAULT else x - 1
+
+
+def _precompile_dynamo_call_identity_module(module, x):
+    return module(x)
+
+
+def _precompile_dynamo_call_identity_module_helper(module, x):
+    return module.helper(x)
+
+
+def _precompile_dynamo_call_identity_module_helper_nested(module, x):
+    def call(module, value):
+        return module.helper(value)
+
+    return call(module, x)
+
+
+def _precompile_dynamo_call_identity_module_methodcaller(module, x):
+    return operator.methodcaller("helper", x)(module)
+
+
+def _precompile_dynamo_getitem_identity_module(module, x):
+    return module[x]
+
+
+def _precompile_dynamo_stdlib_module_dynamic_identity(x):
+    return x + 1 if x is math.__getattribute__("_precompile_token") else x - 1
+
+
+def _precompile_dynamo_stdlib_module_attrgetter_identity(x):
+    token = operator.attrgetter("_precompile_token")(math)
+    return x + 1 if x is token else x - 1
+
+
+def _precompile_dynamo_stdlib_module_getattr_identity(x):
+    name = "_precompile_token"
+    token = getattr(math, name)
+    return x + 1 if x is token else x - 1
+
+
+_DYNAMO_STDLIB_MODULE_GETTERS = [math.__getattribute__]
+
+
+def _precompile_dynamo_stdlib_module_bound_getattr_identity(x):
+    token = _DYNAMO_STDLIB_MODULE_GETTERS[0]("_precompile_token")
+    return x + 1 if x is token else x - 1
+
+
+def _precompile_dynamo_call_nested_identity_module(modules, x):
+    return modules[0](x)
 
 
 class _PrecompileDynamoDynamicIdentity:
@@ -218,6 +555,25 @@ def _make_precompile_dynamo_dynamic_module():
 
 
 _DYNAMO_DYNAMIC_MODULE = _make_precompile_dynamo_dynamic_module()
+_DYNAMO_GETATTR = getattr
+
+
+def _precompile_dynamo_getattr_identity(x):
+    return x + 1 if x is _DYNAMO_GETATTR(_DYNAMO_DYNAMIC_MODULE, "TOKEN") else x - 1
+
+
+_DYNAMO_EXTERNAL_GETATTR_MODULE = types.ModuleType("_dynamo_external_getattr")
+_DYNAMO_EXTERNAL_GETATTR_MODULE._DYNAMO_GETATTR = getattr
+_DYNAMO_EXTERNAL_GETATTR_MODULE._DYNAMO_DYNAMIC_MODULE = _DYNAMO_DYNAMIC_MODULE
+_DYNAMO_EXTERNAL_GETATTR_MODULE.helper = types.FunctionType(
+    _precompile_dynamo_getattr_identity.__code__,
+    _DYNAMO_EXTERNAL_GETATTR_MODULE.__dict__,
+    "helper",
+)
+
+
+def _precompile_dynamo_external_getattr_identity(x):
+    return _DYNAMO_EXTERNAL_GETATTR_MODULE.helper(x)
 
 
 class _PrecompileDynamoCallableIdentity:
@@ -329,14 +685,40 @@ def _precompile_dynamo_varargs(*xs):
     return xs[0] + xs[1]
 
 
-def _precompile_dynamo_dynamic_branch(x):
-    if x.shape[0] == 1:
-        return x + 100
-    return x + 1
+def _precompile_dynamo_varkw(x, /, **kwargs):
+    return x + kwargs["x"]
 
 
 def _precompile_dynamo_scalar(x, scale):
     return x + scale
+
+
+def _precompile_dynamo_scalar_branch(x, scale):
+    if scale == 2:
+        return x.sin()
+    return x.cos()
+
+
+def _precompile_dynamo_many_variants(x, mode):
+    if mode == "m0":
+        return x + 0
+    if mode == "m1":
+        return x + 1
+    if mode == "m2":
+        return x + 2
+    if mode == "m3":
+        return x + 3
+    if mode == "m4":
+        return x + 4
+    if mode == "m5":
+        return x + 5
+    if mode == "m6":
+        return x + 6
+    if mode == "m7":
+        return x + 7
+    if mode == "m8":
+        return x + 8
+    return x + 9
 
 
 def _precompile_dynamo_callable(x, op):
@@ -348,10 +730,163 @@ def _precompile_dynamo_aliasing(a, b):
     return a * b
 
 
+def _precompile_dynamo_rebinds_storage(a, b):
+    a.set_(b)
+    return a + 1
+
+
+class _PrecompileDynamoTensorBox:
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+
+
+class _PrecompileDynamoTensorList(list):
+    def __init__(self, hidden):
+        super().__init__()
+        self.hidden = hidden
+
+
+def _precompile_dynamo_box_aliasing(box):
+    box.a.add_(1)
+    return box.a * box.b
+
+
+def _precompile_dynamo_mapping_aliasing(values):
+    values["a"].add_(1)
+    return values["a"] * values["b"]
+
+
+def _precompile_dynamo_list_subclass_aliasing(values, other):
+    values.hidden.add_(1)
+    return values.hidden * other
+
+
+class _PrecompileDynamoInputGetitem:
+    def __getitem__(self, x):
+        return x + 1 if x is _DYNAMO_TENSOR_DEFAULT else x - 1
+
+
+class _PrecompileDynamoInputObjectBox:
+    def __init__(self):
+        self.inner = _PrecompileDynamoInputGetitem()
+
+
+def _precompile_dynamo_input_getitem(obj, x):
+    return obj[x]
+
+
+def _precompile_dynamo_nested_input_getitem(box, x):
+    return box.inner[x]
+
+
+_DYNAMO_INPUT_OBJECT_GLOBAL = [_DYNAMO_TENSOR_DEFAULT]
+
+
+class _PrecompileDynamoInputStateGlobalAlias:
+    def __init__(self, token):
+        self.token = token
+
+    def __getitem__(self, x):
+        return x + 1 if self.token is _DYNAMO_INPUT_OBJECT_GLOBAL[0] else x - 1
+
+
+class _PrecompileDynamoInputList(list):
+    def __getitem__(self, index):
+        return _DYNAMO_TENSOR_DEFAULT
+
+
 def _precompile_dynamo_dict_order(x, values):
     for value in values.values():
         x = x * value + 1
     return x
+
+
+class _PrecompileDynamoInputAttribute:
+    def __init__(self):
+        self.flag = True
+
+
+def _precompile_dynamo_input_attribute(x, state):
+    return x + (1 if hasattr(state, "flag") else 2)
+
+
+class _PrecompileDynamoCallableAttribute(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.op = torch.sin
+
+    def forward(self, x):
+        return self.op(x)
+
+
+def _precompile_eager_cond(x):
+    return torch.cond(x.sum() > 0, lambda t: t.sin(), lambda t: t.cos(), (x,))
+
+
+def _precompile_eager_while_loop(x):
+    return torch.while_loop(
+        lambda i, t: i < 3,
+        lambda i, t: (i + 1, t + 1.0),
+        (torch.tensor(0), x),
+    )[1]
+
+
+def _precompile_eager_checkpoint(x):
+    return torch.utils.checkpoint.checkpoint(
+        lambda t: t.sin().cos(), x, use_reentrant=False
+    )
+
+
+def _precompile_eager_vmap(x):
+    return torch.vmap(lambda t: t * 2.0)(x)
+
+
+def _precompile_eager_autocast(x):
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        return x @ x
+
+
+def _precompile_eager_no_grad(x):
+    y = x * 2.0
+    with torch.no_grad():
+        return y.sin()
+
+
+_PRECOMPILE_EAGER_ROUND_TRIP = {
+    "autocast": _precompile_eager_autocast,
+    "checkpoint": _precompile_eager_checkpoint,
+    "cond": _precompile_eager_cond,
+    "no_grad": _precompile_eager_no_grad,
+    "vmap": _precompile_eager_vmap,
+    "while_loop": _precompile_eager_while_loop,
+}
+
+
+def _precompile_eager_graph_break(key, x):
+    y = x * 2.0
+    torch._dynamo.graph_break()
+    return _PRECOMPILE_EAGER_ROUND_TRIP[key](y)
+
+
+class _PrecompileWeakValue:
+    pass
+
+
+def _precompile_dynamo_weakref_input(x, values):
+    ref = values.data["value"]
+    return x + (1 if ref.__callback__ is not None else 2)
+
+
+_PRECOMPILE_DYNAMO_GENERATOR = torch.Generator()
+
+
+def _precompile_dynamo_generator_environment(x):
+    return x + (1 if _PRECOMPILE_DYNAMO_GENERATOR.device.type == "cpu" else 2)
+
+
+def _precompile_dynamo_generator_input(x, generator):
+    return x + (1 if generator.device.type == "cpu" else 2)
 
 
 def _precompile_dynamo_graph_break(x):
@@ -360,6 +895,12 @@ def _precompile_dynamo_graph_break(x):
     y = y * 2
     torch._dynamo.graph_break()
     return y.sin()
+
+
+def _precompile_dynamo_branching_graph_break(x, flag):
+    y = x.sin()
+    torch._dynamo.graph_break()
+    return y.cos() if flag else y * 2
 
 
 def _precompile_dynamo_unreachable_helper(x):
@@ -398,8 +939,198 @@ class _PrecompileDynamoBreakingModule(torch.nn.Module):
         return y.sin()
 
 
+class _PrecompileDynamoDisabledMethodHelper:
+    @torch._dynamo.disable
+    def call(self, x):
+        return x + 1
+
+
+_PRECOMPILE_DYNAMO_DISABLED_METHOD_HELPER = _PrecompileDynamoDisabledMethodHelper()
+
+
+class _PrecompileDynamoDisabledMethodModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        return _PRECOMPILE_DYNAMO_DISABLED_METHOD_HELPER.call(self.linear(x)).sum()
+
+
+class _PrecompileDynamoDataDependentModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        value = self.linear(x)
+        scale = value.abs().max().item()
+        return (value * scale).sum()
+
+
+class _PrecompileDynamoBreakInLoopModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        for _ in range(3):
+            x = self.linear(x)
+            x = _precompile_dynamo_disabled(x)
+        return x.sum()
+
+
+_PRECOMPILE_DYNAMO_GLOBAL_SCALE = 3.0
+
+
+class _PrecompileDynamoIdentityToken:
+    pass
+
+
+_PRECOMPILE_DYNAMO_IDENTITY_TOKEN = _PrecompileDynamoIdentityToken()
+
+
+def _precompile_dynamo_input_global_identity(x, token):
+    if token is _PRECOMPILE_DYNAMO_IDENTITY_TOKEN:
+        return x.sin()
+    return x.cos()
+
+
+class _PrecompileDynamoTiedWeights(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.a = torch.nn.Linear(4, 4, bias=False)
+        self.b = torch.nn.Linear(4, 4, bias=False)
+        self.b.weight = self.a.weight
+
+    def forward(self, x):
+        return self.b(self.a(x))
+
+
+class _PrecompileDynamoUnguardedAttribute(torch.nn.Module):
+    def __init__(self, extra):
+        super().__init__()
+        self.linear = torch.nn.Linear(8, 8)
+        self.extra = extra
+
+    def forward(self, x):
+        return self.linear(x).relu().sum()
+
+
+class _PrecompileDynamoReadsTensorAttribute(torch.nn.Module):
+    def forward(self, x):
+        companion = getattr(x, "_cpu_copy", None)
+        return x * 2 if companion is None else x * 2 + companion.to(x.device)
+
+
+def _precompile_dynamo_tensor_attribute_break(module, x):
+    torch._dynamo.graph_break()
+    return module(x).sum()
+
+
+def _precompile_dynamo_reads_tensor_flag(x):
+    return x * getattr(x, "my_flag", 1)
+
+
+class _PrecompileDynamoStepCounter(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(8, 8)
+        self.step = 0
+
+    def forward(self, x):
+        self.step += 1
+        return self.linear(x) * self.step
+
+
+class _PrecompileDynamoPipeline:
+    def __init__(self, model):
+        self.model = model
+        self.iterator = (index for index in range(3))
+
+
+class _PrecompileLockHolder:
+    pass
+
+
+def _precompile_dynamo_pipeline(pipeline, x):
+    return pipeline.model(x).relu().sum()
+
+
+class _PrecompilePlusOneMode(torch.overrides.TorchFunctionMode):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        if func is torch.add and not isinstance(args[1], torch.Tensor):
+            return func(args[0], args[1] + 1, **kwargs)
+        return func(*args, **kwargs)
+
+
+def _precompile_add_one(x):
+    return torch.add(x, 1.0)
+
+
+class _PrecompileDynamoFoldsGlobal(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(4, 3)
+
+    def forward(self, x):
+        return self.linear(x), _PRECOMPILE_DYNAMO_GLOBAL_SCALE
+
+
+class _PrecompileDynamoPlainMatmul(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.randn(8, 8))
+
+    def forward(self, x):
+        return (x @ self.weight).relu()
+
+
+class _PrecompileDynamoCustomOpMatmul(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.randn(8, 8))
+
+    def forward(self, x):
+        return torch.ops.precompile_parity.fused_matmul(x, self.weight).relu()
+
+
+class _PrecompileDynamoGradState(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.randn(4))
+        self.register_buffer("buffer", torch.randn(4, requires_grad=True))
+
+    def step(self, x):
+        ((self.weight + self.buffer) * x).sum().backward()
+
+
 def _precompile_dynamo_call_module(module, x):
     return module(x)
+
+
+def _precompile_dynamo_grad_state(module, x):
+    module.step(x)
+
+
+def _precompile_dynamo_late_varying(fixed, varying):
+    prefix = fixed.sin()
+    torch._dynamo.graph_break()
+    return prefix.sum() + varying.cos().sum()
+
+
+def _precompile_dynamo_wrong_call_module(module, x):
+    return module(x) + 100
+
+
+def _precompile_dynamo_backward(module, x):
+    module(x).sum().backward()
+
+
+def _precompile_dynamo_autograd_grad(module, x, target):
+    loss = torch.nn.functional.mse_loss(module(x), target)
+    return torch.autograd.grad(loss, tuple(module.parameters()))
 
 
 def _precompile_dynamo_aliased_graph_break(x):
@@ -506,6 +1237,23 @@ def _precompile_dynamo_cellvar(x, scale):
 
 
 _PRECOMPILE_DYNAMO_MUTATED_GLOBAL = 0
+_PRECOMPILE_DYNAMO_INPUT_GLOBAL = None
+
+
+def _precompile_dynamo_stores_input_global(x):
+    global _PRECOMPILE_DYNAMO_INPUT_GLOBAL
+    _PRECOMPILE_DYNAMO_INPUT_GLOBAL = x
+    return x + 1
+
+
+def _precompile_dynamo_helper_stores_input_global(x):
+    global _PRECOMPILE_DYNAMO_INPUT_GLOBAL
+    _PRECOMPILE_DYNAMO_INPUT_GLOBAL = x
+    return x
+
+
+def _precompile_dynamo_calls_global_mutating_helper(x):
+    return _precompile_dynamo_helper_stores_input_global(x) + 1
 
 
 @torch._dynamo.disable
@@ -533,7 +1281,7 @@ def _precompile_dynamo_with_dynamic_global(x):
 
 def _precompile_dynamo_with_dead_disabled_branch(x, use_good):
     if use_good:
-        return _precompile_dynamo_disabled(x)
+        return _precompile_dynamo_disabled(x) + 1
     return _precompile_dynamo_mutates_global(x)
 
 
@@ -600,19 +1348,10 @@ def _strip_artifact(cache: bytes) -> bytes:
 def _dynamo_serialized_guard_summary(
     code: str,
 ) -> list[tuple[list[str], list[str], list[str], bool]]:
-    import ast
-    import base64
-
     from torch._dynamo.package import load_guards_state
+    from torch._precompile import _parse_dynamo_state
 
-    encoded_state = ast.literal_eval(
-        next(
-            line.removeprefix("_DYNAMO_STATE = ")
-            for line in code.splitlines()
-            if line.startswith("_DYNAMO_STATE = ")
-        )
-    )
-    state = pickle.loads(base64.b64decode(encoded_state))
+    state = _parse_dynamo_state(code)
     summary = []
     for code_state in state.codes:
         for variant in code_state.variants:
@@ -635,6 +1374,20 @@ def _dynamo_serialized_guard_summary(
                 )
             )
     return summary
+
+
+def _dynamo_frame_variant_counts(code: str) -> list[tuple[str, int]]:
+    from torch._dynamo.package import SerializedCode
+    from torch._precompile import _parse_dynamo_state
+
+    state = _parse_dynamo_state(code)
+    return [
+        (
+            SerializedCode.to_code_object(code_state.code).co_name,
+            len(code_state.variants),
+        )
+        for code_state in state.codes
+    ]
 
 
 def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
@@ -1489,6 +2242,41 @@ class TestPrecompile(TestCase):
         # The public location: test_public_bindings.test_correct_module_names also
         # enforces this for every torch.compiler.__all__ member.
         self.assertEqual(torch.compiler.precompile.__module__, "torch.compiler")
+        for name in (
+            "ExampleInput",
+            "GuardFact",
+            "FrameInvariants",
+            "PrecompileSummary",
+        ):
+            self.assertIn(name, torch.compiler.__all__)
+            self.assertEqual(getattr(torch.compiler, name).__module__, "torch.compiler")
+
+    def test_precompile_public_signature_and_type_hints(self):
+        signature = inspect.signature(torch.compiler.precompile)
+        self.assertEqual(
+            signature.parameters["example_inputs"].kind,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+        self.assertEqual(
+            typing.get_type_hints(torch.compiler.precompile.__call__)["return"],
+            tuple[str, bytes],
+        )
+        typing.get_type_hints(torch.compiler.precompile.load)
+        self.assertEqual(torch.compiler.precompile.load.__module__, "torch.compiler")
+        self.assertEqual(torch.compiler.precompile.load.__qualname__, "precompile.load")
+
+    def test_precompile_documents_dynamo_capture_options(self):
+        documentation = inspect.getdoc(torch.compiler.precompile)
+        for option in (
+            "guard_filter_fn",
+            "recompile_limit",
+            "dynamic",
+            "invariants",
+            "require_complete",
+            "require_no_risky_drops",
+            "require_no_dropped_guards",
+        ):
+            self.assertIn(option, documentation)
 
     def test_backend_invalid_raises(self):
         a, b = torch.randn(4, 4), torch.randn(4, 4)
@@ -1509,6 +2297,17 @@ class TestPrecompile(TestCase):
             )
             self.assertEqual(torch.compiler.precompile.load(code, cache)(m, x), m(x))
 
+    @parametrize("num_examples", [0, 2])
+    def test_make_fx_requires_one_example_input(self, num_examples):
+        x = torch.randn(4)
+        message = "requires example_inputs" if num_examples == 0 else "exactly one"
+        with self.assertRaisesRegex((AssertionError, ValueError), message):
+            torch.compiler.precompile(
+                lambda t: t + 1,
+                example_inputs=[(x,)] * num_examples,
+                backend="eager",
+            )
+
     def test_positional_example_inputs_remain_supported(self):
         x = torch.randn(4)
         y = torch.randn(4)
@@ -1525,19 +2324,389 @@ class TestPrecompile(TestCase):
                 backend="eager",
             )
 
-    def test_zero_argument_call_remains_supported(self):
-        code, cache = torch.compiler.precompile(lambda: 3, backend="eager")
-        self.assertEqual(torch.compiler.precompile.load(code, cache)(), 3)
-
-    @parametrize("tracer", ("make_fx", "dynamo"))
-    def test_example_inputs_require_tuples(self, tracer):
-        with self.assertRaisesRegex(TypeError, "positional-argument tuples"):
+    @parametrize(
+        "option",
+        (
+            {"recompile_limit": 8},
+            {"dynamic": False},
+            {"guard_filter_fn": lambda guards: [True] * len(guards)},
+            {"invariants": "unused.txt"},
+            {"require_complete": False},
+            {"require_no_risky_drops": False},
+            {"require_no_dropped_guards": True},
+        ),
+    )
+    def test_precompile_dynamo_options_require_dynamo(self, option):
+        with self.assertRaisesRegex(ValueError, "apply only to tracer='dynamo'"):
             torch.compiler.precompile(
-                lambda t: t + 1,
-                example_inputs=[[torch.randn(4)]],
-                tracer=tracer,
+                lambda x: x + 1,
+                example_inputs=[(torch.randn(4),)],
+                backend="eager",
+                **option,
+            )
+
+    def test_zero_argument_call_remains_supported(self):
+        code, cache = torch.compiler.precompile(
+            lambda: torch.ones(4) + 1, backend="eager"
+        )
+        self.assertEqual(
+            torch.compiler.precompile.load(code, cache)(), torch.full((4,), 2.0)
+        )
+
+    @parametrize("bad", (torch.ones(1), torch.nn.Linear(1, 1), "input"))
+    def test_precompile_rejects_bare_example_container(self, bad):
+        with self.assertRaisesRegex(TypeError, "sequence of calls"):
+            torch.compiler.precompile(lambda x: x, example_inputs=bad, backend="eager")
+
+    def test_example_input_supports_make_fx_positional_args_only(self):
+        x = torch.randn(4)
+        example = torch.compiler.ExampleInput(args=(x,))
+        code, cache = torch.compiler.precompile(
+            lambda t: t + 1, example_inputs=[example], backend="eager"
+        )
+        self.assertEqual(torch.compiler.precompile.load(code, cache)(x), x + 1)
+        with self.assertRaisesRegex(NotImplementedError, "keyword example inputs"):
+            torch.compiler.precompile(
+                lambda t, *, scale: t * scale,
+                example_inputs=[
+                    torch.compiler.ExampleInput(args=(x,), kwargs={"scale": 2})
+                ],
                 backend="eager",
             )
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_make_fx_artifact_reproduces_capture_autocast(self, backend):
+        def fn(a, b):
+            return a @ b
+
+        a = torch.randn(8, 8)
+        b = torch.randn(8, 8)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            expected = fn(a, b)
+            code, cache = torch.compiler.precompile(
+                fn, example_inputs=[(a, b)], backend=backend
+            )
+        loaded = torch.compiler.precompile.load(code, cache)
+        plain = loaded(a, b)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            under_autocast = loaded(a, b)
+        self.assertEqual(plain.dtype, torch.bfloat16)
+        self.assertEqual(plain, expected)
+        self.assertEqual(under_autocast, expected)
+
+    @parametrize("backend", ("eager", "inductor"))
+    @parametrize("decompositions", (None, {}))
+    def test_make_fx_torch_function_mode_applies_once(self, backend, decompositions):
+        x = torch.zeros(3)
+        with _PrecompilePlusOneMode():
+            expected = _precompile_add_one(x).clone()
+            code, cache = torch.compiler.precompile(
+                _precompile_add_one,
+                example_inputs=[(x,)],
+                backend=backend,
+                decompositions=decompositions,
+            )
+        self.assertEqual(torch.compiler.precompile.load(code, cache)(x), expected)
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_tracer_dynamo_recompiles_to_dynamic_graph(self):
+        examples = [(torch.randn(size, 4),) for size in (2, 3, 5)]
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=examples,
+            tracer="dynamo",
+        )
+
+        self.assertIn('TRACER = "dynamo"', code)
+        self.assertIn("FRAME_COUNT = 1", code)
+        self.assertIn("VARIANT_COUNT = 2", code)
+        self.assertIn("GRAPH_COUNT = 2", code)
+        self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
+        self.assertIn("Inductor output code", code)
+        self.assertIn("Guard trees and Dynamo/disabled-function bytecode", code)
+        self.assertIn("# Backend graph 0:", code)
+        self.assertIn("_DYNAMO_BACKENDS[", code)
+        self.assertNotIn("_DYNAMO_BACKEND_SOURCES", code)
+        self.assertIn(
+            "# Generated by torch._functorch.aot_autograd.compile_to_python", code
+        )
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        self.assertIsInstance(blob["artifact"], list)
+        self.assertTrue(
+            all(item is None or isinstance(item, bytes) for item in blob["artifact"])
+        )
+        guard_summaries = _dynamo_serialized_guard_summary(code)
+        self.assertEqual(len(guard_summaries), 2)
+        for guard_types, _, _, has_shape_guards in guard_summaries:
+            self.assertIn("TENSOR_MATCH", guard_types)
+            self.assertNotIn("GLOBAL_STATE", guard_types)
+            self.assertTrue(has_shape_guards)
+
+        for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
+            self.assertEqual(loaded.capture_summary.variant_examples[0], (0, 1))
+            for size in (2, 7):
+                x = torch.randn(size, 4)
+                self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
+            with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
+                loaded(torch.randn(1, 4))
+
+    def test_tracer_dynamo_external_python_function(self):
+        x = torch.randn(4)
+        target = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_mse_loss,
+            example_inputs=[(x, target)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x, target), _precompile_dynamo_mse_loss(x, target))
+
+    def test_tracer_dynamo_rejects_non_function_callable(self):
+        with self.assertRaisesRegex(NotImplementedError, "requires a Python function"):
+            torch.compiler.precompile(
+                functools.partial(_precompile_dynamo_dynamic),
+                example_inputs=[(torch.randn(4),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_closure(self):
+        offset = 1
+
+        def fn(x):
+            return x + offset
+
+        with self.assertRaisesRegex(NotImplementedError, "closure cells"):
+            torch.compiler.precompile(
+                fn,
+                example_inputs=[(torch.randn(4),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_decompositions(self):
+        with self.assertRaisesRegex(NotImplementedError, "decompositions"):
+            torch.compiler.precompile(
+                _precompile_dynamo_dynamic,
+                example_inputs=[(torch.randn(4),)],
+                tracer="dynamo",
+                backend="eager",
+                decompositions={},
+            )
+
+    def test_tracer_dynamo_library_class_construction(self):
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_construct_relu,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x), _precompile_dynamo_construct_relu(x))
+
+    def test_tracer_dynamo_rejects_imported_helper_input_alias(self):
+        with self.assertRaisesRegex(PrecompileError, "input-derived"):
+            torch.compiler.precompile(
+                _precompile_dynamo_external_module_identity,
+                example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_library_helper_container_input_alias(self):
+        torch._precompile_box = [_DYNAMO_TENSOR_DEFAULT]
+        torch._precompile_helper = types.FunctionType(
+            _precompile_dynamo_torch_helper_template.__code__,
+            torch.__dict__,
+            "_precompile_helper",
+        )
+        try:
+            with self.assertRaisesRegex(PrecompileError, "input-derived"):
+                torch.compiler.precompile(
+                    _precompile_dynamo_torch_helper_identity,
+                    example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+        finally:
+            del torch._precompile_helper
+            del torch._precompile_box
+
+    def test_tracer_dynamo_rejects_library_callable_container_input_alias(self):
+        torch._precompile_box = [_DYNAMO_TENSOR_DEFAULT]
+        call = types.FunctionType(
+            _precompile_dynamo_torch_callable_template.__code__,
+            torch.__dict__,
+            "__call__",
+        )
+        callable_type = type(
+            "_PrecompileCallable",
+            (),
+            {"__module__": "torch", "__call__": call},
+        )
+        torch._precompile_callable = callable_type()
+        try:
+            with self.assertRaisesRegex(PrecompileError, "input-derived"):
+                torch.compiler.precompile(
+                    _precompile_dynamo_torch_callable_identity,
+                    example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+        finally:
+            del torch._precompile_callable
+            del torch._precompile_box
+
+    def test_tracer_dynamo_rejects_library_getitem_container_input_alias(self):
+        torch._precompile_box = [_DYNAMO_TENSOR_DEFAULT]
+        getitem = types.FunctionType(
+            _precompile_dynamo_torch_getitem_template.__code__,
+            torch.__dict__,
+            "__getitem__",
+        )
+        getitem_type = type(
+            "_PrecompileGetitem",
+            (),
+            {"__module__": "torch", "__getitem__": getitem},
+        )
+        torch._precompile_getitem = getitem_type()
+        try:
+            with self.assertRaisesRegex(PrecompileError, "input-derived"):
+                torch.compiler.precompile(
+                    _precompile_dynamo_torch_getitem_identity,
+                    example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+        finally:
+            del torch._precompile_getitem
+            del torch._precompile_box
+
+    def test_tracer_dynamo_rejects_library_class_getitem_input_alias(self):
+        torch._precompile_box = [_DYNAMO_TENSOR_DEFAULT]
+        class_getitem = types.FunctionType(
+            _precompile_dynamo_torch_class_getitem_template.__code__,
+            torch.__dict__,
+            "__class_getitem__",
+        )
+        torch._precompile_generic = type(
+            "_PrecompileGeneric",
+            (),
+            {
+                "__module__": "torch",
+                "__class_getitem__": classmethod(class_getitem),
+            },
+        )
+        try:
+            with self.assertRaisesRegex(PrecompileError, "input-derived"):
+                torch.compiler.precompile(
+                    _precompile_dynamo_torch_class_getitem_identity,
+                    example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+        finally:
+            del torch._precompile_generic
+            del torch._precompile_box
+
+    def test_tracer_dynamo_rejects_library_metaclass_getitem_input_alias(self):
+        torch._precompile_box = [_DYNAMO_TENSOR_DEFAULT]
+        getitem = types.FunctionType(
+            _precompile_dynamo_torch_metaclass_getitem_template.__code__,
+            torch.__dict__,
+            "__getitem__",
+        )
+        metaclass = type(
+            "_PrecompileMeta",
+            (type,),
+            {"__module__": "torch", "__getitem__": getitem},
+        )
+        torch._precompile_meta_generic = metaclass(
+            "_PrecompileMetaGeneric", (), {"__module__": "torch"}
+        )
+        try:
+            with self.assertRaisesRegex(PrecompileError, "input-derived"):
+                torch.compiler.precompile(
+                    _precompile_dynamo_torch_metaclass_getitem_identity,
+                    example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+        finally:
+            del torch._precompile_meta_generic
+            del torch._precompile_box
+
+    def test_tracer_dynamo_rejects_module_state_library_behavior_alias(self):
+        torch._precompile_box = [_DYNAMO_TENSOR_DEFAULT]
+        getitem = types.FunctionType(
+            _precompile_dynamo_torch_getitem_template.__code__,
+            torch.__dict__,
+            "__getitem__",
+        )
+        helper_type = type(
+            "_PrecompileGetitem",
+            (),
+            {"__module__": "torch", "__getitem__": getitem},
+        )
+        module = _PrecompileDynamoLibraryIndexerModule(helper_type())
+        try:
+            with self.assertRaisesRegex(PrecompileError, "input callable"):
+                torch.compiler.precompile(
+                    _precompile_dynamo_call_identity_module,
+                    example_inputs=[(module, _DYNAMO_TENSOR_DEFAULT)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+        finally:
+            del torch._precompile_box
+
+    @parametrize(
+        "fn",
+        (
+            _precompile_dynamo_function_globals_identity,
+            _precompile_dynamo_function_annotations_identity,
+            _precompile_dynamo_function_container_globals_identity,
+            _precompile_dynamo_function_container_annotations_identity,
+        ),
+    )
+    def test_tracer_dynamo_rejects_function_metadata_input_alias(self, fn):
+        with self.assertRaisesRegex(PrecompileError, "input-derived"):
+            torch.compiler.precompile(
+                fn,
+                example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    @parametrize(
+        "helper",
+        (
+            _precompile_dynamo_torch_module_helper_template,
+            _precompile_dynamo_torch_module_getattr_template,
+        ),
+    )
+    def test_tracer_dynamo_rejects_library_helper_module_dispatch(self, helper):
+        module = _PrecompileDynamoModuleMethodGlobalIdentity()
+        torch._precompile_module_helper = types.FunctionType(
+            helper.__code__, torch.__dict__, "_precompile_module_helper"
+        )
+        try:
+            with self.assertRaisesRegex(
+                (PrecompileError, NotImplementedError),
+                "input callable|dynamic global access",
+            ):
+                torch.compiler.precompile(
+                    _precompile_dynamo_torch_module_helper_identity,
+                    example_inputs=[(module, _DYNAMO_TENSOR_DEFAULT)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+        finally:
+            del torch._precompile_module_helper
 
     def test_tracer_dynamo_filters_torch_global_guards_before_serializing(self):
         x = torch.randn(4)
@@ -1547,190 +2716,534 @@ class TestPrecompile(TestCase):
             tracer="dynamo",
             backend="eager",
         )
-        self.assertEqual(torch.compiler.precompile.load(code, cache)(x), torch.sin(x))
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x), torch.sin(x))
 
-    def test_tracer_dynamo_training_flag_controls_grad_mode(self):
-        x = torch.randn(4, requires_grad=True)
+    @parametrize("construct", sorted(_PRECOMPILE_EAGER_ROUND_TRIP))
+    @parametrize("graph_break", (False, True))
+    def test_tracer_dynamo_eager_higher_order_graph(self, construct, graph_break):
+        entry = (
+            _precompile_eager_graph_break
+            if graph_break
+            else _PRECOMPILE_EAGER_ROUND_TRIP[construct]
+        )
+        args = (construct,) if graph_break else ()
+        x = torch.randn(4, 4)
+        with torch.no_grad():
+            expected = torch.compile(entry, backend="eager")(*args, x)
+        torch._dynamo.reset()
         code, cache = torch.compiler.precompile(
-            _precompile_dynamo_torch_sin,
+            entry,
+            example_inputs=[(*args, x)],
+            tracer="dynamo",
+            backend="eager",
+            dynamic=False,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        try:
+            self.assertEqual(loaded.capture_summary.risky_dropped_guards, ())
+            with torch.no_grad():
+                self.assertEqual(loaded(*args, x), expected)
+        finally:
+            if hasattr(loaded, "unload"):
+                loaded.unload()
+
+    @parametrize("graph_break", (False, True))
+    def test_tracer_dynamo_eager_preserves_no_grad_region(self, graph_break):
+        entry = (
+            _precompile_eager_graph_break if graph_break else _precompile_eager_no_grad
+        )
+        args = ("no_grad",) if graph_break else ()
+        x = torch.randn(4, requires_grad=True)
+        with torch.enable_grad():
+            expected = torch.compile(entry, backend="eager")(*args, x)
+            torch._dynamo.reset()
+            code, cache = torch.compiler.precompile(
+                entry,
+                example_inputs=[(*args, x)],
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+                training=True,
+            )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with torch.enable_grad():
+            actual = loaded(*args, x)
+        self.assertFalse(actual.requires_grad)
+        self.assertEqual(actual, expected)
+
+    def test_tracer_dynamo_eager_load_preserves_ambient_grad_mode(self):
+        x = torch.randn(4)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_eager_no_grad,
+                example_inputs=[(x,)],
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+            )
+            self.assertFalse(torch.is_grad_enabled())
+            torch.compiler.precompile.load(code, cache)
+            self.assertFalse(torch.is_grad_enabled())
+
+    def test_tracer_dynamo_eager_higher_order_source_runs_in_fresh_process(self):
+        from unittest import mock
+
+        x = torch.ones(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_eager_cond,
             example_inputs=[(x,)],
             tracer="dynamo",
             backend="eager",
-            training=False,
+            dynamic=False,
         )
-        with torch.enable_grad():
-            self.assertFalse(
-                torch.compiler.precompile.load(code, cache)(x).requires_grad
-            )
+        self.assertIn("def _graph_forward", code)
+        self.assertIn("def _eager_subgraph_0", code)
+        self.assertIn("_EAGER_GRAPH_BODY", code)
+        with mock.patch.object(
+            torch.fx.Tracer,
+            "trace",
+            side_effect=AssertionError("load must not symbolically retrace"),
+        ):
+            loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x), _precompile_eager_cond(x))
 
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as artifact:
+            artifact.write(code)
+            artifact_path = artifact.name
+        try:
+            subprocess.check_call(
+                [
+                    sys.executable,
+                    "-c",
+                    textwrap.dedent(
+                        """
+                        import runpy
+                        import sys
+                        import torch
+
+                        forward = runpy.run_path(sys.argv[1])["forward"]
+                        for x in (torch.ones(4), -torch.ones(4)):
+                            expected = x.sin() if x.sum() > 0 else x.cos()
+                            torch.testing.assert_close(forward(x), expected)
+                        """
+                    ),
+                    artifact_path,
+                ]
+            )
+        finally:
+            os.unlink(artifact_path)
+
+    @parametrize("graph_break", (False, True))
+    def test_tracer_dynamo_eager_checkpoint_training(self, graph_break):
+        entry = (
+            _precompile_eager_graph_break
+            if graph_break
+            else _precompile_eager_checkpoint
+        )
+        args = ("checkpoint",) if graph_break else ()
+        x = torch.randn(4, requires_grad=True)
+        reference_input = x.detach().clone().requires_grad_()
+        expected = entry(*args, reference_input)
+        expected.sum().backward()
         code, cache = torch.compiler.precompile(
-            _precompile_dynamo_torch_sin,
-            example_inputs=[(x,)],
+            entry,
+            example_inputs=[(*args, x)],
             tracer="dynamo",
+            backend="eager",
+            dynamic=False,
             training=True,
         )
-        with torch.no_grad():
-            out = torch.compiler.precompile.load(code, cache)(x)
-        self.assertTrue(out.requires_grad)
+        actual_input = x.detach().clone().requires_grad_()
+        loaded = torch.compiler.precompile.load(code, cache)
+        try:
+            actual = loaded(*args, actual_input)
+            actual.sum().backward()
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual_input.grad, reference_input.grad)
+        finally:
+            if hasattr(loaded, "unload"):
+                loaded.unload()
 
-    @parametrize("backend", ("eager", "inductor"))
-    def test_tracer_dynamo_preserves_inference_mode(self, backend):
-        x = torch.randn(4)
-        with torch.inference_mode():
-            code, cache = torch.compiler.precompile(
-                _precompile_dynamo_dynamic,
-                example_inputs=[(x,)],
-                tracer="dynamo",
-                backend=backend,
-            )
-            expected = _precompile_dynamo_dynamic(x)
-            actual = torch.compiler.precompile.load(code, cache)(x)
-        self.assertEqual(actual, expected)
-        self.assertTrue(torch.is_inference(actual))
-
-    def test_tracer_dynamo_rejects_training_inference_mode(self):
-        x = torch.randn(4, requires_grad=True)
-        with (
-            torch.inference_mode(),
-            self.assertRaisesRegex(PrecompileError, "training=True.*inference_mode"),
-        ):
-            torch.compiler.precompile(
-                _precompile_dynamo_dynamic,
-                example_inputs=[(x,)],
-                tracer="dynamo",
-                backend="inductor",
-                training=True,
-            )
-
-    def test_tracer_dynamo_rejects_input_global_alias(self):
-        with self.assertRaisesRegex(PrecompileError, "aliases the Python environment"):
-            torch.compiler.precompile(
-                _precompile_dynamo_input_global_identity,
-                example_inputs=[(_DYNAMO_INPUT_GLOBAL,)],
-                tracer="dynamo",
-                backend="eager",
-            )
-
-    def test_tracer_dynamo_rejects_global_tensor(self):
-        with self.assertRaisesRegex(PrecompileError, "tensor-valued Python globals"):
-            torch.compiler.precompile(
-                _precompile_dynamo_global_tensor,
-                example_inputs=[(torch.randn(3),)],
-                tracer="dynamo",
-                backend="eager",
-            )
-
-    def test_tracer_dynamo_rejects_input_container_global_alias(self):
-        with self.assertRaisesRegex(PrecompileError, "aliases the Python environment"):
-            torch.compiler.precompile(
-                _precompile_dynamo_container_identity,
-                example_inputs=[(_DYNAMO_CONTAINER_IDENTITY, torch.randn(3))],
-                tracer="dynamo",
-                backend="eager",
-            )
-
-    def test_tracer_dynamo_rejects_input_helper_attribute_alias(self):
-        with self.assertRaisesRegex(PrecompileError, "aliases the Python environment"):
-            torch.compiler.precompile(
-                _precompile_dynamo_helper_attribute_identity,
-                example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
-                tracer="dynamo",
-                backend="eager",
-            )
-
-    @parametrize(
-        "fn",
-        (
-            _precompile_dynamo_descriptor_identity,
-            _precompile_dynamo_custom_descriptor_identity,
-            _precompile_dynamo_slotted_identity,
-            _precompile_dynamo_dynamic_identity,
-            _precompile_dynamo_getattribute_identity,
-            _precompile_dynamo_module_getattr_identity,
-            _precompile_dynamo_callable_identity,
-            _precompile_dynamo_deque_identity,
-            _precompile_dynamo_context_identity,
-            _precompile_dynamo_weak_proxy_identity,
-            _precompile_dynamo_type_identity,
-            _precompile_dynamo_nested_descriptor_identity,
-            _precompile_dynamo_weakref_identity,
-        ),
-        name_fn=lambda fn: fn.__name__,
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
     )
-    def test_tracer_dynamo_rejects_input_descriptor_alias(self, fn):
-        with self.assertRaisesRegex(PrecompileError, "aliases the Python environment"):
-            torch.compiler.precompile(
-                fn,
-                example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
-                tracer="dynamo",
-                backend="eager",
-            )
-
-    def test_tracer_dynamo_ignores_unrelated_global_attributes(self):
-        token = _DYNAMO_IDENTITY_DESCRIPTOR.unused
-        x = torch.randn(3)
+    def test_tracer_dynamo_eager_higher_order_dynamic_shapes(self):
         code, cache = torch.compiler.precompile(
-            _precompile_dynamo_unrelated_attribute,
-            example_inputs=[(token, x)],
+            _precompile_eager_cond,
+            example_inputs=[(torch.ones(2),), (torch.ones(3),)],
             tracer="dynamo",
             backend="eager",
         )
         loaded = torch.compiler.precompile.load(code, cache)
-        other = torch.randn(3)
-        self.assertEqual(
-            loaded(other, x), _precompile_dynamo_unrelated_attribute(other, x)
-        )
+        for x in (torch.ones(5), -torch.ones(7)):
+            self.assertEqual(loaded(x), _precompile_eager_cond(x))
 
-    def test_tracer_dynamo_rejects_tensor_default(self):
-        with self.assertRaisesRegex(PrecompileError, "tensor-valued function defaults"):
-            torch.compiler.precompile(
-                _precompile_dynamo_tensor_default,
-                example_inputs=[(torch.randn(3),)],
-                tracer="dynamo",
-                backend="eager",
-            )
-
-    def test_tracer_dynamo_rejects_tensor_in_object_default(self):
-        with self.assertRaisesRegex(PrecompileError, "non-literal function defaults"):
-            torch.compiler.precompile(
-                _precompile_dynamo_object_default,
-                example_inputs=[(torch.randn(3),)],
-                tracer="dynamo",
-                backend="eager",
-            )
-
-    def test_tracer_dynamo_rejects_tensor_in_builtin_subclass_default(self):
-        with self.assertRaisesRegex(PrecompileError, "non-literal function defaults"):
-            torch.compiler.precompile(
-                _precompile_dynamo_tuple_subclass_default,
-                example_inputs=[(torch.randn(3),)],
-                tracer="dynamo",
-                backend="eager",
-            )
-
-    def test_tracer_dynamo_varargs_dispatch(self):
-        x = torch.randn(4)
-        y = torch.randn(4)
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_tracer_dynamo_dynamic_graph_keeps_tensor_contract(self):
         code, cache = torch.compiler.precompile(
-            _precompile_dynamo_varargs,
-            example_inputs=[(x, y)],
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(2, 4),), (torch.randn(3, 4),)],
+            tracer="dynamo",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with self.assertRaisesRegex(PrecompileError, "dtype"):
+            loaded(torch.randn(7, 4, dtype=torch.float64))
+
+    def test_tracer_dynamo_keeps_invariant_input_attribute_guard(self):
+        x = torch.randn(4)
+        state = _PrecompileDynamoInputAttribute()
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_input_attribute,
+            example_inputs=[(x, state)],
             tracer="dynamo",
             backend="eager",
         )
-        self.assertEqual(torch.compiler.precompile.load(code, cache)(x, y), x + y)
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x, state), _precompile_dynamo_input_attribute(x, state))
+        del state.flag
+        with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
+            loaded(x, state)
 
-    def test_tracer_dynamo_captures_more_than_default_recompile_limit(self):
-        x = torch.randn(4)
-        examples = [(x, value) for value in range(9)]
+    def test_tracer_dynamo_does_not_treat_module_callable_as_environment(self):
+        model = _PrecompileDynamoCallableAttribute()
+        with self.assertRaisesRegex(PrecompileError, "can affect dispatch"):
+            torch.compiler.precompile(
+                _precompile_dynamo_call_module,
+                example_inputs=[(model, torch.randn(4))],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_tracer_dynamo_automatic_dynamic_is_per_frame(self):
+        fixed = torch.randn(4)
+        examples = [(fixed, torch.randn(size)) for size in (3, 5)]
         code, cache = torch.compiler.precompile(
-            _precompile_dynamo_scalar,
+            _precompile_dynamo_late_varying,
+            example_inputs=examples,
+            tracer="dynamo",
+            backend="eager",
+        )
+
+        counts = _dynamo_frame_variant_counts(code)
+        entry = [
+            count for name, count in counts if name == "_precompile_dynamo_late_varying"
+        ]
+        resumes = [
+            count for name, count in counts if name.startswith("torch_dynamo_resume_in")
+        ]
+        self.assertEqual(entry, [1])
+        self.assertEqual(resumes, [2])
+
+        loaded = torch.compiler.precompile.load(code, cache)
+        for size in (3, 5, 7):
+            varying = torch.randn(size)
+            self.assertEqual(
+                loaded(fixed, varying),
+                _precompile_dynamo_late_varying(fixed, varying),
+            )
+
+    def test_tracer_dynamo_executes_each_example_once(self):
+        examples = [(torch.zeros(4),), (torch.zeros(8),)]
+        torch.compiler.precompile(
+            lambda x: x.add_(1),
+            example_inputs=examples,
+            tracer="dynamo",
+            backend="eager",
+        )
+        for (example,) in examples:
+            self.assertEqual(example, torch.ones_like(example))
+
+    def test_tracer_dynamo_executes_each_backward_once(self):
+        model = torch.nn.Linear(4, 3)
+        calls: list[torch.Tensor] = []
+        handle = model.weight.register_hook(
+            lambda grad: calls.append(grad.detach().clone())
+        )
+        examples = [(model, torch.randn(size, 4)) for size in (2, 3)]
+        try:
+            torch.compiler.precompile(
+                _precompile_dynamo_backward,
+                example_inputs=examples,
+                tracer="dynamo",
+                backend="eager",
+                training=True,
+            )
+        finally:
+            handle.remove()
+        self.assertEqual(len(calls), len(examples))
+        self.assertIsNone(model.weight.grad)
+
+    @parametrize("bound_method", (False, True))
+    def test_tracer_dynamo_preserves_all_example_grads(self, bound_method):
+        model = _PrecompileDynamoGradState()
+        x = torch.randn(4)
+        model.step(x)
+        before = [
+            (tensor, tensor.grad, tensor.grad.detach().clone())
+            for tensor in (model.weight, model.buffer)
+        ]
+        fn = model.step if bound_method else _precompile_dynamo_grad_state
+        example = (x,) if bound_method else (model, x)
+
+        torch.compiler.precompile(
+            fn,
+            example_inputs=[example],
+            tracer="dynamo",
+            backend="eager",
+            training=True,
+            dynamic=False,
+        )
+
+        for tensor, grad, value in before:
+            self.assertIs(tensor.grad, grad)
+            self.assertEqual(tensor.grad, value)
+
+    def test_tracer_dynamo_guards_mutating_module_at_capture_state(self):
+        torch.manual_seed(0)
+        model = _PrecompileDynamoStepCounter()
+        examples = [(model, torch.randn(size, 8)) for size in (2, 3, 4)]
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_call_module,
+            example_inputs=examples,
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertEqual(model.step, len(examples))
+
+        torch.manual_seed(0)
+        runtime = _PrecompileDynamoStepCounter()
+        torch.manual_seed(0)
+        reference = _PrecompileDynamoStepCounter()
+        loaded = torch.compiler.precompile.load(code, cache)
+        for _, x in examples:
+            self.assertEqual(loaded(runtime, x), reference(x))
+
+    @parametrize("graph_break", (False, True))
+    def test_tracer_dynamo_guard_through_tensor_attribute(self, graph_break):
+        model = _PrecompileDynamoReadsTensorAttribute()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        x.unused_generator = torch.Generator()
+        fn = (
+            _precompile_dynamo_tensor_attribute_break
+            if graph_break
+            else _precompile_dynamo_call_module
+        )
+        code, cache = torch.compiler.precompile(
+            fn,
+            example_inputs=[(model, x)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(model, x), fn(model, x))
+        x._cpu_copy = torch.randn(8)
+        self.assertEqual(loaded(model, x), fn(model, x))
+
+    def test_tracer_dynamo_self_referential_tensor_attribute(self):
+        x = torch.randn(4)
+        x.my_flag = x
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_reads_tensor_flag,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x), _precompile_dynamo_reads_tensor_flag(x))
+
+    def test_tracer_dynamo_rejects_unrebuildable_input_guard(self):
+        from unittest import mock
+
+        from torch._dynamo.guards import GuardsStatePickler
+
+        carry = GuardsStatePickler._carried_tensor_attributes
+
+        def omit_cpu_copy(self, tensor):
+            state = carry(self, tensor)
+            if state is not None:
+                state.pop("_cpu_copy", None)
+            return state or None
+
+        model = _PrecompileDynamoReadsTensorAttribute()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        with (
+            mock.patch.object(
+                GuardsStatePickler, "_carried_tensor_attributes", omit_cpu_copy
+            ),
+            self.assertRaisesRegex(PrecompileError, "input-derived guard"),
+        ):
+            torch.compiler.precompile(
+                _precompile_dynamo_call_module,
+                example_inputs=[(model, x)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_drifted_input_guard(self):
+        from unittest import mock
+
+        from torch._dynamo.guards import GuardsStatePickler
+
+        restore = GuardsStatePickler._restore_tensor_attributes.__func__
+
+        def _restore_tensor_attributes(cls, tensor, state):
+            state = dict(state)
+            if "_cpu_copy" in state:
+                state["_cpu_copy"] = torch.randn(2)
+            restore(cls, tensor, state)
+
+        model = _PrecompileDynamoReadsTensorAttribute()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        with (
+            mock.patch.object(
+                GuardsStatePickler,
+                "_restore_tensor_attributes",
+                classmethod(_restore_tensor_attributes),
+            ),
+            self.assertRaisesRegex(PrecompileError, "input-derived guard.*changed"),
+        ):
+            torch.compiler.precompile(
+                _precompile_dynamo_call_module,
+                example_inputs=[(model, x)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    @parametrize("change", ("add", "remove"))
+    def test_tracer_dynamo_rejects_guard_leaf_drift(self, change):
+        from unittest import mock
+
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        fingerprint = GuardManagerWrapper.leaf_fingerprint
+        calls = 0
+
+        def drift_after_capture(self):
+            nonlocal calls
+            calls += 1
+            result = fingerprint(self)
+            if calls > 1:
+                if change == "add":
+                    return result | {("x", "TEST_GUARD", "changed after serialization")}
+                return result - {sorted(result)[0]}
+            return result
+
+        with (
+            mock.patch.object(
+                GuardManagerWrapper, "leaf_fingerprint", drift_after_capture
+            ),
+            self.assertRaisesRegex(PrecompileError, "changed input-derived checks"),
+        ):
+            torch.compiler.precompile(
+                _precompile_dynamo_dynamic,
+                example_inputs=[(torch.randn(4),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_wrapper_subclass_requires_grad(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        x = TwoTensor(torch.randn(3), torch.randn(3)).requires_grad_(True)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+            training=True,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
+
+    @parametrize(
+        "marking",
+        ("unbacked", "unbacked_bounds", "unbacked_shape_id", "static", "dynamic"),
+    )
+    def test_tracer_dynamo_marked_artifact_serves_capture_tensor(self, marking):
+        model = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        {
+            "unbacked": lambda t: mark_unbacked(t, 0),
+            "unbacked_bounds": lambda t: mark_unbacked(t, 0, min=4, max=16),
+            "unbacked_shape_id": lambda t: mark_unbacked(t, 0, shape_id="batch"),
+            "static": lambda t: torch._dynamo.decorators.mark_static(t, 0),
+            "dynamic": lambda t: mark_dynamic(t, 0),
+        }[marking](x)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_call_module,
+            example_inputs=[(model, x)],
+            tracer="dynamo",
+            backend="eager",
+            training=True,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(model, x), model(x))
+
+    def test_tracer_dynamo_captures_every_example_past_default_limit(self):
+        x = torch.randn(4)
+        examples = [(x, f"m{i}") for i in range(10)]
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_many_variants,
             example_inputs=examples,
             tracer="dynamo",
             backend="eager",
         )
         loaded = torch.compiler.precompile.load(code, cache)
-        for args in examples:
-            self.assertEqual(loaded(*args), _precompile_dynamo_scalar(*args))
+        for example in examples:
+            self.assertEqual(
+                loaded(*example), _precompile_dynamo_many_variants(*example)
+            )
+
+    def test_tracer_dynamo_capture_preserves_existing_compile_entries(self):
+        torch._dynamo.reset()
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(
+            _precompile_dynamo_dynamic, backend=counter, dynamic=False
+        )
+        x = torch.randn(4)
+        self.assertEqual(compiled(x), _precompile_dynamo_dynamic(x))
+        self.assertEqual(counter.frame_count, 1)
+
+        torch.compiler.precompile(
+            _precompile_dynamo_scalar,
+            example_inputs=[(x, 2)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertEqual(compiled(x), _precompile_dynamo_dynamic(x))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_tracer_dynamo_capture_isolated_from_same_function_cache(self):
+        torch._dynamo.reset()
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(
+            _precompile_dynamo_dynamic, backend=counter, dynamic=False
+        )
+        x = torch.randn(4)
+        self.assertEqual(compiled(x), _precompile_dynamo_dynamic(x))
+
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+            dynamic=False,
+        )
+        self.assertIn("GRAPH_COUNT = 1", code)
+        self.assertEqual(
+            torch.compiler.precompile.load(code, cache)(x),
+            _precompile_dynamo_dynamic(x),
+        )
+        self.assertEqual(counter.frame_count, 1)
 
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True
@@ -1774,167 +3287,405 @@ class TestPrecompile(TestCase):
         }
         self.assertEqual(after, before)
 
-    def test_tracer_dynamo_load_does_not_copy_unrelated_module_globals(self):
+    def test_tracer_dynamo_varargs_dispatch(self):
+        x = torch.randn(4)
+        y = torch.randn(4)
         code, cache = torch.compiler.precompile(
-            _precompile_dynamo_dynamic,
-            example_inputs=[(torch.randn(4),)],
+            _precompile_dynamo_varargs,
+            example_inputs=[(x, y)],
             tracer="dynamo",
             backend="eager",
         )
-        loaded = torch.compiler.precompile.load(code, cache)
-        self.assertNotIn("_GLOBAL_TENSOR", loaded._loaded_forward.__globals__)
+        self.assertEqual(torch.compiler.precompile.load(code, cache)(x, y), x + y)
 
-    @parametrize("num_examples", [0, 2])
-    def test_make_fx_requires_one_example_input(self, num_examples):
+    def test_tracer_dynamo_varkw_dispatch(self):
         x = torch.randn(4)
-        message = "at least one" if num_examples == 0 else "exactly one"
-        with self.assertRaisesRegex(ValueError, message):
+        y = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_varkw,
+            example_inputs=[torch.compiler.ExampleInput(args=(x,), kwargs={"x": y})],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertEqual(torch.compiler.precompile.load(code, cache)(x, x=y), x + y)
+
+    def test_tracer_dynamo_failed_capture_cleans_up_state(self):
+        with self.assertRaisesRegex(PrecompileError, "recompile_limit=1"):
             torch.compiler.precompile(
-                lambda t: t + 1,
-                example_inputs=[(x,)] * num_examples,
+                _precompile_dynamo_scalar_branch,
+                example_inputs=[(torch.randn(4), 2), (torch.randn(4), 3)],
+                tracer="dynamo",
                 backend="eager",
+                dynamic=False,
+                recompile_limit=1,
             )
 
-    def test_example_input_supports_make_fx_positional_args_only(self):
         x = torch.randn(4)
-        example = torch.compiler.ExampleInput(args=(x,))
-        code, cache = torch.compiler.precompile(
-            lambda t: t + 1, example_inputs=[example], backend="eager"
-        )
-        self.assertEqual(torch.compiler.precompile.load(code, cache)(x), x + 1)
-        with self.assertRaisesRegex(NotImplementedError, "keyword example inputs"):
-            torch.compiler.precompile(
-                lambda t, *, scale: t * scale,
-                example_inputs=[
-                    torch.compiler.ExampleInput(args=(x,), kwargs={"scale": 2})
-                ],
-                backend="eager",
-            )
-
-    @torch._dynamo.config.patch(
-        automatic_dynamic_shapes=True, assume_static_by_default=True
-    )
-    def test_tracer_dynamo_recompiles_to_dynamic_graph(self):
-        examples = [(torch.randn(size, 4),) for size in (2, 3, 5)]
-        code, cache = torch.compiler.precompile(
-            _precompile_dynamo_dynamic,
-            example_inputs=examples,
-            tracer="dynamo",
-        )
-
-        self.assertIn('TRACER = "dynamo"', code)
-        self.assertIn("FRAME_COUNT = 1", code)
-        self.assertIn("VARIANT_COUNT = 2", code)
-        self.assertIn("GRAPH_COUNT = 2", code)
-        self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
-        self.assertIn("Inductor output code", code)
-        self.assertIn("Guard trees and Dynamo/disabled-function bytecode", code)
-        self.assertIn("# Backend graph 0:", code)
-        self.assertIn("_DYNAMO_BACKENDS[", code)
-        self.assertNotIn("_DYNAMO_BACKEND_SOURCES", code)
-        self.assertIn(
-            "# Generated by torch._functorch.aot_autograd.compile_to_python", code
-        )
-        for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
-            for size in (2, 7):
-                x = torch.randn(size, 4)
-                self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
-
-    def test_tracer_dynamo_external_python_function(self):
-        x = torch.randn(4)
-        target = torch.randn(4)
-        code, cache = torch.compiler.precompile(
-            _precompile_dynamo_mse_loss,
-            example_inputs=[(x, target)],
-            tracer="dynamo",
-            backend="eager",
-        )
-        loaded = torch.compiler.precompile.load(code, cache)
-        self.assertEqual(loaded(x, target), _precompile_dynamo_mse_loss(x, target))
-
-    @torch._dynamo.config.patch(
-        automatic_dynamic_shapes=True, assume_static_by_default=True
-    )
-    def test_tracer_dynamo_keeps_invariant_input_guards(self):
-        examples = [(torch.randn(size, 4),) for size in (2, 3, 5)]
-        code, cache = torch.compiler.precompile(
-            _precompile_dynamo_dynamic_branch,
-            example_inputs=examples,
-            tracer="dynamo",
-            backend="eager",
-        )
-        loaded = torch.compiler.precompile.load(code, cache)
-        with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
-            loaded(torch.randn(1, 4))
-
-    @torch._dynamo.config.patch(
-        automatic_dynamic_shapes=True, assume_static_by_default=True
-    )
-    def test_tracer_dynamo_dynamic_graph_keeps_tensor_contract(self):
-        code, cache = torch.compiler.precompile(
-            _precompile_dynamo_dynamic,
-            example_inputs=[(torch.randn(2, 4),), (torch.randn(3, 4),)],
-            tracer="dynamo",
-        )
-        loaded = torch.compiler.precompile.load(code, cache)
-        with self.assertRaisesRegex(PrecompileError, "dtype"):
-            loaded(torch.randn(7, 4, dtype=torch.float64))
-
-    def test_tracer_dynamo_capture_preserves_existing_compile_entries(self):
-        from torch._dynamo.testing import CompileCounter
-
-        torch._dynamo.reset()
-        counter = CompileCounter()
-        compiled = torch.compile(
-            _precompile_dynamo_dynamic, backend=counter, dynamic=False
-        )
-        x = torch.randn(4)
-        self.assertEqual(compiled(x), _precompile_dynamo_dynamic(x))
-        self.assertEqual(counter.frame_count, 1)
-
-        torch.compiler.precompile(
-            _precompile_dynamo_scalar,
-            example_inputs=[(x, 2)],
-            tracer="dynamo",
-            backend="eager",
-        )
-        self.assertEqual(compiled(x), _precompile_dynamo_dynamic(x))
-        self.assertEqual(counter.frame_count, 1)
-
-    def test_tracer_dynamo_capture_isolated_from_same_function_cache(self):
-        from torch._dynamo.testing import CompileCounter
-
-        torch._dynamo.reset()
-        counter = CompileCounter()
-        compiled = torch.compile(
-            _precompile_dynamo_dynamic, backend=counter, dynamic=False
-        )
-        x = torch.randn(4)
-        self.assertEqual(compiled(x), _precompile_dynamo_dynamic(x))
-
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_dynamic,
             example_inputs=[(x,)],
             tracer="dynamo",
             backend="eager",
         )
-        self.assertIn("GRAPH_COUNT = 1", code)
         self.assertEqual(
             torch.compiler.precompile.load(code, cache)(x),
             _precompile_dynamo_dynamic(x),
         )
-        self.assertEqual(counter.frame_count, 1)
 
-    def test_tracer_dynamo_executes_each_example_once(self):
-        examples = [(torch.zeros(4),), (torch.zeros(8),)]
-        torch.compiler.precompile(
-            lambda x: x.add_(1),
+    def test_tracer_dynamo_rejects_inference_examples(self):
+        with torch.inference_mode():
+            inference_tensor = torch.randn(4)
+            inference_module = torch.nn.Linear(4, 3)
+        with self.assertRaisesRegex(PrecompileError, "inference tensors"):
+            torch.compiler.precompile(
+                _precompile_dynamo_dynamic,
+                example_inputs=[(inference_tensor,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+        with self.assertRaisesRegex(PrecompileError, "inference tensor"):
+            torch.compiler.precompile(
+                _precompile_dynamo_call_module,
+                example_inputs=[(inference_module, torch.randn(2, 4))],
+                tracer="dynamo",
+                backend="eager",
+            )
+        with self.assertRaisesRegex(PrecompileError, "inference tensor"):
+            torch.compiler.precompile(
+                inference_module,
+                example_inputs=[(torch.randn(2, 4),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_preserves_inference_mode(self, backend):
+        x = torch.randn(4)
+        with torch.inference_mode():
+            code, cache = torch.compiler.precompile(
+                _precompile_dynamo_dynamic,
+                example_inputs=[(x,)],
+                tracer="dynamo",
+                backend=backend,
+            )
+            expected = _precompile_dynamo_dynamic(x)
+            actual = torch.compiler.precompile.load(code, cache)(x)
+        self.assertEqual(actual, expected)
+        self.assertTrue(torch.is_inference(actual))
+
+    def test_tracer_dynamo_rejects_training_inference_mode(self):
+        x = torch.randn(4, requires_grad=True)
+        with (
+            torch.inference_mode(),
+            self.assertRaisesRegex(PrecompileError, "training=True.*inference_mode"),
+        ):
+            torch.compiler.precompile(
+                _precompile_dynamo_dynamic,
+                example_inputs=[(x,)],
+                tracer="dynamo",
+                backend="eager",
+                training=True,
+            )
+
+    def test_tracer_dynamo_recompile_limit_is_explicit(self):
+        x = torch.randn(4)
+        examples = [(x, f"m{i}") for i in range(3)]
+        with self.assertRaisesRegex(PrecompileError, "recompile_limit=2"):
+            torch.compiler.precompile(
+                _precompile_dynamo_many_variants,
+                example_inputs=examples,
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+                recompile_limit=2,
+            )
+
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_many_variants,
             example_inputs=examples,
             tracer="dynamo",
             backend="eager",
+            dynamic=False,
+            recompile_limit=2,
+            require_complete=False,
         )
-        for (example,) in examples:
-            self.assertEqual(example, torch.ones_like(example))
+        self.assertIn("CAPTURE_COMPLETE = False", code)
+        loaded = torch.compiler.precompile.load(code, cache)
+        for example in examples[:2]:
+            self.assertEqual(
+                loaded(*example), _precompile_dynamo_many_variants(*example)
+            )
+        with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
+            loaded(*examples[2])
+
+    def test_tracer_dynamo_recompile_limit_overrides_accumulated_limit(self):
+        x = torch.randn(4)
+        examples = [(x, f"m{index}") for index in range(3)]
+        with torch._dynamo.config.patch(accumulated_recompile_limit=1):
+            code, cache = torch.compiler.precompile(
+                _precompile_dynamo_many_variants,
+                example_inputs=examples,
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+                recompile_limit=4,
+            )
+        loaded = torch.compiler.precompile.load(code, cache)
+        for example in examples:
+            self.assertEqual(
+                loaded(*example), _precompile_dynamo_many_variants(*example)
+            )
+
+    def test_tracer_dynamo_summary_and_invariants(self):
+        examples = [(torch.randn(4), scale) for scale in (2, 3)]
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "invariants.txt")
+            code, cache = torch.compiler.precompile(
+                _precompile_dynamo_scalar,
+                example_inputs=examples,
+                tracer="dynamo",
+                backend="eager",
+                invariants=path,
+            )
+            with open(path, encoding="utf-8") as report:
+                text = report.read()
+        self.assertIn("invariant:", text)
+        self.assertIn("varying:", text)
+        self.assertIn("variant_examples = (0, 1)", text)
+        self.assertIn("CAPTURE_COMPLETE = True", code)
+        self.assertIn("POLICY_DROPPED_GUARDS", code)
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertIsInstance(loaded.capture_summary, torch.compiler.PrecompileSummary)
+        self.assertTrue(loaded.capture_summary.complete)
+        self.assertEqual(loaded.capture_summary.variant_examples[0], (0, 1))
+
+    def test_tracer_dynamo_custom_guard_filter_is_fail_closed(self):
+        x = torch.randn(4)
+
+        def drop_all(entries):
+            return [False] * len(entries)
+
+        with self.assertRaisesRegex(PrecompileError, "dropped guards.*dispatch"):
+            torch.compiler.precompile(
+                _precompile_dynamo_scalar_branch,
+                example_inputs=[(x, 2)],
+                tracer="dynamo",
+                backend="eager",
+                guard_filter_fn=drop_all,
+            )
+
+    def test_tracer_dynamo_custom_filter_cannot_restore_unserializable_guards(self):
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_graph_break,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+            guard_filter_fn=lambda guards: [True] * len(guards),
+        )
+        self.assertEqual(
+            torch.compiler.precompile.load(code, cache)(x),
+            _precompile_dynamo_graph_break(x),
+        )
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_drops_unrebuildable_environment_guard(self, backend):
+        module_name = "_precompile_weakref_environment"
+        source = textwrap.dedent(
+            """
+            import weakref
+
+            import torch
+
+            class Value:
+                pass
+
+            value = Value()
+            values = weakref.WeakValueDictionary({"value": value})
+
+            def helper(x):
+                ref = values.data["value"]
+                torch._dynamo.graph_break()
+                return x + (1 if ref.__callback__ is not None else 2)
+
+            def fn(x):
+                return helper(x)
+            """
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, f"{module_name}.py")
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(source)
+            sys.path.insert(0, directory)
+            importlib.invalidate_caches()
+            try:
+                fixture = importlib.import_module(module_name)
+                x = torch.randn(4)
+                code, cache = torch.compiler.precompile(
+                    fixture.fn,
+                    example_inputs=[(x,)],
+                    tracer="dynamo",
+                    backend=backend,
+                )
+                loaded = torch.compiler.precompile.load(code, cache)
+                self.assertEqual(loaded(x), fixture.fn(x))
+            finally:
+                sys.path.remove(directory)
+                sys.modules.pop(module_name, None)
+        callback_drops = {
+            guard
+            for guard in loaded.capture_summary.dropped_guards
+            if guard[1].endswith(".__callback__")
+        }
+        weakref_drops = {
+            guard
+            for guard in loaded.capture_summary.dropped_guards
+            if guard[0] == "TYPE_MATCH"
+            and (guard[1] == "ref" or guard[1].endswith(".data['value']"))
+        }
+        self.assertTrue(callback_drops)
+        self.assertTrue(weakref_drops)
+        self.assertTrue(
+            (callback_drops | weakref_drops).issubset(
+                loaded.capture_summary.policy_dropped_guards
+            )
+        )
+        self.assertTrue(
+            (callback_drops | weakref_drops).isdisjoint(
+                loaded.capture_summary.risky_dropped_guards
+            )
+        )
+
+    def test_tracer_dynamo_does_not_assume_weakref_input_is_environment(self):
+        value = _PrecompileWeakValue()
+        values = weakref.WeakValueDictionary({"value": value})
+        x = torch.randn(4)
+        with self.assertRaisesRegex(PrecompileError, "can affect dispatch"):
+            torch.compiler.precompile(
+                _precompile_dynamo_weakref_input,
+                example_inputs=[(x, values)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_drops_generator_environment_guard(self):
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_generator_environment,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x), _precompile_dynamo_generator_environment(x))
+        self.assertEqual(loaded.capture_summary.risky_dropped_guards, ())
+        self.assertTrue(
+            set(loaded.capture_summary.policy_dropped_guards).issubset(
+                loaded.capture_summary.dropped_guards
+            )
+        )
+        self.assertTrue(
+            any(
+                "_PRECOMPILE_DYNAMO_GENERATOR" in source
+                for _, source in loaded.capture_summary.policy_dropped_guards
+            )
+        )
+
+    def test_tracer_dynamo_does_not_drop_generator_input_guard(self):
+        with self.assertRaisesRegex(PrecompileError, "can affect dispatch"):
+            torch.compiler.precompile(
+                _precompile_dynamo_generator_input,
+                example_inputs=[(torch.randn(4), torch.Generator())],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    @parametrize(
+        "bad",
+        (
+            lambda guards: [True] * (len(guards) + 1),
+            lambda guards: [1] * len(guards),
+        ),
+    )
+    def test_tracer_dynamo_validates_custom_guard_filter(self, bad):
+        with self.assertRaisesRegex(PrecompileError, "guard_filter_fn"):
+            torch.compiler.precompile(
+                _precompile_dynamo_dynamic,
+                example_inputs=[(torch.randn(4),)],
+                tracer="dynamo",
+                backend="eager",
+                guard_filter_fn=bad,
+            )
+
+    def test_tracer_dynamo_require_no_dropped_guards(self):
+        x = torch.randn(4)
+        with self.assertRaisesRegex(PrecompileError, "dropped environment-contract"):
+            torch.compiler.precompile(
+                _precompile_dynamo_graph_break,
+                example_inputs=[(x,)],
+                tracer="dynamo",
+                backend="eager",
+                require_no_dropped_guards=True,
+            )
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_mark_unbacked_runs_across_sizes(self, backend):
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend=backend,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        for size in (0, 3, 16):
+            runtime = torch.randn(size, 4)
+            self.assertEqual(loaded(runtime), _precompile_dynamo_dynamic(runtime))
+
+    def test_tracer_dynamo_mark_unbacked_bounds_enforced(self):
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0, min=4, max=16)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(torch.randn(6, 4)).shape, (6, 4))
+        with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
+            loaded(torch.randn(2, 4))
+
+    def test_tracer_dynamo_mark_unbacked_shape_id_enforced(self):
+        x = torch.randn(8, 4)
+        y = torch.randn(8, 4)
+        mark_unbacked(x, 0, shape_id="batch")
+        mark_unbacked(y, 0, shape_id="batch")
+        code, cache = torch.compiler.precompile(
+            lambda a, b: a + b,
+            example_inputs=[(x, y)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(torch.randn(3, 4), torch.randn(3, 4)).shape, (3, 4))
+        with self.assertRaises((PrecompileError, RuntimeError, AssertionError)):
+            loaded(torch.randn(3, 4), torch.randn(5, 4))
+
+    def test_tracer_dynamo_mark_unbacked_hint_override_honored(self):
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0, hint_override=16)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        for size in (8, 32):
+            runtime = torch.randn(size, 4)
+            self.assertEqual(loaded(runtime), _precompile_dynamo_dynamic(runtime))
 
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True
@@ -1950,7 +3701,7 @@ class TestPrecompile(TestCase):
 
         self.assertIn("TRAINING = True", code)
         self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
-        self.assertIn("class _CompiledFunction_s0(torch.autograd.Function):", code)
+        self.assertIn("class _CompiledFunction_", code)
         self.assertIn("_inner_call_fw", code)
         self.assertIn("_inner_call_bw", code)
         for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
@@ -1963,6 +3714,101 @@ class TestPrecompile(TestCase):
             actual.sum().backward()
             self.assertEqual(actual, expected)
             self.assertEqual(x.grad, ref.grad)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_training_later_backward(self, backend):
+        model = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_call_module,
+            example_inputs=[(model, x)],
+            tracer="dynamo",
+            backend=backend,
+            training=True,
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, backend):
+            run = copy.deepcopy(model)
+            ref = copy.deepcopy(model)
+            actual = loaded(run, x)
+            expected = ref(x)
+            actual.sum().backward()
+            expected.sum().backward()
+            self.assertEqual(actual, expected)
+            for actual_param, expected_param in zip(run.parameters(), ref.parameters()):
+                self.assertEqual(actual_param.grad, expected_param.grad)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_inference_stays_grad_free(self, backend):
+        model = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4, requires_grad=True)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_call_module,
+            example_inputs=[(model, x)],
+            tracer="dynamo",
+            backend=backend,
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, backend):
+            self.assertFalse(loaded(model, x).requires_grad)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_autograd_grad(self, backend):
+        model = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        target = torch.randn(5, 3)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_autograd_grad,
+            example_inputs=[(model, x, target)],
+            tracer="dynamo",
+            backend=backend,
+            training=True,
+        )
+        run = copy.deepcopy(model)
+        ref = copy.deepcopy(model)
+        actual = torch.compiler.precompile.load(code, cache)(run, x, target)
+        expected = _precompile_dynamo_autograd_grad(ref, x, target)
+        self.assertEqual(actual, expected)
+        self.assertTrue(all(parameter.grad is None for parameter in run.parameters()))
+
+    def test_tracer_dynamo_autograd_grad_does_not_observe_seed(self):
+        def grad_step(model, x):
+            saw_grad = model.weight.grad is not None
+            return saw_grad, torch.autograd.grad(model(x).sum(), (model.weight,))
+
+        model = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            grad_step,
+            example_inputs=[(model, x)],
+            tracer="dynamo",
+            backend="eager",
+            training=True,
+        )
+        run = copy.deepcopy(model)
+        actual = torch.compiler.precompile.load(code, cache)(run, x)
+        expected = grad_step(copy.deepcopy(model), x)
+        self.assertEqual(actual, expected)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_in_function_backward(self, backend):
+        model = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_backward,
+            example_inputs=[(model, x)],
+            tracer="dynamo",
+            backend=backend,
+            training=True,
+        )
+        self.assertTrue(all(parameter.grad is None for parameter in model.parameters()))
+        run = copy.deepcopy(model)
+        ref = copy.deepcopy(model)
+        loaded = torch.compiler.precompile.load(code, cache)
+        loaded(run, x)
+        loaded(run, x)
+        _precompile_dynamo_backward(ref, x)
+        _precompile_dynamo_backward(ref, x)
+        for actual_param, expected_param in zip(run.parameters(), ref.parameters()):
+            self.assertEqual(actual_param.grad, expected_param.grad)
 
     def test_tracer_dynamo_training_source_runs_in_fresh_process(self):
         x = torch.randn(4, requires_grad=True)
@@ -2000,16 +3846,14 @@ class TestPrecompile(TestCase):
         finally:
             os.unlink(artifact_path)
 
-    def test_training_requires_dynamo_inductor(self):
+    def test_training_requires_dynamo(self):
         x = torch.randn(4, requires_grad=True)
-        for kwargs in ({}, {"tracer": "dynamo", "backend": "eager"}):
-            with self.assertRaisesRegex(NotImplementedError, "dynamo.*inductor"):
-                torch.compiler.precompile(
-                    _precompile_dynamo_dynamic,
-                    example_inputs=[(x,)],
-                    training=True,
-                    **kwargs,
-                )
+        with self.assertRaisesRegex(NotImplementedError, "tracer='dynamo'"):
+            torch.compiler.precompile(
+                _precompile_dynamo_dynamic,
+                example_inputs=[(x,)],
+                training=True,
+            )
 
     def test_tracer_dynamo_captures_explicit_graph_break(self):
         x = torch.randn(4)
@@ -2049,6 +3893,73 @@ class TestPrecompile(TestCase):
         finally:
             os.unlink(artifact_path)
 
+    @parametrize(
+        "module_type",
+        (
+            _PrecompileDynamoDisabledMethodModule,
+            _PrecompileDynamoDataDependentModule,
+            _PrecompileDynamoBreakInLoopModule,
+        ),
+    )
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_graph_break_kinds(self, module_type, backend):
+        model = module_type().eval()
+        x = torch.randn(4, 4)
+        expected = model(x)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_call_module,
+            example_inputs=[(model, x)],
+            tracer="dynamo",
+            backend=backend,
+            require_complete=False,
+            require_no_risky_drops=False,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        try:
+            self.assertEqual(loaded(model, x), expected)
+        finally:
+            if hasattr(loaded, "unload"):
+                loaded.unload()
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_graph_break_recompilations(self, backend):
+        calls = [(torch.randn(size), flag) for size in (3, 5) for flag in (False, True)]
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_branching_graph_break,
+            example_inputs=calls,
+            tracer="dynamo",
+            backend=backend,
+            dynamic=False,
+        )
+        counts = _dynamo_frame_variant_counts(code)
+        self.assertTrue(any(count > 1 for _, count in counts))
+        self.assertTrue(
+            any(name.startswith("torch_dynamo_resume_in") for name, _ in counts)
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, backend):
+            for call in calls:
+                self.assertEqual(
+                    loaded(*call), _precompile_dynamo_branching_graph_break(*call)
+                )
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_tracer_dynamo_auto_dynamic_across_graph_breaks(self):
+        examples = [(torch.randn(size),) for size in (3, 5)]
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_graph_break,
+            example_inputs=examples,
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertIn("FRAME_COUNT = 3", code)
+        self.assertIn("VARIANT_COUNT = 6", code)
+        loaded = torch.compiler.precompile.load(code, cache)
+        for size in (3, 5, 7):
+            x = torch.randn(size)
+            self.assertEqual(loaded(x), _precompile_dynamo_graph_break(x))
+
     def test_tracer_dynamo_keyword_examples(self):
         def fn(x, *, scale=1.0):
             return x * scale
@@ -2070,6 +3981,12 @@ class TestPrecompile(TestCase):
         loaded = torch.compiler.precompile.load(code, cache)
         self.assertEqual(loaded(x), fn(x))
         self.assertEqual(loaded(x, scale=3.0), fn(x, scale=3.0))
+
+        for args, kwargs in (((), {}), ((x,), {"unexpected": 1.0})):
+            with self.assertRaisesRegex(
+                PrecompileError, "different structure|captured signature"
+            ):
+                loaded(*args, **kwargs)
 
     @parametrize("backend", ("eager", "inductor"))
     def test_tracer_dynamo_module_argument(self, backend):
@@ -2128,6 +4045,61 @@ class TestPrecompile(TestCase):
         self.assertEqual(second(x), _precompile_dynamo_unreachable_caller(x))
         second.unload()
 
+    def test_tracer_dynamo_installed_unload_is_terminal(self):
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_unreachable_caller,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x), _precompile_dynamo_unreachable_caller(x))
+        loaded.unload()
+        with self.assertRaisesRegex(RuntimeError, "has been unloaded"):
+            loaded(x)
+
+    def test_tracer_dynamo_installed_reset_requires_reload(self):
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_unreachable_caller,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x), _precompile_dynamo_unreachable_caller(x))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(PrecompileError, "cleared this loaded artifact"):
+            loaded(x)
+        loaded.unload()
+
+    def test_tracer_dynamo_installed_unload_interrupt_is_retryable(self):
+        from unittest import mock
+
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_unreachable_caller,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        loaded.__enter__()
+        artifact = loaded._loaded_forward
+        with artifact.state:
+            artifact.active_calls = 1
+        with mock.patch.object(artifact.state, "wait", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                loaded.unload()
+        self.assertTrue(artifact.loaded)
+        self.assertFalse(artifact.unloading)
+        with artifact.state:
+            artifact.active_calls = 0
+            artifact.state.notify_all()
+        loaded.unload()
+        self.assertFalse(artifact.loaded)
+
     def test_tracer_dynamo_installed_artifact_rejects_unseen_variant(self):
         x = torch.randn(4)
         code, cache = torch.compiler.precompile(
@@ -2147,6 +4119,75 @@ class TestPrecompile(TestCase):
             loaded(x, 2)
         loaded.unload()
 
+    def test_tracer_dynamo_installed_artifact_reuses_prepared_state(self):
+        from unittest import mock
+
+        import torch._dynamo.package as package_module
+
+        built = []
+        load_guard_manager = package_module.load_guard_manager
+
+        def count(*args, **kwargs):
+            built.append(1)
+            return load_guard_manager(*args, **kwargs)
+
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_unreachable_branch_caller,
+            example_inputs=[(x, 0), (x, 1)],
+            tracer="dynamo",
+            backend="eager",
+            dynamic=False,
+        )
+        with mock.patch.object(package_module, "load_guard_manager", count):
+            loaded = torch.compiler.precompile.load(code, cache)
+            at_load = len(built)
+            try:
+                loaded(x, 0)
+            finally:
+                loaded.unload()
+        self.assertGreater(at_load, 0)
+        self.assertEqual(len(built), at_load)
+
+    def test_tracer_dynamo_installed_artifact_never_compiles_at_serve_time(self):
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_unreachable_branch_caller,
+            example_inputs=[(x, 0), (x, 1)],
+            tracer="dynamo",
+            backend="eager",
+            dynamic=False,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        try:
+            self.assertEqual(loaded.serve_time_compiles(), 0)
+            loaded(x, 0)
+            self.assertEqual(loaded.serve_time_compiles(), 0)
+            with torch._dynamo.config.patch(suppress_errors=True):
+                with self.assertRaisesRegex(
+                    PrecompileError, "no captured Dynamo variant"
+                ):
+                    loaded(x, 2)
+            self.assertEqual(loaded.serve_time_compiles(), 0)
+        finally:
+            loaded.unload()
+
+    def test_tracer_dynamo_installed_artifact_rejects_wrong_callable(self):
+        model = _PrecompileDynamoBreakingModule().eval()
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_call_module,
+            example_inputs=[(model, x)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        with self.assertRaisesRegex(
+            PrecompileError, "different callable|captured from"
+        ):
+            torch.compiler.precompile.load(
+                code, cache, fn=_precompile_dynamo_wrong_call_module
+            )
+
     @parametrize("backend", ("eager", "inductor"))
     def test_tracer_dynamo_module_graph_break_uses_installed_artifact(self, backend):
         from torch._precompile import _parse_artifact_metadata
@@ -2165,10 +4206,359 @@ class TestPrecompile(TestCase):
             with loaded:
                 self.assertEqual(loaded(replacement, x), replacement(x))
 
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_module_callable(self, backend):
+        model = _PrecompileDynamoFoldsGlobal().eval()
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            model,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend=backend,
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        replacement = _PrecompileDynamoFoldsGlobal().eval()
+        self.assertEqual(loaded(model, x), model(x))
+        self.assertEqual(loaded(replacement, x), replacement(x))
+
+    @parametrize("backend", ("eager", "inductor"))
+    @parametrize("kind", ("plain", "custom_op"))
+    def test_tracer_dynamo_module_callable_with_grad_input(self, backend, kind):
+        from torch.library import _scoped_library
+
+        with _scoped_library("precompile_parity", "FRAGMENT") as lib:
+            lib.define("fused_matmul(Tensor x, Tensor w) -> Tensor")
+            lib.impl("fused_matmul", torch.mm, "CompositeExplicitAutograd")
+            lib.impl("fused_matmul", torch.mm, "Meta")
+            module_type = (
+                _PrecompileDynamoPlainMatmul
+                if kind == "plain"
+                else _PrecompileDynamoCustomOpMatmul
+            )
+            model = module_type()
+            x = torch.randn(8, 8, requires_grad=True)
+            code, cache = torch.compiler.precompile(
+                model,
+                example_inputs=[(x,)],
+                tracer="dynamo",
+                backend=backend,
+            )
+            loaded = torch.compiler.precompile.load(code, cache)
+            with torch.no_grad():
+                self.assertEqual(loaded(model, x), model(x))
+
+    def test_tracer_dynamo_bare_builtin_module_is_rejected(self):
+        model = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        with self.assertRaisesRegex(PrecompileError, "function that calls the module"):
+            torch.compiler.precompile(
+                model,
+                example_inputs=[(x,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_defaults_roundtrip(self, backend):
+        def fn(model, x, scale=2.0, *, bias=1.0):
+            return model(x) * scale + bias
+
+        model = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            fn,
+            example_inputs=[(model, x)],
+            tracer="dynamo",
+            backend=backend,
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, backend):
+            self.assertEqual(loaded(model, x), fn(model, x))
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_multiple_module_args(self, backend):
+        first = torch.nn.Linear(4, 3).eval()
+        second = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+
+        def fn(a, b, value):
+            return a(value) + b(value)
+
+        code, cache = torch.compiler.precompile(
+            fn,
+            example_inputs=[(first, second, x)],
+            tracer="dynamo",
+            backend=backend,
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, backend):
+            self.assertEqual(loaded(first, second, x), fn(first, second, x))
+            replacement_a = torch.nn.Linear(4, 3).eval()
+            replacement_b = torch.nn.Linear(4, 3).eval()
+            self.assertEqual(
+                loaded(replacement_a, replacement_b, x),
+                fn(replacement_a, replacement_b, x),
+            )
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_tied_weights_roundtrip(self, backend):
+        model = _PrecompileDynamoTiedWeights().eval()
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_call_module,
+            example_inputs=[(model, x)],
+            tracer="dynamo",
+            backend=backend,
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, backend):
+            self.assertEqual(loaded(model, x), model(x))
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_nested_and_nontensor_outputs(self, backend):
+        def fn(x):
+            y = x.sin()
+            return y, {"twice": y * 2}, 3.14, "artifact"
+
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            fn,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend=backend,
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, backend):
+            self.assertEqual(loaded(x), fn(x))
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_input_mutation_and_output_alias(self, backend):
+        def mutate(x):
+            return x.add_(1)
+
+        example = torch.zeros(4)
+        code, cache = torch.compiler.precompile(
+            mutate,
+            example_inputs=[(example,)],
+            tracer="dynamo",
+            backend=backend,
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, backend):
+            runtime = torch.zeros(4)
+            self.assertEqual(loaded(runtime), torch.ones(4))
+            self.assertEqual(runtime, torch.ones(4))
+
+        x = torch.randn(2, 3)
+        code, cache = torch.compiler.precompile(
+            lambda value: value.t(),
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend=backend,
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, backend):
+            runtime = x.clone()
+            output = loaded(runtime)
+            output.add_(1)
+            self.assertEqual(runtime, x + 1)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_module_buffer_mutation(self, backend):
+        def fresh():
+            return torch.nn.BatchNorm1d(4).train()
+
+        model = fresh()
+        x = torch.randn(8, 4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_call_module,
+            example_inputs=[(model, x)],
+            tracer="dynamo",
+            backend=backend,
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, backend):
+            run = fresh()
+            reference = copy.deepcopy(run)
+            actual = loaded(run, x)
+            expected = reference(x)
+            self.assertEqual(actual, expected)
+            self.assertEqual(run.running_mean, reference.running_mean)
+            self.assertEqual(run.running_var, reference.running_var)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_returned_global_constant(self, backend):
+        def fn(x):
+            return x.sin(), _PRECOMPILE_DYNAMO_GLOBAL_SCALE
+
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            fn,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend=backend,
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, backend):
+            self.assertEqual(loaded(x), fn(x))
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_preserves_autocast_guard(self, backend):
+        def fn(a, b):
+            return a @ b
+
+        a = torch.randn(8, 8)
+        b = torch.randn(8, 8)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            expected = fn(a, b)
+            code, cache = torch.compiler.precompile(
+                fn,
+                example_inputs=[(a, b)],
+                tracer="dynamo",
+                backend=backend,
+            )
+        for _, loaded in _default_and_inlined_loaders(code, cache, backend):
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                self.assertEqual(loaded(a, b), expected)
+            with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
+                loaded(a, b)
+
+    def test_tracer_dynamo_eager_custom_builtins(self):
+        def fn(x):
+            return torch.relu(x).masked_fill(x < 0, float("-inf"))
+
+        x = torch.randn(8)
+        code, cache = torch.compiler.precompile(
+            fn,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertEqual(torch.compiler.precompile.load(code, cache)(x), fn(x))
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_dtensor_subclass(self, backend):
+        import torch.distributed as dist
+
+        if not dist.is_available() or not dist.is_gloo_available():
+            self.skipTest("gloo not available")
+
+        from torch.distributed.tensor import DeviceMesh, distribute_tensor, Replicate
+        from torch.testing._internal.common_utils import find_free_port
+
+        saved_env = {key: os.environ.get(key) for key in ("MASTER_ADDR", "MASTER_PORT")}
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
+        dist.init_process_group("gloo", rank=0, world_size=1)
+        try:
+            mesh = DeviceMesh("cpu", list(range(1)))
+            model = torch.nn.Linear(4, 3).eval()
+            for name, parameter in list(model.named_parameters()):
+                setattr(
+                    model,
+                    name,
+                    torch.nn.Parameter(
+                        distribute_tensor(parameter.detach(), mesh, [Replicate()])
+                    ),
+                )
+            x = distribute_tensor(torch.randn(5, 4), mesh, [Replicate()])
+            expected = model(x)
+            code, cache = torch.compiler.precompile(
+                _precompile_dynamo_call_module,
+                example_inputs=[(model, x)],
+                tracer="dynamo",
+                backend=backend,
+            )
+            for _, loaded in _default_and_inlined_loaders(code, cache, backend):
+                self.assertEqual(loaded(model, x).to_local(), expected.to_local())
+        finally:
+            dist.destroy_process_group()
+            for key, value in saved_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_tracer_dynamo_cross_tracer_cache_rejected(self):
+        x = torch.randn(4)
+        dynamo_code, _ = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        _, make_fx_cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(x,)],
+            backend="eager",
+        )
+        with self.assertRaisesRegex(PrecompileError, "code_hash|does not match|tracer"):
+            torch.compiler.precompile.load(dynamo_code, make_fx_cache)
+
+    def test_tracer_dynamo_mismatched_code_cache_pair_rejected(self):
+        code, _ = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(3),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        _, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(5),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        with self.assertRaisesRegex(
+            PrecompileError, "cache does not match python_code"
+        ):
+            torch.compiler.precompile.load(code, cache)
+
+    def test_tracer_dynamo_corrupt_cache_bundle_degrades(self):
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        blob["artifact"] = [b"corrupt"]
+        buffer = io.BytesIO()
+        torch.save(blob, buffer)
+        with self.assertLogs("torch.compiler._cache", level="WARNING") as logs:
+            loaded = torch.compiler.precompile.load(code, buffer.getvalue())
+        self.assertTrue(
+            any("Failed to un-pickle cache artifacts" in line for line in logs.output)
+        )
+        self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
+
+    def test_tracer_dynamo_rejects_torch_version_skew(self):
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(4),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertIn(f"_DYNAMO_TORCH_VERSION = {torch.__version__!r}", code)
+        mismatched = code.replace(
+            f"_DYNAMO_TORCH_VERSION = {torch.__version__!r}",
+            "_DYNAMO_TORCH_VERSION = 'different-build'",
+            1,
+        )
+        with self.assertRaisesRegex(
+            PrecompileError, "produced by torch different-build"
+        ):
+            torch.compiler.precompile.load(mismatched, cache)
+
+    def test_tracer_dynamo_rejects_partial_cleanly(self):
+        def fn(x, scale):
+            return x * scale
+
+        with self.assertRaisesRegex((NotImplementedError, PrecompileError), "partial"):
+            torch.compiler.precompile(
+                functools.partial(fn, scale=2),
+                example_inputs=[(torch.randn(4),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True
     )
-    def test_tracer_dynamo_training_module_graph_break(self):
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_training_module_graph_break(self, backend):
         from torch._precompile import _parse_artifact_metadata
 
         model = _PrecompileDynamoBreakingModule().train()
@@ -2179,39 +4569,42 @@ class TestPrecompile(TestCase):
             _precompile_dynamo_call_module,
             example_inputs=examples,
             tracer="dynamo",
+            backend=backend,
             training=True,
         )
         self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
 
-        actual_model = copy.deepcopy(model)
-        expected_model = copy.deepcopy(model)
-        actual_input = torch.randn(7, 4, requires_grad=True)
-        expected_input = actual_input.detach().clone().requires_grad_()
-        expected = expected_model(expected_input)
-        expected.sum().backward()
-        loaded = torch.compiler.precompile.load(code, cache)
-        with loaded:
-            actual = loaded(actual_model, actual_input)
-            actual.sum().backward()
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual_input.grad, expected_input.grad)
-        for actual_param, expected_param in zip(
-            actual_model.parameters(), expected_model.parameters()
-        ):
-            self.assertEqual(actual_param.grad, expected_param.grad)
+        for _, loaded in _default_and_inlined_loaders(code, cache, backend):
+            actual_model = copy.deepcopy(model)
+            expected_model = copy.deepcopy(model)
+            actual_input = torch.randn(7, 4, requires_grad=True)
+            expected_input = actual_input.detach().clone().requires_grad_()
+            expected = expected_model(expected_input)
+            expected.sum().backward()
+            with loaded:
+                actual = loaded(actual_model, actual_input)
+                actual.sum().backward()
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual_input.grad, expected_input.grad)
+            for actual_param, expected_param in zip(
+                actual_model.parameters(), expected_model.parameters()
+            ):
+                self.assertEqual(actual_param.grad, expected_param.grad)
 
-    def test_tracer_dynamo_training_across_disabled_graph_break(self):
+    @parametrize("backend", ("eager", "inductor"))
+    def test_tracer_dynamo_training_across_disabled_graph_break(self, backend):
         x = torch.randn(4, requires_grad=True)
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_with_disabled,
             example_inputs=[(x,)],
             tracer="dynamo",
+            backend=backend,
             training=True,
         )
 
-        self.assertIn("class _CompiledFunction_s0(torch.autograd.Function):", code)
-        self.assertIn("class _CompiledFunction_s1(torch.autograd.Function):", code)
-        for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
+        if backend == "inductor":
+            self.assertEqual(code.count("class _CompiledFunction_"), 2)
+        for _, loaded in _default_and_inlined_loaders(code, cache, backend):
             actual_input = torch.randn(4, requires_grad=True)
             ref_input = actual_input.detach().clone().requires_grad_()
             expected = _precompile_dynamo_with_disabled(ref_input)
@@ -2323,6 +4716,8 @@ class TestPrecompile(TestCase):
         for size in (2, 7):
             x = torch.randn(size, 4)
             self.assertEqual(loaded(x), _precompile_dynamo_with_disabled(x))
+        with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
+            loaded(torch.randn(1, 4))
 
         with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as artifact:
             artifact.write(code)
@@ -2436,6 +4831,25 @@ class TestPrecompile(TestCase):
         finally:
             _PRECOMPILE_DYNAMO_MUTATED_GLOBAL = 0
 
+    @parametrize(
+        "fn",
+        (
+            _precompile_dynamo_stores_input_global,
+            _precompile_dynamo_calls_global_mutating_helper,
+        ),
+    )
+    def test_tracer_dynamo_rejects_input_global_mutation_before_capture(self, fn):
+        global _PRECOMPILE_DYNAMO_INPUT_GLOBAL
+        _PRECOMPILE_DYNAMO_INPUT_GLOBAL = None
+        with self.assertRaisesRegex(NotImplementedError, "cannot mutate globals"):
+            torch.compiler.precompile(
+                fn,
+                example_inputs=[(torch.randn(4),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+        self.assertIsNone(_PRECOMPILE_DYNAMO_INPUT_GLOBAL)
+
     def test_tracer_dynamo_rejects_dynamic_disabled_globals(self):
         with self.assertRaisesRegex(NotImplementedError, "dynamic global access"):
             torch.compiler.precompile(
@@ -2527,7 +4941,7 @@ class TestPrecompile(TestCase):
 
     def test_tracer_dynamo_rejects_unserializable_dispatch_guards(self):
         x = torch.randn(4)
-        with self.assertRaisesRegex(PrecompileError, "identity-dependent.*op"):
+        with self.assertRaisesRegex(PrecompileError, "dropped guards.*op"):
             torch.compiler.precompile(
                 _precompile_dynamo_callable,
                 example_inputs=[(x, torch.sin), (x, torch.cos)],
@@ -2535,7 +4949,7 @@ class TestPrecompile(TestCase):
                 backend="eager",
             )
 
-    def test_tracer_dynamo_retains_input_scalar_guards(self):
+    def test_tracer_dynamo_retains_scalar_dispatch_guards(self):
         examples = [(torch.randn(4), scale) for scale in (2, 3)]
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_scalar,
@@ -2546,12 +4960,30 @@ class TestPrecompile(TestCase):
 
         loaded = torch.compiler.precompile.load(code, cache)
         summaries = _dynamo_serialized_guard_summary(code)
-        self.assertTrue(
-            any("CONSTANT_MATCH" in guards for guards, _, _, _ in summaries)
+        self.assertEqual(len(summaries), 2)
+        self.assertEqual(
+            ["CONSTANT_MATCH" in guard_types for guard_types, _, _, _ in summaries],
+            [True, False],
         )
+        for guard_types, _, _, _ in summaries:
+            self.assertIn("TENSOR_MATCH", guard_types)
+            self.assertNotIn("GLOBAL_STATE", guard_types)
         x = torch.randn(4)
         self.assertEqual(loaded(x, 2), _precompile_dynamo_scalar(x, 2))
         self.assertEqual(loaded(x, 4), _precompile_dynamo_scalar(x, 4))
+
+    def test_tracer_dynamo_keeps_invariant_value_guard(self):
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_scalar_branch,
+            example_inputs=[(x, 2)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(x, 2), _precompile_dynamo_scalar_branch(x, 2))
+        with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
+            loaded(x, 3)
 
     def test_tracer_dynamo_preserves_relational_guards(self):
         shared = torch.ones(4)
@@ -2585,109 +5017,874 @@ class TestPrecompile(TestCase):
             self.assertEqual(actual_shared, expected_shared)
 
     def test_tracer_dynamo_rejects_storage_alias_topology_change(self):
+        left_base = torch.ones(5)
+        right_base = torch.ones(5)
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_aliasing,
-            example_inputs=[(torch.ones(4), torch.ones(4))],
+            example_inputs=[(left_base[:4], right_base[1:])],
             tracer="dynamo",
-            backend="eager",
         )
-        loaded = torch.compiler.precompile.load(code, cache)
+
+        for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
+            shared = torch.ones(5)
+            with self.assertRaisesRegex(PrecompileError, "storage alias"):
+                loaded(shared[:4], shared[1:])
+
+            shared_buffer = bytearray(20)
+            left = torch.frombuffer(shared_buffer, dtype=torch.float32, count=4)
+            right = torch.frombuffer(
+                shared_buffer, dtype=torch.float32, count=4, offset=4
+            )
+            with self.assertRaisesRegex(PrecompileError, "storage alias"):
+                loaded(left, right)
+
         shared = torch.ones(5)
         with self.assertRaisesRegex(PrecompileError, "storage alias"):
-            loaded(shared[:4], shared[1:])
+            torch.compiler.precompile(
+                _precompile_dynamo_aliasing,
+                example_inputs=[
+                    (torch.ones(4), torch.ones(4)),
+                    (shared[:4], shared[1:]),
+                ],
+                tracer="dynamo",
+            )
+
         with self.assertRaisesRegex(PrecompileError, "storage alias"):
             torch.compiler.precompile(
                 _precompile_dynamo_aliasing,
                 example_inputs=[(shared[:4], shared[1:])],
                 tracer="dynamo",
-                backend="eager",
             )
 
-    def test_tracer_dynamo_rejects_local_import_input_alias(self):
-        token = torch.randn(3)
-        torch._precompile_review_token = token
-        try:
-            with self.assertRaisesRegex(PrecompileError, "Python environment"):
-                torch.compiler.precompile(
-                    _precompile_dynamo_local_import_identity,
-                    example_inputs=[(token,)],
-                    tracer="dynamo",
-                    backend="eager",
-                )
-        finally:
-            del torch._precompile_review_token
-
-    def test_tracer_dynamo_rejects_input_implicit_dispatch_alias(self):
-        holder = _PrecompileDynamoInputGetitem()
-        with self.assertRaisesRegex(PrecompileError, "Python environment"):
+        shared_buffer = bytearray(20)
+        left = torch.frombuffer(shared_buffer, dtype=torch.float32, count=4)
+        right = torch.frombuffer(shared_buffer, dtype=torch.float32, count=4, offset=4)
+        with self.assertRaisesRegex(PrecompileError, "storage alias"):
             torch.compiler.precompile(
-                _precompile_dynamo_input_getitem_identity,
-                example_inputs=[(holder, _DYNAMO_TENSOR_DEFAULT)],
+                _precompile_dynamo_aliasing,
+                example_inputs=[(left, right)],
+                tracer="dynamo",
+            )
+
+        with self.assertRaisesRegex(PrecompileError, "storage alias"):
+            torch.compiler.precompile(
+                _precompile_dynamo_box_aliasing,
+                example_inputs=[(_PrecompileDynamoTensorBox(shared[:4], shared[1:]),)],
+                tracer="dynamo",
+            )
+
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_box_aliasing,
+            example_inputs=[
+                (_PrecompileDynamoTensorBox(torch.ones(4), torch.ones(4)),)
+            ],
+            tracer="dynamo",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        shared = torch.ones(5)
+        with self.assertRaisesRegex(PrecompileError, "storage alias"):
+            loaded(_PrecompileDynamoTensorBox(shared[:4], shared[1:]))
+
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_mapping_aliasing,
+            example_inputs=[
+                (types.MappingProxyType({"a": torch.ones(4), "b": torch.ones(4)}),)
+            ],
+            tracer="dynamo",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        shared = torch.ones(5)
+        with self.assertRaisesRegex(PrecompileError, "storage alias"):
+            loaded(types.MappingProxyType({"a": shared[:4], "b": shared[1:]}))
+
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_list_subclass_aliasing,
+            example_inputs=[
+                (_PrecompileDynamoTensorList(torch.ones(4)), torch.ones(4))
+            ],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        other = torch.ones(4)
+        values = _PrecompileDynamoTensorList(torch.ones(4))
+        values.hidden.set_(other)
+        with self.assertRaisesRegex(PrecompileError, "storage alias"):
+            loaded(values, other)
+
+        shared = torch.ones(4)
+        with self.assertRaisesRegex(PrecompileError, "storage alias"):
+            torch.compiler.precompile(
+                _precompile_dynamo_list_subclass_aliasing,
+                example_inputs=[(_PrecompileDynamoTensorList(shared[:]), shared[:])],
                 tracer="dynamo",
                 backend="eager",
             )
 
-    def test_tracer_dynamo_rejects_nested_library_helper_alias(self):
+    def test_tracer_dynamo_storage_contract_precedes_input_mutation(self):
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_rebinds_storage,
+            example_inputs=[(torch.ones(4), torch.full((4,), 2.0))],
+            tracer="dynamo",
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
+            left = torch.ones(4)
+            right = torch.full((4,), 2.0)
+            self.assertEqual(loaded(left, right), torch.full((4,), 3.0))
+
+    def test_tracer_dynamo_rejects_input_global_identity_guard(self):
+        x = torch.randn(4)
+        with self.assertRaisesRegex(PrecompileError, "input-derived"):
+            torch.compiler.precompile(
+                _precompile_dynamo_input_global_identity,
+                example_inputs=[(x, _PRECOMPILE_DYNAMO_IDENTITY_TOKEN)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_input_container_global_identity_guard(self):
+        with self.assertRaisesRegex(PrecompileError, "input-derived"):
+            torch.compiler.precompile(
+                _precompile_dynamo_container_identity,
+                example_inputs=[(_DYNAMO_CONTAINER_IDENTITY, torch.randn(3))],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_input_helper_attribute_identity_guard(self):
+        with self.assertRaisesRegex(PrecompileError, "input-derived"):
+            torch.compiler.precompile(
+                _precompile_dynamo_helper_attribute_identity,
+                example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_input_helper_container_attribute_identity_guard(
+        self,
+    ):
+        with self.assertRaisesRegex(PrecompileError, "input-derived"):
+            torch.compiler.precompile(
+                _precompile_dynamo_helper_container_attribute_identity,
+                example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_module_attribute_global_identity_guard(self):
+        module = _PrecompileDynamoModuleAttributeIdentity(_DYNAMO_TENSOR_DEFAULT)
+        with self.assertRaisesRegex(PrecompileError, "input-derived"):
+            torch.compiler.precompile(
+                _precompile_dynamo_module_attribute_identity,
+                example_inputs=[(module, torch.randn(3))],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_module_forward_global_identity_guard(self):
+        module = _PrecompileDynamoModuleForwardGlobalIdentity()
+        with self.assertRaisesRegex(PrecompileError, "input callable"):
+            torch.compiler.precompile(
+                _precompile_dynamo_call_identity_module,
+                example_inputs=[(module, _DYNAMO_TENSOR_DEFAULT)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_target_module_global_identity_guard(self):
+        with self.assertRaisesRegex(PrecompileError, "input callable"):
+            torch.compiler.precompile(
+                _PrecompileDynamoModuleForwardGlobalIdentity(),
+                example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_nested_module_forward_global_identity_guard(self):
+        module = _PrecompileDynamoModuleForwardGlobalIdentity()
+        with self.assertRaisesRegex(PrecompileError, "input callable"):
+            torch.compiler.precompile(
+                _precompile_dynamo_call_nested_identity_module,
+                example_inputs=[([module], _DYNAMO_TENSOR_DEFAULT)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    @parametrize(
+        "fn",
+        (
+            _precompile_dynamo_call_identity_module_helper,
+            _precompile_dynamo_call_identity_module_helper_nested,
+        ),
+    )
+    def test_tracer_dynamo_rejects_module_method_global_identity_guard(self, fn):
+        module = _PrecompileDynamoModuleMethodGlobalIdentity()
+        with self.assertRaisesRegex(PrecompileError, "input callable"):
+            torch.compiler.precompile(
+                fn,
+                example_inputs=[(module, _DYNAMO_TENSOR_DEFAULT)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_dynamic_module_method_dispatch(self):
+        module = _PrecompileDynamoModuleMethodGlobalIdentity()
+        with self.assertRaisesRegex(NotImplementedError, "methodcaller"):
+            torch.compiler.precompile(
+                _precompile_dynamo_call_identity_module_methodcaller,
+                example_inputs=[(module, _DYNAMO_TENSOR_DEFAULT)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_module_implicit_dispatch(self):
+        module = _PrecompileDynamoModuleGetitemGlobalIdentity()
+        with self.assertRaisesRegex(PrecompileError, "input callable"):
+            torch.compiler.precompile(
+                _precompile_dynamo_getitem_identity_module,
+                example_inputs=[(module, _DYNAMO_TENSOR_DEFAULT)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_imported_module_method_identity_guard(self):
+        module = _PrecompileDynamoModuleMethodGlobalIdentity()
+        with self.assertRaisesRegex(PrecompileError, "input callable"):
+            torch.compiler.precompile(
+                _precompile_dynamo_call_external_module_method,
+                example_inputs=[(module, _DYNAMO_TENSOR_DEFAULT)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    @parametrize(
+        "fn",
+        (
+            _precompile_dynamo_stdlib_module_dynamic_identity,
+            _precompile_dynamo_stdlib_module_attrgetter_identity,
+            _precompile_dynamo_stdlib_module_getattr_identity,
+            _precompile_dynamo_stdlib_module_bound_getattr_identity,
+        ),
+    )
+    def test_tracer_dynamo_rejects_dynamic_stdlib_module_alias(self, fn):
+        missing = object()
+        previous = getattr(math, "_precompile_token", missing)
+        math._precompile_token = _DYNAMO_TENSOR_DEFAULT
+        try:
+            with self.assertRaisesRegex(
+                (PrecompileError, NotImplementedError),
+                "input-derived|dynamic global access",
+            ):
+                torch.compiler.precompile(
+                    fn,
+                    example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+        finally:
+            if previous is missing:
+                del math._precompile_token
+            else:
+                math._precompile_token = previous
+
+    def test_tracer_dynamo_rejects_dynamic_attribute_alias(self):
+        with self.assertRaisesRegex(
+            NotImplementedError, "dynamic global access.*getattr"
+        ):
+            torch.compiler.precompile(
+                _precompile_dynamo_getattr_identity,
+                example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_imported_dynamic_attribute_alias(self):
+        with self.assertRaisesRegex(PrecompileError, "input-derived"):
+            torch.compiler.precompile(
+                _precompile_dynamo_external_getattr_identity,
+                example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    @parametrize(
+        "fn",
+        (
+            _precompile_dynamo_descriptor_identity,
+            _precompile_dynamo_custom_descriptor_identity,
+            _precompile_dynamo_slotted_identity,
+            _precompile_dynamo_dynamic_identity,
+            _precompile_dynamo_getattribute_identity,
+            _precompile_dynamo_module_getattr_identity,
+            _precompile_dynamo_callable_identity,
+            _precompile_dynamo_deque_identity,
+            _precompile_dynamo_context_identity,
+            _precompile_dynamo_weak_proxy_identity,
+            _precompile_dynamo_type_identity,
+            _precompile_dynamo_nested_descriptor_identity,
+            _precompile_dynamo_weakref_identity,
+        ),
+        name_fn=lambda fn: fn.__name__,
+    )
+    def test_tracer_dynamo_rejects_input_descriptor_identity_guard(self, fn):
+        with self.assertRaisesRegex(PrecompileError, "input-derived"):
+            torch.compiler.precompile(
+                fn,
+                example_inputs=[(_DYNAMO_TENSOR_DEFAULT,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    @parametrize(
+        "fn,obj",
+        (
+            (_precompile_dynamo_input_getitem, _PrecompileDynamoInputGetitem()),
+            (
+                _precompile_dynamo_nested_input_getitem,
+                _PrecompileDynamoInputObjectBox(),
+            ),
+            (
+                _precompile_dynamo_input_getitem,
+                _PrecompileDynamoInputStateGlobalAlias(_DYNAMO_TENSOR_DEFAULT),
+            ),
+            (_precompile_dynamo_input_getitem, _PrecompileDynamoInputList([0])),
+        ),
+    )
+    def test_tracer_dynamo_rejects_input_object_behavior_alias(self, fn, obj):
+        with self.assertRaisesRegex(PrecompileError, "input callable"):
+            torch.compiler.precompile(
+                fn,
+                example_inputs=[(obj, _DYNAMO_TENSOR_DEFAULT)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_ignores_unrelated_global_attributes(self):
+        token = _DYNAMO_IDENTITY_DESCRIPTOR.unused
+        x = torch.randn(3)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_unrelated_attribute,
+            example_inputs=[(token, x)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        other = torch.randn(3)
+        self.assertEqual(
+            loaded(other, x), _precompile_dynamo_unrelated_attribute(other, x)
+        )
+
+    def test_tracer_dynamo_rejects_global_tensor(self):
+        with self.assertRaisesRegex(PrecompileError, "tensor-valued Python globals"):
+            torch.compiler.precompile(
+                _precompile_dynamo_global_tensor,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_indirect_global_tensor(self):
+        module_name = "_precompile_indirect_global_tensor"
+        source = textwrap.dedent(
+            """
+            import types
+
+            import torch
+
+            BOX = types.SimpleNamespace(value=torch.randn(3))
+
+            def helper(x):
+                return x + BOX.value
+
+            def fn(x):
+                return helper(x)
+            """
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, f"{module_name}.py")
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(source)
+            sys.path.insert(0, directory)
+            importlib.invalidate_caches()
+            try:
+                fixture = importlib.import_module(module_name)
+                with self.assertRaisesRegex(
+                    PrecompileError, "tensor-valued Python globals"
+                ):
+                    torch.compiler.precompile(
+                        fixture.fn,
+                        example_inputs=[(torch.randn(3),)],
+                        tracer="dynamo",
+                        backend="eager",
+                    )
+            finally:
+                sys.path.remove(directory)
+                sys.modules.pop(module_name, None)
+
+    def test_tracer_dynamo_rejects_imported_input_environment_identity(self):
+        token = torch.randn(3)
+        torch._precompile_identity_token = token
+        module_name = "_precompile_identity_module"
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, f"{module_name}.py")
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(
+                    textwrap.dedent(
+                        """
+                        import types
+
+                        import torch
+
+                        TOKEN = torch._precompile_identity_token
+
+                        class Holder:
+                            def __init__(self, value):
+                                self.value = value
+
+                            def __call__(self):
+                                return self.value
+
+                        CALLABLE = Holder(TOKEN)
+                        SUBMODULE = types.ModuleType("_precompile_identity_submodule")
+                        SUBMODULE.CALLABLE = CALLABLE
+                        USED = 2
+
+                        def __getattr__(name):
+                            if name == "DYNAMIC":
+                                return TOKEN
+                            raise AttributeError(name)
+
+                        def helper(module, x):
+                            return x + 1 if x is module._precompile_identity_token else x - 1
+
+                        def global_module_fn(x):
+                            return helper(torch, x)
+
+                        MODULES = [torch]
+
+                        def global_module_container_fn(x):
+                            return helper(MODULES[0], x)
+
+                        def class_helper(cls, x):
+                            return x + 1 if x is cls._precompile_identity_token else x - 1
+
+                        def global_class_fn(x):
+                            return class_helper(torch.nn.Module, x)
+                        """
+                    )
+                )
+            package_name = "_precompile_identity_package"
+            package = os.path.join(directory, package_name)
+            os.makedirs(os.path.join(package, "sub"))
+            for init in (package, os.path.join(package, "sub")):
+                with open(os.path.join(init, "__init__.py"), "w", encoding="utf-8"):
+                    pass
+            with open(
+                os.path.join(package, "sub", "mod.py"), "w", encoding="utf-8"
+            ) as file:
+                file.write("import torch\nTOKEN = torch._precompile_identity_token\n")
+            sys.path.insert(0, directory)
+            importlib.invalidate_caches()
+            torch.nn.Module._precompile_identity_token = token
+            try:
+                fixture = importlib.import_module(module_name)
+                for fn in (
+                    _precompile_dynamo_imported_module_identity,
+                    _precompile_dynamo_imported_callable_identity,
+                    _precompile_dynamo_imported_nested_callable_identity,
+                    _precompile_dynamo_imported_dynamic_identity,
+                ):
+                    with self.assertRaisesRegex(
+                        PrecompileError, "input-derived identity"
+                    ):
+                        torch.compiler.precompile(
+                            fn,
+                            example_inputs=[(token,)],
+                            tracer="dynamo",
+                            backend="eager",
+                        )
+
+                for fn in (
+                    fixture.global_module_fn,
+                    fixture.global_module_container_fn,
+                    fixture.global_class_fn,
+                ):
+                    with self.assertRaisesRegex(
+                        PrecompileError, "input-derived|module object"
+                    ):
+                        torch.compiler.precompile(
+                            fn,
+                            example_inputs=[(token,)],
+                            tracer="dynamo",
+                            backend="eager",
+                        )
+
+                for fn in (
+                    _precompile_dynamo_imported_module_alias_identity,
+                    _precompile_dynamo_dotted_import_identity,
+                ):
+                    with self.assertRaisesRegex(
+                        PrecompileError,
+                        "input-derived identity|locally imported module",
+                    ):
+                        torch.compiler.precompile(
+                            fn,
+                            example_inputs=[(token,)],
+                            tracer="dynamo",
+                            backend="eager",
+                        )
+
+                for fn in (
+                    _precompile_dynamo_imported_unrelated_attribute,
+                    _precompile_dynamo_import_shadowed_in_nested_scope,
+                ):
+                    code, cache = torch.compiler.precompile(
+                        fn,
+                        example_inputs=[(token,)],
+                        tracer="dynamo",
+                        backend="eager",
+                    )
+                    loaded = torch.compiler.precompile.load(code, cache)
+                    x = torch.randn(3)
+                    self.assertEqual(loaded(x), fn(x))
+            finally:
+                sys.path.remove(directory)
+                for imported in (
+                    module_name,
+                    package_name,
+                    f"{package_name}.sub",
+                    f"{package_name}.sub.mod",
+                ):
+                    sys.modules.pop(imported, None)
+                del torch.nn.Module._precompile_identity_token
+                del torch._precompile_identity_token
+
+    def test_tracer_dynamo_ignores_unused_function_metadata_tensor(self):
+        _precompile_dynamo_metadata_helper.unused = torch.randn(3)
+        try:
+            code, cache = torch.compiler.precompile(
+                _precompile_dynamo_calls_metadata_helper,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+            for _, loaded in _default_and_inlined_loaders(code, cache, "eager"):
+                x = torch.randn(3)
+                self.assertEqual(loaded(x), x + 1)
+        finally:
+            del _precompile_dynamo_metadata_helper.unused
+
+    def test_tracer_dynamo_rejects_library_helper_environment_aliases(self):
         token = torch.randn(3)
         module = types.ModuleType("torch._precompile_reviewlib")
-        module.TOKEN = token
+        module.token = token
         exec(
-            "def inner(x):\n"
-            "    return x + 1 if x is TOKEN else x - 1\n"
-            "def outer(x):\n"
-            "    return inner(x)\n",
+            textwrap.dedent(
+                """
+                import functools
+                import torch
+
+                TOKEN = token
+
+                class Holder:
+                    def reveal(self):
+                        return TOKEN
+
+                HOLDER = Holder()
+
+                def helper(obj, x):
+                    return x + 1 if x is obj.reveal() else x - 1
+
+                def inner(x):
+                    return x + 1 if x is TOKEN else x - 1
+
+                def outer(x):
+                    return inner(x)
+
+                FUNCTIONS = [inner]
+
+                def container_outer(x):
+                    return FUNCTIONS[0](x)
+
+                PARTIAL = functools.partial(inner)
+
+                def partial_outer(x):
+                    return PARTIAL(x)
+
+                class Callable:
+                    def __call__(self, x):
+                        return inner(x)
+
+                CALLABLE = Callable()
+
+                def callable_outer(x):
+                    return CALLABLE(x)
+
+                class PropertyHolder:
+                    @property
+                    def token(self):
+                        return TOKEN
+
+                def bound_helper(obj, x):
+                    return x + 1 if x is obj.token else x - 1
+
+                BOUND_PARTIAL = functools.partial(bound_helper, PropertyHolder())
+
+                def bound_partial_outer(x):
+                    return BOUND_PARTIAL(x)
+
+                def keyword_bound_helper(x, obj=None):
+                    return x + 1 if x is obj.token else x - 1
+
+                KEYWORD_PARTIAL = functools.partial(
+                    keyword_bound_helper, obj=PropertyHolder()
+                )
+
+                def keyword_partial_outer(x):
+                    return KEYWORD_PARTIAL(x)
+
+                class PropertyCallable:
+                    @property
+                    def token(self):
+                        return TOKEN
+
+                    def __call__(self, x):
+                        return x + 1 if x is self.token else x - 1
+
+                PROPERTY_CALLABLE = PropertyCallable()
+
+                def property_callable_outer(x):
+                    return PROPERTY_CALLABLE(x)
+
+                class Factory:
+                    def __new__(cls, x):
+                        return x + 1 if x is TOKEN_BOX[0] else x - 1
+
+                TOKEN_BOX = [TOKEN]
+
+                class DirectHolder:
+                    def __init__(self, value):
+                        self.value = value
+
+                    def reveal(self):
+                        return self.value
+
+                    @property
+                    def token(self):
+                        return TOKEN_BOX[0]
+
+                DIRECT_HOLDER = DirectHolder(TOKEN)
+
+                def direct_method_outer(x):
+                    return x + 1 if x is DIRECT_HOLDER.reveal() else x - 1
+
+                def direct_property_outer(x):
+                    return x + 1 if x is DIRECT_HOLDER.token else x - 1
+
+                def factory_outer(x):
+                    return Factory(x)
+
+                def module_helper(mod, x):
+                    return x + 1 if x is mod._precompile_review_token else x - 1
+
+                def module_outer(x):
+                    return module_helper(torch, x)
+
+                def __getattr__(name):
+                    if name == "DYNAMIC":
+                        return TOKEN
+                    raise AttributeError(name)
+
+                def dynamic_module_outer(x):
+                    return x + 1 if x is SELF.DYNAMIC else x - 1
+                """
+            ),
             module.__dict__,
         )
+        module.SELF = module
         torch._precompile_reviewlib = module
+        torch._precompile_review_token = token
         sys.modules[module.__name__] = module
         try:
-            with self.assertRaisesRegex(PrecompileError, "Python environment"):
+            for fn in (
+                _precompile_dynamo_library_object_identity,
+                _precompile_dynamo_library_nested_helper_identity,
+                _precompile_dynamo_library_container_helper_identity,
+                _precompile_dynamo_library_partial_helper_identity,
+                _precompile_dynamo_library_callable_helper_identity,
+                _precompile_dynamo_library_bound_partial_identity,
+                _precompile_dynamo_library_keyword_partial_identity,
+                _precompile_dynamo_library_property_callable_identity,
+                _precompile_dynamo_library_factory_identity,
+                _precompile_dynamo_library_dynamic_module_identity,
+                _precompile_dynamo_library_direct_method_identity,
+                _precompile_dynamo_library_direct_property_identity,
+            ):
+                with self.subTest(fn=fn.__name__):
+                    with self.assertRaisesRegex(PrecompileError, "input-derived"):
+                        torch.compiler.precompile(
+                            fn,
+                            example_inputs=[(token,)],
+                            tracer="dynamo",
+                            backend="eager",
+                        )
+            with self.assertRaisesRegex(PrecompileError, "input-derived"):
                 torch.compiler.precompile(
-                    _precompile_dynamo_nested_library_identity,
+                    _precompile_dynamo_library_module_value_identity,
                     example_inputs=[(token,)],
                     tracer="dynamo",
                     backend="eager",
                 )
         finally:
             sys.modules.pop(module.__name__, None)
+            del torch._precompile_review_token
             del torch._precompile_reviewlib
 
-    def test_tracer_dynamo_preserves_literal_globals(self):
-        x = torch.randn(3)
+    def test_tracer_dynamo_rejects_library_helper_late_import_alias(self):
+        token = torch.randn(3)
+        module = types.ModuleType("torch._precompile_latelib")
+        inner_module = types.ModuleType("torch._precompile_lateinner")
+        exec(
+            textwrap.dedent(
+                """
+                def inner(x):
+                    import _precompile_late_env
+
+                    return (
+                        x + 1
+                        if x is _precompile_late_env.HOLDER.reveal()
+                        else x - 1
+                    )
+                """
+            ),
+            inner_module.__dict__,
+        )
+        module.inner = inner_module.inner
+        exec(
+            textwrap.dedent(
+                """
+                def outer(x):
+                    return inner(x)
+                """
+            ),
+            module.__dict__,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "_precompile_late_env.py")
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(
+                    textwrap.dedent(
+                        """
+                        import torch
+
+                        class Holder:
+                            def __init__(self, value):
+                                self.value = value
+
+                            def reveal(self):
+                                return self.value
+
+                        HOLDER = Holder(torch._precompile_late_token)
+                        """
+                    )
+                )
+            sys.path.insert(0, directory)
+            importlib.invalidate_caches()
+            torch._precompile_latelib = module
+            torch._precompile_late_token = token
+            sys.modules[module.__name__] = module
+            sys.modules[inner_module.__name__] = inner_module
+            try:
+                with self.assertRaisesRegex(PrecompileError, "locally imported module"):
+                    torch.compiler.precompile(
+                        _precompile_dynamo_library_late_import_identity,
+                        example_inputs=[(token,)],
+                        tracer="dynamo",
+                        backend="eager",
+                    )
+            finally:
+                sys.path.remove(directory)
+                sys.modules.pop("_precompile_late_env", None)
+                sys.modules.pop(module.__name__, None)
+                sys.modules.pop(inner_module.__name__, None)
+                del torch._precompile_late_token
+                del torch._precompile_latelib
+
+    def test_tracer_dynamo_rejects_unserializable_input_contract(self):
+        inp = _UnserializableCtxInput(torch.randn(3), torch.randn(3))
+        with self.assertRaisesRegex(PrecompileError, "serialize the input structure"):
+            torch.compiler.precompile(
+                lambda value: value.a + value.b,
+                example_inputs=[(inp,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
         code, cache = torch.compiler.precompile(
-            _precompile_dynamo_literal_global,
-            example_inputs=[(x,)],
+            lambda values: values[0] + values[1],
+            example_inputs=[([torch.randn(3), torch.randn(3)],)],
             tracer="dynamo",
             backend="eager",
         )
-        self.assertEqual(
-            torch.compiler.precompile.load(code, cache)(x),
-            _precompile_dynamo_literal_global(x),
-        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with self.assertRaisesRegex(
+            PrecompileError, "runtime input structure cannot be serialized"
+        ):
+            loaded(inp)
 
-    def test_tracer_dynamo_rejects_default_global_identity(self):
-        with self.assertRaisesRegex(PrecompileError, "default.*Python environment"):
+    def test_tracer_dynamo_rejects_tensor_default(self):
+        with self.assertRaisesRegex(PrecompileError, "tensor-valued function defaults"):
             torch.compiler.precompile(
-                _precompile_dynamo_default_global_identity,
+                _precompile_dynamo_tensor_default,
                 example_inputs=[(torch.randn(3),)],
                 tracer="dynamo",
                 backend="eager",
             )
 
-    def test_tracer_dynamo_rejects_global_mutation(self):
-        global _DYNAMO_MUTATED_GLOBAL
-        _DYNAMO_MUTATED_GLOBAL = None
-        try:
-            with self.assertRaisesRegex(PrecompileError, "mutate globals"):
-                torch.compiler.precompile(
-                    _precompile_dynamo_mutates_global,
-                    example_inputs=[(torch.randn(3),)],
-                    tracer="dynamo",
-                    backend="eager",
-                )
-            self.assertIsNone(_DYNAMO_MUTATED_GLOBAL)
-        finally:
-            _DYNAMO_MUTATED_GLOBAL = None
+    def test_tracer_dynamo_rejects_tensor_in_object_default(self):
+        with self.assertRaisesRegex(PrecompileError, "tensor-valued function defaults"):
+            torch.compiler.precompile(
+                _precompile_dynamo_object_default,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_tensor_in_builtin_subclass_default(self):
+        with self.assertRaisesRegex(PrecompileError, "non-literal function defaults"):
+            torch.compiler.precompile(
+                _precompile_dynamo_tuple_subclass_default,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_load_does_not_copy_unrelated_module_globals(self):
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(4),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertNotIn("_GLOBAL_TENSOR", loaded._loaded_forward.__globals__)
+
+    def test_tracer_dynamo_python_minor_mismatch_uses_public_error(self):
+        from torch._precompile import _make_inlined_forward
+
+        code, _ = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(4),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        version = tuple(sys.version_info[:2])
+        incompatible = code.replace(
+            f"_DYNAMO_PYTHON_VERSION = {version!r}",
+            "_DYNAMO_PYTHON_VERSION = (0, 0)",
+        )
+        with self.assertRaisesRegex(PrecompileError, "produced on Python"):
+            _make_inlined_forward(incompatible)
 
     def test_tracer_dynamo_preserves_key_order_guard_dependencies(self):
         forward = {"a": 2.0, "b": 3.0}
@@ -2705,6 +5902,96 @@ class TestPrecompile(TestCase):
         x = torch.ones(4)
         self.assertEqual(loaded(x, forward), _precompile_dynamo_dict_order(x, forward))
         self.assertEqual(loaded(x, reverse), _precompile_dynamo_dict_order(x, reverse))
+
+    def test_tracer_dynamo_prunes_unguarded_user_object_attributes(self):
+        pipeline = _PrecompileDynamoPipeline(torch.nn.Linear(8, 8))
+        x = torch.randn(4, 8)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_pipeline,
+            example_inputs=[(pipeline, x)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(pipeline, x), _precompile_dynamo_pipeline(pipeline, x))
+
+    def test_guard_serialization_prunes_loaded_precompile_handle(self):
+        import threading
+
+        from torch._dynamo.guards import _Missing, GuardsStatePickler
+
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_unreachable_caller,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        inner = loaded._loaded_forward
+        if inner is None:
+            raise AssertionError("expected an installed artifact")
+        holder = _PrecompileLockHolder()
+        holder.scale = 2.0
+
+        try:
+            for handle in (loaded, inner):
+                holder.installed = handle
+                buf = io.BytesIO()
+                GuardsStatePickler({}, {}, {}, buf).dump(holder)
+                restored = pickle.loads(buf.getvalue())
+                self.assertIsInstance(restored.installed, _Missing)
+                self.assertEqual(restored.scale, 2.0)
+
+                with self.assertRaisesRegex(
+                    PackageError, "guard directly references a precompile handle"
+                ):
+                    GuardsStatePickler({id(handle): handle}, {}, {}, io.BytesIO()).dump(
+                        handle
+                    )
+
+            holder.installed = threading.RLock()
+            with self.assertRaisesRegex(TypeError, "cannot pickle.*RLock"):
+                GuardsStatePickler({}, {}, {}, io.BytesIO()).dump(holder)
+        finally:
+            loaded.unload()
+
+    @parametrize("kind", ("dtype", "int", "str", "device"))
+    def test_tracer_dynamo_unguarded_interned_attribute(self, kind):
+        extra = {
+            "dtype": torch.float32,
+            "int": 8,
+            "str": "cuda",
+            "device": torch.device("cpu"),
+        }[kind]
+        model = _PrecompileDynamoUnguardedAttribute(extra).eval()
+        x = torch.randn(4, 8)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_call_module,
+            example_inputs=[(model, x)],
+            tracer="dynamo",
+            backend="inductor",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(loaded(model, x), model(x))
+
+    def test_guard_serialization_error_names_the_value_path(self):
+        from torch._dynamo.guards import _offending_value_path
+
+        class Scope:
+            pass
+
+        holder = Scope()
+        holder.deep = Scope()
+        holder.deep.iterator = (index for index in range(3))
+        state = Scope()
+        state.output_graph = Scope()
+        state.output_graph.local_scope = {"pipeline": holder}
+        state.output_graph.global_scope = {}
+        path = _offending_value_path(
+            state, TypeError("cannot pickle 'generator' object")
+        )
+        self.assertIn("local_scope['pipeline'].deep.iterator", path)
 
     def test_tracer_invalid_raises(self):
         a, b = torch.randn(4, 4), torch.randn(4, 4)
@@ -3357,83 +6644,78 @@ class TestPrecompile(TestCase):
         ):
             torch.compiler.precompile.load("x = 1\n", buf.getvalue())
 
-    def test_invalid_dynamo_metadata_rejected(self):
-        import hashlib
+    def test_missing_dynamo_state_rejected(self):
+        x = torch.randn(3)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        code = "\n".join(
+            line
+            for line in code.splitlines()
+            if not line.startswith("_DYNAMO_STATE = ")
+        )
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        blob["code_hash"] = hashlib.sha256(code.encode()).hexdigest()
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        with self.assertRaisesRegex(
+            PrecompileError, "missing calling-convention metadata.*_DYNAMO_STATE"
+        ):
+            torch.compiler.precompile.load(code, buf.getvalue())
 
+    @parametrize(
+        "name,replacement",
+        (
+            ("TRAINING", "TRAINING = 'False'"),
+            ("_DYNAMO_BACKEND_IDS", "_DYNAMO_BACKEND_IDS = 1"),
+            ("_DYNAMO_BACKENDS", "_DYNAMO_BACKENDS = []"),
+            ("_DYNAMO_PYTHON_VERSION", "_DYNAMO_PYTHON_VERSION = ()"),
+            ("_DYNAMO_STATE", "_DYNAMO_STATE = 1"),
+            ("_DYNAMO_TORCH_VERSION", "_DYNAMO_TORCH_VERSION = 1"),
+        ),
+    )
+    def test_invalid_dynamo_metadata_rejected(self, name, replacement):
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_dynamic,
             example_inputs=[(torch.randn(3),)],
             tracer="dynamo",
             backend="eager",
         )
-
-        def paired_cache(updated_code):
-            blob = torch.load(io.BytesIO(cache), weights_only=True)
-            blob["code_hash"] = hashlib.sha256(updated_code.encode()).hexdigest()
-            buffer = io.BytesIO()
-            torch.save(blob, buffer)
-            return buffer.getvalue()
-
-        missing_state = "\n".join(
-            line
+        code = "\n".join(
+            replacement if line.startswith(f"{name} = ") else line
             for line in code.splitlines()
-            if not line.startswith("_DYNAMO_STATE = ")
         )
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        blob["code_hash"] = hashlib.sha256(code.encode()).hexdigest()
+        buf = io.BytesIO()
+        torch.save(blob, buf)
         with self.assertRaisesRegex(
-            PrecompileError, "missing calling-convention metadata.*_DYNAMO_STATE"
+            PrecompileError, f"invalid calling-convention metadata.*{name}"
         ):
-            torch.compiler.precompile.load(missing_state, paired_cache(missing_state))
+            torch.compiler.precompile.load(code, buf.getvalue())
 
-        invalid_state = "\n".join(
+    def test_invalid_serialized_dynamo_state_rejected(self):
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(3),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        code = "\n".join(
             "_DYNAMO_STATE = 'not-base64'"
             if line.startswith("_DYNAMO_STATE = ")
             else line
             for line in code.splitlines()
         )
-        with self.assertRaisesRegex(PrecompileError, "invalid serialized Dynamo state"):
-            torch.compiler.precompile.load(invalid_state, paired_cache(invalid_state))
-
-        invalid_training = code.replace("TRAINING = False", "TRAINING = object()", 1)
-        with self.assertRaisesRegex(
-            PrecompileError, "invalid calling-convention metadata.*TRAINING"
-        ):
-            torch.compiler.precompile.load(
-                invalid_training, paired_cache(invalid_training)
-            )
-
-        invalid_backends = code.replace(
-            "_DYNAMO_BACKENDS = {}", "_DYNAMO_BACKENDS = []", 1
-        )
-        with self.assertRaisesRegex(
-            PrecompileError, "invalid calling-convention metadata.*_DYNAMO_BACKENDS"
-        ):
-            torch.compiler.precompile.load(
-                invalid_backends, paired_cache(invalid_backends)
-            )
-
-    def test_tracer_dynamo_rejects_torch_version_skew(self):
-        import hashlib
-
-        code, cache = torch.compiler.precompile(
-            _precompile_dynamo_dynamic,
-            example_inputs=[(torch.randn(3),)],
-            tracer="dynamo",
-            backend="eager",
-        )
-        self.assertIn(f"_DYNAMO_TORCH_VERSION = {torch.__version__!r}", code)
-        mismatched = code.replace(
-            f"_DYNAMO_TORCH_VERSION = {torch.__version__!r}",
-            "_DYNAMO_TORCH_VERSION = 'different-build'",
-            1,
-        )
         blob = torch.load(io.BytesIO(cache), weights_only=True)
-        blob["code_hash"] = hashlib.sha256(mismatched.encode()).hexdigest()
-        buffer = io.BytesIO()
-        torch.save(blob, buffer)
-        with self.assertRaisesRegex(
-            PrecompileError, "produced by torch different-build"
-        ):
-            torch.compiler.precompile.load(mismatched, buffer.getvalue())
+        blob["code_hash"] = hashlib.sha256(code.encode()).hexdigest()
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        with self.assertRaisesRegex(PrecompileError, "invalid serialized Dynamo state"):
+            torch.compiler.precompile.load(code, buf.getvalue())
 
     def test_singleton_pickle_deepcopy_roundtrip(self):
         # torch.compiler.precompile is a process-wide singleton; pickle and deepcopy
@@ -3824,19 +7106,10 @@ class TestPrecompile(TestCase):
         self.assertEqual(torch.compiler.precompile.load(ecode, ecache)(run, x), run(x))
 
     def test_unbacked_equality_shared_vs_independent_shape_id(self):
-        # MAJOR1 (invariant 3 DANGER note): two mark_unbacked dims that the graph requires
-        # to be EQUAL behave differently depending on shape_id. (a) A SHARED shape_id binds
-        # them to ONE symbol, so they are equal by construction AND a runtime size mismatch
-        # is LOUDLY rejected. (b) Two INDEPENDENTLY marked dims (no shared shape_id)
-        # combined elementwise bake a SILENT equal-size assumption: unlike eager, a runtime
-        # mismatch is NOT loudly rejected -- NOT because the constraint is unrecoverable, but
-        # because precompile does not harvest it: the capture ShapeEnv DOES record the
-        # equality as a deferred runtime assert (Eq(u0, u1)), yet only the decorator's
-        # min/max feed USER_INPUT_BOUNDS, so the driver never enforces the relational assert.
-        # The artifact runs and returns the FIRST input's shape. This documents the "give
-        # equal-must-be-equal dims a shared shape_id" limitation (and would flip to a loud
-        # failure if that harvesting gap is later closed) rather than asserting silent-wrong
-        # is correct.
+        # A shared shape_id binds both dimensions to one symbol, so runtime mismatches are
+        # rejected. Independently marked dimensions would instead introduce a deferred
+        # equality constraint that the standalone driver cannot enforce, so capture must
+        # fail rather than bake the example relation.
         m = torch.nn.Linear(4, 4).eval()
         # (a) shared shape_id -> equality enforced.
         xs = torch.randn(8, 4)
@@ -3851,20 +7124,28 @@ class TestPrecompile(TestCase):
         self.assertEqual(f_s(m, xt, yt), m(xt) + yt)  # matched sizes work
         with self.assertRaisesRegex(PrecompileError, "shape or memory format"):
             f_s(m, torch.randn(8, 4), torch.randn(16, 4))  # mismatch rejected
-        # (b) independent marks -> the documented silent equal-size limitation. A matched
-        # call works; a mismatched call does NOT raise and returns the first input's shape.
+        # (b) independent marks -> fail closed on the unhandled equality constraint.
         xi = torch.randn(8, 4)
         yi = torch.randn(8, 4)
         mark_unbacked(xi, 0)
         mark_unbacked(yi, 0)
-        code_i, cache_i = torch.compiler.precompile(
-            lambda mm, a, b: mm(a) + b, example_inputs=[(m, xi, yi)]
-        )
-        f_i = torch.compiler.precompile.load(code_i, cache_i)
-        xm, ym = torch.randn(10, 4), torch.randn(10, 4)
-        self.assertEqual(f_i(m, xm, ym), m(xm) + ym)  # matched sizes work
-        out = f_i(m, torch.randn(10, 4), torch.randn(12, 4))  # mismatch NOT rejected
-        self.assertEqual(tuple(out.shape), (10, 4))  # broadcasts to the first input
+        with self.assertRaisesRegex(PrecompileError, "runtime shape constraints"):
+            torch.compiler.precompile(
+                lambda mm, a, b: mm(a) + b, example_inputs=[(m, xi, yi)]
+            )
+
+    def test_unbacked_derived_runtime_constraint_rejected(self):
+        def fn(x):
+            y = x.nonzero()
+            torch._check(y.shape[0] > 0)
+            return y
+
+        x = torch.ones(8)
+        mark_unbacked(x, 0)
+        with self.assertRaisesRegex(
+            PrecompileError, "deferred runtime shape constraints"
+        ):
+            torch.compiler.precompile(fn, example_inputs=[(x,)])
 
     def test_grad_identity_preserved_across_precompile(self):
         # Capture snapshots and restores the example model's .grad by the SAME object (no
@@ -4028,10 +7309,27 @@ class TestPrecompileNumerics(TestCase):
     # exercises the CUDA lowering, not just CPU.
 
     @onlyCUDA
+    def test_make_fx_autocast_tracks_graph_devices(self, device):
+        def fn(x):
+            moved = x.to(device)
+            return moved @ moved.t()
+
+        x = torch.randn(4, 8)
+        code, cache = torch.compiler.precompile(
+            fn, example_inputs=[(x,)], backend="eager"
+        )
+        self.assertIn("GRAPH_DEVICES = ('cpu', 'cuda')", code)
+        loaded = torch.compiler.precompile.load(code, cache)
+        expected = loaded(x)
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            actual = loaded(x)
+        self.assertEqual(actual.dtype, torch.float32)
+        self.assertEqual(actual, expected)
+
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True
     )
-    def test_tracer_dynamo_recompiles_to_dynamic_cuda_graph(self, device):
+    def test_tracer_dynamo_recompiles_to_dynamic_graph(self, device):
         from torch._inductor.utils import fresh_cache
 
         examples = [
@@ -4046,16 +7344,16 @@ class TestPrecompileNumerics(TestCase):
             )
 
         self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
-        self.assertIn("@triton.jit", code)
+        if device != "cpu":
+            self.assertIn("@triton.jit", code)
         loaded = torch.compiler.precompile.load(code, cache)
         x = make_tensor((7, 4), device=device, dtype=torch.float32)
         self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
 
-    @onlyCUDA
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True
     )
-    def test_tracer_dynamo_graph_break_cuda(self, device):
+    def test_tracer_dynamo_graph_break(self, device):
         from torch._inductor.utils import fresh_cache
 
         examples = [
@@ -4072,14 +7370,16 @@ class TestPrecompileNumerics(TestCase):
         self.assertIn("FRAME_COUNT = 2", code)
         self.assertIn("GRAPH_COUNT = 4", code)
         self.assertIn("DYNAMIC_GRAPH_COUNT = 2", code)
-        self.assertIn("@triton.jit", code)
+        if device != "cpu":
+            self.assertIn("@triton.jit", code)
         for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
             for size in (2, 7):
                 x = make_tensor((size, 4), device=device, dtype=torch.float32)
                 self.assertEqual(loaded(x), _precompile_dynamo_with_disabled(x))
+            with self.assertRaisesRegex(PrecompileError, "no captured Dynamo variant"):
+                loaded(make_tensor((1, 4), device=device, dtype=torch.float32))
 
-    @onlyCUDA
-    def test_tracer_dynamo_installed_graph_break_cuda(self, device):
+    def test_tracer_dynamo_installed_graph_break(self, device):
         from torch._inductor.utils import fresh_cache
         from torch._precompile import _parse_artifact_metadata
 
@@ -4093,16 +7393,16 @@ class TestPrecompileNumerics(TestCase):
             )
 
         self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
-        self.assertIn("@triton.jit", code)
+        if device != "cpu":
+            self.assertIn("@triton.jit", code)
         for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
             self.assertEqual(loaded(model, x), model(x))
             loaded.unload()
 
-    @onlyCUDA
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True
     )
-    def test_tracer_dynamo_training_cuda(self, device):
+    def test_tracer_dynamo_training(self, device):
         from torch._inductor.utils import fresh_cache
 
         examples = [
@@ -4123,7 +7423,8 @@ class TestPrecompileNumerics(TestCase):
 
         self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
         self.assertIn("_inner_call_bw", code)
-        self.assertIn("@triton.jit", code)
+        if device != "cpu":
+            self.assertIn("@triton.jit", code)
         for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
             x = make_tensor(
                 (7, 4), device=device, dtype=torch.float32, requires_grad=True
