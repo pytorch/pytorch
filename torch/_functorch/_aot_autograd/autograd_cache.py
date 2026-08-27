@@ -13,10 +13,10 @@ import json
 import logging
 import os
 import pickle
-import random
 import shutil
 import time
 import traceback
+import uuid
 from copy import copy
 from typing import Any, TYPE_CHECKING
 from typing_extensions import override
@@ -961,7 +961,13 @@ def autograd_cache_key(
                 "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
                 exc_info=True,
             )
-            return str(random.random()), []
+            # Unique per CALL, not merely per graph. random.random() is not:
+            # Dynamo save/restores Python random state around every frame it
+            # compiles, so on that path this returned the same value for every
+            # graph in one capture, and the second graph HIT the first's entry
+            # -- the keyed lookup still runs, so a precompile's graphs share a
+            # keyspace even though the artifact is addressed by backend id.
+            return uuid.uuid4().hex, []
         else:
             raise
 
