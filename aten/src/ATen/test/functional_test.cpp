@@ -19,12 +19,16 @@ struct RefOverloadCallable {
   }
 };
 
+// Only move assignment is deleted (not the move constructor): std::vector
+// growth requires MoveInsertable even when never actually triggered at
+// runtime, and a deleted move ctor would break that; leaving it undeclared
+// falls back to the copy ctor while still forcing is_move_assignable_v to
+// false.
 struct CopyOnly {
   explicit CopyOnly(int value) : value(value) {}
 
   CopyOnly(const CopyOnly&) = default;
   CopyOnly& operator=(const CopyOnly&) = default;
-  CopyOnly(CopyOnly&&) = delete;
   CopyOnly& operator=(CopyOnly&&) = delete;
 
   int value;
