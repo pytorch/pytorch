@@ -3,16 +3,16 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec_base.h>
-#include <c10/util/irange.h>
+#include <torch/headeronly/cpu/vec/intrinsics.h>
+#include <torch/headeronly/cpu/vec/vec_base.h>
+#include <torch/headeronly/util/irange.h>
 
 #if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
 #include <sleef.h>
 #endif
 
 #if defined(CPU_CAPABILITY_SVE128)
-#include <ATen/cpu/vec/sve/vec_float.h>
+#include <torch/headeronly/cpu/vec/sve/sve_exp_u20.h>
 #endif
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
@@ -79,6 +79,12 @@ static inline float32x4_t sve_to_neon(svfloat32_t v) {
 namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
+
+using torch::headeronly::irange;
+using torch::headeronly::pi;
+using torch::headeronly::native::ceil_impl;
+using torch::headeronly::native::floor_impl;
+using torch::headeronly::native::round_impl;
 
 template <int index, bool mask_val>
 struct BlendRegs {
@@ -257,7 +263,7 @@ class Vectorized<float> {
   bool has_inf_nan() const {
     __at_align__ float tmp[size()];
     store(tmp);
-    for (const auto i : c10::irange(size())) {
+    for (const auto i : irange(size())) {
       if (_isnan(tmp[i]) || _isinf(tmp[i])) {
         return true;
       }
@@ -267,7 +273,7 @@ class Vectorized<float> {
   Vectorized<float> map(float (*const f)(float)) const {
     __at_align__ float tmp[size()];
     store(tmp);
-    for (const auto i : c10::irange(size())) {
+    for (const auto i : irange(size())) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -279,7 +285,7 @@ class Vectorized<float> {
     __at_align__ float tmp_second[size()];
     store(tmp);
     second.store(tmp_second);
-    for (const auto i : c10::irange(size())) {
+    for (const auto i : irange(size())) {
       tmp[i] = f(tmp[i], tmp_second[i]);
     }
     return loadu(tmp);
@@ -289,7 +295,7 @@ class Vectorized<float> {
   }
   Vectorized<float> angle() const {
     auto zero = Vectorized<float>(0);
-    auto pi = Vectorized<float>(c10::pi<float>);
+    auto pi = Vectorized<float>(pi<float>);
     auto tmp = blendv(zero, pi, *this < zero);
     return blendv(tmp, *this, isnan());
   }
@@ -410,10 +416,10 @@ class Vectorized<float> {
     if (svptest_any(svptrue_b32(), is_special_case)) {
       return exp();
     }
-    return sve_to_neon(at::vec::exp_u20_fast_path(sve_values));
+    return sve_to_neon(exp_u20_fast_path(sve_values));
   }
   Vectorized<float> fexp_u20() const {
-    return sve_to_neon(at::vec::fexp_u20(neon_to_sve(values)));
+    return sve_to_neon(fexp_u20(neon_to_sve(values)));
   }
 #else
   Vectorized<float> exp_u20() const {
@@ -504,10 +510,10 @@ class Vectorized<float> {
     return map(std::cosh);
   }
   Vectorized<float> ceil() const {
-    return map(at::native::ceil_impl);
+    return map(torch::headeronly::native::ceil_impl);
   }
   Vectorized<float> floor() const {
-    return map(at::native::floor_impl);
+    return map(torch::headeronly::native::floor_impl);
   }
   Vectorized<float> neg() const {
     return Vectorized<float>(vnegq_f32(values));
@@ -515,7 +521,7 @@ class Vectorized<float> {
   Vectorized<float> round() const {
     // We do not use std::round because we would like to round midway numbers to
     // the nearest even integer.
-    return map(at::native::round_impl);
+    return map(torch::headeronly::native::round_impl);
   }
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(tan)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(tanh)
