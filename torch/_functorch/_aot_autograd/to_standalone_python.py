@@ -189,6 +189,14 @@ def _known_helper_table() -> dict[int, tuple[str, str]]:
     table: dict[int, tuple[str, str]] = {
         id(torch): ("import torch", "torch"),
         id(rt.normalize_as_list): (f"{_RT} normalize_as_list", "normalize_as_list"),
+        id(rt._dealias_marked_returns): (
+            f"{_RT} _dealias_marked_returns",
+            "_dealias_marked_returns",
+        ),
+        id(rt._replay_input_mutation): (
+            f"{_RT} _replay_input_mutation",
+            "_replay_input_mutation",
+        ),
         id(rt.mark_dynamo_propagated_dynamic_indices): (
             f"{_RT} mark_dynamo_propagated_dynamic_indices",
             "mark_dynamo_propagated_dynamic_indices",

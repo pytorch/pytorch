@@ -237,6 +237,25 @@ def _identity(x: Any) -> Any:
     return x
 
 
+def _replay_input_mutation(orig: torch.Tensor, updated: torch.Tensor) -> None:
+    """Replay a functionalized input mutation onto the caller's tensor.
+
+    Opaque ops can mutate storage without participating in autograd or bumping the
+    version counter. Replaying that write with a tracked ``copy_`` rejects views
+    returned by custom autograd Functions, while changing their creation metadata
+    would alter backward semantics. Detect this unguarded property per runtime call.
+    """
+    if (
+        orig._is_view()
+        and torch._C._autograd._get_creation_meta(orig)
+        != torch._C._autograd.CreationMeta.DEFAULT
+    ):
+        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
+            orig.copy_(updated)
+    else:
+        orig.copy_(updated)
+
+
 class AliasOfInputHandler:
     def __init__(
         self,
@@ -1080,7 +1099,11 @@ def _create_runtime_wrapper(
             args="orig_inputs, updated_inputs",
             artifact_name="mutation_epilogue",
         )
-        buf.bind(torch=torch, _unwrap_tensoralias=_unwrap_tensoralias)
+        buf.bind(
+            torch=torch,
+            _replay_input_mutation=_replay_input_mutation,
+            _unwrap_tensoralias=_unwrap_tensoralias,
+        )
         wrote_body = False
         with buf.indent():
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
@@ -1136,7 +1159,7 @@ def _create_runtime_wrapper(
                             )
                             buf.writeline(f"raise RuntimeError({msg_name})")
                         else:
-                            buf.writeline(f"{oi}.copy_({ui})")
+                            buf.writeline(f"_replay_input_mutation({oi}, {ui})")
             if not wrote_body:
                 buf.writeline("pass")
 
@@ -3954,6 +3977,37 @@ class _AutogradSavedState:
         ctx.opaque_objects = opaque_object_outs
 
 
+def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> None:
+    """Give marked slots their own TensorImpl when an unmarked slot shares it.
+
+    ``mark_non_differentiable`` is keyed on TensorImpl, while a backend may return
+    the same object for a differentiable slot and one that is about to be marked.
+    Detaching only the marked slot preserves the differentiable slot's identity and
+    is safe because the replacement is immediately declared non-differentiable.
+    """
+    if not marked:
+        return
+
+    marked_positions: dict[int, list[int]] = {}
+    for index in marked:
+        value = raw_returns[index]
+        if isinstance(value, torch.Tensor):
+            marked_positions.setdefault(id(value), []).append(index)
+    if not marked_positions:
+        return
+
+    marked_set = set(marked)
+    collided: set[int] = set()
+    for index, value in enumerate(raw_returns):
+        if index in marked_set:
+            continue
+        positions = marked_positions.get(id(value))
+        if positions is not None:
+            collided.update(positions)
+    for index in collided:
+        raw_returns[index] = raw_returns[index].detach()
+
+
 @dataclass
 class _AutogradForwardEpilogue:
     metadata: ViewAndMutationMeta
@@ -4018,13 +4072,14 @@ class _AutogradForwardEpilogue:
             if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ] + self.metadata.output_info
 
-        fw_outs_not_requiring_grad = [
-            x
+        non_diff_indices = [
+            i
             for (i, x) in enumerate(raw_returns_not_including_intermediate_bases)
             if isinstance(x, torch.Tensor) and not raw_returns_meta[i].requires_grad
         ]
+        _dealias_marked_returns(raw_returns, non_diff_indices)
         _set_grad_output_prototypes(ctx, raw_returns, self.metadata)
-        ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
+        ctx.mark_non_differentiable(*(raw_returns[i] for i in non_diff_indices))
         ctx._materialize_non_diff_grads = False
         _snapshot_external_objects(ctx)
 
@@ -4881,7 +4936,12 @@ class _AOTDispatchAutogradFunctionFactory:
             args="raw_returns",
             artifact_name="compiled_fn_wrapper",
         )
-        buf.bind(TensorAlias=TensorAlias, torch=torch, Tensor=Tensor)
+        buf.bind(
+            TensorAlias=TensorAlias,
+            torch=torch,
+            Tensor=Tensor,
+            _dealias_marked_returns=_dealias_marked_returns,
+        )
 
         with buf.indent():
             for i, idx in enumerate(fw_metadata.mutated_inp_runtime_indices):
@@ -4917,6 +4977,9 @@ class _AOTDispatchAutogradFunctionFactory:
                 ):
                     _non_diff_indices.append(i)
             if _non_diff_indices:
+                buf.writeline(
+                    f"_dealias_marked_returns(raw_returns, {_non_diff_indices!r})"
+                )
                 checks = " + ".join(
                     f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
                     for i in _non_diff_indices
