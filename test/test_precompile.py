@@ -1,4 +1,6 @@
 # Owner(s): ["oncall: pt2"]
+import ast
+import base64
 import copy
 import enum
 import functools
@@ -2652,6 +2654,37 @@ class TestPrecompile(TestCase):
                 loaded(x, 5)
 
 
+    def test_serialized_guards_drop_export_bookkeeping(self):
+        # Guard.code_list and .guard_types are rebuilt by create_fn at load, and
+        # set_export_info EXTENDS them on every guard build, so shipping them
+        # means shipping each code part once per build.
+        from torch._dynamo.package import load_guards_state
+        from torch._precompile import _read_literal
+
+        model = torch.nn.Linear(8, 4).eval()
+        xs = [torch.randn(n, 8) for n in (3, 5)]
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_call_model,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                example_inputs=[(model, x) for x in xs],
+            )
+        frames = pickle.loads(
+            base64.b64decode(_read_literal(ast.parse(code), "_FRAMES"))
+        )
+        for frame in frames:
+            for variant in frame["variants"]:
+                state = load_guards_state(variant["guards_state"])
+                for guard in state.output_graph.guards:
+                    self.assertIsNone(guard.code_list)
+                    self.assertIsNone(guard.guard_types)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            for x in xs:
+                self.assertEqual(loaded(model, x), model(x))
 
 
 
