@@ -527,7 +527,7 @@ You still land the change yourself with `@pytorchmergebot merge`. When GreenLigh
 
 GreenLight does not review drafts, PRs with unresolved requested changes, PRs already approved by someone listed in `merge_rules.yaml`, or PRs that have not been updated in the last 24 hours, and a diff over 2000 lines is declined automatically as too large to review. It also skips PRs labeled `Stale` and does not re-scan them; pushing does not help while the label is set, and the name is matched exactly, so remove it to bring the PR back into scope. If a PR is reverted, GreenLight dismisses its approval and does not review that PR again, so re-landing it always needs a human approval.
 
-To propose a change to what GreenLight reviews or how it decides, open an issue in [pytorch/test-infra](https://github.com/pytorch/test-infra/issues); those are triaged on the [GreenLight Policies Reviews](https://github.com/orgs/pytorch/projects/177/views/1) board.
+To propose a change to what GreenLight reviews or how it decides, open an issue in [pytorch/test-infra](https://github.com/pytorch/test-infra/issues) with the label `Greenlight: policy triage`; those are triaged on the [GreenLight Policies Reviews](https://github.com/orgs/pytorch/projects/177/views/1) board.
 
 ## Writing documentation
 
