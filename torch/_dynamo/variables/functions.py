@@ -4561,14 +4561,7 @@ class BoundBuiltinMethodVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         name = self.descriptor.__name__
-        if isinstance(self.obj, variables.UserDefinedObjectVariable):
-            # obj is-a base VT (multiple inheritance): dispatch the C base method
-            # on obj via super(), bypassing obj's own call_method re-lookup (which
-            # would rebind this descriptor and recurse) and any subclass override.
-            return super(
-                variables.UserDefinedObjectVariable, self.obj
-            ).call_method(tx, name, list(args), kwargs)
-        return self.obj.call_method(tx, name, list(args), kwargs)
+        return self.obj.call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
