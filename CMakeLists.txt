@@ -522,7 +522,7 @@ cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
 cmake_dependent_option(
   USE_CMAKE_INSTRUMENTATION
   "Use cmake-instrumentation to collect build metrics"
-  OFF # disabled by default because it causes CI timeouts
+  ${CPU_INTEL} # AArch64 CI times out when profiling is enabled
   "CMAKE_VERSION VERSION_GREATER_EQUAL 4.3"
   OFF
 )
