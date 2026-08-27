@@ -384,6 +384,21 @@ class TestInnerTreeOrder(TestCase):
                 checked += 1
         self.assertEqual(checked, len(_GOLDEN) // 2)
 
+    def test_staging_is_actually_used_in_the_mid_band(self):
+        # The 112 hashes prove staging is bit-neutral -- which is exactly why they cannot prove it
+        # RAN. If the gate silently stopped firing, every other test here would still pass and
+        # the mid-band would just be slow again, so assert the plan picks it, and that the two
+        # cases it cannot serve keep the register fold.
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        for n in (1024, 2048, 4096, 8192):
+            with self.subTest(n=n, staged=True):
+                self.assertGreater(rt.itree_plan(n, 4096, 4).stage_e, 0)
+        # A ragged row cannot declare cp.async's 16-byte source alignment, and a multi-batch
+        # shape is not covered by the single-batch tiling.
+        self.assertEqual(rt.itree_plan(4097, 4096, 4).stage_e, 0)
+        self.assertEqual(rt.itree_plan(100000, 64, 4).stage_e, 0)
+
 
 instantiate_parametrized_tests(TestInnerTreeOrder)
 
