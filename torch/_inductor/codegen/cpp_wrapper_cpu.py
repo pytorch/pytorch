@@ -3698,8 +3698,26 @@ if (!custom_op_wrapper) {
                     # from<std::optional> handle any internal pointers.
                     codegen_arg = codegen_arg.removeprefix("&")
 
-                    if codegen_arg == "nullptr":
+                    # val_to_arg_str spells a missing Optional[Device]/List/Tuple as
+                    # the c-shim's two-token "nullptr, 0" rather than a bare nullptr;
+                    # both mean nullopt here, and there is no two-argument `from`.
+                    if codegen_arg in ("nullptr", "nullptr, 0"):
                         return "torch::stable::detail::from(std::nullopt)"
+
+                    element_type = arg_type.getElementType()
+                    if isinstance(
+                        element_type,
+                        (torch.DeviceObjType, torch.ListType, torch.TupleType),
+                    ):
+                        # A *present* value is two tokens too, which this path cannot
+                        # pack into one StableIValue yet; fail here rather than emit
+                        # C++ that will not compile.
+                        raise NotImplementedError(
+                            "aoti_torch_call_dispatcher: a non-null "
+                            f"Optional[{element_type}] argument is not yet supported "
+                            "by the StableIValue fallback path "
+                            f"(codegen produced {codegen_arg!r})"
+                        )
 
                     var_name = f"tmp_var_{next(tmp_var_number)}"
                     dispatch_lines.writeline(
