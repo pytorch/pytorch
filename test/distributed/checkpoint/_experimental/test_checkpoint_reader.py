@@ -19,7 +19,20 @@ from torch.testing._internal.common_utils import (
 
 class _CheckpointReaderTestBase(TestCase):
     def _get_state_dict(self) -> dict[str, Any]:
-        raise NotImplementedError
+        return {
+            "model": {
+                "weight": torch.randn(10, 5),
+                "bias": torch.randn(5),
+                "test_list": [torch.randn(2), torch.randn(2)],
+            },
+            "optimizer": {
+                "param_groups": [
+                    {"lr": 0.01, "test_list": [torch.randn(2), torch.randn(2)]}
+                ]
+            },
+            "epoch": 5,
+            "step": 1000,
+        }
 
     def setUp(self):
         super().setUp()
@@ -52,25 +65,22 @@ class _CheckpointReaderTestBase(TestCase):
         # Clean up the temporary directory
         shutil.rmtree(self.temp_dir)
 
+    def move_tensors_to_device(self, state_dict: Any, device: str) -> Any:
+        if isinstance(state_dict, dict):
+            return {
+                key: self.move_tensors_to_device(value, device)
+                for key, value in state_dict.items()
+            }
+        elif isinstance(state_dict, list):
+            return [self.move_tensors_to_device(item, device) for item in state_dict]
+        elif isinstance(state_dict, torch.Tensor):
+            return state_dict.to(device)
+        else:
+            return state_dict
+
 
 class TestCheckpointReader(_CheckpointReaderTestBase):
     hw_classification = HardwareClassification.GENERIC
-
-    def _get_state_dict(self) -> dict[str, Any]:
-        return {
-            "model": {
-                "weight": torch.randn(10, 5),
-                "bias": torch.randn(5),
-                "test_list": [torch.randn(2), torch.randn(2)],
-            },
-            "optimizer": {
-                "param_groups": [
-                    {"lr": 0.01, "test_list": [torch.randn(2), torch.randn(2)]}
-                ]
-            },
-            "epoch": 5,
-            "step": 1000,
-        }
 
     def deep_compare(self, obj1: Any, obj2: Any) -> bool:
         if isinstance(obj1, dict) and isinstance(obj2, dict):
@@ -218,22 +228,14 @@ class TestCheckpointReader(_CheckpointReaderTestBase):
 class TestCheckpointReaderDevice(_CheckpointReaderTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def _get_state_dict(self) -> dict[str, Any]:
-        return {
-            "model": {
-                "weight": torch.randn(10, 5),
-                "bias": torch.randn(5),
-            },
-            "epoch": 5,
-            "step": 1000,
-        }
-
     def test_read_with_map_location(self, device):
         map_location = torch.device(device).type
         read_state_dict, _ = self.reader.read(
             self.checkpoint_path, map_location=map_location
         )
+        read_state_dict = self.move_tensors_to_device(read_state_dict, map_location)
         self.assertIn("model", read_state_dict)
+        self.assertIn("optimizer", read_state_dict)
         self.assertEqual(read_state_dict["epoch"], 5)
         self.assertEqual(read_state_dict["step"], 1000)
         self.assertEqual(read_state_dict["model"]["weight"].device.type, map_location)
