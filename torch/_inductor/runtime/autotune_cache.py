@@ -126,7 +126,7 @@ class AutotuneCache:
     remote_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
     artifact_recorder: CacheArtifactRecorder | None = None
 
-    # Create a AutotuneCache. Returns None if none of the caches can be used.
+    # Create an AutotuneCache. Returns None if none of the caches can be used.
     @staticmethod
     def create(
         inductor_meta: _InductorMetaTy, filename: str, configs_hash: str
