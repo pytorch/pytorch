@@ -2131,8 +2131,9 @@ if __name__ == '__main__':
         "requires ROCm build with USE_ROCM_KERNEL_ASSERT enabled",
     )
     def test_rocm_kernel_assert_percent_in_condition(self):
-        # Device assert with '%' in #cond; stderr must include the full condition.
-        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+        # Device assert with '%' in #cond; stderr must match stock HIP format and
+        # the subprocess must fail (assert must not compile away silently).
+        code = """\
 import torch
 from torch.utils.cpp_extension import load_inline
 
@@ -2163,16 +2164,33 @@ mod = load_inline(
     verbose=False,
 )
 mod.trigger_device_assert()
-""")
-        self.assertIn(
-            "Device-side assertion",
-            stderr,
-            msg=f"expected device assert message in stderr, got:\n{stderr}",
+raise RuntimeError("device assert did not fire")
+"""
+        env = os.environ.copy()
+        env["PYTORCH_API_USAGE_STDERR"] = "1"
+        env.pop("CI", None)
+        env.pop("TEST_SHOWLOCALS", None)
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            env=env,
         )
-        self.assertIn(
-            "x[0] % 2 == 0",
+        stderr = proc.stderr.decode("ascii")
+        self.assertNotEqual(
+            proc.returncode,
+            0,
+            msg=(
+                "expected subprocess failure after device assert, "
+                f"got rc={proc.returncode}\n{stderr}"
+            ),
+        )
+        self.assertRegex(
             stderr,
-            msg=f"expected full condition with %%, got:\n{stderr}",
+            (
+                r"[^\n]+:\d+: assert_mod_kernel: "
+                r"Device-side assertion `x\[0\] % 2 == 0` failed\."
+            ),
+            msg=f"expected full HIP-format assert line in stderr, got:\n{stderr}",
         )
 
     @slowTest
