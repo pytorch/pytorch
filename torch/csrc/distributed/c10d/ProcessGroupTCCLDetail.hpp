@@ -7,8 +7,13 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <memory>
 #include <vector>
+
+#if defined(__aarch64__) && defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
 
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
@@ -67,11 +72,60 @@ inline void TCCLSumOp<c10::Half>::operator()(
   }
 }
 
+// bfloat16 SUM. On FEAT_BF16 hardware (all Apple Silicon with bf16) this reduces
+// with native __bf16 arithmetic (armv8.6-a); set TCCL_NATIVE_BF16=0 to force the
+// float32-accumulate fallback. On Apple aarch64 there is no scalar bf16 FADD, so
+// __bf16 addition lowers to fcvt -> fp32 add -> fcvt: a correctly-rounded single
+// add, bitwise-identical to the fp32-accumulate path (verified), so this is a
+// pure speedup with no change to reduction semantics. The native path avoids the
+// explicit per-element convert loop, which is the bf16 all-reduce cost vs JACCL.
+
+#if defined(__aarch64__) && defined(__APPLE__)
+
+inline bool tcclNativeBf16Enabled() {
+  static bool enabled = []() {
+    int value = 0;
+    std::size_t value_size = sizeof(value);
+    bool hw = sysctlbyname(
+                  "hw.optional.arm.FEAT_BF16",
+                  &value,
+                  &value_size,
+                  nullptr,
+                  0) == 0 &&
+        value != 0;
+    if (!hw) {
+      return false;
+    }
+    const char* e = std::getenv("TCCL_NATIVE_BF16");
+    return e == nullptr || std::atoi(e) != 0;
+  }();
+  return enabled;
+}
+
+__attribute__((target("arch=armv8.6-a"))) inline void tcclNativeBf16Sum(
+    const c10::BFloat16* input,
+    c10::BFloat16* output,
+    std::size_t n) {
+  auto in = reinterpret_cast<const __bf16*>(input);
+  auto out = reinterpret_cast<__bf16*>(output);
+  for (std::size_t i = 0; i < n; ++i) {
+    out[i] = out[i] + in[i];
+  }
+}
+
+#endif // defined(__aarch64__) && defined(__APPLE__)
+
 template <>
 inline void TCCLSumOp<c10::BFloat16>::operator()(
     const c10::BFloat16* input,
     c10::BFloat16* output,
     std::size_t n) const {
+#if defined(__aarch64__) && defined(__APPLE__)
+  if (tcclNativeBf16Enabled()) {
+    tcclNativeBf16Sum(input, output, n);
+    return;
+  }
+#endif
   for (std::size_t i = 0; i < n; ++i) {
     output[i] = static_cast<c10::BFloat16>(
         static_cast<float>(output[i]) + static_cast<float>(input[i]));
@@ -204,12 +258,18 @@ class TCCLEngine {
   // Larger messages split into a chunk loop and reduce incrementally.
   static constexpr size_t kChunkSize = 512 * 1024;
 
+  // Pipeline depth for the bidirectional ring: pieces in flight per stream, with
+  // an equal number of double-buffered staging slots. 2 matches JACCL's PIPELINE.
+  static constexpr int kPipelineDepth = 2;
+
   TCCLEngine(
       int rank,
       int size,
       std::vector<std::unique_ptr<TCCLConnection>>& connections,
       std::vector<TCCLSharedBuffer>& send_buffers,
       std::vector<TCCLSharedBuffer>& recv_buffers,
+      std::vector<TCCLSharedBuffer>& pipe_send_buffers,
+      std::vector<TCCLSharedBuffer>& pipe_recv_buffers,
       const std::chrono::milliseconds& timeout,
       bool ring_topology = false)
       : rank_(rank),
@@ -217,6 +277,8 @@ class TCCLEngine {
         connections_(connections),
         send_buffers_(send_buffers),
         recv_buffers_(recv_buffers),
+        pipe_send_buffers_(pipe_send_buffers),
+        pipe_recv_buffers_(pipe_recv_buffers),
         timeout_(timeout),
         ring_topology_(ring_topology) {}
 
@@ -270,6 +332,24 @@ class TCCLEngine {
       const std::vector<void*>& out_ptrs,
       std::size_t per_rank_bytes);
 
+  // Mesh gather (rooted): the root collects rank r's `per_rank_bytes` shard into
+  // out_ptrs[r]; every non-root rank sends `in`. out_ptrs is root-only (size_
+  // entries); pass empty elsewhere.
+  void gather(
+      const void* in,
+      const std::vector<void*>& out_ptrs,
+      std::size_t per_rank_bytes,
+      int root);
+
+  // Mesh scatter (rooted): the root sends in_ptrs[r] (`per_rank_bytes`) to rank r;
+  // every non-root rank receives its slice into `out`. in_ptrs is root-only
+  // (size_ entries).
+  void scatter(
+      const std::vector<const void*>& in_ptrs,
+      void* out,
+      std::size_t per_rank_bytes,
+      int root);
+
   // Mesh reduce-scatter. in_chunks[p] points at this rank's contribution
   // destined for peer p (count_per_rank elements); on exit `out` holds the
   // element-wise reduction across ranks of chunk number rank_. Reduces straight
@@ -319,7 +399,11 @@ class TCCLEngine {
   //     on_recv(peer, recv_buf, off, chunk_bytes) per recv
   // Per-peer send_src lets reduce_scatter send each peer a different slab;
   // want_recv + nullable send_src let broadcast post an asymmetric WR set.
-  template <typename SendSrc, typename WantRecv, typename OnRecv>
+  // Pipeline=true drives a depth-kPipelineDepth per-peer pipeline at size_>=3;
+  // safe ONLY when on_recv is cheap (a byte copy, e.g. all_gather) - a slow
+  // on_recv (reduce) held over a recv buffer starves the all-to-all under UC drop
+  // and deadlocks, so reduce collectives keep the default depth-1 path.
+  template <bool Pipeline = false, typename SendSrc, typename WantRecv, typename OnRecv>
   void mesh_exchange(
       std::size_t total_bytes,
       SendSrc send_src,
@@ -341,11 +425,40 @@ class TCCLEngine {
       std::size_t recv_bytes,
       OnRecv on_recv);
 
+  // Bidirectional ring step: two counter-rotating rings concurrently over the two
+  // neighbor links, so both links carry traffic in both directions (~2x the
+  // unidirectional ring bandwidth; JACCL all_reduce<MAX_DIR=2> equivalent).
+  //   ring A (clockwise): send sendA_bytes from sendA_base to `right`, recv
+  //     recvA_bytes from `left`, firing on_recv_A per received piece.
+  //   ring B (counter-clockwise): send sendB_bytes from sendB_base to `left`, recv
+  //     recvB_bytes from `right`, firing on_recv_B per received piece.
+  // Four independent streams (A_send/A_recv/B_send/B_recv), kChunkSize pieces,
+  // PIPELINE=1 per stream. Completions demuxed by the (isSend, peer) wr_id: a
+  // connection's CQ carries one send stream and one recv stream (different rings).
+  // Recv posted before send (UC discipline), per-WR wc.status check, timeout_ watchdog.
+  template <typename OnRecvA, typename OnRecvB>
+  void bidir_ring_step(
+      int right,
+      int left,
+      const char* sendA_base,
+      std::size_t sendA_bytes,
+      std::size_t recvA_bytes,
+      OnRecvA on_recv_A,
+      const char* sendB_base,
+      std::size_t sendB_bytes,
+      std::size_t recvB_bytes,
+      OnRecvB on_recv_B);
+
   int rank_;
   int size_;
   std::vector<std::unique_ptr<TCCLConnection>>& connections_;
   std::vector<TCCLSharedBuffer>& send_buffers_;
   std::vector<TCCLSharedBuffer>& recv_buffers_;
+  // Depth-indexed staging pools for the pipelined bidirectional ring, flat
+  // [peer * kPipelineDepth + slot]. Separate from send_buffers_/recv_buffers_
+  // (which stay one-per-peer for the PIPELINE=1 mesh/p2p/broadcast paths).
+  std::vector<TCCLSharedBuffer>& pipe_send_buffers_;
+  std::vector<TCCLSharedBuffer>& pipe_recv_buffers_;
   const std::chrono::milliseconds& timeout_;
   // True => mesh_exchange must never be reached
   const bool ring_topology_{false};

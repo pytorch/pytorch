@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -22,22 +23,28 @@ namespace c10d {
 
 // Work-request id encoding for completion-event demultiplexing.
 //   bit 63          : 1 = send, 0 = recv
-//   bits 62..32     : reserved
+//   bits 40..33     : pipeline slot (0..kPipelineDepth-1)
+//   bits 62..41, 32 : reserved
 //   bits 31..0      : peer rank
 //
-// At PIPELINE=1 there is one in-flight chunk per (peer, direction), so
-// (direction, peer) fully identifies a completion; reserved bits leave room to
-// grow.
+// PIPELINE=1 callers omit the slot (defaults 0), so (direction, peer) still
+// fully identifies their single in-flight chunk. The pipelined bidirectional
+// ring keeps up to kPipelineDepth pieces in flight per (peer, direction) and
+// uses the slot field to tell which staging buffer a completion refers to.
 namespace tccl_wr {
 
 constexpr uint64_t kSendBit = 1ULL << 63;
+constexpr uint64_t kSlotShift = 33;
+constexpr uint64_t kSlotMask = 0xFFULL;
 
-inline uint64_t makeSend(int peer) {
-  return kSendBit | static_cast<uint64_t>(peer);
+inline uint64_t makeSend(int peer, int slot = 0) {
+  return kSendBit | (static_cast<uint64_t>(slot) << kSlotShift) |
+      static_cast<uint64_t>(peer);
 }
 
-inline uint64_t makeRecv(int peer) {
-  return static_cast<uint64_t>(peer);
+inline uint64_t makeRecv(int peer, int slot = 0) {
+  return (static_cast<uint64_t>(slot) << kSlotShift) |
+      static_cast<uint64_t>(peer);
 }
 
 inline bool isSend(uint64_t wr_id) {
@@ -48,6 +55,10 @@ inline int peer(uint64_t wr_id) {
   return static_cast<int>(wr_id & 0xFFFFFFFFULL);
 }
 
+inline int slot(uint64_t wr_id) {
+  return static_cast<int>((wr_id >> kSlotShift) & kSlotMask);
+}
+
 } // namespace tccl_wr
 
 // mesh_exchange
@@ -55,7 +66,7 @@ inline int peer(uint64_t wr_id) {
 // The one place the UC-ordering discipline (recv before send) and the WC-status
 // / duplicate-completion / timeout-watchdog checks live. The mesh collectives
 // are thin adapters over this; contract in the header.
-template <typename SendSrc, typename WantRecv, typename OnRecv>
+template <bool Pipeline, typename SendSrc, typename WantRecv, typename OnRecv>
 void TCCLEngine::mesh_exchange(
     std::size_t total_bytes,
     SendSrc send_src,
@@ -69,6 +80,212 @@ void TCCLEngine::mesh_exchange(
       "TCCL: mesh_exchange invoked under ring topology - a collective's "
       "dispatch failed to select its ring variant (internal error).");
   if (size_ <= 1) {
+    return;
+  }
+
+  // 2-node fast path: depth-kPipelineDepth pipeline over the single peer, so the
+  // per-piece memcpy/reduce overlaps the wire (the PIPELINE=1 general path below
+  // ran them serially - worst at N=2 where mesh is the only option and the reduce
+  // sat on the critical path). Restricted to size_==2: with one peer there is no
+  // round-robin, so a recv buffer briefly held by the reduce cannot starve other
+  // peers' recvs. At size_>=3 that starvation deadlocks under UC drop semantics,
+  // so the general path keeps its synchronized one-chunk-per-round discipline.
+  if (size_ == 2) {
+    const int peer = 1 - rank_;
+    const bool do_send = (send_src(peer, 0) != nullptr);
+    const bool do_recv = want_recv(peer);
+    constexpr int D = kPipelineDepth;
+    std::vector<ibv_wc> wcs(2 * D + 2);
+    std::size_t send_off = 0, recv_off = 0, send_done = 0, recv_done = 0;
+    int send_if = 0, recv_if = 0;
+    std::size_t slen[D] = {0}, roff[D] = {0}, rlen[D] = {0};
+    auto fill_recv = [&]() {
+      if (!do_recv) return;
+      for (int s = 0; s < D; ++s) {
+        const std::size_t idx = static_cast<std::size_t>(peer) * D + s;
+        if (rlen[s] == 0 && recv_off < total_bytes) {
+          const std::size_t L = std::min(kChunkSize, total_bytes - recv_off);
+          roff[s] = recv_off;
+          rlen[s] = L;
+          connections_[peer]->postRecv(
+              pipe_recv_buffers_[idx], L, tccl_wr::makeRecv(peer, s));
+          recv_off += L;
+          ++recv_if;
+        }
+      }
+    };
+    auto fill_send = [&]() {
+      if (!do_send) return;
+      for (int s = 0; s < D; ++s) {
+        const std::size_t idx = static_cast<std::size_t>(peer) * D + s;
+        if (slen[s] == 0 && send_off < total_bytes) {
+          const std::size_t L = std::min(kChunkSize, total_bytes - send_off);
+          const void* src = send_src(peer, send_off);
+          std::memcpy(pipe_send_buffers_[idx].data(), src, L);
+          slen[s] = L;
+          connections_[peer]->postSend(
+              pipe_send_buffers_[idx], L, tccl_wr::makeSend(peer, s));
+          send_off += L;
+          ++send_if;
+        }
+      }
+    };
+    fill_recv();
+    fill_send();
+    auto deadline = std::chrono::steady_clock::now() + timeout_;
+    while ((do_send && send_done < total_bytes) ||
+           (do_recv && recv_done < total_bytes)) {
+      int n = connections_[peer]->pollCq(
+          static_cast<int>(wcs.size()), wcs.data());
+      if (n == 0) {
+        TORCH_CHECK_WITH(
+            DistBackendError,
+            std::chrono::steady_clock::now() <= deadline,
+            "TCCL mesh(2-node): timed out after ", timeout_.count(),
+            " ms (send ", send_done, "/", do_send ? total_bytes : 0,
+            ", recv ", recv_done, "/", do_recv ? total_bytes : 0, " peer ", peer,
+            "). The poll bound is the process-group timeout; a persistent stall "
+            "here indicates a dropped UC packet (no hardware retransmission).");
+        continue;
+      }
+      for (int i = 0; i < n; ++i) {
+        TORCH_CHECK_WITH(
+            DistBackendError,
+            wcs[i].status == IBV_WC_SUCCESS,
+            "TCCL mesh(2-node): WC failed status=",
+            static_cast<int>(wcs[i].status), " (peer=", peer, ").");
+        const int s = tccl_wr::slot(wcs[i].wr_id);
+        const std::size_t idx = static_cast<std::size_t>(peer) * D + s;
+        if (tccl_wr::isSend(wcs[i].wr_id)) {
+          send_done += slen[s];
+          slen[s] = 0;
+          --send_if;
+          fill_send();
+        } else {
+          on_recv(peer, pipe_recv_buffers_[idx].data(), roff[s], rlen[s]);
+          recv_done += rlen[s];
+          rlen[s] = 0;
+          --recv_if;
+          fill_recv();
+        }
+      }
+      deadline = std::chrono::steady_clock::now() + timeout_;
+    }
+    return;
+  }
+
+  // Pipelined multi-peer path (Pipeline=true, size_>=3): depth-kPipelineDepth per
+  // peer over the full mesh, so all N-1 links stay busy and the per-piece copy
+  // overlaps the wire. Only enabled for copy-based collectives (all_gather): the
+  // on_recv is a fast memcpy that frees the recv buffer promptly, so a peer cannot
+  // starve while another is serviced. A slow on_recv (reduce) would deadlock here,
+  // which is why reduce collectives use the depth-1 path below.
+  if (Pipeline && size_ > 2) {
+    constexpr int D = kPipelineDepth;
+    std::vector<ibv_wc> wcs(2 * D + 2);
+    std::vector<char> sends_to(size_, 0), recvs_from(size_, 0);
+    for (int p = 0; p < size_; ++p) {
+      if (p == rank_) continue;
+      sends_to[p] = (send_src(p, 0) != nullptr) ? 1 : 0;
+      recvs_from[p] = want_recv(p) ? 1 : 0;
+    }
+    std::vector<std::size_t> send_off(size_, 0), recv_off(size_, 0);
+    std::vector<std::size_t> send_done(size_, 0), recv_done(size_, 0);
+    std::vector<int> send_if(size_, 0), recv_if(size_, 0);
+    const std::size_t NS = static_cast<std::size_t>(size_) * D;
+    std::vector<std::size_t> slen(NS, 0), roff(NS, 0), rlen(NS, 0);
+    auto fill_recv = [&](int p) {
+      if (!recvs_from[p]) return;
+      for (int s = 0; s < D; ++s) {
+        const std::size_t idx = static_cast<std::size_t>(p) * D + s;
+        if (rlen[idx] == 0 && recv_off[p] < total_bytes) {
+          const std::size_t L = std::min(kChunkSize, total_bytes - recv_off[p]);
+          roff[idx] = recv_off[p];
+          rlen[idx] = L;
+          connections_[p]->postRecv(
+              pipe_recv_buffers_[idx], L, tccl_wr::makeRecv(p, s));
+          recv_off[p] += L;
+          ++recv_if[p];
+        }
+      }
+    };
+    auto fill_send = [&](int p) {
+      if (!sends_to[p]) return;
+      for (int s = 0; s < D; ++s) {
+        const std::size_t idx = static_cast<std::size_t>(p) * D + s;
+        if (slen[idx] == 0 && send_off[p] < total_bytes) {
+          const std::size_t L = std::min(kChunkSize, total_bytes - send_off[p]);
+          const void* src = send_src(p, send_off[p]);
+          std::memcpy(pipe_send_buffers_[idx].data(), src, L);
+          slen[idx] = L;
+          connections_[p]->postSend(
+              pipe_send_buffers_[idx], L, tccl_wr::makeSend(p, s));
+          send_off[p] += L;
+          ++send_if[p];
+        }
+      }
+    };
+    for (int p = 0; p < size_; ++p)
+      if (p != rank_) fill_recv(p);
+    for (int p = 0; p < size_; ++p)
+      if (p != rank_) fill_send(p);
+    auto all_done = [&]() {
+      for (int p = 0; p < size_; ++p) {
+        if (p == rank_) continue;
+        if (recvs_from[p] && recv_done[p] < total_bytes) return false;
+        if (sends_to[p] && send_done[p] < total_bytes) return false;
+      }
+      return true;
+    };
+    auto deadline = std::chrono::steady_clock::now() + timeout_;
+    while (!all_done()) {
+      bool made_progress = false;
+      for (int p = 0; p < size_; ++p) {
+        if (p == rank_) continue;
+        if (send_if[p] == 0 && recv_if[p] == 0) continue;
+        int n = connections_[p]->pollCq(static_cast<int>(wcs.size()), wcs.data());
+        if (n == 0) continue;
+        made_progress = true;
+        for (int i = 0; i < n; ++i) {
+          const ibv_wc& wc = wcs[i];
+          TORCH_CHECK_WITH(
+              DistBackendError, wc.status == IBV_WC_SUCCESS,
+              "TCCL mesh(pipe): WC failed status=", static_cast<int>(wc.status),
+              " (peer=", p, ", wr_id=", wc.wr_id, ")");
+          const int s = tccl_wr::slot(wc.wr_id);
+          const std::size_t idx = static_cast<std::size_t>(p) * D + s;
+          if (tccl_wr::isSend(wc.wr_id)) {
+            send_done[p] += slen[idx];
+            slen[idx] = 0;
+            --send_if[p];
+            fill_send(p);
+          } else {
+            on_recv(p, pipe_recv_buffers_[idx].data(), roff[idx], rlen[idx]);
+            recv_done[p] += rlen[idx];
+            rlen[idx] = 0;
+            --recv_if[p];
+            fill_recv(p);
+          }
+        }
+      }
+      if (made_progress) {
+        deadline = std::chrono::steady_clock::now() + timeout_;
+      } else if (std::chrono::steady_clock::now() > deadline) {
+        std::string outstanding;
+        for (int p = 0; p < size_; ++p) {
+          if (p == rank_) continue;
+          if (sends_to[p] && send_done[p] < total_bytes)
+            outstanding += " send->" + std::to_string(p);
+          if (recvs_from[p] && recv_done[p] < total_bytes)
+            outstanding += " recv<-" + std::to_string(p);
+        }
+        TORCH_CHECK_WITH(
+            DistBackendError, false,
+            "TCCL mesh(pipe): timed out after ", timeout_.count(),
+            " ms (total_bytes=", total_bytes, "). outstanding:", outstanding,
+            ". A persistent stall here indicates a dropped UC packet.");
+      }
+    }
     return;
   }
 
@@ -331,26 +548,232 @@ void TCCLEngine::ring_step(
         }
       }
     }
-    if (!made_progress && std::chrono::steady_clock::now() > deadline) {
+    if (!made_progress) {
+      if (std::chrono::steady_clock::now() > deadline) {
+        TORCH_CHECK_WITH(
+            DistBackendError,
+            false,
+            "TCCL ring: timed out after ",
+            timeout_.count(),
+            " ms. send ",
+            send_off,
+            "/",
+            send_bytes,
+            " to peer ",
+            send_peer,
+            ", recv ",
+            recv_off,
+            "/",
+            recv_bytes,
+            " from peer ",
+            recv_peer,
+            ". The poll bound is the process-group timeout "
+            "(init_process_group(timeout=) / set_timeout); a persistent stall "
+            "here indicates a dropped UC packet (no hardware retransmission).");
+      }
+    }
+  }
+}
+
+// bidir_ring_step (contract in the header)
+//
+// Four independent piece-streams over the two neighbor connections. conn[right]
+// carries A_send (send completions) + B_recv (recv completions); conn[left]
+// carries B_send + A_recv. Each stream keeps up to kPipelineDepth pieces in
+// flight with an equal number of double-buffered staging slots, so a piece's
+// memcpy/reduce overlaps the wire transfer of another piece (JACCL PIPELINE=2).
+// Completions are demuxed by (isSend, slot) from the wr_id. Recv posted before
+// send (UC), per-WR wc.status check, timeout_ watchdog.
+template <typename OnRecvA, typename OnRecvB>
+void TCCLEngine::bidir_ring_step(
+    int right,
+    int left,
+    const char* sendA_base,
+    std::size_t sendA_bytes,
+    std::size_t recvA_bytes,
+    OnRecvA on_recv_A,
+    const char* sendB_base,
+    std::size_t sendB_bytes,
+    std::size_t recvB_bytes,
+    OnRecvB on_recv_B) {
+  constexpr int D = kPipelineDepth;
+  std::vector<ibv_wc> wcs(2 * D + 2);
+
+  // Per-stream state: next byte to post, bytes completed, in-flight slot count,
+  // and per-slot (offset, length) so a completion knows which piece it was
+  // (length 0 = slot free). Send buffers indexed by destination peer, recv by
+  // source peer, both in the depth pool [peer * D + slot].
+  std::size_t asend_next = 0, asend_done = 0;
+  std::size_t bsend_next = 0, bsend_done = 0;
+  std::size_t arecv_next = 0, arecv_done = 0;
+  std::size_t brecv_next = 0, brecv_done = 0;
+  int asend_if = 0, bsend_if = 0, arecv_if = 0, brecv_if = 0;
+  std::size_t asoff[D] = {0}, aslen[D] = {0}; // A send -> right
+  std::size_t bsoff[D] = {0}, bslen[D] = {0}; // B send -> left
+  std::size_t aroff[D] = {0}, arlen[D] = {0}; // A recv <- left
+  std::size_t broff[D] = {0}, brlen[D] = {0}; // B recv <- right
+
+  auto fill_send = [&](int peer,
+                       const char* base,
+                       std::size_t total,
+                       std::size_t& next_off,
+                       int& inflight,
+                       std::size_t* soff,
+                       std::size_t* slen) {
+    for (int s = 0; s < D; ++s) {
+      if (slen[s] == 0 && next_off < total) {
+        const std::size_t L = std::min(kChunkSize, total - next_off);
+        auto& buf =
+            pipe_send_buffers_[static_cast<std::size_t>(peer) * D + s];
+        std::memcpy(buf.data(), base + next_off, L);
+        soff[s] = next_off;
+        slen[s] = L;
+        connections_[peer]->postSend(buf, L, tccl_wr::makeSend(peer, s));
+        next_off += L;
+        ++inflight;
+      }
+    }
+  };
+  auto fill_recv = [&](int peer,
+                       std::size_t total,
+                       std::size_t& next_off,
+                       int& inflight,
+                       std::size_t* soff,
+                       std::size_t* slen) {
+    for (int s = 0; s < D; ++s) {
+      if (slen[s] == 0 && next_off < total) {
+        const std::size_t L = std::min(kChunkSize, total - next_off);
+        auto& buf =
+            pipe_recv_buffers_[static_cast<std::size_t>(peer) * D + s];
+        soff[s] = next_off;
+        slen[s] = L;
+        connections_[peer]->postRecv(buf, L, tccl_wr::makeRecv(peer, s));
+        next_off += L;
+        ++inflight;
+      }
+    }
+  };
+
+  // UC discipline: post recvs before sends.
+  fill_recv(left, recvA_bytes, arecv_next, arecv_if, aroff, arlen);
+  fill_recv(right, recvB_bytes, brecv_next, brecv_if, broff, brlen);
+  fill_send(right, sendA_base, sendA_bytes, asend_next, asend_if, asoff, aslen);
+  fill_send(left, sendB_base, sendB_bytes, bsend_next, bsend_if, bsoff, bslen);
+
+  auto done = [&]() {
+    return asend_done >= sendA_bytes && arecv_done >= recvA_bytes &&
+        bsend_done >= sendB_bytes && brecv_done >= recvB_bytes;
+  };
+
+  auto deadline = std::chrono::steady_clock::now() + timeout_;
+  while (!done()) {
+    bool made_progress = false;
+
+    if (asend_if != 0 || brecv_if != 0) {
+      int n = connections_[right]->pollCq(
+          static_cast<int>(wcs.size()), wcs.data());
+      for (int i = 0; i < n; ++i) {
+        const ibv_wc& wc = wcs[i];
+        TORCH_CHECK_WITH(
+            DistBackendError,
+            wc.status == IBV_WC_SUCCESS,
+            "TCCL bidir-ring: WC failed status=",
+            static_cast<int>(wc.status),
+            " (peer=",
+            right,
+            ", wr_id=",
+            wc.wr_id,
+            ")");
+        made_progress = true;
+        const int s = tccl_wr::slot(wc.wr_id);
+        if (tccl_wr::isSend(wc.wr_id)) {
+          asend_done += aslen[s];
+          aslen[s] = 0;
+          --asend_if;
+          fill_send(
+              right, sendA_base, sendA_bytes, asend_next, asend_if, asoff, aslen);
+        } else {
+          on_recv_B(
+              broff[s],
+              pipe_recv_buffers_[static_cast<std::size_t>(right) * D + s].data(),
+              brlen[s]);
+          brecv_done += brlen[s];
+          brlen[s] = 0;
+          --brecv_if;
+          fill_recv(right, recvB_bytes, brecv_next, brecv_if, broff, brlen);
+        }
+      }
+    }
+
+    if (bsend_if != 0 || arecv_if != 0) {
+      int n = connections_[left]->pollCq(
+          static_cast<int>(wcs.size()), wcs.data());
+      for (int i = 0; i < n; ++i) {
+        const ibv_wc& wc = wcs[i];
+        TORCH_CHECK_WITH(
+            DistBackendError,
+            wc.status == IBV_WC_SUCCESS,
+            "TCCL bidir-ring: WC failed status=",
+            static_cast<int>(wc.status),
+            " (peer=",
+            left,
+            ", wr_id=",
+            wc.wr_id,
+            ")");
+        made_progress = true;
+        const int s = tccl_wr::slot(wc.wr_id);
+        if (tccl_wr::isSend(wc.wr_id)) {
+          bsend_done += bslen[s];
+          bslen[s] = 0;
+          --bsend_if;
+          fill_send(
+              left, sendB_base, sendB_bytes, bsend_next, bsend_if, bsoff, bslen);
+        } else {
+          on_recv_A(
+              aroff[s],
+              pipe_recv_buffers_[static_cast<std::size_t>(left) * D + s].data(),
+              arlen[s]);
+          arecv_done += arlen[s];
+          arlen[s] = 0;
+          --arecv_if;
+          fill_recv(left, recvA_bytes, arecv_next, arecv_if, aroff, arlen);
+        }
+      }
+    }
+
+    if (made_progress) {
+      deadline = std::chrono::steady_clock::now() + timeout_;
+    } else if (std::chrono::steady_clock::now() > deadline) {
       TORCH_CHECK_WITH(
           DistBackendError,
           false,
-          "TCCL ring: timed out after ",
+          "TCCL bidir-ring: timed out after ",
           timeout_.count(),
-          " ms. send ",
-          send_off,
+          " ms. A send ",
+          asend_done,
           "/",
-          send_bytes,
-          " to peer ",
-          send_peer,
-          ", recv ",
-          recv_off,
+          sendA_bytes,
+          "->",
+          right,
+          ", A recv ",
+          arecv_done,
           "/",
-          recv_bytes,
-          " from peer ",
-          recv_peer,
-          ". The poll bound is the process-group timeout "
-          "(init_process_group(timeout=) / set_timeout); a persistent stall "
+          recvA_bytes,
+          "<-",
+          left,
+          ", B send ",
+          bsend_done,
+          "/",
+          sendB_bytes,
+          "->",
+          left,
+          ", B recv ",
+          brecv_done,
+          "/",
+          recvB_bytes,
+          "<-",
+          right,
+          ". The poll bound is the process-group timeout; a persistent stall "
           "here indicates a dropped UC packet (no hardware retransmission).");
     }
   }
@@ -358,10 +781,13 @@ void TCCLEngine::ring_step(
 
 // ring_all_reduce
 //
-// Bandwidth-optimal ring: reduce-scatter (size_-1 steps) then all-gather
-// (size_-1 steps). Each step depends on the previous (synchronous, no
-// cross-step pipelining yet). Traffic bounded to the two ring neighbors - the
-// avoidance strategy for large/bf16 messages.
+// Bidirectional (double) ring: two counter-rotating rings over disjoint halves
+// of `data`, in place. Ring A (clockwise, d=+1) reduces the first half; ring B
+// (counter-clockwise, d=-1) reduces the second half. Both run their reduce-
+// scatter (size_-1 steps) + all-gather (size_-1 steps) driven IN LOCKSTEP by
+// bidir_ring_step, so both neighbor links carry traffic in both directions
+// (~2x the unidirectional ring bandwidth). d=+1 reproduces the classic single-
+// ring index math; d=-1 is the same algorithm on the reversed ring.
 template <typename T, typename ReduceOp>
 void TCCLEngine::ring_all_reduce(
     T* data,
@@ -382,52 +808,94 @@ void TCCLEngine::ring_all_reduce(
   const int N = size_;
   const int right = (rank_ + 1) % N;
   const int left = (rank_ + N - 1) % N;
-  char* base = reinterpret_cast<char*>(data);
 
-  // Split `count` elements into N contiguous chunks of `chunk` elements (the
-  // last chunk may be short or empty). Chunk c is elements [c*chunk, end_c).
-  const std::size_t chunk = (count + static_cast<std::size_t>(N) - 1) / N;
-  auto lo = [&](int c) {
-    return std::min<std::size_t>(static_cast<std::size_t>(c) * chunk, count);
-  };
-  auto hi = [&](int c) {
-    return std::min<std::size_t>((static_cast<std::size_t>(c) + 1) * chunk, count);
-  };
-  auto chunk_nbytes = [&](int c) { return (hi(c) - lo(c)) * sizeof(T); };
-  auto chunk_ptr = [&](int c) { return base + lo(c) * sizeof(T); };
+  // Two halves on the same buffer: ring A = [0, countA), ring B = [countA, count).
+  const std::size_t countA = count / 2;
+  const std::size_t countB = count - countA;
+  T* dataA = data;
+  T* dataB = data + countA;
 
-  // Reduce-scatter: send chunk (rank-s) right, recv+reduce chunk (rank-s-1) left.
+  // Per-half chunking into N pieces (ragged/empty last piece via the clamps).
+  const std::size_t chunkA = (countA + static_cast<std::size_t>(N) - 1) / N;
+  const std::size_t chunkB = (countB + static_cast<std::size_t>(N) - 1) / N;
+  auto ptrA = [&](int c) {
+    return reinterpret_cast<char*>(dataA) +
+        std::min<std::size_t>(static_cast<std::size_t>(c) * chunkA, countA) *
+        sizeof(T);
+  };
+  auto nbA = [&](int c) {
+    const std::size_t lo =
+        std::min<std::size_t>(static_cast<std::size_t>(c) * chunkA, countA);
+    const std::size_t hi = std::min<std::size_t>(
+        (static_cast<std::size_t>(c) + 1) * chunkA, countA);
+    return (hi - lo) * sizeof(T);
+  };
+  auto ptrB = [&](int c) {
+    return reinterpret_cast<char*>(dataB) +
+        std::min<std::size_t>(static_cast<std::size_t>(c) * chunkB, countB) *
+        sizeof(T);
+  };
+  auto nbB = [&](int c) {
+    const std::size_t lo =
+        std::min<std::size_t>(static_cast<std::size_t>(c) * chunkB, countB);
+    const std::size_t hi = std::min<std::size_t>(
+        (static_cast<std::size_t>(c) + 1) * chunkB, countB);
+    return (hi - lo) * sizeof(T);
+  };
+
+  // Reduce-scatter: A clockwise, B counter-clockwise.
   for (int s = 0; s < N - 1; ++s) {
-    const int send_c = ((rank_ - s) % N + N) % N;
-    const int recv_c = (send_c - 1 + N) % N;
-    char* recv_dst = chunk_ptr(recv_c);
-    ring_step(
+    const int aSend = ((rank_ - s) % N + N) % N;
+    const int aRecv = ((aSend - 1) % N + N) % N;
+    const int bSend = ((rank_ + s) % N + N) % N;
+    const int bRecv = ((bSend + 1) % N + N) % N;
+    char* aRecvDst = ptrA(aRecv);
+    char* bRecvDst = ptrB(bRecv);
+    bidir_ring_step(
         right,
-        chunk_ptr(send_c),
-        chunk_nbytes(send_c),
         left,
-        chunk_nbytes(recv_c),
+        ptrA(aSend),
+        nbA(aSend),
+        nbA(aRecv),
         [&](std::size_t off, const void* src, std::size_t nbytes) {
           reduce_op(
               static_cast<const T*>(src),
-              reinterpret_cast<T*>(recv_dst + off),
+              reinterpret_cast<T*>(aRecvDst + off),
+              nbytes / sizeof(T));
+        },
+        ptrB(bSend),
+        nbB(bSend),
+        nbB(bRecv),
+        [&](std::size_t off, const void* src, std::size_t nbytes) {
+          reduce_op(
+              static_cast<const T*>(src),
+              reinterpret_cast<T*>(bRecvDst + off),
               nbytes / sizeof(T));
         });
   }
 
-  // All-gather: send chunk (rank-s+1) right, recv+overwrite chunk (rank-s) left.
+  // All-gather: A clockwise, B counter-clockwise.
   for (int s = 0; s < N - 1; ++s) {
-    const int send_c = ((rank_ - s + 1) % N + N) % N;
-    const int recv_c = (send_c - 1 + N) % N;
-    char* recv_dst = chunk_ptr(recv_c);
-    ring_step(
+    const int aSend = ((rank_ - s + 1) % N + N) % N;
+    const int aRecv = ((aSend - 1) % N + N) % N;
+    const int bSend = ((rank_ + s - 1) % N + N) % N;
+    const int bRecv = ((bSend + 1) % N + N) % N;
+    char* aRecvDst = ptrA(aRecv);
+    char* bRecvDst = ptrB(bRecv);
+    bidir_ring_step(
         right,
-        chunk_ptr(send_c),
-        chunk_nbytes(send_c),
         left,
-        chunk_nbytes(recv_c),
+        ptrA(aSend),
+        nbA(aSend),
+        nbA(aRecv),
         [&](std::size_t off, const void* src, std::size_t nbytes) {
-          std::memcpy(recv_dst + off, src, nbytes);
+          std::memcpy(aRecvDst + off, src, nbytes);
+        },
+        ptrB(bSend),
+        nbB(bSend),
+        nbB(bRecv),
+        [&](std::size_t off, const void* src, std::size_t nbytes) {
+          std::memcpy(bRecvDst + off, src, nbytes);
         });
   }
 }
@@ -460,20 +928,34 @@ inline void TCCLEngine::ring_all_gather(
   const int N = size_;
   const int right = (rank_ + 1) % N;
   const int left = (rank_ + N - 1) % N;
-  // Step k: send shard (rank-k) to the right, receive shard (rank-k-1) from the
-  // left (the shard we just received / our own at k=0), copy it into its slot.
+  // Bidirectional: split each shard's bytes in half. Ring A circulates half A of
+  // every shard clockwise (send shard (rank-k) right, recv shard (rank-k-1) left);
+  // ring B circulates half B counter-clockwise (send shard (rank+k) left, recv
+  // shard (rank+k+1) right). Both cover all N-1 other shards, so out_ptrs[r] gets
+  // its half A via ring A and half B via ring B.
+  const std::size_t halfA = per_rank_bytes / 2;
+  const std::size_t halfB = per_rank_bytes - halfA;
   for (int k = 0; k < N - 1; ++k) {
-    const int send_c = ((rank_ - k) % N + N) % N;
-    const int recv_c = (send_c - 1 + N) % N;
-    char* recv_dst = reinterpret_cast<char*>(out_ptrs[recv_c]);
-    ring_step(
+    const int aSend = ((rank_ - k) % N + N) % N;
+    const int aRecv = ((aSend - 1) % N + N) % N;
+    const int bSend = ((rank_ + k) % N + N) % N;
+    const int bRecv = ((bSend + 1) % N + N) % N;
+    char* aRecvDst = reinterpret_cast<char*>(out_ptrs[aRecv]);
+    char* bRecvDst = reinterpret_cast<char*>(out_ptrs[bRecv]) + halfA;
+    bidir_ring_step(
         right,
-        reinterpret_cast<const char*>(out_ptrs[send_c]),
-        per_rank_bytes,
         left,
-        per_rank_bytes,
+        reinterpret_cast<const char*>(out_ptrs[aSend]),
+        halfA,
+        halfA,
         [&](std::size_t off, const void* src, std::size_t nbytes) {
-          std::memcpy(recv_dst + off, src, nbytes);
+          std::memcpy(aRecvDst + off, src, nbytes);
+        },
+        reinterpret_cast<const char*>(out_ptrs[bSend]) + halfA,
+        halfB,
+        halfB,
+        [&](std::size_t off, const void* src, std::size_t nbytes) {
+          std::memcpy(bRecvDst + off, src, nbytes);
         });
   }
 }
@@ -503,7 +985,10 @@ void TCCLEngine::ring_reduce_scatter(
 
   // Ring reduce-scatter accumulates partials in place, so it needs a mutable
   // copy of all N input chunks (mesh reduce_scatter reduces straight into `out`
-  // with no scratch).
+  // with no scratch). Bidirectional: split each chunk in half - ring A reduce-
+  // scatters half A clockwise (d=+1), ring B half B counter-clockwise (d=-1),
+  // driven in lockstep by bidir_ring_step so both neighbor links carry traffic
+  // both ways (~2x the unidirectional bandwidth, mirroring ring_all_gather).
   std::vector<char> work(static_cast<std::size_t>(N) * chunk_bytes);
   for (int c = 0; c < N; ++c) {
     std::memcpy(
@@ -516,24 +1001,37 @@ void TCCLEngine::ring_reduce_scatter(
   auto chunk = [&](int c) {
     return work.data() + static_cast<std::size_t>(c) * chunk_bytes;
   };
-  // Step s: send chunk (rank-s-1) right, recv+reduce chunk (rank-s-2) from left
-  // (carry-forward: what we send at s is what we reduced at s-1). This lands the
-  // full reduction of chunk rank_ at work[rank_] after N-1 steps. (Indexing is
-  // validated against mesh reduce_scatter by the correctness test.)
+  const std::size_t abytes = (count_per_rank / 2) * sizeof(T);  // half A
+  const std::size_t bbytes = chunk_bytes - abytes;              // half B
+  // Ring A (d=+1): send chunk (rank-s-1) right, recv+reduce (rank-s-2) from left.
+  // Ring B (d=-1): the mirror - send chunk (rank+s+1) left, recv+reduce (rank+s+2)
+  // from right. Each lands work[rank_]'s half fully reduced after N-1 steps.
   for (int s = 0; s < N - 1; ++s) {
-    const int send_c = ((rank_ - s - 1) % N + N) % N;
-    const int recv_c = ((send_c - 1) % N + N) % N;
-    char* recv_chunk = chunk(recv_c);
-    ring_step(
+    const int aSend = ((rank_ - s - 1) % N + N) % N;
+    const int aRecv = ((aSend - 1) % N + N) % N;
+    const int bSend = ((rank_ + s + 1) % N + N) % N;
+    const int bRecv = ((bSend + 1) % N + N) % N;
+    char* aRecvHalf = chunk(aRecv);
+    char* bRecvHalf = chunk(bRecv) + abytes;
+    bidir_ring_step(
         right,
-        chunk(send_c),
-        chunk_bytes,
         left,
-        chunk_bytes,
+        chunk(aSend),
+        abytes,
+        abytes,
         [&](std::size_t off, const void* src, std::size_t nbytes) {
           reduce_op(
               static_cast<const T*>(src),
-              reinterpret_cast<T*>(recv_chunk + off),
+              reinterpret_cast<T*>(aRecvHalf + off),
+              nbytes / sizeof(T));
+        },
+        chunk(bSend) + abytes,
+        bbytes,
+        bbytes,
+        [&](std::size_t off, const void* src, std::size_t nbytes) {
+          reduce_op(
+              static_cast<const T*>(src),
+              reinterpret_cast<T*>(bRecvHalf + off),
               nbytes / sizeof(T));
         });
   }
@@ -674,7 +1172,7 @@ inline void TCCLEngine::all_gather(
     return;
   }
 
-  mesh_exchange(
+  mesh_exchange<true>(
       per_rank_bytes,
       // Send every peer our whole shard at `offset`.
       [&](int /*peer*/, std::size_t offset) -> const void* {
@@ -691,6 +1189,93 @@ inline void TCCLEngine::all_gather(
             reinterpret_cast<char*>(out_ptrs[peer]) + offset,
             recv_ptr,
             chunk_bytes);
+      });
+}
+
+// gather (rooted): root collects each shard; non-root sends to root.
+inline void TCCLEngine::gather(
+    const void* in,
+    const std::vector<void*>& out_ptrs,
+    std::size_t per_rank_bytes,
+    int root) {
+  TORCH_CHECK_WITH(
+      DistBackendError, in != nullptr,
+      "TCCL mesh: gather called with null input pointer.");
+  TORCH_CHECK_WITH(
+      DistBackendError, root >= 0 && root < size_,
+      "TCCL mesh: gather root ", root, " out of range [0, ", size_, ").");
+  const bool is_root = (rank_ == root);
+  const char* in_base = reinterpret_cast<const char*>(in);
+  if (is_root) {
+    TORCH_CHECK_WITH(
+        DistBackendError, static_cast<int>(out_ptrs.size()) == size_,
+        "TCCL mesh: gather expects ", size_, " output pointers on the root.");
+    // Root's own shard.
+    std::memcpy(out_ptrs[rank_], in_base, per_rank_bytes);
+  }
+  if (size_ <= 1) {
+    return;
+  }
+  mesh_exchange<true>(
+      per_rank_bytes,
+      // Non-root sends its shard to root.
+      [&](int peer, std::size_t offset) -> const void* {
+        return (!is_root && peer == root) ? (in_base + offset) : nullptr;
+      },
+      // Only root receives.
+      [&](int /*peer*/) { return is_root; },
+      // Place each peer's shard.
+      [&](int peer,
+          const void* recv_ptr,
+          std::size_t offset,
+          std::size_t chunk_bytes) {
+        std::memcpy(
+            reinterpret_cast<char*>(out_ptrs[peer]) + offset,
+            recv_ptr,
+            chunk_bytes);
+      });
+}
+
+// scatter (rooted): root sends each slice; non-root receives from root.
+inline void TCCLEngine::scatter(
+    const std::vector<const void*>& in_ptrs,
+    void* out,
+    std::size_t per_rank_bytes,
+    int root) {
+  TORCH_CHECK_WITH(
+      DistBackendError, out != nullptr,
+      "TCCL mesh: scatter called with null output pointer.");
+  TORCH_CHECK_WITH(
+      DistBackendError, root >= 0 && root < size_,
+      "TCCL mesh: scatter root ", root, " out of range [0, ", size_, ").");
+  const bool is_root = (rank_ == root);
+  char* out_base = reinterpret_cast<char*>(out);
+  if (is_root) {
+    TORCH_CHECK_WITH(
+        DistBackendError, static_cast<int>(in_ptrs.size()) == size_,
+        "TCCL mesh: scatter expects ", size_, " input pointers on the root.");
+    // Root's own slice.
+    std::memcpy(out_base, in_ptrs[rank_], per_rank_bytes);
+  }
+  if (size_ <= 1) {
+    return;
+  }
+  mesh_exchange<true>(
+      per_rank_bytes,
+      // Root sends each peer its slice.
+      [&](int peer, std::size_t offset) -> const void* {
+        return is_root
+            ? (reinterpret_cast<const char*>(in_ptrs[peer]) + offset)
+            : nullptr;
+      },
+      // Only non-root receives, from root.
+      [&](int peer) { return !is_root && peer == root; },
+      // Store the received slice.
+      [&](int /*peer*/,
+          const void* recv_ptr,
+          std::size_t offset,
+          std::size_t chunk_bytes) {
+        std::memcpy(out_base + offset, recv_ptr, chunk_bytes);
       });
 }
 
@@ -746,29 +1331,36 @@ inline void TCCLEngine::p2p_send(
       DistBackendError,
       dst >= 0 && dst < size_ && dst != rank_,
       "TCCL p2p_send: invalid dst ", dst, " (rank ", rank_, ", size ", size_, ").");
-  std::vector<ibv_wc> wcs(8);
-  // Bytes acknowledged sent
-  std::size_t off = 0;
-  // In-flight chunk size - 0 = none
-  std::size_t inflight = 0;
-  auto post = [&]() {
-    if (inflight == 0 && off < nbytes) {
-      inflight = std::min(kChunkSize, nbytes - off);
-      std::memcpy(send_buffers_[dst].data(), in + off, inflight);
-      connections_[dst]->postSend(
-          send_buffers_[dst], inflight, tccl_wr::makeSend(dst));
+  constexpr int D = kPipelineDepth;
+  std::vector<ibv_wc> wcs(D + 2);
+  // Depth-D pipeline: up to D pieces in flight, double-buffered staging, so the
+  // per-piece memcpy overlaps the wire (PIPELINE=1 ran them serially).
+  std::size_t next_off = 0, done = 0;
+  int inflight = 0;
+  std::size_t slen[D] = {0};
+  auto fill = [&]() {
+    for (int s = 0; s < D; ++s) {
+      if (slen[s] == 0 && next_off < nbytes) {
+        const std::size_t L = std::min(kChunkSize, nbytes - next_off);
+        auto& buf = pipe_send_buffers_[static_cast<std::size_t>(dst) * D + s];
+        std::memcpy(buf.data(), in + next_off, L);
+        slen[s] = L;
+        connections_[dst]->postSend(buf, L, tccl_wr::makeSend(dst, s));
+        next_off += L;
+        ++inflight;
+      }
     }
   };
-  post();
+  fill();
   auto deadline = std::chrono::steady_clock::now() + timeout_;
-  while (off < nbytes) {
+  while (done < nbytes) {
     int n = connections_[dst]->pollCq(static_cast<int>(wcs.size()), wcs.data());
     if (n == 0) {
       TORCH_CHECK_WITH(
           DistBackendError,
           std::chrono::steady_clock::now() <= deadline,
           "TCCL p2p_send: timed out after ", timeout_.count(), " ms sending ",
-          off, "/", nbytes, " bytes to peer ", dst,
+          done, "/", nbytes, " bytes to peer ", dst,
           ". The poll bound is the process-group timeout; a persistent stall here "
           "indicates a dropped UC packet (no hardware retransmission).");
       continue;
@@ -779,11 +1371,12 @@ inline void TCCLEngine::p2p_send(
           wcs[i].status == IBV_WC_SUCCESS,
           "TCCL p2p_send: WC failed status=", static_cast<int>(wcs[i].status),
           " (peer=", dst, ").");
-      off += inflight;
-      inflight = 0;
-      post();
+      const int s = tccl_wr::slot(wcs[i].wr_id);
+      done += slen[s];
+      slen[s] = 0;
+      --inflight;
     }
-    // Progress -> reset
+    fill();
     deadline = std::chrono::steady_clock::now() + timeout_;
   }
 }
@@ -794,28 +1387,37 @@ inline void TCCLEngine::p2p_recv(
       DistBackendError,
       src >= 0 && src < size_ && src != rank_,
       "TCCL p2p_recv: invalid src ", src, " (rank ", rank_, ", size ", size_, ").");
-  std::vector<ibv_wc> wcs(8);
-  // Bytes received and handled
-  std::size_t off = 0;
-  // In-flight chunk size - 0 = none
-  std::size_t inflight = 0;
-  auto post = [&]() {
-    if (inflight == 0 && off < nbytes) {
-      inflight = std::min(kChunkSize, nbytes - off);
-      connections_[src]->postRecv(
-          recv_buffers_[src], inflight, tccl_wr::makeRecv(src));
+  constexpr int D = kPipelineDepth;
+  std::vector<ibv_wc> wcs(D + 2);
+  // Depth-D pipeline: up to D recvs in flight; the copy-out of one piece overlaps
+  // the wire arrival of the next. Per-slot offset recorded so completions (which a
+  // single QP delivers in post order) copy to the right place regardless.
+  std::size_t next_off = 0, done = 0;
+  int inflight = 0;
+  std::size_t soff[D] = {0}, slen[D] = {0};
+  auto fill = [&]() {
+    for (int s = 0; s < D; ++s) {
+      if (slen[s] == 0 && next_off < nbytes) {
+        const std::size_t L = std::min(kChunkSize, nbytes - next_off);
+        auto& buf = pipe_recv_buffers_[static_cast<std::size_t>(src) * D + s];
+        soff[s] = next_off;
+        slen[s] = L;
+        connections_[src]->postRecv(buf, L, tccl_wr::makeRecv(src, s));
+        next_off += L;
+        ++inflight;
+      }
     }
   };
-  post();
+  fill();
   auto deadline = std::chrono::steady_clock::now() + timeout_;
-  while (off < nbytes) {
+  while (done < nbytes) {
     int n = connections_[src]->pollCq(static_cast<int>(wcs.size()), wcs.data());
     if (n == 0) {
       TORCH_CHECK_WITH(
           DistBackendError,
           std::chrono::steady_clock::now() <= deadline,
           "TCCL p2p_recv: timed out after ", timeout_.count(), " ms receiving ",
-          off, "/", nbytes, " bytes from peer ", src,
+          done, "/", nbytes, " bytes from peer ", src,
           ". The poll bound is the process-group timeout; a persistent stall here "
           "indicates a dropped UC packet (no hardware retransmission).");
       continue;
@@ -826,12 +1428,16 @@ inline void TCCLEngine::p2p_recv(
           wcs[i].status == IBV_WC_SUCCESS,
           "TCCL p2p_recv: WC failed status=", static_cast<int>(wcs[i].status),
           " (peer=", src, ").");
-      std::memcpy(out + off, recv_buffers_[src].data(), inflight);
-      off += inflight;
-      inflight = 0;
-      post();
+      const int s = tccl_wr::slot(wcs[i].wr_id);
+      std::memcpy(
+          out + soff[s],
+          pipe_recv_buffers_[static_cast<std::size_t>(src) * D + s].data(),
+          slen[s]);
+      done += slen[s];
+      slen[s] = 0;
+      --inflight;
     }
-    // Progress -> reset
+    fill();
     deadline = std::chrono::steady_clock::now() + timeout_;
   }
 }

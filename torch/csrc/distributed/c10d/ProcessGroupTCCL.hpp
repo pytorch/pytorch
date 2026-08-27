@@ -207,6 +207,12 @@ class TORCH_API ProcessGroupTCCL : public Backend {
   std::vector<TCCLSharedBuffer> sendBuffers_;
   std::vector<TCCLSharedBuffer> recvBuffers_;
 
+  // Depth-indexed staging pools for the pipelined bidirectional ring, flat
+  // [peer * kPipelineDepth + slot]. Sized size_ * kPipelineDepth; non-neighbor
+  // and self slots stay empty under ring topology.
+  std::vector<TCCLSharedBuffer> pipeSendBuffers_;
+  std::vector<TCCLSharedBuffer> pipeRecvBuffers_;
+
   // RDMA collective engine. Constructed after buffers are. Holds references
   // into connections_/sendBuffers_/recvBuffers_;
   std::unique_ptr<TCCLEngine> engine_;

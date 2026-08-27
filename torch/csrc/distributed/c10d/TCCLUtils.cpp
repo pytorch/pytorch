@@ -502,10 +502,22 @@ void TCCLConnection::transitionToRTR(const TCCLDestination& remote) {
 
   ibv_qp_attr attr{};
   attr.qp_state = IBV_QPS_RTR;
-  // IBV_MTU_1024 - TN3205 recommends 4096 but it consistently caused RTR
-  // timeouts on the Thunderbolt RDMA stack; the hardware appears to negotiate
-  // 1024 as the supported MTU.
+  // MTU. TN3205 recommends IBV_MTU_4096. We keep 1024 as the default (all campaign
+  // results were validated on it); TCCL_PATH_MTU lets you select another value.
+  // Measured 2026-08-21: 4096 negotiates cleanly (the old "RTR timeout" was a subnet
+  // issue, not the MTU) and is perf-NEUTRAL - per-link BW 9.32 vs 9.33 GB/s, allreduce
+  // within noise. The TB controller segments on fixed 4KB frames regardless of
+  // path_mtu, so this attribute does not affect bandwidth on this stack.
   attr.path_mtu = IBV_MTU_1024;
+  if (const char* m = std::getenv("TCCL_PATH_MTU")) {
+    if (std::strcmp(m, "4096") == 0) {
+      attr.path_mtu = IBV_MTU_4096;
+    } else if (std::strcmp(m, "2048") == 0) {
+      attr.path_mtu = IBV_MTU_2048;
+    } else if (std::strcmp(m, "512") == 0) {
+      attr.path_mtu = IBV_MTU_512;
+    }
+  }
   attr.rq_psn = remote.psn;
   attr.dest_qp_num = remote.qp_num;
   attr.ah_attr.dlid = remote.lid;
