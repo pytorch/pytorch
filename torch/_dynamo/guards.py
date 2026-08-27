@@ -5359,7 +5359,9 @@ class CheckFunctionManager:
             reason = f"Cache line invalidated because {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
 
-            extra_state.invalidate(cache_entry, deleted_guard_manager)
+            extra_state.invalidate(
+                cache_entry, deleted_guard_manager, self.guard_manager
+            )
             self.guard_manager = deleted_guard_manager
 
     def id_ref(self, obj: object, obj_str: str) -> int:
