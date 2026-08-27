@@ -30,6 +30,7 @@ from torch._inductor.codecache import WritableTempFile
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.select_algorithm import TritonTemplate
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import (
     is_big_gpu,
@@ -85,7 +86,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     runOnRocm,
-    skipIfRocm,
     skipIfRocmArch,
     skipIfWindows,
     skipIfWindowsXPU,
@@ -245,6 +245,80 @@ def get_triton_grid_info(kernel, total_elements, src_code):
         return None, expected_grids
 
 
+# copy_tests() only copies test_* methods onto the concrete device classes, so
+# helpers shared by the bmm_shared_a tests have to live at module level.
+def _skip_unless_bmm_shared_a_runnable(test):
+    # Any Triton-capable accelerator can run the template; it is only ever
+    # offered under max-autotune.
+    if test.device != GPU_TYPE:
+        raise unittest.SkipTest("requires an accelerator")
+    if not is_big_gpu():
+        raise unittest.SkipTest("requires modern GPU to run max-autotune")
+
+
+def _bmm_shared_a_model():
+    class Model(torch.nn.Module):
+        def forward(self, a, b):
+            # Broadcasting a over the batch is what gives mat1 the zero batch
+            # stride the template keys on.
+            return torch.bmm(a.expand(b.shape[0], -1, -1), b)
+
+    return Model()
+
+
+def _record_bmm_shared_a_choices(example_inputs, model=None, **config_overrides):
+    """Compile through AOTI and return the configs offered to the autotuner.
+
+    Which candidate ultimately wins is a timing outcome and not stable enough to
+    assert on; whether the template was offered at all is the behaviour the
+    eligibility rules actually control.
+    """
+    offered = []
+    maybe_append_choice = TritonTemplate.maybe_append_choice
+
+    def record(template, choices, **kwargs):
+        if template.name == "bmm_shared_a":
+            offered.append(kwargs)
+        return maybe_append_choice(template, choices, **kwargs)
+
+    patches = {"max_autotune": True, "bmm_shared_a": True, **config_overrides}
+    with (
+        patch.object(TritonTemplate, "maybe_append_choice", record),
+        config.patch(patches),
+        torch.no_grad(),
+    ):
+        torch._dynamo.reset()
+        torch._export.aot_compile(
+            model if model is not None else _bmm_shared_a_model(), example_inputs
+        )
+    return offered
+
+
+def profiled_ivalue_kinds(code, kernel_name):
+    """The kinds of IValue recorded for the profiled kernel whose recorded name
+    matches kernel_name, in recorded order: "tensor" for a real tensor handle
+    and "scalar" for the placeholder that stands in for a non-tensor argument.
+
+    kernel_name is matched against the whole recorded name so a fused Triton
+    kernel over the same op cannot be picked up by mistake. Reading the IValue
+    vector rather than the individual conversions pins down the order as well
+    as the count."""
+    record = re.search(
+        rf'RAIIAtenRecordFunctionHandle \w+\("{kernel_name}", nullptr, (\w+)\);', code
+    )
+    if record is None:
+        raise AssertionError(f"no profiled record function for {kernel_name}")
+    vector = re.search(
+        rf"std::vector<C10IValueHandle> {record.group(1)}\(\{{(.*?)\}}\)", code
+    )
+    if vector is None:
+        raise AssertionError(f"no profiling IValue vector for {kernel_name}")
+    return [
+        "scalar" if "_scalar_" in entry else "tensor"
+        for entry in vector.group(1).split(",")
+    ]
+
+
 class AOTInductorTestsTemplate:
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     @common_utils.parametrize("max_autotune", [False, True])
@@ -335,6 +409,40 @@ class AOTInductorTestsTemplate:
 
         inputs = (torch.randn(4, device=self.device),)
         self.check_model(Model(), inputs)
+
+    def test_triton_kernel_lite_mode(self):
+        # A user-defined Triton kernel (a triton_kernel_wrapper_functional HOP) compiled
+        # under AOTInductor all-fallback / lite mode. Previously the HOP was forced to the
+        # AOT ProxyExecutor -- which only serializes OpOverload targets -- and failed. It
+        # is now decomposed to its mutation form in lite mode (compile_fx runs the
+        # decomposition even with post-grad passes off) and compiled as a
+        # UserDefinedTritonKernel into the AOT artifact.
+        #
+        # use_post_grad_passes=False is as load bearing as fallback_by_default: with
+        # post-grad passes on, post_grad_passes decomposes the functional HOP itself and
+        # the graph takes the same path with or without this change.
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.zeros_like(x)
+                n_elements = out.numel()
+                add_kernel[(n_elements,)](x, y, out, n_elements, BLOCK_SIZE=16)
+                return out
+
+        inputs = (
+            torch.randn(64, device=self.device),
+            torch.randn(64, device=self.device),
+        )
+        model = Model()
+        with config.patch({"fallback_by_default": True, "use_post_grad_passes": False}):
+            self.check_model(model, inputs)
+
+            # The kernel is compiled into the artifact and launched, rather than
+            # dispatched through the proxy executor.
+            _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, model, inputs)
+            FileCheck().check("launchKernel(").run(code)
 
     def test_triton_kernel_bool_tensor_arg(self):
         if self.device != GPU_TYPE or self.device == "mps":
@@ -1925,7 +2033,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179958")
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
@@ -1942,13 +2049,14 @@ class AOTInductorTestsTemplate:
         model = Model()
 
         # Scale inputs so this grid-size test is not sensitive to FP16 BMM noise.
+        # Outputs stay under 0.125, where 1 fp16 ULP exceeds same()'s 1e-4 tolerance.
         def make_inputs(batch):
             return (
-                0.5
+                0.25
                 * random_matrix_with_scaled_reduction_dim(
                     M, K, batch, device=self.device, dtype=dtype, reduction_dim=-1
                 ),
-                0.5
+                0.25
                 * random_matrix_with_scaled_reduction_dim(
                     K, N, batch, device=self.device, dtype=dtype, reduction_dim=-2
                 ),
@@ -5145,6 +5253,161 @@ class AOTInductorTestsTemplate:
         m = M()
         self.check_model(m, example_args)
 
+    def test_proxy_executor_scalar_tensor_arg(self):
+        # A Python float bound to a Tensor-typed schema arg ("scalar in place of a
+        # tensor", a wrapped number) on a no-c-shim op. complex64 forces div.Tensor to
+        # fall back to the AOT ProxyExecutor (Inductor has no complex lowering and there
+        # is no c-shim), and 2.0 lands in div.Tensor's Tensor-typed `other` slot.
+        # Exercises FallbackKernel._materialize_scalar_tensor_args: the scalar is
+        # materialized into a constant tensor buffer so the proxy-executor path can
+        # serialize it (this previously raised AssertionError: got <class 'float'> in
+        # fill_args).
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.div.Tensor(x, 2.0)
+
+        example_args = (torch.randn((1, 300, 201), dtype=torch.complex64),)
+        m = M()
+        self.check_model(m, example_args)
+
+    def test_proxy_executor_symint_scalar_arg(self):
+        # A SymInt (a symbolic scalar from a dynamic shape) bound to a Number/Scalar-typed
+        # arg -- arange.default's `end`. Under lite-mode fallback, arange goes through the
+        # AOT ProxyExecutor and its symbolic `end` exercises fill_args' NumberType branch
+        # (routed via cexpr like the SymIntType branch) plus the host proxy executor's
+        # as_sym_int handling. This previously raised: expected arg to be int, float, or
+        # bool, got <class 'torch.SymInt'>.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.arange(x.shape[0], device=x.device, dtype=x.dtype) + x
+
+        # Compile at n=64 and re-run the same artifact at n=257. A second shape is what
+        # actually pins the runtime half of the fix: the symbolic `end` has to travel the
+        # int64 runtime array (correctly counted by num_ints, read back at the matching
+        # index by the host), so a run at a size the artifact was not compiled for must
+        # produce arange(257) rather than a stale or misindexed 64.
+        dynamic_shapes = ({0: torch.export.Dim("n", min=2, max=4096)},)
+        list_example_inputs = [
+            (torch.randn(64, device=self.device),),
+            (torch.randn(257, device=self.device),),
+        ]
+        self.check_model_with_multiple_inputs(
+            M(),
+            list_example_inputs,
+            options={"fallback_by_default": True},
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    def test_proxy_executor_default_scalar_kwarg(self):
+        # An op with a defaulted Scalar kwarg (sub.Tensor's `alpha`) routed through the AOT
+        # ProxyExecutor under all-fallback. serialize_inputs omits the unprovided default,
+        # and the host prefills it statically, so codegen must not count it in the runtime
+        # int array -- otherwise num_ints disagrees with the host and the runtime raises
+        # "Mismatch between ints consumed and num_ints".
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aten.sub.Tensor(x, y)
+
+        example_args = (
+            torch.randn(64, device=self.device),
+            torch.randn(64, device=self.device),
+        )
+        self.check_model(M(), example_args, options={"fallback_by_default": True})
+
+    def test_proxy_executor_provided_scalar_kwarg(self):
+        # The other half of the predicate: the kwarg-only Scalar IS provided, so
+        # serialize_inputs emits it and the host registers it as a dynamic int. Codegen
+        # must still count it in the runtime int array -- skipping every kwarg-only arg
+        # would make the host consume one int too many.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aten.sub.Tensor(x, y, alpha=2)
+
+        example_args = (
+            torch.randn(64, device=self.device),
+            torch.randn(64, device=self.device),
+        )
+        self.check_model(M(), example_args, options={"fallback_by_default": True})
+
+    def test_proxy_executor_integral_add_scalar(self):
+        # The C-shim types alpha as double, so the default alpha=1 would arrive as 1.0,
+        # which ATen rejects for integral tensors. Must route to the proxy executor.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.add.Tensor(x, 1)
+
+        example_args = (torch.randint(0, 10, (64,), device=self.device),)
+        self.check_model(M(), example_args, options={"fallback_by_default": True})
+
+    def test_proxy_executor_integral_pow_scalar(self):
+        # Same rule via an explicit Scalar slot rather than a schema default: through the
+        # c-shim the exponent arrives as a double and promotes the int64 base.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.pow.Tensor_Scalar(x, 2)
+
+        example_args = (
+            torch.randint(0, 10, (64,), dtype=torch.int64, device=self.device),
+        )
+        self.check_model(M(), example_args, options={"fallback_by_default": True})
+
+    def test_proxy_executor_bool_scalar_alpha(self):
+        # alpha=True arrives as 1.0 through the double ABI, which alpha_check rejects for
+        # a Bool result; eager accepts a Boolean alpha. The proxy executor keeps it a bool.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aten.add.Tensor(x, y, alpha=True)
+
+        example_args = (
+            torch.tensor([True, False, True, False], device=self.device),
+            torch.tensor([True, True, False, False], device=self.device),
+        )
+        self.check_model(M(), example_args, options={"fallback_by_default": True})
+
+    def test_proxy_executor_bool_scalar_infers_dtype(self):
+        # full.default infers its dtype from the fill Scalar (True -> bool, 1.0 -> float)
+        # and has no tensor arg for the integral-tensor gate to see. dtype is deliberately
+        # not passed, so the Scalar drives the output dtype.
+        #
+        # NB forward-looking guard, not a regression test: full.default's c-shim is
+        # version-gated and absent today, so this passes with or without the bool rule.
+        # test_proxy_executor_bool_scalar_alpha is the actual regression test.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.full.default(x.shape, True, device=x.device) & x
+
+        example_args = (torch.tensor([True, False, True], device=self.device),)
+        self.check_model(M(), example_args, options={"fallback_by_default": True})
+
+    def test_proxy_executor_empty_int_list_arg(self):
+        # An EMPTY (Sym)IntList argument on an op dispatched through the AOT
+        # ProxyExecutor -- e.g. the size/stride of a 0-d aten.empty_strided([], []).
+        # An empty list contributes no runtime ints, so the host's dynamic-arg loop
+        # skipped the slot entirely and the argument reached the op as None, where
+        # toIntList() aborts with "Expected SymIntList or IntList but got None".
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::sum_to_shape",
+                "(Tensor a, SymInt[] shape) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "mylib::sum_to_shape", "CompositeExplicitAutograd", lib=lib
+            )
+            @torch.library.register_fake("mylib::sum_to_shape", lib=lib)
+            def sum_to_shape_impl(a: torch.Tensor, shape: list[int]) -> torch.Tensor:
+                return a.sum().expand(shape).clone()
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    # An empty shape: reduce all the way down to a 0-d tensor.
+                    return torch.ops.mylib.sum_to_shape(x, []) + 1
+
+            example_args = (torch.randn(8, device=self.device),)
+            self.check_model(M(), example_args, options={"fallback_by_default": True})
+
     def test_proxy_executor_error_message_preserved(self):
         @torch.library.custom_op("aoti_test::validate_input", mutates_args=())
         def validate_input(x: torch.Tensor) -> torch.Tensor:
@@ -6317,6 +6580,177 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(N, K, self.device), example_inputs)
 
     @unittest.skipIf(
+        config.triton.native_matmul, "different kernel name when native matmul"
+    )
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_input_shapes(self):
+        # Verify that kernel profiling records tensor input shapes,
+        # scalar args, output handles, and ReinterpretView logical shapes.
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                # addmm: exercises scalar args (alpha, beta) and output handle
+                out = torch.nn.functional.linear(a, self.weight, self.bias)
+                # mm with transposed view: exercises ReinterpretView input path
+                return torch.mm(out.t(), a)
+
+        M = 8
+        N = 6
+        K = 16
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            # Verify that tensor inputs are converted to IValues for
+            # shape recording (3-arg RAIIAtenRecordFunctionHandle form).
+            FileCheck().check("aoti_torch_tensor_to_ivalue").run(code)
+            # Verify dummy scalar IValues are generated for non-tensor args.
+            FileCheck().check("aoti_torch_int64_to_ivalue").run(code)
+            FileCheck().check("std::vector<C10IValueHandle>").run(code)
+            # Verify output tensor is included in IValues for out-variant
+            # kernels.
+            FileCheck().check_regex(r"tmp_.*_output\b").run(code)
+            # Verify ReinterpretView inputs use reinterpret_tensor_wrapper
+            # for correct logical shapes in profiling.
+            FileCheck().check("reinterpret_tensor_wrapper").run(code)
+
+            self.check_model(Model(N, K, self.device), example_inputs)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_conv_input_shapes(self):
+        # Convolution is a single-output ExternKernelAlloc, so it flows through
+        # the alloc codegen path; verify its tensor inputs are recorded with
+        # shapes when profiling is enabled (3-arg RAIIAtenRecordFunctionHandle
+        # with an IValue vector).
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 6, kernel_size=3, padding=1).to(device)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        model = Model(self.device)
+        x = torch.randn(2, 3, 16, 16, device=self.device)
+        example_inputs = (x,)
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            # Conv tensor inputs are converted to IValues for shape recording,
+            # collected into a vector, and passed to the record function.
+            FileCheck().check("aoti_torch_tensor_to_ivalue").run(code)
+            FileCheck().check("std::vector<C10IValueHandle>").run(code)
+            FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+
+            # Conv on CUDA uses TF32, which differs from the fp32 reference by
+            # ~1e-3; the profiling assertions above are this test's focus.
+            self.check_model(Model(self.device), example_inputs, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_multi_output_fallback_input_shapes(self):
+        # A tuple-returning fallback (scaled_dot_product_attention) is the
+        # representative kernel reaching generate_c_shim_fallback_kernel;
+        # zero-output and dict-returning fallbacks route there too. Its q/k/v
+        # are transposed views, so this pins down that the recorded shapes are
+        # the logical view shapes and not the base buffers.
+        #
+        # A fused backend is required: without one SDPA decomposes to math and
+        # emits no extern shim. CPU always has one; XPU has no fp32 fused path.
+        if self.device == "xpu":
+            raise unittest.SkipTest("XPU has no fused fp32 SDPA backend")
+        if self.device != "cpu" and not (
+            PLATFORM_SUPPORTS_FLASH_ATTENTION or PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+        ):
+            raise unittest.SkipTest("Some archs don't support fused SDPA")
+
+        class Model(torch.nn.Module):
+            def forward(self, q, k, v):
+                # transpose() makes each operand a ReinterpretView whose logical
+                # shape differs from its base buffer.
+                return torch.nn.functional.scaled_dot_product_attention(
+                    q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+                )
+
+        example_inputs = tuple(
+            torch.randn(4, 8, 2, 16, device=self.device) for _ in range(3)
+        )
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            # The handle must be the reinterpret expression, not a bare buffer
+            # name: a base-buffer handle would record the wrong shape while
+            # still looking populated to a trace consumer. The IValue variable
+            # carries the shim name, so match it in the same line to pin the
+            # assertion to this kernel rather than any transposed GEMM.
+            FileCheck().check_regex(
+                r"aoti_torch_tensor_to_ivalue\(wrap_with_raii_handle_if_needed\("
+                r"reinterpret_tensor_wrapper.*"
+                r"tmp_aoti_torch_\w*scaled_dot_product\w*_input_0\)"
+            ).run(code)
+            FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+
+            self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_tensor_list_input_shapes(self):
+        # A tensor-list fallback collapses its whole list into a single codegen
+        # arg, so the profiling handles for its ReinterpretView inputs have no
+        # positional correspondence with the kernel's args.
+        if self.device != "cpu":
+            raise unittest.SkipTest("aten.cat only falls back to ATen for cpu uint8")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c, d):
+                # Slicing makes every list element a ReinterpretView, and four
+                # elements outnumber the kernel's args.
+                return torch.cat([a[:, :2], b[:, :2], c[:, :2], d[:, :2]], dim=1)
+
+        example_inputs = tuple(
+            torch.randint(0, 255, (4, 8), dtype=torch.uint8, device=self.device)
+            for _ in range(4)
+        )
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            FileCheck().check("aoti_torch_cpu_cat").run(code)
+            # A handle for the fourth input proves the handles are derived per
+            # input: the kernel's args collapse the whole list into a single
+            # entry, so a positional args lookup cannot reach index 3.
+            FileCheck().check("tmp_aoti_torch_cpu_cat_input_3").run(code)
+            # The IValue variable name is built from the loop index alone, so
+            # pin the handle expression too: the slices must be recorded as
+            # reinterpret views rather than their base buffers.
+            FileCheck().check(
+                "aoti_torch_tensor_to_ivalue(wrap_with_raii_handle_if_needed("
+                "reinterpret_tensor_wrapper"
+            ).run(code)
+            FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+
+            self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
@@ -6361,6 +6795,143 @@ class AOTInductorTestsTemplate:
                 example_inputs,
                 dynamic_shapes=dynamic_shapes,
             )
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_records_schema_arg_order(self):
+        # index_reduce interleaves non-tensor and tensor arguments:
+        #   (Tensor self, int dim, Tensor index, Tensor source, str reduce,
+        #    *, bool include_self)
+        # Partitioning a kernel's arguments into tensors and constants loses
+        # that interleaving, so the recording has to be rebuilt from the
+        # schema. Assert the exact sequence, not just the count: a recording
+        # that lists all three tensors first has the right length but reports
+        # every shape against the wrong argument.
+        class Model(torch.nn.Module):
+            def forward(self, x, index, source):
+                return x.index_reduce(0, index, source, "prod", include_self=False)
+
+        example_inputs = (
+            torch.randn(4, 8, device=self.device),
+            torch.tensor([0, 2, 1], device=self.device, dtype=torch.int64),
+            torch.randn(3, 8, device=self.device),
+        )
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            self.assertEqual(
+                profiled_ivalue_kinds(code, r"aoti_torch_\w*_index_reduce"),
+                ["tensor", "scalar", "tensor", "tensor", "scalar", "scalar"],
+            )
+
+            self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_records_unprovided_default_args(self):
+        # _embedding_bag_forward_only takes nine arguments and the lowering
+        # provides only the three tensors, leaving the rest to their defaults.
+        # The shim call still passes all nine, so the recording must too;
+        # otherwise a consumer reading positionally attributes the shapes to
+        # the wrong arguments of every later kernel in the trace.
+        class Model(torch.nn.Module):
+            def forward(self, weight, indices, offsets):
+                return torch.nn.functional.embedding_bag(
+                    indices, weight, offsets, mode="sum"
+                )
+
+        example_inputs = (
+            torch.randn(10, 4, device=self.device),
+            torch.tensor([1, 2, 4, 5, 4, 3, 2, 9], device=self.device),
+            torch.tensor([0, 4], device=self.device, dtype=torch.int64),
+        )
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            self.assertEqual(
+                profiled_ivalue_kinds(
+                    code, r"aoti_torch_\w*__embedding_bag_forward_only"
+                ),
+                ["tensor"] * 3 + ["scalar"] * 6,
+            )
+
+            self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_records_kwarg_only_tensor_once(self):
+        # searchsorted's `sorter` is a keyword-only tensor:
+        #   (Tensor sorted_sequence, Tensor self, *, bool out_int32,
+        #    bool right, str? side, Tensor? sorter)
+        # It is both a tensor input and a keyword argument, so it is the case
+        # that gets recorded twice -- once with its real shape and once as a
+        # placeholder -- unless every schema argument is visited exactly once.
+        if self.device != "cpu":
+            raise unittest.SkipTest("searchsorted only falls back to ATen for cpu")
+
+        class Model(torch.nn.Module):
+            def forward(self, sequence, values, sorter):
+                return torch.searchsorted(sequence, values, sorter=sorter)
+
+        example_inputs = (
+            torch.tensor([[1.0, 3.0, 5.0, 7.0]], device=self.device),
+            torch.tensor([[2.0, 6.0]], device=self.device),
+            torch.tensor([[0, 1, 2, 3]], device=self.device, dtype=torch.int64),
+        )
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            self.assertEqual(
+                profiled_ivalue_kinds(code, r"aoti_torch_\w*_searchsorted_Tensor"),
+                ["tensor", "tensor", "scalar", "scalar", "scalar", "tensor"],
+            )
+
+            self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_aoti_profiler_records_kwarg_supplied_positional_args_once(self):
+        # convolution has nine positional arguments and no keyword-only ones,
+        # but the lowering supplies everything after `weight` by keyword, so
+        # they reach the kernel through both its keyword list and the
+        # fill-in-defaults path. They must still be recorded once each.
+        # The convolution is bias-free so that the recording is the same on
+        # every device: with a bias, CUDA folds it into a separate epilogue
+        # and passes none to the kernel while CPU passes the tensor.
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    3, 6, kernel_size=3, padding=1, bias=False
+                ).to(device)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        example_inputs = (torch.randn(2, 3, 16, 16, device=self.device),)
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(self.device), example_inputs
+            )
+            self.assertEqual(
+                profiled_ivalue_kinds(code, r"aoti_torch_\w*_convolution"),
+                ["tensor"] * 2 + ["scalar"] * 7,
+            )
+
+            # Conv on CUDA uses TF32, which differs from the fp32 reference by
+            # ~1e-3; the profiling assertion above is this test's focus.
+            self.check_model(Model(self.device), example_inputs, atol=1e-2, rtol=1e-2)
 
     def test_aoti_user_defined_triton_kernel_profiling(self):
         if self.device != GPU_TYPE or self.device == "mps":
@@ -6407,6 +6978,49 @@ class AOTInductorTestsTemplate:
                     op_events[0]["args"].get("Input Args", ""),
                     ["in_ptr0", "in_ptr1", "out_ptr", "n_elements"],
                 )
+
+    def test_aoti_user_defined_triton_kernel_python_float_arg_signature_matches_triton(
+        self,
+    ):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        from triton.runtime.jit import mangle_type
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                n_elements = out.numel()
+                add_kernel_with_scaling[(n_elements,)](
+                    x,
+                    y,
+                    out,
+                    n_elements,
+                    0.5,
+                    BLOCK_SIZE=16,
+                )
+                return out
+
+        example_inputs = (
+            torch.randn(4, 4, device=self.device),
+            torch.randn(4, 4, device=self.device),
+        )
+
+        _, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, Model(), example_inputs)
+        signature_to_cpp_type = {"fp32": "float", "fp64": "double"}
+        expected_cpp_type = signature_to_cpp_type[mangle_type(0.5)]
+        expected_signature = mangle_type(0.5)
+        self.assertIn(f"'scaling_factor': '{expected_signature}'", code)
+        self.assertRegex(code, rf"\b{expected_cpp_type}\s+scaling_factor[,\s)]")
+        self.assertRegex(
+            code, rf"\b{expected_cpp_type}\s+var_\d+\s*=\s*scaling_factor;"
+        )
+        self.assertIn(
+            "call_add_kernel_with_scaling_0(arg0_1, arg1_1, buf0, 16, 0.5", code
+        )
+        if expected_cpp_type != "double":
+            self.assertNotRegex(code, r"\bdouble\s+scaling_factor[,\s)]")
+            self.assertNotRegex(code, r"\bdouble\s+var_\d+\s*=\s*scaling_factor;")
 
     def test_aoti_debug_printer_user_defined_triton_kernel(self):
         if self.device != GPU_TYPE:
@@ -9284,6 +9898,70 @@ torch._inductor.aoti_load_package("{model_path}")
         with config.patch({"combo_kernels": True}):
             self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
+    def test_bmm_shared_a_numerics(self):
+        _skip_unless_bmm_shared_a_runnable(self)
+        # Autotuning only times candidates, it does not check them, so a template
+        # config that miscompiles can win and silently return garbage. Comparing
+        # against eager after a real AOTI compile is what catches that.
+        example_inputs = (
+            torch.randn(1, 64, 64, device=self.device, dtype=torch.float16),
+            torch.randn(128, 64, 32, device=self.device, dtype=torch.float16),
+        )
+        with config.patch({"max_autotune": True, "bmm_shared_a": True}):
+            self.check_model(_bmm_shared_a_model(), example_inputs)
+
+    def test_bmm_shared_a_offered_when_eligible(self):
+        _skip_unless_bmm_shared_a_runnable(self)
+        example_inputs = (
+            torch.randn(1, 64, 64, device=self.device, dtype=torch.float16),
+            torch.randn(128, 64, 32, device=self.device, dtype=torch.float16),
+        )
+        offered = _record_bmm_shared_a_choices(example_inputs)
+        self.assertTrue(offered, "bmm_shared_a was not offered to the autotuner")
+        # BLOCK_Q batches share one A tile, so the accumulator is
+        # BLOCK_M x BLOCK_N x BLOCK_Q floats; the config space is bounded to keep
+        # that in registers.
+        for cfg in offered:
+            self.assertLessEqual(64, cfg["BLOCK_N"] * cfg["BLOCK_Q"])
+            self.assertLessEqual(cfg["BLOCK_N"] * cfg["BLOCK_Q"], 256)
+            self.assertLessEqual(
+                cfg["BLOCK_M"] * cfg["BLOCK_N"] * cfg["BLOCK_Q"], 64 * 256
+            )
+
+    def test_bmm_shared_a_not_offered_when_disabled(self):
+        _skip_unless_bmm_shared_a_runnable(self)
+        example_inputs = (
+            torch.randn(1, 64, 64, device=self.device, dtype=torch.float16),
+            torch.randn(128, 64, 32, device=self.device, dtype=torch.float16),
+        )
+        offered = _record_bmm_shared_a_choices(example_inputs, bmm_shared_a=False)
+        self.assertEqual(offered, [])
+
+    def test_bmm_shared_a_not_offered_for_small_batch(self):
+        _skip_unless_bmm_shared_a_runnable(self)
+        # Below the profitability gate: with few batches the grouping only costs
+        # parallelism, so the template must decline.
+        example_inputs = (
+            torch.randn(1, 64, 64, device=self.device, dtype=torch.float16),
+            torch.randn(8, 64, 32, device=self.device, dtype=torch.float16),
+        )
+        offered = _record_bmm_shared_a_choices(example_inputs)
+        self.assertEqual(offered, [])
+
+    def test_bmm_shared_a_not_offered_without_broadcast(self):
+        _skip_unless_bmm_shared_a_runnable(self)
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.bmm(a, b)
+
+        example_inputs = (
+            torch.randn(128, 64, 64, device=self.device, dtype=torch.float16),
+            torch.randn(128, 64, 32, device=self.device, dtype=torch.float16),
+        )
+        offered = _record_bmm_shared_a_choices(example_inputs, model=Model())
+        self.assertEqual(offered, [])
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
@@ -9424,8 +10102,6 @@ GPU_TEST_FAILURES = {
 MPS_TEST_FAILURES = {
     # aten::_scaled_dot_product_efficient_attention is not currently implemented for the MPS device.
     "test_scaled_dot_product_efficient_attention": fail_mps(),
-    # aten::_int_mm is not implemented for MPS backend
-    "test__int_mm": fail_mps(),
     # MPS doesn't support float64
     "test_while_loop_with_conv_dynamic_True": fail_mps(),
     "test_while_loop_with_conv_dynamic_False": fail_mps(),

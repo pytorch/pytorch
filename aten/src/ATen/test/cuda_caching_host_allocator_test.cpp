@@ -7,6 +7,8 @@
 #include <c10/core/ScalarType.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <bit>
+
 constexpr int64_t N = 100;
 
 // NOTE: please leave this as the first test to ensure that
@@ -17,7 +19,7 @@ TEST(CachingHostAllocatorTest, check_stats) {
   }
 
   // Clear the stats and ensure they are zero.
-  size_t round_size = c10::llvm::PowerOf2Ceil(N);
+  size_t round_size = std::bit_ceil(static_cast<size_t>(N));
   auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
   ASSERT_EQ(stats.allocations.current, 0);
   ASSERT_EQ(stats.allocations.peak, 0);
@@ -54,7 +56,7 @@ TEST(CachingHostAllocatorTest, check_stats) {
   // Ensure we don't reuse the allocation, due to size mismatch.
   {
     int64_t new_size = N*2;
-    size_t new_round_size = c10::llvm::PowerOf2Ceil(new_size);
+    size_t new_round_size = std::bit_ceil(static_cast<size_t>(new_size));
     auto pinned_tensor = at::empty(
         {new_size}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
     auto stats = at::getHostAllocator(at::kCUDA)->get_stats();

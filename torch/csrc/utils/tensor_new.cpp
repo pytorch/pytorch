@@ -92,8 +92,7 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
   THPObjectPtr obj;
   while (PySequence_Check(seq)) {
     auto length = PySequence_Length(seq);
-    if (length < 0)
-      throw python_error();
+    TORCH_CHECK_PYTHON(length >= 0);
     if (is_storage) {
       length /= static_cast<int64_t>(elementSize(scalar_type));
     }
@@ -172,16 +171,14 @@ ScalarType infer_scalar_type(PyObject* obj) {
       "'");
   if (PySequence_Check(obj)) {
     auto length = PySequence_Length(obj);
-    if (length < 0)
-      throw python_error();
+    TORCH_CHECK_PYTHON(length >= 0);
     // match NumPy semantics, except use default tensor type instead of double.
     if (length == 0)
       return torch::tensors::get_default_scalar_type();
     ScalarType scalarType{};
     for (const auto i : c10::irange(length)) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
-      if (!handle)
-        throw python_error();
+      TORCH_CHECK_PYTHON(handle);
       auto cur_item = handle.get();
       TORCH_CHECK_TYPE(
           cur_item != obj, "new(): self-referential lists are incompatible");
@@ -231,8 +228,7 @@ void recursive_store(
 
   auto n = sizes[dim];
   auto seq = THPObjectPtr(PySequence_Fast(obj, "not a sequence"));
-  if (!seq)
-    throw python_error();
+  TORCH_CHECK_PYTHON(seq);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto seq_size = PySequence_Fast_GET_SIZE(seq.get());
   TORCH_CHECK_VALUE(
@@ -939,9 +935,7 @@ static Tensor sparse_compressed_tensor_ctor_worker(
     // See https://github.com/pytorch/pytorch/issues/58520 for more details
     auto rc = PyObject_GetAttrString(o, attr_name);
     if (!rc) {
-      if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
-        throw python_error();
-      }
+      TORCH_CHECK_PYTHON(PyErr_ExceptionMatches(PyExc_AttributeError));
       // Warning: a wrong attribute error may be suppressed here
       PyErr_Clear();
     }
@@ -1459,8 +1453,7 @@ Tensor tensor_ctor(
           "To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() "
           "or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).",
           1);
-      if (ret != 0)
-        throw python_error();
+      TORCH_CHECK_PYTHON(ret == 0);
     }
 
     bool type_inference = r.isNone(1);
@@ -1520,8 +1513,7 @@ Tensor new_tensor(
           "To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() "
           "or sourceTensor.detach().clone().requires_grad_(True), rather than tensor.new_tensor(sourceTensor).",
           1);
-      if (ret != 0)
-        throw python_error();
+      TORCH_CHECK_PYTHON(ret == 0);
     }
 
     bool args_requires_grad = r.toBool(3);

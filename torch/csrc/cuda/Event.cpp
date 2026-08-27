@@ -266,12 +266,9 @@ void THCPEvent_init(PyObject* module) {
   Py_INCREF(THPEventClass);
   THCPEventType.tp_base = THPEventClass;
   THCPEventClass = (PyObject*)&THCPEventType;
-  if (PyType_Ready(&THCPEventType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&THCPEventType) >= 0);
   Py_INCREF(&THCPEventType);
-  if (PyModule_AddObject(module, "_CudaEventBase", (PyObject*)&THCPEventType) <
-      0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(module, "_CudaEventBase", (PyObject*)&THCPEventType) >=
+      0);
 }
