@@ -27,9 +27,15 @@ def _create_fake_pg(common_opts, backend_opts):
     # an explicitly selected fake-world contract consistent across subgroups.
     if backend_opts is None and dist.is_initialized():
         default_pg = dist.distributed_c10d._get_default_group()
-        default_backend = default_pg._get_backend(torch.device("cpu"))
-        if isinstance(default_backend, FakeProcessGroup):
-            backend_opts = default_backend.options
+        for device in default_pg._device_types:
+            default_backend = default_pg._get_backend(device)
+            if not isinstance(default_backend, FakeProcessGroup):
+                continue
+            default_options = default_backend.options
+            if default_options is not None and default_options.simulate_uniform_ranks:
+                backend_opts = FakeProcessGroup.Options()
+                backend_opts.simulate_uniform_ranks = True
+                break
 
     return FakeProcessGroup._create_internal(
         common_opts.group_rank, common_opts.group_size, backend_opts

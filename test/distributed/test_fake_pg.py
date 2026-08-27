@@ -1071,13 +1071,26 @@ class TestFakePGUniformRanks(TestCase):
         self.assertIsNone(backend.options)
 
     def test_new_group_inherits_uniform_rank_simulation(self):
-        self._init(rank=0, world_size=2)
+        opts = FakeProcessGroup.Options()
+        opts.fake_option = 17
+        opts.simulate_uniform_ranks = True
+        dist.init_process_group(
+            backend="cuda:fake",
+            rank=0,
+            world_size=2,
+            store=FakeStore(),
+            pg_options=opts,
+        )
 
-        process_group = dist.new_group(ranks=[0, 1])
+        process_group = dist.new_group(ranks=[0, 1], backend="fake")
         self.assertIsInstance(process_group, dist.ProcessGroup)
         backend = process_group._get_backend(torch.device("cpu"))
         self.assertIsInstance(backend, FakeProcessGroup)
         self.assertTrue(backend.options.simulate_uniform_ranks)
+        self.assertEqual(backend.options.fake_option, 0)
+
+        backend.options.simulate_uniform_ranks = False
+        self.assertTrue(opts.simulate_uniform_ranks)
 
     def test_split_group_inherits_uniform_rank_simulation(self):
         self._init(rank=0, world_size=2)
