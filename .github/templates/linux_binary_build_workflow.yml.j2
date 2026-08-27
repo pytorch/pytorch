@@ -600,7 +600,7 @@ jobs:
 
   libtorch-extract:
     name: ${{ matrix.build_name }}-extract
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: !{{ owner_if }}
     needs: [manywheel-build]
     runs-on: "mt-l-x86iavx512-16-128"
     container:
