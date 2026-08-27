@@ -391,16 +391,16 @@ jobs:
       cuda-version: "13.2"
     secrets: inherit
 
-  libtorch-linux-jammy-cuda13_4-py3_10-gcc13-debug-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' libtorch-linux-jammy-cuda13.4-py3.10-gcc13-debug ') }}
-    name: libtorch-linux-jammy-cuda13.4-py3.10-gcc13-debug
+  libtorch-linux-jammy-cuda13_4-py3_10-gcc11-debug-build:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' libtorch-linux-jammy-cuda13.4-py3.10-gcc11-debug ') }}
+    name: libtorch-linux-jammy-cuda13.4-py3.10-gcc11-debug
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
     with:
-      build-environment: libtorch-linux-jammy-cuda13.4-py3.10-gcc13
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc13
+      build-environment: libtorch-linux-jammy-cuda13.4-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-generates-artifacts: false
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -410,21 +410,21 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
       python-version: "3.10"
-      compiler: gcc13
+      compiler: gcc11
       cuda-version: "13.4"
     secrets: inherit
 
-  linux-jammy-cuda13_4-py3_10-gcc13-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.4-py3.10-gcc13 ') }}
-    name: linux-jammy-cuda13.4-py3.10-gcc13
+  linux-jammy-cuda13_4-py3_10-gcc11-build:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.4-py3.10-gcc11 ') }}
+    name: linux-jammy-cuda13.4-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.4-py3.10-gcc13
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc13
+      build-environment: linux-jammy-cuda13.4-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '7.5 8.9'
       test-matrix: |
@@ -456,50 +456,50 @@ jobs:
           { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.metal.nvidia.gpu" },
         ]}
       python-version: "3.10"
-      compiler: gcc13
+      compiler: gcc11
       cuda-version: "13.4"
     secrets: inherit
 
-  linux-jammy-cuda13_4-py3_10-gcc13-test:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.4-py3.10-gcc13 ') }}
-    name: linux-jammy-cuda13.4-py3.10-gcc13
+  linux-jammy-cuda13_4-py3_10-gcc11-test:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.4-py3.10-gcc11 ') }}
+    name: linux-jammy-cuda13.4-py3.10-gcc11
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-cuda13_4-py3_10-gcc13-build
+      - linux-jammy-cuda13_4-py3_10-gcc11-build
       - target-determination
       - job-filter
       - get-label-type
     with:
       timeout-minutes: 360
-      build-environment: linux-jammy-cuda13.4-py3.10-gcc13
-      docker-image: ${{ needs.linux-jammy-cuda13_4-py3_10-gcc13-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda13_4-py3_10-gcc13-build.outputs.test-matrix }}
+      build-environment: linux-jammy-cuda13.4-py3.10-gcc11
+      docker-image: ${{ needs.linux-jammy-cuda13_4-py3_10-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_4-py3_10-gcc11-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
       python-version: "3.10"
-      compiler: gcc13
+      compiler: gcc11
       cuda-version: "13.4"
     secrets: inherit
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
-  linux-jammy-cuda13_4-py3_10-gcc13-no-ops-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.4-py3.10-gcc13-no-ops ') }}
-    name: linux-jammy-cuda13.4-py3.10-gcc13-no-ops
+  linux-jammy-cuda13_4-py3_10-gcc11-no-ops-build:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.4-py3.10-gcc11-no-ops ') }}
+    name: linux-jammy-cuda13.4-py3.10-gcc11-no-ops
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.4-py3.10-gcc13-no-ops
+      build-environment: linux-jammy-cuda13.4-py3.10-gcc11-no-ops
       cuda-arch-list: '7.5 8.9'
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc13
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
       python-version: "3.10"
-      compiler: gcc13
+      compiler: gcc11
       cuda-version: "13.4"
     secrets: inherit
 
@@ -707,12 +707,12 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.4-py3.12-gcc13-sm80
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc13-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.4-py3.12-gcc11-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0'
       python-version: "3.12"
-      compiler: gcc13
+      compiler: gcc11
       cuda-version: "13.4"
     secrets: inherit
 
