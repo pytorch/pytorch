@@ -52,8 +52,9 @@ Use these GitHub MCP tools for triage:
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__github__issue_read` | Get issue details, comments, and existing labels |
-| `mcp__github__issue_write` | Apply labels or close issues |
+| `mcp__github__get_issue` | Get issue details and existing labels |
+| `mcp__github__get_issue_comments` | Get existing issue comments |
+| `mcp__github__update_issue` | Apply labels or close issues |
 | `mcp__github__add_issue_comment` | Add comment (only for redirecting questions) |
 | `mcp__github__search_issues` | Find similar issues for context |
 

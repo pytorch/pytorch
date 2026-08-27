@@ -358,14 +358,8 @@ ROCM_HOME = _find_rocm_home() if (torch.cuda._is_compiled() and torch.version.hi
 HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
 IS_HIP_EXTENSION = bool(ROCM_HOME is not None and torch.version.hip is not None)
 ROCM_VERSION = None
-HIP_VERSION = None
 if torch.version.hip is not None:
-    HIP_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
-    if torch.version.rocm is None:
-        raise AssertionError(
-            "torch.version.hip is set but torch.version.rocm is not; "
-            "torch/version.py is inconsistent with this build of PyTorch")
-    ROCM_VERSION = tuple(int(v) for v in torch.version.rocm.split('.')[:2])
+    ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
 
 CUDA_HOME = _find_cuda_home() if (torch.cuda._is_compiled() and torch.version.cuda) else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
