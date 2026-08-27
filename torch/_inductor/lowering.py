@@ -7293,15 +7293,23 @@ def _make_reduction_inner(
         and len(reduced_sizes) > 1
         and supports_logical_index_argreduce
     ):
-        if isinstance(x.data, PermuteView):
-            should_compute_logical_index = True
-        elif isinstance(x.data, ir.ReinterpretView) or (
+        # The default arg-reduce index is the kernel's flat iteration index,
+        # which matches the logical index only for a realized buffer whose
+        # layout is already fixed and contiguous. A FlexibleLayout may later
+        # be frozen to a permuted stride order and an unrealized producer's
+        # iteration order is unknown at lowering time, so compute the logical
+        # index explicitly in those cases.
+        if isinstance(x.data, ir.ReinterpretView) or (
             isinstance(x.data, ir.StorageBox) and isinstance(x.data.data, ir.Buffer)
         ):
             layout = x.get_layout()
             should_compute_logical_index = (
-                layout.is_transposed() or not layout.is_contiguous()
+                not isinstance(layout, ir.FixedLayout)
+                or layout.is_transposed()
+                or not layout.is_contiguous()
             )
+        else:
+            should_compute_logical_index = True
 
     def loader(index, reduction_index):
         if len(reduction_index) != len(reduced_idx):
