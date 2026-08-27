@@ -1103,15 +1103,14 @@ py::object apply_output_convert(
   return convert(std::move(result));
 }
 
-// Runs a Python fake callback over the op's stack args; returns false and
-// restores the stack if it returns NotImplemented, else pushes the results.
-bool run_fake_python_callback(
+// Runs a Python callback over the op's stack args; returns false and restores
+// the stack if it returns NotImplemented, else pushes the results.
+bool run_python_callback(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     const std::function<py::object(py::object, py::dict)>& call,
     const std::function<py::object(py::object)>& convert,
-    const char* label,
-    bool clear_in_kernel = true) {
+    const char* label) {
   const auto& schema = op.schema();
   auto arguments = torch::jit::pop(*stack, schema.arguments().size());
   // Restore the popped args unless we commit results below, so this either
@@ -1126,22 +1125,6 @@ bool run_fake_python_callback(
     }
   });
   auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
-  auto tls = c10::impl::tls_local_dispatch_key_set();
-  if (clear_in_kernel) {
-    tls.included_ = tls.included_.remove(c10::DispatchKey::Meta);
-  }
-  tls.excluded_ = tls.excluded_.remove(c10::DispatchKey::Fake);
-  c10::impl::ForceDispatchKeyGuard guard(tls);
-  const auto old_in_kernel = c10::impl::in_kernel_invocation();
-  if (clear_in_kernel) {
-    c10::impl::set_in_kernel_invocation(false);
-  }
-  auto restore_in_kernel = c10::make_scope_exit(
-      [old_in_kernel, clear_in_kernel]() {
-        if (clear_in_kernel) {
-          c10::impl::set_in_kernel_invocation(old_in_kernel);
-        }
-      });
   py::object result = call(args_kwargs.first, args_kwargs.second);
   if (result.is(py::handle(Py_NotImplemented))) {
     return false;
@@ -1150,6 +1133,18 @@ bool run_fake_python_callback(
   committed = true;
   pushPyOutToStack(op, stack, std::move(result), label);
   return true;
+}
+
+bool run_fake_python_callback(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    const std::function<py::object(py::object, py::dict)>& call,
+    const std::function<py::object(py::object)>& convert,
+    const char* label) {
+  auto tls = c10::impl::tls_local_dispatch_key_set();
+  tls.excluded_ = tls.excluded_.remove(c10::DispatchKey::Fake);
+  c10::impl::ForceDispatchKeyGuard guard(tls);
+  return run_python_callback(op, stack, call, convert, label);
 }
 
 // The active FakeTensorMode and the CppFakeTensorMode Python object that
@@ -1305,14 +1300,8 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
           c10::DispatchKeySet(c10::DispatchKey::Python) |
           c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
       auto tls = c10::impl::tls_local_dispatch_key_set();
-      tls.included_ = tls.included_.remove(c10::DispatchKey::Meta);
       tls.excluded_ = tls.excluded_.remove(c10::DispatchKey::Fake);
       c10::impl::ForceDispatchKeyGuard fake_guard(tls);
-      const auto old_in_kernel = c10::impl::in_kernel_invocation();
-      c10::impl::set_in_kernel_invocation(false);
-      auto restore_in_kernel = c10::make_scope_exit([old_in_kernel]() {
-        c10::impl::set_in_kernel_invocation(old_in_kernel);
-      });
       result = op_impl(
           active.py_fake_mode, py_op, *args_kwargs.first, **args_kwargs.second);
     }
@@ -1375,8 +1364,7 @@ bool ConcretePyInterpreterVTable::fake_try_prim_meta(
         return prim_meta_impl(*args, **kwargs);
       },
       /*convert=*/{},
-      "prim_meta_impl",
-      /*clear_in_kernel=*/false);
+      "prim_meta_impl");
 }
 
 bool ConcretePyInterpreterVTable::fake_infer_from_real_tensors(
