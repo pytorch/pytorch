@@ -80,6 +80,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyAccelerator,
     ops,
     skipOps,
     tol,
@@ -11965,8 +11966,8 @@ class TestAOTAutogradWithCacheCUDA(
     hw_classification = HardwareClassification.CUDA
 
 
-class TestAOTAutogradAccelerator(_AOTAutogradHardwareTestBase):
-    hw_classification = HardwareClassification.ACCELERATOR
+class TestAOTAutogradAutocast(_AOTAutogradHardwareTestBase):
+    hw_classification = HardwareClassification.CPU
 
     def test_backward_pass_autocast_on(self, device):
         self._test_backward_pass_autocast(
@@ -11984,6 +11985,97 @@ class TestAOTAutogradAccelerator(_AOTAutogradHardwareTestBase):
             expected_grad=0,
         )
 
+    def test_backward_pass_autocast_custom(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast=[{"device_type": torch.device(device).type}],
+            forward_autocast=False,
+            expected_grad=1,
+        )
+
+
+class TestAOTAutogradWithDynamoAutocast(
+    _AOTAutogradDynamoHardwareMixin, TestAOTAutogradAutocast
+):
+    hw_classification = HardwareClassification.CPU
+
+    def test_backward_pass_autocast_on(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="same_as_forward",
+            forward_autocast=True,
+            expected_grad=1,
+        )
+
+    def test_backward_pass_autocast_off(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="off",
+            forward_autocast=True,
+            expected_grad=0,
+        )
+
+    def test_backward_pass_autocast_custom(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast=[{"device_type": torch.device(device).type}],
+            forward_autocast=False,
+            expected_grad=1,
+        )
+
+
+class TestAOTAutogradWithCacheAutocast(
+    _AOTAutogradCacheHardwareMixin, TestAOTAutogradWithDynamoAutocast
+):
+    hw_classification = HardwareClassification.CPU
+
+    def test_backward_pass_autocast_on(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="same_as_forward",
+            forward_autocast=True,
+            expected_grad=1,
+        )
+
+    def test_backward_pass_autocast_off(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="off",
+            forward_autocast=True,
+            expected_grad=0,
+        )
+
+    def test_backward_pass_autocast_custom(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast=[{"device_type": torch.device(device).type}],
+            forward_autocast=False,
+            expected_grad=1,
+        )
+
+
+class TestAOTAutogradAccelerator(_AOTAutogradHardwareTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_backward_pass_autocast_on(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="same_as_forward",
+            forward_autocast=True,
+            expected_grad=1,
+        )
+
+    @onlyAccelerator
+    def test_backward_pass_autocast_off(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="off",
+            forward_autocast=True,
+            expected_grad=0,
+        )
+
+    @onlyAccelerator
     def test_backward_pass_autocast_custom(self, device):
         self._test_backward_pass_autocast(
             device,
@@ -11998,6 +12090,7 @@ class TestAOTAutogradWithDynamoAccelerator(
 ):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @onlyAccelerator
     def test_backward_pass_autocast_on(self, device):
         self._test_backward_pass_autocast(
             device,
@@ -12006,6 +12099,7 @@ class TestAOTAutogradWithDynamoAccelerator(
             expected_grad=1,
         )
 
+    @onlyAccelerator
     def test_backward_pass_autocast_off(self, device):
         self._test_backward_pass_autocast(
             device,
@@ -12014,6 +12108,7 @@ class TestAOTAutogradWithDynamoAccelerator(
             expected_grad=0,
         )
 
+    @onlyAccelerator
     def test_backward_pass_autocast_custom(self, device):
         self._test_backward_pass_autocast(
             device,
@@ -12028,6 +12123,7 @@ class TestAOTAutogradWithCacheAccelerator(
 ):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @onlyAccelerator
     def test_backward_pass_autocast_on(self, device):
         self._test_backward_pass_autocast(
             device,
@@ -12036,6 +12132,7 @@ class TestAOTAutogradWithCacheAccelerator(
             expected_grad=1,
         )
 
+    @onlyAccelerator
     def test_backward_pass_autocast_off(self, device):
         self._test_backward_pass_autocast(
             device,
@@ -12044,6 +12141,7 @@ class TestAOTAutogradWithCacheAccelerator(
             expected_grad=0,
         )
 
+    @onlyAccelerator
     def test_backward_pass_autocast_custom(self, device):
         self._test_backward_pass_autocast(
             device,
@@ -12918,22 +13016,58 @@ class TestAOTModuleSimplifiedCUDA(_AOTModuleSimplifiedHardwareTestBase):
 instantiate_parametrized_tests(TestAOTModuleSimplifiedCUDA)
 
 
-class TestAOTModuleSimplifiedAccelerator(_AOTModuleSimplifiedHardwareTestBase):
-    hw_classification = HardwareClassification.ACCELERATOR
+class TestAOTModuleSimplifiedNoncontiguousTangents(
+    _AOTModuleSimplifiedHardwareTestBase
+):
+    hw_classification = HardwareClassification.CPU
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @parametrize("dynamic_shapes", [True, False])
     @parametrize("test_subclasses", [True, False])
     @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
     def test_noncontig_nonmemformat_tangents(
         self, dynamic_shapes, test_subclasses, device
     ):
-        if torch.device(device).type == "cpu" and not torch.cuda.is_available():
-            self.skipTest("CUDA is unavailable")
         self._test_noncontig_nonmemformat_tangents(
             dynamic_shapes, test_subclasses, device
         )
 
 
+class TestAOTModuleSimplifiedAccelerator(_AOTModuleSimplifiedHardwareTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    @parametrize("dynamic_shapes", [True, False])
+    @parametrize("test_subclasses", [True, False])
+    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
+    def test_noncontig_nonmemformat_tangents(
+        self, dynamic_shapes, test_subclasses, device
+    ):
+        self._test_noncontig_nonmemformat_tangents(
+            dynamic_shapes, test_subclasses, device
+        )
+
+
+instantiate_device_type_tests(
+    TestAOTAutogradAutocast,
+    globals(),
+    only_for=("cpu",),
+)
+instantiate_device_type_tests(
+    TestAOTAutogradWithDynamoAutocast,
+    globals(),
+    only_for=("cpu",),
+)
+instantiate_device_type_tests(
+    TestAOTAutogradWithCacheAutocast,
+    globals(),
+    only_for=("cpu",),
+)
+instantiate_device_type_tests(
+    TestAOTModuleSimplifiedNoncontiguousTangents,
+    globals(),
+    only_for=("cpu",),
+)
 instantiate_device_type_tests(
     TestAOTAutogradAccelerator,
     globals(),
