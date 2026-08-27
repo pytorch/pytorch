@@ -75,11 +75,11 @@ else:
 
 if torch.accelerator.is_available():
     acc = torch.accelerator.current_accelerator()
-    DEVICE_TYPE = str(acc)
+    DEVICE_TYPE = acc.type
     # Use the backend registered for this accelerator type. If no backend is
     # registered, the accelerator's companion plugin is missing or broken.
-    DISTRIBUTED_BACKEND = dist.Backend.default_device_backend_map[acc.type]
-    DEVICE_COUNT = torch.get_device_module(acc.type).device_count()
+    DISTRIBUTED_BACKEND = get_default_backend_for_device(acc)
+    DEVICE_COUNT = torch.accelerator.device_count()
 else:
     DEVICE_TYPE = "cpu"
     DISTRIBUTED_BACKEND = "gloo"
