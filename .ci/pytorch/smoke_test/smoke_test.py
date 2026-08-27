@@ -362,6 +362,7 @@ def smoke_test_cuda(
         ]
     ):
         smoke_test_compile("cuda" if torch.cuda.is_available() else "cpu")
+        smoke_test_compile_dynamic_indirect_indexing()
 
     if torch.cuda.is_available():
         if torch.version.cuda != gpu_arch_ver:
@@ -526,6 +527,71 @@ def smoke_test_compile(device: str = "cpu") -> None:
     x = torch.rand(64, 1, 28, 28, device=device).type(torch.float32)
     model = Net().to(device=device)
     x_pt2 = torch.compile(model, mode="max-autotune")(x)
+
+
+def smoke_test_compile_dynamic_indirect_indexing(device: str = "cuda") -> None:
+    """Regression check for gh-194490 (2.13 Inductor regression).
+
+    A gather/scatter pair around a loop reduction produced Triton whose
+    epilogue read a temporary defined only inside the reduction body
+    (``NameError: tmp19 is not defined``). It reproduced only on the *second*
+    compile, once a differing shape triggered automatic dynamic shapes, so a
+    single compiled call does not exercise it -- hence the two trials below
+    with deliberately different row counts and no ``dynamic=`` flag.
+
+    The reduction dim is kept at 4096 so the reduction stays non-persistent
+    and the loop path is actually generated; the other dims are small to keep
+    this cheap. If Inductor's persistent-reduction heuristic ever changes,
+    this stops covering the bug rather than failing -- the authoritative test
+    is test/inductor/test_indexing.py::test_loop_epilogue_indirect_load_scope.
+    """
+    if not torch.cuda.is_available():
+        print("CUDA is not available, skipping dynamic indirect indexing test")
+        return
+
+    def normalize_selected(
+        x: torch.Tensor, buf: torch.Tensor, idx: torch.Tensor, beta: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # Kept faithful to the gh-194490 reproducer: the failure surfaced as a
+        # `tl.where` in the epilogue reading a loop-local temp, so the
+        # torch.where over a tensor predicate is load-bearing here.
+        idx = idx.unsqueeze(-1)
+        selected = torch.gather(buf, -2, idx)
+        stat = x.float().pow(2).mean(dim=-1, keepdim=True)
+        updated = torch.where(
+            (1.0 - beta).abs() >= 0.5,
+            stat,
+            torch.lerp(selected, stat, 1.0 - beta),
+        )
+        normalized = x.float() / (updated.sqrt() + 1e-8)
+        return normalized, buf.scatter(-2, idx, updated)
+
+    compiled = torch.compile(normalize_selected, fullgraph=True)
+
+    # Two distinct row counts: the first compiles statically, the second forces
+    # automatic dynamic-shape generalization, which is what triggered gh-194490.
+    for rows in (64, 32):
+        k = rows // 4
+        torch.manual_seed(0)
+        x = torch.randn(2, k, 4096, device=device, dtype=torch.bfloat16)
+        buf = torch.randn(2, rows, 1, device=device, dtype=torch.float32).abs()
+        idx = torch.stack(
+            [torch.randperm(rows, device=device)[:k] for _ in range(2)]
+        )
+        beta = torch.tensor(0.95, device=device)
+
+        print(f"Testing compile with dynamic indirect indexing, rows={rows}")
+        expected = normalize_selected(x, buf, idx, beta)
+        actual = compiled(x, buf, idx, beta)
+        torch.cuda.synchronize()
+        # The point of this check is that codegen succeeds at all -- the bug was
+        # a NameError raised while compiling the Triton kernel. Tolerances are
+        # deliberately loose: a 4096-wide reduction over bf16 inputs will differ
+        # between eager and Inductor by reduction order alone, and a wheel check
+        # must not fail on that.
+        assert len(actual) == len(expected)
+        for got, want in zip(actual, expected):
+            torch.testing.assert_close(got, want, rtol=1e-4, atol=1e-4)
 
 
 def smoke_test_nvshmem() -> None:
