@@ -3,7 +3,7 @@ import functools
 from collections import deque
 
 import torch
-from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
@@ -457,24 +457,9 @@ def is_b2b_gemm_good_on(
     # size checks: we only dispatch to B2B-GEMM when the average load ratio is > 1
     M, N = A.shape
     O, P = C.shape
-
-    # Convert symbolic shape dims to concrete ints up front. FakeTensor shapes
-    # may be torch.SymInt: a hinted SymInt guards to its concrete value, but an
-    # unhinted/unbacked one raises GuardOnDataDependentSymNode (a RuntimeError,
-    # not TypeError); a non-SymInt, non-int raises TypeError. Converting before
-    # the compatibility checks below matters because SymInt == SymInt returns a
-    # SymBool whose bool() raises GuardOnDataDependentSymNode when the symbol
-    # is unbacked, which would otherwise escape this heuristic. Once concrete,
-    # the checks below are plain int comparisons. If we can't make the dims
-    # concrete, the heuristic can't be evaluated statically, so skip b2b_gemm.
-    try:
-        M, N, O, P = int(M), int(N), int(O), int(P)
-        # contraction dims must line up: A cols == B rows, B cols == C rows.
-        N_b, O_b = int(B.shape[0]), int(B.shape[1])
-    except (TypeError, GuardOnDataDependentSymNode):
-        return False
-    if not (N == N_b and O == O_b):
-        return False
+    # The load ratio is only a profitability heuristic, so do not guard on the
+    # representative values of symbolic dimensions.
+    M, N, O, P = map(optimization_hint, (M, N, O, P))
 
     ratios = []
     if is_left_assoc:
