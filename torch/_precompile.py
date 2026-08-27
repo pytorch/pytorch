@@ -2680,9 +2680,8 @@ class _PrecompileApi:
 
     A single instance is exposed as ``torch.compiler.precompile``; calling it precompiles a
     computation and ``torch.compiler.precompile.load`` reloads the resulting source
-    artifacts. ``capture`` provides the guarded multi-graph path. It is a
-    class (rather than a function with attached attributes) so these operations and the
-    error type are explicit members.
+    artifacts. It is a class (rather than a function with attached attributes) so
+    these operations and the error type are explicit members.
 
     The contract for both ``__call__`` and ``load`` is Note [precompile programming
     model] in this module.
@@ -2732,6 +2731,7 @@ class _PrecompileApi:
         require_no_risky_drops: bool = True,
         require_no_dropped_guards: bool = False,
         training: bool = False,
+        keep_example_grads: bool = False,
     ) -> tuple[str, bytes] | list[object]:
         """Ahead-of-time precompile ``fn`` against example inputs.
 
@@ -2749,9 +2749,18 @@ class _PrecompileApi:
           memory; and because precompile makes the example calls for you, this
           is how you get their results back -- a training capture whose examples
           are real batches can hand the losses on to your metrics without a
-          second forward. Only ``tracer='dynamo'`` runs the calls for real;
-          ``tracer='make_fx'`` traces ``fn`` under proxy/fake tensors, so it
-          writes both files and returns ``[]``.
+          second forward. Only ``tracer='dynamo'`` runs the calls for real, so
+          naming the paths with ``tracer='make_fx'`` -- which traces ``fn``
+          under proxy/fake tensors -- is refused BEFORE ``fn`` runs, rather
+          than handing back nothing after it.
+
+        By default precompile snapshots and clears the example model's
+        gradients before the calls and restores them afterwards, so a capture
+        cannot double the gradients of the documented warmup-step-then-capture
+        flow. Pass ``keep_example_grads=True`` when the example call IS your
+        live training step and its gradients are what you are going to
+        optimize on; otherwise the backward is discarded and the artifact is
+        produced either way, so nothing tells you a batch went missing.
 
         ``tracer`` picks the capture front-end. ``"make_fx"`` (the default) is one
         non-strict ATen trace, so it takes exactly one call and refuses a longer
@@ -2994,11 +3003,24 @@ class _PrecompileApi:
                 or not require_complete
                 or not require_no_risky_drops
                 or require_no_dropped_guards
+                or keep_example_grads
             ):
                 raise ValueError(
-                    "guard_filter_fn, recompile_limit, dynamic, invariants and the "
-                    "require_* gates describe a multi-variant capture and apply "
-                    "only to tracer='dynamo'"
+                    "guard_filter_fn, recompile_limit, dynamic, invariants, "
+                    "keep_example_grads and the require_* gates describe a "
+                    "multi-variant capture and apply only to tracer='dynamo'"
+                )
+            # Before fn runs, not after. The on-disk form's return value IS the
+            # example calls' results, and a make_fx trace has none to give -- so
+            # returning an empty list would hand back "no results" to a caller
+            # whose region had already executed, and whose obvious recovery is
+            # to run it a second time.
+            if out_paths is not None:
+                raise ValueError(
+                    "artifact_path/cache_path return what the example calls "
+                    "returned, which only tracer='dynamo' produces -- a make_fx "
+                    "capture traces fn under proxy tensors. Use tracer='dynamo', "
+                    "or take the pair in memory and write it yourself."
                 )
             from torch._dynamo.precompile_package import _example_call
 
@@ -3021,15 +3043,7 @@ class _PrecompileApi:
             # rebuilt, and so code_hash is sha256 over exactly the bytes returned
             # to the caller (a matched pair loads).
             python_code = compiled.to_python_code()
-            cache = compiled.to_cache_bytes(python_code)
-            if out_paths is not None:
-                _write_artifact(*out_paths, python_code, cache)
-                # A make_fx capture traces fn under proxy/fake tensors, so what
-                # fn returned during the trace is a proxy rather than a value.
-                # There is no result to hand back; tracer='dynamo' runs the
-                # example calls for real and does return them.
-                return []
-            return python_code, cache
+            return python_code, compiled.to_cache_bytes(python_code)
 
         if decompositions is not None:
             raise ValueError(
@@ -3076,6 +3090,7 @@ class _PrecompileApi:
                 example_inputs=example_inputs,
                 invariants=invariants,
                 training=bool(training),
+                keep_example_grads=bool(keep_example_grads),
             )
         )
         session._session._prune_invariant_guards = True
@@ -3088,8 +3103,7 @@ class _PrecompileApi:
         with session:
             pass
         # The capture is finished, so hand back the artifact rather than a
-        # session the caller has to know to save. capture() remains for a
-        # capture whose calls the caller has to make.
+        # session the caller has to know to save.
         python_code, cache = session.artifact(
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,

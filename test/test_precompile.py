@@ -245,6 +245,12 @@ def _maybe_scoped(loaded):
     return loaded if hasattr(loaded, "__enter__") else contextlib.nullcontext()
 
 
+def _precompile_grad_step(model, x):
+    loss = model(x).sum()
+    loss.backward()
+    return loss
+
+
 class _PrecompileRebound:
     def forward(self, x):
         return x * 2
@@ -1765,29 +1771,107 @@ class TestPrecompile(TestCase):
             with _maybe_scoped(loaded), torch.no_grad():
                 self.assertEqual(loaded(m, xs[0]), m(xs[0]))
 
-    def test_precompile_make_fx_on_disk_has_no_call_results(self):
-        # make_fx traces fn under proxy/fake tensors, so what it returned during
-        # the trace is a proxy rather than a value. Both files are still
-        # written; there is simply nothing to hand back.
+    def test_precompile_make_fx_refuses_the_on_disk_form_before_running_fn(self):
+        # The on-disk form's return value IS the example calls' results, and a
+        # make_fx trace has none. Refusing BEFORE fn runs is the point: handing
+        # back an empty list afterwards leaves a caller whose region already
+        # executed, whose obvious recovery is to run it again -- a second
+        # backward over storages the first one freed.
+        ran = []
+
+        def entry(model, t):
+            ran.append(1)
+            return model(t)
+
         m = torch.nn.Linear(4, 3)
         x = torch.randn(2, 4)
         with tempfile.TemporaryDirectory() as d:
-            artifact_path = os.path.join(d, "artifact.py")
-            cache_path = os.path.join(d, "artifact.cache")
-            results = torch.compiler.precompile(
-                lambda model, t: model(t),
+            with self.assertRaisesRegex(ValueError, "only tracer='dynamo' produces"):
+                torch.compiler.precompile(
+                    entry,
+                    backend="eager",
+                    example_inputs=[(m, x)],
+                    artifact_path=os.path.join(d, "artifact.py"),
+                    cache_path=os.path.join(d, "artifact.cache"),
+                )
+        self.assertEqual(ran, [])
+
+    def test_precompile_keeps_the_example_calls_gradients_when_asked(self):
+        # precompile snapshots and restores .grad around the example calls, so
+        # capturing cannot double the gradients of the documented
+        # warmup-step-then-capture flow. A caller whose example IS their live
+        # training step needs the opposite: restoring silently discards the
+        # backward they just paid for, and the artifact is produced either way,
+        # so nothing tells them a batch of gradients went missing.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(2, 4)
+
+        m.zero_grad(set_to_none=True)
+        _precompile_grad_step(m, x)
+        expected = m.weight.grad.detach().clone()
+
+        m.zero_grad(set_to_none=True)
+        torch.compiler.precompile(
+            _precompile_grad_step,
+            tracer="dynamo",
+            backend="eager",
+            training=True,
+            example_inputs=[(m, x)],
+            require_no_risky_drops=False,
+            require_complete=False,
+        )
+        # The default restores what was there before -- nothing.
+        self.assertIsNone(m.weight.grad)
+
+        m.zero_grad(set_to_none=True)
+        torch.compiler.precompile(
+            _precompile_grad_step,
+            tracer="dynamo",
+            backend="eager",
+            training=True,
+            example_inputs=[(m, x)],
+            require_no_risky_drops=False,
+            require_complete=False,
+            keep_example_grads=True,
+        )
+        self.assertEqual(m.weight.grad, expected)
+
+    def test_precompile_keep_example_grads_accumulates_like_eager(self):
+        # Not "restore afterwards" but "do not touch .grad at all": a grad
+        # already present when capture starts must accumulate, which is what
+        # the same two calls do in eager.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(2, 4)
+        m.zero_grad(set_to_none=True)
+        _precompile_grad_step(m, x)
+        _precompile_grad_step(m, x)
+        expected = m.weight.grad.detach().clone()
+
+        m.zero_grad(set_to_none=True)
+        _precompile_grad_step(m, x)
+        torch.compiler.precompile(
+            _precompile_grad_step,
+            tracer="dynamo",
+            backend="eager",
+            training=True,
+            example_inputs=[(m, x)],
+            require_no_risky_drops=False,
+            require_complete=False,
+            keep_example_grads=True,
+        )
+        self.assertEqual(m.weight.grad, expected)
+
+    def test_precompile_keep_example_grads_is_dynamo_only(self):
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(2, 4)
+        with self.assertRaisesRegex(ValueError, "keep_example_grads"):
+            torch.compiler.precompile(
+                _precompile_grad_step,
                 backend="eager",
+                training=True,
                 example_inputs=[(m, x)],
-                artifact_path=artifact_path,
-                cache_path=cache_path,
+                keep_example_grads=True,
             )
-            self.assertEqual(results, [])
-            self.assertGreater(os.path.getsize(artifact_path), 0)
-            self.assertGreater(os.path.getsize(cache_path), 0)
-            loaded = torch.compiler.precompile.load(
-                artifact_path=artifact_path, cache_path=cache_path
-            )
-            self.assertEqual(loaded(m, x), m(x))
 
     def test_precompile_paths_come_in_pairs(self):
         # Half an artifact can never be loaded: the cache carries a sha256 of
