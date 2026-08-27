@@ -21,6 +21,7 @@ from torch._C._distributed_c10d import (
     Work as _Work,
 )
 from torch._prims_common import make_contiguous_strides_for
+from torch._utils import _decode_scalar_type
 from torch.utils._triton import has_triton
 
 
@@ -1702,43 +1703,6 @@ def _maybe_convert_scalar_types_to_dtypes(
     `ScalarType[]`, it is converted to a list of scalar type enum values. This
     function converts it back to a list of `torch.dtype`s.
     """
-    # Values are the c10::ScalarType enumerators, whose numbering is part of the
-    # serialization format and so is append-only. Keep this in step with
-    # AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS in
-    # torch/headeronly/core/ScalarType.h; the indices there are written in a
-    # trailing comment on each line.
-    _SCALAR_TYPE_TO_DTYPE = {
-        0: torch.uint8,
-        1: torch.int8,
-        2: torch.short,
-        3: torch.int,
-        4: torch.int64,
-        5: torch.half,
-        6: torch.float,
-        7: torch.double,
-        8: torch.complex32,
-        9: torch.complex64,
-        10: torch.complex128,
-        11: torch.bool,
-        12: torch.qint8,
-        13: torch.quint8,
-        14: torch.qint32,
-        15: torch.bfloat16,
-        16: torch.quint4x2,
-        17: torch.quint2x4,
-        18: torch.bits1x8,
-        19: torch.bits2x4,
-        20: torch.bits4x2,
-        21: torch.bits8,
-        22: torch.bits16,
-        23: torch.float8_e5m2,
-        24: torch.float8_e4m3fn,
-        25: torch.float8_e5m2fnuz,
-        26: torch.float8_e4m3fnuz,
-        27: torch.uint16,
-        28: torch.uint32,
-        29: torch.uint64,
-    }
     if any(not isinstance(x, (type(None), int)) for x in scalar_types):
         return scalar_types
 
@@ -1746,10 +1710,11 @@ def _maybe_convert_scalar_types_to_dtypes(
     for scalar_type in scalar_types:
         if scalar_type is None:
             dtypes.append(scalar_type)
-        elif scalar_type not in _SCALAR_TYPE_TO_DTYPE:
-            raise ValueError(f"Unrecognized scalar type {scalar_type}")
-        else:
-            dtypes.append(_SCALAR_TYPE_TO_DTYPE[scalar_type])
+            continue
+        try:
+            dtypes.append(_decode_scalar_type(scalar_type))
+        except IndexError:
+            raise ValueError(f"Unrecognized scalar type {scalar_type}") from None
     return dtypes
 
 

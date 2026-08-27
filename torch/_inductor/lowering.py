@@ -45,6 +45,7 @@ from torch._prims_common import (
     is_integer_dtype,
     Number,
 )
+from torch._utils import _decode_scalar_type
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
@@ -256,38 +257,13 @@ add_needs_realized_inputs(
 )
 
 # TODO(jansel): ezyang says we won't need this in the future, try removing it
-# based on https://github.com/pytorch/pytorch/blob/9e3eb329df8f701/c10/core/ScalarType.h#L28
-DTYPE_ID_LOOKUP = {
-    0: torch.uint8,
-    1: torch.int8,
-    2: torch.int16,
-    3: torch.int32,
-    4: torch.int64,
-    5: torch.float16,
-    6: torch.float32,
-    7: torch.float64,
-    8: torch.complex32,
-    9: torch.complex64,
-    10: torch.complex32,
-    11: torch.bool,
-    15: torch.bfloat16,
-    # TODO(jansel): add quantized types?
-    #  _(c10::qint8, QInt8) /* 12 */
-    # _(c10::quint8, QUInt8) /* 13 */
-    # _(c10::qint32, QInt32) /* 14 */
-    # _(c10::quint4x2, QUInt4x2) /* 16 */
-    # _(c10::quint2x4, QUInt2x4) /* 17 */
-}
-
-
 def decode_dtype(dtype: int | torch.dtype) -> torch.dtype:
     if not isinstance(dtype, int):
         return dtype
-    if dtype not in DTYPE_ID_LOOKUP:
-        raise AssertionError(f"id {dtype} missing from DTYPE_ID_LOOKUP")
-
-    dtype = DTYPE_ID_LOOKUP[dtype]
-    return dtype
+    try:
+        return _decode_scalar_type(dtype)
+    except IndexError:
+        raise AssertionError(f"unrecognized scalar type {dtype}") from None
 
 
 def is_integer_type(x: object) -> TypeGuard[TensorBox | IRNode | sympy.Expr | int]:
