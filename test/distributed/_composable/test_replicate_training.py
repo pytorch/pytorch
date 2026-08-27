@@ -53,12 +53,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
     TransformerBlock,
 )
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    Capability, 
-    requires_capabilities,
-)
-
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 c10d_ops = torch.ops.c10d
 funcol = torch.ops.c10d_functional
@@ -221,7 +216,6 @@ class TestReplicateCastAfterInitPrecision(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     @wrapSwapTensorsTest(True)
-    @requires_capabilities(Capability.distributed.fsdp)
     def test_to_float64_after_init(self):
         """Tests that the user can cast the module to float64 after init."""
         # NOTE: Test fp64 instead of a lower precision dtype like bf16 for
@@ -436,7 +430,6 @@ class TestReplicate1DTrainingCoreSleep(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
-    @requires_capabilities(Capability.distributed.fsdp)
     def test_train_parity_multi_groups(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
@@ -457,7 +450,6 @@ class TestReplicate1DTrainingCoreSleep(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @requires_capabilities(Capability.distributed.fsdp)
     def test_train_parity_multi_group_cpu_offload_eager(self):
         """
         Tests train parity when using multiple parameter groups for
@@ -1177,7 +1169,6 @@ class TestReplicateTPTraining(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(8)
-    @requires_capabilities(Capability.distributed.dtensor)
     def test_replicate_tp(self):
         global_mesh = self.init_global_mesh()
         self.run_subtests(
