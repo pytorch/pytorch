@@ -2,9 +2,8 @@
 
 Most optimizer classes are available both from ``torch.optim`` and from the
 nested module in which they are defined. For example, ``torch.optim.Adam`` and
-``torch.optim.adam.Adam`` refer to the same class. Existing functional APIs in
-the nested optimizer modules remain available for backward compatibility, but
-new code should use the canonical {mod}`torch.optim.functional` namespace; see
+``torch.optim.adam.Adam`` refer to the same class. While some functional optimizer APIs are exposed in their respective nested modules, all functional
+optimizer APIs are available in the {mod}`torch.optim.functional` namespace; see
 {ref}`functional-optimizer-api` for usage guidance.
 
 ```{eval-rst}
