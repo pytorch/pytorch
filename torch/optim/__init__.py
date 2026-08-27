@@ -7,8 +7,8 @@ future.
 """
 
 from torch.optim import lr_scheduler as lr_scheduler, swa_utils as swa_utils
-from torch.optim._adafactor import Adafactor as Adafactor
-from torch.optim._muon import Muon as Muon
+from torch.optim._adafactor import Adafactor as Adafactor, adafactor as adafactor
+from torch.optim._muon import Muon as Muon, muon as muon
 from torch.optim._stateless import (
     swap_in_optimizer_params_and_state as swap_in_optimizer_params_and_state,
 )
@@ -29,7 +29,9 @@ from torch.optim.sparse_adam import SparseAdam as SparseAdam
 
 
 Adafactor.__module__ = "torch.optim"
+adafactor.__module__ = "torch.optim"
 Muon.__module__ = "torch.optim"
+muon.__module__ = "torch.optim"
 swap_in_optimizer_params_and_state.__module__ = "torch.optim"
 
 
@@ -50,6 +52,7 @@ del lbfgs  # type: ignore[name-defined] # noqa: F821
 
 __all__ = [
     "Adafactor",
+    "adafactor",
     "Adadelta",
     "Adagrad",
     "Adam",
@@ -59,6 +62,7 @@ __all__ = [
     "LBFGS",
     "lr_scheduler",
     "Muon",
+    "muon",
     "NAdam",
     "Optimizer",
     "RAdam",

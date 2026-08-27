@@ -144,25 +144,37 @@ When using these functional optimizer APIs, the caller has full control and
 responsibility for creating and retaining state, filtering parameters without
 gradients from every list consistently, and saving and restoring that state.
 
-They are each located in their respective optimizer's module, such as
-{func}`torch.optim.adamw.adamw`:
+Most public functional optimizer APIs are located in their respective
+optimizer's module, such as {func}`torch.optim.adamw.adamw`. Since Adafactor and
+Muon are implemented in private modules, their functional APIs are exposed
+directly from {mod}`torch.optim`.
 
 | Optimizer | Functional API |
 | --- | --- |
 | {class}`Adadelta` | {func}`torch.optim.adadelta.adadelta` |
-| {class}`Adafactor` | {func}`torch.optim.adafactor.adafactor` |
+| {class}`Adafactor` | {func}`torch.optim.adafactor` |
 | {class}`Adagrad` | {func}`torch.optim.adagrad.adagrad` |
 | {class}`Adam` | {func}`torch.optim.adam.adam` |
 | {class}`Adamax` | {func}`torch.optim.adamax.adamax` |
 | {class}`AdamW` | {func}`torch.optim.adamw.adamw` |
 | {class}`ASGD` | {func}`torch.optim.asgd.asgd` |
-| {class}`Muon` | {func}`torch.optim.muon.muon` |
+| {class}`Muon` | {func}`torch.optim.muon` |
 | {class}`NAdam` | {func}`torch.optim.nadam.nadam` |
 | {class}`RAdam` | {func}`torch.optim.radam.radam` |
 | {class}`RMSprop` | {func}`torch.optim.rmsprop.rmsprop` |
 | {class}`Rprop` | {func}`torch.optim.rprop.rprop` |
 | {class}`SGD` | {func}`torch.optim.sgd.sgd` |
 | {class}`SparseAdam` | {func}`torch.optim.sparse_adam.sparse_adam` |
+
+```{eval-rst}
+.. currentmodule:: torch.optim
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+    adafactor
+    muon
+```
 
 {class}`LBFGS` does not currently expose a functional API. Its update is
 coupled to repeated closure evaluations and optional line-search orchestration,

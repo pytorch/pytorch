@@ -1,10 +1,13 @@
 # APIs in optimizer submodules
 
-Optimizer classes are available both from ``torch.optim`` and from the nested
-module in which they are defined. For example, ``torch.optim.Adam`` and
-``torch.optim.adam.Adam`` refer to the same class. Functional optimizer APIs,
-such as ``torch.optim.adam.adam``, are available only from the nested modules.
-See :ref:`functional-optimizer-api` for guidance on using them.
+Most optimizer classes are available both from ``torch.optim`` and from the
+nested module in which they are defined. For example, ``torch.optim.Adam`` and
+``torch.optim.adam.Adam`` refer to the same class. Most functional optimizer
+APIs, such as ``torch.optim.adam.adam``, are available from the nested modules,
+except for ``Muon`` and ``Adafactor`` which are available from the top-level
+direction like ``torch.optim.muon`` and ``torch.optim.adafactor``.
+
+See :ref:`functional-optimizer-api` for all supported paths and usage guidance.
 
 ```{eval-rst}
 .. automodule:: torch.optim.adadelta
@@ -15,17 +18,6 @@ See :ref:`functional-optimizer-api` for guidance on using them.
 
     Adadelta
     adadelta
-```
-
-```{eval-rst}
-.. automodule:: torch.optim.adafactor
-.. currentmodule:: torch.optim.adafactor
-.. autosummary::
-   :toctree: generated
-   :nosignatures:
-
-    Adafactor
-    adafactor
 ```
 
 ```{eval-rst}
@@ -91,17 +83,6 @@ See :ref:`functional-optimizer-api` for guidance on using them.
    :nosignatures:
 
     LBFGS
-```
-
-```{eval-rst}
-.. automodule:: torch.optim.muon
-.. currentmodule:: torch.optim.muon
-.. autosummary::
-   :toctree: generated
-   :nosignatures:
-
-    Muon
-    muon
 ```
 
 ```{eval-rst}

@@ -1,21 +1,16 @@
 # mypy: allow-untyped-defs
 
-import math
-
 import torch
 from torch import Tensor
 
-from .optimizer import (
-    _functional_api_doc,
-    _maximize_doc,
-    _params_doc,
-    _to_scalar,
-    Optimizer,
-    ParamsT,
-)
+from . import _functional as F
+from .optimizer import _maximize_doc, _params_doc, _to_scalar, Optimizer, ParamsT
 
 
 __all__ = ["SparseAdam", "sparse_adam"]
+
+sparse_adam = F.sparse_adam
+sparse_adam.__module__ = "torch.optim.sparse_adam"
 
 
 class SparseAdam(Optimizer):
@@ -121,7 +116,7 @@ class SparseAdam(Optimizer):
                     # record the step after step update
                     state_steps.append(state["step"])
 
-            sparse_adam(
+            F.sparse_adam(
                 params_with_grad,
                 grads,
                 exp_avgs,
@@ -135,68 +130,6 @@ class SparseAdam(Optimizer):
             )
 
         return loss
-
-
-def sparse_adam(
-    params: list[Tensor],
-    grads: list[Tensor],
-    exp_avgs: list[Tensor],
-    exp_avg_sqs: list[Tensor],
-    state_steps: list[int],
-    *,
-    eps: float,
-    beta1: float,
-    beta2: float,
-    lr: float,
-    maximize: bool,
-) -> None:
-    for i, param in enumerate(params):
-        grad = grads[i]
-        grad = grad if not maximize else -grad
-        grad = grad.coalesce()  # the update is non-linear so indices must be unique
-        grad_indices = grad._indices()
-        grad_values = grad._values()
-        if grad_values.numel() == 0:
-            # Skip update for empty grad
-            continue
-        size = grad.size()
-
-        exp_avg = exp_avgs[i]
-        exp_avg_sq = exp_avg_sqs[i]
-        step = state_steps[i]
-
-        def make_sparse(values: Tensor) -> Tensor:
-            constructor = grad.new
-            if grad_indices.dim() == 0 or values.dim() == 0:
-                return constructor().resize_as_(grad)
-            return constructor(grad_indices, values, size)
-
-        # Decay the first and second moment running average coefficient
-        #      old <- b * old + (1 - b) * new
-        # <==> old += (1 - b) * (new - old)
-        old_exp_avg_values = exp_avg.sparse_mask(grad)._values()
-        exp_avg_update_values = grad_values.sub(old_exp_avg_values).mul_(1 - beta1)
-        exp_avg.add_(make_sparse(exp_avg_update_values))
-        old_exp_avg_sq_values = exp_avg_sq.sparse_mask(grad)._values()
-        exp_avg_sq_update_values = (
-            grad_values.pow(2).sub_(old_exp_avg_sq_values).mul_(1 - beta2)
-        )
-        exp_avg_sq.add_(make_sparse(exp_avg_sq_update_values))
-
-        # Dense addition again is intended, avoiding another sparse_mask
-        numer = exp_avg_update_values.add_(old_exp_avg_values)
-        exp_avg_sq_update_values.add_(old_exp_avg_sq_values)
-        denom = exp_avg_sq_update_values.sqrt_().add_(eps)
-        del exp_avg_update_values, exp_avg_sq_update_values
-
-        bias_correction1 = 1 - beta1**step
-        bias_correction2 = 1 - beta2**step
-        step_size = lr * math.sqrt(bias_correction2) / bias_correction1
-
-        param.add_(make_sparse(-step_size * numer.div_(denom)))
-
-
-sparse_adam.__doc__ = _functional_api_doc.format(optimizer="SparseAdam")
 
 
 SparseAdam.__doc__ = rf"""SparseAdam implements a masked version of the Adam algorithm
