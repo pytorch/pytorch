@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import ast
+import builtins
 import contextlib
 import plistlib
 import unittest
@@ -1183,10 +1184,13 @@ def helper(x):
             ),
         )
         rendered, imports = _render_constexpr_constants({"FORMAT": plistlib.FMT_XML})
+        rendered_again, _ = _render_constexpr_constants({"FORMAT": plistlib.FMT_XML})
         self.assertEqual(
             repr(rendered["FORMAT"]),
             "__inductor_constexpr_module_0.PlistFormat['FMT_XML']",
         )
+        self.assertEqual(rendered["FORMAT"], rendered_again["FORMAT"])
+        self.assertEqual(hash(rendered["FORMAT"]), hash(rendered_again["FORMAT"]))
         self.assertEqual(imports, ["import plistlib as __inductor_constexpr_module_0"])
 
         class Mode(IntEnum):
@@ -1218,6 +1222,16 @@ def helper(x):
         with self.assertRaisesRegex(RuntimeError, "cannot be written into"):
             _render_constexpr_constants({"MODE": Local.VALUE})
 
+        from torch.utils._ordered_set import OrderedSet
+
+        ordered = OrderedSet([2, 1])
+        source, imports = _constexpr_source(ordered)
+        scope = {}
+        exec("\n".join(imports), scope)
+        reconstructed = eval(source, scope)
+        self.assertIs(type(reconstructed), OrderedSet)
+        self.assertEqual(list(reconstructed), [2, 1])
+
     @parametrize(
         "value, expected",
         (
@@ -1242,6 +1256,8 @@ def helper(x):
                 (frozenset({1, 2}), ("frozenset((1, 2,))", [])),
                 name="frozenset",
             ),
+            subtest((builtins.set(), ("set()", [])), name="empty_set"),
+            subtest((builtins.set((2, 1)), ("{1, 2}", [])), name="set"),
         ),
     )
     def test_constexpr_builtin_source(self, value, expected):
@@ -1270,6 +1286,7 @@ def helper(x):
             ),
         )
 
+    @unittest.skipUnless(torch.distributed.is_available(), "requires torch.distributed")
     def test_constexpr_enum_imports_do_not_collide(self):
         from torch._inductor.codegen.wrapper import (
             _constexpr_source,
@@ -1409,6 +1426,8 @@ def helper(x):
         actual, code = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(actual, fn(x))
         self.assertNotIn("<Mode.", code[0])
+        self.assertIn("'MODE': 1", code[0])
+        self.assertIn("'MODE': 2", code[0])
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_plain_enum_constexpr_in_user_defined_triton_kernel(self):
@@ -1443,6 +1462,8 @@ def helper(x):
         import triton
         import triton.language as tl
 
+        from torch._dynamo.exc import BackendCompilerFailed
+
         class Mode(Enum):
             ADD = 1
 
@@ -1462,7 +1483,7 @@ def helper(x):
             return output
 
         x = torch.randn(128, device=GPU_TYPE)
-        with self.assertRaisesRegex(Exception, "cannot be written into"):
+        with self.assertRaisesRegex(BackendCompilerFailed, "cannot be written into"):
             torch.compile(fn)(x)
 
 

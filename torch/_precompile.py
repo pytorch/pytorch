@@ -222,9 +222,12 @@ it.
 
 from __future__ import annotations
 
+import contextvars
+import gc
 import hashlib
 import io
 import logging
+import sys
 import threading
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
@@ -1702,7 +1705,9 @@ def _precompile_dynamo(
     import contextlib
     import dis
     import inspect
+    import operator
     import types
+    import weakref
 
     import torch._functorch.config as functorch_config
 
@@ -1713,6 +1718,11 @@ def _precompile_dynamo(
     if decompositions is not None:
         raise NotImplementedError(
             "precompile decompositions are not yet supported with tracer='dynamo'."
+        )
+    if training and torch.is_inference_mode_enabled():
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot capture training=True inside "
+            "torch.inference_mode()."
         )
     for example in example_inputs:
         if not isinstance(example, tuple):
@@ -1750,6 +1760,15 @@ def _precompile_dynamo(
             "cells; pass captured values as explicit arguments."
         )
 
+    def is_literal(value: object) -> bool:
+        if value is None or type(value) in (bool, int, float, complex, str, bytes):
+            return True
+        if type(value) is tuple:
+            return all(is_literal(item) for item in value)
+        if type(value) is frozenset:
+            return all(is_literal(item) for item in value)
+        return False
+
     def contains_tensor(value: object, seen: set[int]) -> bool:
         if isinstance(value, torch.Tensor):
             return True
@@ -1768,58 +1787,694 @@ def _precompile_dynamo(
     if contains_tensor((target.__defaults__, target.__kwdefaults__), set()):
         raise PrecompileError(
             "precompile tracer='dynamo' cannot serialize tensor-valued function "
-            "defaults; pass every tensor as an explicit example input."
+            "defaults; remove the default and pass every tensor as an explicit input."
+        )
+    defaults = (
+        *(target.__defaults__ or ()),
+        *((target.__kwdefaults__ or {}).values()),
+    )
+    if not all(is_literal(value) for value in defaults):
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot serialize non-literal function defaults; "
+            "remove the default and pass mutable or user-defined values explicitly."
         )
 
-    def loaded_global_names(code: types.CodeType) -> set[str]:
+    def loaded_global_paths(code: types.CodeType) -> list[tuple[str, ...]]:
+        paths = []
+        instructions = list(dis.get_instructions(code))
+        for index, instruction in enumerate(instructions):
+            if instruction.opname not in (
+                "LOAD_GLOBAL",
+                "LOAD_NAME",
+                "LOAD_FROM_DICT_OR_GLOBALS",
+            ) or not isinstance(instruction.argval, str):
+                continue
+            path = [instruction.argval]
+            for following in instructions[index + 1 :]:
+                if following.opname not in ("LOAD_ATTR", "LOAD_METHOD"):
+                    break
+                if not isinstance(following.argval, str):
+                    break
+                path.append(following.argval)
+            paths.append(tuple(path))
+        for constant in code.co_consts:
+            if isinstance(constant, types.CodeType):
+                paths.extend(loaded_global_paths(constant))
+        return paths
+
+    def loaded_local_paths(
+        code: types.CodeType, local_name: str
+    ) -> list[tuple[str, ...]]:
+        paths = []
+        instructions = list(dis.get_instructions(code))
+        for index, instruction in enumerate(instructions):
+            if not instruction.opname.startswith("LOAD_FAST") or (
+                instruction.argval != local_name
+            ):
+                continue
+            path = []
+            for following in instructions[index + 1 :]:
+                if following.opname not in ("LOAD_ATTR", "LOAD_METHOD"):
+                    break
+                if not isinstance(following.argval, str):
+                    break
+                path.append(following.argval)
+            if path:
+                paths.append(tuple(path))
+        return paths
+
+    def loaded_attribute_names(code: types.CodeType) -> set[str]:
         names = {
             instruction.argval
             for instruction in dis.get_instructions(code)
-            if instruction.opname
-            in ("LOAD_GLOBAL", "LOAD_NAME", "LOAD_FROM_DICT_OR_GLOBALS")
+            if instruction.opname in ("LOAD_ATTR", "LOAD_METHOD")
             and isinstance(instruction.argval, str)
         }
         for constant in code.co_consts:
             if isinstance(constant, types.CodeType):
-                names.update(loaded_global_names(constant))
+                names.update(loaded_attribute_names(constant))
         return names
 
-    input_ids = {
-        id(value)
-        for example in example_inputs
-        for value in pytree.tree_leaves(example)
-        if not isinstance(value, (type(None), bool, int, float, complex, str, bytes))
-    }
-
-    def reaches_input(value: object, seen: set[int]) -> bool:
-        value_id = id(value)
-        if value_id in input_ids:
+    def has_unmodeled_local_access(code: types.CodeType, local_name: str) -> bool:
+        if local_name in code.co_cellvars:
             return True
-        if value_id in seen:
-            return False
-        seen.add(value_id)
-        if isinstance(value, dict):
-            return any(
-                reaches_input(item, seen) for pair in value.items() for item in pair
-            )
-        if isinstance(value, (tuple, list, set, frozenset)):
-            return any(reaches_input(item, seen) for item in value)
-        if isinstance(
-            value, (types.FunctionType, types.ModuleType, type, torch.Tensor)
-        ) or not hasattr(value, "__dict__"):
-            return False
-        return any(reaches_input(item, seen) for item in vars(value).values())
+        instructions = list(dis.get_instructions(code))
+        for index, instruction in enumerate(instructions):
+            if not instruction.opname.startswith("LOAD_FAST") or (
+                instruction.argval != local_name
+            ):
+                continue
+            if index + 1 == len(instructions) or instructions[index + 1].opname not in (
+                "LOAD_ATTR",
+                "LOAD_METHOD",
+            ):
+                return True
+        return False
 
+    def object_state_values(value: object) -> list[object]:
+        try:
+            values = list(vars(value).values())
+        except TypeError:
+            values = []
+        if not isinstance(value, type):
+            value_type = type(value)
+            for cls in value_type.__mro__:
+                for descriptor in vars(cls).values():
+                    if not isinstance(descriptor, types.MemberDescriptorType):
+                        continue
+                    try:
+                        values.append(descriptor.__get__(value, value_type))
+                    except AttributeError:
+                        pass
+        values.extend(
+            item
+            for item in gc.get_referents(value)
+            if not isinstance(item, (types.CodeType, types.ModuleType, type))
+        )
+        if isinstance(value, contextvars.ContextVar):
+            try:
+                values.append(value.get())
+            except LookupError:
+                pass
+        elif isinstance(value, contextvars.Context):
+            values.extend(value.values())
+        return values
+
+    def reachable_object_ids(values: Sequence[object]) -> set[int]:
+        stack = list(values)
+        seen: set[int] = set()
+        literal_types = (bool, int, float, complex, str, bytes)
+        while stack:
+            value = stack.pop()
+            if value is None or type(value) in literal_types:
+                continue
+            value_id = id(value)
+            if value_id in seen:
+                continue
+            seen.add(value_id)
+            if isinstance(value, (dict, MappingProxyType)):
+                stack.extend(value.keys())
+                stack.extend(value.values())
+            elif isinstance(value, (tuple, list, set, frozenset)):
+                stack.extend(value)
+            elif isinstance(value, torch.nn.Module):
+                stack.extend(value.modules())
+                stack.extend(value.parameters())
+                stack.extend(value.buffers())
+                stack.extend(object_state_values(value))
+            elif isinstance(value, weakref.ReferenceType):
+                referent = value()
+                if referent is not None:
+                    stack.append(referent)
+                callback = value.__callback__
+                if callback is not None:
+                    stack.append(callback)
+            elif isinstance(value, types.MethodType):
+                stack.extend((value.__func__, value.__self__))
+            elif isinstance(value, types.FunctionType):
+                stack.extend(value.__defaults__ or ())
+                stack.extend((value.__kwdefaults__ or {}).values())
+                stack.extend(value.__dict__.values())
+                for cell in value.__closure__ or ():
+                    try:
+                        stack.append(cell.cell_contents)
+                    except ValueError:
+                        pass
+            elif not isinstance(value, (types.CodeType, type, types.ModuleType)):
+                stack.extend(object_state_values(value))
+        return seen
+
+    input_behavior_names = {"forward", *loaded_attribute_names(target.__code__)}
+    input_ids = reachable_object_ids(
+        [value for example in example_inputs for value in example]
+    )
+
+    def resolve_static_path(
+        root: object, path: tuple[str, ...]
+    ) -> tuple[object, object | None, bool, bool]:
+        def has_custom_getattribute(value: object) -> bool:
+            value_type = type(value)
+            implementation = inspect.getattr_static(
+                value_type, "__getattribute__", None
+            )
+            if isinstance(value, type):
+                return implementation is not type.__getattribute__
+            if isinstance(value, types.ModuleType):
+                return implementation is not types.ModuleType.__getattribute__
+            return implementation is not object.__getattribute__
+
+        value = root
+        receiver = None
+        aliases_input = id(value) in input_ids
+        for attribute in path:
+            receiver = value
+            if isinstance(value, types.FunctionType) and attribute in (
+                "__annotations__",
+                "__closure__",
+                "__defaults__",
+                "__dict__",
+                "__globals__",
+                "__kwdefaults__",
+            ):
+                value = getattr(value, attribute)
+                aliases_input |= id(value) in input_ids
+                continue
+            dynamic_lookup = has_custom_getattribute(receiver)
+            try:
+                value = inspect.getattr_static(value, attribute)
+            except AttributeError:
+                return receiver, None, aliases_input, True
+            aliases_input |= id(value) in input_ids
+            if dynamic_lookup:
+                return receiver, None, aliases_input, True
+        return value, receiver, aliases_input, False
+
+    def referenced_globals(
+        function: types.FunctionType,
+    ) -> list[tuple[str, object, object | None, bool, bool]]:
+        values = []
+        for path in loaded_global_paths(function.__code__):
+            if path[0] not in function.__globals__:
+                continue
+            resolved = resolve_static_path(function.__globals__[path[0]], path[1:])
+            values.append((".".join(path), *resolved))
+        return values
+
+    def is_library_module(module_name: str | None) -> bool:
+        root = (module_name or "").partition(".")[0]
+        return root == "torch" or root in sys.stdlib_module_names
+
+    def dynamic_globals_reach_input(globals_scope: dict[str, object]) -> bool:
+        values = list(globals_scope.values())
+        leaves = []
+        seen_modules = set()
+        while values:
+            value = values.pop()
+            if isinstance(value, types.ModuleType) and not is_library_module(
+                value.__name__
+            ):
+                if id(value) in seen_modules:
+                    continue
+                seen_modules.add(id(value))
+                values.extend(vars(value).values())
+            else:
+                leaves.append(value)
+        return bool(reachable_object_ids(leaves) & input_ids)
+
+    def dynamic_module_access_reaches_input(function: types.FunctionType) -> bool:
+        paths = loaded_global_paths(function.__code__)
+        dynamic_builtin_lookup = any(
+            path[0] in ("getattr", "vars") and path[0] not in function.__globals__
+            for path in paths
+        )
+        modules = []
+        for path in paths:
+            if path[0] not in function.__globals__:
+                continue
+            root = function.__globals__[path[0]]
+            if not isinstance(root, types.ModuleType):
+                continue
+            if dynamic_builtin_lookup or any(
+                name in ("__getattr__", "__getattribute__") for name in path[1:]
+            ):
+                modules.append(root)
+        values = [
+            value
+            for module in modules
+            for value in vars(module).values()
+            if not isinstance(value, (types.CodeType, type, types.ModuleType))
+        ]
+        return bool(reachable_object_ids(values) & input_ids)
+
+    def receiver_reaches_input(
+        receiver: object, seen: set[tuple[int, int | None, int, bool]]
+    ) -> bool:
+        return reaches_input(receiver, seen, scan_receiver=True)
+
+    def reaches_input(
+        value: object,
+        seen: set[tuple[int, int | None, int, bool]],
+        receiver: object | None = None,
+        *,
+        scan_receiver: bool = False,
+    ) -> bool:
+        work = [(value, receiver, scan_receiver, target.__globals__, True)]
+        scanned_receivers: set[tuple[int, int, bool]] = set()
+        dynamic_globals_seen: set[str] = set()
+        dynamic_global_builtins = (
+            ("eval", eval),
+            ("exec", exec),
+            ("getattr", getattr),
+            ("globals", globals),
+            ("attrgetter", operator.attrgetter),
+            ("itemgetter", operator.itemgetter),
+            ("locals", locals),
+            ("methodcaller", operator.methodcaller),
+            ("vars", vars),
+        )
+        while work:
+            value, receiver, scan_receiver, globals_scope, may_enter_external = (
+                work.pop()
+            )
+            if scan_receiver:
+                receiver_key = (id(value), id(globals_scope), may_enter_external)
+                if receiver_key in scanned_receivers:
+                    continue
+                scanned_receivers.add(receiver_key)
+                work.append((value, None, False, globals_scope, may_enter_external))
+                if isinstance(value, types.ModuleType):
+                    module_library = is_library_module(value.__name__)
+                    module_values = (
+                        (vars(value).get("__getattr__"),)
+                        if module_library
+                        else vars(value).values()
+                    )
+                    work.extend(
+                        (
+                            item,
+                            None,
+                            False,
+                            globals_scope,
+                            may_enter_external and not module_library,
+                        )
+                        for item in module_values
+                        if item is not None
+                    )
+                receiver_type = value if isinstance(value, type) else type(value)
+                receiver_library = is_library_module(receiver_type.__module__)
+                work.extend(
+                    (
+                        item,
+                        None,
+                        False,
+                        globals_scope,
+                        may_enter_external and not receiver_library,
+                    )
+                    for cls in receiver_type.__mro__
+                    for item in vars(cls).values()
+                    if not is_library_module(cls.__module__)
+                )
+                continue
+
+            value_id = id(value)
+            receiver_id = None if receiver is None else id(receiver)
+            if value_id in input_ids or receiver_id in input_ids:
+                return True
+            key = (value_id, receiver_id, id(globals_scope), may_enter_external)
+            if key in seen:
+                continue
+            seen.add(key)
+            dynamic_builtin_name = next(
+                (name for name, builtin in dynamic_global_builtins if value is builtin),
+                None,
+            )
+            bound_self = getattr(value, "__self__", None)
+            dynamic_name = getattr(value, "__name__", None)
+            if (
+                dynamic_builtin_name is None
+                and isinstance(bound_self, types.ModuleType)
+                and dynamic_name in ("__getattr__", "__getattribute__")
+            ):
+                dynamic_builtin_name = dynamic_name
+            if may_enter_external and dynamic_builtin_name is not None:
+                if dynamic_globals_reach_input(globals_scope):
+                    return True
+                dynamic_globals_seen.add(dynamic_builtin_name)
+                continue
+            if isinstance(value, dict):
+                items = [item for pair in value.items() for item in pair]
+                if any(id(item) in input_ids for item in items):
+                    return True
+                work.extend(
+                    (item, None, False, globals_scope, may_enter_external)
+                    for item in items
+                )
+            if isinstance(value, (tuple, list, set, frozenset)):
+                if any(id(item) in input_ids for item in value):
+                    return True
+                work.extend(
+                    (item, None, False, globals_scope, may_enter_external)
+                    for item in value
+                )
+            if isinstance(value, weakref.ProxyTypes):
+                if may_enter_external:
+                    return True
+                continue
+            if isinstance(value, weakref.ReferenceType):
+                referent = value()
+                callback = value.__callback__
+                if referent is not None:
+                    work.append(
+                        (referent, None, False, globals_scope, may_enter_external)
+                    )
+                if callback is not None:
+                    work.append(
+                        (callback, None, False, globals_scope, may_enter_external)
+                    )
+                continue
+            if isinstance(value, types.MethodType):
+                work.append(
+                    (
+                        value.__func__,
+                        value.__self__,
+                        False,
+                        globals_scope,
+                        may_enter_external,
+                    )
+                )
+                continue
+            if isinstance(value, classmethod):
+                bound = (
+                    receiver
+                    if isinstance(receiver, type) or receiver is None
+                    else type(receiver)
+                )
+                work.append(
+                    (value.__func__, bound, False, globals_scope, may_enter_external)
+                )
+                continue
+            if isinstance(value, staticmethod):
+                work.append(
+                    (
+                        value.__func__,
+                        None,
+                        False,
+                        globals_scope,
+                        may_enter_external,
+                    )
+                )
+                continue
+            if isinstance(value, property):
+                if value.fget is not None:
+                    work.append(
+                        (
+                            value.fget,
+                            receiver,
+                            False,
+                            globals_scope,
+                            may_enter_external,
+                        )
+                    )
+                continue
+            if isinstance(value, types.FunctionType):
+                if dynamic_module_access_reaches_input(value):
+                    return True
+                function_globals = value.__globals__
+                next_scope = function_globals
+                library_function = function_globals is not target.__globals__ and (
+                    is_library_module(function_globals.get("__name__"))
+                )
+                input_behavior_names.update(loaded_attribute_names(value.__code__))
+                next_may_enter_external = (
+                    may_enter_external and not library_function
+                ) or function_globals is target.__globals__
+                if (
+                    not library_function
+                    and "__globals__" in input_behavior_names
+                    and reachable_object_ids(list(function_globals.values()))
+                    & input_ids
+                ):
+                    return True
+                captured = (
+                    *(value.__defaults__ or ()),
+                    *((value.__kwdefaults__ or {}).values()),
+                    *value.__dict__.values(),
+                    *(value.__annotations__.values() if not library_function else ()),
+                )
+                if any(id(item) in input_ids for item in captured):
+                    return True
+                work.extend(
+                    (
+                        item,
+                        None,
+                        False,
+                        next_scope,
+                        next_may_enter_external,
+                    )
+                    for item in captured
+                )
+                for cell in value.__closure__ or ():
+                    try:
+                        if id(cell.cell_contents) in input_ids:
+                            return True
+                        work.append(
+                            (
+                                cell.cell_contents,
+                                None,
+                                False,
+                                next_scope,
+                                next_may_enter_external,
+                            )
+                        )
+                    except ValueError:
+                        pass
+                dynamic_globals = {
+                    path[0]
+                    for path in loaded_global_paths(value.__code__)
+                    if path[0]
+                    in ("eval", "exec", "getattr", "globals", "locals", "vars")
+                }
+                if dynamic_globals and (next_may_enter_external or library_function):
+                    if library_function:
+                        if dynamic_globals_reach_input(next_scope):
+                            return True
+                    else:
+                        dynamic_globals_seen.update(dynamic_globals)
+                if library_function:
+                    library_values = [
+                        item for _, item, _, _, _ in referenced_globals(value)
+                    ]
+                    if any(
+                        item is builtin
+                        for item in library_values
+                        for _, builtin in dynamic_global_builtins
+                    ) and dynamic_globals_reach_input(next_scope):
+                        return True
+                    if reachable_object_ids(library_values) & input_ids:
+                        return True
+                    continue
+                for (
+                    _,
+                    item,
+                    item_receiver,
+                    aliases_input,
+                    unresolved,
+                ) in referenced_globals(value):
+                    if aliases_input:
+                        return True
+                    work.append(
+                        (
+                            item,
+                            None,
+                            True,
+                            next_scope,
+                            next_may_enter_external,
+                        )
+                        if unresolved
+                        else (
+                            item,
+                            item_receiver,
+                            False,
+                            next_scope,
+                            next_may_enter_external,
+                        )
+                    )
+                if receiver is not None and value.__code__.co_argcount:
+                    local_name = value.__code__.co_varnames[0]
+                    for path in loaded_local_paths(value.__code__, local_name):
+                        item, item_receiver, aliases_input, unresolved = (
+                            resolve_static_path(receiver, path)
+                        )
+                        if aliases_input:
+                            return True
+                        work.append(
+                            (
+                                item,
+                                None,
+                                True,
+                                next_scope,
+                                next_may_enter_external,
+                            )
+                            if unresolved
+                            else (
+                                item,
+                                item_receiver,
+                                False,
+                                next_scope,
+                                next_may_enter_external,
+                            )
+                        )
+                    if has_unmodeled_local_access(value.__code__, local_name):
+                        work.append(
+                            (
+                                receiver,
+                                None,
+                                True,
+                                next_scope,
+                                next_may_enter_external,
+                            )
+                        )
+                continue
+            if receiver is not None:
+                descriptor_get = inspect.getattr_static(type(value), "__get__", None)
+                if descriptor_get is not None:
+                    work.append(
+                        (
+                            descriptor_get,
+                            value,
+                            False,
+                            globals_scope,
+                            may_enter_external,
+                        )
+                    )
+                    work.append(
+                        (receiver, None, True, globals_scope, may_enter_external)
+                    )
+            if isinstance(value, torch.Tensor):
+                continue
+            if isinstance(value, types.ModuleType):
+                value_type = type(value)
+                if value_type is types.ModuleType:
+                    if not is_library_module(value.__name__):
+                        work.extend(
+                            (
+                                item,
+                                None,
+                                False,
+                                globals_scope,
+                                may_enter_external,
+                            )
+                            for item in vars(value).values()
+                        )
+                    continue
+            elif isinstance(value, type):
+                value_type = value
+            else:
+                work.extend(
+                    (item, None, False, globals_scope, may_enter_external)
+                    for item in object_state_values(value)
+                )
+                value_type = type(value)
+            if isinstance(value, type):
+                work.extend(
+                    (item, None, False, globals_scope, may_enter_external)
+                    for cls in value.__mro__
+                    for name, item in vars(cls).items()
+                    if name in ("__class_getitem__", "__init__", "__new__")
+                )
+                work.extend(
+                    (item, value, False, globals_scope, may_enter_external)
+                    for cls in type(value).__mro__
+                    for name, item in vars(cls).items()
+                    if name.startswith("__")
+                    and name.endswith("__")
+                    and name not in ("__del__", "__init__", "__new__")
+                )
+                continue
+            if value_type.__module__ != "builtins":
+                behavior_library = is_library_module(value_type.__module__)
+                work.extend(
+                    (
+                        item,
+                        None,
+                        False,
+                        globals_scope,
+                        may_enter_external and not behavior_library,
+                    )
+                    for cls in value_type.__mro__
+                    if not is_library_module(cls.__module__)
+                    for item in vars(cls).values()
+                )
+                if behavior_library:
+                    work.extend(
+                        (item, value, False, globals_scope, may_enter_external)
+                        for cls in value_type.__mro__
+                        if is_library_module(cls.__module__)
+                        for name, item in vars(cls).items()
+                        if name.startswith("__")
+                        and name.endswith("__")
+                        and name not in ("__del__", "__init__", "__new__")
+                    )
+        if dynamic_globals_seen:
+            names = ", ".join(sorted(dynamic_globals_seen))
+            raise NotImplementedError(
+                "precompile tracer='dynamo' cannot validate input/environment "
+                f"aliasing through dynamic global access via {names}."
+            )
+        return False
+
+    target_references = referenced_globals(target)
     aliased_globals = [
         name
-        for name in loaded_global_names(target.__code__)
-        if name in target.__globals__ and reaches_input(target.__globals__[name], set())
+        for name, value, receiver, aliases_input, unresolved in target_references
+        if aliases_input
+        or (
+            receiver_reaches_input(value, set())
+            if unresolved
+            else reaches_input(value, set(), receiver)
+        )
     ]
     if aliased_globals:
         raise PrecompileError(
             "precompile tracer='dynamo' cannot capture an explicit input that aliases "
             "the Python environment; pass the value only as an input. Aliased global: "
             f"{aliased_globals[0]!r}."
+        )
+    if dynamic_module_access_reaches_input(target):
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot preserve an input-derived identity "
+            "relation reached through dynamic module attribute access."
+        )
+    tensor_globals = [
+        name
+        for name, value, _, _, _ in target_references
+        if contains_tensor(value, set())
+    ]
+    if tensor_globals:
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot capture tensor-valued Python globals; "
+            "pass every tensor as an explicit input. Referenced global: "
+            f"{tensor_globals[0]!r}."
         )
 
     capture_globals = dict(target.__globals__)
@@ -1871,7 +2526,6 @@ def _precompile_dynamo(
             )
         )
         capture_stack.enter_context(_use_code_state(pgo_state))
-        capture_stack.enter_context(torch.inference_mode(False))
         capture_stack.enter_context(torch.set_grad_enabled(training))
         compiled = torch._dynamo.optimize(
             backend=_dynamo_backend_compiler(backend, training),
