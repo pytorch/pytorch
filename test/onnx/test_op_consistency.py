@@ -38,6 +38,7 @@ from torch.testing._internal import (
     common_methods_invocations,
     common_utils,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
@@ -271,6 +272,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     This is a parameterized test suite.
     """
 
+    hw_classification = HardwareClassification.CPU
     opset_version = -1
 
     @common_device_type.ops(
@@ -281,10 +283,6 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     )
     def test_output_match(self, device: str, dtype: torch.dtype, op):
         """Test the ONNX exporter."""
-        # device is provided by instantiate_device_type_tests, but we only want to run in cpu.
-        if device != "cpu":
-            raise AssertionError(f"Expected device 'cpu', got {device!r}")
-
         samples = op.sample_inputs(
             device,
             dtype,
