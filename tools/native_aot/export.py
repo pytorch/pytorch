@@ -386,20 +386,33 @@ def _collect_jobs(ops_filter, out_root: str, archs):
                 #     plain spelling, so a declaration pinning ('sm_100a',) got a
                 #     tree it disowned.
                 if arch is not None:
-                    # Validated even though the comparison below is by string:
-                    # cc_of is the only thing that rejects a malformed sm string,
-                    # and without it `--arch sm100a` matched no declaration and
-                    # exported nothing at exit 0 -- a typo that looked like success.
-                    decl.cc_of(layout_arch)
+                    # main() has already refused an --arch outside KNOWN_ARCHES, so
+                    # the string comparison below is against a spelling that parses.
                     claims = decl.archs_of(d)
                     if layout_arch not in claims:
-                        # Claiming this CAPABILITY under another spelling is always a
-                        # mistake, so it is reported HERE, per arch. The misses
-                        # collected below are suppressed once the declaration ships
-                        # for any arch, which hid exactly this case: the matched
-                        # arches embed and pass the post-relink check while every
-                        # device of the missed capability falls back to aten, with
-                        # nothing in the build log.
+                        # REPORTED, not refused: the two spellings are distinct
+                        # nvcc targets for one piece of hardware, so a declaration
+                        # pinning "sm_100a" is stating that its kernels need the
+                        # arch-conditional target, and a plain-10.0 build genuinely
+                        # cannot use them. Falling back to aten is the right answer
+                        # there; what is worth saying out loud is that this build
+                        # asked for a capability the declaration covers under the
+                        # other name.
+                        #
+                        # Reported HERE, per arch, because the whole-declaration
+                        # misses collected below are suppressed once the declaration
+                        # ships for ANY arch -- which hid exactly this case: the
+                        # matched arches embed and pass the post-relink check while
+                        # every device of the missed capability falls back to aten,
+                        # with nothing in the build log.
+                        #
+                        # The asymmetry to know about: archs_from_cuda_arch_list
+                        # collapses a capability to the CONDITIONAL spelling, so a
+                        # declaration pinning only the plain one loses under a
+                        # release list naming both, even though plain-target kernels
+                        # would run on the conditional build. Matching by capability
+                        # instead would need the tree name and the declaration's
+                        # claim to disagree, which generation filters on.
                         other = _claimed_spelling(layout_arch, claims)
                         if other:
                             print(
@@ -664,10 +677,10 @@ def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
         major, _, minor = entry.removesuffix("+PTX").partition(".")
         suffix = "a" if minor.endswith("a") else ""
         minor = minor.removesuffix("a")
-        # str.isdigit accepts a non-ASCII digit that int() then rejects, so an
-        # entry like "\N{SUPERSCRIPT TWO}.0" raises rather than being skipped. Kept
-        # as-is: no release arch list holds one, and \d would behave identically.
-        if not (major.isdigit() and minor.isdigit()):
+        # isascii too: str.isdigit is Unicode-aware, so an Arabic-Indic or
+        # full-width digit satisfies it AND converts, which torchgen's sm parsing
+        # rejects for the same reason.
+        if not all(p.isascii() and p.isdigit() for p in (major, minor)):
             continue  # named arch ("Hopper") or malformed: skip
         sm = f"sm_{int(major) * 10 + int(minor)}{suffix}"
         if sm in EXPORTABLE_ARCHES and sm not in out:
@@ -733,6 +746,21 @@ def main(argv: list[str] | None = None) -> None:
         "explicit GPUTarget). Default: detect from the local device.",
     )
     args = parser.parse_args(argv)
+    # An explicit --arch is checked HERE, before anything reads the disk. The same
+    # check used to sit three loops deep (inside the per-declaration, per-arch walk),
+    # where a tree with no declaration never reached it: `--arch sm100a` then matched
+    # nothing and exited 0, the typo-that-looks-like-success this refuses.
+    #
+    # TORCH_CUDA_ARCH_LIST is FILTERED a few lines below rather than refused, because
+    # a release list names arches AOT does not ship (7.5, 8.6) and must not fail the
+    # build for naming them.
+    for named_arch in args.arch or ():
+        if named_arch not in decl.KNOWN_ARCHES:
+            raise RuntimeError(
+                f"--arch {named_arch} is not an arch this tooling knows "
+                f"({' '.join(decl.KNOWN_ARCHES)}). To target another, add it there "
+                f"and give the declaration an ARCHS entry naming it."
+            )
     if args.jobs is None:
         env_jobs = os.getenv("MAX_JOBS") or os.getenv("CMAKE_BUILD_PARALLEL_LEVEL")
         # Half the CPU count, not all of it: os.cpu_count() reports SMT
