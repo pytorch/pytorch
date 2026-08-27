@@ -1025,7 +1025,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
         StartProcessesListAsFuncTest,
         StartProcessesNotCIAsFuncTest,
     ):
-
         def setUp(self):
             super().setUp()
             self._start_methods = ["forkserver"]
@@ -1045,6 +1044,7 @@ class BoundedCloseTest(TestCase):
     within a bounded time when child processes refuse to die (simulating a
     Linux D-state worker, which SIGKILL cannot reap).
     """
+
     hw_classification = HardwareClassification.GENERIC
 
     def _make_multiprocess_context(self) -> MultiprocessContext:
