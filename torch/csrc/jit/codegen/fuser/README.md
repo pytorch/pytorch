@@ -4,7 +4,7 @@ The fuser accepts subgraphs wrapped in "fusion nodes" and tries to execute them 
 
 ## Code Organization
 
-The fuser is designed hierarchically with device-independent logic eventually deferring to device-specific logic and implementation. The device-specific code is (mostly) found in each devices' subdirectory. The device-independent logic has six components:
+The fuser is designed hierarchically with device-independent logic eventually deferring to device-specific logic and implementation. The device-specific code is (mostly) found in each device's subdirectory. The device-independent logic has six components:
 
 * The Interface (interface.h/cpp) has functions to register and run fusions, interrogate fusion functionality, and perform debugging.
 * The Compiler (compiler.h/cpp) performs "upfront" and "runtime" compilation. When fusions are registered, upfront compilation produces fallback code and performs some shape inference. When a fusion is run, runtime compilation invokes code generation and the device-specific compilation logic.

@@ -21,7 +21,7 @@ namespace torch::data::datasets {
 /// ended, it should return an empty optional. The dataloader knows to modify
 /// its implementation based on whether the dataset is stateless or stateful.
 ///
-/// Note that when subclassing a from `StatefulDataset<Self, T>`, the return
+/// Note that when subclassing from `StatefulDataset<Self, T>`, the return
 /// type of `get_batch()`, which the subclass must override, will be
 /// `optional<T>` (i.e. the type specified in the `StatefulDataset`
 /// specialization is automatically boxed into an `optional` for the dataset's
