@@ -967,7 +967,7 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
 
 class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
-    disable_backward_cudagraphs: bool
+    cudagraphs_bwd_override: bool | None
     static_input_idxs: Sequence[int]
     is_backward: bool
     graph_id: int | None
@@ -2694,7 +2694,7 @@ class CompilerConfigExtra:
     graph_id: int
     forward_device: BoxedDeviceIndex
     forward_is_partitioned: BoxedBool
-    disable_backward_cudagraphs: bool = False
+    cudagraphs_bwd_override: bool | None = None
 
 
 def create_compiler_config_extra(
@@ -2708,11 +2708,11 @@ def create_compiler_config_extra(
     # the final determination if cudagraphs actually can be used or not.
     cudagraphs = BoxedBool(config.triton.cudagraphs)
 
-    disable_backward_cudagraphs = False
+    cudagraphs_bwd_override: bool | None = None
 
     # Override cudagraphs BoxedBool based on override_cudagraphs annotation.
     # Disabling fwd disables bwd (copying activations isn't profitable),
-    # so a separate backward flag is only needed for fwd=True / bwd=False.
+    # so cudagraphs_bwd_override is only needed for fwd=True / bwd=False.
     if (
         gm_meta is not None
         and (annotation := gm_meta.get("cudagraph_annotation")) is not None
@@ -2731,7 +2731,7 @@ def create_compiler_config_extra(
         # bwd override only matters when fwd enables cudagraphs but bwd
         # explicitly disables them.
         if cudagraphs.value and annotation.bwd is not None and not annotation.bwd:
-            disable_backward_cudagraphs = True
+            cudagraphs_bwd_override = annotation.bwd
             log_cudagraph_skip_and_bump_counter(
                 "disabling cudagraphs for backward due to override_cudagraphs annotation"
             )
@@ -2754,7 +2754,7 @@ def create_compiler_config_extra(
         cudagraphs=cudagraphs,
         graph_id=graph_id,
         forward_device=forward_device,
-        disable_backward_cudagraphs=disable_backward_cudagraphs,
+        cudagraphs_bwd_override=cudagraphs_bwd_override,
         forward_is_partitioned=forward_is_partitioned,
     )
 
@@ -2945,8 +2945,8 @@ def compile_fx_backward(
 
         # Check if cudagraphs should be overridden for backward via annotation
         cudagraphs = compiler_config_extra.cudagraphs
-        if compiler_config_extra.disable_backward_cudagraphs:
-            cudagraphs = BoxedBool(False)
+        if compiler_config_extra.cudagraphs_bwd_override is not None:
+            cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
 
         # Static backward inputs (see Note: [static_input_idxs semantics])
         # are the saved tensors, minus two over-approximations of the
@@ -2970,8 +2970,10 @@ def compile_fx_backward(
             if placeholders[i].meta.get("is_static_input", True)
         ]
         cudagraph_kwargs: _CompileFxKwargs = {}
-        if compiler_config_extra.disable_backward_cudagraphs:
-            cudagraph_kwargs["disable_backward_cudagraphs"] = True
+        if compiler_config_extra.cudagraphs_bwd_override is not None:
+            cudagraph_kwargs["cudagraphs_bwd_override"] = (
+                compiler_config_extra.cudagraphs_bwd_override
+            )
         with (
             (
                 config.patch(get_cpp_wrapper_config())
