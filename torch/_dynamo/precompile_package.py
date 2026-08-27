@@ -108,6 +108,7 @@ import copy
 import functools
 import hashlib
 import importlib.machinery
+import itertools
 import logging
 import os
 import pickle
@@ -1111,6 +1112,34 @@ def _wont_generalize(
     return tuple(sorted(pinned))
 
 
+def _grad_snapshot(
+    fn: object, examples: Sequence[object]
+) -> dict[torch.Tensor, torch.Tensor | None]:
+    """Every tensor an example could accumulate a gradient into, and its .grad.
+
+    Keyed by the tensor itself so one entry survives a tensor appearing in
+    several examples; Tensor hashes by identity, which is what is wanted here.
+    """
+    found: dict[torch.Tensor, torch.Tensor | None] = {}
+
+    def visit(value: object) -> None:
+        if isinstance(value, torch.Tensor):
+            found.setdefault(value, value.grad)
+        elif isinstance(value, torch.nn.Module):
+            for tensor in itertools.chain(value.parameters(), value.buffers()):
+                found.setdefault(tensor, tensor.grad)
+
+    visit(fn if isinstance(fn, torch.nn.Module) else getattr(fn, "__self__", None))
+    for example in examples:
+        args, kwargs = _example_call(example)
+        for leaf in tree_leaves((args, kwargs)):
+            visit(leaf)
+        # tree_leaves flattens a Module to nothing, so visit the raw arguments too.
+        for value in (*args, *kwargs.values()):
+            visit(value)
+    return found
+
+
 def _unrebuildable_guards(code_entry: Any, cause: Exception) -> PackageError:
     """The error for a frame whose serialized guards will not rebuild.
 
@@ -1357,6 +1386,7 @@ class PrecompileSession:
             raise RuntimeError("PrecompileSession cannot be re-entered")
         if self._stack is not None:
             raise RuntimeError("PrecompileSession is already active")
+        grads: dict[torch.Tensor, torch.Tensor | None] = {}
         stack = contextlib.ExitStack()
         # Backends must serialize into the artifact rather than into the
         # process-local inductor cache.
@@ -1392,6 +1422,15 @@ class PrecompileSession:
                 _register_explicit_compile_region(isolate_recompiles_id, self)
                 self._optimized = optimize_ctx(self._fn)
             self._compiled = self._optimized
+            # A training example runs a real backward, which ACCUMULATES into
+            # the caller's tensors. Snapshot and clear first, restore in the
+            # finally below: capturing a model must not leave its gradients
+            # changed, and on the documented warmup-step-then-capture flow it
+            # would otherwise double them. make_fx does the same; see the
+            # rationale at torch._precompile._capture.
+            grads = _grad_snapshot(self._fn, self._example_inputs)
+            for tensor in grads:
+                tensor.grad = None
             # Automatic examples are the ordinary no_grad inference path.
             # inference_mode is a distinct guarded state and is disabled here
             # even when the caller entered it before starting capture.
@@ -1438,6 +1477,11 @@ class PrecompileSession:
                     self._finished = True
             raise
         finally:
+            # The SAME grad object, not a copy: a caller holding a prior p.grad
+            # reference, or optimizer state keyed on grad identity, must not be
+            # invalidated by having been used as an example.
+            for tensor, grad in grads.items():
+                tensor.grad = grad
             # Guard/backend state is already in the package. Do not retain the
             # caller's potentially large CPU/GPU example tensors with the session.
             self._example_inputs = ()
