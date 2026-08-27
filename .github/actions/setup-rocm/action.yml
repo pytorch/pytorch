@@ -113,18 +113,6 @@ runs:
         # The group name corresponding to group ID 1 can change depending on the OS, so both are necessary.
         echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd $DEVICE_FLAG --group-add video --group-add $render_gid --group-add daemon --group-add bin --cap-add=SYS_PTRACE --security-opt seccomp=unconfined" >> "${GITHUB_ENV}"
 
-    - name: ROCm set CPU_FLAG
-      shell: bash
-      run: |
-        # k8s ARC runners write /etc/podinfo/gha-docker-cpu-flags (rocOps podinfo) so nested
-        # test containers inherit the pod CPU quota instead of the full node count (~192).
-        if [ -f "/etc/podinfo/gha-docker-cpu-flags" ]; then
-          CPU_FLAG=$(cat /etc/podinfo/gha-docker-cpu-flags)
-        else
-          CPU_FLAG=""
-        fi
-        echo "CPU_FLAG=${CPU_FLAG}" >> "${GITHUB_ENV}"
-
     - name: Login to ECR
       uses: pytorch/pytorch/.github/actions/ecr-login@main
 
