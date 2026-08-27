@@ -402,6 +402,8 @@ def _build_dynamo_forward():
     """
     import base64
     import contextlib
+    import contextvars
+    import gc
     import importlib
     import inspect
     import pickle
@@ -434,7 +436,20 @@ def _build_dynamo_forward():
             f"{torch.__version__}."
         )
 
-    state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
+    try:
+        state = pickle.loads(base64.b64decode(_DYNAMO_STATE, validate=True))
+        from torch._precompile import _DynamoArtifactState
+
+        if not isinstance(state, _DynamoArtifactState):
+            raise TypeError(
+                f"expected _DynamoArtifactState, got {type(state).__name__}"
+            )
+    except Exception as e:
+        from torch._precompile import PrecompileError
+
+        raise PrecompileError(
+            "python_code contains invalid serialized Dynamo state."
+        ) from e
     if (
         state.device_type in ("cuda", "xpu")
         and not getattr(torch, state.device_type).is_available()
@@ -488,6 +503,90 @@ def _build_dynamo_forward():
         if contract is None:
             return
 
+        def tensor_inputs(leaves):
+            def object_state_values(value):
+                try:
+                    values = list(vars(value).values())
+                except TypeError:
+                    values = []
+                if not isinstance(value, type):
+                    value_type = type(value)
+                    for cls in value_type.__mro__:
+                        for descriptor in vars(cls).values():
+                            if not isinstance(descriptor, types.MemberDescriptorType):
+                                continue
+                            try:
+                                values.append(descriptor.__get__(value, value_type))
+                            except AttributeError:
+                                pass
+                values.extend(
+                    item
+                    for item in gc.get_referents(value)
+                    if not isinstance(item, (types.CodeType, types.ModuleType, type))
+                )
+                if isinstance(value, contextvars.ContextVar):
+                    try:
+                        values.append(value.get())
+                    except LookupError:
+                        pass
+                elif isinstance(value, contextvars.Context):
+                    values.extend(value.values())
+                return values
+
+            tensors: list[torch.Tensor] = []
+            decomposed = set()
+            pending = list(leaves)
+            seen = set()
+            while pending:
+                value = pending.pop()
+                value_id = id(value)
+                if value_id in seen:
+                    continue
+                seen.add(value_id)
+                if isinstance(value, torch.Tensor):
+                    tensors.append(value)
+                    tensor_flatten = getattr(value, "__tensor_flatten__", None)
+                    if type(value) is not torch.Tensor and callable(tensor_flatten):
+                        try:
+                            flattened = tensor_flatten()
+                            if not isinstance(flattened, tuple) or len(flattened) != 2:
+                                raise TypeError("invalid __tensor_flatten__ result")
+                            names = flattened[0]
+                            if not isinstance(names, (tuple, list)):
+                                raise TypeError("invalid __tensor_flatten__ names")
+                            children = [getattr(value, name) for name in names]
+                        except (AttributeError, RuntimeError, TypeError, ValueError):
+                            children = []
+                        if any(isinstance(child, torch.Tensor) for child in children):
+                            decomposed.add(value_id)
+                            pending.extend(children)
+                    continue
+                if isinstance(value, (dict, types.MappingProxyType)):
+                    pending.extend(value.keys())
+                    pending.extend(value.values())
+                    if type(value) in (dict, types.MappingProxyType):
+                        continue
+                elif isinstance(value, (tuple, list, set, frozenset)):
+                    pending.extend(value)
+                    if type(value) in (tuple, list, set, frozenset):
+                        continue
+                if isinstance(value, torch.nn.Module):
+                    pending.extend(value.modules())
+                    pending.extend(
+                        tensor
+                        for _, tensor in value.named_parameters(remove_duplicate=False)
+                    )
+                    pending.extend(
+                        tensor
+                        for _, tensor in value.named_buffers(remove_duplicate=False)
+                    )
+                if isinstance(
+                    value, (types.CodeType, type, types.FunctionType, types.ModuleType)
+                ):
+                    continue
+                pending.extend(object_state_values(value))
+            return tensors, decomposed
+
         def module_signature(module):
             tensors = [
                 ("parameter", name, tensor)
@@ -521,7 +620,15 @@ def _build_dynamo_forward():
             )
 
         leaves, spec = _pytree.tree_flatten((args, kwargs))
-        serialized_spec = _pytree.treespec_dumps(spec)
+        try:
+            serialized_spec = _pytree.treespec_dumps(spec)
+        except Exception as error:
+            from torch._precompile import PrecompileError
+
+            raise PrecompileError(
+                "precompile: runtime input structure cannot be serialized for "
+                "comparison with the captured Dynamo examples."
+            ) from error
         variant = next(
             (
                 candidate
@@ -537,6 +644,62 @@ def _build_dynamo_forward():
                 "precompile: runtime inputs have a different structure from the "
                 "captured Dynamo examples."
             )
+        storage_ranges: dict[tuple[str, int | None], list[tuple[int, int]]] = {}
+        storage_ids: set[tuple[str, int | None, int]] = set()
+        seen_objects: set[int] = set()
+        tensors, decomposed = tensor_inputs((args, kwargs))
+        for tensor in tensors:
+            object_id = id(tensor)
+            if object_id in seen_objects:
+                continue
+            seen_objects.add(object_id)
+            try:
+                storage = tensor.untyped_storage()
+            except RuntimeError as e:
+                if object_id in decomposed:
+                    continue
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    "precompile: cannot verify storage aliasing for this runtime "
+                    "tensor input."
+                ) from e
+            storage_key = (tensor.device.type, tensor.device.index, storage._cdata)
+            if storage_key in storage_ids:
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    "precompile: storage aliasing between distinct runtime tensor "
+                    "inputs is not supported by the captured Dynamo artifact."
+                )
+            storage_ids.add(storage_key)
+            try:
+                start = storage.data_ptr()
+                size = storage.nbytes()
+            except RuntimeError as e:
+                if object_id in decomposed:
+                    continue
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    "precompile: cannot verify storage aliasing for this runtime "
+                    "tensor input."
+                ) from e
+            if start != 0 and size > 0:
+                storage_ranges.setdefault(
+                    (tensor.device.type, tensor.device.index), []
+                ).append((start, start + size))
+        for ranges in storage_ranges.values():
+            furthest_end = 0
+            for start, end in sorted(ranges):
+                if start < furthest_end:
+                    from torch._precompile import PrecompileError
+
+                    raise PrecompileError(
+                        "precompile: storage aliasing between distinct runtime tensor "
+                        "inputs is not supported by the captured Dynamo artifact."
+                    )
+                furthest_end = max(furthest_end, end)
         for index, (value, expected) in enumerate(
             zip(leaves, variant.leaves, strict=True)
         ):

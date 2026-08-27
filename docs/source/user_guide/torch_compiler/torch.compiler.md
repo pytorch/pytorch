@@ -52,13 +52,21 @@ preserving how every example dispatches. The contract requires the Python enviro
 including globals and context-manager state, to remain semantically unchanged and allows
 recompilation-causing variation only through explicit inputs. Environment-only guards may
 therefore be omitted, while every portable input-derived guard is retained by default.
+Distinct tensor inputs must not share or overlap storage at capture or runtime.
+An explicit input must not also be reachable through globals or other environment state;
+dynamic native indirection that hides such an identity relation is unsupported. Dynamo
+input pytree structures must be serializable so runtime safety checks can be reconstructed.
+User-defined code must access Python module objects (`types.ModuleType`) through static
+attribute paths rather than pass or alias them. Python functions that assign or delete
+globals are rejected.
 Explicitly filtering an input guard is a risky drop and requires opting out of the default
 safety gate. Guards are rebuilt from frozen capture state and checked for predicate drift
 before the artifact is emitted. Breaking an unchecked environment assumption can silently
 miscompute. Tensor, scalar, Python-container, and `nn.Module` arguments are supported.
 Function defaults must be recursive immutable literals; mutable or user-defined values
 must be passed explicitly rather than used as defaults. Tensor-valued globals are also
-rejected because every tensor must be an explicit input. Graph breaks and closure-free
+rejected when referenced by user-defined code because user-owned tensors must be explicit
+inputs. Graph breaks and closure-free
 `torch._dynamo.disable` functions are preserved; top-level closures and
 nested functions that capture locals are not yet supported. The eager backend also
 preserves higher-order graphs such as `torch.cond`, `torch.while_loop`, non-reentrant
@@ -69,10 +77,12 @@ call installs them, and `unload()` removes them; it can also be scoped with `wit
 An uncovered call raises instead of compiling a new variant, just as it does for a
 standalone artifact. With
 `training=True`, both eager and Inductor artifacts retain autograd history; Inductor
-graphs include readable compiled forward and backward code. This training mode works
-across captured recompilations and graph breaks. `PrecompileSummary` reports coverage
-and dropped guards, including which example first produced each frame variant, while
-the `require_*` options let callers reject incomplete or insufficiently guarded captures.
+graphs include readable compiled forward and backward code. Serving pins grad mode to
+this option: inference artifacts disable gradients even inside `torch.enable_grad()`,
+while training artifacts enable them even inside `torch.no_grad()`. This training mode
+works across captured recompilations and graph breaks. `PrecompileSummary` reports
+coverage and dropped guards, including which example first produced each frame variant,
+while the `require_*` options let callers reject incomplete or insufficiently guarded captures.
 See the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}
