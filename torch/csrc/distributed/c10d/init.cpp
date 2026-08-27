@@ -4658,6 +4658,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       .def_readwrite(
           "error_on_collective",
           &::c10d::FakeProcessGroup::Options::error_on_collective)
+      .def_readwrite(
+          "simulate_uniform_ranks",
+          &::c10d::FakeProcessGroup::Options::simulate_uniform_ranks)
       .def(
           "__copy__",
           [](const ::c10d::FakeProcessGroup::Options& self) {
@@ -4673,6 +4676,13 @@ such as `dist.all_reduce(tensor, async_op=True)`.
   fakeProcessGroup
       .def_static(
           "_create_internal",
+          [](int rank, int size) {
+            return ::c10d::FakeProcessGroup::_create_internal(rank, size);
+          },
+          py::arg("rank"),
+          py::arg("world_size"))
+      .def_static(
+          "_create_internal",
           [](int rank,
              int size,
              c10::intrusive_ptr<::c10d::FakeProcessGroup::Options> options) {
@@ -4681,8 +4691,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           },
           py::arg("rank"),
           py::arg("world_size"),
-          py::arg("options") =
-              c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
+          py::arg("options"))
       .def_property_readonly("options", &::c10d::FakeProcessGroup::getOptions);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
