@@ -2358,8 +2358,9 @@ class SliceVariable(VariableTracker):
 
 
 class BaseListIteratorVariable(IteratorVariable):
-    # In CPython list_iterator and _deque_iterator are siblings, not subclasses
-    # of one another, so the concrete VTs share this base rather than each other.
+    # In CPython list_iterator, tuple_iterator, and _deque_iterator are siblings,
+    # not subclasses of one another, so the concrete VTs share this base rather
+    # than each other.
 
     _nonvar_fields = {
         "index",
@@ -2437,9 +2438,17 @@ class ListIteratorVariable(BaseListIteratorVariable):
     _cpython_type = type(iter([]))
 
 
-class TupleIteratorVariable(ListIteratorVariable):
+class TupleIteratorVariable(BaseListIteratorVariable):
     # PyTupleIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L1067
     _cpython_type = type(iter(()))
+
+    def python_type(self) -> type:
+        return type(iter(()))
+
+    def as_python_constant(self) -> Any:
+        if self.index > 0:
+            raise NotImplementedError
+        return iter(tuple(x.as_python_constant() for x in self.items))
 
 
 class DequeIteratorVariable(BaseListIteratorVariable):
