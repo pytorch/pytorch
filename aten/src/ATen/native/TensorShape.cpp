@@ -1063,7 +1063,8 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   // (because we can have an arbitrary number of 0-sized chunks adding up to 0).
   // So, call split_with_sizes with the correct number of chunks, eventually we
   // will do this for all cases.
-  if (split_size == 0 && dim_size == 0) {
+  if (TORCH_GUARD_OR_FALSE(split_size.sym_eq(0)) &&
+      TORCH_GUARD_OR_FALSE(dim_size.sym_eq(0))) {
     std::vector<c10::SymInt> split_sizes(chunks, split_size);
     split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size);
     return self.split_with_sizes_symint(split_sizes, dim);

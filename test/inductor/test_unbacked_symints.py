@@ -150,6 +150,22 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_chunk(self, device):
+        # torch.chunk on a data-dependent (unbacked) dim size used to raise
+        # GuardOnDataDependentSymNode ("Could not guard on data-dependent
+        # expression Eq(u0, 0)") because chunk compared the symbolic
+        # split_size/dim_size against 0 with a hard equality guard.
+        def fn(x):
+            nz = torch.nonzero(x)  # unbacked symint in nz.size(0)
+            return torch.chunk(nz, 2, dim=0)
+
+        example_inputs = (torch.randn(32, device=device),)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_view_of_slice(self, device):
         # Tests View.create(slice, size_with_unbacked_symint)
         def fn(x):
