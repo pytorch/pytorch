@@ -87,6 +87,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       loaded artifact raises when a call fails
       every retained guard set, and never compiles a new variant. Graph breaks are
       captured as Dynamo resume frames.
+      Distinct tensor inputs must not share or overlap storage, and an explicit input
+      must not also be reachable through the Python environment. Statically visible
+      identity relations are rejected, as are Python functions that mutate globals.
       Closure-free Python functions wrapped with ``torch._dynamo.disable`` are embedded
       and execute eagerly between compiled graph segments. Global names left in
       transformed bytecode must resolve to recursive literal values or independently
@@ -94,8 +97,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       ``globals()``, ``eval()``, or ``exec()``; their importable module globals are
       rebound at load, while recursive literal globals and defaults are captured by
       value. Top-level defaults must also be recursive literals; mutable or user-defined
-      values must be passed explicitly rather than used as defaults. Tensor-valued
-      globals are also rejected because every tensor must be an explicit input. Compiled
+      values must be passed explicitly rather than used as defaults, and a default cannot
+      share identity with a global. Tensor-valued globals are also rejected because every
+      tensor must be an explicit input. Dynamo artifacts are tied to the Python minor and
+      torch version used to produce them. Compiled
       graphs and kernels remain Python source; guard
       trees, transformed Dynamo entry/resume bytecode, and embedded disabled-function
       bytecode are stored as opaque inline data because they have no Python-source
