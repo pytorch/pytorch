@@ -1,9 +1,11 @@
 # Owner(s): ["module: inductor"]
 import ast
+import builtins
 import contextlib
+import plistlib
 import unittest
 from collections import namedtuple
-from enum import Enum, IntEnum
+from enum import Enum, Flag, IntEnum, IntFlag
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -39,6 +41,11 @@ from torch._inductor.utils import (
     run_and_get_kernels,
 )
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    subtest,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -51,6 +58,7 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
 
 
+@instantiate_parametrized_tests
 class TestCodegenTriton(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -1161,54 +1169,188 @@ def helper(x):
             self.assertIn("\nfrom torch._dynamo.testing import rand_strided\n", imports)
             self.assertIn("\nimport torch\n", imports)
 
-    def test_sanitize_for_repr(self):
-        from torch._inductor.codegen.wrapper import _sanitize_for_repr
-
-        class Color(Enum):
-            RED = "red"
-            BLUE = "blue"
-
-        class Priority(IntEnum):
-            LOW = 0
-            HIGH = 1
-
-        # Enum -> value
-        self.assertEqual(_sanitize_for_repr(Color.RED), "red")
-        self.assertEqual(_sanitize_for_repr(Priority.HIGH), 1)
-
-        # Recursion into containers
-        self.assertEqual(
-            _sanitize_for_repr({"a": Color.RED, "b": [Priority.LOW, 42]}),
-            {"a": "red", "b": [0, 42]},
+    def test_constexpr_source_reconstructs_or_declines(self):
+        from torch._inductor.codegen.wrapper import (
+            _constexpr_constant,
+            _constexpr_source,
+            _render_constexpr_constants,
         )
 
-        # Tuples
         self.assertEqual(
-            _sanitize_for_repr((Color.BLUE, 1)),
-            ("blue", 1),
+            _constexpr_source(plistlib.FMT_XML),
+            (
+                "__inductor_constexpr_module_0.PlistFormat['FMT_XML']",
+                ["import plistlib as __inductor_constexpr_module_0"],
+            ),
+        )
+        rendered, imports = _render_constexpr_constants({"FORMAT": plistlib.FMT_XML})
+        rendered_again, _ = _render_constexpr_constants({"FORMAT": plistlib.FMT_XML})
+        self.assertEqual(
+            repr(rendered["FORMAT"]),
+            "__inductor_constexpr_module_0.PlistFormat['FMT_XML']",
+        )
+        self.assertEqual(rendered["FORMAT"], rendered_again["FORMAT"])
+        self.assertEqual(hash(rendered["FORMAT"]), hash(rendered_again["FORMAT"]))
+        self.assertEqual(imports, ["import plistlib as __inductor_constexpr_module_0"])
+
+        class Mode(IntEnum):
+            EVEN = 2
+
+        self.assertEqual(_constexpr_constant(Mode.EVEN), 2)
+        self.assertEqual(_constexpr_constant(IntFlag("Flags", {"A": 1}).A), 1)
+        text_mode = Enum("TextMode", {"A": "a"}, type=str)
+        self.assertEqual(_constexpr_constant(text_mode.A), "a")
+        float_mode = Enum("FloatMode", {"A": 1.5}, type=float)
+        self.assertEqual(_constexpr_constant(float_mode.A), 1.5)
+        Pair = namedtuple("Pair", ("left", "right"))
+        nested = {Mode.EVEN: [Mode.EVEN, (Mode.EVEN,), Pair(Mode.EVEN, 3)]}
+        self.assertEqual(_constexpr_constant(nested), {2: [2, (2,), Pair(2, 3)]})
+
+        class Shifted(namedtuple("ShiftedBase", ("value",))):
+            __slots__ = ()
+
+            def __new__(cls, value):
+                return super().__new__(cls, value + 1)
+
+        shifted = Shifted(1)
+        self.assertEqual(_constexpr_constant(shifted).value, 2)
+
+        class Local(Enum):
+            VALUE = 1
+
+        self.assertIsNone(_constexpr_source(Local.VALUE))
+        with self.assertRaisesRegex(RuntimeError, "cannot be written into"):
+            _render_constexpr_constants({"MODE": Local.VALUE})
+
+        from torch.utils._ordered_set import OrderedSet
+
+        ordered = OrderedSet([2, 1])
+        source, imports = _constexpr_source(ordered)
+        scope = {}
+        exec("\n".join(imports), scope)
+        reconstructed = eval(source, scope)
+        self.assertIs(type(reconstructed), OrderedSet)
+        self.assertEqual(list(reconstructed), [2, 1])
+
+    @parametrize(
+        "value, expected",
+        (
+            subtest((64, ("64", [])), name="int"),
+            subtest((float("inf"), ("float('inf')", [])), name="positive_inf"),
+            subtest((float("-inf"), ("float('-inf')", [])), name="negative_inf"),
+            subtest((float("nan"), None), name="nan"),
+            subtest((-float("nan"), None), name="negative_nan"),
+            subtest(
+                (
+                    torch.float32,
+                    (
+                        "__inductor_constexpr_module_0.float32",
+                        ["import torch as __inductor_constexpr_module_0"],
+                    ),
+                ),
+                name="torch_dtype",
+            ),
+            subtest((slice(1, 5, 2), ("slice(1, 5, 2)", [])), name="slice"),
+            subtest((range(3), ("range(0, 3)", [])), name="range"),
+            subtest(
+                (frozenset({1, 2}), ("frozenset((1, 2,))", [])),
+                name="frozenset",
+            ),
+            subtest((builtins.set(), ("set()", [])), name="empty_set"),
+            subtest((builtins.set((2, 1)), ("{1, 2}", [])), name="set"),
+        ),
+    )
+    def test_constexpr_builtin_source(self, value, expected):
+        from torch._inductor.codegen.wrapper import _constexpr_source
+
+        self.assertEqual(_constexpr_source(value), expected)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_constexpr_triton_dtype_source(self):
+        import triton.language as tl
+
+        from torch._inductor.codegen.wrapper import _constexpr_source
+
+        self.assertEqual(
+            _constexpr_source(tl.float32),
+            (
+                "__inductor_constexpr_module_0.float32",
+                ["import triton.language as __inductor_constexpr_module_0"],
+            ),
+        )
+        self.assertEqual(
+            _constexpr_source((tl.float32,)),
+            (
+                "(__inductor_constexpr_module_0.float32,)",
+                ["import triton.language as __inductor_constexpr_module_0"],
+            ),
         )
 
-        # Namedtuples
-        Pair = namedtuple("Pair", ["x", "y"])
-        result = _sanitize_for_repr(Pair(Color.RED, Priority.HIGH))
-        self.assertIsInstance(result, Pair)
-        self.assertEqual(result, Pair("red", 1))
-
-        # Enum as dict key
-        self.assertEqual(
-            _sanitize_for_repr({Color.RED: 1}),
-            {"red": 1},
+    @unittest.skipUnless(torch.distributed.is_available(), "requires torch.distributed")
+    def test_constexpr_enum_imports_do_not_collide(self):
+        from torch._inductor.codegen.wrapper import (
+            _constexpr_source,
+            _render_constexpr_mappings,
+        )
+        from torch.distributed.fsdp._common_utils import (
+            TrainingState as FSDP1TrainingState,
+        )
+        from torch.distributed.fsdp._fully_shard._fsdp_common import (
+            TrainingState as FSDP2TrainingState,
         )
 
-        # Nested enum value
-        class Outer(Enum):
-            INNER = Color.RED
+        values = (
+            FSDP1TrainingState.FORWARD_BACKWARD,
+            FSDP2TrainingState.FORWARD,
+        )
+        rendered, imports = _render_constexpr_mappings(
+            [{"LEFT": values[0]}, {"RIGHT": values[1]}]
+        )
+        scope = {}
+        exec("\n".join(imports), scope)
+        left, right = (eval(repr(mapping), scope) for mapping in rendered)
+        self.assertIs(left["LEFT"], values[0])
+        self.assertIs(right["RIGHT"], values[1])
 
-        self.assertEqual(_sanitize_for_repr(Outer.INNER), "red")
+        class Bits(Flag):
+            LEFT = 1
+            RIGHT = 2
 
-        # Non-enum passthrough
-        self.assertEqual(_sanitize_for_repr(42), 42)
-        self.assertEqual(_sanitize_for_repr("hello"), "hello")
+        self.assertIsNone(_constexpr_source(Bits.LEFT | Bits.RIGHT))
+
+    def test_launcher_constexpr_scope_avoids_argument_names(self):
+        from torch._inductor.runtime.triton_heuristics import CompileResult
+
+        class Mode(Enum):
+            VALUE = 1
+
+        result = CompileResult(
+            None,
+            SimpleNamespace(kwargs={}),
+            {
+                "constants": {"MODE": Mode.VALUE, "LIMIT": float("inf")},
+                "signature": {
+                    "x": "i32",
+                    "_constexpr_0": "i32",
+                    "MODE": "i32",
+                    "LIMIT": "fp32",
+                },
+            },
+            {},
+        )
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.triton_version_uses_attrs_dict",
+            return_value=True,
+        ):
+            call_args, def_args, _, constant_scope = result._get_arg_lists(
+                ["x", "_constexpr_0", "MODE", "LIMIT"], {2, 3}
+            )
+        self.assertEqual(def_args, ["x", "_constexpr_0"])
+        self.assertEqual(
+            call_args, ["x", "_constexpr_0", "_constexpr_1", "_constexpr_2"]
+        )
+        self.assertIs(constant_scope["_constexpr_1"], Mode.VALUE)
+        self.assertEqual(constant_scope["_constexpr_2"], float("inf"))
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_enum_constexpr_in_user_defined_triton_kernel(self):
@@ -1244,6 +1386,105 @@ def helper(x):
         self.assertEqual(fn(x), res)
         # Verify generated code doesn't contain invalid Enum repr like <Mode.ADD: 1>
         self.assertNotIn("<Mode.", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_enum_constexpr_in_autotune_config(self):
+        import triton
+        import triton.language as tl
+
+        class Mode(IntEnum):
+            ADD = 1
+            MUL = 2
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"MODE": Mode.ADD, "BLOCK_SIZE": 64}, num_warps=4),
+                triton.Config({"MODE": Mode.MUL, "BLOCK_SIZE": 128}, num_warps=4),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = tl.where(MODE == 1, x + 1, x + 1)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            output = torch.empty_like(x)
+
+            def grid(meta):
+                return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
+
+            enum_kernel[grid](x, output, x.numel())
+            return output
+
+        x = torch.randn(128, device=GPU_TYPE)
+        actual, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(actual, fn(x))
+        self.assertNotIn("<Mode.", code[0])
+        self.assertIn("'MODE': 1", code[0])
+        self.assertIn("'MODE': 2", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_plain_enum_constexpr_in_user_defined_triton_kernel(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE.value == 1:
+                output = x + 1
+            else:
+                output = x * 2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            output = torch.empty_like(x)
+            enum_kernel[(1,)](x, output, x.numel(), plistlib.FMT_XML, BLOCK_SIZE=256)
+            return output
+
+        x = torch.randn(128, device=GPU_TYPE)
+        actual, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(actual, fn(x))
+        self.assertIn("PlistFormat['FMT_XML']", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_unspellable_enum_constexpr_errors_clearly(self):
+        import triton
+        import triton.language as tl
+
+        from torch._dynamo.exc import BackendCompilerFailed
+
+        class Mode(Enum):
+            ADD = 1
+
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = tl.where(MODE == 1, x + 1, x * 2)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            output = torch.empty_like(x)
+            enum_kernel[(1,)](x, output, x.numel(), Mode.ADD, 256)
+            return output
+
+        x = torch.randn(128, device=GPU_TYPE)
+        with self.assertRaisesRegex(BackendCompilerFailed, "cannot be written into"):
+            torch.compile(fn)(x)
 
 
 if __name__ == "__main__":
