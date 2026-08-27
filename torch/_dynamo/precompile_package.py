@@ -193,6 +193,11 @@ def _capture_config(training: bool = False) -> Iterator[None]:
             functorch_config.force_non_lazy_backward_lowering,
         )
         functorch_config.bundled_autograd_cache = True
+        # Keeps an empty graph as a compiled frame so its guards reach the
+        # artifact. Note it also extends the lifetime of objects the frame
+        # holds: with it on, a weakref callback on a value the frame captured
+        # does not fire when the caller drops its reference
+        # (test/dynamo/test_repros.py ReproTests.test_weakref_callback).
         dynamo_config.allow_empty_graphs = True
         if training:
             # AOTAutograd lowers the backward on the first .backward() call, so
@@ -1115,6 +1120,14 @@ def _wont_generalize(
 # Healing re-serializes, which can in principle prune something new. Bounded
 # rather than open: in practice one pass is always enough.
 _VALIDATION_PASSES = 4
+
+
+def _autograd_cache_bypasses() -> int:
+    """How many graphs AOTAutogradCache declined. Nonzero means the artifact is
+    empty because the cache refused the graph, not because of the grad mode."""
+    from torch._dynamo.utils import counters
+
+    return counters["aot_autograd"].get("autograd_cache_bypass", 0)
 
 
 def _grad_snapshot(
@@ -2299,13 +2312,18 @@ class PrecompileSession:
                 raise
             raise PackageError(
                 "Precompilation captured graphs but their compiled backends were "
-                "never recorded, so there is nothing to serialize. AOTAutograd only "
-                "records the bundled artifact once the BACKWARD compiles, so a "
-                "forward-only capture with grad enabled records nothing on its own. "
-                "Pass training=True to lower the backward eagerly (the joint "
-                "trace synthesizes tangents, so no loss is needed), capture "
-                "under torch.no_grad()/torch.inference_mode() for an inference "
-                "artifact, or run .backward() inside the capture block."
+                "never recorded, so there is nothing to serialize. AOTAutograd "
+                f"records the bundled artifact only when its cache accepts the "
+                f"graph, and it bypassed {_autograd_cache_bypasses()} time(s) "
+                "here. The two things that cause that are a graph the cache "
+                "refuses -- re-run with TORCH_LOGS=+torch._functorch._aot_autograd "
+                "to see the reason at the offending graph -- and a capture whose "
+                "backward never compiles, which is a forward-only capture with "
+                "grad enabled. For the second, pass training=True to lower the "
+                "backward eagerly (the joint trace synthesizes tangents, so no "
+                "loss is needed), capture under torch.no_grad() / "
+                "torch.inference_mode() for an inference artifact, or run "
+                ".backward() inside the capture block."
             ) from e
         log.info("precompile: saved %s to %s", summary, path)
         return summary
@@ -2377,13 +2395,18 @@ class PrecompileSession:
         if missing:
             raise PackageError(
                 "Precompilation captured graphs but their compiled backends were "
-                "never recorded, so there is nothing to serialize. AOTAutograd only "
-                "records the bundled artifact once the BACKWARD compiles, so a "
-                "forward-only capture with grad enabled records nothing on its own. "
-                "Pass training=True to lower the backward eagerly (the joint "
-                "trace synthesizes tangents, so no loss is needed), capture "
-                "under torch.no_grad()/torch.inference_mode() for an inference "
-                "artifact, or run .backward() inside the capture block."
+                "never recorded, so there is nothing to serialize. AOTAutograd "
+                f"records the bundled artifact only when its cache accepts the "
+                f"graph, and it bypassed {_autograd_cache_bypasses()} time(s) "
+                "here. The two things that cause that are a graph the cache "
+                "refuses -- re-run with TORCH_LOGS=+torch._functorch._aot_autograd "
+                "to see the reason at the offending graph -- and a capture whose "
+                "backward never compiles, which is a forward-only capture with "
+                "grad enabled. For the second, pass training=True to lower the "
+                "backward eagerly (the joint trace synthesizes tangents, so no "
+                "loss is needed), capture under torch.no_grad() / "
+                "torch.inference_mode() for an inference artifact, or run "
+                ".backward() inside the capture block."
             )
         return {str(b): collected[b] for b in entry.backend_ids}
 
