@@ -19,11 +19,7 @@ from torch.testing._internal.common_distributed import (
     SaveForwardInputsModel,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     FSDPTestContinuous,
