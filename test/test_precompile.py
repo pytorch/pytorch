@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
 # A module-level (global) model + a function referencing it, to exercise the
 # constant-tensor guard against a baked global.
 _GLOBAL_TENSOR = torch.randn(3)
+_DYNAMO_TENSOR_DEFAULT = torch.randn(3)
 
 
 def _precompile_dynamo_dynamic(x):
@@ -49,6 +50,10 @@ def _precompile_dynamo_dynamic(x):
 
 def _precompile_dynamo_torch_sin(x):
     return torch.sin(x)
+
+
+def _precompile_dynamo_tensor_default(x, bias=_DYNAMO_TENSOR_DEFAULT):
+    return x + bias
 
 
 def _precompile_dynamo_varargs(*xs):
@@ -3570,7 +3575,9 @@ class TestPrecompile(TestCase):
             "_DYNAMO_TORCH_VERSION = 'different-build'",
             1,
         )
-        with self.assertRaisesRegex(ValueError, "produced by torch different-build"):
+        with self.assertRaisesRegex(
+            PrecompileError, "produced by torch different-build"
+        ):
             exec(compile(mismatched, "<artifact>", "exec"), {"__name__": "_artifact"})
 
     def test_tracer_dynamo_rejects_partial_cleanly(self):
@@ -4038,6 +4045,42 @@ class TestPrecompile(TestCase):
                 backend="eager",
             )
 
+    def test_tracer_dynamo_rejects_tensor_default(self):
+        with self.assertRaisesRegex(PrecompileError, "tensor-valued function defaults"):
+            torch.compiler.precompile(
+                _precompile_dynamo_tensor_default,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_load_does_not_copy_unrelated_module_globals(self):
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(4),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertNotIn("_GLOBAL_TENSOR", loaded._loaded_forward.__globals__)
+
+    def test_tracer_dynamo_python_minor_mismatch_uses_public_error(self):
+        from torch._precompile import _make_inlined_forward
+
+        code, _ = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(4),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        version = tuple(sys.version_info[:2])
+        incompatible = code.replace(
+            f"_DYNAMO_PYTHON_VERSION = {version!r}",
+            "_DYNAMO_PYTHON_VERSION = (0, 0)",
+        )
+        with self.assertRaisesRegex(PrecompileError, "produced on Python"):
+            _make_inlined_forward(incompatible)
+
     def test_tracer_dynamo_preserves_key_order_guard_dependencies(self):
         forward = {"a": 2.0, "b": 3.0}
         reverse = {"b": 3.0, "a": 2.0}
@@ -4098,9 +4141,9 @@ class TestPrecompile(TestCase):
                 with self.assertRaisesRegex(
                     PackageError, "guard directly references a precompile handle"
                 ):
-                    GuardsStatePickler(
-                        {id(handle): handle}, {}, {}, io.BytesIO()
-                    ).dump(handle)
+                    GuardsStatePickler({id(handle): handle}, {}, {}, io.BytesIO()).dump(
+                        handle
+                    )
 
             holder.installed = threading.RLock()
             with self.assertRaisesRegex(TypeError, "cannot pickle.*RLock"):

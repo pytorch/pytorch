@@ -68,13 +68,9 @@ An uncovered call compiles with a warning and increments `serve_time_compiles()`
 standalone artifact instead rejects calls outside its captured guard sets. With
 `training=True`, both eager and Inductor artifacts retain autograd history; Inductor
 graphs include readable compiled forward and backward code. This training mode works
-across captured recompilations, graph breaks, and supported tensor subclasses. Each
-example's real backward compiles and records an integer bitmask whose set bits identify
-undefined output tangents, and Inductor serializes the matching backward variants
-without passing `None` to a kernel Tensor input. A pattern absent from the examples is
-rejected at runtime. If the examples only run forwards, only the all-tangents-present
-backward is covered. `PrecompileSummary` reports coverage and dropped guards, while the
-`require_*` options let callers reject incomplete or insufficiently guarded captures.
+across captured recompilations and graph breaks. `PrecompileSummary` reports coverage
+and dropped guards, while the `require_*` options let callers reject incomplete or
+insufficiently guarded captures.
 See the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}

@@ -1182,16 +1182,12 @@ def helper(x):
                 ["import plistlib as __inductor_constexpr_module_0"],
             ),
         )
-        rendered, imports = _render_constexpr_constants(
-            {"FORMAT": plistlib.FMT_XML}
-        )
+        rendered, imports = _render_constexpr_constants({"FORMAT": plistlib.FMT_XML})
         self.assertEqual(
             repr(rendered["FORMAT"]),
             "__inductor_constexpr_module_0.PlistFormat['FMT_XML']",
         )
-        self.assertEqual(
-            imports, ["import plistlib as __inductor_constexpr_module_0"]
-        )
+        self.assertEqual(imports, ["import plistlib as __inductor_constexpr_module_0"])
 
         class Mode(IntEnum):
             EVEN = 2
@@ -1255,9 +1251,9 @@ def helper(x):
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
     def test_constexpr_triton_dtype_source(self):
-        from torch._inductor.codegen.wrapper import _constexpr_source
-
         import triton.language as tl
+
+        from torch._inductor.codegen.wrapper import _constexpr_source
 
         self.assertEqual(
             _constexpr_source(tl.float32),
@@ -1279,7 +1275,6 @@ def helper(x):
             _constexpr_source,
             _render_constexpr_mappings,
         )
-
         from torch.distributed.fsdp._common_utils import (
             TrainingState as FSDP1TrainingState,
         )
@@ -1403,7 +1398,10 @@ def helper(x):
 
         def fn(x):
             output = torch.empty_like(x)
-            grid = lambda meta: (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
+
+            def grid(meta):
+                return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
+
             enum_kernel[grid](x, output, x.numel())
             return output
 
@@ -1432,9 +1430,7 @@ def helper(x):
 
         def fn(x):
             output = torch.empty_like(x)
-            enum_kernel[(1,)](
-                x, output, x.numel(), plistlib.FMT_XML, BLOCK_SIZE=256
-            )
+            enum_kernel[(1,)](x, output, x.numel(), plistlib.FMT_XML, BLOCK_SIZE=256)
             return output
 
         x = torch.randn(128, device=GPU_TYPE)

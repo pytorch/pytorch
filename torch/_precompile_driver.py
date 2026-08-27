@@ -419,13 +419,17 @@ def _build_dynamo_forward():
     )
 
     if tuple(_DYNAMO_PYTHON_VERSION) != sys.version_info[:2]:
-        raise ValueError(
+        from torch._precompile import PrecompileError
+
+        raise PrecompileError(
             "precompile artifact was produced on Python "
             f"{_DYNAMO_PYTHON_VERSION[0]}.{_DYNAMO_PYTHON_VERSION[1]}, but is "
             f"being loaded on Python {sys.version_info[0]}.{sys.version_info[1]}."
         )
     if _DYNAMO_TORCH_VERSION != torch.__version__:
-        raise ValueError(
+        from torch._precompile import PrecompileError
+
+        raise PrecompileError(
             "precompile artifact was produced by torch "
             f"{_DYNAMO_TORCH_VERSION}, but is being loaded by torch "
             f"{torch.__version__}."
@@ -607,15 +611,6 @@ def _build_dynamo_forward():
                         )
 
     for code_state in state.codes:
-        module = sys.modules.get(code_state.python_module)
-        if module is None:
-            try:
-                module = importlib.import_module(code_state.python_module)
-            except ImportError:
-                module = None
-        if module is not None:
-            for name, value in vars(module).items():
-                namespace.setdefault(name, value)
         for alias, (module_name, path) in code_state.global_bindings.items():
             value = importlib.import_module(module_name)
             for attr in path:
