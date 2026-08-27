@@ -19,6 +19,7 @@
 #include <c10/util/string_view.h>
 
 #include <algorithm>
+#include <vector>
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
@@ -641,6 +642,18 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   }
   auto head_dim_limit = 128;
   auto dprops = at::cuda::getCurrentDeviceProperties();
+  if (TORCH_GUARD_OR_FALSE(s_q.sym_eq(1)) &&
+      is_cudnn_attention_decode_disabled()) {
+    if (debug) {
+      TORCH_WARN(
+          "cuDNN SDPA decode is disabled on SM ",
+          dprops->major,
+          ".",
+          dprops->minor,
+          " for cuDNN versions 9.19-9.25.0 (except 9.24.1)");
+    }
+    return false;
+  }
   const bool is_sm90_or_sm10x =
       (dprops->major == 9 && !dprops->minor) || dprops->major == 10;
   const bool is_unsupported_sm107 =
@@ -927,6 +940,30 @@ bool check_cudnn_deterministic(const sdp_params& params, bool debug) {
 }
 
 } // namespace
+
+// See #193893 and #194927 for reasoning
+// TODO: Remove this and all associated calls/imports when fixed
+bool is_cudnn_attention_decode_disabled() {
+#if AT_CUDNN_ENABLED() && defined(CUDNN_VERSION)
+  static const std::vector<bool> disabled_by_device = [] {
+    const auto cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
+    std::vector<bool> disabled(at::cuda::device_count());
+    // cuDNN versions 9.19-9.25.0 (except 9.24.1) on SM 10.x and 11.x are disabled
+    // This check also allows possible future 9.24 patch versions without a rewrite
+    if (cudnn_version < 91900 || cudnn_version > 92500 || (cudnn_version > 92400 && cudnn_version < 92500)) {
+      return disabled;
+    }
+    for (const auto device : c10::irange(at::cuda::device_count())) {
+      const auto* dprops = at::cuda::getDeviceProperties(device);
+      disabled[device] = dprops->major == 10 || dprops->major == 11;
+    }
+    return disabled;
+  }();
+  return disabled_by_device.at(at::cuda::current_device());
+#else
+  return false;
+#endif
+}
 
 bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
 #if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || !defined(CUDNN_VERSION)
