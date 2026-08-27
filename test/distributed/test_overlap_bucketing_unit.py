@@ -4,7 +4,6 @@ import os
 import tempfile
 import unittest
 
-import torch
 import torch._dynamo
 import torch._dynamo.logging
 import torch._dynamo.test_case
@@ -37,10 +36,6 @@ from torch.utils._ordered_set import OrderedSet
 
 
 aten = torch.ops.aten
-
-from torch.testing._internal.common_fsdp import get_devtype
-
-
 
 import torch
 import torch._dynamo
@@ -1911,7 +1906,7 @@ class TestForeachGroupsUnit(InductorTestCase):
         self.assertTrue(torch.allclose(result_with, result_without))
 
 
-instantiate_device_type_tests(TestForeachGroupsUnit, globals(), except_for="cpu")
+instantiate_device_type_tests(TestForeachGroupsUnit, globals(), except_for="cpu", allow_xpu=True)
 
 
 class TestNodeRuntimeEstimationUnit(InductorTestCase):
@@ -2196,7 +2191,7 @@ class TestCoalescedCollectiveOverlapDevice(InductorTestCase):
         super().tearDownClass()
         dist.destroy_process_group()
 
-    def _make_coalesced_rs_graph(self, num_tensors=3):
+    def _make_coalesced_rs_graph(self, num_tensors=3, device=None):
         """Create an FX graph with a coalesced reduce_scatter and surrounding compute."""
         group_name = dist.distributed_c10d._get_default_group().group_name
 
@@ -2231,7 +2226,7 @@ class TestCoalescedCollectiveOverlapDevice(InductorTestCase):
         """
         from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
 
-        traced = self._make_coalesced_rs_graph(num_tensors=3)
+        traced = self._make_coalesced_rs_graph(num_tensors=3, device=device)
 
         def custom_runtime(node, override_size):
             if "reduce_scatter" in str(node.target):
@@ -2265,7 +2260,7 @@ class TestCoalescedCollectiveOverlapDevice(InductorTestCase):
         """
         from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
 
-        traced = self._make_coalesced_rs_graph(num_tensors=4)
+        traced = self._make_coalesced_rs_graph(num_tensors=4, device=device)
 
         def custom_runtime(node, override_size):
             if "reduce_scatter" in str(node.target):
@@ -2298,7 +2293,7 @@ class TestCoalescedCollectiveOverlapDevice(InductorTestCase):
             gather_node_runtime_estimations,
         )
 
-        traced = self._make_coalesced_rs_graph(num_tensors=3)
+        traced = self._make_coalesced_rs_graph(num_tensors=3, device=device)
 
         def custom_runtime(node, override_size):
             if "reduce_scatter" in str(node.target):
@@ -2324,7 +2319,7 @@ class TestCoalescedCollectiveOverlapDevice(InductorTestCase):
         """
         from torch._inductor.comm_analysis import estimate_fx_collective_size
 
-        traced = self._make_coalesced_rs_graph(num_tensors=2)
+        traced = self._make_coalesced_rs_graph(num_tensors=2, device=device)
 
         rs_nodes = traced.graph.find_nodes(
             op="call_function",
