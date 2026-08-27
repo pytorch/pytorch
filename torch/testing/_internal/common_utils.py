@@ -106,8 +106,17 @@ SEED = 1234
 MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
 MI200_ARCH = ("gfx90a",)
-NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
+NAVI_ARCH = (
+    "gfx1030",
+    "gfx1100",
+    "gfx1101",
+    "gfx1150",
+    "gfx1151",
+    "gfx1200",
+    "gfx1201",
+)
 NAVI3_ARCH = ("gfx1100", "gfx1101")
+NAVI3_5_ARCH = ("gfx1150", "gfx1151")
 NAVI4_ARCH = ("gfx1200", "gfx1201")
 
 class ProfilingMode(Enum):
@@ -1794,6 +1803,7 @@ _dsl_checker = LazyDSLCheck()
 TEST_TRITON_DSL = LazyVal(lambda: _dsl_checker.is_available('triton'))
 TEST_CUTEDSL = LazyVal(lambda: _dsl_checker.is_available('cutedsl'))
 TEST_HELION_DSL = LazyVal(lambda: _dsl_checker.is_available('helion'))
+TEST_FLYDSL = LazyVal(lambda: _dsl_checker.is_available('flydsl'))
 
 def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
@@ -1806,6 +1816,7 @@ skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
 skipIfNoTritonDSL = unittest.skipIf(not TEST_TRITON_DSL, "Triton DSL not available")
 skipIfNoCuteDSL = unittest.skipIf(not TEST_CUTEDSL, "CuTeDSL not available")
 skipIfNoHelionDSL = unittest.skipIf(not TEST_HELION_DSL, "Helion DSL not available")
+skipIfNoFlyDSL = unittest.skipIf(not TEST_FLYDSL, "FlyDSL not available")
 
 def skipIfDSLUnavailable(dsl_name: str, reason: str | None = None):
     """Skip test if specific DSL is not available"""
@@ -1944,6 +1955,7 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     torch.cuda.set_per_process_memory_fraction(round((gb_available - num_procs * .85) / gb_available / num_procs, 2))
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
+requires_xpu = unittest.skipUnless(TEST_XPU, "Requires XPU")
 
 
 def lazy_skip_if(condition_fn, reason):
@@ -1975,6 +1987,11 @@ def lazy_skip_if(condition_fn, reason):
             return fn(*args, **kwargs)
         return wrapper
     return decorator
+
+requires_accelerator = lazy_skip_if(
+    lambda: not torch.accelerator.is_available(),
+    "requires accelerator",
+)
 
 
 def skipIfCrossRef(fn):
