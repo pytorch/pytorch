@@ -298,7 +298,8 @@ void prepareTrace(
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config,
     const std::string& trace_id,
-    const ActivityFilter& activity_filter) {
+    const ActivityFilter& activity_filter,
+    const ProfilerExtensionMap& profiler_extensions) {
 #ifdef USE_KINETO
   libkineto::api().resetKinetoTLS();
   if (!libkineto::api().isProfilerRegistered()) {
@@ -418,9 +419,11 @@ void prepareTrace(
   }
 
   const std::string traceIdStr = setTraceID(trace_id);
+  for (const auto& [name, value] : profiler_extensions) {
+    extraConfig += name + '=' + value + '\n';
+  }
   const std::string configStr =
-      appendCustomConfig(traceIdStr, config.custom_profiler_config) +
-      extraConfig;
+      appendCustomConfig(traceIdStr, config.custom_profiler_config) + extraConfig;
 
   libkineto::api().activityProfiler().prepareTrace(k_activities, configStr);
 #endif // USE_KINETO
@@ -519,6 +522,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
       [[fallthrough]];
     case libkineto::ActivityType::CUDA_SYNC:
     case libkineto::ActivityType::CUDA_PROFILER_RANGE:
+    case libkineto::ActivityType::HARDWARE_COUNTERS:
       return device_type_privateuse1_or(c10::DeviceType::CUDA);
     // TODO: T151322015
     case libkineto::ActivityType::MTIA_CCP_EVENTS:

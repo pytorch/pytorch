@@ -626,6 +626,14 @@ void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities,
     const ActivityFilter& activity_filter) {
+  prepareProfiler(config, activities, activity_filter, ProfilerExtensionMap{});
+}
+
+void prepareProfiler(
+    const torch::profiler::impl::ProfilerConfig& config,
+    const std::set<torch::profiler::impl::ActivityType>& activities,
+    const ActivityFilter& activity_filter,
+    const ProfilerExtensionMap& profiler_extensions) {
   if (config.state == ProfilerState::NVTX ||
       config.state == ProfilerState::ITT) {
     return;
@@ -649,7 +657,8 @@ void prepareProfiler(
       activities,
       config.experimental_config,
       config.trace_id,
-      activity_filter);
+      activity_filter,
+      profiler_extensions);
 
   if (!config.experimental_config.performance_events.empty()) {
     /* For now only CPU activity is supported */
