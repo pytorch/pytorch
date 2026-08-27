@@ -10,7 +10,16 @@
 #include <string>
 #include <string_view>
 
+#if defined(USE_ROCM) && defined(__has_include) && \
+    __has_include(<ATen/ROCmCKSDPAConfig.h>)
 #include <ATen/ROCmCKSDPAConfig.h>
+#endif
+#ifndef AT_ROCM_CK_SDPA_ARCHS
+// Non-CMake builds could define USE_ROCM but not generate this header;
+// empty disables the runtime check.
+#define AT_ROCM_CK_SDPA_ARCHS ""
+#endif
+
 #include <ATen/cpu/FlushDenormal.h>
 
 #ifdef USE_FBGEMM
