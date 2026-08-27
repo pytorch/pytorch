@@ -451,6 +451,30 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
     return fn
 
 
+def _descriptor_functions(obj: Any) -> list[tuple[str, Any]]:
+    """The functions a descriptor wraps, as (attribute name, function) pairs.
+
+    ``getattr`` on the CLASS returns the descriptor itself, not the function
+    inside it, so a code object defined under ``@property`` resolves to a
+    ``property`` object that nothing downstream can descend into. The attribute
+    name is what makes the path round-trip: the loader replays it with plain
+    ``getattr``, and ``property.fget`` is an ordinary attribute.
+    """
+    if isinstance(obj, property):
+        return [
+            (name, fn)
+            for name, fn in (
+                ("fget", obj.fget),
+                ("fset", obj.fset),
+                ("fdel", obj.fdel),
+            )
+            if fn is not None
+        ]
+    if isinstance(obj, functools.cached_property):
+        return [("func", obj.func)] if obj.func is not None else []
+    return []
+
+
 def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
     raise PackageError(
         f"Cannot resolve a fully qualified name for {code}. Lookup scope: {scope}"
@@ -481,7 +505,15 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             if not hasattr(toplevel, part):
                 _raise_resolution_error(code, toplevel)
             toplevel = getattr(toplevel, part)
-            if inspect.isfunction(toplevel) or inspect.ismethod(toplevel):
+            if (
+                inspect.isfunction(toplevel)
+                or inspect.ismethod(toplevel)
+                or _descriptor_functions(toplevel)
+            ):
+                # Stop at a descriptor too, and let _find_code_source unwrap it.
+                # Walking past one cannot work: the remaining parts of a
+                # qualname like "C.prop.<locals>.inner" are not attributes of
+                # the property object.
                 break
     seen = set()
 
@@ -500,6 +532,13 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             for i, const in enumerate(obj.co_consts):
                 if (res := _find_code_source(const)) is not None:
                     return f".co_consts[{i}]{res}"
+
+        for attr, wrapped in _descriptor_functions(obj):
+            if (res := _find_code_source(wrapped)) is not None:
+                # No `toplevel = obj` here: the recursive call sets it to the
+                # wrapped function, whose __qualname__ is the descriptor's own
+                # dotted name, which is what the loader walks to.
+                return f".{attr}{res}"
 
         if inspect.ismethod(obj):
             if (res := _find_code_source(obj.__func__)) is not None:
@@ -544,14 +583,22 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                         value = getattr(obj, name)
                     except AttributeError:
                         continue
+                    # A descriptor is what getattr on the CLASS returns for
+                    # anything defined under @property or @cached_property, so
+                    # excluding it here hides every code object inside one.
+                    wrapped = _descriptor_functions(value)
                     if not (
                         inspect.isfunction(value)
                         or inspect.isclass(value)
                         or inspect.ismethod(value)
+                        or wrapped
                     ):
                         continue
                     if (res := _find_code_source(value)) is not None:
-                        if value.__name__ != name:
+                        # A descriptor has no __name__; the functions it wraps
+                        # carry the attribute's name instead.
+                        actual = wrapped[0][1].__name__ if wrapped else value.__name__
+                        if actual != name:
                             _raise_resolution_error(code, toplevel)
                         return res
         return None
