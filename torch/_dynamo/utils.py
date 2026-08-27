@@ -1308,6 +1308,7 @@ def _unpack_fast_types() -> tuple[type, ...]:
             variables.DequeVariable,
             variables.ListVariable,
             variables.ListIteratorVariable,
+            variables.TupleIteratorVariable,
             variables.DequeIteratorVariable,
             variables.RangeVariable,
             variables.SetVariable,
@@ -2572,6 +2573,7 @@ def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     _copy_dynamo_attr(src, dst, "_dynamo_shape_ids")
     _copy_dynamo_attr(src, dst, "_dynamo_strict_unbacked_indices")
     _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_dynamic_range")
     _copy_dynamo_attr(src, dst, "_dynamo_propagated_dynamic_indices")
     _copy_dynamo_attr(src, dst, "_has_dynamo_dim_marking")
 
@@ -3157,7 +3159,13 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
     if not isinstance(obj, dict):
         raise AssertionError(f"Expected obj to be a dict, got {type(obj)}")
     if istype(obj, (dict, OrderedDict)):
-        return obj.items()
+        # Snapshot into a list rather than returning the live items view. Callers
+        # consume this lazily while building VariableTrackers, and when obj is a
+        # frame-globals dict Dynamo may add or drop its own generated globals
+        # (e.g. __compiled_fn / __resume_at, removed by a CleanupHook firing at
+        # GC time) on that same dict mid-iteration, which a live view would turn
+        # into "dictionary changed size during iteration".
+        return list(obj.items())
     elif isinstance(obj, OrderedDict):
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
@@ -5043,6 +5051,9 @@ def is_compile_supported(device_type: DeviceLikeType) -> Any:
     else:
         compile_supported = False
     return compile_supported
+
+
+is_compile_supported._dynamo_marked_constant = True  # type: ignore[attr-defined]
 
 
 # The following 3.11 source code functions are adapted from
