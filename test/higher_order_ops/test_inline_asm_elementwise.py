@@ -12,6 +12,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch.testing._internal.common_cuda import evaluate_gfx_arch_within, SM70OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -283,6 +285,33 @@ TEST_CASES = [
 TEST_CASE_NAMES = [tc.name for tc in TEST_CASES]
 
 
+def _require_device_triton(device, *, xfail=False):
+    reason = None
+    if not has_triton():
+        reason = "Triton not available"
+    else:
+        try:
+            device_interface = get_interface_for_device(torch.device(device).type)
+        except NotImplementedError:
+            reason = f"Triton not available for {device}"
+        else:
+            if not device_interface.is_triton_capable(device):
+                reason = f"Triton not available for {device}"
+            else:
+                try:
+                    device_interface.raise_if_triton_unavailable(device)
+                except TritonUnavailableError as exc:
+                    reason = str(exc)
+
+    if reason is None:
+        return
+    if xfail:
+        import pytest
+
+        pytest.xfail(reason)
+    raise unittest.SkipTest(reason)
+
+
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
 class TestInlineAsmElementwise(TestCase):
     """Parametrized tests for inline_asm_elementwise."""
@@ -327,8 +356,7 @@ class TestInlineAsmElementwise(TestCase):
             )
 
         # This test always runs torch.compile(inductor); Inductor needs Triton for CUDA.
-        if not has_triton():
-            self.skipTest("Requires Triton")
+        _require_device_triton(device)
 
         torch._dynamo.reset()
         compiled_result = torch.compile(fn, backend="inductor")(*inputs)
@@ -385,8 +413,7 @@ class TestInlineAsmElementwise(TestCase):
             )
 
         if tc.compile_only:
-            if not has_triton():
-                self.skipTest("torch.compile requires Triton")
+            _require_device_triton(device)
             torch._dynamo.reset()
             result = torch.compile(fn, backend="inductor")(*inputs)
         else:
@@ -496,6 +523,8 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
 
     @xfailIfNoAcceleratorTriton
     def test_composition_with_pytorch_ops(self, device):
+        _require_device_triton(device, xfail=True)
+
         def fn(x, y):
             z = x * 2
             w = inline_asm_elementwise(
@@ -581,6 +610,8 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
 
     @xfailIfNoAcceleratorTriton
     def test_dynamic_shapes(self, device):
+        _require_device_triton(device, xfail=True)
+
         def fn(x, y):
             return inline_asm_elementwise(
                 x,
@@ -611,6 +642,8 @@ class TestInlineAsmPackPadding(TestCase):
 
     def test_pack2_xblock1_padding(self, device):
         """Force XBLOCK=1 with pack=2 so padding is needed."""
+        _require_device_triton(device, xfail=True)
+
         from torch._inductor.choices import InductorChoices
         from torch._inductor.codegen.triton import FixedTritonConfig
         from torch._inductor.utils import run_and_get_code
@@ -650,6 +683,8 @@ class TestInlineAsmPackPadding(TestCase):
 
     def test_pack4_xblock1_padding(self, device):
         """Force XBLOCK=1 with pack=4 so padding is needed."""
+        _require_device_triton(device, xfail=True)
+
         from torch._inductor.choices import InductorChoices
         from torch._inductor.codegen.triton import FixedTritonConfig
         from torch._inductor.utils import run_and_get_code
@@ -694,6 +729,8 @@ class TestInlineAsmPackPadding(TestCase):
 
     def test_pack4_xblock2_partial_padding(self, device):
         """XBLOCK=2 < pack=4, so 1 round of padding is needed (not 2)."""
+        _require_device_triton(device, xfail=True)
+
         from torch._inductor.choices import InductorChoices
         from torch._inductor.codegen.triton import FixedTritonConfig
         from torch._inductor.utils import run_and_get_code
@@ -738,6 +775,8 @@ class TestInlineAsmPackPadding(TestCase):
 
     def test_pack2_xblock1_yblock1_padding(self, device):
         """Force XBLOCK=1, YBLOCK=1 with pack=2 on a 2D-tiled kernel."""
+        _require_device_triton(device, xfail=True)
+
         from torch._inductor.choices import InductorChoices
         from torch._inductor.codegen.triton import FixedTritonConfig
         from torch._inductor.utils import run_and_get_code
