@@ -4134,6 +4134,70 @@ class TestPrecompile(TestCase):
         path = _offending_value_path(state, holder.deep.it)
         self.assertIn("local_scope['p'].deep.it", path)
 
+    def test_unpicklable_value_reachable_only_through_a_global_is_named(self):
+        # pickle_guards_state empties global_scope before dumping, so a walk
+        # that reads the scope afterwards finds nothing and the error arrives as
+        # a bare type name. Capturing the roots first is what keeps a value
+        # reachable only through a global nameable -- which is how a real
+        # "cannot pickle '_thread.RLock' object" arrived with no path at all.
+        from torch._dynamo.guards import _offending_value_path, _scope_roots
+
+        class _Scope:
+            pass
+
+        holder = _Scope()
+        holder.cfg = _Scope()
+        holder.cfg.lock = threading.RLock()
+        state = _Scope()
+        state.output_graph = _Scope()
+        state.output_graph.local_scope = {}
+        state.output_graph.global_scope = {"CFG": holder}
+
+        roots = _scope_roots(state.output_graph)
+        state.output_graph.global_scope = {}  # what the pruning does
+
+        self.assertEqual(_offending_value_path(state, holder.cfg.lock), "")
+        self.assertIn(
+            "global_scope['CFG'].cfg.lock",
+            _offending_value_path(state, holder.cfg.lock, roots),
+        )
+
+    def test_unpicklable_value_outside_both_scopes_is_named(self):
+        # What gets pickled is `state`; the two scopes are a handful of objects
+        # off it. A real capture failed on a lock held by a compiler internal
+        # reachable from the guards, not from either scope, so preserving the
+        # scopes perfectly still found nothing. The walk has to start where the
+        # pickler starts.
+        from torch._dynamo.guards import _offending_value_path, _scope_roots
+
+        class _Scope:
+            pass
+
+        state = _Scope()
+        state.output_graph = _Scope()
+        state.output_graph.local_scope = {"x": _Scope()}
+        state.output_graph.global_scope = {"g": _Scope()}
+        internal = _Scope()
+        internal.lock = threading.RLock()
+        state.output_graph.guards = [internal]
+
+        roots = _scope_roots(state.output_graph)
+        self.assertEqual(len(roots), 2)
+        self.assertIn(
+            "state.output_graph.guards[0].lock",
+            _offending_value_path(state, internal.lock, roots),
+        )
+
+        # Reachable both ways: the short, readable scope path still wins, so
+        # rooting at state does not make the common report worse.
+        shared = threading.RLock()
+        state.output_graph.local_scope["x"].it = shared
+        state.output_graph.guards.append(shared)
+        self.assertIn(
+            "local_scope['x'].it",
+            _offending_value_path(state, shared, _scope_roots(state.output_graph)),
+        )
+
     def test_offending_value_path_never_masks_the_real_error(self):
         # It is a diagnostic appended to an error already being raised, so any
         # failure inside it must stay silent.
