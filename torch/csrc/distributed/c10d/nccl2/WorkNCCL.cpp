@@ -19,6 +19,10 @@
 
 namespace c10d::nccl2 {
 
+namespace {
+std::atomic<uint64_t> nextCompletionKey{1};
+} // namespace
+
 WorkNCCL::WorkNCCL(
     ProcessGroupNCCL* comm,
     cudaStream_t stream,
@@ -32,7 +36,9 @@ WorkNCCL::WorkNCCL(
           at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
       work_start_time_(std::chrono::steady_clock::now()),
       timeout_ms_(timeout_ms),
-      timing_enabled_(comm->collectivesTimingEnabled()) {
+      timing_enabled_(comm->collectivesTimingEnabled()),
+      completionKey_(
+          nextCompletionKey.fetch_add(1, std::memory_order_relaxed)) {
   start_event_ = comm_->getEvent(timing_enabled_);
   end_event_ = comm_->getEvent(timing_enabled_);
   future_work_result_ =
@@ -52,7 +58,9 @@ WorkNCCL::WorkNCCL(
           at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
       work_start_time_(std::chrono::steady_clock::now()),
       timeout_ms_(timeout_ms),
-      timing_enabled_(comm->collectivesTimingEnabled()) {
+      timing_enabled_(comm->collectivesTimingEnabled()),
+      completionKey_(
+          nextCompletionKey.fetch_add(1, std::memory_order_relaxed)) {
   start_event_ = comm_->getEvent(timing_enabled_);
   end_event_ = comm_->getEvent(timing_enabled_);
   future_work_result_ =
@@ -154,7 +162,7 @@ void WorkNCCL::notifyCompletion() {
           << "Cannot measure collective duration: " << e.what();
     }
   }
-  comm_->runCompletionHooks(this, duration);
+  comm_->runCompletionHooks(completionKey_, duration);
 }
 
 WorkNCCL::WorkStatus WorkNCCL::checkStatus(
@@ -342,6 +350,10 @@ float WorkNCCL::getDuration() const {
 
 uint64_t WorkNCCL::getSequencenumber() const {
   return seq_;
+}
+
+uint64_t WorkNCCL::getCompletionKey() const {
+  return completionKey_;
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
