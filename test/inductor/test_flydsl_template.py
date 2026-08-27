@@ -541,7 +541,7 @@ class TestFlyDSLTemplate(TestCase):
         max_autotune_gemm=True,
         max_autotune_gemm_backends="FLYDSL",
     )
-    def test_flydsl_gemm_all_layouts_e2e(self):
+    def test_flydsl_gemm_all_layouts_accuracy(self):
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
         if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
@@ -550,16 +550,10 @@ class TestFlyDSLTemplate(TestCase):
         m = n = 64
         k = 96
         dtype = torch.bfloat16
-        for a_is_transposed, b_is_transposed in (
-            (False, False),
-            (False, True),
-            (True, False),
-            (True, True),
-        ):
-            layout_name = ("t" if a_is_transposed else "n") + (
-                "t" if b_is_transposed else "n"
-            )
-            with self.subTest(layout=layout_name):
+        for layout in ("nn", "nt", "tn", "tt"):
+            a_is_transposed = layout[0] == "t"
+            b_is_transposed = layout[1] == "t"
+            with self.subTest(layout=layout):
                 a = (
                     torch.randn(k, m, device="cuda", dtype=dtype).t()
                     if a_is_transposed
