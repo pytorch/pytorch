@@ -33,6 +33,7 @@ from torch._functorch._aot_autograd.autograd_cache import (
     autograd_cache_key,
     BypassAOTAutogradCache,
     check_cacheable,
+    normalize_placeholder_names,
     sanitize_gm_for_cache,
 )
 from torch._functorch._aot_autograd.schemas import AOTConfig, CacheableAOTConfig
@@ -3511,6 +3512,7 @@ class _MockEntryForPickleTest:
 
 
 @inductor_config.patch("fx_graph_cache", True)
+@instantiate_parametrized_tests
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
     @property
     def device_type(self) -> str:
@@ -3568,6 +3570,118 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                     None,
                     act_input_paths=act_input_paths,
                 )
+
+    # (name, is_symint), interleaved so that normalization has to number SymInt
+    # and tensor placeholders with independent counters.
+    _PLACEHOLDERS = (
+        ("sym_a", True),
+        ("tensor_a", False),
+        ("sym_b", True),
+        ("tensor_b", False),
+    )
+    _NORMALIZED = [("s_0", "s_0"), ("p_0", "p_0"), ("s_1", "s_1"), ("p_1", "p_1")]
+
+    def _placeholder_graph(self, spec=_PLACEHOLDERS):
+        graph = torch.fx.Graph()
+        outputs = [
+            graph.placeholder(name, type_expr=torch.SymInt)
+            if is_symint
+            else graph.placeholder(name)
+            for name, is_symint in spec
+        ]
+        graph.output(tuple(outputs))
+        return torch.fx.GraphModule({}, graph)
+
+    def _placeholder_state(self, gm):
+        """Placeholder names, code and namespace state, so one assertEqual covers restore."""
+        return (
+            [
+                (node.name, node.target)
+                for node in gm.graph.find_nodes(op="placeholder", sort=True)
+            ],
+            gm.code,
+            copy.copy(gm.graph._graph_namespace._used_names),
+        )
+
+    def _hash_placeholder_graph(self, gm, normalize_inputs):
+        before = self._placeholder_state(gm)
+        with functorch_config.patch(
+            {"autograd_cache_normalize_inputs": normalize_inputs}
+        ):
+            with sanitize_gm_for_cache(gm):
+                result = AOTAutogradCachePickler(gm).get_hash(gm)
+        self.assertEqual(self._placeholder_state(gm), before)
+        return result
+
+    @parametrize("normalize_inputs", (False, True))
+    def test_placeholder_names_in_cache_key(self, normalize_inputs):
+        gm = self._placeholder_graph()
+        original_hash = self._hash_placeholder_graph(gm, normalize_inputs)
+
+        for i, node in enumerate(gm.graph.find_nodes(op="placeholder", sort=True)):
+            new_name = f"renamed_{i}"
+            node.target = new_name
+            node._rename(new_name)
+        gm.recompile()
+
+        renamed_hash = self._hash_placeholder_graph(gm, normalize_inputs)
+        if normalize_inputs:
+            self.assertEqual(original_hash, renamed_hash)
+        else:
+            self.assertNotEqual(original_hash, renamed_hash)
+
+    def test_placeholder_names_are_normalized_in_order(self):
+        gm = self._placeholder_graph()
+        before = self._placeholder_state(gm)
+        with functorch_config.patch({"autograd_cache_normalize_inputs": True}):
+            with normalize_placeholder_names(gm):
+                self.assertEqual(self._placeholder_state(gm)[0], self._NORMALIZED)
+                for name, _ in self._PLACEHOLDERS:
+                    self.assertNotIn(name, gm.code)
+        self.assertEqual(self._placeholder_state(gm), before)
+
+    def test_placeholder_name_normalization_restores_graph_after_exception(self):
+        gm = self._placeholder_graph()
+        before = self._placeholder_state(gm)
+
+        with (
+            functorch_config.patch({"autograd_cache_normalize_inputs": True}),
+            self.assertRaisesRegex(RuntimeError, "test exception"),
+        ):
+            with normalize_placeholder_names(gm):
+                self.assertEqual(self._placeholder_state(gm)[0], self._NORMALIZED)
+                raise RuntimeError("test exception")
+
+        self.assertEqual(self._placeholder_state(gm), before)
+
+    def test_placeholder_name_normalization_restores_colliding_names(self):
+        gm = self._placeholder_graph(
+            (("s_1", True), ("s_0", True), ("p_1", False), ("p_0", False))
+        )
+        before = self._placeholder_state(gm)
+        with functorch_config.patch({"autograd_cache_normalize_inputs": True}):
+            with normalize_placeholder_names(gm):
+                names = self._placeholder_state(gm)[0]
+                # Guard against this fixture silently ceasing to collide.
+                self.assertTrue(any(name != target for name, target in names))
+        self.assertEqual(self._placeholder_state(gm), before)
+
+    def test_placeholder_name_normalization_with_no_placeholders(self):
+        gm = self._placeholder_graph(())
+        before = self._placeholder_state(gm)
+        with functorch_config.patch({"autograd_cache_normalize_inputs": True}):
+            with normalize_placeholder_names(gm):
+                self.assertEqual(self._placeholder_state(gm)[0], [])
+        self.assertEqual(self._placeholder_state(gm), before)
+
+    def test_placeholder_name_normalization_skips_module_without_graph(self):
+        # Standalone inductor bypasses the cache and hands over a module with no
+        # graph; normalization must no-op rather than raise.
+        module = torch.nn.Module()
+        with functorch_config.patch({"autograd_cache_normalize_inputs": True}):
+            with normalize_placeholder_names(module):
+                pass
+        self.assertFalse(hasattr(module, "graph"))
 
     @functorch_config.patch({"bypass_autograd_cache_key": True})
     def test_fallback_nonce_cache_dirs_are_unique(self):
