@@ -13,7 +13,7 @@ from unittest import mock
 from sympy import I, Max, Min, Symbol, sympify
 
 import torch
-from torch._dynamo.device_interface import DeviceInterface
+from torch._dynamo.device_interface import DeviceInterface, get_interface_for_device
 from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
@@ -347,6 +347,18 @@ class TestDeviceTflops(TestCase):
     @xfailIfNoAcceleratorTriton
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     def test_get_device_tflops(self, device, dtype):
+        device_interface = get_interface_for_device(torch.device(device).type)
+        if not device_interface.is_triton_capable(device):
+            import pytest
+
+            pytest.xfail(f"Triton not available for {device}")
+        try:
+            device_interface.raise_if_triton_unavailable(device)
+        except TritonUnavailableError as exc:
+            import pytest
+
+            pytest.xfail(str(exc))
+
         with torch.cuda.device(device):
             ret = get_device_tflops(dtype)
         self.assertTrue(type(ret) is float)
