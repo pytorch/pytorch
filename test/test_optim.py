@@ -148,10 +148,7 @@ def _nadam_reference_pre_patch(
     differentiable,
     has_complex,
 ):
-    """Verbatim _single_tensor_nadam from main (pre-patch).
-    The only difference: .sqrt() instead of .sqrt_() on denom.
-    Pulled from: git show main:torch/optim/nadam.py
-    """
+    """Pre-patch copy of _single_tensor_nadam -- uses .sqrt() instead of .sqrt_()."""
     from torch.optim.optimizer import (
         _get_capturable_supported_devices,
         _get_value,
@@ -203,7 +200,7 @@ def _nadam_reference_pre_patch(
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
         denom = exp_avg_sq.div(
             bias_correction2
-        ).sqrt()  # PRE-PATCH: .sqrt() not .sqrt_()
+        ).sqrt()  # pre-patch: .sqrt() not .sqrt_()
 
         if differentiable or capturable:
             denom = denom.add(eps)
@@ -243,11 +240,7 @@ def _rprop_reference_pre_patch(
     differentiable,
     has_complex,
 ):
-    """Verbatim _single_tensor_rprop from main (pre-patch).
-    Differences: .sign() not .sign_(), copy_(where(...)) not where() directly,
-    copy_(where(...,0,grad)) not masked_fill_().
-    Pulled from: git show main:torch/optim/rprop.py
-    """
+    """Rprop before the in-place rewrite -- .sign(), sequential copy_(where(...)) calls, no masked_fill_."""
     from torch.optim.optimizer import _get_capturable_supported_devices
 
     for i, param in enumerate(params):
@@ -277,14 +270,14 @@ def _rprop_reference_pre_patch(
             step_size = torch.view_as_real(step_size)
 
         if differentiable:
-            sign = grad.mul(prev.clone()).sign()  # PRE-PATCH: .sign() not .sign_()
+            sign = grad.mul(prev.clone()).sign()  # pre-patch: .sign() not .sign_()
         else:
             sign = grad.mul(prev).sign()
 
         if capturable:
             sign.copy_(
                 torch.where(sign.gt(0), etaplus, sign)
-            )  # PRE-PATCH: copy_(where)
+            )  # pre-patch: copy_(where)
             sign.copy_(torch.where(sign.lt(0), etaminus, sign))
             sign.copy_(torch.where(sign.eq(0), 1, sign))
         else:
@@ -298,7 +291,7 @@ def _rprop_reference_pre_patch(
         if capturable:
             grad.copy_(
                 torch.where(sign.eq(etaminus), 0, grad)
-            )  # PRE-PATCH: copy_(where)
+            )  # pre-patch: copy_(where)
         else:
             grad[sign.eq(etaminus)] = 0
 
@@ -328,12 +321,7 @@ def _adam_reference_pre_patch(
     differentiable,
     decoupled_weight_decay,
 ):
-    """Verbatim _single_tensor_adam from main (pre-patch).
-
-    The only difference: out-of-place denom chain (.sqrt() / .add_())
-    instead of in-place (.sqrt_() / .div_() / .add_()).
-    Pulled from: git show main:torch/optim/adam.py
-    """
+    """Adam denom chain before the in-place split -- out-of-place sqrt/div/add."""
     from torch import Tensor
     from torch.optim.optimizer import (
         _get_capturable_supported_devices,
@@ -456,12 +444,12 @@ def _adam_reference_pre_patch(
 
                 max_exp_avg_sqs[i].copy_(torch.maximum(max_exp_avg_sq, exp_avg_sq))
 
-                # PRE-PATCH: out-of-place denom chain
+                # pre-patch: out-of-place denom chain
                 denom = (
                     max_exp_avg_sqs[i].sqrt() / (bias_correction2_sqrt * step_size_neg)
                 ).add_(eps / step_size_neg)
             else:
-                # PRE-PATCH: out-of-place denom chain
+                # pre-patch: out-of-place denom chain
                 denom = (
                     exp_avg_sq.sqrt() / (bias_correction2_sqrt * step_size_neg)
                 ).add_(eps / step_size_neg)
@@ -3117,6 +3105,7 @@ class TestOptimRenewed(TestCase):
             expected,
         )
 
+
     # In-place rewrite tests (perf/optimizer-memory-eager-loop)
 
     @optims(
@@ -3136,7 +3125,7 @@ class TestOptimRenewed(TestCase):
         rewrite: the denom chain in the capturable branch. At N=1024, the
         pre-patch code allocates one extra param-sized intermediate that the
         in-place rewrite eliminates. The tight budget (2x param) catches this
-        because it excludes state bytes — which are already allocated before
+        because it excludes state bytes - which are already allocated before
         measurement begins and would otherwise absorb the difference.
         """
         N = 1024
@@ -3169,11 +3158,7 @@ class TestOptimRenewed(TestCase):
                 f"Peak {peak - baseline} exceeds budget {budget} for {optim_cls.__name__}",
             )
 
-            # Tight assertion: catch regression of in-place rewrite.
-            # The rewrite eliminates one param-sized intermediate in the
-            # capturable denom chain (Adam/AdamW only). This assertion
-            # excludes state bytes (already allocated before measurement)
-            # to create a tight bound that would reject the pre-patch code.
+            # Excludes state bytes so a reverted rewrite would fail this, not just the loose budget above.
             if (
                 optim_cls.__name__ in ("Adam", "AdamW")
                 and kwargs.get("capturable")
@@ -3199,7 +3184,7 @@ class TestOptimRenewed(TestCase):
             N = 128
             shape = (N,)
 
-            # ---- NAdam: denom sqrt chain (.sqrt vs .sqrt_) ----
+            # NAdam denom sqrt chain
             for differentiable in [False, True]:
                 torch.manual_seed(42)
                 p_shipped = torch.rand(shape, dtype=dtype)
@@ -3256,7 +3241,7 @@ class TestOptimRenewed(TestCase):
                     msg=f"NAdam dtype={dtype}, differentiable={differentiable}",
                 )
 
-            # ---- Rprop: sign chain (.sign vs .sign_), where, masked_fill ----
+            # Rprop sign chain
             for differentiable in [False, True]:
                 torch.manual_seed(42)
                 N = 64
@@ -3308,10 +3293,8 @@ class TestOptimRenewed(TestCase):
                     msg=f"Rprop dtype={dtype}, differentiable={differentiable}",
                 )
 
-            # ---- Adam: denom chain (.sqrt() / .add_() vs .sqrt_() / .div_() / .add_()) ----
-            # The Adam in-place rewrite only changes the capturable branch,
-            # so we must use capturable=True to exercise the changed code.
-            # capturable=True requires CUDA.
+            # Adam denom chain
+            # Only capturable=True (CUDA) exercises the changed Adam branch.
             if device == "cuda" and dtype == torch.float32:
                 from torch.optim.adam import _single_tensor_adam
 
@@ -3430,14 +3413,14 @@ class TestOptimRenewed(TestCase):
                     msg="Adam capturable amsgrad",
                 )
 
-            # ---- Algebraic trap: div then sqrt vs sqrt then div (order matters) ----
+            # Algebraic trap: div then sqrt vs sqrt then div
             x2 = torch.tensor([4.0], dtype=dtype)
             correct = x2.div(0.25).sqrt()
             wrong = x2.sqrt().div_(0.25)
             self.assertNotEqual(correct, wrong)
 
     def test_diff_gradcheck_adam(self, device):
-        """Differentiable-path gradcheck for Adam."""
+        """Gradcheck on Adam differentiable path, including amsgrad max_exp_avg_sq."""
         state = {
             "step": torch.tensor(10.0, requires_grad=False, dtype=torch.float64),
             "exp_avg": torch.rand(10, requires_grad=True, dtype=torch.float64),
@@ -3460,7 +3443,7 @@ class TestOptimRenewed(TestCase):
         )
 
     def test_diff_gradcheck_nadam(self, device):
-        """Differentiable-path gradcheck for NAdam."""
+        """Gradcheck on NAdam differentiable path, including the mu_product state."""
         state = {
             "step": torch.tensor(10.0, requires_grad=False, dtype=torch.float64),
             "exp_avg": torch.rand(10, requires_grad=True, dtype=torch.float64),
@@ -3483,7 +3466,7 @@ class TestOptimRenewed(TestCase):
         )
 
     def test_diff_gradcheck_rprop(self, device):
-        """Differentiable-path gradcheck for Rprop."""
+        """Gradcheck on Rprop differentiable path, covering step_size and prev states."""
         state = {
             "step": torch.tensor(10.0, requires_grad=False, dtype=torch.float64),
             "prev": torch.rand(10, requires_grad=True, dtype=torch.float64),
