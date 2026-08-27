@@ -250,9 +250,23 @@ def do_mma(a, b, accumulator):
             # Move across tiles
             while tidx >= iterated_tiles and tidx < iterated_tiles + num_tiles:
                 gidx = tidx - iterated_tiles
+{%- if GROUP_M is defined and GROUP_M %}
+                # Sweep GROUP_M m-tiles across all of N before advancing in M.
+                # Splitting M first alone makes an A tile's reuse distance the
+                # whole group slab, so once that slab outgrows last-level cache
+                # every n-tile pass re-reads all of A from memory. Grouping caps
+                # the live A rows at GROUP_M * BLOCK_M.
+                tiles_per_group = GROUP_M * num_n_tiles
+                first_m_tile = (gidx // tiles_per_group) * GROUP_M
+                group_m = min(num_m_tiles - first_m_tile, GROUP_M)
+                in_group = gidx % tiles_per_group
+                tile_m_idx = first_m_tile + in_group % group_m
+                tile_n_idx = in_group // group_m
+{%- else %}
                 # Split M first and N second.
                 tile_m_idx = gidx % num_m_tiles
                 tile_n_idx = gidx // num_m_tiles
+{%- endif %}
 
                 accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 
