@@ -140,7 +140,11 @@ class WorkNCCL : public c10d::Work {
     c10::intrusive_ptr<c10::ivalue::Future> futureWorkResult;
     bool hostBlocking{false};
   };
-  void notifyCompletion();
+  struct TrackedWork {
+    std::shared_ptr<State> state;
+    std::shared_ptr<InputTensorShelf> inputTensors;
+  };
+
   // Poll the CUDA events and advance status; used by the GC queue + watchdog.
   WorkStatus checkStatus(
       std::optional<std::chrono::milliseconds> timeout = std::nullopt);
@@ -164,16 +168,19 @@ class WorkNCCLQueue {
   WorkNCCL::WorkStatus garbageCollect();
   // Finalize function can only be called from the main thread
   WorkNCCL::WorkStatus finalize();
-  void enqueueWork(c10::intrusive_ptr<WorkNCCL> work, cudaStream_t stream);
+  void enqueueWork(
+      const c10::intrusive_ptr<WorkNCCL>& work,
+      cudaStream_t stream);
 
  private:
-  // completed collects the works retired as COMPLETED, so the caller can push
+  // completed collects the states retired as COMPLETED, so the caller can push
   // their completion out after dropping work_queues_mutex_.
   WorkNCCL::WorkStatus garbageCollectLocked(
-      std::vector<c10::intrusive_ptr<WorkNCCL>>& completed);
-  std::unordered_map<cudaStream_t, std::queue<c10::intrusive_ptr<WorkNCCL>>>
+      std::vector<std::shared_ptr<WorkNCCL::State>>& completed);
+  std::unordered_map<cudaStream_t, std::queue<WorkNCCL::TrackedWork>>
       stream_work_queues_;
-  std::queue<c10::intrusive_ptr<WorkNCCL>> completed_work_queue_;
+  std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>>
+      completedInputTensors_;
   std::mutex work_queues_mutex_;
 };
 

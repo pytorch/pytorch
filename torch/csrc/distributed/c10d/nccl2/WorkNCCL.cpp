@@ -189,10 +189,6 @@ void WorkNCCL::State::notifyCompletion() {
   comm->runCompletionHooks(completionKey, duration);
 }
 
-void WorkNCCL::notifyCompletion() {
-  state_->notifyCompletion();
-}
-
 WorkNCCL::WorkStatus WorkNCCL::status() const {
   return state_->status();
 }
@@ -317,8 +313,11 @@ bool WorkNCCL::isSuccess() const {
 
 void WorkNCCL::synchronizeInternal() {
   WorkStatus local_state = status();
-  if (local_state == WorkStatus::COMPLETED ||
-      local_state == WorkStatus::ERROR || local_state == WorkStatus::TIMEDOUT) {
+  if (local_state == WorkStatus::COMPLETED) {
+    inputTensors_->clear();
+    return;
+  }
+  if (local_state == WorkStatus::ERROR || local_state == WorkStatus::TIMEDOUT) {
     return;
   }
 
