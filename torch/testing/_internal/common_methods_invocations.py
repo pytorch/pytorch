@@ -787,6 +787,22 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': False})
 
 
+def sample_inputs_nextafter(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
+
+    # nextafter is defined on bit patterns; backends that flush subnormals return
+    # the wrong value there and random samples never reach that range.
+    if dtype is not torch.bfloat16:
+        return
+    bits = torch.tensor([1, 2, 3, 7, -32767, -32766, 0, -32768], dtype=torch.int16)
+    lhs = bits.view(torch.bfloat16).to(device)
+    for to in (1.0, -1.0, 0.0):
+        yield SampleInput(
+            lhs.clone().requires_grad_(requires_grad),
+            args=(torch.full_like(lhs, to),),
+        )
+
+
 def sample_inputs_ldexp(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(
         op_info, device, dtype, requires_grad, **kwargs
@@ -17581,6 +17597,7 @@ op_db: list[OpInfo] = [
     ),
     BinaryUfuncInfo('nextafter',
                     dtypes=floating_types_and(torch.bfloat16, torch.half),
+                    sample_inputs_func=sample_inputs_nextafter,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=False),
