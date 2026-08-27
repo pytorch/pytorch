@@ -840,6 +840,8 @@ class TestStatelessRNGCompile(TestCase):
 
 
 class TestStatelessRNGInteger(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize("dtype", all_int_dtypes)
     def test_basic_shape_and_dtype(self, device, dtype):
         key = random.key(42, device=device)
@@ -1166,22 +1168,12 @@ class TestStatelessRNGInteger(TestCase):
         )
 
 
-instantiate_device_type_tests(TestStatelessRNGKey, globals(), only_for=("cpu", "cuda"))
-instantiate_device_type_tests(
-    TestStatelessRNGKeySplit, globals(), only_for=("cpu", "cuda")
-)
-instantiate_device_type_tests(
-    TestStatelessRNGKeyFoldIn, globals(), only_for=("cpu", "cuda")
-)
-instantiate_device_type_tests(
-    TestStatelessRNGDistribution, globals(), only_for=("cpu", "cuda")
-)
-instantiate_device_type_tests(
-    TestStatelessRNGCompile, globals(), only_for=("cpu", "cuda")
-)
-instantiate_device_type_tests(
-    TestStatelessRNGInteger, globals(), only_for=("cpu", "cuda")
-)
+instantiate_device_type_tests(TestStatelessRNGKey, globals())
+instantiate_device_type_tests(TestStatelessRNGKeySplit, globals())
+instantiate_device_type_tests(TestStatelessRNGKeyFoldIn, globals())
+instantiate_device_type_tests(TestStatelessRNGDistribution, globals())
+instantiate_device_type_tests(TestStatelessRNGCompile, globals())
+instantiate_device_type_tests(TestStatelessRNGInteger, globals())
 
 
 if __name__ == "__main__":
