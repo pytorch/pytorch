@@ -165,37 +165,85 @@ def _backend_ids_from_code(code: types.CodeType) -> Iterator[_BackendId]:
             yield from _backend_ids_from_code(const)
 
 
+class _CompressedContent:
+    def __get__(
+        self, instance: object | None, owner: type[object] | None = None
+    ) -> str:
+        if instance is None:
+            raise AttributeError
+        compressed_content = object.__getattribute__(instance, "_compressed_content")
+        if not isinstance(compressed_content, bytes):
+            actual_type = type(compressed_content)
+            raise TypeError(
+                f"Expected compressed content to be bytes, got {actual_type}"
+            )
+        return zlib.decompress(compressed_content).decode()
+
+    def __set__(self, instance: object, content: str) -> None:
+        object.__setattr__(
+            instance, "_compressed_content", zlib.compress(content.encode())
+        )
+
+
+_COMPRESSED_CONTENT = _CompressedContent()
+
+
 @dataclasses.dataclass(frozen=True)
 class InlinedSource:
     module: str
     firstlineno: int
     lastlineno: int
     checksum: str
-    content_hash: str
-    _compressed_content: bytes = dataclasses.field(repr=False)
+    content: str = _COMPRESSED_CONTENT
+    content_hash: str = ""
 
-    @property
-    def content(self) -> str:
-        return zlib.decompress(self._compressed_content).decode()
+    def __post_init__(self) -> None:
+        if not self.content_hash:
+            object.__setattr__(self, "content_hash", _hash_source(self.content))
+
+    @classmethod
+    def _from_compressed_content(
+        cls,
+        module: str,
+        firstlineno: int,
+        lastlineno: int,
+        checksum: str,
+        compressed_content: bytes,
+        content_hash: str,
+    ) -> "InlinedSource":
+        result = object.__new__(cls)
+        object.__setattr__(result, "module", module)
+        object.__setattr__(result, "firstlineno", firstlineno)
+        object.__setattr__(result, "lastlineno", lastlineno)
+        object.__setattr__(result, "checksum", checksum)
+        object.__setattr__(result, "_compressed_content", compressed_content)
+        object.__setattr__(result, "content_hash", content_hash)
+        return result
+
+    def __getstate__(self) -> dict[str, object]:
+        return {
+            "module": self.module,
+            "firstlineno": self.firstlineno,
+            "lastlineno": self.lastlineno,
+            "checksum": self.checksum,
+            "content": self.content,
+            "content_hash": self.content_hash,
+        }
 
     def __setstate__(self, state: dict[str, object]) -> None:
-        if "content" in state:
-            state = state.copy()
-            content = state.pop("content")
-            if not isinstance(content, str):
-                raise TypeError(f"Expected content to be str, got {type(content)}")
-            state["_compressed_content"] = zlib.compress(content.encode())
-        if "content_hash" not in state:
-            compressed_content = state["_compressed_content"]
-            if not isinstance(compressed_content, bytes):
-                raise TypeError(
-                    f"Expected compressed content to be bytes, got {type(compressed_content)}"
-                )
-            state["content_hash"] = _hash_source(
-                zlib.decompress(compressed_content).decode()
-            )
+        state = state.copy()
+        content = state.pop("content")
+        if not isinstance(content, str):
+            raise TypeError(f"Expected content to be str, got {type(content)}")
+        content_hash = state.pop("content_hash", None)
+        if content_hash is None:
+            content_hash = _hash_source(content)
+        if not isinstance(content_hash, str):
+            raise TypeError(f"Expected content hash to be str, got {type(content_hash)}")
         for name, value in state.items():
             object.__setattr__(self, name, value)
+        _COMPRESSED_CONTENT.__set__(self, content)
+        object.__setattr__(self, "content_hash", content_hash)
 
 
 @functools.cache
@@ -222,13 +270,13 @@ class SourceInfo:
             )
         compressed_content, content_hash = _get_module_source(module)
         self.inlined_sources.add(
-            InlinedSource(
+            InlinedSource._from_compressed_content(
                 module=module.__name__,
                 firstlineno=firstlineno,
                 lastlineno=lastlineno,
                 checksum=_hash_source(source),
                 content_hash=content_hash,
-                _compressed_content=compressed_content,
+                compressed_content=compressed_content,
             )
         )
 
