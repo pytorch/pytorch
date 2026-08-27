@@ -923,12 +923,14 @@ def mark_kernels(annotation: str | dict[str, Any], *, backward: bool = True):
         yield
 
     tools_ids = _end_kernel_scope(scope)
+    print(f"[fqn_debug] mark_kernels({annotation!r}): tools_ids={tools_ids}")
     if tools_ids:
         _pending_scopes.append((annotation, tools_ids))
 
 
 def resolve_pending_annotations() -> None:
     """Resolve pending scope toolsIds into kernel annotations."""
+    print(f"[fqn_debug] resolve_pending_annotations: _pending_scopes={len(_pending_scopes)}")
     if not _pending_scopes:
         return
 
