@@ -147,7 +147,10 @@ class ConstDictVariable(VariableTracker):
             return key if isinstance(key, Hashable) else Hashable(key)
 
         items_cls = cast(type, self._cpython_type)
-        self.items = items_cls({make_hashable(x): v for x, v in items.items()})
+        storage_cls = dict if items_cls is collections.defaultdict else items_cls
+        self.items: dict[HashableTracker, VariableTracker] = storage_cls(
+            {make_hashable(x): v for x, v in items.items()}
+        )
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = (
@@ -155,9 +158,8 @@ class ConstDictVariable(VariableTracker):
         )
         self.original_items = items.copy()
         # Re-entrancy guard for is_python_constant against self-referential
-        # dicts (d[k] = d, directly or via an OrderedDict/defaultdict wrapper
-        # whose _base_vt is this instance). Both forms re-enter this same
-        # instance's is_python_constant, so a per-instance flag suffices.
+        # dicts. Both forms re-enter this same instance's is_python_constant, so
+        # a per-instance flag suffices.
         self._checking_python_constant = False
 
     def as_proxy(self) -> dict[Any, Any]:
@@ -175,10 +177,9 @@ class ConstDictVariable(VariableTracker):
         # Avoid the base implementation, which probes as_python_constant() and
         # thus rebuilds a real dict, re-hashing the keys (wrong for keys with a
         # side-effecting __hash__).  Check element constness directly instead.
-        # Re-entrancy guard: a self-referential dict (d[k] = d, directly or via
-        # an OrderedDict/defaultdict wrapper delegating to this _base_vt) would
-        # otherwise recurse forever. A cyclic dict is not a flat python
-        # constant; return False so reconstruct handles the cycle.
+        # Re-entrancy guard: a self-referential dict would otherwise recurse
+        # forever. A cyclic dict is not a flat python constant; return False so
+        # reconstruct handles the cycle.
         if self._checking_python_constant:
             return False
         self._checking_python_constant = True
@@ -490,7 +491,7 @@ class ConstDictVariable(VariableTracker):
         if self.source and not is_constant_source(self.source):
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
             tx.output.guard_on_key_order.add(self.source)
-        return DictIterator(self.items.keys())
+        return DictIterator(self.items)
 
     def tp_init_impl(
         self,
@@ -546,6 +547,14 @@ class ConstDictVariable(VariableTracker):
             tx.output.guard_on_key_order.add(self.source)
         return DictValuesVariable(self)
 
+    def _new_dict(
+        self, items: dict[HashableTracker, VariableTracker]
+    ) -> "ConstDictVariable":
+        # items is already hashed (e.g. self.items.copy()), same as the
+        # "cloning" case ConstDictVariable.__init__ documents/supports.
+        # pyrefly: ignore[bad-argument-type]
+        return type(self)(items, mutation_type=ValueMutationNew())
+
     def dict_copy(
         self,
         tx: "InstructionTranslatorBase",
@@ -553,22 +562,7 @@ class ConstDictVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self.install_dict_keys_match_guard()
-        # For a dict subclass, dict.copy() returns a plain dict; clone the base
-        # _base_vt view rather than the UserDefined* object itself, whose __dict__
-        # carries fields (e.g. _looked_up_attrs) that VariableTracker.__init__
-        # would reject.
-        base = (
-            self._base_vt
-            if isinstance(self, variables.UserDefinedObjectVariable)
-            else self
-        )
-        if base is None:
-            raise AssertionError("_base_vt must not be None")
-        return base.clone(
-            items=base.items.copy(),  # type: ignore[missing-attribute]
-            mutation_type=ValueMutationNew(),
-            source=None,
-        )
+        return self._new_dict(self.items.copy())
 
     def dict_get(
         self,
@@ -846,7 +840,6 @@ class ConstDictVariable(VariableTracker):
         # dict_richcompare: https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4198
         # Only supports eq/ne; returns NotImplemented for ordering.
         from .builder import SourcelessBuilder
-        from .user_defined import UserDefinedDictVariable
 
         if op not in ("__eq__", "__ne__"):
             return ConstantVariable.create(NotImplemented)
@@ -855,11 +848,7 @@ class ConstDictVariable(VariableTracker):
         # internal C struct directly (ma_used, dk_entries, _Py_dict_lookup)
         # -- it never calls __getitem__ or __len__ on dict subclasses.
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
-        if isinstance(other, UserDefinedDictVariable):
-            if other._base_vt is None:
-                raise AssertionError("expected _base_vt to be set")
-            other = other._base_vt
-        elif not isinstance(other, ConstDictVariable):
+        if not isinstance(other, ConstDictVariable):
             return ConstantVariable.create(NotImplemented)
         eq_result = SourcelessBuilder.create(tx, polyfills.dict___eq__).call_function(
             tx, [self, other], {}
@@ -881,6 +870,10 @@ class ConstDictVariable(VariableTracker):
 
 class OrderedDictVariable(ConstDictVariable):
     _cpython_type = collections.OrderedDict
+    # self.items is actually a collections.OrderedDict at runtime for this
+    # class (see ConstDictVariable.__init__'s storage_cls), which is what
+    # gives move_to_end/popitem(last=) below their real backing storage.
+    items: "collections.OrderedDict[HashableTracker, VariableTracker]"  # pyrefly: ignore[bad-override]
 
     # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
     # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
@@ -1688,6 +1681,11 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
 class DunderDictVariable(ConstDictVariable):
     """represents object.__dict__"""
 
+    # Overrides ConstDictVariable.items: this class backs its storage with
+    # the side-effects table (via SideEffectsProxyDict) instead of a real
+    # dict, so self.items has a different runtime shape here.
+    items: SideEffectsProxyDict  # pyrefly: ignore[bad-override]
+
     @classmethod
     def create(
         cls,
@@ -1745,6 +1743,9 @@ class DunderDictVariable(ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # self.items is a SideEffectsProxyDict (a MutableMapping, not a real
+        # dict); dict()'s overloads have no shape for an arbitrary Mapping.
+        # pyrefly: ignore[no-matching-overload]
         return ConstDictVariable(
             dict(self.items), mutation_type=ValueMutationNew(), source=None
         )
