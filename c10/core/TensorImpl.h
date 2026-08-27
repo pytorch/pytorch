@@ -236,11 +236,16 @@ struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
 
+  // when false, disallow a fake tensor from having a 'meta' device
+  bool allow_meta_ = true;
+
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
-      std::shared_ptr<c10::SafePyObject> converter)
+      std::shared_ptr<c10::SafePyObject> converter,
+      bool allow_meta = true)
       : shape_env_(std::move(shape_env)),
-        fake_tensor_converter_(std::move(converter)) {}
+        fake_tensor_converter_(std::move(converter)),
+        allow_meta_(allow_meta) {}
 
   // record the real constant a fake tensor was created from, or clear it when
   // constant is nullptr; the constant is stored on the fake's ExtraMeta so it
@@ -1487,7 +1492,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
-    get_extra_meta().fake_tensor_mode_ = std::move(mode);
+    auto& extra_meta = get_extra_meta();
+    // python validates allow_meta against the mode that owns the tensor, which
+    // is only known here: set_fake_device may run before the mode is attached
+    // (and outside its scope), so its ambient-TLS check can pass vacuously.
+    if (mode && extra_meta.fake_device_.has_value() &&
+        extra_meta.fake_device_->type() == c10::DeviceType::Meta) {
+      TORCH_CHECK(
+          mode->allow_meta_,
+          "device.type must not be 'meta' when allow_meta is False");
+    }
+    extra_meta.fake_tensor_mode_ = std::move(mode);
   }
 
   std::shared_ptr<FakeTensorMode> fake_tensor_mode() const {
