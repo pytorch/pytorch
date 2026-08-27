@@ -1101,6 +1101,12 @@ class Loops(IRNode):
     def get_pointwise_size(self) -> Sequence[_IntLike]:
         return self.ranges
 
+    def get_auxiliary_writes(
+        self,
+        indexer: Callable[[Sequence[Expr]], Expr],
+    ) -> tuple[AuxiliaryWriteRegion, ...]:
+        return ()
+
     @classmethod
     def create(cls, *args: Any, **kwargs: Any) -> TensorBox:
         origin_node = kwargs.pop("origin_node", None)
@@ -1210,6 +1216,30 @@ class Loops(IRNode):
         )
 
 
+@dataclasses.dataclass(frozen=True)
+class AuxiliaryWriteRegion:
+    """A secondary write domain owned by the enclosing computed buffer.
+
+    The selected output indices must be in bounds, injective, and disjoint from
+    the primary store and every other auxiliary write in the same kernel.
+    """
+
+    numel: Expr
+    index_var: Symbol
+    output_index: Expr
+    predicate: Expr
+    value: bool | float | int
+
+    def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
+        result = OrderedSet().union(
+            get_free_symbols(self.numel, unbacked_only),
+            get_free_symbols(self.output_index, unbacked_only),
+            get_free_symbols(self.predicate, unbacked_only),
+        )
+        result.discard(self.index_var)
+        return result
+
+
 def nop_loader_fn(idx: Expr | Sequence[Expr], *, dtype: torch.dtype) -> OpsValue:
     if dtype.is_floating_point:
         return ops.constant(float("nan"), dtype)
@@ -1290,6 +1320,47 @@ class Scatter(Pointwise):
             indexer(self.output_indexer(vars)),
             loader(vars),
             mode=self.scatter_mode,
+        )
+
+
+@ir_dataclass
+class PaddedScatter(Scatter):
+    dynamic_padding_numel: Expr | None = None
+    dynamic_padding_mask: Callable[[Expr], Sequence[Expr]] | None = None
+    padding_value: bool | float | int = 0
+
+    def constant_to_device(self, device: torch.device) -> IRNode:
+        loader = self.make_loader()
+        loader = patch.object(ConstantBuffer, "override_device", device)(loader)
+        return PaddedScatter(
+            device=device,
+            dtype=self.dtype,
+            inner_fn=loader,
+            ranges=self.ranges,
+            output_indexer=self.output_indexer,
+            scatter_mode=self.scatter_mode,
+            dynamic_padding_numel=self.dynamic_padding_numel,
+            dynamic_padding_mask=self.dynamic_padding_mask,
+            padding_value=self.padding_value,
+        )
+
+    def get_auxiliary_writes(
+        self,
+        indexer: Callable[[Sequence[Expr]], Expr],
+    ) -> tuple[AuxiliaryWriteRegion, ...]:
+        if self.dynamic_padding_numel is None:
+            return ()
+        if self.dynamic_padding_mask is None:
+            raise AssertionError("dynamic padding mask is required")
+        auxiliary_index = Symbol("auxiliary_index", integer=True, nonnegative=True)
+        return (
+            AuxiliaryWriteRegion(
+                numel=self.dynamic_padding_numel,
+                index_var=auxiliary_index,
+                output_index=indexer([auxiliary_index]),
+                predicate=sympy.Or(*self.dynamic_padding_mask(auxiliary_index)),
+                value=self.padding_value,
+            ),
         )
 
 
@@ -5627,16 +5698,35 @@ class ComputedBuffer(OperationBuffer):
 
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():
-                return extract_read_writes(
+                read_writes = extract_read_writes(
                     self.get_store_function(),
                     self.data.get_pointwise_size(),
                     self.data.get_reduction_size(),
                 )
             else:
-                return extract_read_writes(
+                read_writes = extract_read_writes(
                     self.get_store_function(),
                     self.data.get_size(),
                 )
+
+            if self._get_auxiliary_writes():
+                read_writes.writes.add(dependencies.StarDep(self.get_name()))
+            return read_writes
+
+    def _get_auxiliary_writes(self) -> tuple[AuxiliaryWriteRegion, ...]:
+        if not config.triton.enable_fuse_auxiliary_writes:
+            return ()
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            writes = self.data.get_auxiliary_writes(
+                self.get_layout().as_fixed().make_indexer()
+            )
+        if writes and not V.graph.sizevars.statically_known_gt(
+            sympy_product(self.data.get_pointwise_size()), sympy.S.Zero
+        ):
+            raise AssertionError(
+                "auxiliary writes require a statically nonempty primary domain"
+            )
+        return writes
 
     @cache_on_self_and_args("ComputedBuffer")
     def get_free_symbol_uses(
@@ -5659,6 +5749,9 @@ class ComputedBuffer(OperationBuffer):
         result = self.layout.get_free_symbol_uses(
             unbacked_only
         ) | self.data.get_free_symbol_uses(unbacked_only)
+
+        for write in self._get_auxiliary_writes():
+            result |= write.get_free_symbol_uses(unbacked_only)
 
         if self.has_store_function():
             result |= self.get_read_writes().get_free_symbol_uses(unbacked_only)
@@ -5754,6 +5847,9 @@ class ComputedBuffer(OperationBuffer):
                 (args if self.get_reduction_type() else args[:1]),
                 var_ranges,
                 *args,
+                auxiliary_writes=tuple(
+                    (self.get_name(), write) for write in self._get_auxiliary_writes()
+                ),
             )
         index_vars = []
         reduce_vars: list[Any] = []
@@ -6203,8 +6299,9 @@ class TemplateBuffer(OperationBuffer):
         structured: object,
         *,
         direct_alias_at_leaf: dict[int, IRNode] | None = None,
-        on_tensor_leaf: Callable[[str, MultiOutput, list[tuple[type, int]], int], None]
-        | None = None,
+        on_tensor_leaf: (
+            Callable[[str, MultiOutput, list[tuple[type, int]], int], None] | None
+        ) = None,
         on_non_tensor_leaf: Callable[[int], None] | None = None,
     ) -> tuple[TensorBox, ...]:
         """Walk a structured output tree, creating MultiOutput nodes for tensor leaves."""
@@ -11461,9 +11558,11 @@ class Switch(ExternKernel):
             MultiOutput(
                 FixedLayout(
                     # pyrefly: ignore [bad-argument-type]
-                    device=output.get_device()
-                    if output.get_device() is not None
-                    else device,  # type: ignore[arg-type]
+                    device=(
+                        output.get_device()
+                        if output.get_device() is not None
+                        else device
+                    ),  # type: ignore[arg-type]
                     dtype=output.get_dtype(),
                     size=[_maybe_expr(sz) for sz in merged_output.size()],
                     stride=[_maybe_expr(sz) for sz in merged_output.stride()],

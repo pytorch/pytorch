@@ -7,7 +7,7 @@ import re
 import torch
 import torch._inductor.config as inductor_config
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
-from torch._inductor import metrics
+from torch._inductor import inductor_prims, metrics
 from torch._inductor.choices import InductorChoices
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
@@ -197,6 +197,34 @@ class _NestedReductionBase:
 
     def test_layernorm_weighted_sum_B1(self):
         self._weighted_norm_reduce_k(_layernorm, "sum", 1, 16, 1024)
+
+    @inductor_config.patch("triton.enable_fuse_auxiliary_writes", True)
+    def test_padded_xdl_scale_scatter_epilogue(self):
+        cols, group = 3, 32
+
+        def f(x):
+            rows = x.shape[0]
+            normalized = _layernorm(x)
+            block_amax = normalized.reshape(rows, cols, group).abs().amax(dim=-1)
+            scales = (block_amax > 0).to(torch.uint8) * 17
+            padded_rows = (rows + 95) // 96 * 128
+            padded = inductor_prims.padded_xdl_scale_scatter(
+                scales,
+                padded_rows,
+                4,
+                96,
+                128,
+                32,
+                4,
+                2,
+                127,
+            )
+            return normalized, padded
+
+        x = torch.randn(101, cols * group, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0, min=1, max=192)
+        self.check_numeric(f, (x,), tol=1.0e-5)
+        self.check_fusion()
 
     def test_fullres_prologue_small_dim_in_x_loop_order(self):
         """Remap full-res prologue from physical [B*K, D] to logical [B, K, D]."""
@@ -3039,6 +3067,53 @@ class NestedReductionInternalsNonPersistentTest(_InternalsBase, TestCase):
 
 class NestedReductionAOTITest(TestCase):
     __unittest_skip__ = not HAS_GPU
+
+    def test_padded_xdl_scale_scatter_dynamic_rows(self):
+        class Model(torch.nn.Module):
+            def forward(self, values):
+                rows = values.shape[0]
+                padded_rows = (rows + 63) // 64 * 64
+                return inductor_prims.padded_xdl_scale_scatter(
+                    values,
+                    padded_rows,
+                    12,
+                    64,
+                    64,
+                    32,
+                    4,
+                    2,
+                    127,
+                )
+
+        model = Model()
+        example = torch.randint(
+            0,
+            255,
+            (65, 9),
+            dtype=torch.uint8,
+            device=GPU_TYPE,
+        )
+        runtime_input = torch.randint(
+            0,
+            255,
+            (31, 9),
+            dtype=torch.uint8,
+            device=GPU_TYPE,
+        )
+        expected = model(runtime_input)
+        rows = torch.export.Dim("rows", min=1, max=65)
+        with fresh_inductor_cache():
+            exported = torch.export.export(
+                model,
+                (example,),
+                dynamic_shapes={"values": {0: rows}},
+            )
+            package_path = torch._inductor.aoti_compile_and_package(exported)
+            compiled = torch._inductor.aoti_load_package(package_path)
+            actual = compiled(runtime_input)
+
+        self.assertEqual((64 * 12,), actual.shape)
+        self.assertEqual(expected, actual)
 
     def test_rmsnorm_block_amax(self):
         B, D, G = 8, 1024, 32

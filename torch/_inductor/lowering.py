@@ -536,8 +536,9 @@ def _register_lowering(
 def register_lowering(
     aten_fn,
     broadcast=False,
-    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
-    | None = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    type_promotion_kind: (
+        ELEMENTWISE_TYPE_PROMOTION_KIND | None
+    ) = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
     lowering_dict=lowerings,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
@@ -1577,9 +1578,11 @@ def _register_unbacked_slice_size_bindings(dim, start, end, step, size):
     current_node = V.graph.current_node
     node_unbacked_bindings = resolve_unbacked_bindings(
         V.graph.sizevars.shape_env,
-        current_node.meta.get("unbacked_bindings", {})
-        if current_node is not None
-        else {},
+        (
+            current_node.meta.get("unbacked_bindings", {})
+            if current_node is not None
+            else {}
+        ),
     )
     sym_size, sym_storage = None, None
     if node_unbacked_bindings:
@@ -3109,6 +3112,177 @@ def inductor_force_stride_order(input_tensor, stride):
     return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
 
 
+@register_lowering(
+    inductor_prims.padded_xdl_scale_scatter,
+    type_promotion_kind=None,
+)
+def padded_xdl_scale_scatter(
+    values,
+    padded_rows,
+    padded_cols,
+    logical_row_chunk,
+    physical_row_chunk,
+    xdl,
+    col_chunk,
+    col_inner,
+    padding_value,
+):
+    """Lower blocked scale scattering with optional fused padding writes."""
+    values_size = list(values.get_size())
+    if len(values_size) != 2:
+        raise AssertionError("values must be two-dimensional")
+
+    device = values.get_device_or_error()
+    if (
+        min(
+            logical_row_chunk,
+            physical_row_chunk,
+            xdl,
+            col_chunk,
+            col_inner,
+        )
+        <= 0
+        or physical_row_chunk < logical_row_chunk
+        or physical_row_chunk % (2 * xdl)
+        or col_chunk != 2 * col_inner
+    ):
+        raise AssertionError("invalid blocked layout parameters")
+
+    rows, cols = values_size
+    output_numel = padded_rows * padded_cols
+    required_physical_rows = (
+        FloorDiv(rows + logical_row_chunk - 1, logical_row_chunk) * physical_row_chunk
+    )
+    sizevars = V.graph.sizevars
+    sizevars.check_leq(required_physical_rows, padded_rows)
+    sizevars.check_leq(cols, padded_cols)
+    sizevars.check(sympy.Eq(Mod(padded_rows, physical_row_chunk), sympy.S.Zero))
+    sizevars.check(sympy.Eq(Mod(padded_rows, 2 * xdl), sympy.S.Zero))
+    sizevars.check(sympy.Eq(Mod(padded_cols, col_chunk), sympy.S.Zero))
+
+    def logical_indices(linear):
+        row_half = Mod(linear, 2)
+        linear = FloorDiv(linear, 2)
+        col_half = Mod(linear, 2)
+        linear = FloorDiv(linear, 2)
+        row_lane = Mod(linear, xdl)
+        linear = FloorDiv(linear, xdl)
+        col_lane = Mod(linear, col_inner)
+        linear = FloorDiv(linear, col_inner)
+        col_blocks = FloorDiv(padded_cols, col_chunk)
+        col_outer = Mod(linear, col_blocks)
+        row_outer = FloorDiv(linear, col_blocks)
+        physical_row = row_outer * (2 * xdl) + row_lane + row_half * xdl
+        physical_row_in_chunk = Mod(physical_row, physical_row_chunk)
+        logical_row = (
+            FloorDiv(physical_row, physical_row_chunk) * logical_row_chunk
+            + physical_row_in_chunk
+        )
+        logical_col = col_outer * col_chunk + col_lane + col_half * col_inner
+        return physical_row_in_chunk, logical_row, logical_col
+
+    def pointwise_fallback():
+        values_loader = values.make_loader()
+
+        def inner_fn(index):
+            physical_row_in_chunk, logical_row, logical_col = logical_indices(index[0])
+            valid = ops.and_(
+                ops.index_expr(
+                    physical_row_in_chunk < logical_row_chunk,
+                    torch.bool,
+                ),
+                ops.and_(
+                    ops.index_expr(logical_row < rows, torch.bool),
+                    ops.index_expr(logical_col < cols, torch.bool),
+                ),
+            )
+            return ops.masked(
+                valid,
+                lambda: values_loader([logical_row, logical_col]),
+                padding_value,
+            )
+
+        return Pointwise.create(
+            device=device,
+            dtype=values.get_dtype(),
+            inner_fn=inner_fn,
+            ranges=[output_numel],
+        )
+
+    if not all(
+        isinstance(value, (int, sympy.Integer))
+        for value in (*values_size, padded_rows, padded_cols)
+    ):
+        if not (
+            config.triton.enable_fuse_auxiliary_writes
+            and V.graph.has_feature(device, BackendFeature.AUXILIARY_WRITE_REGIONS)
+            and sizevars.statically_known_gt(rows * cols, sympy.S.Zero)
+        ):
+            return pointwise_fallback()
+
+        output = empty(
+            [output_numel],
+            dtype=values.get_dtype(),
+            device=device,
+        )
+        output.realize()
+
+        def shuffled_offset(physical_row, col):
+            row_outer = FloorDiv(physical_row, 2 * xdl)
+            row_inner = Mod(physical_row, 2 * xdl)
+            col_outer = FloorDiv(col, col_chunk)
+            col_inner_index = Mod(col, col_chunk)
+            return (
+                (
+                    (
+                        (row_outer * FloorDiv(padded_cols, col_chunk) + col_outer)
+                        * col_inner
+                        + Mod(col_inner_index, col_inner)
+                    )
+                    * xdl
+                    + Mod(row_inner, xdl)
+                )
+                * 2
+                + FloorDiv(col_inner_index, col_inner)
+            ) * 2 + FloorDiv(row_inner, xdl)
+
+        def output_indexer(index):
+            row, col = index
+            physical_row = FloorDiv(row, logical_row_chunk) * physical_row_chunk + Mod(
+                row, logical_row_chunk
+            )
+            return [shuffled_offset(physical_row, col)]
+
+        def dynamic_padding_mask(linear):
+            physical_row_in_chunk, logical_row, logical_col = logical_indices(linear)
+            return (
+                physical_row_in_chunk >= logical_row_chunk,
+                logical_row >= values_size[0],
+                logical_col >= values_size[1],
+            )
+
+        scatter = ir.PaddedScatter(
+            device=device,
+            dtype=values.get_dtype(),
+            inner_fn=values.make_loader(),
+            ranges=values_size,
+            output_indexer=output_indexer,
+            dynamic_padding_numel=output_numel,
+            dynamic_padding_mask=dynamic_padding_mask,
+            padding_value=padding_value,
+        )
+        buffer = ir.ComputedBuffer(
+            name=None,
+            layout=ir.MutationLayoutSHOULDREMOVE(output),
+            data=scatter,
+        )
+        buffer.name = V.graph.register_buffer(buffer)
+        V.graph.register_operation(buffer)
+        return output
+
+    return pointwise_fallback()
+
+
 @register_lowering(inductor_prims.seed, type_promotion_kind=None)
 def inductor_seed(device: torch.device):
     raise AssertionError("should be handled in fuse_seed_creation_pass()")
@@ -3194,6 +3368,7 @@ def inductor_random(
                 ops.index_expr(random_pos(index), torch.int32),
                 vec=int(vec),
             )
+
     else:
 
         def inner_fn(index):

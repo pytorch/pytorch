@@ -466,6 +466,7 @@ def register_backend_for_device(
 
 
 class BackendFeature(Enum):
+    AUXILIARY_WRITE_REGIONS = auto()
     FOREACH = auto()
     BUCKETIZE = auto()
     INPLACE_BUFFERS = auto()
@@ -1415,9 +1416,9 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     mul_rn=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
         cpp=lambda x, y: f"({x}) * ({y})",  # C++ doesn't need special handling
-        triton=lambda x, y: f"({x}) * ({y})"
-        if torch.version.hip
-        else f"libdevice.mul_rn({x}, {y})",
+        triton=lambda x, y: (
+            f"({x}) * ({y})" if torch.version.hip else f"libdevice.mul_rn({x}, {y})"
+        ),
         name="mul_rn",
     ),
     # erfinv, exp2, expit, gammaln
@@ -2092,8 +2093,9 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         name_prefix: str = "tmp",
         iter_buffers: itertools.count[int] | None = None,
         store_cache: MutableMapping[str, CSEVariableType] | None = None,
-        reduction_cache: MutableMapping[ReductionCacheKey, CSEVariableType]
-        | None = None,
+        reduction_cache: (
+            MutableMapping[ReductionCacheKey, CSEVariableType] | None
+        ) = None,
         varname_map: dict[str, CSEVariableType] | None = None,
     ):
         self.prefix = prefix

@@ -56,6 +56,50 @@ def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     return new_tensor
 
 
+def eager_padded_xdl_scale_scatter(
+    values: Tensor,
+    padded_rows: int,
+    padded_cols: int,
+    logical_row_chunk: int,
+    physical_row_chunk: int,
+    xdl: int,
+    col_chunk: int,
+    col_inner: int,
+    padding_value,
+) -> Tensor:
+    rows, cols = values.shape
+    logical_rows = torch.arange(rows, device=values.device)[:, None]
+    logical_cols = torch.arange(cols, device=values.device)[None, :]
+    physical_rows = (
+        logical_rows // logical_row_chunk * physical_row_chunk
+        + logical_rows % logical_row_chunk
+    )
+    row_outer = physical_rows // (2 * xdl)
+    row_inner = physical_rows % (2 * xdl)
+    col_outer = logical_cols // col_chunk
+    col_inner_index = logical_cols % col_chunk
+    destination_offsets = (
+        (
+            (
+                (row_outer * (padded_cols // col_chunk) + col_outer) * col_inner
+                + col_inner_index % col_inner
+            )
+            * xdl
+            + row_inner % xdl
+        )
+        * 2
+        + col_inner_index // col_inner
+    ) * 2 + row_inner // xdl
+    result = torch.full(
+        (padded_rows * padded_cols,),
+        padding_value,
+        dtype=values.dtype,
+        device=values.device,
+    )
+    result[destination_offsets.reshape(-1)] = values.reshape(-1)
+    return result
+
+
 def eager_prepare_softmax(x: Tensor, dim: int) -> tuple[Tensor, Tensor]:
     amax = torch.amax(x, dim, keepdim=True)
     return amax, torch.sum(torch.exp(x - amax), dim, keepdim=True)
@@ -196,6 +240,11 @@ force_stride_order = make_prim(
     "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
     eager_force_stride,
     doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
+)
+padded_xdl_scale_scatter = make_prim(
+    "padded_xdl_scale_scatter(Tensor values, SymInt padded_rows, SymInt padded_cols, int logical_row_chunk, int physical_row_chunk, int xdl, int col_chunk, int col_inner, Scalar padding_value) -> Tensor",
+    eager_padded_xdl_scale_scatter,
+    doc="Store scales in a padded XDL layout with two-way row and column interleaving",
 )
 _unsafe_index_put_ = make_prim(
     "_unsafe_index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",
