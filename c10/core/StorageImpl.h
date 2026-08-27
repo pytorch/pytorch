@@ -67,6 +67,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
         size_bytes_is_heap_allocated_(size_bytes_.is_heap_allocated()),
         resizable_(resizable),
         received_cuda_(false),
+        received_via_ipc_(false),
         allocator_(allocator) {
     if (resizable) {
       TORCH_INTERNAL_ASSERT(
@@ -289,6 +290,14 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return received_cuda_;
   }
 
+  void set_received_via_ipc(bool received_via_ipc) {
+    received_via_ipc_ = received_via_ipc;
+  }
+
+  bool received_via_ipc() {
+    return received_via_ipc_;
+  }
+
   impl::PyObjectSlot* pyobj_slot() {
     return &pyobj_slot_;
   }
@@ -395,6 +404,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation
   bool received_cuda_;
+  // Identifies that Storage was received via PrivateUse1 IPC; re-sharing is
+  // not supported without an explicit clone.
+  bool received_via_ipc_;
   // All special checks in data/data_ptr calls are guarded behind this single
   // boolean. This is for performance: .data/.data_ptr calls are commonly in the
   // hot-path.

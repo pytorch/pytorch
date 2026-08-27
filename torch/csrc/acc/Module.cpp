@@ -192,6 +192,12 @@ void initModule(PyObject* module) {
       "register_python_privateuseone_device_guard",
       &registerPythonPrivateUse1DeviceGuard);
   _acc.def("create_empty_tensor", &createEmptyTensor);
+  _acc.def("_is_privateuse1_ipc_supported", []() -> bool {
+    if (!at::isPrivateUse1HooksRegistered()) {
+      return false;
+    }
+    return at::detail::getPrivateUse1Hooks().supportsIpc();
+  });
 }
 
 } // namespace torch::acc
