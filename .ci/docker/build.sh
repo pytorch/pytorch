@@ -318,6 +318,10 @@ case "$tag" in
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build)
     GCC_VERSION=14
+    # Pre-built RISC-V wheels for the target side of the cross environment
+    # See https://riseproject-dev.github.io/python-wheels/
+    PIP_EXTRA_INDEX_URL=https://pypi.riseproject.dev/simple
+    PIP_PREFER_BINARY=1
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
