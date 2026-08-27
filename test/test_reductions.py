@@ -2994,6 +2994,7 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(torch_result, numpy_result, exact_dtype=exact_dtype)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @skipIfTorchDynamo("https://github.com/intel/torch-xpu-ops/issues/5123")
     @skipIfMPS
     def test_var_vs_numpy(self, device, dtype):
         _size = (20, 20)
@@ -3006,6 +3007,7 @@ class TestReductionsDevice(TestCase):
             self._compare_std_var_with_numpy('var', device, dtype, *test_case)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @skipIfTorchDynamo("https://github.com/intel/torch-xpu-ops/issues/5123")
     @skipIfMPS
     def test_std_vs_numpy(self, device, dtype):
         _size = (20, 20)
@@ -3357,6 +3359,7 @@ class TestReductionsDevice(TestCase):
     # Tests to ensure that reduction functions employing comparison operators are usable when there
     # exists a zero dimension (i.e. when the tensors are empty) in the tensor. These tests specifically
     # cater to functions where specifying the `dim` parameter is necessary.
+    @skipIfTorchDynamo("https://github.com/intel/torch-xpu-ops/issues/5126")
     def test_tensor_compare_ops_empty(self, device):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
