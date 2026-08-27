@@ -155,33 +155,6 @@ class ReplicateTest(MultiProcContinuousTest):
         )
         self._compare_module(model, replicate_model)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179746")
-    @skip_if_lt_x_gpu(2)
-    def test_replicate_device_id(self, device):
-        model = Net().to(device)
-        model_cuda = deepcopy(model)
-        model_cuda2 = deepcopy(model_cuda)
-        replicate(model, device_id=torch.device(device))
-        # DDP instance is attached in first pre forward
-        model(torch.randn(2, 2, device=device))
-        replicate_ddp_weakref = replicate.state(model)._ddp_weakref()
-        # Should be None for device training when device_id matches
-        self.assertEqual(None, replicate_ddp_weakref.device_ids)
-
-        replicate(
-            model_cuda, device_id=torch.device(torch.accelerator.current_device_index())
-        )
-        # DDP instance is attached in first pre forward
-        model_cuda(torch.randn(2, 2, device=device))
-        replicate_ddp_weakref = replicate.state(model_cuda)._ddp_weakref()
-        self.assertEqual([0], replicate_ddp_weakref.device_ids)
-        # Pass in int as device_id
-        replicate(model_cuda2, device_id=int(torch.accelerator.current_device_index()))
-        # DDP instance is attached in first pre forward
-        model_cuda2(torch.randn(2, 2, device=device))
-        replicate_ddp_weakref = replicate.state(model_cuda2)._ddp_weakref()
-        self.assertEqual([0], replicate_ddp_weakref.device_ids)
-
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176155")
     def test_replicate_wrong_device_id_type(self, device):
         model = Net().to(device)
@@ -220,33 +193,60 @@ class ReplicateTestNoXPU(MultiProcContinuousTest):
         a, b = torch.randn(2, 2, device=device), torch.randn(2, 2, device=device)
         model(a, kwarg=b).sum().backward()
 
-        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179854")
-        @skip_if_lt_x_gpu(2)
-        def test_replicate_ignore_module(self, device):
-            # Seed ensures diff input and thus different local grads across ranks.
-            torch.manual_seed(self.rank)
-            model = Net().to(device)
-            replicate(model, ignored_modules=[model.fc1])
-            # CPU input ensures that replicate can move input to GPU as DDP does.
-            inp = torch.randn(5, 2, device=device) * (self.rank + 1)
-            out = model(inp) * 10
-            out.sum().backward()
-            # FC1 grads should not be synchronized, FC2 and 3 should be.
-            fc1_grad = model.fc1.weight.grad
-            tensor_list = [torch.zeros_like(fc1_grad) for _ in range(dist.get_world_size())]
-            dist.all_gather(tensor_list, fc1_grad)
-            grad, rest = tensor_list[0], tensor_list[1:]
-            for g in rest:
-                self.assertNotEqual(grad, g)
+@unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179854")
+@skip_if_lt_x_gpu(2)
+def test_replicate_ignore_module(self, device):
+    # Seed ensures diff input and thus different local grads across ranks.
+    torch.manual_seed(self.rank)
+    model = Net().to(device)
+    replicate(model, ignored_modules=[model.fc1])
+    # CPU input ensures that replicate can move input to GPU as DDP does.
+    inp = torch.randn(5, 2, device=device) * (self.rank + 1)
+    out = model(inp) * 10
+    out.sum().backward()
+    # FC1 grads should not be synchronized, FC2 and 3 should be.
+    fc1_grad = model.fc1.weight.grad
+    tensor_list = [torch.zeros_like(fc1_grad) for _ in range(dist.get_world_size())]
+    dist.all_gather(tensor_list, fc1_grad)
+    grad, rest = tensor_list[0], tensor_list[1:]
+    for g in rest:
+        self.assertNotEqual(grad, g)
 
-            for dp_grad in [model.fc2.weight.grad, model.fc3.weight.grad]:
-                tensor_list = [
-                    torch.zeros_like(dp_grad) for _ in range(dist.get_world_size())
-                ]
-                dist.all_gather(tensor_list, dp_grad)
-                grad, rest = tensor_list[0], tensor_list[1:]
-                for g in rest:
-                    self.assertEqual(grad, g)
+    for dp_grad in [model.fc2.weight.grad, model.fc3.weight.grad]:
+        tensor_list = [
+            torch.zeros_like(dp_grad) for _ in range(dist.get_world_size())
+        ]
+        dist.all_gather(tensor_list, dp_grad)
+        grad, rest = tensor_list[0], tensor_list[1:]
+        for g in rest:
+          self.assertEqual(grad, g)
+
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179746")
+    @skip_if_lt_x_gpu(2)
+    def test_replicate_device_id(self, device):
+        model = Net().to(device)
+        model_cuda = deepcopy(model)
+        model_cuda2 = deepcopy(model_cuda)
+        replicate(model, device_id=torch.device(device))
+        # DDP instance is attached in first pre forward
+        model(torch.randn(2, 2, device=device))
+        replicate_ddp_weakref = replicate.state(model)._ddp_weakref()
+        # Should be None for device training when device_id matches
+        self.assertEqual(None, replicate_ddp_weakref.device_ids)
+
+        replicate(
+            model_cuda, device_id=torch.device(torch.accelerator.current_device_index())
+        )
+        # DDP instance is attached in first pre forward
+        model_cuda(torch.randn(2, 2, device=device))
+        replicate_ddp_weakref = replicate.state(model_cuda)._ddp_weakref()
+        self.assertEqual([0], replicate_ddp_weakref.device_ids)
+        # Pass in int as device_id
+        replicate(model_cuda2, device_id=int(torch.accelerator.current_device_index()))
+        # DDP instance is attached in first pre forward
+        model_cuda2(torch.randn(2, 2, device=device))
+        replicate_ddp_weakref = replicate.state(model_cuda2)._ddp_weakref()
+        self.assertEqual([0], replicate_ddp_weakref.device_ids)
 
 
 class ReplicateFullyShardInit(ReplicateTest):
