@@ -21,9 +21,25 @@ class ShardedTensorTestBase(MultiProcessTestCase):
     def world_size(self):
         return TEST_GPU_NUM
 
+    @property
+    def backend(self) -> str:
+        """Resolve the default distributed backend from the test variant's device_type.
+
+        Uses ``dist.get_default_backend_for_device()`` so any registered
+        out-of-tree backend is picked up automatically.  Falls back to
+        ``"gloo"`` for CPU variants.
+        """
+        device_type = getattr(self, "device_type", None)
+        if device_type is None or device_type == "cpu":
+            return "gloo"
+        return dist.get_default_backend_for_device(device_type)
+
     def init_pg(self, backend="nccl"):
-        if backend not in ["nccl", "gloo", "mpi", "hccl", "xccl"]:
-            raise RuntimeError(f"Backend {backend} not supported!")
+        # set device for accelerator pg for collectives
+        # must be called BEFORE init_process_group, otherwise HCCL
+        # communicator creation fails with "same physical device ID" error
+        if backend != "gloo":
+            torch.accelerator.set_device_index(self.rank)
 
         dist.init_process_group(
             backend=backend,
@@ -31,10 +47,6 @@ class ShardedTensorTestBase(MultiProcessTestCase):
             rank=self.rank,
             init_method=f"file://{self.file_name}",
         )
-
-        # set device for nccl pg for collectives
-        if backend == "nccl" or backend == "xccl":
-            torch.accelerator.set_device_index(self.rank)
 
     def init_rpc(self):
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
@@ -94,16 +106,23 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
+        # Default "nccl" → resolve from self.backend at runtime
+        # Explicit backend (e.g. "gloo") → use as-is
+        if backend == "nccl":
+            resolved_backend = self.backend
+        else:
+            resolved_backend = backend
+
         # Skip test if backend requires accelerator but not enough devices available
-        acc = torch.accelerator.current_accelerator()
-        if backend in ["nccl", "xccl", "hccl"]:
+        if resolved_backend != "gloo":
+            acc = torch.accelerator.current_accelerator()
             if (
                 acc is None
-                or backend != dist.get_default_backend_for_device(acc)
+                or resolved_backend != dist.get_default_backend_for_device(acc)
                 or torch.accelerator.device_count() < self.world_size
             ):
                 sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-        self.init_comms(init_rpc=init_rpc, backend=backend)
+        self.init_comms(init_rpc=init_rpc, backend=resolved_backend)
         func(self, *args, **kwargs)
         self.destroy_comms(destroy_rpc=init_rpc)
 
