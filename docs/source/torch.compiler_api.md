@@ -98,10 +98,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       live capture so a changed input predicate cannot silently ship. This filtering is
       at guard-record granularity, so a retained composite record can still contain
       invariant leaf checks. Breaking an unchecked environment assumption can silently
-      miscompute. A standalone artifact raises when a call fails every retained guard
-      set. An installed artifact may compile an uncovered call with its selected
-      backend; it logs a warning and increments ``serve_time_compiles()`` when that
-      happens. Graph breaks are captured as Dynamo resume frames.
+      miscompute. An artifact raises when a call fails every retained guard set,
+      including when captured graph-break frames require installed mode. It never
+      compiles an uncovered variant while serving. Graph breaks are captured as Dynamo
+      resume frames.
       Closure-free Python functions wrapped with ``torch._dynamo.disable`` are embedded
       and execute eagerly between compiled graph segments. Global names left in
       standalone transformed bytecode must resolve to recursive literal values or
@@ -109,8 +109,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       their defining modules. Disabled functions cannot assign globals or use
       ``globals()``, ``eval()``, or ``exec()``; their importable module globals are
       rebound at load, while recursive literal globals and defaults are captured by
-      value. Tensor-valued defaults are rejected because every tensor must be an
-      explicit input. Compiled graph bodies and kernels remain Python source. The eager backend
+      value. Top-level defaults must also be recursive literals; mutable or user-defined
+      values must be passed explicitly rather than used as defaults. Tensor-valued
+      defaults and globals are rejected because every tensor must be an explicit input.
+      Compiled graph bodies and kernels remain Python source. The eager backend
       supports higher-order graphs such as ``torch.cond``, ``torch.while_loop``,
       non-reentrant activation checkpointing, ``vmap``, autocast, and grad-mode regions.
       Their nested graph bodies are rendered as Python too, while the FX ``Graph``
@@ -129,6 +131,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       context-manager entry), and ``unload()`` removes only that artifact's entries.
       Installed artifacts require the defining Python modules to be importable. Pass the
       live callable as ``fn=`` to ``load`` when the entry itself must be rebound.
+      ``capture_summary.variant_examples`` reports, for each captured frame, the index
+      of the example that first produced each guarded variant.
 
       Pass ``training=True`` with ``tracer="dynamo"`` to capture differentiable graphs
       on either backend. Inductor segments contain readable source for both their

@@ -66,6 +66,7 @@ class FrameInvariants:
     filename: str
     lineno: int
     variants: int
+    variant_examples: tuple[int, ...]
     invariant: tuple[GuardFact, ...]
     varying: tuple[GuardFact, ...]
     undetermined: tuple[GuardFact, ...]
@@ -88,6 +89,7 @@ class PrecompileSummary:
     risky_dropped_guards: tuple[tuple[str, str], ...] = ()
     policy_dropped_guards: tuple[tuple[str, str], ...] = ()
     capture_errors: tuple[str, ...] = ()
+    variant_examples: tuple[tuple[int, ...], ...] = ()
 
     @property
     def complete(self) -> bool:

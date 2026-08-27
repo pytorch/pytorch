@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import builtins
 import collections
 import contextlib
 import dataclasses
@@ -237,6 +238,17 @@ def _constexpr_source_impl(
             return None if cls_ref is None else f"{cls_ref}._make(({body}))"
         return f"({body})"
     if isinstance(value, OrderedSet):
+        cls_ref = _constexpr_type_ref(type(value), module_aliases, imports)
+        if cls_ref is None:
+            return None
+        items = []
+        for item in value:
+            source = _constexpr_source_impl(item, module_aliases, imports)
+            if source is None:
+                return None
+            items.append(source)
+        return f"{cls_ref}([{', '.join(items)}])"
+    if type(value) in (builtins.set, frozenset):
         items = []
         for item in sorted(
             value,
@@ -250,24 +262,13 @@ def _constexpr_source_impl(
             if source is None:
                 return None
             items.append(source)
-        return "set()" if not items else "{" + ", ".join(items) + "}"
-    if isinstance(value, frozenset):
-        items = []
-        for item in sorted(
-            value,
-            key=lambda item: (
-                type(item).__module__,
-                type(item).__qualname__,
-                repr(item),
-            ),
-        ):
-            source = _constexpr_source_impl(item, module_aliases, imports)
-            if source is None:
-                return None
-            items.append(source)
+        if type(value) is frozenset:
+            if not items:
+                return "frozenset()"
+            return "frozenset((" + ", ".join(items) + ",))"
         if not items:
-            return "frozenset()"
-        return "frozenset((" + ", ".join(items) + ",))"
+            return "set()"
+        return "{" + ", ".join(items) + "}"
     if isinstance(value, slice):
         items = []
         for item in (value.start, value.stop, value.step):
@@ -318,9 +319,9 @@ def _constexpr_source(value: Any) -> tuple[str, list[str]] | None:
     return None if source is None else (source, imports)
 
 
+@dataclasses.dataclass(frozen=True)
 class _SourceLiteral:
-    def __init__(self, source: str) -> None:
-        self.source = source
+    source: str
 
     def __repr__(self) -> str:
         return self.source
