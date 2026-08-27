@@ -918,6 +918,10 @@ if(USE_CUDA)
   list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
 endif()
 
+if(USE_XPU)
+  list(APPEND ATen_XPU_DEPENDENCY_LIBS ATEN_XPU_FILES_GEN_LIB)
+endif()
+
 if(USE_MPS)
     include(../../../cmake/Metal.cmake)
 
