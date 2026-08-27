@@ -217,9 +217,11 @@ def maybe_stamp_capture_root(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     stream_handle = torch.cuda.current_stream().cuda_stream
     state = _get_capture_state(stream_handle)
     if state is None:
+        print("[fqn_debug] maybe_stamp_capture_root: not capturing (state=None)")
         return
     _capture_root_graph_id = _graph_id(state[0])
     torch_cuda_graph._capture_graph_id = _capture_root_graph_id
+    print(f"[fqn_debug] maybe_stamp_capture_root: _capture_root_graph_id={_capture_root_graph_id}")
     # Fresh capture: annotations are keyed by this capture id until remapped.
     torch_cuda_graph._remapped_exec_id = None
 
@@ -562,6 +564,7 @@ def _begin_kernel_scope() -> _KernelScope | None:
     stream = torch.cuda.current_stream().cuda_stream
     capture_state = _get_capture_state(stream)
     if capture_state is None:
+        print("[fqn_debug] _begin_kernel_scope: not capturing (None)")
         return None
     graph, frontier = capture_state
 
@@ -588,6 +591,7 @@ def _end_kernel_scope(scope: _KernelScope) -> list[int]:
             if int(node) not in (scope.entry_root_keys or set())
         ]
         scope_nodes = _collect_descendants(new_roots, include_start_nodes=True)
+    print(f"[fqn_debug] _end_kernel_scope: frontier_len={len(scope.frontier)}, scope_nodes_found={len(scope_nodes)}")
 
     annotatable = _get_annotatable_types()
     nested = _get_nested_graph_types()
@@ -901,6 +905,7 @@ def mark_kernels(annotation: str | dict[str, Any], *, backward: bool = True):
         yield
         return
 
+    print(f"[fqn_debug] mark_kernels({annotation!r}): scope.graph_id={_graph_id(scope.graph)}, _capture_root_graph_id={_capture_root_graph_id}")
     if (
         _capture_root_graph_id is not None
         and _graph_id(scope.graph) != _capture_root_graph_id
@@ -989,6 +994,7 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     matches the live exec id (e.g. replay after instantiate) this is a no-op.
     """
     capture_graph_id = torch_cuda_graph._capture_graph_id
+    print(f"[fqn_debug] remap_to_exec_graph: capture_graph_id={capture_graph_id}, _kernel_annotations size={len(_kernel_annotations)}")
     if not _kernel_annotations or capture_graph_id is None:
         return
 
