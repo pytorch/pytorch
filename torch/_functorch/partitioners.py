@@ -2642,8 +2642,6 @@ def solve_min_cut(
         cannot_save_reason is None for finite weights, or a string explaining
         why the node cannot be saved for infinite weights.
         """
-        if node.meta.get("aot_mutated_input_requires_grad", False):
-            return math.inf, "mutated input requiring grad"
         if (
             config.treat_parameters_as_free_to_save
             and node in static_lifetime_input_nodes
@@ -3504,10 +3502,7 @@ def choose_saved_values_set(
             ban_if_materialized_backward=False,
             ban_if_not_in_allowlist=False,
         )
-    if memory_budget == 0 and not any(
-        node.meta.get("aot_mutated_input_requires_grad", False)
-        for node in node_info.inputs
-    ):
+    if memory_budget == 0:
         return node_info.inputs
 
     runtime_optimized_saved_values, _ = solve_min_cut(
@@ -3875,6 +3870,7 @@ def _sync_decision_cross_ranks(
     joint_graph: torch.fx.Graph, saved_values: list[torch.fx.Node]
 ) -> list[torch.fx.Node]:
     # use the same policy across different GPUs
+    from torch._dynamo.distributed import get_compile_sync_pg
     from torch._subclasses.fake_tensor import unset_fake_temporarily
 
     def has_collectives(joint_graph: torch.fx.Graph) -> bool:
@@ -3892,6 +3888,11 @@ def _sync_decision_cross_ranks(
         and has_collectives(joint_graph)
     ):
         return saved_values
+
+    pg = get_compile_sync_pg()
+    if pg is None:
+        raise AssertionError("Compile sync process group must be available here")
+    coll_device = torch.distributed.distributed_c10d._get_object_coll_device(pg)
 
     canonical = _canonical_node_names(joint_graph)
     reverse_canonical = {v: k for k, v in canonical.items()}
@@ -3913,10 +3914,9 @@ def _sync_decision_cross_ranks(
             for n in sorted(joint_graph.nodes, key=lambda n: canonical[n])
         )
         inputs = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
-        all_inputs = [None for _ in range(torch.distributed.get_world_size())]
+        all_inputs = [None for _ in range(pg.size())]
         with no_dispatch(), unset_fake_temporarily():
-            # TODO: maybe use a different process group?
-            torch.distributed.all_gather_object(all_inputs, inputs)
+            torch.distributed.all_gather_object(all_inputs, inputs, group=pg)
             for rank, x in enumerate(all_inputs):
                 if all_inputs[0] != x:
                     log.debug(
@@ -3931,10 +3931,10 @@ def _sync_decision_cross_ranks(
             # Communicate saved values using canonical names so that
             # node names (which may differ across ranks) don't matter.
             objects = [[canonical[x] for x in saved_values]]
-            saved_ops_names_all_ranks: list[list[str]] = [
-                [] for _ in range(torch.distributed.get_world_size())
-            ]
-            torch.distributed.all_gather_object(saved_ops_names_all_ranks, objects[0])
+            saved_ops_names_all_ranks: list[list[str]] = [[] for _ in range(pg.size())]
+            torch.distributed.all_gather_object(
+                saved_ops_names_all_ranks, objects[0], group=pg
+            )
             saved_sizes: list[int] = []
             saved_ops_with_sizes: dict[str, int] = {}
 
@@ -3946,17 +3946,16 @@ def _sync_decision_cross_ranks(
                 for node in saved_nodes:
                     size_of_node = _size_of(node)
                     saved_size += size_of_node
-                    if idx == torch.distributed.get_rank():
+                    if idx == pg.rank():
                         saved_ops_with_sizes[node.name] = size_of_node
                 saved_ops_with_sizes["total size"] = saved_size
                 saved_sizes.append(saved_size)
 
-            saved_sizes_tensor = torch.tensor(
-                saved_sizes,
-                device=torch.distributed.distributed_c10d._get_object_coll_device(),
-            )
+            saved_sizes_tensor = torch.tensor(saved_sizes, device=coll_device)
             torch.distributed.all_reduce(
-                saved_sizes_tensor, op=torch.distributed.distributed_c10d.ReduceOp.MAX
+                saved_sizes_tensor,
+                op=torch.distributed.distributed_c10d.ReduceOp.MAX,
+                group=pg,
             )
 
             picked_rank_idx = int(torch.argmin(saved_sizes_tensor).item())
