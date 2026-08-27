@@ -25,11 +25,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     TEST_SKIPS,
 )
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_fsdp import check_sharded_parity, MLPStack
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -84,7 +80,6 @@ class ReplicateTest(MultiProcContinuousTest):
         )
 
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     def test_replicate_transformer(self, device):
         """
         This tests that replicate works on a transformer model with fully_shard and replicate layers
@@ -138,7 +133,6 @@ class ReplicateTest(MultiProcContinuousTest):
                     self.assertEqual(parameter.placements, (Shard(dim=0),))
 
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(Capability.distributed.backend)
     def test_replicate_transformer_managed_modules(self, device):
         """
         This tests that replicate managed modules works properly. In this test we use a Transformer Module with 3 layers,
@@ -210,7 +204,6 @@ class ReplicateTest(MultiProcContinuousTest):
         )
 
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.dtensor)
     def test_replicate_tp_device_mesh(self, device):
         """
         This tests that a user can pass in a device mesh to replicate a module
@@ -240,7 +233,6 @@ class ReplicateTest(MultiProcContinuousTest):
                 self.assertEqual(parameter.placements, (Replicate(),))
 
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     def test_train_replicate_fsdp(self, device):
         """
         Tests that replicate_model has the same behavior as original model when training
@@ -290,7 +282,6 @@ class ReplicateTest(MultiProcContinuousTest):
             check_sharded_parity(self, model, replicate_model)
 
     @skip_if_lt_x_gpu(4)
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     def test_train_parity_2d_mlp(self, device):
         """
         Verifies when a device mesh is passed in, the model has the same behavior as the original model when training
@@ -348,7 +339,7 @@ class ReplicateTest(MultiProcContinuousTest):
             self.assertEqual(losses[0], losses[1])
 
 
-instantiate_device_type_tests(ReplicateTest, globals(), except_for=["cpu"])
+instantiate_device_type_tests(ReplicateTest, globals(), except_for="cpu", allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
