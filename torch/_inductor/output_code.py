@@ -557,6 +557,10 @@ class CompiledFxGraph(OutputCode):
     compile_region_name: str | None
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
+    # The resolved layout_opt decision made on the forward graph. Persisted so
+    # that a forward FX-cache hit (which never constructs GraphLowering) can
+    # still propagate the decision to the paired lazy backward compile.
+    resolved_layout_opt: bool
 
     _boxed_call: bool | None = None
     _triton_bundle: TritonBundle | None = None
@@ -743,6 +747,7 @@ class CompiledFxGraph(OutputCode):
         self.compile_region_name = compile_region_name
         self.inputs_to_check = inputs_to_check
         self.fx_kwargs = fx_kwargs
+        self.resolved_layout_opt = graph.layout_opt
         self._set_compile_context_for_autotune_cache()
 
         # aot autograd needs to know to pass in inputs as a list

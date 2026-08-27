@@ -785,9 +785,6 @@ class GraphLowering(torch.fx.Interpreter):
         """
         Decide if we should enable layout optimization for this graph based on
         heuristics.
-
-        Backward graphs decide layout_opt independently from the forward graph;
-        the two compiles can return different results.
         """
         if not config.layout_optimization:
             return False
@@ -796,13 +793,7 @@ class GraphLowering(torch.fx.Interpreter):
             return True
 
         conv_nodes = [
-            n
-            for n in gm.graph.nodes
-            if n.target
-            in (
-                torch.ops.aten.convolution.default,
-                torch.ops.aten.convolution_backward.default,
-            )
+            n for n in gm.graph.nodes if n.target is torch.ops.aten.convolution.default
         ]
 
         for n in gm.graph.nodes:
@@ -829,11 +820,7 @@ class GraphLowering(torch.fx.Interpreter):
         # Following models are skipped due to this:
         # jx_nest_base
         # volo_d1_224
-        # The threshold was calibrated on forward graphs; backward graphs have
-        # 2-3x the nodes for the same conv count (recomputation, grad chains), so
-        # applying it there would silently disable layout opt for conv-sparse
-        # backward graphs that the forward graph enables.
-        if is_inference and len(list(gm.graph.nodes)) >= 300 * nconv:
+        if len(list(gm.graph.nodes)) >= 300 * nconv:
             log.debug("Skipped layout opt because only a few conv")
             return False
 
@@ -847,32 +834,24 @@ class GraphLowering(torch.fx.Interpreter):
             )
             return False
 
-        def _weight_node(n: torch.fx.Node) -> torch.fx.Node:
-            if n.target is torch.ops.aten.convolution_backward.default:
-                return n.args[2]  # type: ignore[union-attr, return-value]
-            return n.args[1]  # type: ignore[union-attr, return-value]
-
         def is_grouped(n: Any) -> bool:
-            meta_val = _weight_node(n).meta["val"]  # type: ignore[union-attr, operator]
+            meta_val = n.args[1].meta["val"]  # type: ignore[union-attr, operator]
             if not isinstance(meta_val, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(meta_val)}")
-            if n.target is torch.ops.aten.convolution_backward.default:
-                groups = n.args[9]  # groups is index 9 (10th of 11 positional args)
-            else:
-                groups = n.args[8]  # groups is index 8 (9th of 9 positional args)
-            return groups > 1 and meta_val.size(1) > 1  # type: ignore[union-attr, operator]
+            return n.args[-1] > 1 and meta_val.size(1) > 1  # type: ignore[union-attr, operator]
 
         def is_in_out_channel(n: torch.fx.Node) -> bool:
-            meta_val = _weight_node(n).meta["val"]  # type: ignore[union-attr, operator]
-            # Thresholds were calibrated on forward convolution benchmarks.
-            return meta_val.size(0) * 2 <= meta_val.size(1) and meta_val.size(2) > 1
+            return (
+                n.args[1].meta["val"].size(0) * 2 <= n.args[1].meta["val"].size(1)  # type: ignore[union-attr, operator]
+                and n.args[1].meta["val"].size(2) > 1  # type: ignore[union-attr, operator]
+            )
 
         def is_small_channel(n: torch.fx.Node) -> bool:
-            meta_val = _weight_node(n).meta["val"]  # type: ignore[union-attr, operator]
-            return meta_val.size(0) <= 64 and meta_val.size(1) <= 64
+            return (
+                n.args[1].meta["val"].size(0) <= 64  # type: ignore[union-attr, operator]
+                and n.args[1].meta["val"].size(1) <= 64  # type: ignore[union-attr, operator]
+            )
 
-        # FLOP-based heuristic applies to inference only; backward graphs
-        # (is_inference=False) use the grouped/in_out/small_channel checks below instead.
         # only grouped convolutions benchmarked as slower in conv samples for inference only
         if is_inference:
             flop_counts: dict[str, float] = defaultdict(float)
@@ -1019,10 +998,7 @@ class GraphLowering(torch.fx.Interpreter):
         nodes_cannot_propagate = [torch.ops.aten.bmm.default]
         output_set = OrderedSet[Node]()
         for n in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]
-            if n.target in (
-                torch.ops.aten.convolution.default,
-                torch.ops.aten.convolution_backward.default,
-            ):
+            if n.target is torch.ops.aten.convolution.default:
                 output_set.add(n)
                 if last_conv is None:
                     last_conv = n

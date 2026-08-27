@@ -65,6 +65,7 @@ from torch._functorch.aot_autograd import (
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
+    BoxedLayoutOpt,
     cudagraph_trees_clone_live_user_visible_outputs,
     cudagraphs_log,
     format_default_skip_message,
@@ -1396,6 +1397,7 @@ class _InProcessFxCompile(FxCompile):
         fx_wrapper: bool = graph_kwargs.get("fx_wrapper", False)
         aot_mode: bool = V.aot_compilation
         is_inference: bool = graph_kwargs.get("is_inference", False)
+        layout_opt: bool | None = graph_kwargs.get("layout_opt", None)
         extern_node_serializer: Callable[[list[ExternKernelNode]], Any] | None = (
             graph_kwargs.get("extern_node_serializer", None)
         )
@@ -1646,6 +1648,7 @@ class _InProcessFxCompile(FxCompile):
                     inputs_to_check=inputs_to_check,
                     fx_wrapper=fx_wrapper,
                     get_decomp_fn=get_decomp_fn,
+                    layout_opt=layout_opt,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
@@ -2553,6 +2556,7 @@ class CompilerConfigExtra:
     graph_id: int
     forward_device: BoxedDeviceIndex
     forward_is_partitioned: BoxedBool
+    forward_layout_opt: BoxedLayoutOpt
     cudagraphs_bwd_override: bool | None = None
 
 
@@ -2609,12 +2613,19 @@ def create_compiler_config_extra(
     # to have fixed addresses.
     forward_is_partitioned = BoxedBool(False)
 
+    # Set by the forward compilation to its resolved layout_opt decision. The
+    # lazy backward compile inherits it so that the paired fw/bw graphs use a
+    # consistent layout instead of rerunning forward-calibrated heuristics on
+    # the structurally different backward graph.
+    forward_layout_opt = BoxedLayoutOpt()
+
     return CompilerConfigExtra(
         cudagraphs=cudagraphs,
         graph_id=graph_id,
         forward_device=forward_device,
         cudagraphs_bwd_override=cudagraphs_bwd_override,
         forward_is_partitioned=forward_is_partitioned,
+        forward_layout_opt=forward_layout_opt,
     )
 
 
@@ -2768,6 +2779,14 @@ def compile_fx_forward(
         ):
             compiler_config_extra.forward_is_partitioned.value = True
 
+        if isinstance(result, CompiledFxGraph):
+            # Stale FX-cache entries predating resolved_layout_opt lack the
+            # field; leave the box unset (backward falls back to its own
+            # decision) rather than crash.
+            resolved_layout_opt = getattr(result, "resolved_layout_opt", None)
+            if resolved_layout_opt is not None:
+                compiler_config_extra.forward_layout_opt.set(resolved_layout_opt)
+
         return result
 
 
@@ -2830,6 +2849,7 @@ def compile_fx_backward(
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
                 boxed_forward_device_index=compiler_config_extra.forward_device,
+                layout_opt=compiler_config_extra.forward_layout_opt.value,
             )
 
 

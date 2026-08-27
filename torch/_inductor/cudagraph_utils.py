@@ -421,6 +421,16 @@ class BoxedDeviceIndex:
         self.value = device_idx
 
 
+@dataclasses.dataclass
+class BoxedLayoutOpt:
+    value: bool | None = None
+
+    def set(self, layout_opt: bool) -> None:
+        if not isinstance(layout_opt, bool):
+            raise AssertionError(f"expected layout_opt to be bool, got {layout_opt!r}")
+        self.value = layout_opt
+
+
 def check_for_mutation_ignore_cuda_graph_managed_tensor(
     gm: torch.fx.GraphModule,
     mutated_inputs: OrderedSet[str],

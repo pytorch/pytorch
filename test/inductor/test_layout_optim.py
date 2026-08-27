@@ -1,15 +1,20 @@
 # Owner(s): ["module: inductor"]
 import copy
+import operator
 import os
 import random
 
 import torch
 from torch import nn
-from torch._dynamo.utils import same
+from torch._dynamo.utils import counters, same
 from torch._inductor import config
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import (
+    fresh_cache,
+    run_and_get_code,
+    run_and_get_graph_lowering,
+)
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -344,7 +349,11 @@ class TestLayoutOptim(TestCase):
 
     @config.patch(layout_optimization=True, force_layout_optimization=False)
     @skipIfXpu
-    def test_decide_layout_opt_backward_graph(self):
+    def test_decide_layout_opt_backward_only_no_self_decide(self):
+        # decide_layout_opt is a single forward decision: a backward-only graph
+        # (no forward convolution) must not self-enable layout opt. The paired
+        # lazy backward compile inherits the forward's decision instead (see
+        # test_backward_inherits_forward_layout_opt).
         g = torch.fx.Graph()
         with torch._subclasses.FakeTensorMode():
             grad = torch.empty(1, 128, 32, 32, device=GPU_TYPE)
@@ -373,65 +382,24 @@ class TestLayoutOptim(TestCase):
                     [True, True, True],
                 ),
             )
-            g.output((conv_backward,))
-
-        gm = torch.fx.GraphModule(torch.nn.Module(), g)
-        result = GraphLowering.decide_layout_opt(gm, is_inference=False)
-        self.assertTrue(
-            result,
-            "decide_layout_opt should return True for backward graphs "
-            "with convolution_backward nodes",
-        )
-
-    @config.patch(layout_optimization=True, force_layout_optimization=False)
-    @skipIfXpu
-    def test_decide_layout_opt_backward_grouped_conv(self):
-        g = torch.fx.Graph()
-        with torch._subclasses.FakeTensorMode():
-            grad = torch.empty(1, 224, 32, 32, device=GPU_TYPE)
-            inp = torch.empty(1, 112, 32, 32, device=GPU_TYPE)
-            weight = torch.empty(224, 112, 3, 3, device=GPU_TYPE)
-            a = g.placeholder("grad_output")
-            a.meta["val"] = grad
-            b = g.placeholder("input")
-            b.meta["val"] = inp
-            c = g.placeholder("weight")
-            c.meta["val"] = weight
-
-            conv_backward = g.call_function(
-                torch.ops.aten.convolution_backward.default,
-                (
-                    a,
-                    b,
-                    c,
-                    None,
-                    [1, 1],
-                    [0, 0],
-                    [1, 1],
-                    False,
-                    [0, 0],
-                    2,
-                    [True, True, True],
-                ),
-            )
-            g.output((conv_backward,))
+            # conv_backward returns a 3-tuple; unpack before feeding relu.
+            grad_input = g.call_function(operator.getitem, (conv_backward, 0))
+            g.output((grad_input,))
 
         gm = torch.fx.GraphModule(torch.nn.Module(), g)
         result = GraphLowering.decide_layout_opt(gm, is_inference=False)
         self.assertFalse(
             result,
-            "decide_layout_opt should return False for grouped backward "
-            "conv with in_channels > 1",
+            "decide_layout_opt must not self-enable layout opt for a "
+            "backward-only graph; the forward graph decides once",
         )
 
     @config.patch(layout_optimization=True, force_layout_optimization=False)
     @skipIfXpu
     def test_decide_layout_opt_backward_sparse_conv(self):
-        # Backward graphs carry 2-3x the nodes of the forward graph for the same
-        # conv count (recomputation, grad chains). The 300 * nconv node-count
-        # bailout was calibrated on forward graphs only, so applying it to a
-        # conv-sparse backward graph would silently disable layout opt even
-        # though the forward graph enables it.
+        # A conv-sparse backward graph with many pointwise nodes no longer runs
+        # the forward-calibrated 300 * nconv bailout: layout opt is decided on
+        # the forward graph once and inherited by the lazy backward compile.
         g = torch.fx.Graph()
         with torch._subclasses.FakeTensorMode():
             grad = torch.empty(1, 128, 32, 32, device=GPU_TYPE)
@@ -444,7 +412,7 @@ class TestLayoutOptim(TestCase):
             c = g.placeholder("weight")
             c.meta["val"] = weight
 
-            node = g.call_function(
+            conv_backward = g.call_function(
                 torch.ops.aten.convolution_backward.default,
                 (
                     a,
@@ -460,8 +428,9 @@ class TestLayoutOptim(TestCase):
                     [True, True, True],
                 ),
             )
-            # Add enough pointwise nodes that a forward graph with a single conv
-            # would exceed the 300 * nconv bailout.
+            # conv_backward returns a 3-tuple; unpack before feeding relu.
+            grad_input = g.call_function(operator.getitem, (conv_backward, 0))
+            node = grad_input
             for _ in range(310):
                 node = g.call_function(torch.ops.aten.relu.default, (node,))
                 node.meta["val"] = grad
@@ -470,16 +439,264 @@ class TestLayoutOptim(TestCase):
         gm = torch.fx.GraphModule(torch.nn.Module(), g)
         self.assertGreaterEqual(len(list(gm.graph.nodes)), 300)
         result = GraphLowering.decide_layout_opt(gm, is_inference=False)
-        self.assertTrue(
-            result,
-            "decide_layout_opt should not apply the forward-calibrated "
-            "300 * nconv bailout to backward graphs",
-        )
-        inference_result = GraphLowering.decide_layout_opt(gm, is_inference=True)
         self.assertFalse(
-            inference_result,
-            "the same node count should still trigger the bailout for "
-            "forward/inference graphs",
+            result,
+            "decide_layout_opt is forward-only; the 300 * nconv bailout is "
+            "not evaluated against backward graphs at all",
+        )
+
+    @config.patch(layout_optimization=True, force_layout_optimization=False)
+    @skipIfXpu
+    def test_decide_layout_opt_forward_grouped_conv_rejected(self):
+        # Valid grouped convolution: in_channels=224, groups=2 -> per-group
+        # channels = 112, weight [224, 112, 3, 3]. Forward graph must reject
+        # layout opt; the paired backward inherits the rejection.
+        g = torch.fx.Graph()
+        with torch._subclasses.FakeTensorMode():
+            x = torch.empty(1, 224, 32, 32, device=GPU_TYPE)
+            weight = torch.empty(224, 112, 3, 3, device=GPU_TYPE)
+            a = g.placeholder("x")
+            a.meta["val"] = x
+            c = g.placeholder("weight")
+            c.meta["val"] = weight
+
+            conv = g.call_function(
+                torch.ops.aten.convolution.default,
+                (
+                    a,
+                    c,
+                    None,
+                    [1, 1],
+                    [0, 0],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    2,
+                ),
+            )
+            g.output((conv,))
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), g)
+        result = GraphLowering.decide_layout_opt(gm, is_inference=False)
+        self.assertFalse(
+            result,
+            "decide_layout_opt should return False for grouped conv with "
+            "in_channels > 1",
+        )
+
+    @config.patch(layout_optimization=True, force_layout_optimization=False)
+    @skipIfXpu
+    def test_backward_inherits_forward_layout_opt(self):
+        # Regression test for #189239: the backward graph used to decide
+        # layout_opt independently (nconv counted only forward convs) and
+        # returned False for a conv-only backward, silently dropping the
+        # forward's channels-last decision. The resolved forward decision is now
+        # propagated to the lazy backward compile, so the backward lowers its
+        # convolution_backward with channels-last operands.
+        channels = 128
+        conv = nn.Conv2d(
+            channels,
+            channels,
+            3,
+            padding=1,
+            groups=channels,
+            device=GPU_TYPE,
+            bias=False,
+        )
+        x = torch.randn(2, channels, 16, 16, device=GPU_TYPE)
+        x = x.to(memory_format=torch.channels_last)
+        x.requires_grad_(True)
+
+        ref = conv(x)
+        ref.sum().backward()
+        ref_x_grad = x.grad.clone()  # type: ignore[union-attr]
+        ref_w_grad = conv.weight.grad.clone()  # type: ignore[union-attr]
+        x.grad = None
+        conv.weight.grad = None
+
+        def run():
+            out = torch.compile(conv, backend="inductor", fullgraph=True)(x)
+            out.sum().backward()
+            return out
+
+        compiled_out, graphs = run_and_get_graph_lowering(run)
+        forward_graph = next(g for g in graphs if not g.is_backward)
+        backward_graph = next(g for g in graphs if g.is_backward)
+        self.assertTrue(
+            forward_graph.layout_opt, "forward graph should enable layout opt"
+        )
+        self.assertTrue(
+            backward_graph.layout_opt,
+            "backward graph should inherit the forward's layout_opt decision",
+        )
+        self.assertGreater(
+            backward_graph.num_channels_last_conv,
+            0,
+            "backward conv should lower with channels-last operands",
+        )
+        self.assertTrue(
+            torch.allclose(ref, compiled_out, atol=1e-4, rtol=1e-4)  # type: ignore[arg-type]
+        )
+        self.assertTrue(
+            torch.allclose(ref_x_grad, x.grad, atol=1e-4, rtol=1e-4)  # type: ignore[union-attr]
+        )
+        self.assertTrue(
+            torch.allclose(ref_w_grad, conv.weight.grad, atol=1e-4, rtol=1e-4)  # type: ignore[union-attr]
+        )
+
+    @config.patch(layout_optimization=True, force_layout_optimization=False)
+    @skipIfXpu
+    def test_backward_inherits_grouped_conv_layout_opt(self):
+        # A grouped conv with in_channels > 1 makes the forward graph reject
+        # layout opt; the backward must inherit the same rejection and stay
+        # numerically correct.
+        channels = 224
+        conv = nn.Conv2d(
+            channels,
+            channels,
+            3,
+            padding=1,
+            groups=2,
+            device=GPU_TYPE,
+            bias=False,
+        )
+        x = torch.randn(2, channels, 16, 16, device=GPU_TYPE)
+        x = x.to(memory_format=torch.channels_last)
+        x.requires_grad_(True)
+
+        ref = conv(x)
+        ref.sum().backward()
+        ref_x_grad = x.grad.clone()  # type: ignore[union-attr]
+        ref_w_grad = conv.weight.grad.clone()  # type: ignore[union-attr]
+        x.grad = None
+        conv.weight.grad = None
+
+        def run():
+            out = torch.compile(conv, backend="inductor", fullgraph=True)(x)
+            out.sum().backward()
+            return out
+
+        compiled_out, graphs = run_and_get_graph_lowering(run)
+        forward_graph = next(g for g in graphs if not g.is_backward)
+        backward_graph = next(g for g in graphs if g.is_backward)
+        self.assertFalse(
+            forward_graph.layout_opt,
+            "forward graph should reject layout opt for grouped conv",
+        )
+        self.assertFalse(
+            backward_graph.layout_opt,
+            "backward graph should inherit the grouped-conv rejection",
+        )
+        self.assertTrue(
+            torch.allclose(ref, compiled_out, atol=1e-4, rtol=1e-4)  # type: ignore[arg-type]
+        )
+        self.assertTrue(
+            torch.allclose(ref_x_grad, x.grad, atol=1e-4, rtol=1e-4)  # type: ignore[union-attr]
+        )
+        self.assertTrue(
+            torch.allclose(ref_w_grad, conv.weight.grad, atol=1e-4, rtol=1e-4)  # type: ignore[union-attr]
+        )
+
+    @config.patch(layout_optimization=True, force_layout_optimization=False)
+    @config.patch(fx_graph_cache=True, fx_graph_remote_cache=False)
+    @skipIfXpu
+    def test_backward_layout_opt_fx_cache_hit(self):
+        # The forward's resolved layout_opt must survive an FX-cache hit (which
+        # never constructs GraphLowering) and still reach the lazy backward
+        # compile. Prime the cache with a forward-only run, then verify the
+        # cached forward decision flows to a freshly compiled backward.
+        channels = 128
+        conv = nn.Conv2d(
+            channels,
+            channels,
+            3,
+            padding=1,
+            groups=channels,
+            device=GPU_TYPE,
+            bias=False,
+        )
+        x = torch.randn(2, channels, 16, 16, device=GPU_TYPE)
+        x = x.to(memory_format=torch.channels_last)
+        x.requires_grad_(True)
+
+        def run():
+            out = torch.compile(conv, backend="inductor", fullgraph=True)(x)
+            out.sum().backward()
+            return out
+
+        with fresh_cache():
+            # Prime the FX graph cache with the forward graph only.
+            torch.compile(conv, backend="inductor", fullgraph=True)(x)
+            torch._dynamo.reset()
+            hits_before = counters["inductor"]["fxgraph_cache_hit"]
+
+            compiled_out, graphs = run_and_get_graph_lowering(run)
+            # The forward is served from the FX cache (no GraphLowering is
+            # constructed), so only the freshly compiled lazy backward appears.
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], hits_before + 1)
+            backward_graphs = [g for g in graphs if g.is_backward]
+            self.assertEqual(len(backward_graphs), 1)
+            backward_graph = backward_graphs[0]
+            self.assertTrue(
+                backward_graph.layout_opt,
+                "cached forward layout_opt decision should reach the lazy backward",
+            )
+            self.assertGreater(backward_graph.num_channels_last_conv, 0)
+
+    @config.patch(layout_optimization=True, force_layout_optimization=False)
+    @skipIfXpu
+    def test_backward_conv_channels_last(self):
+        # e2e: verify the compiled weight gradient and input gradient come back
+        # correct and the generated backward code runs convolution_backward as
+        # an extern call on channels-last operands (no triton decomposition /
+        # layout-conversion copy in between).
+        channels = 128
+        conv = nn.Conv2d(
+            channels,
+            channels,
+            3,
+            padding=1,
+            groups=channels,
+            device=GPU_TYPE,
+            bias=False,
+        )
+        x = torch.randn(2, channels, 16, 16, device=GPU_TYPE)
+        x = x.to(memory_format=torch.channels_last)
+        x.requires_grad_(True)
+
+        ref = conv(x)
+        ref.sum().backward()
+        ref_grad = x.grad.clone()  # type: ignore[union-attr]
+        ref_w_grad = conv.weight.grad.clone()  # type: ignore[union-attr]
+        x.grad = None
+        conv.weight.grad = None
+
+        def run():
+            out = torch.compile(conv, backend="inductor", fullgraph=True)(x)
+            out.sum().backward()
+            return out
+
+        compiled_out, code = run_and_get_code(run)
+        backward_code = code[-1]
+
+        self.assertTrue(
+            torch.allclose(ref, compiled_out, atol=1e-4, rtol=1e-4)  # type: ignore[arg-type]
+        )
+        self.assertTrue(
+            torch.allclose(ref_grad, x.grad, atol=1e-4, rtol=1e-4)  # type: ignore[union-attr]
+        )
+        self.assertTrue(
+            torch.allclose(ref_w_grad, conv.weight.grad, atol=1e-4, rtol=1e-4)  # type: ignore[union-attr]
+        )
+        self.assertIn(
+            "torch.ops.aten.convolution_backward.default(",
+            backward_code,
+            "expected backward graph to lower convolution_backward directly",
+        )
+        self.assertNotIn(
+            "triton_poi_fused_convolution_backward",
+            backward_code,
+            "backward conv should not be decomposed with layout conversions",
         )
 
     @config.patch(layout_optimization=True, force_layout_optimization=False)
@@ -538,59 +755,6 @@ class TestLayoutOptim(TestCase):
             result,
             "decide_layout_opt should return False for graphs without conv nodes",
         )
-
-    @config.patch(layout_optimization=True, force_layout_optimization=False)
-    def test_backward_conv_channels_last(self):
-        # Regression test for #189239: a backward graph with only
-        # convolution_backward nodes used to get layout_opt=False (nconv counted
-        # only forward convs), so channels-last was not applied to the backward
-        # conv and the fix never took effect. Compile a depthwise conv with
-        # channels-last input and assert the generated backward code runs
-        # convolution_backward directly on channels-last strides (no layout
-        # conversion / triton decomposition in between).
-        channels = 128
-        conv = nn.Conv2d(
-            channels,
-            channels,
-            3,
-            padding=1,
-            groups=channels,
-            device=GPU_TYPE,
-            bias=False,
-        )
-        x = torch.randn(2, channels, 16, 16, device=GPU_TYPE)
-        x = x.to(memory_format=torch.channels_last)
-        x.requires_grad_(True)
-
-        ref = conv(x)
-        ref.sum().backward()
-        ref_grad = x.grad.clone()  # type: ignore[union-attr]
-
-        x.grad = None
-
-        def run():
-            out = torch.compile(conv, backend="inductor", fullgraph=True)(x)
-            out.sum().backward()
-            return out
-
-        compiled_out, code = run_and_get_code(run)
-        backward_code = code[-1]
-
-        self.assertTrue(
-            torch.allclose(ref, compiled_out, atol=1e-4, rtol=1e-4)  # type: ignore[arg-type]
-        )
-        self.assertIn(
-            "torch.ops.aten.convolution_backward.default(",
-            backward_code,
-            "expected backward graph to lower convolution_backward directly",
-        )
-        self.assertNotIn(
-            "triton_poi_fused_convolution_backward",
-            backward_code,
-            "backward conv should not be decomposed with layout conversions",
-        )
-
-        self.assertTrue(torch.allclose(ref_grad, x.grad, atol=1e-4, rtol=1e-4))  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":
