@@ -144,7 +144,6 @@ xfails = [
     NestedGraphBreaksDecoratorTests.test_torch_guards_stack_frame_register_inlining_disable_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksSubGraphTests.test_resume_paths_join_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksReproTests.test_udf_classes_reconstruction_nested_graph_breaks,  # noqa: F821
-    NestedGraphBreaksUnspecTests.test_unspecialized_float_multiply_precision,  # noqa: F821
 ]
 
 case = None
@@ -153,6 +152,14 @@ for case in xfails:
     unittest.expectedFailure(case)
 
 del case, xfails
+
+
+# make_test_cls_with_patches drops the @config.patch class decorator; reapply it
+NestedGraphBreaksUnspecTests.test_unspecialized_float_multiply_precision = (  # noqa: F821
+    torch._dynamo.config.patch(assume_static_by_default=False)(
+        NestedGraphBreaksUnspecTests.test_unspecialized_float_multiply_precision  # noqa: F821
+    )
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -280,6 +280,8 @@ class FxGraphRunnableTest(TestCase):
 
     @unittest.skipUnless(has_triton(), "Triton not available")
     @requires_gpu
+    # in-process compile: preexisting async workers lack the env patched on this class
+    @torch._inductor.config.patch(compile_threads=1)
     def test_multi_kernel_nesting_and_global_constexpr(self):
         def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             n_elements = x.numel()

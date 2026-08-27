@@ -1034,6 +1034,28 @@ def substitute_in_graph(
     return wrapper
 
 
+def _unregister_substitute_in_graph(original_fn: Callable[..., Any]) -> None:
+    from torch._dynamo.trace_rules import (
+        _polyfilled_function_ids,
+        get_torch_obj_rule_map,
+    )
+    from torch._dynamo.variables import PolyfilledFunctionVariable
+    from torch._dynamo.variables.builder import (
+        ITERTOOLS_POLYFILLED_TYPE_IDS,
+        VariableBuilder,
+    )
+
+    handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
+    wrapped = handlers.get(original_fn)
+    fns = (original_fn,) if wrapped is None else (original_fn, wrapped)
+    for fn in fns:
+        VariableBuilder._id_dispatch().pop(id(fn), None)
+        _polyfilled_function_ids.remove(id(fn))
+        get_torch_obj_rule_map().pop(fn, None)
+        handlers.pop(fn, None)
+    ITERTOOLS_POLYFILLED_TYPE_IDS.discard(id(original_fn))
+
+
 # Helper function to flatten a tensor subclass and apply a function to
 # all inner tensors that match the outer dim. Used to reduce duplication
 # across the various marking APIs.

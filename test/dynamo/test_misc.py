@@ -203,6 +203,23 @@ class UserDefineSetAttr:
             return None
 
 
+@functools.cache
+@scoped_load_inline
+def _load_pybind11_enum_mod(*, load_inline):
+    cpp_source = """
+    #include <torch/extension.h>
+
+    enum class E { A = 0, B = 1 };
+
+    PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+        py::enum_<E>(m, "E")
+            .value("A", E::A)
+            .value("B", E::B);
+    }
+    """
+    return load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
+
+
 class MiscTests(torch._inductor.test_case.TestCase):
     def test_get_cache_entry(self):
         def f(x):
@@ -234,20 +251,8 @@ class MiscTests(torch._inductor.test_case.TestCase):
         entries = _debug_get_cache_entry_list(torch._dynamo.graph_break)
         self.assertEqual(len(entries), 0)
 
-    @torch.testing._internal.common_utils.scoped_load_inline
-    def test_pybind11_enum_conversion(self, load_inline):
-        cpp_source = """
-        #include <torch/extension.h>
-
-        enum class E { A = 0, B = 1 };
-
-        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-            py::enum_<E>(m, "E")
-                .value("A", E::A)
-                .value("B", E::B);
-        }
-        """
-        mod = load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
+    def test_pybind11_enum_conversion(self):
+        mod = _load_pybind11_enum_mod()
         e = mod.E.A
         self.assertEqual(
             torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
@@ -7634,8 +7639,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         def gn(x):
             return
 
-        torch._dynamo.config.reorderable_logging_functions.add(gn)
-
         @torch.compile(backend="eager")
         def fn(x):
             x = x + 1
@@ -7644,7 +7647,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 4
 
         # If this doesn't crash, the test passes
-        fn(torch.ones(3))
+        with torch._dynamo.config.patch(reorderable_logging_functions={gn}):
+            fn(torch.ones(3))
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_tensor_ctor_list_of_tensor(self):
