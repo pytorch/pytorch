@@ -48,6 +48,8 @@ aspects of contributing to PyTorch.
 - [C++ development tips](#c-development-tips)
   - [Build only what you need](#build-only-what-you-need)
   - [Build environment variable reference](#build-environment-variable-reference)
+    - [How to set them](#how-to-set-them)
+    - [What the annotations mean](#what-the-annotations-mean)
     - [Everyday knobs](#everyday-knobs)
     - [Feature toggles](#feature-toggles)
     - [Architecture selection](#architecture-selection)
@@ -55,7 +57,6 @@ aspects of contributing to PyTorch.
     - [Library location hints](#library-location-hints)
     - [Handled outside the forwarding module](#handled-outside-the-forwarding-module)
     - [CMake-only options](#cmake-only-options)
-    - [Removed with setup.py](#removed-with-setuppy)
   - [Profile build time](#profile-build-time)
   - [Code completion and IDE support](#code-completion-and-ide-support)
   - [Make no-op build fast](#make-no-op-build-fast)
@@ -985,13 +986,9 @@ BUILD_CONFIG USE_CUDA=1 pip install --no-build-isolation -v -e .
 BUILD_CONFIG USE_CUDA=1 USE_DISTRIBUTED=1 pip install --no-build-isolation -v -e .
 ```
 
-For subsequent builds (i.e., when `build/CMakeCache.txt` exists), an option
-that is no longer in the environment keeps the value the cache remembers from
-the first build, while a variable that is in the environment is re-applied on
-every build. Environment variables win over `-C` flags, `-C` flags win over
-`pyproject.toml`, and all three win over the cache. To change a cached option
-without setting its variable, run `ccmake build/`, run `cmake-gui build/`, or
-directly edit `build/CMakeCache.txt`.
+Build options persist in `build/CMakeCache.txt` between builds, with a wrinkle depending on how
+each one reaches CMake; see
+[How to set them](#how-to-set-them) below.
 
 ### Build environment variable reference
 
@@ -1005,8 +1002,48 @@ An environment variable reaches CMake, as a cache variable of the same name, if 
   module.
 
 Anything else is not forwarded; set it as a CMake option with `-D` / `cmake.define` instead.
-Variables below that match the forwarding rule are passed through by that module; the rest are
-handled where noted.
+
+#### How to set them
+
+Everything in this reference except the [CMake-only options](#cmake-only-options) is set as an
+environment variable on the build command:
+
+```bash
+USE_CUDA=0 BUILD_TEST=0 python -m pip install --no-build-isolation -v -e .
+```
+
+How a variable reaches CMake decides what happens on the *next* build, which is where the
+surprises are. Both kinds are sticky if you simply drop them from the command line -- the cached
+value stays -- but they differ in whether setting them again works:
+
+- Variables matched by the prefix rule (`BUILD_*`, `USE_*`, `CMAKE_*`) are re-applied on every
+  configure and **override** the cache, so setting one to a new value takes effect immediately.
+- Everything else -- the alias and passthrough lists, such as `BLAS`, `TORCH_CUDA_ARCH_LIST` and
+  the `CUDNN_*` hints -- only **seeds** a cache entry that does not already exist. Once it is in
+  the cache, changing the environment variable has no further effect: edit the cache with
+  `ccmake build/` or `cmake-gui build/`, or delete `build/CMakeCache.txt` to configure from
+  scratch.
+- Variables a CMake module reads directly are read fresh on every configure, at the location
+  noted in their entry.
+
+The split between the first two cases is an inconsistency rather than a deliberate design, and is
+expected to be resolved in favour of a single rule; this section will change when it is. In the
+meantime, `ccmake build/` shows what the cache actually holds.
+
+#### What the annotations mean
+
+Entries below note how each variable reaches CMake, which is what to check when one appears not
+to take effect:
+
+- **forwarded by prefix** -- matches the prefix rule above; set as a cache variable of the same
+  name, overriding the cache
+- **passthrough** -- does not match the prefix rule, but is listed in `_ENV_PASSTHROUGH` and
+  forwarded under the same name; seeds the cache only
+- **alias** -- forwarded under a *different* CMake name, from `_ENV_ALIASES`; seeds the cache only
+- **read from the environment** -- not forwarded at all; the named CMake module reads `$ENV{...}`
+  itself
+- **CMake-native**, or handled via `pyproject.toml` -- consumed by CMake or scikit-build-core
+  directly, not by this module
 
 #### Everyday knobs
 
@@ -1021,6 +1058,8 @@ handled where noted.
   (`CFLAGS` also applies to C++ unless `CXXFLAGS` is set)
 - `TORCH_CUDA_ARCH_LIST` -- CUDA arches to build for, e.g. `"8.0;9.0"`
 - `USE_COLORIZE_OUTPUT=1` -- colorize compiler output for easier reading
+- `CMAKE_GENERATOR=Ninja` -- select the build generator; ninja is the default when
+  available. This replaces the old `USE_NINJA` toggle
 
 #### Feature toggles
 
@@ -1123,17 +1162,6 @@ These are CMake options, set with `-D` / `cmake.define`, not environment variabl
   variable was inaccurate -- it was never forwarded
 - `CUDA_DEVICE_DEBUG` -- build CUDA device code with `-g -G` (read in `cmake/public/cuda.cmake`;
   no effect on MSVC)
-
-#### Removed with setup.py
-
-No longer available.
-
-- `CMAKE_FRESH` -- force a fresh configure. Delete the `build/` directory to reconfigure from
-  scratch instead
-- `CMAKE_ONLY` -- configure without building; no equivalent (this was a `setup.py`-only debugging
-  aid)
-- `USE_NINJA` -- select the generator via `CMAKE_GENERATOR=Ninja` instead (ninja is the default
-  when available)
 
 ### Profile build time
 
