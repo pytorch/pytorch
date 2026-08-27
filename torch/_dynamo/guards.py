@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import builtins
 import collections
+import contextlib
 import dataclasses
 import enum
 import functools
@@ -4143,6 +4144,16 @@ def _get_unsupported_types() -> tuple[type, ...]:
     return ret
 
 
+@contextlib.contextmanager
+def _quiet(logger: logging.Logger) -> Generator[None, None, None]:
+    disabled = logger.disabled
+    logger.disabled = True
+    try:
+        yield
+    finally:
+        logger.disabled = disabled
+
+
 def _is_interned_singleton(value: Any) -> bool:
     """Whether pruning ``value`` would poison unrelated references to it.
 
@@ -5015,6 +5026,7 @@ class CheckFunctionManager:
         save_guards: bool = False,
         strict_error: bool = False,
         guard_build_local_state: Any | None = None,
+        collect_guard_failures: list[tuple[Guard, Exception]] | None = None,
     ) -> None:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -5081,6 +5093,11 @@ class CheckFunctionManager:
                 return ret
 
         all_guards = sorted(guards or (), key=Guard.sort_key)
+        # Building a guard EVALUATES its source, which can fail when the values
+        # were reconstructed from a pickle rather than captured live. A caller
+        # probing rebuildability wants to know WHICH guards those are, not just
+        # that one of them exists, so it can drop exactly those.
+        self._collect_guard_failures = collect_guard_failures
 
         # Runtime and serialized guards are intentionally separate. A package
         # may need to omit a non-portable identity guard, but dropping it from
@@ -5097,6 +5114,7 @@ class CheckFunctionManager:
                 nonlocal filter_entries
                 if filter_entries is not None:
                     return
+                nonlocal all_guards
                 inspection_builder, _ = self.build_guards(
                     all_guards,
                     existing_diff_guard_sources,
@@ -5104,6 +5122,9 @@ class CheckFunctionManager:
                     output_graph,
                     False,
                 )
+                if collect_guard_failures:
+                    failed = {id(g) for g, _ in collect_guard_failures}
+                    all_guards = [g for g in all_guards if id(g) not in failed]
                 filter_entries = [
                     make_guard_filter_entry(guard, inspection_builder)
                     for guard in all_guards
@@ -5492,7 +5513,17 @@ class CheckFunctionManager:
             ):
                 continue
 
-            guard.create(builder)
+            if self._collect_guard_failures is None:
+                guard.create(builder)
+            else:
+                # Guard.create logs the traceback before re-raising, which is
+                # right when the failure is fatal and pure noise when the
+                # caller is probing and will report the guard itself.
+                try:
+                    with _quiet(torch._guards.log):
+                        guard.create(builder)
+                except Exception as e:
+                    self._collect_guard_failures.append((guard, e))
         return builder, guard_manager
 
     def compile_check_fn(
