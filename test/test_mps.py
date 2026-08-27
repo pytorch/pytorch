@@ -722,6 +722,25 @@ class MatmulTest(TestCaseMPS):
         self.assertEqual(lin_cpu.weight.grad, lin_mps.weight.grad.cpu(), atol=1e-3, rtol=1e-4)
         self.assertEqual(x_cpu.grad, x_mps.grad.cpu(), atol=1e-3, rtol=1e-4)
 
+    # #177116 / #193487: the same over-read hits the batched entry points. The extra
+    # terms come from memory past the operands, so dirty it before computing.
+    @parametrize("op", ["bmm", "baddbmm", "matmul", "einsum"])
+    def test_batched_matmul_large_K(self, op):
+        torch.manual_seed(0)
+        b1_cpu, b2_cpu = torch.randn(2, 25, 40000), torch.randn(2, 40000, 25)
+        b1, b2 = b1_cpu.to("mps"), b2_cpu.to("mps")
+        torch.full((5_000_000,), 1000.0, device="mps")
+        if op == "bmm":
+            out_cpu, out = torch.bmm(b1_cpu, b2_cpu), torch.bmm(b1, b2)
+        elif op == "baddbmm":
+            bias_cpu = torch.randn(2, 25, 25)
+            out_cpu, out = torch.baddbmm(bias_cpu, b1_cpu, b2_cpu), torch.baddbmm(bias_cpu.to("mps"), b1, b2)
+        elif op == "matmul":
+            out_cpu, out = b1_cpu @ b2_cpu, b1 @ b2
+        else:
+            out_cpu, out = torch.einsum("bik,bkj->bij", b1_cpu, b2_cpu), torch.einsum("bik,bkj->bij", b1, b2)
+        self.assertEqual(out_cpu, out.cpu(), atol=1e-3, rtol=1e-4)
+
 class MPSLeakyReluTest(TestCaseMPS):
     def _npLeakyRelu(self, np_features, negative_slope=0.1):
         return np.maximum(np_features, negative_slope * np_features).astype(np_features.dtype)
