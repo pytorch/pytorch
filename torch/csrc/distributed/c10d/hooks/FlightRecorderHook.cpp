@@ -556,7 +556,7 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
   // entry the ring buffer has already overwritten (retire_completed would no-op
   // on it), so the buffer's own capacity is the bound. Dropping the oldest also
   // releases its Work, so a backend that never finishes an op cannot be pinned
-  // by the recorder for ever.
+  // by the recorder forever.
   while (inflight_.size() > max_inflight_) {
     auto oldest = inflight_.begin();
     if (oldest->second.work) {
