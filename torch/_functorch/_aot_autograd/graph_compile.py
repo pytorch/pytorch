@@ -18,7 +18,7 @@ import threading
 import time
 import traceback
 from collections import defaultdict
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager, nullcontext
 from typing import Any
 
@@ -58,9 +58,14 @@ from .autograd_cache import (
     should_use_remote_autograd_cache,
 )
 from .descriptors import AOTOutput, PlainAOTOutput
-from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
+from .graph_capture import (
+    _clone_traced_inputs_for_autograd,
+    aot_dispatch_autograd_graph,
+    aot_dispatch_base_graph,
+)
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
+    _grad_output_surviving_indices,
     AOTDedupeWrapper,
     AOTDispatchAutograd,
     AOTDispatchAutogradCompileSpec,
@@ -79,16 +84,21 @@ from .runtime_wrappers import (
     SerializableCompiledFunction,
 )
 from .schemas import (
+    AOTAutogradTraceInfo,
     AOTConfig,
     AOTGraphCapture,
     AOTState,
     FlatFn,
     FxValue,
     MutationType,
+    SubclassCreationMeta,
     SubclassMeta,
     ViewAndMutationMeta,
 )
-from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
+from .subclass_utils import (
+    compute_inner_mutated_inp_indices_from_subclass_meta,
+    requires_subclass_dispatch,
+)
 from .utils import (
     contain_metadata_mutation_ops,
     get_default_generator,
@@ -189,6 +199,39 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]
     return [AOTDedupeWrapper(), AOTSyntheticBaseWrapper(trace_joint=needs_autograd)]
 
 
+def _clone_fw_metadata_for_retrace(
+    metadata: ViewAndMutationMeta,
+) -> ViewAndMutationMeta:
+    def clone_subclass_meta(meta: Any) -> Any:
+        if not isinstance(meta, SubclassCreationMeta):
+            return meta
+        cloned = copy.copy(meta)
+        cloned.attrs = {
+            name: clone_subclass_meta(attr) for name, attr in meta.attrs.items()
+        }
+        return cloned
+
+    cloned = copy.copy(metadata)
+    for field in dataclasses.fields(metadata):
+        value = getattr(metadata, field.name)
+        if isinstance(value, list):
+            setattr(cloned, field.name, list(value))
+        elif isinstance(value, dict):
+            setattr(cloned, field.name, dict(value))
+        elif isinstance(value, set):
+            setattr(cloned, field.name, set(value))
+    cloned.subclass_inp_meta = [
+        clone_subclass_meta(meta) for meta in metadata.subclass_inp_meta
+    ]
+    cloned.subclass_fw_graph_out_meta = [
+        clone_subclass_meta(meta) for meta in metadata.subclass_fw_graph_out_meta
+    ]
+    cloned.subclass_tangent_meta = [
+        clone_subclass_meta(meta) for meta in metadata.subclass_tangent_meta
+    ]
+    return cloned
+
+
 def aot_stage1_graph_capture(
     aot_state: AOTState,
     orig_flat_fn: FlatFn,
@@ -234,6 +277,48 @@ def aot_stage1_graph_capture(
     # deterministic TLS can be different
     aot_state.fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
     updated_flat_args: list[Any] | tuple[list[Any], list[Any]]
+
+    autograd_trace_info = None
+    unwrapped_flat_fn = flat_fn
+    while hasattr(unwrapped_flat_fn, "__wrapped__"):
+        unwrapped_flat_fn = unwrapped_flat_fn.__wrapped__
+    has_dynamo_autograd_function = isinstance(
+        unwrapped_flat_fn, torch.fx.GraphModule
+    ) and any(
+        node.op == "call_function"
+        and node.target is torch.ops.higher_order.autograd_function_apply
+        for module in unwrapped_flat_fn.modules()
+        if isinstance(module, torch.fx.GraphModule)
+        for node in module.graph.nodes
+    )
+    # Synthetic-base wrappers close over real example views, effect tokens contain
+    # trace-local tensors, tensor subclasses require their original dispatch setup,
+    # and Dynamo has already specialized Python autograd.Function backward subgraphs.
+    # These cases must use structural specialization or the existing materialization
+    # fallback because the forward cannot safely be rerun to retrace the joint graph.
+    can_retrace_backward = (
+        not any(
+            isinstance(wrapper, AOTSyntheticBaseWrapper) and wrapper.needs_post_compile
+            for wrapper in wrappers
+        )
+        and not aot_state.fw_metadata.tokens
+        and not requires_subclass_dispatch(  # type: ignore[arg-type]
+            aot_state.flat_args,
+            aot_state.fw_metadata,
+        )
+        and not has_dynamo_autograd_function
+    )
+    if (
+        aot_state.needs_autograd
+        and not aot_config.pre_dispatch
+        and can_retrace_backward
+    ):
+        autograd_trace_info = AOTAutogradTraceInfo(
+            flat_fn=flat_fn,
+            flat_args=_clone_traced_inputs_for_autograd(aot_state.flat_args),
+            flat_args_descs=list(aot_state.flat_args_descs),
+            fw_metadata=_clone_fw_metadata_for_retrace(aot_state.fw_metadata),
+        )
 
     with maybe_skip_decompose(aot_config) as graph_capture_aot_config:
         # if config.selective_decompose, skip decomposition and apply selective_decompose
@@ -281,6 +366,7 @@ def aot_stage1_graph_capture(
         updated_flat_args=updated_flat_args,
         updated_flat_args_descs=updated_flat_args_descs,
         maybe_subclass_meta=maybe_subclass_meta,
+        autograd_trace_info=autograd_trace_info,
     )
 
 
@@ -2301,6 +2387,125 @@ def _aot_stage2b_fw_compile(
     )
 
 
+def _backward_placeholder_key(node: torch.fx.Node) -> tuple[str, str]:
+    desc = node.meta.get("desc")
+    if desc is not None:
+        return "desc", repr(desc)
+    return "name", str(node.target)
+
+
+def _retrace_backward_for_undefined_grad_outputs(
+    trace_info: AOTAutogradTraceInfo,
+    aot_config: AOTConfig,
+    undefined_grad_out_indices: Sequence[int],
+    original_bw_module: torch.fx.GraphModule,
+    original_placeholder_list: Sequence[Any],
+) -> tuple[torch.fx.GraphModule, list[Any], tuple[int, ...]] | None:
+    """Retrace with literal ``None`` tangents while preserving the forward ABI.
+
+    Returns ``None`` when the retraced backward needs an input the already-compiled
+    forward did not save, or when a tensor subclass needs the structural fallback.
+    """
+    if trace_info.partition_fn is None or trace_info.original_fw_module is None:
+        return None
+
+    metadata = _clone_fw_metadata_for_retrace(trace_info.fw_metadata)
+    undefined = set(undefined_grad_out_indices)
+    for index, grad_out_index in enumerate(_grad_output_surviving_indices(metadata)):
+        if grad_out_index not in undefined:
+            continue
+        if is_traceable_wrapper_subclass(metadata.traced_tangents[index]):
+            return None
+        metadata.traced_tangents[index] = None
+
+    retrace_config = dataclasses.replace(aot_config, cache_info=None)
+    with (
+        torch.enable_grad(),
+        maybe_skip_decompose(retrace_config) as graph_capture_config,
+    ):
+        graph, joint_inputs, _, maybe_subclass_meta = aot_dispatch_autograd_graph(
+            trace_info.flat_fn,
+            _clone_traced_inputs_for_autograd(trace_info.flat_args),
+            list(trace_info.flat_args_descs),
+            graph_capture_config,
+            fw_metadata=metadata,
+        )
+    if config.selective_decompose:
+        from torch.fx.experimental.proxy_tensor import selective_decompose
+        from torch.fx.passes.regional_inductor import _needs_inductor_compile
+
+        graph = selective_decompose(
+            graph,
+            *joint_inputs,
+            decomposition=retrace_config.decompositions,
+            should_decompose=_needs_inductor_compile,
+            trace_joint_graph=True,
+        )
+
+    fw_module, bw_module, _, _, _, _ = _aot_stage2a_partition(
+        graph,
+        joint_inputs,
+        maybe_subclass_meta,
+        metadata,
+        retrace_config,
+        trace_info.partition_fn,
+    )
+
+    original_fw_outputs = next(
+        reversed(trace_info.original_fw_module.graph.find_nodes(op="output"))
+    ).args[0]
+    retraced_fw_outputs = next(reversed(fw_module.graph.find_nodes(op="output"))).args[
+        0
+    ]
+    if (
+        len(original_fw_outputs) < metadata.num_forward
+        or len(retraced_fw_outputs) < metadata.num_forward
+    ):
+        return None
+    for original, retraced in zip(
+        original_fw_outputs[: metadata.num_forward],
+        retraced_fw_outputs[: metadata.num_forward],
+    ):
+        if isinstance(original, torch.fx.Node) and isinstance(retraced, torch.fx.Node):
+            if original.name != retraced.name:
+                return None
+        elif original != retraced:
+            return None
+
+    original_placeholders = original_bw_module.graph.find_nodes(op="placeholder")
+    if len(original_placeholders) != len(original_placeholder_list):
+        raise AssertionError(
+            "expected the original backward placeholders and inputs to line up"
+        )
+    original_by_key: dict[tuple[str, str], list[tuple[int, torch.fx.Node, Any]]] = (
+        defaultdict(list)
+    )
+    for index, (node, value) in enumerate(
+        zip(original_placeholders, original_placeholder_list)
+    ):
+        original_by_key[_backward_placeholder_key(node)].append((index, node, value))
+
+    for node in list(bw_module.graph.find_nodes(op="placeholder")):
+        if not node.users and "val" not in node.meta:
+            bw_module.graph.erase_node(node)
+
+    kept_arg_indices: list[int] = []
+    placeholder_list: list[Any] = []
+    for node in bw_module.graph.find_nodes(op="placeholder"):
+        matches = original_by_key.get(_backward_placeholder_key(node))
+        if not matches:
+            return None
+        index, original_node, value = matches.pop(0)
+        kept_arg_indices.append(index)
+        placeholder_list.append(value)
+        if "val" in original_node.meta:
+            node.meta["val"] = original_node.meta["val"]
+
+    bw_module.graph.lint()
+    bw_module.recompile()
+    return bw_module, placeholder_list, tuple(kept_arg_indices)
+
+
 def _aot_stage2b_bw_compile(
     bw_module: torch.fx.GraphModule,
     maybe_subclass_meta: SubclassMeta | None,
@@ -2310,6 +2515,7 @@ def _aot_stage2b_bw_compile(
     aot_config: AOTConfig,
     # pyrefly: ignore [implicit-any]
     bw_compiler: Callable,
+    autograd_trace_info: AOTAutogradTraceInfo | None = None,
     # pyrefly: ignore [implicit-any]
 ) -> tuple[AutogradLazyBackwardCompileInfo, Callable | None]:
     """
@@ -2456,6 +2662,7 @@ def _aot_stage2b_bw_compile(
                 placeholder_list,
                 saved_context,
                 saved_compile_context,
+                autograd_trace_info,
             )
 
             return lazy_backward_info, compiled_bw_func
@@ -2518,6 +2725,10 @@ def aot_stage2_autograd(
         fw_compiler,
     )
 
+    if aot_graph_capture.autograd_trace_info is not None:
+        aot_graph_capture.autograd_trace_info.partition_fn = partition_fn
+        aot_graph_capture.autograd_trace_info.original_fw_module = fw_module
+
     lazy_backward_info, compiled_bw_func = _aot_stage2b_bw_compile(
         bw_module,
         maybe_subclass_meta,
@@ -2526,6 +2737,7 @@ def aot_stage2_autograd(
         num_symints_saved_for_bw,
         aot_config,
         bw_compiler,
+        autograd_trace_info=aot_graph_capture.autograd_trace_info,
     )
 
     try_save_cache_entry, entry = _cache_autograd_info(
