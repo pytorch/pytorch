@@ -210,7 +210,7 @@ class HuggingFaceStorageReader(FileSystemReader):
 
         Args:
             path: directory where the checkpoint will be read from.
-            thread_count: Number of threads to use to read distributed checkpoint. Default to 1.
+            thread_count: Number of threads to use to read distributed checkpoint. Defaults to 1.
         """
 
         super().__init__(path=path)

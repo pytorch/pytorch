@@ -2447,6 +2447,14 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
+            # https://github.com/intel/torch-xpu-ops/issues/1963
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_autocast",
+                device_type="xpu",
+                dtypes=[torch.float32],
+            ),
         ),
     ),
     OpInfo(
@@ -2649,6 +2657,14 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 device_type="mps",
                 dtypes=(torch.complex64,),
+            ),
+            # torch-xpu-ops/issues/4313
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="xpu",
+                dtypes=(torch.float64,),
             ),
             # The test is flaky on AMX with Inductor
             DecorateInfo(

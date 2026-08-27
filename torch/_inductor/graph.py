@@ -58,6 +58,7 @@ from torch.utils._typing_utils import not_none
 
 from . import config, ir
 from .codegen.common import (
+    _uses_gpu_cpp_wrapper,
     BackendFeature,
     DeviceOpOverrides,
     FileBackedGraphModule,
@@ -143,6 +144,7 @@ from torch._inductor.codecache import output_code_log
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+
 
 aten = torch.ops.aten
 
@@ -1644,10 +1646,22 @@ class GraphLowering(torch.fx.Interpreter):
 
         return self.add_tensor_constant(value, target)
 
-    def call_module(self, target: Any, args: Any, kwargs: Any) -> NoReturn:
+    @typing_extensions.override
+    def call_module(
+        self,
+        target: torch.fx.node.Target,
+        args: tuple[torch.fx.node.Argument, ...],
+        kwargs: dict[str, object],
+    ) -> NoReturn:
         raise AssertionError
 
-    def call_method(self, target: Any, args: Any, kwargs: Any) -> NoReturn:
+    @typing_extensions.override
+    def call_method(
+        self,
+        target: torch.fx.node.Target,
+        args: tuple[torch.fx.node.Argument, ...],
+        kwargs: dict[str, object],
+    ) -> NoReturn:
         raise AssertionError
 
     @typing_extensions.override
@@ -1817,7 +1831,7 @@ class GraphLowering(torch.fx.Interpreter):
                 f"old_kwargs length ({len(old_kwargs)}) != new_kwargs length ({len(new_kwargs)})"
             )
 
-        def already_reflected(old_arg: Any, new_arg: Any) -> bool:
+        def already_reflected(old_arg: object, new_arg: object) -> bool:
             # No propagation is needed when new_arg already reflects the
             # mutation of old_arg: either they are the same object, or they are
             # distinct IR nodes aliasing the same buffer (e.g. an in-place op
@@ -2594,7 +2608,7 @@ class GraphLowering(torch.fx.Interpreter):
         `cpp_wrapper_cpu.py`).
         """
         self.validate_can_generate_cpp_wrapper()
-        has_gpu = any(device in self.device_types for device in ["cuda", "xpu"])
+        has_gpu = any(_uses_gpu_cpp_wrapper(device) for device in self.device_types)
         # CPU + user-defined Triton + AOTI + autotune block disabled is the
         # only CPU configuration that needs the two-pass dance: the autotune
         # block normally populates CpuTritonKernelCache, but here it doesn't run.
@@ -2904,7 +2918,7 @@ class GraphLowering(torch.fx.Interpreter):
         # A "cpu" device would precompile cpp_wrapper/cpu.h, which does not
         # include the CUDA headers needed to compile the kernel call sites.
         device_type = next(
-            (d for d in self.device_types if d in ("cuda", "xpu")),
+            (d for d in self.device_types if _uses_gpu_cpp_wrapper(d)),
             next((d for d in self.device_types if d != "meta"), "cpu"),
         )
 

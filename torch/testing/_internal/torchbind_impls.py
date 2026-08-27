@@ -51,12 +51,18 @@ def register_fake_operators():
     torch.library.register_autocast(
         "_TorchScriptTesting::queue_push", "cuda", torch.float32
     )
+    torch.library.register_autocast(
+        "_TorchScriptTesting::queue_push", "xpu", torch.float32
+    )
 
     torch.library.register_autocast(
         "_TorchScriptTesting::queue_pop", "cpu", torch.float32
     )
     torch.library.register_autocast(
         "_TorchScriptTesting::queue_pop", "cuda", torch.float32
+    )
+    torch.library.register_autocast(
+        "_TorchScriptTesting::queue_pop", "xpu", torch.float32
     )
 
     @torch.library.register_fake("_TorchScriptTesting::queue_size")

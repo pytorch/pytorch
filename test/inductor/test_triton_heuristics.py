@@ -50,6 +50,7 @@ from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
     _enforce_reduction_config_block_minimums,
+    _find_names,
     _num_warps,
     _persistent_reduction_configs,
     _reduction_configs,
@@ -65,6 +66,12 @@ from torch._inductor.runtime.triton_heuristics import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
+
+
+class _FindNamesProbe:
+    # A gc-tracked stand-in for a CachingAutotuner; object() is untracked, so a
+    # dict holding one can itself stay untracked and escape gc.get_referrers.
+    pass
 
 
 @triton.jit
@@ -94,6 +101,41 @@ def get_autotuned_amd_sqr_kernel():
 @instantiate_parametrized_tests
 class TestTritonHeuristics(TestCase):
     device_type = GPU_TYPE
+
+    def test_find_names_ignores_frame_locals(self):
+        """
+        A kernel held only by frame locals has no name, so DebugAutotuner can
+        fall back to inductor_meta["kernel_name"]. The stack walk used to leak
+        _find_names' own `obj` and the caller's `self` into the result.
+        """
+        probe = _FindNamesProbe()
+        self.assertEqual(_find_names(probe), [])
+
+    def test_find_names_finds_namespace_binding(self):
+        probe = _FindNamesProbe()
+        namespace = {"triton_poi_fused_add_0": probe}
+        try:
+            self.assertIn("triton_poi_fused_add_0", _find_names(probe))
+        finally:
+            del namespace
+
+    def test_unbound_kernel_falls_back_to_inductor_meta_name(self):
+        """
+        The label DebugAutotuner.run derives for an unbound kernel. The stack
+        walk made _find_names return ['obj', 'self'], so max(..., key=len)
+        picked "self" instead of reaching the inductor_meta fallback.
+        """
+
+        class FakeAutotuner:
+            inductor_meta = {"kernel_name": "triton_poi_fused_add_0"}
+
+            def kernel_name(self):
+                possible_names = _find_names(self)
+                if possible_names:
+                    return f"{max(possible_names, key=len)}"
+                return self.inductor_meta["kernel_name"]
+
+        self.assertEqual(FakeAutotuner().kernel_name(), "triton_poi_fused_add_0")
 
     def test_triton_config(self):
         """

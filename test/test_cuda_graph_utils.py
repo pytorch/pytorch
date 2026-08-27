@@ -499,6 +499,34 @@ class TestMarkKernels(TestCase):
 
         self.assertAnnotations({"name": "aux_branch", "stream": expected_stream_id})
 
+    def test_mark_stream_does_not_mutate_caller_annotation(self):
+        """The stream id goes onto a copy. The annotation is stored by reference, so
+        writing it through would leak back to the caller and, for a dict reused across
+        lanes, retag the regions already recorded with it to the last lane."""
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda")
+        capture_stream = torch.cuda.Stream()
+        lane_a = torch.cuda.Stream()
+        lane_b = torch.cuda.Stream()
+        id_a, id_b = _get_stream_id(lane_a), _get_stream_id(lane_b)
+        shared = {"name": "comm"}
+
+        capture_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.graph(graph, stream=capture_stream, enable_annotations=True):
+            for lane in (lane_a, lane_b):
+                lane_ready = capture_stream.record_event()
+                lane_done = torch.cuda.Event()
+                with mark_stream(lane, shared):
+                    lane.wait_event(lane_ready)
+                    _ = x * 2
+                    lane.record_event(lane_done)
+                capture_stream.wait_event(lane_done)
+
+        self.assertNotIn("stream", shared)
+        self.assertAnnotations(
+            {"name": "comm", "stream": id_a}, {"name": "comm", "stream": id_b}
+        )
+
     def _exec_graph_id(self, graph):
         from cuda.bindings import runtime as cuda_runtime
 

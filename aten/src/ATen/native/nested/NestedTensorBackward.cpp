@@ -7,7 +7,6 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
-#include <c10/core/DeviceType.h>
 
 #include <utility>
 

@@ -3,8 +3,13 @@
 import contextlib
 import enum
 import gc
+import os
 import random
 import re
+import subprocess
+import sys
+import tempfile
+import textwrap
 import unittest
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -51,7 +56,9 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     IS_LINUX,
+    IS_SANDCASTLE,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import (
@@ -2528,6 +2535,134 @@ class GraphModule(torch.nn.Module):
         self.assertIsNotNone(x.grad)
         expected_grad = torch.ones_like(x) * 2.5
         self.assertTrue(torch.allclose(x.grad, expected_grad))
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_opaque_constant_output_with_subclass_output(self, backend):
+        """Constant-type opaque created inside a compiled region must not be
+        corrupted when the same graph also produces a tensor-subclass output.
+        """
+        a = torch.randn(3, 3, requires_grad=True)
+        b = torch.randn(3, 3, requires_grad=True)
+        counter = Counter(start=1, end=5)
+        size = SizeStore(3)
+        x = TensorWithCounter(a, b, counter, size)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(3, 3))
+
+            def forward(self, x):
+                cfg = ValueConfig("square")
+                return x * self.w, cfg
+
+        m = M()
+        opt_m = torch.compile(m, backend=backend, fullgraph=True)
+        result, cfg = opt_m(x)
+
+        # Without the fix: type(cfg) is FakeScriptObject
+        self.assertIs(type(cfg), ValueConfig)
+        self.assertIsInstance(result, TensorWithCounter)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_opaque_constant_output_with_subclass_output_cache_hit(self):
+        """Cross-process FX graph cache hit must not lose opaque constants
+        when the graph also produces a tensor-subclass output.
+        """
+        script = textwrap.dedent(
+            """
+            import torch
+            from torch._library.opaque_object import register_custom_class
+            from torch._inductor import config
+            from torch._dynamo.utils import counters
+
+            config.fx_graph_cache = True
+            config.fx_graph_remote_cache = False
+
+            class Q:
+                def __init__(self, scale):
+                    self.scale = scale
+                def __eq__(self, other):
+                    return type(other) is Q and other.scale == self.scale
+                def __hash__(self):
+                    return hash(self.scale)
+                def __fx_repr__(self):
+                    return (f"Q({self.scale!r})", {"Q": Q})
+
+            register_custom_class(Q, typ="constant")
+
+            class WS(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, q):
+                    return torch.Tensor._make_wrapper_subclass(
+                        cls, data.shape, dtype=data.dtype, device=data.device
+                    )
+                def __init__(self, data, q):
+                    self._data, self._q = data, q
+                def __tensor_flatten__(self):
+                    return ["_data"], {"q": self._q}
+                @staticmethod
+                def __tensor_unflatten__(inner, ctx, size, stride):
+                    return WS(inner["_data"], ctx["q"])
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs=None):
+                    from torch.utils._pytree import tree_map
+                    def unwrap(t):
+                        return t._data if isinstance(t, WS) else t
+                    return func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {}))
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.qs = []
+                    self.ws = None
+                    self.w = torch.nn.Parameter(torch.randn(8, 8))
+                def forward(self, x):
+                    if not self.qs:
+                        q = Q(0.5)
+                        self.qs.append(q)
+                    else:
+                        q = self.qs[0]
+                    out = x @ self.w
+                    self.ws = WS(out, q)
+                    return out
+
+            m = M()
+            c = torch.compile(m, fullgraph=True)
+            with torch.no_grad():
+                c(torch.randn(4, 8))
+            hit = counters["inductor"]["fxgraph_cache_hit"]
+            miss = counters["inductor"]["fxgraph_cache_miss"]
+            cfg_type = type(m.qs[0]).__name__ if m.qs else "empty"
+            print(f"RESULT hit={hit} miss={miss} cfg_type={cfg_type}")
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = os.environ.copy()
+            env["TORCHINDUCTOR_CACHE_DIR"] = tmpdir
+            env["PYTHONPATH"] = os.pathsep.join(
+                x for x in (os.getcwd(), env.get("PYTHONPATH", "")) if x
+            )
+
+            def run_and_parse():
+                out = subprocess.check_output(
+                    [sys.executable, "-c", script],
+                    env=env,
+                    stderr=subprocess.STDOUT,
+                ).decode()
+                for line in out.splitlines():
+                    if line.startswith("RESULT "):
+                        return line
+                self.fail(f"No RESULT line in subprocess output:\n{out}")
+
+            # Run 1: populate cache (cold compile)
+            line1 = run_and_parse()
+            self.assertEqual(line1, "RESULT hit=0 miss=1 cfg_type=Q")
+
+            # Run 2: cache hit in a fresh process, opaque must survive
+            line2 = run_and_parse()
+            self.assertEqual(line2, "RESULT hit=1 miss=0 cfg_type=Q")
 
     def test_tensor_subclass_opaque_backward_compiled_autograd(self):
         """Test opaque objects work with compiled autograd backward."""

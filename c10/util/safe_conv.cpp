@@ -1,7 +1,8 @@
 #include <c10/util/safe_conv.h>
 
+#include <c10/util/Exception.h>
+
 #include <sstream>
-#include <stdexcept>
 #include <utility>
 
 namespace c10::detail {
@@ -12,7 +13,7 @@ namespace c10::detail {
   if (name != nullptr) {
     oss << ": " << name;
   }
-  throw std::runtime_error(std::move(oss).str());
+  TORCH_CHECK(false, std::move(oss).str());
 }
 
 } // namespace c10::detail

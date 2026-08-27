@@ -49,7 +49,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    skipMeta, get_all_device_types
+    expectedFailureMPSPre27, skipMeta, get_all_device_types
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -8701,7 +8701,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 0], g[:, :, : pl + 1].sum(-1))
             self.assertEqual(x.grad[:, :, -1], g[:, :, -pr - 1:].sum(-1))
 
-    @expectedFailureMPS  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
+    @expectedFailureMPSPre27  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad2d_large(self, device):
         shapes = ([2, 65736, 4, 4], [65736, 2, 4, 4])
         pl, pr, pt, pb = 3, 4, 5, 6
@@ -14599,6 +14599,14 @@ if __name__ == '__main__':
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy, bias):
+        if (
+            TEST_WITH_ROCM
+            and (torch.version.rocm or "0").split(".")[0] == "10"
+            and not bias
+            and dtype == torch.float16
+            and acc_policy == "compact"
+        ):
+            self.skipTest("times out on ROCm 10")
         if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
             self.skipTest("bf16 requires SM80+ on CUDA")
         self._test_linear_cross_entropy_loss(
@@ -14612,6 +14620,14 @@ if __name__ == '__main__':
     def test_linear_cross_entropy_loss_none_reduction_with_acc_dtype(
         self, device, dtype, acc_policy, bias
     ):
+        if (
+            TEST_WITH_ROCM
+            and (torch.version.rocm or "0").split(".")[0] == "10"
+            and not bias
+            and dtype == torch.bfloat16
+            and acc_policy == "auto"
+        ):
+            self.skipTest("times out on ROCm 10")
         # reduction='none' counterpart of
         # test_linear_cross_entropy_loss_with_acc_dtype: exercises the
         # no_reduction op (per-sample loss + recompute backward)

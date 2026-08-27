@@ -12,4 +12,9 @@ TORCH_API bool PeepholeOptimizeAliasSensitive(
     const std::shared_ptr<Graph>& graph,
     bool shape_peepholes);
 
+TORCH_API bool PeepholeOptimizeAliasSensitive(
+    const std::shared_ptr<Graph>& graph,
+    bool shape_peepholes,
+    AliasDb& alias_db);
+
 } // namespace torch::jit

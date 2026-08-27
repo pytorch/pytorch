@@ -2665,6 +2665,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def repr_recursive_sentinel(self) -> str:
+        """What repr() emits for this object when it contains itself.
+
+        Mirrors what a tp_repr writes after Py_ReprEnter reports a cycle.
+        """
+        return "..."
+
     def tp_str_impl(
         self,
         tx: InstructionTranslatorBase,

@@ -14905,58 +14905,22 @@ are freshly created instead of aliasing the input.
 """,
 )
 
-for unary_base_func_name in (
-    "exp",
-    "sqrt",
-    "abs",
-    "acos",
-    "asin",
-    "atan",
-    "ceil",
-    "cos",
-    "cosh",
-    "erf",
-    "erfc",
-    "expm1",
-    "floor",
-    "log",
-    "log10",
-    "log1p",
-    "log2",
-    "neg",
-    "tan",
-    "tanh",
-    "sin",
-    "sinh",
-    "round",
-    "lgamma",
-    "frac",
-    "reciprocal",
-    "sigmoid",
-    "trunc",
-    "zero",
-):
-    unary_foreach_func_name = f"_foreach_{unary_base_func_name}"
-    if hasattr(torch, unary_foreach_func_name):
+# Create docs for our private APIs that will link to the public ones
+for private_func_name in dir(torch):
+    if not private_func_name.startswith("_foreach_"):
+        continue
+    if private_func_name == "_foreach_powsum":
+        continue
+    foreach_func_name = private_func_name.removeprefix("_foreach_")
+    private_func = getattr(torch, private_func_name)
+    if private_func.__doc__ is None:
         add_docstr(
-            getattr(torch, unary_foreach_func_name),
+            private_func,
             rf"""
-{unary_foreach_func_name}(self: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...]
-
-Applies :func:`torch.{unary_base_func_name}` to each tensor in ``self`` and returns the
-results as a tuple.
+Please use our public :func:`torch.foreach.{foreach_func_name}` instead.
+This private API is maintained during migration to support backwards
+compatibility.
             """,
-        )
-    unary_inplace_foreach_func_name = f"{unary_foreach_func_name}_"
-    if hasattr(torch, unary_inplace_foreach_func_name):
-        add_docstr(
-            getattr(torch, unary_inplace_foreach_func_name),
-            rf"""
-{unary_inplace_foreach_func_name}(self: tuple[Tensor, ...] | list[Tensor]) -> tuple[Tensor, ...] | list[Tensor]
-
-Applies :func:`torch.{unary_base_func_name}` in-place to each tensor in ``self`` and
-returns ``self``. The returned object is the exact list or tuple passed as input.
-        """,
         )
 
 add_docstr(

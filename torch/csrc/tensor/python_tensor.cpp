@@ -200,7 +200,7 @@ static void py_initialize_tensor_type(
   // we need to initialize as many types as there are VariableType instances.
   // We copy the basic object fields from a prototype definition and initialize
   // the remaining fields below.
-  memcpy(&type, &tensor_type_prototype, sizeof(PyTypeObject));
+  type = tensor_type_prototype;
   // Subclassing from torch.<ScalarType>Tensor isn't supported.
   // (Py_TPFLAGS_BASETYPE omitted). Subclassing torch.Tensor still allowed.
   type.tp_flags = Py_TPFLAGS_DEFAULT;

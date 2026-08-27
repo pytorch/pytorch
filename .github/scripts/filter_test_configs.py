@@ -480,8 +480,13 @@ def parse_reenabled_issues(s: str | None) -> list[str]:
 def get_reenabled_issues(pr_body: str = "") -> list[str]:
     default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
     try:
+        # Read commit subjects with git log instead of git cherry. CI checks out
+        # treeless (--filter=tree:0), and git cherry computes patch-ids, which
+        # may require multiple round-trip fetches.
         commit_messages = subprocess.check_output(
-            f"git cherry -v {default_branch}".split(" ")
+            ["git", "log", "--format=%s", f"{default_branch}..HEAD"],
+            env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
+            timeout=60,
         ).decode("utf-8")
     except Exception as e:
         warnings.warn(f"failed to get commit messages: {e}")

@@ -3,9 +3,6 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/Layout.h>
-#include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
@@ -24,14 +21,12 @@
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_with_dims_native.h>
-#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe.h>
 #include <ATen/ops/_validate_sparse_compressed_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_csr_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_csc_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_bsr_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_bsc_tensor_args_native.h>
-#include <ATen/ops/aminmax.h>
 #include <ATen/ops/ccol_indices_native.h>
 #include <ATen/ops/clone_native.h>
 #include <ATen/ops/col_indices_native.h>

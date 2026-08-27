@@ -204,8 +204,8 @@ case "$tag" in
       ANACONDA_PYTHON_VERSION=3.12
     fi
     GCC_VERSION=13
-    ROCM_VERSION=7.14
-    THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
+    ROCM_VERSION=10.0
+    THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
     TRITON=yes
     KATEX=yes
     PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
@@ -216,7 +216,7 @@ case "$tag" in
   pytorch-linux-noble-rocm-preview-py3)
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
-    ROCM_VERSION=7.15.0a20260712
+    ROCM_VERSION=10.1.0a20260805
     THEROCK_INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
     USE_MSLK=0
     TRITON=yes

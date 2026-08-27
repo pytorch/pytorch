@@ -46,6 +46,7 @@ __all__ = [
     "GradientEdge",
     "get_gradient_edge",
     "increment_version",
+    "queue_callback",
     "region_activation_memory_budget",
     "set_warn_on_accumulate_grad_stream_mismatch",
     "set_override_stale_capture_stream",
@@ -255,7 +256,7 @@ def increment_version(tensor: torch.Tensor | Iterable[torch.Tensor]) -> None:
     This is to enable more accurate error checking within the autograd engine.
     It is already done automatically by PyTorch functions and within custom Function
     when mark_dirty() is called appropriately so you only need to call this explicitly
-    if you are doing inplace operation on the Tensor data in a way that Pytorch doesn't
+    if you are doing inplace operation on the Tensor data in a way that PyTorch doesn't
     know about. For example a custom kernel that reads the Tensor data_ptr and modifies
     the memory inplace based on this pointer. Can accept either a tensor, or a list of tensors.
 
@@ -268,6 +269,29 @@ def increment_version(tensor: torch.Tensor | Iterable[torch.Tensor]) -> None:
     if isinstance(tensor, torch.Tensor):
         tensor = (tensor,)
     torch._C._increment_version(tensor)
+
+
+def queue_callback(callback: Callable[[], None]) -> None:
+    """Queue a callback to run after the current backward pass completes.
+
+    Must be called during a backward pass, for example from a
+    :class:`torch.autograd.Function` backward or a backward hook. The callback
+    runs once the backward pass currently executing on this thread completes
+    successfully; it is not run if the backward pass raises an error.
+    Callbacks queued multiple times run multiple times, in queueing order.
+
+    Example::
+
+        >>> t = torch.rand(3, requires_grad=True)
+        >>>
+        >>> def hook(unused_grad):
+        ...     torch.autograd.graph.queue_callback(lambda: print("backward done"))
+        >>>
+        >>> _ = t.register_hook(hook)
+        >>> t.sum().backward()
+        backward done
+    """
+    Variable._execution_engine.queue_callback(callback)
 
 
 class saved_tensors_hooks:

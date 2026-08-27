@@ -1075,7 +1075,11 @@ def mark_stream(stream: torch.cuda.Stream, annotation: str | dict[str, Any]):
         if isinstance(annotation, str):
             annotation = {"name": annotation}
         if isinstance(annotation, dict):
-            annotation["stream"] = _get_stream_id(stream)
+            # Copy rather than write through: the annotation is stored by reference, so an
+            # in-place "stream" would leak back to the caller and, when one dict is reused
+            # across mark_stream calls, retag every region already recorded with it to the
+            # last lane written.
+            annotation = {**annotation, "stream": _get_stream_id(stream)}
         with mark_kernels(annotation):
             with torch.cuda.stream(stream):
                 yield

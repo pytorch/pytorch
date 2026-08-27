@@ -454,6 +454,9 @@ static void fill_pool_size_strides(PoolingParams<5>& params,
                                    const Tensor& output,
                                    const std::optional<Tensor>& indices_opt) {
   const Tensor& indices = *(at::borrow_from_optional_tensor(indices_opt));
+  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input) && canUse32BitIndexMath(output) &&
+                                  (!indices.defined() || canUse32BitIndexMath(indices)),
+                              "MPS pooling does not support tensors that require 64-bit indexing");
   for (const auto dim : c10::irange(input.dim())) {
     params.input_sizes[dim] = safe_downcast<int32_t, int64_t>(input.size(dim));
     params.input_strides[dim] = safe_downcast<int32_t, int64_t>(input.stride(dim));
@@ -573,6 +576,10 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto numThreads = grad_output.numel();
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      canUse32BitIndexMath(grad_input) && canUse32BitIndexMath(grad_output) && canUse32BitIndexMath(indices),
+      op_name,
+      ": MPS does not support tensors that require 64-bit indexing");
   PoolingBackwardParams<5> params;
 
   params.dims = dims;
@@ -848,6 +855,9 @@ static void avg_pool_out_mps_template(const Tensor& output,
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto numThreads = output.numel();
+  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(input) && canUse32BitIndexMath(output),
+                              op_name,
+                              ": MPS does not support tensors that require 64-bit indexing");
 
   AvgPoolingParams<5> params;
 
@@ -907,6 +917,9 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto numThreads = grad_output.numel();
+  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(grad_input) && canUse32BitIndexMath(grad_output),
+                              op_name,
+                              ": MPS does not support tensors that require 64-bit indexing");
 
   AvgPoolingParams<5> params;
 

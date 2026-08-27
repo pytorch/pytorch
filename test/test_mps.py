@@ -16283,6 +16283,9 @@ class TestConsistency(TestCaseMPS):
             mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample, opt_dtype)
 
             atol, rtol = self._compute_tolerances(op, dtype)
+            # Forward is bit-exact; backward may include inexact broadcast reductions.
+            if op.name == "nextafter":
+                atol, rtol = 0, 0
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
                mps_sample.kwargs.get("mode") == "bilinear" and
                mps_sample.kwargs.get("recompute_scale_factor") is True and
@@ -16745,7 +16748,13 @@ class TestConsistency(TestCaseMPS):
         x[-1, -1, :] = 1000.0
         x = x.requires_grad_(True)
         weight = torch.ones(C, device=device, dtype=dtype, requires_grad=True)
-        torch.group_norm(x, num_groups=C, weight=weight).sum().backward()
+        # .sum() over >2**32 elements raises on MPS; reuse out as its own ones
+        # gradient to keep peak memory at the old sum().backward() level
+        # (out is not saved for backward, so the in-place fill is safe)
+        out = torch.group_norm(x, num_groups=C, weight=weight)
+        with torch.no_grad():
+            out.fill_(1)
+        out.backward(out)
 
         x_last_cpu = x[-1:, -1:].detach().cpu().requires_grad_(True)
         weight_last_cpu = torch.ones(1, dtype=dtype, requires_grad=True)

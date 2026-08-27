@@ -3144,12 +3144,8 @@ def sample_inputs_foreach(
 
 
 def get_foreach_method_names(name):
-    # get torch inplace reference function
-    op_name = "_foreach_" + name
-    inplace_op_name = op_name + "_"
-
-    op = getattr(torch, op_name, None)
-    inplace_op = getattr(torch, inplace_op_name, None)
+    op = getattr(torch.foreach, name, None)
+    inplace_op = getattr(torch.foreach, name + "_", None)
 
     ref = getattr(torch, name, None)
     ref_inplace = getattr(torch.Tensor, name + "_", None)
@@ -3164,9 +3160,9 @@ class ForeachFuncInfo(OpInfo):
     are set to `get_all_dtypes(include_qint=False)`, and (b) the following arguments.
 
     ``supports_alpha_param=True`` means that the function supports a python scalar (``numbers.Number``)
-    as the last keyword argument such as `_foreach_add`.
+    as the last keyword argument such as ``torch.foreach.add``.
     ``supports_scalar_self_arg=True`` means that the function can take a python scalar as its first argument.
-    Currently only `_foreach_pow` supports this.
+    Currently only ``torch.foreach.pow`` supports this.
     ``backward_requires_result=True``, which could sound self-explanatory, means that the function uses
     the forward result for its backward computation.
     """
@@ -3183,10 +3179,8 @@ class ForeachFuncInfo(OpInfo):
             torch_ref_inplace,
         ) = get_foreach_method_names(self.name)
         if not self.supports_out:
-            # note(crcrpar): `foreach_method` for `"zero"` is `None` but `None` would call
-            # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
-            # is not defined at the moment. Thus to skip the qualification, set a similar torch
-            # function.
+            # Functional foreach APIs do not exist for zero and copy. Use their
+            # in-place variants to avoid qualifying a missing function.
             if foreach_method is not None:
                 raise AssertionError("foreach_method must be None")
             if torch_ref_method is not None:
@@ -3211,6 +3205,8 @@ class ForeachFuncInfo(OpInfo):
         self.has_no_in_place = self.inplace_variant is None
 
         name = self.name
+        # Keep the established private-style OpInfo names for test IDs and
+        # name-based skips even while testing the public callables above.
         self.name = f"_foreach_{name}"
         if name == "norm":
             self.ref = torch.linalg.vector_norm

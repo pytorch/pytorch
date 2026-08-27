@@ -46,11 +46,13 @@ from .cpp_utils import (
     LAYOUT_TO_ATEN,
 )
 from .wrapper import (
+    _get_profiling_args,
     _rewrite_symbol_solution_for_int_codegen,
     codegen_reinterpret_view_helper,
     EnterSubgraphLine,
     ExitSubgraphLine,
     HasWriteLine,
+    kernel_profile_enabled,
     PythonWrapperCodegen,
     SymbolicCallArg,
     WrapperLine,
@@ -271,6 +273,20 @@ class DeferredCpuTritonCallWrapper:
         # Register .so artifacts so the AOTI packager picks them up.
         V.graph.wrapper_code.additional_files.append(info["kernel_so_path"])
         V.graph.wrapper_code.additional_files.append(info["launcher_so_path"])
+
+
+def _ivalue_conversion(ivalue_var: str, to_ivalue_call: str) -> list[str]:
+    """The lines that turn one kernel argument into an IValue for the profiler:
+    declare the handle, fill it, and hand it to an RAII guard.
+
+    The conversion is error-checked because it leaves the handle untouched when
+    it fails, and the guard would then take ownership of an indeterminate
+    pointer."""
+    return [
+        f"C10IValueHandle {ivalue_var} = nullptr;",
+        f"AOTI_TORCH_ERROR_CODE_CHECK({to_ivalue_call});",
+        f"RAIIC10IValueHandle RAII_{ivalue_var}({ivalue_var});",
+    ]
 
 
 class CppWrapperCpu(PythonWrapperCodegen):
@@ -1881,6 +1897,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         *,
         debug_args: list[str] | None = None,
         stack_traces: OrderedSet[str] | None = None,
+        profiling_args: Sequence[str | None] | None = None,
+        output_handle: str | None = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
@@ -1891,10 +1909,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         debug_printer_manager.set_printer_args(
             debug_args if debug_args is not None else args, kernel, None, None, "extern"
         )
-        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
-            "linux",
-            "win32",
-        ]
+        enable_kernel_profile = kernel_profile_enabled()
         enable_kernel_context_guard = (
             enable_kernel_profile and config.cpp.enable_kernel_context_guard
         )
@@ -1905,7 +1920,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ]
             if enable_kernel_profile:
                 call_code = shim_fn_codes[0]
-                shim_fn_codes = ["{"]
+                stack_trace_str = ""
                 if enable_kernel_context_guard:
                     stack_trace_str = 'R"('
                     if stack_traces:
@@ -1914,16 +1929,81 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                 stack_trace_str += f"\n{line}"
                             stack_trace_str += "\n"
                     stack_trace_str += ')"'
-                    shim_fn_codes.append(
-                        f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});"""
+
+                has_profiling_inputs = profiling_args or output_handle
+                if has_profiling_inputs:
+                    # Generate IValue conversions so that tensor shapes
+                    # and scalar types are recorded by the profiler.
+                    # Recorded order is the operator's schema order, with `out`
+                    # last where the caller records one, matching the eager
+                    # trace layout. It is not the shim's argument order, which
+                    # passes `out` first, so consumers must not zip "Input
+                    # Dims" against the shim signature.
+                    ivalue_lines: list[str] = []
+                    ivalue_names: list[str] = []
+                    # Tensors and placeholders are numbered independently so a
+                    # name identifies which kind of argument it holds.
+                    num_inputs = 0
+                    num_scalars = 0
+
+                    for profiling_arg in profiling_args or ():
+                        if profiling_arg is None:
+                            # A non-tensor argument only has to hold its schema
+                            # position, so record a dummy int64.
+                            ivalue_var = f"tmp_{shim_fn}_scalar_{num_scalars}"
+                            num_scalars += 1
+                            to_ivalue = f"aoti_torch_int64_to_ivalue(0, &{ivalue_var})"
+                        else:
+                            ivalue_var = f"tmp_{shim_fn}_input_{num_inputs}"
+                            num_inputs += 1
+                            to_ivalue = (
+                                f"aoti_torch_tensor_to_ivalue({profiling_arg}, "
+                                f"&{ivalue_var})"
+                            )
+                        ivalue_lines.extend(_ivalue_conversion(ivalue_var, to_ivalue))
+                        ivalue_names.append(ivalue_var)
+
+                    if output_handle:
+                        ivalue_var = f"tmp_{shim_fn}_output"
+                        ivalue_lines.extend(
+                            _ivalue_conversion(
+                                ivalue_var,
+                                f"aoti_torch_tensor_to_ivalue({output_handle}, "
+                                f"&{ivalue_var})",
+                            )
+                        )
+                        ivalue_names.append(ivalue_var)
+
+                    inputs_vec_var = f"{shim_fn}_inputs_"
+                    ivalue_lines.append(
+                        f"std::vector<C10IValueHandle> {inputs_vec_var}({{{', '.join(ivalue_names)}}});"
                     )
-                shim_fn_codes.extend(
-                    [
-                        f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);""",
-                        call_code,
-                        "}",
-                    ]
-                )
+
+                    shim_fn_codes = ["{", *ivalue_lines]
+                    if enable_kernel_context_guard:
+                        shim_fn_codes.append(
+                            f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});"""
+                        )
+                    shim_fn_codes.extend(
+                        [
+                            f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr, {inputs_vec_var});""",
+                            call_code,
+                            "}",
+                        ]
+                    )
+                else:
+                    shim_fn_codes = ["{"]
+                    if enable_kernel_context_guard:
+                        shim_fn_codes.append(
+                            f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});"""
+                        )
+                    shim_fn_codes.extend(
+                        [
+                            f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);""",
+                            call_code,
+                            "}",
+                        ]
+                    )
             self.writelines(shim_fn_codes)
 
     def generate_c_shim_extern_kernel_alloc(
@@ -1943,8 +2023,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         device = d.type if (d := extern_kernel.get_device()) else self.device
 
+        # profiling_args is consumed only inside the C shim's
+        # enable_kernel_profile branch, so build it only when profiling is on.
+        profiling_args = None
+        if kernel_profile_enabled():
+            profiling_args = _get_profiling_args(extern_kernel)
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.get_kernel_name(), args, device
+            extern_kernel.get_kernel_name(),
+            args,
+            device,
+            profiling_args=profiling_args,
         )
 
         if extern_kernel.python_kernel_name in (
@@ -1970,6 +2058,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def generate_c_shim_fallback_kernel(
         self, fallback_kernel: ir.FallbackKernel, args: list[str]
     ) -> None:
+        # profiling_args is consumed only inside the C shim's
+        # enable_kernel_profile branch, so build it only when profiling is on.
+        profiling_args = None
+        if kernel_profile_enabled():
+            profiling_args = _get_profiling_args(fallback_kernel)
+
         output_args = []
         output_raii_handles = []
         output_name_base = fallback_kernel.get_name()
@@ -2007,6 +2101,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
             args,
             device,
+            profiling_args=profiling_args,
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
@@ -2019,16 +2114,23 @@ class CppWrapperCpu(PythonWrapperCodegen):
         args: list[str],
         device: str,
         stack_traces: OrderedSet[str] | None = None,
+        profiling_args: Sequence[str | None] | None = None,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
             self.writeline(f"auto {out_name} = {out_view};")
             args.insert(0, out_name)
         else:
+            out_name = out
             args.insert(0, out)
 
         self.generate_c_shim_extern_kernel_call(
-            kernel, args, device, stack_traces=stack_traces
+            kernel,
+            args,
+            device,
+            stack_traces=stack_traces,
+            profiling_args=profiling_args,
+            output_handle=out_name,
         )
 
     def _get_scatter_reduce_enum(self, reduce):
@@ -3144,7 +3246,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         f"Fall through arguments must be one of static_arg_types, got {type(arg_type)}"
                     )
 
-        for arg, arg_type in zip(raw_args, arg_types):
+        # serialize_inputs (which produced V.extern_kernel_nodes[-1]) omits unprovided
+        # kwarg-only default args, and the host proxy executor prefills those statically
+        # rather than consuming them as runtime (dynamic) args. raw_args still carries their
+        # default values (appended via ordered_kwargs), so counting them into new_int_args /
+        # new_tensor_args here would desync num_ints/num_tensors from what the host consumes
+        # ("Mismatch between ints consumed and num_ints" at runtime). Skip exactly those --
+        # kwarg-only schema args whose name was not serialized.
+        serialized_input_names = OrderedSet(
+            [inp.name for inp in V.extern_kernel_nodes[-1].node.inputs]
+        )
+        for arg, arg_type, schema_arg in zip(raw_args, arg_types, schema.arguments):
+            if schema_arg.kwarg_only and schema_arg.name not in serialized_input_names:
+                continue
             if arg is not None:
                 if isinstance(arg_type, torch.OptionalType):
                     fill_args(arg, arg_type.getElementType())
@@ -3686,8 +3800,26 @@ if (!custom_op_wrapper) {
                     # from<std::optional> handle any internal pointers.
                     codegen_arg = codegen_arg.removeprefix("&")
 
-                    if codegen_arg == "nullptr":
+                    # val_to_arg_str spells a missing Optional[Device]/List/Tuple as
+                    # the c-shim's two-token "nullptr, 0" rather than a bare nullptr;
+                    # both mean nullopt here, and there is no two-argument `from`.
+                    if codegen_arg in ("nullptr", "nullptr, 0"):
                         return "torch::stable::detail::from(std::nullopt)"
+
+                    element_type = arg_type.getElementType()
+                    if isinstance(
+                        element_type,
+                        (torch.DeviceObjType, torch.ListType, torch.TupleType),
+                    ):
+                        # A *present* value is two tokens too, which this path cannot
+                        # pack into one StableIValue yet; fail here rather than emit
+                        # C++ that will not compile.
+                        raise NotImplementedError(
+                            "aoti_torch_call_dispatcher: a non-null "
+                            f"Optional[{element_type}] argument is not yet supported "
+                            "by the StableIValue fallback path "
+                            f"(codegen produced {codegen_arg!r})"
+                        )
 
                     var_name = f"tmp_var_{next(tmp_var_number)}"
                     dispatch_lines.writeline(

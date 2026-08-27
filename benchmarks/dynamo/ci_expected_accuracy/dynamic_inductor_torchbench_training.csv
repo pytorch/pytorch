@@ -42,7 +42,7 @@ dcgan,pass,6
 
 
 
-demucs,pass,9
+demucs,pass,6
 
 
 
@@ -182,7 +182,7 @@ torchrec_dlrm,pass,6
 
 
 
-tts_angular,pass,9
+tts_angular,pass,10
 
 
 
@@ -190,7 +190,7 @@ vgg16,pass,6
 
 
 
-vision_maskrcnn,fail_to_run,38
+vision_maskrcnn,fail_to_run,33
 
 
 

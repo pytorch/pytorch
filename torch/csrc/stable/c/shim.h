@@ -248,13 +248,13 @@ AOTI_TORCH_EXPORT const char* torch_exception_get_what();
 /// thread is shutdown.
 AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace();
 
-// Allocates an StableIValue on the heap, returns an owning pointer.
+// Allocates a StableIValue on the heap, returns an owning pointer.
 // This allocation must be deleted with torch_delete_stable_ivalue or
 // by passing it to a dispatch call which frees it internally.
 AOTI_TORCH_EXPORT AOTITorchError
 torch_new_stable_ivalue(StableIValue** ret_value);
 
-// Frees an StableIValue that was created by torch_new_stable_ivalue.
+// Frees a StableIValue that was created by torch_new_stable_ivalue.
 // Deleting a nullptr is invalid and returns failure, allocations must
 // only be deleted once.
 AOTI_TORCH_EXPORT AOTITorchError

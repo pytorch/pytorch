@@ -837,7 +837,7 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   TORCH_CHECK(
       graph.use_count() == 1,
       "differentiate will mutate and destroy the graph, so it requires "
-      "graph.use_count() == 1, but found %d",
+      "graph.use_count() == 1, but found ",
       graph.use_count());
   std::swap(graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!

@@ -44,6 +44,10 @@ class ASGD(Optimizer):
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
+        if not 0.0 <= lambd:
+            raise ValueError(f"Invalid lambd value: {lambd}")
+        if not 0.0 <= alpha:
+            raise ValueError(f"Invalid alpha value: {alpha}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 

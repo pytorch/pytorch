@@ -1,6 +1,7 @@
 # Owner(s): ["module: nestedtensor"]
 # ruff: noqa: F841
 import ast
+import contextlib
 import io
 import itertools
 import math
@@ -19,6 +20,7 @@ import torch._dynamo.testing
 import torch.nn
 import torch.nn.functional as F
 from torch.nested._internal.nested_tensor import (
+    _rebuild_njt,
     buffer_from_jagged,
     jagged_from_list,
     nested_view_from_values_offsets,
@@ -957,6 +959,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         self.assertEqual(a.grad, torch.ones(2, 4, device=device, dtype=dtype))
         self.assertEqual(b.grad, torch.ones(5, 4, device=device, dtype=dtype))
 
+    @serialTest()
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
     @parametrize("weights_only", [False, True])
@@ -969,12 +972,20 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
                 nt2._nested_tensor_storage_offsets(),
             )
 
+        # Strided nested tensors are not allowlisted for weights_only load by
+        # default and must be opted into via safe_globals.
+        load_ctx = (
+            torch.serialization.safe_globals([torch._utils._rebuild_nested_tensor])
+            if weights_only
+            else contextlib.nullcontext()
+        )
         nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
         for a in [nt_contiguous, nt_noncontiguous]:
             buffer = io.BytesIO()
             serialized = torch.save(a, buffer)
             buffer.seek(0)
-            b = torch.load(buffer, weights_only=weights_only)
+            with load_ctx:
+                b = torch.load(buffer, weights_only=weights_only)
             # should be both conceptually equal and metadata equivalent
             self.assertEqual(a, b)
             compare_metadata(a, b)
@@ -4055,6 +4066,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         return example_lists
 
+    @serialTest()
     @dtypes(torch.float32)
     @parametrize(
         "contiguity",
@@ -4096,10 +4108,18 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         nt.size()
         nt.stride()
 
+        # NJTs are not allowlisted for weights_only load by default and must be
+        # opted into via safe_globals.
+        load_ctx = (
+            torch.serialization.safe_globals([_rebuild_njt, NestedTensor])
+            if weights_only
+            else contextlib.nullcontext()
+        )
         with tempfile.TemporaryFile() as f:
             torch.save(nt, f)
             f.seek(0)
-            nt_loaded = torch.load(f, weights_only=weights_only)
+            with load_ctx:
+                nt_loaded = torch.load(f, weights_only=weights_only)
 
             self.assertIsNot(nt, nt_loaded)
             # we expect a new offsets tensor -> different nested int upon load

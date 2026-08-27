@@ -2645,6 +2645,7 @@ class TestImports(TestCase):
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
+                           "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
                            "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.reductions.inner_tree_kernel",  # depends on cutlass
                            "torch._native.ops.scatter_add",  # depends on cutlass
@@ -2660,6 +2661,7 @@ class TestImports(TestCase):
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
                            "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
+                           "torch._inductor.kernel.vendored_templates.flydsl",  # depends on flydsl
                            "torch._vendor.quack",  # depends on cutlass / cuda-python
                            "torch.profiler._cupti",  # depends on cupti-python
                            ]

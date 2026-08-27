@@ -278,10 +278,7 @@ struct TORCH_API Stride {
       const std::optional<size_t>& stride)
       : stride_index_(stride_index), contiguous_(contiguous), stride_(stride) {}
 
-  bool operator==(const Stride& b) const {
-    return stride_index_ == b.stride_index_ && contiguous_ == b.contiguous_ &&
-        stride_ == b.stride_;
-  }
+  bool operator==(const Stride& b) const = default;
 
   bool isComplete() const {
     return stride_index_ && contiguous_ && stride_;

@@ -824,7 +824,7 @@ class RNN(RNNBase):
 # More discussion details in https://github.com/pytorch/pytorch/pull/23266
 #
 # TODO: remove the overriding implementations for LSTM and GRU when TorchScript
-# support expressing these two modules generally.
+# supports expressing these two modules generally.
 
 
 class LSTM(RNNBase):

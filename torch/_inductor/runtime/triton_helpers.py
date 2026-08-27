@@ -101,7 +101,7 @@ def get_backend_options():
     return get_backend_options_for_target(target)
 
 
-def _is_concrete_backend_option_value(value: Any) -> bool:
+def _is_concrete_backend_option_value(value: object) -> bool:
     import sympy
 
     import torch
@@ -1027,7 +1027,7 @@ def constexpr_next_power_of_2(
     n: tl.constexpr, *, _builder: object = None
 ) -> tl.constexpr:
     """
-    A version triton.next_power_of_two that can be used within a kernel on constants.
+    A version of triton.next_power_of_two that can be used within a kernel on constants.
     """
     if not isinstance(n, tl.constexpr):
         raise AssertionError(f"Expected tl.constexpr, got {type(n)}")

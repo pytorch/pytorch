@@ -475,6 +475,7 @@ jobs:
       build-environment: linux-jammy-cuda13.0-cudnn9-py3.10-clang20
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-clang20
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '7.5 8.0'
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -500,6 +501,7 @@ jobs:
       build-environment: linux-jammy-cuda13.2-cudnn9-py3.10-clang20
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.10-clang20
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '7.5 8.0'
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },

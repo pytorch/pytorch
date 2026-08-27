@@ -20,6 +20,7 @@ This checklist covers areas that CI cannot check. Skip items related to linting,
 When a PR introduces new API patterns, carefully evaluate the broader implications:
 
 - [ ] **No flag-based internal access** - Reject patterns like `_internal=True` kwargs that gate internal functionality. These are confusing to reason about, impossible to document properly, and create BC headaches. Use a separate private function instead (e.g., `_my_internal_op()`)
+- [ ] **Positional-only / keyword-only markers** - While historical APIs don't use them, new public APIs (and internal functions) should use `/` and `*` appropriately, e.g. `def my_api(module, /, x, *, dtype=None)`. Either marker can be dropped later without breaking callers, so we always prefer to have them to begin with unless the author explicitly refuses. Put arguments whose names are not part of the documented contract (`self`, callbacks, wrapped objects) before `/`, and optional or configuration arguments after `*`. Leave an argument positional-or-keyword only when both its name and its position are meant to be stable.
 - [ ] **Pattern already exists?** - Before accepting a new pattern, search the codebase to check if this pattern is already established. If not, the PR is introducing a new convention that needs stronger justification
 - [ ] **Documentation implications** - Can this API be clearly documented? Flag-based access creates ambiguity about what is public vs private
 - [ ] **BC implications going forward** - Will this pattern create future BC constraints?

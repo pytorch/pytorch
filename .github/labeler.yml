@@ -167,6 +167,13 @@
 - torch/_inductor/kernel/flex_gemm/**
 - torch/_inductor/kernel/flex/flex_flash_attention.py
 - torch/_inductor/runtime/cutedsl_cache.py
+- torch/_inductor/kernel/mm_grouped.py
+- torch/_inductor/kernel/templates/cutedsl_mm_grouped.py.jinja
+- torch/_inductor/kernel/vendored_templates/cutedsl/**
+- torch/_inductor/heuristics/template/cutedsl.py
+- test/inductor/test_cutedsl_grouped_mm.py
+- test/inductor/test_cutedsl_template.py
+- test/python_native/**
 
 "ciflow/h100":
 - test/test_matmul_cuda.py
