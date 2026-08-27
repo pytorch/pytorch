@@ -1200,7 +1200,16 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
 
   // Use Metal kernels for integer and complex types
   if (c10::isIntegralType(batch1.scalar_type(), true) || c10::isComplexType(batch1.scalar_type())) {
-    return do_metal_addbmm_or_baddbmm(input, batch1, batch2, alpha, beta, result, opType == BADDBMM_OP_TYPE);
+    // beta == 0 means input is ignored, so nan/inf in it must not propagate (see the
+    // MPSGraph path below, which drops the bias node entirely). The Metal kernel always
+    // reads the bias, so hand it zeros instead.
+    return do_metal_addbmm_or_baddbmm((beta.toComplexDouble() == 0.0 ? (at::zeros_like(input)) : input),
+                                      batch1,
+                                      batch2,
+                                      alpha,
+                                      beta,
+                                      result,
+                                      opType == BADDBMM_OP_TYPE);
   }
 
   MPSStream* stream = getCurrentMPSStream();
