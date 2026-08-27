@@ -49,6 +49,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+from torch.utils.weak import WeakIdKeyDictionary
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
@@ -79,6 +80,7 @@ DimList = list
 
 pytree = torch.utils._pytree
 T = TypeVar("T")
+_ItemMemo = int | float | bool | SymInt | SymFloat | SymBool
 
 aten = torch._ops.ops.aten
 
@@ -196,14 +198,25 @@ class FakeTensorTLS(threading.local):
     # Default to None, otherwise it'll be used to override _all_
     # `FakeTensorMode.allow_non_fake_inputs` in this thread.
     allow_non_fake_inputs_override: bool | None
-    non_strict_export_fake_tensor_tracker: weakref.WeakSet[FakeTensor]
+    non_strict_export_fake_tensor_tracker: WeakIdKeyDictionary
 
     def __init__(self) -> None:
         self.allow_non_fake_inputs_override = None
-        self.non_strict_export_fake_tensor_tracker = weakref.WeakSet()
+        self.non_strict_export_fake_tensor_tracker = WeakIdKeyDictionary()
 
 
 fake_tensor_tls = FakeTensorTLS()
+
+
+# C++ fake tensors have no Python __init__, and constructor-only tracking misses
+# memoized tensors reused during non-strict export.
+def track_fake_tensor_for_export(t: object) -> None:
+    if (
+        torch.compiler.is_exporting()
+        and torch._export.config.detect_non_strict_fake_tensor_leaks
+        and is_fake_tensor(t)
+    ):
+        fake_tensor_tls.non_strict_export_fake_tensor_tracker[t] = None
 
 
 def ordered_set(*items: T) -> dict[T, Literal[True]]:
@@ -327,21 +340,83 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
 
 
 def maybe_get_real_tensor(x: object) -> Tensor | None:
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.real_tensor
+    elif isinstance(x, FunctionalTensor):
+        return maybe_get_real_tensor(x.elem)
+    elif isinstance(x, Tensor) and torch._is_functional_tensor(x):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
+        return maybe_get_real_tensor(unwrapped)
+    elif isinstance(x, Tensor) and is_functorch_wrapped_tensor(x):
+        return maybe_get_real_tensor(torch._C._functorch.get_unwrapped(x))
+    elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        return torch._C._get_fake_real_tensor(x)
     return None
+
+
+def maybe_set_real_tensor(x: object, real: Tensor | None) -> None:
+    # Store the shadow real tensor on a Python FakeTensor or a C++ fake.
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        x.real_tensor = real
+    elif real is not None and isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        torch._C._set_fake_real_tensor(x, real)
+
+
+def maybe_get_item_memo(x: object) -> _ItemMemo | None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return x.item_memo
+    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        fake_mode = maybe_get_fake_mode(x)
+        if fake_mode is not None:
+            return cast(Any, fake_mode).get_item_memo(x)
+    return None
+
+
+def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        x.item_memo = memo
+    elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        fake_mode = maybe_get_fake_mode(x)
+        if fake_mode is not None:
+            cast(Any, fake_mode).set_item_memo(x, memo)
 
 
 def maybe_get_fake_device(x: object) -> torch.device | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.fake_device
+    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        try:
+            return torch._C._fake_tensor_device(x)
+        except RuntimeError:
+            return None
     return None
+
+
+def maybe_set_fake_device(x: object, device: torch.device) -> None:
+    # Set the fake device on a Python FakeTensor or a C++ fake tensor.
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        x.fake_device = device
+    elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        torch._C._set_fake_device(x, device)
 
 
 def maybe_get_fake_constant(x: object) -> Tensor | None:
+    # The constant a fake tensor was created from, for Python or C++ fakes.
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.constant
+    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        return torch._C._get_fake_constant(x)
     return None
+
+
+def maybe_clear_fake_constant(x: object) -> None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        x.constant = None
+    elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        torch._C._clear_fake_constant(x)
 
 
 @functools.cache
@@ -643,7 +718,7 @@ class FakeTensorConverter:
                 if source is None:
                     # Plain FakeTensorMode may not have a ShapeEnv. Preserve
                     # the concrete scalar memo for real 0-D tensor inputs.
-                    out.item_memo = value
+                    maybe_set_item_memo(out, value)
                 else:
                     if shape_env is None:
                         raise AssertionError("shape_env unexpectedly missing")
@@ -661,16 +736,22 @@ class FakeTensorConverter:
                     # NB: reusing item_memo here ensures that we invalidate on
                     # mutation
                     if t.dtype == torch.int64:
-                        out.item_memo = shape_env.create_symintnode(
-                            symbol,
-                            hint=value,
-                            source=item_source,
+                        maybe_set_item_memo(
+                            out,
+                            shape_env.create_symintnode(
+                                symbol,
+                                hint=value,
+                                source=item_source,
+                            ),
                         )
                     elif t.dtype == torch.float64:
-                        out.item_memo = shape_env.create_symfloatnode(
-                            symbol,
-                            hint=value,
-                            source=item_source,
+                        maybe_set_item_memo(
+                            out,
+                            shape_env.create_symfloatnode(
+                                symbol,
+                                hint=value,
+                                source=item_source,
+                            ),
                         )
         if make_constant:
             self.add_constant_storage_mapping(out)
@@ -711,6 +792,22 @@ def init_gpu_context(device: torch.device) -> None:
             if torch.version.hip is None
             else torch.zeros(1, device=device)
         )
+
+
+# Restore explicitly because mock.patch.object cannot delete C++-backed properties.
+@contextlib.contextmanager
+def allow_non_fake_inputs_temporarily(
+    fake_mode: FakeTensorMode | None,
+) -> Generator[None, None, None]:
+    if fake_mode is None:
+        yield
+        return
+    previous = fake_mode.allow_non_fake_inputs
+    fake_mode.allow_non_fake_inputs = True
+    try:
+        yield
+    finally:
+        fake_mode.allow_non_fake_inputs = previous
 
 
 @contextlib.contextmanager
@@ -1096,7 +1193,7 @@ class FakeTensor(Tensor):
             torch.compiler.is_exporting()
             and torch._export.config.detect_non_strict_fake_tensor_leaks
         ):
-            fake_tensor_tls.non_strict_export_fake_tensor_tracker.add(self)
+            fake_tensor_tls.non_strict_export_fake_tensor_tracker[self] = None
 
     @staticmethod
     def from_tensor(t: Tensor, fake_mode: FakeTensorMode) -> FakeTensor:
@@ -1639,6 +1736,9 @@ class FakeTensorMode(TorchDispatchMode):
 
     def reset_nt_tensor_id_counter(self) -> None:
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
+
+    def clear_non_cpu_constants(self) -> None:
+        self.fake_tensor_converter.clear_non_cpu_constants()
 
     # Typically, there is only one fake tensor mode and you test for it by
     # doing an isinstance test.  However, in some situations, there might be

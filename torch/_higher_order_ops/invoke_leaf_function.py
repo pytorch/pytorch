@@ -458,6 +458,8 @@ def _make_forward(
             effective_keys = effective_keys.remove(DispatchKey.PythonDispatcher)
         if effective_keys.has(DispatchKey.Python):
             effective_keys = effective_keys.remove(DispatchKey.Python)
+        if effective_keys.has(DispatchKey.Fake):
+            effective_keys = effective_keys.remove(DispatchKey.Fake)
         with torch._C._ForceDispatchKeyGuard(effective_keys, exclude_keys):
             with torch.enable_grad():
                 outputs = fn(*args, **kwargs)
