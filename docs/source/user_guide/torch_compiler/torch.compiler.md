@@ -51,9 +51,12 @@ and treats the Python environment as an unchecked invariant between capture and 
 changing it can silently run a specialization captured for the old state. Tensor,
 scalar, Python-container, and `nn.Module` arguments are supported. Graph breaks and
 closure-free `torch._dynamo.disable` functions are preserved; top-level closures and
-nested functions that capture locals are not yet supported. Captured nested frames that
-cannot be reached by a source-only dispatcher use an isolated installed artifact; it
-installs lazily, can be scoped with `with`, and exposes `unload()`. With `training=True`,
+nested functions that capture locals are not yet supported. Function defaults must be
+recursive immutable literals; mutable or user-defined values must be passed explicitly.
+Tensor-valued globals are also rejected because every tensor must be an explicit input.
+Captured nested frames that cannot be reached by a source-only dispatcher use an
+isolated installed artifact; it installs lazily, can be scoped with `with`, and exposes
+`unload()`. With `training=True`,
 Dynamo/Inductor graphs include readable compiled forward and backward code, so served
 outputs retain a `grad_fn` and can be passed to `backward()`. This training mode works
 across captured recompilations and graph breaks. See the

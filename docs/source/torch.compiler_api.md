@@ -93,7 +93,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       importable objects. Disabled functions cannot assign globals or use
       ``globals()``, ``eval()``, or ``exec()``; their importable module globals are
       rebound at load, while recursive literal globals and defaults are captured by
-      value. Compiled graphs and kernels remain Python source; guard
+      value. Top-level defaults must also be recursive literals; mutable or user-defined
+      values must be passed explicitly rather than used as defaults. Tensor-valued
+      globals are also rejected because every tensor must be an explicit input. Compiled
+      graphs and kernels remain Python source; guard
       trees, transformed Dynamo entry/resume bytecode, and embedded disabled-function
       bytecode are stored as opaque inline data because they have no Python-source
       representation. The top-level function cannot have closure cells or nested
