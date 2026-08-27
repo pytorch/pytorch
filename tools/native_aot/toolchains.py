@@ -50,9 +50,9 @@ Properties consumed by the driver scripts:
   * ``NARROWS_SHAPES_TO_INT32``: the exported ABI takes i32 extents, so
     gen_aot_lib emits a stub gate declining dims past INT32_MAX.
   * ``ARCH_ENV_VAR``: env var this kind reads when no arch is passed
-    explicitly; export._effective_arch resolves it so the sidecar records
-    the arch actually compiled for and a run that changes only that
-    variable is not skipped as already exported.
+    explicitly. export REFUSES it rather than resolving it: it answers for
+    one kind, so with two kinds registered a tree named for its value held
+    sidecars recording the detected arch. Pass --arch instead.
 
 Export runs as stage 2 of the two-stage build (build torch -> build
 the AOT lib), so torch is always importable during export.
@@ -327,6 +327,12 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
             with open(path, encoding="utf-8", errors="replace") as f:
                 header = f.read()
         except FileNotFoundError:
+            # ABSENT, which is not the same as unreadable: OSError is deliberately
+            # not caught, so a permission error or a directory in its place still
+            # raises. Nothing that ships gets here -- export re-exports a point whose
+            # header is missing, and generation refuses a sidecar whose artifacts are
+            # not on disk -- so this is the unit-fixture path, where a sidecar dict
+            # stands in for a tree that was never written.
             return
         header = self._ABI_COMMENT.sub(" ", header)
         prefix = sidecar["prefix"]
@@ -350,14 +356,20 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                 )
             name = a["name"]
             tname = f"{prefix}_Tensor_{name}_t"
+            # Two names for one thing, and both are external: the DSL's C header
+            # declares dynamic_shapes, while the sidecar records dynamic_sizes after
+            # aten. Kept as an explicit (header member, sidecar key) pair so every
+            # message below can name the side it is about -- one that used the header
+            # spelling while telling the reader to fix the builder named a sidecar key
+            # that does not exist.
             claims = {
-                "dynamic_strides": a.get("dynamic_strides") or [],
-                "dynamic_shapes": a.get("dynamic_sizes") or [],
+                "dynamic_strides": ("dynamic_strides", a.get("dynamic_strides") or []),
+                "dynamic_shapes": ("dynamic_sizes", a.get("dynamic_sizes") or []),
             }
-            for field, slots in claims.items():
+            for key, slots in claims.values():
                 if not isinstance(slots, list):
                     raise RuntimeError(
-                        f"{path}: {name}'s {field} is {slots!r}, not a list of "
+                        f"{path}: {name}'s {key} is {slots!r}, not a list of "
                         f"dims. The launcher emits one assignment per element; fix "
                         f"the builder and re-export this point."
                     )
@@ -398,7 +410,7 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                     " ".join(m.group("type").split()),
                     m.group("bound"),
                 )
-            for field, slots in claims.items():
+            for field, (key, slots) in claims.items():
                 if field not in declared:
                     # MENTIONED but unread is not the same as absent: a spelling
                     # this parser cannot classify (a comma-separated declarator,
@@ -420,9 +432,9 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                     if slots:
                         raise RuntimeError(
                             f"{path}: {name} declares no {field} this parser can "
-                            f"read, but the sidecar claims {len(slots)}. The "
-                            f"launcher would assign to a member that does not "
-                            f"exist. Make the builder's {field!r} list match the "
+                            f"read, but the sidecar's {key} claims {len(slots)}. "
+                            f"The launcher would assign to a member that does not "
+                            f"exist. Make the builder's {key!r} list match the "
                             f"dims its fake args mark dynamic, and re-export."
                         )
                     continue
@@ -456,21 +468,21 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                     raise RuntimeError(
                         f"{path}: {name}'s {field} is declared with the bound "
                         f"`{bound}`, which is not a literal count, so it cannot be "
-                        f"compared with the {len(slots)} slot(s) the sidecar "
-                        f"claims. Re-export this point; if the DSL now emits "
+                        f"compared with the {len(slots)} slot(s) the sidecar's "
+                        f"{key} claims. Re-export this point; if the DSL now emits "
                         f"computed bounds, update validate_abi."
                     )
                 if int(digits.group("n")) != len(slots):
                     raise RuntimeError(
-                        f"{path}: the sidecar claims {len(slots)} {field} slot(s) "
+                        f"{path}: the sidecar's {key} claims {len(slots)} slot(s) "
                         f"for {name} but the header declares {field}[{bound}]. The "
                         f"launcher fills exactly the slots the sidecar lists, into "
                         f"an uninitialized struct, so a mismatch either stores past "
                         f"the end of that array or leaves the kernel reading an "
                         f"indeterminate value -- and torch builds with "
                         f"-Wno-array-bounds, so nothing warns. Make the builder's "
-                        f"list match the dims its fake args mark dynamic, and "
-                        f"re-export this point."
+                        f"{key!r} list match the dims its fake args mark dynamic, "
+                        f"and re-export this point."
                     )
 
     def gen_launcher(self, sidecar: dict) -> str:
