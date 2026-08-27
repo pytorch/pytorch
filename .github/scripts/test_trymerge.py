@@ -1949,11 +1949,32 @@ class TestMergeAuthorizedLogins(TestCase):
             merge_authorized_logins(DummyGitRepo(), "pytorch", "pytorch"), frozenset()
         )
 
+    @mock.patch("trymerge.read_merge_rules")
+    def test_an_unexpandable_team_ref_yields_an_empty_set(
+        self, mock_rules: Any, *args: Any
+    ) -> None:
+        """Expanding a team ref is a live request; a blip must not end the merge."""
+        mock_rules.return_value = [
+            MergeRule(
+                name="Some Team",
+                patterns=["*"],
+                approved_by=["pytorch/some-team"],
+                mandatory_checks_name=None,
+            )
+        ]
+        with mock.patch(
+            "trymerge.gh_get_team_members", side_effect=RuntimeError("testing")
+        ):
+            self.assertEqual(
+                merge_authorized_logins(DummyGitRepo(), "pytorch", "pytorch"),
+                frozenset(),
+            )
+
     @mock.patch(
         "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
     )
     @mock.patch("trymerge.read_merge_rules")
-    def test_a_malformed_team_ref_in_an_unmatched_rule_still_raises(
+    def test_a_malformed_team_ref_in_an_unmatched_rule_yields_an_empty_set(
         self, mock_rules: Any, *args: Any
     ) -> None:
         """Refusing a mis-typed team ref is deliberate: it must never resolve to nobody.
@@ -1961,7 +1982,7 @@ class TestMergeAuthorizedLogins(TestCase):
         find_matching_merge_rule drops a rule whose patterns miss the PR before it
         expands that rule's approvers, so the ref below never reaches it. This set
         spans every rule in the file regardless of patterns, and the empty set it
-        would otherwise produce is what the guard reads as "no human authorized this".
+        produces instead is what the guard reads as "no human authorized this".
         """
         mock_rules.return_value = [
             MergeRule(
@@ -1981,10 +2002,9 @@ class TestMergeAuthorizedLogins(TestCase):
                 "No rule found to match PR",
                 lambda: find_matching_merge_rule(pr, DummyGitRepo()),
             )
-            self.assertRaisesRegex(
-                ValueError,
-                MALFORMED_TEAM_REF,
-                lambda: merge_authorized_logins(DummyGitRepo(), "pytorch", "pytorch"),
+            self.assertEqual(
+                merge_authorized_logins(DummyGitRepo(), "pytorch", "pytorch"),
+                frozenset(),
             )
         mock_members.assert_not_called()
 

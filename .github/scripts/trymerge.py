@@ -1759,19 +1759,20 @@ def merge_authorized_logins(
     against before deciding a human has already handled a PR. Answering that question
     with a different set would have the guard wait for a review that never comes.
 
-    An unreadable rules file yields the empty set rather than an error: the guard would
-    otherwise invent a refusal out of a failure to read a file the real merge gate reads
-    on the same pass, and would blame the wrong thing when it did.
+    An unusable rules file yields the empty set rather than an error: the guard would
+    otherwise invent a refusal out of a failure the real merge gate hits on the same
+    pass, and would blame the wrong thing when it did.
     """
     try:
         rules = read_merge_rules(repo, org, project)
+        # frozenset() forces the generator, so rule_approvers' GraphQL calls run here.
+        return frozenset(
+            normalize_login(login) for rule in rules for login in rule_approvers(rule)
+        )
     except Exception as e:
-        print(f"Warning: failed to read {MERGE_RULE_PATH} for {org}/{project}: {e}")
+        print(f"Warning: failed to resolve {MERGE_RULE_PATH} for {org}/{project}: {e}")
         traceback.print_exc()
         return frozenset()
-    return frozenset(
-        normalize_login(login) for rule in rules for login in rule_approvers(rule)
-    )
 
 
 def _find_non_matching_files(patterns: list[str], files: list[str]) -> list[str]:
