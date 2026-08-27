@@ -245,6 +245,48 @@ def _maybe_scoped(loaded):
     return loaded if hasattr(loaded, "__enter__") else contextlib.nullcontext()
 
 
+class _PrecompileRebound:
+    def forward(self, x):
+        return x * 2
+
+
+class _PrecompileReboundModule(torch.nn.Module):
+    def forward(self, x):
+        return x * 2
+
+
+def _precompile_rebound_shadow(x):
+    return x * 3
+
+
+class _PrecompileForwardHolder:
+    """The torchrec TrainPipelineSparseDist shape.
+
+    It keeps each module's ORIGINAL bound forward in a list, and optionally
+    rebinds the attribute the way TrainPipelineSparseDist swaps in a
+    PipelinedForward. Both halves matter: the saved method's receiver is what
+    pruning replaces with the sentinel, and whether the attribute still
+    resolves to the saved function is what used to pick the reducer's branch.
+    """
+
+    def __init__(self, inner, shadow):
+        self.inner = inner
+        self._original_forwards = [inner.forward]
+        self.scale = torch.zeros(4)
+        if shadow:
+            inner.forward = _precompile_rebound_shadow
+
+
+def _precompile_rebound_entry(pipeline, x):
+    return pipeline._original_forwards[0](x) + x
+
+
+def _precompile_rebound_unread_entry(pipeline, x):
+    # The holder is passed through and guarded, but nothing reads the saved
+    # method -- the shape the real model has.
+    return x * 2 + pipeline.scale
+
+
 def _precompile_defaulted_helper(model, x, scale):
     # A nested frame no name in the entry reaches, which is what puts the
     # capture into the installed serving mode.
@@ -1862,6 +1904,78 @@ class TestPrecompile(TestCase):
             with _maybe_scoped(loaded), torch.no_grad():
                 x = torch.randn(rows, 8)
                 self.assertEqual(loaded(model, x), _precompile_attr_entry(model, x))
+
+    @parametrize("module_receiver", [True, False])
+    @parametrize("shadow", [True, False])
+    @parametrize("read", [True, False])
+    def test_precompile_serves_a_bound_method_whose_receiver_was_pruned(
+        self, module_receiver, shadow, read
+    ):
+        # The bound-method reducer EMITS a bound method, so re-serializing its
+        # own output reaches it again with a receiver the first pass replaced
+        # with the _Missing sentinel. Deciding the branch by reading that
+        # receiver then raised "'_Missing' object has no attribute forward".
+        # Only the public path re-serializes -- the guard policy rebuilds each
+        # frame from the pickle capture already made -- so only it aborted.
+        #
+        # Serving, not merely capturing, is the assertion that matters: an
+        # earlier attempt at this fix degraded the method itself to the
+        # sentinel, which captured fine and then re-pinned the TYPE_MATCH on it
+        # to _Missing, so the artifact could never match a live receiver.
+        inner = _PrecompileReboundModule() if module_receiver else _PrecompileRebound()
+        holder = _PrecompileForwardHolder(inner, shadow)
+        entry = _precompile_rebound_entry if read else _precompile_rebound_unread_entry
+        x = torch.randn(4)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                entry,
+                tracer="dynamo",
+                backend="eager",
+                example_inputs=[(holder, x)],
+                require_no_risky_drops=False,
+                require_complete=False,
+            )
+            expected = entry(holder, x)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(holder, x), expected)
+
+    def test_precompile_pruned_receiver_identity_guard_is_risky_not_silent(self):
+        # The CLOSURE_MATCH identity slot on the saved function is dropped, as
+        # it is in every artifact -- but as RISKY, which the default refuses.
+        # Both entry points must agree on that, or require_no_risky_drops means
+        # something different depending on which one you called.
+        from torch._dynamo.precompile_package import precompile_capture
+
+        x = torch.randn(4)
+        with (
+            self.assertRaisesRegex(
+                torch.compiler.precompile.PrecompileError,
+                r"_original_forwards\[0\]",
+            ),
+            torch.no_grad(),
+        ):
+            torch.compiler.precompile(
+                _precompile_rebound_entry,
+                tracer="dynamo",
+                backend="eager",
+                example_inputs=[
+                    (_PrecompileForwardHolder(_PrecompileRebound(), True), x)
+                ],
+                require_complete=False,
+            )
+
+        session = precompile_capture(
+            _precompile_rebound_entry,
+            backend="eager",
+            example_inputs=[(_PrecompileForwardHolder(_PrecompileRebound(), True), x)],
+        )
+        with session:
+            pass
+        session.artifact(require_no_risky_drops=False, require_complete=False)
+        risky = [name for _, name in session.summary().risky_dropped_guards]
+        self.assertIn("pipeline._original_forwards[0].__func__", risky)
 
     def test_precompile_stale_module_memo_is_revalidated(self):
         # The filename -> module memo caches a hit outright, and its ABA check
