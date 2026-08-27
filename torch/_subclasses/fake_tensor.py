@@ -1846,7 +1846,10 @@ class FakeTensorMode(TorchDispatchMode):
             if self.cache_crosscheck_enabled:
                 # For debugging / testing: Validate that the output synthesized
                 # from the cache matches the output created by normal dispatch.
-                with disable_fake_tensor_cache(self):
+                with (
+                    disable_fake_tensor_cache(self),
+                    torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing(),
+                ):
                     self._crosscheck_cache_output(output, func, types, args, kwargs)
             return output
 
