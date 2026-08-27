@@ -60,16 +60,24 @@ def _idx_sentinel(idx_dtype):
 
 def _pos_id(acc):
     # "Largest" identity for a min-reduction's init / the value that loses every
-    # max. For floats this is +inf; integer accumulators (a later family) will
-    # override with their max representable value. Wrap in `acc(...)` so the result
-    # carries the accumulator dtype -- `acc.inf` is a bare Python float, which the
-    # DSL treats as Float32, breaking the ifexp type-match in `_pick` for fp64.
+    # max. +inf for floats; the max representable value for integer accumulators
+    # (Int32/Int64 have no .inf). Wrap in `acc(...)` so the result carries the
+    # accumulator dtype -- a bare Python number would be treated as Float32,
+    # breaking the ifexp type-match in `_pick` for fp64.
+    if acc is Int32:
+        return acc(_INT32_MAX)
+    if acc is Int64:
+        return acc(_INT64_MAX)
     return acc(acc.inf)
 
 
 def _neg_id(acc):
-    # "Smallest" identity for a max-reduction's init. -inf for floats; typed via
-    # `acc(...)` for the same reason as `_pos_id`.
+    # "Smallest" identity for a max-reduction's init: -inf for floats, the min
+    # representable value for integer accumulators; typed via `acc(...)` as above.
+    if acc is Int32:
+        return acc(-_INT32_MAX - 1)
+    if acc is Int64:
+        return acc(-_INT64_MAX - 1)
     return acc(-acc.inf)
 
 
@@ -160,6 +168,18 @@ class NormOps:
             return cute.math.exp(cute.math.log(s) / self.acc(self.p))
 
 
+@cute.jit
+def _welford_denom(acc_dtype, nf, correction):
+    # var/std divisor, CLAMPED AT ZERO like aten: `correction >= n` must divide by 0
+    # (-> +inf, which is what aten returns and what the numpy-reference tests expect
+    # after their inf->nan mapping), NOT by a negative number. Unclamped, a
+    # correction larger than the reduced extent returned a NEGATIVE variance.
+    # `nf` is a runtime value, so this is a select, not a python max().
+    d = nf - acc_dtype(correction)
+    z = acc_dtype(0.0)
+    return d if d > z else z  # noqa: FURB136 -- builtin max()/min() do not lower
+
+
 class WelfordOps:
     # acc = (mean, m2, nf) all in the accumulator dtype.
     #   reduce  = ONLINE (Welford) update of a single element.
@@ -222,7 +242,7 @@ class WelfordOps:
         mean, m2, nf = acc
         if const_expr(self.return_mean):
             return mean
-        var = m2 / (nf - self.acc(self.correction))
+        var = m2 / _welford_denom(self.acc, nf, self.correction)
         if const_expr(self.take_sqrt):
             return cute.math.sqrt(var)
         return var
@@ -237,7 +257,7 @@ class ArgMaxOps:
     # extent can exceed 2^31 so the winning position never overflows -- the builder
     # picks it from N (this is what lets the cross-CTA split serve huge-N argmax; the
     # stage-1 fold's chunk-global column must be computed in the same width, see
-    # kernel_row.col_base).
+    # tile.TileMap.col_base).
     nfields = 2
     has_index = True
 
@@ -715,20 +735,34 @@ class AMinOps:
         return acc[0]
 
 
-def _offsets(threads_per_row):
+def _offsets(threads_per_row, ascending: bool = False):
     # Decreasing butterfly offsets: matches the PyTorch/Triton fp reduction order.
+    # ASCENDING (1, 2, 4, ...) is ATen's WarpReduceDirection::ASCENDING, which the tile
+    # datapath's lane merge uses. Same result mathematically, different add order ->
+    # different fp bits, so the direction is part of a kernel's numerics contract.
     n = min(threads_per_row, WARP)
     offs = []
-    o = n // 2
-    while o > 0:
-        offs.append(o)
-        o = o // 2
+    if ascending:
+        o = 1
+        while o < n:
+            offs.append(o)
+            o = o * 2
+    else:
+        o = n // 2
+        while o > 0:
+            offs.append(o)
+            o = o // 2
     return offs
 
 
 @cute.jit
-def warp_reduce(trait, acc, threads_per_row: cutlass.Constexpr):
-    for offset in _offsets(threads_per_row):
+def warp_reduce(
+    trait,
+    acc,
+    threads_per_row: cutlass.Constexpr,
+    ascending: cutlass.Constexpr = False,
+):
+    for offset in _offsets(threads_per_row, ascending):
         acc = trait.combine(acc, trait.shfl_down(acc, offset))
     return acc
 
@@ -786,7 +820,7 @@ class VarMeanOps(WelfordOps):
     @cute.jit
     def project(self, acc, n):
         mean, m2, nf = acc
-        var = m2 / (nf - self.acc(self.correction))
+        var = m2 / _welford_denom(self.acc, nf, self.correction)
         result = cute.math.sqrt(var) if const_expr(self.take_sqrt) else var
         return (result, mean)
 
