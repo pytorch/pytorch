@@ -8,7 +8,7 @@ from typing_extensions import ParamSpec
 import torch
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 
-# ``torch.compiler.precompile``: make_fx/Dynamo AOT capture -> executable Python source
+# ``torch.compiler.precompile``: make_fx AOT capture -> self-contained Python source
 # plus an acceleration cache. Re-exported from the private impl module, whose
 # ``_PrecompileApi.__module__`` is forced to "torch.compiler" so this is the single
 # public location. Distinct from ``torch._dynamo.config.caching_precompile`` (a
@@ -19,12 +19,6 @@ from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 from torch._precompile import (
     precompile as precompile,
     PrecompileError as PrecompileError,
-)
-from torch.compiler._precompile_types import (
-    ExampleInput as ExampleInput,
-    FrameInvariants as FrameInvariants,
-    GuardFact as GuardFact,
-    PrecompileSummary as PrecompileSummary,
 )
 
 from . import config
@@ -54,10 +48,6 @@ __all__ = [
     "load_compiled_function",
     "precompile",
     "PrecompileError",
-    "ExampleInput",
-    "GuardFact",
-    "FrameInvariants",
-    "PrecompileSummary",
     "wrap_numpy",
     "is_compiling",
     "is_dynamo_compiling",

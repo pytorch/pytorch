@@ -1,10 +1,5 @@
 # Owner(s): ["module: dynamo"]
-import faulthandler
 import operator
-import queue
-import sys
-import textwrap
-import threading
 import unittest
 import weakref
 from functools import cache
@@ -23,7 +18,6 @@ from torch._dynamo.exc import FailOnRecompileLimitHit
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    TestCase,
 )
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
@@ -503,42 +497,6 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         return len(torch._dynamo.eval_frame._debug_get_cache_entry_list(code))
 
     # ===== Basic isolation: independent caches per compile call =====
-
-    def test_concurrent_calls_do_not_deadlock_on_the_cache_lock(self):
-        def f(x):
-            return x.sin() + x.cos()
-
-        opt = torch.compile(f, backend="eager", dynamic=False)
-        args = [torch.randn(n) for n in (3, 4, 5)]
-        for arg in args:
-            opt(arg)
-
-        errors = queue.SimpleQueue()
-
-        def hammer():
-            try:
-                for _ in range(200):
-                    for arg in args:
-                        opt(arg)
-            except BaseException as e:
-                errors.put(e)
-
-        threads = [threading.Thread(target=hammer, daemon=True) for _ in range(4)]
-        prior_interval = sys.getswitchinterval()
-        sys.setswitchinterval(1e-6)
-        faulthandler.dump_traceback_later(300, exit=True, file=sys.__stderr__)
-        try:
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join()
-        finally:
-            faulthandler.cancel_dump_traceback_later()
-            sys.setswitchinterval(prior_interval)
-        raised = []
-        while not errors.empty():
-            raised.append(errors.get_nowait())
-        self.assertEqual(raised, [])
 
     @torch._dynamo.config.patch(
         recompile_limit=1,
@@ -1695,115 +1653,6 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(self._num_cache_entries(f), 0)
 
     # ===== Debug / introspection =====
-
-    def test_cache_key_lookup_is_off_until_a_cache_key_backend_exists(self):
-        script = textwrap.dedent(
-            """
-            import torch
-            from torch._C._dynamo.eval_frame import (
-                _debug_get_cache_entry_list,
-                _enable_precompile_cache_keys,
-            )
-
-            def fn(x):
-                return x.sin()
-
-            class Backend:
-                def __init__(self, inner):
-                    self._torchdynamo_orig_backend = inner
-                    self._torchdynamo_cache_key = object()
-
-                def __call__(self, gm, inputs):
-                    return self._torchdynamo_orig_backend(gm, inputs)
-
-            inner = torch._dynamo.lookup_backend("eager")
-
-            def entries(same_key):
-                torch._dynamo.reset()
-                x = torch.randn(4)
-                a, b = Backend(inner), Backend(inner)
-                if same_key:
-                    b._torchdynamo_cache_key = a._torchdynamo_cache_key
-                torch._dynamo.optimize(a)(fn)(x)
-                torch._dynamo.optimize(b)(fn)(x)
-                return len(_debug_get_cache_entry_list(fn.__code__))
-
-            print("off", entries(False))
-            _enable_precompile_cache_keys()
-            _enable_precompile_cache_keys()
-            print("on", entries(False))
-            print("on_same_key", entries(True))
-            """
-        )
-        stdout, stderr = TestCase.run_process_no_exception(script)
-        out = stdout.decode()
-        self.assertIn("off 1", out, stderr.decode())
-        self.assertIn("on 2", out, stderr.decode())
-        self.assertIn("on_same_key 1", out, stderr.decode())
-
-    def test_has_precompile_entries_is_region_exact(self):
-        from torch._C._dynamo.eval_frame import (
-            _debug_get_cache_entry_list,
-            _has_precompile_entries,
-            _load_precompile_entry,
-            _reset_precompile_entries_for_region,
-        )
-
-        def never_compiled(x):
-            return x + 1
-
-        self.assertFalse(_has_precompile_entries(never_compiled.__code__, -1))
-        with self.assertRaisesRegex(TypeError, "expected a code object"):
-            _has_precompile_entries(never_compiled, -1)
-
-        def f(x):
-            return x.sin()
-
-        torch.compile(f, backend="eager", dynamic=False)(torch.randn(3))
-        code = f.__code__
-        self.assertFalse(_has_precompile_entries(code, 7))
-
-        guard_manager = _debug_get_cache_entry_list(code)[0].guard_manager
-        _load_precompile_entry(code, guard_manager, code, 7)
-        try:
-            self.assertTrue(_has_precompile_entries(code, 7))
-            self.assertFalse(_has_precompile_entries(code, 9))
-            self.assertFalse(_has_precompile_entries(code, -1))
-        finally:
-            _reset_precompile_entries_for_region(code, 7)
-        self.assertFalse(_has_precompile_entries(code, 7))
-
-    def test_precompile_entries_are_removed_by_owner_not_by_region(self):
-        from torch._C._dynamo.eval_frame import (
-            _debug_get_cache_entry_list,
-            _debug_get_precompile_entries,
-            _load_precompile_entry,
-            _reset_precompile_entries_for_owner,
-            _reset_precompile_entries_for_region,
-        )
-
-        def f(x):
-            return x.sin()
-
-        torch.compile(f, backend="eager", dynamic=False)(torch.randn(3))
-        code = f.__code__
-        guard_manager = _debug_get_cache_entry_list(code)[0].guard_manager
-
-        first, second = object(), object()
-        _load_precompile_entry(code, guard_manager, code, -1, first)
-        _load_precompile_entry(code, guard_manager, code, -1, second)
-        try:
-            self.assertEqual(len(_debug_get_precompile_entries(code)), 2)
-            _reset_precompile_entries_for_owner(code, -1, first)
-            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
-            _reset_precompile_entries_for_owner(code, -1, first)
-            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
-            _reset_precompile_entries_for_owner(code, 7, second)
-            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
-            _reset_precompile_entries_for_owner(code, -1, second)
-            self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
-        finally:
-            _reset_precompile_entries_for_region(code, -1)
 
     def test_isolate_recompiles_debug_cache_entry_list_deterministic_order(self):
         """_debug_get_cache_entry_list returns entries sorted by
