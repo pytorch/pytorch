@@ -53,7 +53,7 @@ jobs:
       # The amd-sandbox experiment routes the mi350 test shards onto the
       # amd-sandbox- prefixed runner scale sets via the dedicated
       # amd-sandbox-label-type output (empty when the experiment is disabled, in
-      # which case the canonical linuxlinux.rocm.gpu.mi350.* labels are used).
+      # which case the canonical linux.rocm.gpu.mi350.* labels are used).
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1" },
