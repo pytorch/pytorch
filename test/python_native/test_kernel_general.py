@@ -87,6 +87,24 @@ class TestKernelGeneral(TestCase):
         )
         self.assertTrue(found[0].startswith("tile.py"), f"the body moved: {found}")
 
+    def test_internal_invariants_raise(self):
+        # The point of spelling these as raises rather than asserts is that they survive
+        # `python -O`, so assert they fire at all -- a suppressed assert passes every other test
+        # in this file exactly as a real check does.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_general as kg
+
+        trait = T.SumOps(acc=cutlass.Float32)
+        xt = torch.randn(64, 128, device="cuda").t()  # reduce-all wants a flat view
+        with self.assertRaisesRegex(AssertionError, "contiguous CUDA input"):
+            kg._reduce_all(trait, "inv", xt, [torch.float32], 1, 128, 4)
+        with self.assertRaisesRegex(AssertionError, "count and num_o"):
+            kg.ReduceBlock(
+                trait, count=2**31, num_o=1, red_pairs=((2**31, 1),), kept_pairs=()
+            )
+
 
 if __name__ == "__main__":
     run_tests()
