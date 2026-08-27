@@ -98,6 +98,14 @@ class WorkNCCL : public c10d::Work {
 
  private:
   struct Events;
+  struct InputTensorShelf {
+    explicit InputTensorShelf(std::vector<at::Tensor> tensors);
+    void append(InputTensorShelf& other);
+    void clear();
+
+    std::mutex mutex;
+    std::vector<at::Tensor> tensors;
+  };
   struct State {
     State(
         ProcessGroupNCCL* comm,
@@ -142,10 +150,8 @@ class WorkNCCL : public c10d::Work {
   void synchronizeInternal();
 
   std::shared_ptr<State> state_;
-  std::vector<at::Tensor> inputTensors_;
-  at::Tensor inputTensor_;
+  std::shared_ptr<InputTensorShelf> inputTensors_;
   std::vector<at::Tensor> outputs_;
-  std::vector<c10::intrusive_ptr<WorkNCCL>> children_;
   std::optional<at::RecordFunction> recordFunction_;
   c10::intrusive_ptr<c10::ivalue::Future> future_;
 };

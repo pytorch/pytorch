@@ -10,6 +10,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 
+#include <iterator>
 #include <thread>
 
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
@@ -46,6 +47,23 @@ struct WorkNCCL::Events {
   std::unique_ptr<at::cuda::CUDAEvent> end;
 };
 
+WorkNCCL::InputTensorShelf::InputTensorShelf(std::vector<at::Tensor> tensors)
+    : tensors(std::move(tensors)) {}
+
+void WorkNCCL::InputTensorShelf::append(InputTensorShelf& other) {
+  std::scoped_lock lock(mutex, other.mutex);
+  tensors.insert(
+      tensors.end(),
+      std::make_move_iterator(other.tensors.begin()),
+      std::make_move_iterator(other.tensors.end()));
+  other.tensors.clear();
+}
+
+void WorkNCCL::InputTensorShelf::clear() {
+  std::lock_guard<std::mutex> lock(mutex);
+  tensors.clear();
+}
+
 WorkNCCL::State::State(
     ProcessGroupNCCL* comm,
     cudaStream_t stream,
@@ -70,7 +88,7 @@ WorkNCCL::WorkNCCL(
     std::chrono::milliseconds timeout_ms,
     const std::vector<at::Tensor>& inputTensors)
     : state_(std::make_shared<State>(comm, stream, timeout_ms)),
-      inputTensors_(inputTensors) {}
+      inputTensors_(std::make_shared<InputTensorShelf>(inputTensors)) {}
 
 WorkNCCL::WorkNCCL(
     ProcessGroupNCCL* comm,
@@ -78,7 +96,8 @@ WorkNCCL::WorkNCCL(
     std::chrono::milliseconds timeout_ms,
     at::Tensor inputTensor)
     : state_(std::make_shared<State>(comm, stream, timeout_ms)),
-      inputTensor_(std::move(inputTensor)) {}
+      inputTensors_(std::make_shared<InputTensorShelf>(
+          std::vector<at::Tensor>{std::move(inputTensor)})) {}
 
 WorkNCCL::~WorkNCCL() = default;
 
@@ -88,18 +107,16 @@ void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
     return;
   }
 
-  if (!inputTensors_.empty()) {
+  std::lock_guard<std::mutex> lock(inputTensors_->mutex);
+  if (!inputTensors_->tensors.empty()) {
     std::vector<c10::IValue> inputs;
-    inputs.reserve(inputTensors_.size());
-    for (const auto& tensor : inputTensors_) {
+    inputs.reserve(inputTensors_->tensors.size());
+    for (const auto& tensor : inputTensors_->tensors) {
       inputs.emplace_back(tensor);
     }
     recordFunction_->before(
         coll_name,
         c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
-  } else if (inputTensor_.defined()) {
-    recordFunction_->before(
-        coll_name, c10::ArrayRef<const c10::IValue>(inputTensor_));
   } else {
     recordFunction_->before(coll_name, c10::ArrayRef<const c10::IValue>{});
   }
@@ -202,7 +219,9 @@ void WorkNCCL::setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children) {
     std::lock_guard<std::mutex> lock(state_->durationMutex);
     state_->durationStartEvents = children.front()->state_->events;
   }
-  children_ = std::move(children);
+  for (const auto& child : children) {
+    inputTensors_->append(*child->inputTensors_);
+  }
 }
 
 void WorkNCCL::setSequenceNumber(uint64_t seq) {
@@ -332,8 +351,7 @@ void WorkNCCL::synchronizeInternal() {
 
   // Release tensor references. The CUDA caching allocator manages stream
   // semantics and will not reclaim memory until the stream operations complete.
-  inputTensors_.clear();
-  inputTensor_.reset();
+  inputTensors_->clear();
 }
 
 bool WorkNCCL::wait(std::chrono::milliseconds timeout) {
