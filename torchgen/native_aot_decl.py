@@ -75,10 +75,19 @@ _OPTIONAL_FNS = {
     "cpp_covers": 0,
 }
 
+# Every sm spelling this tooling can parse and target. export checks an explicit
+# --arch against it before touching the disk, so a typo bails out naming the set
+# instead of matching no declaration and exporting nothing at exit 0. Deliberately
+# WIDER than export.EXPORTABLE_ARCHES, which is what the standard build ships: an
+# explicit --arch is how a hand run targets something the release wheels do not.
+KNOWN_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a", "sm_103", "sm_103a")
+
 # Default ARCHS: every current kernel requires sm90+ features (TMA,
 # clusters, cp.async.bulk); Blackwell variants included. Declarations
 # override to narrow (e.g. a Blackwell-only kernel pins ("sm_100a",)).
-_DEFAULT_ARCHS = ("sm_90", "sm_90a", "sm_100", "sm_100a", "sm_103", "sm_103a")
+# The same tuple as KNOWN_ARCHES today, named separately because "the tooling can
+# target this arch" is not "every declaration's kernels work on it".
+_DEFAULT_ARCHS = KNOWN_ARCHES
 
 _SM_RE = r"sm_\d+a?"
 
