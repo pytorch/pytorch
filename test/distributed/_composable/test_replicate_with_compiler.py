@@ -29,12 +29,7 @@ from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    onlyAccelerator,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_LINUX,
