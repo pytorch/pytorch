@@ -14,6 +14,8 @@ Covers:
 import unittest
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch._inductor.runtime.triton_helpers import (
     exclusive_scan_decoupled_lookback_64,
     max2,
@@ -32,11 +34,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
 )
 from torch.testing._internal.common_utils import HardwareClassification
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON, requires_triton
-
-
-HAS_GPU_DEVICE = GPU_TYPE != "mps" and getattr(torch, GPU_TYPE).is_available()
-HAS_ACCELERATOR = HAS_GPU_DEVICE or torch.mps.is_available()
+from torch.testing._internal.inductor_utils import HAS_TRITON, requires_triton
 
 
 if HAS_TRITON:
@@ -163,13 +161,31 @@ if HAS_TRITON:
             tl.store(max_ptr + row, max2(x, 0))
 
 
-class ExclusiveScanDecoupledLookback64Test(TestCase):
+class _TritonDeviceTestCase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        device = cls.get_primary_device()
+        if not HAS_TRITON:
+            raise unittest.SkipTest(f"triton is required for {device}")
+        try:
+            device_interface = get_interface_for_device(torch.device(device).type)
+        except NotImplementedError as exc:
+            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
+        if not device_interface.is_triton_capable(device):
+            raise unittest.SkipTest(f"requires Triton support for {device}")
+        try:
+            device_interface.raise_if_triton_unavailable(device)
+        except TritonUnavailableError as exc:
+            raise unittest.SkipTest(str(exc)) from exc
+
+
+class ExclusiveScanDecoupledLookback64Test(_TritonDeviceTestCase):
     """Test cases for exclusive_scan_decoupled_lookback_64 dtype fix."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_flag_2_branch_with_int64_index(self, device) -> None:
         """Test `if flag == 2` branch with int64 index."""
@@ -194,7 +210,6 @@ class ExclusiveScanDecoupledLookback64Test(TestCase):
         torch.testing.assert_close(result, expected)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_flag_2_branch_with_int32_index(self, device) -> None:
         """Test `if flag == 2` branch with int32 index."""
@@ -219,7 +234,7 @@ class ExclusiveScanDecoupledLookback64Test(TestCase):
         torch.testing.assert_close(result, expected)
 
 
-class SelectOneTest(TestCase):
+class SelectOneTest(_TritonDeviceTestCase):
     """Test cases for select_one bitcast fix with sub-32-bit dtypes.
 
     The fix (D93872067) adds an intermediate .to(idtype) truncation before
@@ -244,35 +259,31 @@ class SelectOneTest(TestCase):
         torch.testing.assert_close(result, expected)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_select_one_bfloat16(self, device) -> None:
         """Test select_one with bfloat16 (16-bit) — triggers the bitcast fix."""
         self._run_select_one(device, torch.bfloat16)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_select_one_float16(self, device) -> None:
         """Test select_one with float16 (16-bit) — triggers the bitcast fix."""
         self._run_select_one(device, torch.float16)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_select_one_float32(self, device) -> None:
         """Test select_one with float32 (32-bit) — baseline that always worked."""
         self._run_select_one(device, torch.float32)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_select_one_float64(self, device) -> None:
         """Test select_one with float64 (64-bit) — baseline that always worked."""
         self._run_select_one(device, torch.float64)
 
 
-class Random4xTest(TestCase):
+class Random4xTest(_TritonDeviceTestCase):
     """Test cases for rand4x/randn4x helper packing order."""
 
     hw_classification = HardwareClassification.ACCELERATOR
@@ -292,37 +303,31 @@ class Random4xTest(TestCase):
         torch.testing.assert_close(helper_result, expected_result, atol=0, rtol=0)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_rand4x_order(self, device) -> None:
         self._run_random_4x_order(device, normal=False, block_size=16)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_randn4x_order(self, device) -> None:
         self._run_random_4x_order(device, normal=True, block_size=16)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_rand4x_order_quarter_block_size_2(self, device) -> None:
         self._run_random_4x_order(device, normal=False, block_size=8)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_randn4x_order_quarter_block_size_2(self, device) -> None:
         self._run_random_4x_order(device, normal=True, block_size=8)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_rand4x_fallback_block_size_2(self, device) -> None:
         self._run_random_4x_order(device, normal=False, block_size=2)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_randn4x_fallback_block_size_2(self, device) -> None:
         self._run_random_4x_order(device, normal=True, block_size=2)
@@ -352,19 +357,16 @@ class Random4xTest(TestCase):
         torch.testing.assert_close(small_block_result, large_block_result)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_rand4x_block_size_stability(self, device) -> None:
         self._run_random_4x_block_size_stability(device, normal=False)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_randn4x_block_size_stability(self, device) -> None:
         self._run_random_4x_block_size_stability(device, normal=True)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_rand4x_distribution(self, device) -> None:
         block_size = 1024
@@ -389,7 +391,6 @@ class Random4xTest(TestCase):
         self.assertLess(max_bucket_error / (sample_count / 10), 0.08)
 
     @onlyAccelerator
-    @unittest.skipIf(not HAS_ACCELERATOR, "requires gpu")
     @requires_triton()
     def test_randn4x_distribution(self, device) -> None:
         block_size = 1024
@@ -414,7 +415,7 @@ class Random4xTest(TestCase):
         self.assertLess(abs(skewness), 0.05)
 
 
-class MinimumMaximumTest(TestCase):
+class MinimumMaximumTest(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_elementwise_nan_and_signed_zero(self, device: str) -> None:
@@ -538,26 +539,31 @@ class MinimumMaximumTest(TestCase):
 instantiate_device_type_tests(
     ExclusiveScanDecoupledLookback64Test,
     globals(),
-    only_for=(GPU_TYPE,),
+    except_for=("cpu", "hpu"),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     SelectOneTest,
     globals(),
-    only_for=(GPU_TYPE,),
+    except_for=("cpu", "hpu"),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     Random4xTest,
     globals(),
-    only_for=(GPU_TYPE,),
+    except_for=("cpu", "hpu"),
     allow_xpu=True,
 )
 
-if HAS_GPU_DEVICE and HAS_TRITON:
-    instantiate_device_type_tests(MinimumMaximumTest, globals(), only_for=GPU_TYPE)
+if HAS_TRITON:
+    instantiate_device_type_tests(
+        MinimumMaximumTest,
+        globals(),
+        except_for=("cpu", "hpu"),
+        allow_xpu=True,
+    )
 
 
 if __name__ == "__main__":
-    if HAS_GPU_DEVICE and HAS_TRITON:
+    if HAS_TRITON:
         run_tests()
