@@ -310,15 +310,4 @@ To unsafe_wrapping_convert(From f, const char* name) {
 
 HIDDEN_NAMESPACE_END(torch, headeronly)
 
-namespace c10 {
-using torch::headeronly::checked_convert;
-using torch::headeronly::convert;
-using torch::headeronly::maybe_bool;
-using torch::headeronly::maybe_real;
-using torch::headeronly::needs_real;
-using torch::headeronly::static_cast_with_inter_type;
-using torch::headeronly::unchecked_cast_to_int;
-using torch::headeronly::unsafe_wrapping_convert;
-} // namespace c10
-
 C10_CLANG_DIAGNOSTIC_POP()

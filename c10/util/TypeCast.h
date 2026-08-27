@@ -13,6 +13,74 @@
 
 #include <torch/headeronly/util/TypeCast.h>
 
+#include <type_traits>
+
 namespace c10 {
+
+// Thin forwarding templates keep c10 as the customization point so downstream
+// explicit specializations in namespace c10 remain source-compatible.
+template <typename dest_t, typename src_t>
+struct needs_real {
+  constexpr static bool value =
+      torch::headeronly::needs_real<dest_t, src_t>::value;
+};
+
+template <bool B, typename src_t>
+struct maybe_real {
+  C10_HOST_DEVICE static inline decltype(auto) apply(src_t src) {
+    return torch::headeronly::maybe_real<B, src_t>::apply(src);
+  }
+};
+
+template <bool B, typename src_t>
+struct maybe_bool {
+  C10_HOST_DEVICE static inline decltype(auto) apply(src_t src) {
+    return torch::headeronly::maybe_bool<B, src_t>::apply(src);
+  }
+};
+
+template <typename dest_t, typename src_t>
+C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t
+unchecked_cast_to_int(src_t src) {
+  return torch::headeronly::unchecked_cast_to_int<dest_t, src_t>(src);
+}
+
+template <typename dest_t, typename src_t>
+struct static_cast_with_inter_type {
+  C10_HOST_DEVICE static inline dest_t apply(src_t src) {
+    return torch::headeronly::static_cast_with_inter_type<dest_t, src_t>::apply(
+        src);
+  }
+};
+
+template <typename To, typename From>
+C10_HOST_DEVICE To convert(From f) {
+  return static_cast_with_inter_type<To, From>::apply(f);
+}
+
 [[noreturn]] C10_API void report_overflow(const char* name);
+
+template <typename To, typename From>
+To checked_convert(From f, const char* name) {
+  // Converting to bool can't overflow so we exclude this case from checking.
+  if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
+    report_overflow(name);
+  }
+  return convert<To, From>(f);
+}
+
+// Range-checked conversion that PERMITS signed->unsigned two's-complement
+// wraparound (via overflows() with its default strict_unsigned=false). Retained
+// only to preserve the historical behavior of the few call sites that relied on
+// the wrap. DO NOT use in new code: use c10::safe_conv (strict integer
+// narrowing, c10/util/safe_conv.h) or checked_convert (general, above).
+template <typename To, typename From>
+To unsafe_wrapping_convert(From f, const char* name) {
+  // Converting to bool can't overflow so we exclude this case from checking.
+  if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
+    report_overflow(name);
+  }
+  return convert<To, From>(f);
+}
+
 } // namespace c10
