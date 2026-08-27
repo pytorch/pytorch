@@ -7,6 +7,7 @@
 # wires its own branch in as it is introduced:
 #   contiguous last-dim, smem-fits   -> kernel_rowtile   (one-shot)
 #   contiguous last-dim, larger N    -> kernel_xcta      (fused cross-CTA split)
+#   prime / awkward N                -> _two_stage_row   (ragged split, K0 body)
 #   every kept extent 1              -> reduce_all
 #   anything only K0 could serve     -> declined to aten by the cond
 #
@@ -41,7 +42,9 @@
 #   npairs_red / npairs_kept : the (extent, stride) pair COUNTS (decode depth).
 #   nouts        : 1 or 2 result tensors (var_mean / max.dim are 2).
 #   gidx_from    : "r" -> argmax index is the linear reduction index r (per-axis
-#                  reductions); "flat" -> the global flat input offset (reduce-all).
+#                  reductions); "flat" -> the global flat input offset (reduce-all);
+#                  "chunk" -> chunk_base + r, the GLOBAL COLUMN of a ragged row split
+#                  (where r is only the index within this chunk).
 #   final        : True  -> project the accumulator, store nouts result(s);
 #                  False -> store the RAW accumulator fields to per-field gmem
 #                           partial buffers (cross-CTA stage 1).
@@ -50,6 +53,10 @@
 #                  False -> it REDUCEs raw scalar inputs.
 #   flat_tail    : clamp the per-block fold bound to `limit` (reduce-all stage 1,
 #                  where the last chunk overhangs the flat input).
+#   ragged_chunk : clamp it to the end of THIS OUTPUT's reduced run instead (split stage 1,
+#                  where an extent that is not a multiple of the chunk leaves the last chunk
+#                  of every output short). `limit` then carries the reduced extent. Counted
+#                  in STEPS, so it is independent of the reduced axis's stride.
 #
 # runtime geometry args (Int32/Int64 launch args, NOT in the compile key):
 #   rvals/kvals  : interleaved (extent, stride) Int64 lists for reduced/kept dims.
@@ -92,6 +99,7 @@ class ReduceBlock:
         final=True,
         gidx_from="r",
         flat_tail=False,
+        ragged_chunk=False,
         from_partials=False,
         block=128,
     ):
@@ -113,8 +121,9 @@ class ReduceBlock:
         self.project_n = project_n if project_n is not None else count
         self.nouts = nouts
         self.final = final
-        self.gidx_from = gidx_from  # "r" (per-axis index) or "flat" (reduce-all)
+        self.gidx_from = gidx_from  # "r" | "flat" (reduce-all) | "chunk" (row split)
         self.flat_tail = flat_tail  # clamp the fold bound to limit (reduce-all s1)
+        self.ragged_chunk = ragged_chunk  # clamp to this output's reduced run
         self.from_partials = from_partials
         self.block = block
         self.num_warps = block // WARP
@@ -134,6 +143,7 @@ class ReduceBlock:
             self.final,
             self.gidx_from,
             self.flat_tail,
+            self.ragged_chunk,
             self.from_partials,
             self.block,
             self.trait.nfields,
@@ -198,9 +208,32 @@ class ReduceBlock:
         # stage 1, red stride 1 by construction) clamp to the elements left before
         # `limit` so the overhanging last chunk folds nothing out of range. Runtime
         # value -> the full-wave count n_full is a DYNAMIC loop trip count.
+        # nonzero only under ragged_chunk -- see gidx_from == "chunk"
+        chunk_base = Int32(0)
         rb = count
         if const_expr(self.flat_tail):
             left = limit - obase
+            c64 = cutlass.Int64(count)
+            left = left if left < c64 else c64  # noqa: FURB136 -- no DSL builtin min
+            zero = cutlass.Int64(0)
+            left = left if left > zero else zero  # noqa: FURB136 -- no DSL builtin max
+            rb = cutlass.Int32(left)
+        elif const_expr(self.ragged_chunk):
+            # RAGGED CHUNK SPLIT (stage 1): the reduced run is cut into chunks of `count`
+            # STEPS each, and its extent need not be a multiple of count -- so the LAST chunk
+            # of every output is short and must fold nothing belonging to the next output.
+            # `limit` carries the reduced EXTENT; the chunk pair is the fastest-varying kept
+            # pair, so its magic quad in kvals yields the chunk index with no runtime divide
+            # (see _magic). One such computation per BLOCK, not per element.
+            #
+            # Counted in STEPS of the reduced axis, not elements, so this is independent of
+            # that axis's stride: a contiguous row split (stride 1, count = chunk columns)
+            # and a column split (stride = row length, count = chunk rows) use it unchanged.
+            q = (cutlass.Int64(o) * kvals[0]) >> kvals[1]
+            c = cutlass.Int64(o) - q * kvals[2]
+            cnt = cutlass.Int64(count)
+            chunk_base = Int32(c * cnt)  # this chunk's first step, for gidx
+            left = limit - c * cnt
             c64 = cutlass.Int64(count)
             left = left if left < c64 else c64  # noqa: FURB136 -- no DSL builtin min
             zero = cutlass.Int64(0)
@@ -267,6 +300,20 @@ class ReduceBlock:
                         Int32(obase + _decode_offset(base_r, rvals, self.npairs_red)),
                         True,
                     )
+                elif const_expr(self.gidx_from == "chunk"):
+                    # Chunked row: base_r is the index WITHIN this chunk, so the winning
+                    # column is chunk_base + base_r. Inlined like the others -- binding it
+                    # would make the DSL treat it as loop-carried.
+                    acc = reduce_fn(
+                        acc,
+                        acc_dtype(
+                            mIns[0][
+                                obase + _decode_offset(base_r, rvals, self.npairs_red)
+                            ]
+                        ),
+                        chunk_base + base_r,
+                        True,
+                    )
                 else:
                     acc = reduce_fn(
                         acc,
@@ -289,6 +336,8 @@ class ReduceBlock:
             # the global flat input offset (reduce-all; fits int32 per-chunk).
             if const_expr(self.gidx_from == "flat"):
                 acc = reduce_fn(acc, val, Int32(off_s), valid)
+            elif const_expr(self.gidx_from == "chunk"):
+                acc = reduce_fn(acc, val, chunk_base + base_r, valid)
             else:
                 acc = reduce_fn(acc, val, base_r, valid)
 
@@ -498,6 +547,8 @@ _SMEM_BUDGET = 192 * 1024
 # vec 4 -> 48) from every bad one (128, 256). tile.MAX_UNROLL bounds the same quantity inside
 # the kernel; this is the gate's copy.
 _ONESHOT_MAX_LOADS = 64
+# Chunks per row for the ragged split (_two_stage_row). Caps the stage-2 fold.
+_C_MAX_ROW = 64
 
 # K0 general (correctness-fallback) kernel config, as named DATA. K0 is the any-geometry
 # backstop (scalar/strided offset-decoded loads), NOT a perf path, so its knobs are
@@ -547,11 +598,18 @@ def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
         # The same fused split as nouts==1, projecting both fields. Without it a
         # few-row/huge-N 2-output reduction lands on K0's one-block-per-row (0.63x of
         # ATen at N=65536, 0.20x at N=131072, for every M).
-        return xc.reduce_row_xcta_2out(trait, trait_key, x, out_dtypes)
+        res = xc.reduce_row_xcta_2out(trait, trait_key, x, out_dtypes)
+        if res is not None:
+            return res
+        # xcta declined (no divisor split for this N) -> ragged split, same as nouts==1.
+        return _two_stage_row(trait, trait_key, x, out_dtypes, nouts)
     res = xc.reduce_row_xcta(trait, trait_key, x, out_dtypes[0])
-    if res is None:
-        return None  # xcta declined (no divisor split for this N) -> K0 general kernel
-    return (res,)
+    if res is not None:
+        return (res,)
+    # xcta declined: no C divides N inside its window (a prime N, say), or the trait
+    # carries an index. Split raggedly instead -- same two stages, but the chunk need not
+    # divide the row, and stage 1 can carry the absolute column.
+    return _two_stage_row(trait, trait_key, x, out_dtypes, nouts)
 
 
 
@@ -568,6 +626,79 @@ def _as_shape(out, out_shape):
         return reshaped
     out.resize_(out_shape)
     return out
+
+
+def _two_stage_row(trait, trait_key, x, out_dtypes, nouts, block=_K0_ALL_BLOCK):
+    # RAGGED cross-CTA row split, for a (M, N) contiguous last-dim reduction that the
+    # reshape-based split (kernel_xcta) declines: that one needs C to DIVIDE N exactly, so a
+    # prime N -- or one whose only divisors fall outside its window -- has no legal split and
+    # lands on the single-kernel K0 path with ONE block per row. At few rows that is 8 blocks
+    # on a 148-SM device: measured 0.28x of ATen at (8, 131071) and 0.63x at (8, 65537).
+    #
+    # Here the chunk length s does NOT have to divide N: chunk c covers [c*s, min((c+1)*s, N))
+    # and stage 1 clamps its fold to the end of the row (ragged_chunk). Stage 2 then combines
+    # the C partials per row exactly as reduce_all's does. Returns None when a split would not
+    # help (C == 1: no extra parallelism to buy, so the caller's single-kernel path is
+    # strictly cheaper than paying a second launch).
+    #
+    # Index traits ARE served, which is why xcta can decline them: stage 1 runs
+    # gidx_from="chunk", feeding the trait chunk_base + r -- the GLOBAL column -- so stage 2's
+    # combine over the C partials picks the true global winner with no remap, and ATen's
+    # first-wins tie-break survives because a lower column always compares lower. Measured
+    # 1.29-3.17x of ATen on the argmax shapes xcta refuses. (reduce_all gets the same for free
+    # from "flat": with one row the flat offset IS the column.)
+    M, N = x.shape
+    sm = torch.cuda.get_device_properties(x.device).multi_processor_count
+    # Enough chunks to fill the device, then round s up to a 16B-friendly multiple so the
+    # per-chunk base stays aligned; C follows from s, and the tail is whatever is left.
+    C = max(1, min(_C_MAX_ROW, -(-(sm * _K0_ALL_GRID_MULT) // max(1, M))))
+    if C == 1:
+        return None
+    vec = max(1, 16 // x.element_size())
+    s_chunk = max(vec, -(-N // C) // vec * vec)
+    C = -(-N // s_chunk)
+    if C == 1:
+        return None
+
+    parts = [
+        torch.empty(M * C, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
+        for f in range(trait.nfields)
+    ]
+    outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes]
+
+    # Stage 1: one output per (row, chunk). Kept pairs are (C, s_chunk) FASTEST-varying then
+    # (M, N), so o = m*C + c decodes to obase = m*N + c*s_chunk -- and the chunk pair being
+    # first is what lets the ragged clamp read its magic quad from kvals[0..3].
+    s1 = ReduceBlock(
+        trait,
+        count=s_chunk,
+        num_o=M * C,
+        red_pairs=[(s_chunk, 1)],
+        kept_pairs=[(C, s_chunk), (M, N)],
+        limit=N,
+        ragged_chunk=True,
+        gidx_from="chunk" if getattr(trait, "has_index", False) else "r",
+        nouts=trait.nfields,
+        final=False,
+        block=block,
+    )
+    _launch(s1, ("rowrag1", trait_key, x.dtype) + s1.cache_sig, [_flat(x)], parts)
+
+    # Stage 2: fold the C partials of each row, project once with the TRUE row length.
+    s2 = ReduceBlock(
+        trait,
+        count=C,
+        num_o=M,
+        red_pairs=[(C, 1)],
+        kept_pairs=[(M, C)],
+        from_partials=True,
+        project_n=N,
+        nouts=nouts,
+        final=True,
+        block=block,
+    )
+    _launch(s2, ("rowrag2", trait_key, tuple(out_dtypes)) + s2.cache_sig, parts, outs)
+    return tuple(outs)
 
 
 def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
