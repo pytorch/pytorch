@@ -657,7 +657,12 @@ class CustomOpDef:
         the number of outputs of the operator.
         The ``ctx`` object is `the same ctx object <context_method_mixins>`_ used by
         :class:`torch.autograd.Function`. The semantics of ``backward_fn`` are the
-        same as :meth:`torch.autograd.Function.backward`.
+        same as :meth:`torch.autograd.Function.backward`. If a forward output is
+        contiguous (possibly in a non-default memory format like
+        ``torch.channels_last``), the corresponding gradient is guaranteed to be
+        contiguous in the same memory format; PyTorch copies the gradient if
+        necessary. Gradients for outputs that are not contiguous in any standard
+        memory format are passed through unchanged and may have arbitrary strides.
 
         ``setup_context(ctx, inputs, output)`` runs during the forward pass.
         Please save quantities needed for backward onto the ``ctx`` object via
