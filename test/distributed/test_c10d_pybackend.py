@@ -312,19 +312,12 @@ def create_process_group(backend):
 
 class TestPyBackend(TestCase):
     def test_collective_config(self) -> None:
-        class LowLevelConfig:
-            ptr = 1234
-
-        class Config:
-            def _to_lowpp(self) -> LowLevelConfig:
-                return LowLevelConfig()
-
         backend = RecordingBackend(0, 1)
         group = create_process_group(backend)
-        config = Config()
+        config = object()
 
         tensor = torch.zeros(2)
-        dist.all_reduce(tensor, group=group, config=config)
+        dist.all_reduce(tensor, dist.ReduceOp.SUM, group, False, config)
         dist.all_reduce_coalesced([tensor], group=group, config=config)
         dist.broadcast(tensor, group=group, group_src=0, config=config)
         dist.reduce(tensor, group=group, group_dst=0, config=config)
@@ -342,11 +335,7 @@ class TestPyBackend(TestCase):
             torch.empty_like(tensor), tensor, group=group, config=config
         )
         for call in backend.calls:
-            self.assertIsInstance(call[-1].config, LowLevelConfig)
-            self.assertEqual(call[-1].config.ptr, 1234)
-
-        with self.assertRaisesRegex(TypeError, "nccl4py CollConfig"):
-            dist.all_reduce(torch.zeros(2), group=group, config=object())
+            self.assertIs(call[-1].config, config)
 
     def test_attr_overrides(self) -> None:
         backend = RecordingBackend(0, 1)

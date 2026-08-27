@@ -125,25 +125,7 @@ TORCH_API bool isComplexViewAsRealAllowed(const ReduceOp& reduceOp);
 
 constexpr auto kUnsetTimeout = std::chrono::milliseconds(-1);
 
-struct TORCH_API CollectiveConfig final : torch::CustomClassHolder {
-  CollectiveConfig(const void* data, c10::IValue owner)
-      : data_(data), owner_(std::move(owner)) {}
-
-  const void* data() const {
-    return data_;
-  }
-
-  const c10::IValue& owner() const {
-    return owner_;
-  }
-
- private:
-  const void* data_;
-  c10::IValue owner_;
-};
-
-using CollectiveConfigPtr = c10::intrusive_ptr<CollectiveConfig>;
-using OptionalCollectiveConfig = std::optional<CollectiveConfigPtr>;
+using OptionalCollectiveConfig = std::optional<c10::IValue>;
 
 struct BroadcastOptions {
   int64_t rootRank = 0;

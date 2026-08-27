@@ -45,10 +45,6 @@ void checkSameDtype(
   }
 }
 
-const void* collectiveConfigData(const OptionalCollectiveConfig& config) {
-  return config.has_value() ? config.value()->data() : nullptr;
-}
-
 } // namespace
 
 ncclConfig_t cloneNcclConfig(const ncclConfig_t& config) {
@@ -957,7 +953,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
           root,
           nccl_comm_,
           stream,
-          collectiveConfigData(config)),
+          config),
       timeout,
       "NCCL Broadcast failed");
 
@@ -1002,7 +998,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
           getNcclReduceOp(op, nccl_comm_, tensor),
           nccl_comm_,
           stream,
-          collectiveConfigData(config)),
+          config),
       timeout,
       "NCCL AllReduce failed");
 
@@ -1049,7 +1045,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
           root,
           nccl_comm_,
           stream,
-          collectiveConfigData(config)),
+          config),
       timeout,
       "NCCL Reduce failed");
 
@@ -1148,7 +1144,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
               i,
               nccl_comm_,
               stream,
-              collectiveConfigData(config)),
+              config),
           "NCCL Broadcast failed in all_gather");
     }
   } catch (...) {
@@ -1218,7 +1214,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
           getNcclDataType(input),
           nccl_comm_,
           stream,
-          collectiveConfigData(config)),
+          config),
       timeout,
       "NCCL AllGather failed");
 
@@ -1295,7 +1291,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
                 i,
                 nccl_comm_,
                 stream,
-                collectiveConfigData(config)),
+                config),
             "NCCL Reduce failed in reduce_scatter");
       } else {
         // Other ranks contribute to the reduction
@@ -1311,7 +1307,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
                 i,
                 nccl_comm_,
                 stream,
-                collectiveConfigData(config)),
+                config),
             "NCCL Reduce failed in reduce_scatter");
       }
     }
@@ -1377,7 +1373,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
           getNcclReduceOp(op, nccl_comm_, input),
           nccl_comm_,
           stream,
-          collectiveConfigData(config)),
+          config),
       timeout,
       "NCCL ReduceScatter failed");
 
@@ -1443,7 +1439,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
           data_type,
           nccl_comm_,
           stream,
-          collectiveConfigData(config)),
+          config),
       timeout,
       "NCCL AllToAll failed");
 #else
@@ -1962,7 +1958,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
             root,
             nccl_comm_,
             stream,
-            collectiveConfigData(config)),
+            config),
         timeout,
         "NCCL Gather failed");
     work->recordEnd();

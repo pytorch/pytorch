@@ -105,6 +105,41 @@ bool registerGilChecker() {
 }
 
 static bool registered = registerGilChecker();
+
+::c10d::nccl2::MaterializedCollectiveConfig materializeCollectiveConfig(
+    const c10::IValue& config) {
+  TORCH_CHECK(config.isPyObject(), "Collective config must be a Python object");
+  pybind11::gil_scoped_acquire gil;
+  auto config_obj = py::reinterpret_borrow<py::object>(config.toPyObject());
+  if (!py::hasattr(config_obj, "_to_lowpp")) {
+    throw py::type_error("config must be an nccl4py CollConfig");
+  }
+  auto lowpp = config_obj.attr("_to_lowpp")();
+  if (!py::hasattr(lowpp, "ptr")) {
+    throw py::type_error("config._to_lowpp() must provide ptr");
+  }
+  auto ptr = py::reinterpret_steal<py::object>(
+      PyNumber_Index(lowpp.attr("ptr").ptr()));
+  if (!ptr) {
+    throw py::error_already_set();
+  }
+  void* data = PyLong_AsVoidPtr(ptr.ptr());
+  if (PyErr_Occurred()) {
+    throw py::error_already_set();
+  }
+  TORCH_CHECK(data != nullptr, "config.ptr must be positive");
+  return {
+      data, torch::jit::toIValue(std::move(lowpp), c10::PyObjectType::get())};
+}
+
+bool registerCollectiveConfigConverter() {
+  ::c10d::nccl2::get_collective_config_converter() =
+      &materializeCollectiveConfig;
+  return true;
+}
+
+static bool collective_config_converter_registered =
+    registerCollectiveConfigConverter();
 #endif // USE_C10D_NCCL
 
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
@@ -169,7 +204,7 @@ py::object getCollectiveConfig(const Options& options) {
   if (!options.config.has_value()) {
     return py::none();
   }
-  return torch::jit::toPyObject(options.config.value()->owner());
+  return torch::jit::toPyObject(options.config.value());
 }
 
 template <typename Options>
@@ -178,19 +213,7 @@ void setCollectiveConfig(Options& options, const py::object& config) {
     options.config = std::nullopt;
     return;
   }
-  auto ptr = py::reinterpret_steal<py::object>(
-      PyNumber_Index(config.attr("ptr").ptr()));
-  if (!ptr) {
-    throw py::error_already_set();
-  }
-  void* data = PyLong_AsVoidPtr(ptr.ptr());
-  if (PyErr_Occurred()) {
-    throw py::error_already_set();
-  }
-  TORCH_CHECK(data != nullptr, "config.ptr must be positive");
-  auto owner = torch::jit::toIValue(config, c10::PyObjectType::get());
-  options.config =
-      c10::make_intrusive<::c10d::CollectiveConfig>(data, std::move(owner));
+  options.config = torch::jit::toIValue(config, c10::PyObjectType::get());
 }
 
 py::bytes toPyBytes(const std::vector<uint8_t>& data) {
