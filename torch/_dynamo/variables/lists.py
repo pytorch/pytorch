@@ -168,6 +168,11 @@ class BaseListVariable(VariableTracker):
     ) -> "BaseListVariable":
         return type(self)(items, **kwargs)
 
+    def _new_list(self, items: list[VariableTracker]) -> "BaseListVariable":
+        return type(self)(
+            items, mutation_type=ValueMutationNew() if self.mutation_type else None
+        )
+
     def debug_repr_helper(self, prefix: str, suffix: str) -> str:
         return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
 
@@ -203,12 +208,8 @@ class BaseListVariable(VariableTracker):
                 raise_observed_exception(
                     ValueError, tx, args=["slice step cannot be zero"]
                 )
-            # Set source to None because slicing a list gives a new local
-            return self.clone(
-                items=self.items[index],
-                source=None,
-                mutation_type=ValueMutationNew() if self.mutation_type else None,
-            )
+            # Slicing a list/tuple gives a new local, not sourced from self.
+            return self._new_list(self.items[index])
         else:
             raise_type_error(
                 tx,
@@ -398,10 +399,7 @@ class BaseListVariable(VariableTracker):
 
         left = self.items
         # CPython uses ob_item (the C array) directly, bypassing __iter__.
-        # For user-defined subclasses (UserDefinedListVariable etc.),
-        # the items live on the _base_vt.
-        other_vt = getattr(other, "_base_vt", None) or other
-        right = other_vt.items  # pyrefly: ignore[missing-attribute]
+        right = other.items  # pyrefly: ignore[missing-attribute]
 
         cmp_op = cmp_name_to_op_mapping[op]
 
