@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import functools
+import hashlib
 import inspect
 import multiprocessing as mp
 import os
@@ -842,6 +843,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         )
 
         expected_content = inspect.getsource(sys.modules[__name__])
+        expected_content_hash = hashlib.sha256(expected_content.encode()).hexdigest()
 
         def check_source_info(source_info: SourceInfo) -> None:
             self.assertIsInstance(source_info, SourceInfo)
@@ -849,6 +851,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             for source in source_info.inlined_sources:
                 self.assertEqual(source.module, __name__)
                 self.assertEqual(source.content, expected_content)
+                self.assertEqual(source.content_hash, expected_content_hash)
 
         source_info = compiled_fn.source_info()
         check_source_info(source_info)

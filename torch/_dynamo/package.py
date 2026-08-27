@@ -171,6 +171,7 @@ class InlinedSource:
     firstlineno: int
     lastlineno: int
     checksum: str
+    content_hash: str
     _compressed_content: bytes = dataclasses.field(repr=False)
 
     @property
@@ -184,13 +185,23 @@ class InlinedSource:
             if not isinstance(content, str):
                 raise TypeError(f"Expected content to be str, got {type(content)}")
             state["_compressed_content"] = zlib.compress(content.encode())
+        if "content_hash" not in state:
+            compressed_content = state["_compressed_content"]
+            if not isinstance(compressed_content, bytes):
+                raise TypeError(
+                    f"Expected compressed content to be bytes, got {type(compressed_content)}"
+                )
+            state["content_hash"] = _hash_source(
+                zlib.decompress(compressed_content).decode()
+            )
         for name, value in state.items():
             object.__setattr__(self, name, value)
 
 
 @functools.cache
-def _get_compressed_module_content(module: types.ModuleType) -> bytes:
-    return zlib.compress(inspect.getsource(module).encode())
+def _get_module_source(module: types.ModuleType) -> tuple[bytes, str]:
+    content = inspect.getsource(module)
+    return zlib.compress(content.encode()), _hash_source(content)
 
 
 @dataclasses.dataclass
@@ -209,13 +220,15 @@ class SourceInfo:
                 f"Source mismatch for {module.__name__} "
                 f"(line {firstlineno}-{lastlineno})"
             )
+        compressed_content, content_hash = _get_module_source(module)
         self.inlined_sources.add(
             InlinedSource(
                 module=module.__name__,
                 firstlineno=firstlineno,
                 lastlineno=lastlineno,
                 checksum=_hash_source(source),
-                _compressed_content=_get_compressed_module_content(module),
+                content_hash=content_hash,
+                _compressed_content=compressed_content,
             )
         )
 
