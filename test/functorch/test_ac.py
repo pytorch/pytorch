@@ -5,6 +5,8 @@ from math import prod
 
 import torch
 import torch._functorch.config as config
+from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -358,6 +360,19 @@ class MemoryBudgetBackendSpecificTest(TestCase):
 
     @unittest.skipIf(not has_triton(), "test needs triton")
     def test_custom_triton_kernel(self, device):
+        try:
+            device_interface = get_interface_for_device(torch.device(device).type)
+        except NotImplementedError as exc:
+            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
+
+        if not device_interface.is_triton_capable(device):
+            raise unittest.SkipTest(f"requires Triton support for {device}")
+
+        try:
+            device_interface.raise_if_triton_unavailable(device)
+        except TritonUnavailableError as exc:
+            raise unittest.SkipTest(str(exc)) from exc
+
         @triton.jit
         def relu_kernel_(inp_ptr, out_ptr, sz, BLOCK_SIZE: tl.constexpr):
             pid = tl.program_id(0)
