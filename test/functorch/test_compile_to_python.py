@@ -888,7 +888,6 @@ class TestAOTCompileToPython(TestCase):
             try:
                 AOTAutogradCache.clear()
                 FxGraphCache.clear()
-
                 counters.clear()
                 with (
                     mock.patch.object(

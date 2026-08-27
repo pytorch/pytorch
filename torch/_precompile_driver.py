@@ -397,18 +397,17 @@ def _build_dynamo_forward():
     The compiled graph sources stay ordinary Python in the artifact. Only the minimized
     Dynamo dispatch guards, transformed entry/resume code objects, and embedded disabled
     functions are opaque because none has a source form. Standalone mode has no compiler
-    and raises on a miss; installed mode may compile an uncovered specialization and
-    reports those compiles on its loaded handle.
+    and raises on a miss. Installed mode uses Dynamo only to route into captured nested
+    frames and also raises instead of compiling an uncovered specialization.
     """
     import base64
     import contextlib
     import importlib
     import inspect
-    import logging
     import pickle
     import sys
     import types
-    from typing import cast
+    from typing import Any, cast
 
     import torch
     import torch.utils._pytree as _pytree
@@ -674,28 +673,21 @@ def _build_dynamo_forward():
                 self.backend_ctx_ctor = getattr(
                     self.backend, "backend_ctx_ctor", contextlib.nullcontext
                 )
-                self.lock = threading.Lock()
-                self.compiles = 0
 
             def __call__(self, graph, example_inputs):
-                with self.lock:
-                    self.compiles += 1
-                    compiles = self.compiles
-                logging.getLogger("torch._precompile").warning(
-                    "precompile: serving compiled a new graph because no captured "
-                    "variant matched this call (%d total); recapture with an example "
-                    "that covers it.",
-                    compiles,
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    "precompile: no captured Dynamo variant matches this installed "
+                    "call. Add an example covering it and precompile again."
                 )
-                return self.backend(graph, example_inputs)
 
             def get_compiler_config(self):
                 getter = getattr(self.backend, "get_compiler_config", None)
                 return None if getter is None else getter()
 
             def count(self):
-                with self.lock:
-                    return self.compiles
+                return 0
 
         def keep_serializable_guards(entries):
             from torch._dynamo.guards import CheckFunctionManager
@@ -826,7 +818,10 @@ def _build_dynamo_forward():
                     compiled = context(fn)
                     region = context._isolate_recompiles_id  # type: ignore[attr-defined]
                     try:
-                        package.install(backends, isolate_recompiles_id=region)
+                        package.install(
+                            cast("dict[Any, Any]", backends),
+                            isolate_recompiles_id=region,
+                        )
                     except BaseException:
                         package.uninstall()
                         raise
@@ -857,7 +852,10 @@ def _build_dynamo_forward():
                     compiled = self.compiled
                     self.active_calls += 1
                 try:
-                    with torch.set_grad_enabled(TRAINING):
+                    with (
+                        torch._dynamo.config.patch(suppress_errors=False),
+                        torch.set_grad_enabled(TRAINING),
+                    ):
                         return run_entry(compiled, args, kwargs)
                 except torch._dynamo.exc.BackendCompilerFailed as e:
                     from torch._precompile import PrecompileError
@@ -950,13 +948,20 @@ def _build_dynamo_forward():
             signature = inspect.signature(target_function)
 
             def dispatch(*args, **kwargs):
-                bound = signature.bind(*args, **kwargs)
+                from torch._precompile import PrecompileError
+
+                try:
+                    bound = signature.bind(*args, **kwargs)
+                except TypeError as e:
+                    raise PrecompileError(
+                        f"precompile: call does not match the captured signature of "
+                        f"{target.co_name!r}: {e}"
+                    ) from e
                 bound.apply_defaults()
                 local_scope = dict(bound.arguments)
                 for manager, function in variants:
                     if manager.check(local_scope):
                         return function(*args, **kwargs)
-                from torch._precompile import PrecompileError
 
                 raise PrecompileError(
                     f"precompile: no captured Dynamo variant of {target.co_name!r} "

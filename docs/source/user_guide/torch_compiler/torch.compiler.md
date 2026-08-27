@@ -56,21 +56,23 @@ Explicitly filtering an input guard is a risky drop and requires opting out of t
 safety gate. Guards are rebuilt from frozen capture state and checked for predicate drift
 before the artifact is emitted. Breaking an unchecked environment assumption can silently
 miscompute. Tensor, scalar, Python-container, and `nn.Module` arguments are supported.
-Graph breaks and
-closure-free `torch._dynamo.disable` functions are preserved; top-level closures and
+Function defaults must be recursive immutable literals; mutable or user-defined values
+must be passed explicitly rather than used as defaults. Tensor-valued globals are also
+rejected because every tensor must be an explicit input. Graph breaks and closure-free
+`torch._dynamo.disable` functions are preserved; top-level closures and
 nested functions that capture locals are not yet supported. The eager backend also
 preserves higher-order graphs such as `torch.cond`, `torch.while_loop`, non-reentrant
 checkpointing, `vmap`, autocast, and grad-mode regions without symbolically retracing
 them at load. Captured nested frames that cannot be reached by a source-only dispatcher
 use an isolated installed artifact. Loading prepares its backends and guards, its first
 call installs them, and `unload()` removes them; it can also be scoped with `with`.
-An uncovered call compiles with a warning and increments `serve_time_compiles()`. A
-standalone artifact instead rejects calls outside its captured guard sets. With
+An uncovered call raises instead of compiling a new variant, just as it does for a
+standalone artifact. With
 `training=True`, both eager and Inductor artifacts retain autograd history; Inductor
 graphs include readable compiled forward and backward code. This training mode works
 across captured recompilations and graph breaks. `PrecompileSummary` reports coverage
-and dropped guards, while the `require_*` options let callers reject incomplete or
-insufficiently guarded captures.
+and dropped guards, including which example first produced each frame variant, while
+the `require_*` options let callers reject incomplete or insufficiently guarded captures.
 See the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}

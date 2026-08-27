@@ -971,8 +971,9 @@ class _CompileToPythonState:
     ``install_capture`` connects the generated module's private compiler hook to
     ``compile_mask``. Bit ``i`` is set when grad output ``i`` is undefined. The first
     real backward with a new mask compiles and runs that specialization immediately,
-    then records its source and cache. ``finalize`` emits only those recorded variants
-    and removes the live compiler hook.
+    then records its source and cache. The caller reads the observed masks from the
+    generated call's globals before ``finalize`` emits those variants, then removes the
+    live compiler hook and clears the capture-only variant table.
     """
 
     forward_python: str
