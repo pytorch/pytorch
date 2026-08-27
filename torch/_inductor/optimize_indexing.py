@@ -182,10 +182,11 @@ class _ValueUseRules:
         index: sympy.Expr,
         value: Any,
         mode: Any = None,
+        mask: Any = None,
     ) -> _ValueUseRule:
         return _ValueUseRule(
             value_sinks=(value,),
-            indexing_inputs=(index,),
+            indexing_inputs=(index, mask),
         )
 
     def store_reduction(

@@ -4891,9 +4891,15 @@ def index_put(x, indices, values, accumulate=False):
 
 
 @register_lowering(aten._unsafe_index_put)
-def _unsafe_index_put(x, indices, values, accumulate=False):
+def _unsafe_index_put(x, indices, values, accumulate=False, store_mask=None):
     return index_put_impl_(
-        clone(x), indices, values, accumulate, check=False, may_realize=False
+        clone(x),
+        indices,
+        values,
+        accumulate,
+        check=False,
+        may_realize=False,
+        store_mask=store_mask,
     )
 
 
@@ -4942,7 +4948,9 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
     )
 
 
-def index_put_impl_(self, indices, values, accumulate, check, may_realize=False):
+def index_put_impl_(
+    self, indices, values, accumulate, check, may_realize=False, store_mask=None
+):
     if may_realize:
 
         def indice_slice_from_randperm(indice):
@@ -5043,6 +5051,8 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
     # the Scatter below loads values at every position of expected_vals_size;
     # see expand()
     values = expand(values, expected_vals_size, graph_fanout=True)
+    if store_mask is not None:
+        store_mask = expand(store_mask, expected_vals_size, graph_fanout=True)
     # all guards are set above during broadcast_tensors and expand
 
     device = self.get_device()
@@ -5055,6 +5065,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
         ranges=expected_vals_size,  # iter_ranges,
         output_indexer=inner_fn,
         scatter_mode="atomic_add" if accumulate else None,
+        store_mask=store_mask.make_loader() if store_mask is not None else None,
     )
     buffer = ir.ComputedBuffer(
         name=None,
@@ -5103,15 +5114,18 @@ def _unsafe_masked_index(self, mask, indices, fill):
 
 @register_lowering(aten._unsafe_masked_index_put_accumulate, type_promotion_kind=None)
 def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
-    masked_value = where(mask, values, 0)
     shape = x.get_size()
     clamped_indices = [
         clamp(indices[i], -shape[i], shape[i] - 1) if indices[i] else None
         for i in range(len(indices))
     ]
-    # TODO: use a masked store for this. currently only triton
-    # supports masked stores and cpp backend does not.
-    return _unsafe_index_put(x, clamped_indices, masked_value, accumulate=True)
+    if x.get_device().type == "cuda":
+        return _unsafe_index_put(
+            x, clamped_indices, values, accumulate=True, store_mask=mask
+        )
+    return _unsafe_index_put(
+        x, clamped_indices, where(mask, values, 0), accumulate=True
+    )
 
 
 @make_pointwise

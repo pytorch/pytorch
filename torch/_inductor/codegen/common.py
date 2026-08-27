@@ -1176,7 +1176,12 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         )
 
     def store(
-        self, name: str, index: sympy.Expr, value: OpVarT, mode: StoreMode = None
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: OpVarT,
+        mode: StoreMode = None,
+        mask: OpVarT | None = None,
     ) -> None:
         raise NotImplementedError(
             f"{type(self).__name__}: store should be handled by CSEProxy"
@@ -2399,7 +2404,12 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         raise NotImplementedError
 
     def store(
-        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mode: StoreMode = None,
+        mask: CSEVariable | None = None,
     ) -> None:
         raise NotImplementedError
 
@@ -3039,16 +3049,21 @@ class CSEProxy(DefaultHandler):
                 self.kernel.cse.store_cache[other_name] = value
 
     def store(
-        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mode: StoreMode = None,
+        mask: CSEVariable | None = None,
     ) -> None:
         self.kernel.store_buffer_names.add(name)
         # Update store cache when mode is None or "tma"
         if mode != "atomic_add":
             self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
-            self.kernel.store(name, index, value, mode=mode)
+            self.kernel.store(name, index, value, mode=mode, mask=mask)
             self.kernel.num_store += 1
-        self.kernel.record_op_trace("store", (name, index, value, mode), {})
+        self.kernel.record_op_trace("store", (name, index, value, mode, mask), {})
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)

@@ -181,7 +181,12 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
         return ValueRanges.unknown()
 
     def store(
-        self, name: str, index: sympy.Expr, value: Any, mode: StoreMode = None
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: Any,
+        mode: StoreMode = None,
+        mask: Any = None,
     ) -> None:
         return
 

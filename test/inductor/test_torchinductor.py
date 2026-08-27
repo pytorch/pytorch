@@ -2475,6 +2475,27 @@ class CommonTemplate:
             ),
         )
 
+    @requires_cuda_and_triton
+    def test__unsafe_masked_index_put_accumulate_codegen(self):
+        def fn(a, mask, idx, values):
+            return aten._unsafe_masked_index_put_accumulate(a, mask, idx, values)
+
+        a = torch.randn(4, device=self.device)
+        mask = torch.tensor([[True], [False]], device=self.device)
+        idx = [
+            torch.tensor([[0, 1, 2], [1, 2, 3]], device=self.device),
+        ]
+        values = torch.randn(1, 3, device=self.device)
+        self.common(fn, (a, mask, idx, values))
+
+        code = run_and_get_triton_code(torch.compile(fn), a, mask, idx, values)
+        atomic_add = re.search(
+            r"tl\.atomic_add\(.*?, (tmp\d+), tmp\d+ & xmask", code
+        )
+        if atomic_add is None:
+            raise AssertionError("expected a masked atomic add")
+        self.assertNotIn("{} = tl.where(".format(atomic_add.group(1)), code)
+
     def test_sum1(self):
         def fn(a, b):
             return ((a + b).sum(-1),)

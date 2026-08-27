@@ -1608,8 +1608,10 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     def load(self, name: str, index: sympy.Expr):
         return self._inner.load(name, self._simplify(index))
 
-    def store(self, name, index, value, mode=None):
-        return self._inner.store(name, self._simplify(index), value, mode=mode)
+    def store(self, name, index, value, mode=None, mask=None):
+        return self._inner.store(
+            name, self._simplify(index), value, mode=mode, mask=mask
+        )
 
     def store_reduction(self, name, index, value):
         return self._inner.store_reduction(name, self._simplify(index), value)

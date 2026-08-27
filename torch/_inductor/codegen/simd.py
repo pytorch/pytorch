@@ -2330,11 +2330,12 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
         index: sympy.Expr,
         value: CSEVariable,
         mode: Any = None,
+        mask: CSEVariable | None = None,
     ) -> None:
         k = self._kernel
         remapped_index = self._family.remap_index(index)
         with self._family.ensure_active(k):
-            self._inner.store(name, remapped_index, value, mode=mode)
+            self._inner.store(name, remapped_index, value, mode=mode, mask=mask)
 
 
 class _SubParentSourceLoadResolver(WrapperHandler):  # type: ignore[type-arg]

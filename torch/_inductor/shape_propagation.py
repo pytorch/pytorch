@@ -112,7 +112,13 @@ class ShapePropagationOpsHandler:
         raise NotImplementedError
 
     @staticmethod
-    def store(name: str, index: int, value: ShapeArg, mode: str | None = None) -> None:
+    def store(
+        name: str,
+        index: int,
+        value: ShapeArg,
+        mode: str | None = None,
+        mask: ShapeArg | None = None,
+    ) -> None:
         return None
 
     @staticmethod

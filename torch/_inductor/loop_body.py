@@ -751,12 +751,12 @@ class CaptureIndexing(WrapperHandler):
         )
         return self._inner.load_seed(name, index)
 
-    def store(self, name, index, value, mode=None):
+    def store(self, name, index, value, mode=None, mask=None):
         index = self._simplify(index)
         index = self._add_index(
             index, MemoryUsageType.STORE, buffer_name=name, mode=mode
         )
-        return self._inner.store(name, index, value, mode)
+        return self._inner.store(name, index, value, mode, mask)
 
     def store_reduction(self, name, index, value):
         index = self._simplify(index)

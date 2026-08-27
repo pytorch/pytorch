@@ -358,7 +358,13 @@ class DtypePropagationOpsHandler:
         return dtype
 
     @staticmethod
-    def store(name: str, index, value: DTypeArg, mode: str | None = None) -> None:
+    def store(
+        name: str,
+        index,
+        value: DTypeArg,
+        mode: str | None = None,
+        mask: DTypeArg | None = None,
+    ) -> None:
         return None
 
     @staticmethod

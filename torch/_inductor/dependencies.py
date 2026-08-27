@@ -648,7 +648,12 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         self.load(name, sympy.Integer(index))
 
     def store(
-        self, name: str, index: sympy.Expr, value: str, mode: str | None = None
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: str,
+        mode: str | None = None,
+        mask: str | None = None,
     ) -> None:
         self._writes.add(MemoryDep(name, *self.canonicalize(index), mode=mode))
 

@@ -306,9 +306,11 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
     def load(self, name: str, index: sympy.Expr):
         return self._inner.load(*self.localize(name, index))
 
-    def store(self, name, index, value, mode=None):
+    def store(self, name, index, value, mode=None, mask=None):
         local_buffer_name, local_buffer_index = self.localize(name, index)
-        res = self._inner.store(local_buffer_name, local_buffer_index, value, mode)
+        res = self._inner.store(
+            local_buffer_name, local_buffer_index, value, mode, mask
+        )
         if (
             self.global_to_local
             and name in self.global_to_local

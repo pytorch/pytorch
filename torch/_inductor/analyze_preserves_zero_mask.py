@@ -40,7 +40,12 @@ class PreservesZeros(SymPyOps, DefaultHandler):
         )
 
     def store(
-        self, name: str, index: sympy.Expr, value: TypedExpr, mode: "StoreMode" = None
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: TypedExpr,
+        mode: "StoreMode" = None,
+        mask: TypedExpr | None = None,
     ) -> None:
         if not isinstance(self, PreservesZeros):
             raise AssertionError(f"expected PreservesZeros, got {type(self)}")
@@ -101,7 +106,11 @@ class RecordLowPrecisionOps(DefaultHandler):
 
     @staticmethod
     def store(
-        name: str, index: sympy.Expr, value: TypedExpr, mode: "StoreMode" = None
+        name: str,
+        index: sympy.Expr,
+        value: TypedExpr,
+        mode: "StoreMode" = None,
+        mask: TypedExpr | None = None,
     ) -> None:
         pass
 

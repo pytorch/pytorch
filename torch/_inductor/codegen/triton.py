@@ -5113,7 +5113,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return result_var
 
     def store(
-        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: CSEVariable,
+        mode: StoreMode = None,
+        mask: CSEVariable | None = None,
     ) -> None:
         """
         store the 'value' to the memory location 'name', offset by some indexing expression 'index'.
@@ -5142,6 +5147,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             tma_compatibility_checker=tma_compatibility_checker,
             mask_constant_index=mode == "atomic_add",
         )
+        if mask is not None:
+            mask = ops.to_dtype(mask, torch.bool)
+            indexing.mask_vars.add(mask)
 
         if isinstance(indexing, IndexingOptions) and self._has_stride1_on_rdim(
             indexing.index

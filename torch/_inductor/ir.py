@@ -1262,6 +1262,7 @@ class Pointwise(Loops):
 class Scatter(Pointwise):
     output_indexer: Callable[[Sequence[Expr]], Expr]
     scatter_mode: StoreMode = None
+    store_mask: Callable[[Sequence[Expr]], OpsValue] | None = None
 
     def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
@@ -1274,6 +1275,7 @@ class Scatter(Pointwise):
             ranges=self.ranges,
             output_indexer=self.output_indexer,
             scatter_mode=self.scatter_mode,
+            store_mask=self.store_mask,
         )
 
     def store_output(
@@ -1290,6 +1292,7 @@ class Scatter(Pointwise):
             indexer(self.output_indexer(vars)),
             loader(vars),
             mode=self.scatter_mode,
+            mask=self.store_mask(vars) if self.store_mask is not None else None,
         )
 
 

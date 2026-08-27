@@ -249,6 +249,7 @@ class OpsHandler(Generic[T]):
         index: sympy.Expr,
         value: T,
         mode: StoreMode = None,
+        mask: T | None = None,
     ) -> None:
         """
         Store 'value' to the memory location 'name' offset by 'expr'.  If
