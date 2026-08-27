@@ -109,6 +109,12 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
   export USE_CUDA=0
   export USE_MKLDNN=0
 
+  # common.sh exports CC=gcc/CXX=g++ for every *gcc* BUILD_ENVIRONMENT, which
+  # matches this one and clobbers the cross toolchain the image sets. Put it
+  # back, or CMake configures for riscv64 while compiling with the host gcc.
+  export CC="riscv64-linux-gnu-gcc-${GCC_VERSION}"
+  export CXX="riscv64-linux-gnu-g++-${GCC_VERSION}"
+
   export SLEEF_TARGET_EXEC_USE_QEMU=ON
 
   # Restrict chown to the workspace and the cross-compile sysroot/venv we
