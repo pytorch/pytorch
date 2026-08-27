@@ -9892,9 +9892,13 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         try:
             with torch.compiler.set_stance("fail_on_recompile"):
                 with self.assertRaisesRegex(
-                    RuntimeError, "Failed on the following precompiled guards:"
-                ):
+                    RuntimeError, r"Failed on all 1 precompiled variant\(s\)"
+                ) as ctx:
                     compiled_fn(*args)
+            # One line for the entry, naming the guard that rejected the call --
+            # not the whole guard tree, which for a multi-variant artifact ran
+            # to megabytes.
+            self.assertIn("isinstance(L['x'], bool)", str(ctx.exception))
         finally:
             _reset_precompile_entries(fn.__code__)
 

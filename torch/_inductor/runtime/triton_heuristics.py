@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import builtins
 import copy
 import dataclasses
@@ -2813,10 +2814,10 @@ class CompileResult(Generic[_T]):
 
     def _get_arg_lists(
         self, arg_names, constexprs
-    ) -> tuple[list[str], list[str], OrderedSet[str]]:
+    ) -> tuple[list[str], list[str], OrderedSet[str], dict[str, Any]]:
         """
         Return a bunch of intermediate lists of args needed for generating
-        launcher code.
+        launcher code, plus any objects the generated code names directly.
         """
         compile_meta = self.compile_meta
         cfg = self.config
@@ -2845,11 +2846,23 @@ class CompileResult(Generic[_T]):
         )
         none_args = none_args.difference(OrderedSet(compile_meta["signature"].keys()))
 
+        # Values the launcher source names instead of spelling. repr() is not
+        # an expression for every constexpr a user can pass -- a plain Enum
+        # reprs as "<Mode.even: 2>" -- and the launcher is exec'd, so an
+        # unspellable value is a SyntaxError rather than a bad launch.
+        constant_scope: dict[str, Any] = {}
+
         def _convert_constant(constant):
             if isinstance(constant, str):
                 return "r'" + constant + "'"
-            else:
-                return repr(constant)
+            text = repr(constant)
+            try:
+                ast.parse(text, mode="eval")
+            except SyntaxError:
+                name = f"_constexpr_{len(constant_scope)}"
+                constant_scope[name] = constant
+                return name
+            return text
 
         if triton_version_uses_attrs_dict():
             call_args = arg_names
@@ -2887,7 +2900,7 @@ class CompileResult(Generic[_T]):
         if "extra_launcher_args" in self.inductor_meta:
             def_args = [*def_args, *self.inductor_meta["extra_launcher_args"]]
 
-        return call_args, def_args, none_args
+        return call_args, def_args, none_args, constant_scope
 
 
 _KernelCompileResult: TypeAlias = (
@@ -3046,7 +3059,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
         # want only a subset of the arguments passed to triton.
         # Here, arg_names is exactly fn.src.arg_names and declared_constexprs is exactly fn.src.constexprs,
         # which matches behavior with regular TritonCompileResult
-        _, def_args, none_args = self._get_arg_lists(
+        _, def_args, none_args, constant_scope = self._get_arg_lists(
             self.kernel.arg_names, self.kernel.declared_constexprs
         )
 
@@ -3067,6 +3080,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
 
             scope["_host_tma_aligned"] = _host_tma_aligned
             scope["TensorDescriptor"] = TensorDescriptor
+        scope.update(constant_scope)
         launcher = self._gen_launcher_code(
             scope, def_args, runner_args, pre_runner_lines=pre_runner_lines
         )
@@ -3170,7 +3184,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
         binary = self.kernel
         fn = binary.src.fn
         binary._init_handles()
-        (call_args, def_args, none_args) = self._get_arg_lists(
+        (call_args, def_args, none_args, constant_scope) = self._get_arg_lists(
             fn.arg_names, get_constexprs(fn)
         )
         binary_shared = (
@@ -3277,6 +3291,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             scope["_host_tma_aligned"] = _host_tma_aligned
             scope["TensorDescriptor"] = TensorDescriptor
 
+        scope.update(constant_scope)
         launcher = self._gen_launcher_code(
             scope, def_args, runner_args, pre_runner_lines=pre_runner_lines
         )
