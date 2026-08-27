@@ -51,7 +51,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *, example_inputs, backend="inductor", tracer="make_fx", decompositions=None, training=False)
+.. py:function:: precompile(fn, *example_args, example_inputs=None, backend="inductor", tracer="make_fx", decompositions=None, training=False)
 
    Ahead-of-time precompile ``fn`` against example inputs, returning a runnable Python
    source string plus an acceleration cache as ``(python_code, cache)``.
@@ -81,8 +81,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       vary across examples. The
       artifact retains guards derived from runtime inputs and drops an environment guard
       only when doing so preserves how every example matches the captured variants. The
-      environment is therefore a caller-provided invariant, while input changes remain
-      responsible for variant dispatch. The loaded artifact raises when a call fails
+      environment is therefore an unchecked caller-provided invariant: changing a
+      global or context-manager state can silently run code specialized for its
+      capture-time value. Input changes remain responsible for variant dispatch. The
+      loaded artifact raises when a call fails
       every retained guard set, and never compiles a new variant. Graph breaks are
       captured as Dynamo resume frames.
       Closure-free Python functions wrapped with ``torch._dynamo.disable`` are embedded
@@ -125,6 +127,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
        as positional arguments.
+       Positional arguments after ``fn`` remain supported as one example call and cannot
+       be combined with ``example_inputs``.
    :param example_inputs: A sequence of positional-argument tuples or
        ``torch.compiler.ExampleInput`` values for ``fn``. ``ExampleInput`` carries an
        ``args`` tuple and ``kwargs`` dict. The

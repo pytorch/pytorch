@@ -47,7 +47,8 @@ example calls and retains the guarded recompilations they trigger, including
 automatically dynamic graphs. Use `torch.compiler.ExampleInput(args=..., kwargs=...)`
 for a call with keyword arguments. Its serialized guard records are minimized while
 preserving how every example dispatches. It retains guards derived from runtime inputs
-and treats the Python environment as invariant between capture and runtime. Tensor,
+and treats the Python environment as an unchecked invariant between capture and runtime;
+changing it can silently run a specialization captured for the old state. Tensor,
 scalar, Python-container, and `nn.Module` arguments are supported. Graph breaks and
 closure-free `torch._dynamo.disable` functions are preserved; top-level closures and
 nested functions that capture locals are not yet supported. Captured nested frames that
