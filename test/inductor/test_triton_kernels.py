@@ -221,8 +221,27 @@ if HAS_TRITON:
         return f
 
 
+class _TritonDeviceTestCase(torch._inductor.test_case.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        device = cls.get_primary_device()
+        try:
+            device_interface = get_interface_for_device(torch.device(device).type)
+        except NotImplementedError as exc:
+            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
+
+        if not device_interface.is_triton_capable(device):
+            raise unittest.SkipTest(f"requires Triton support for {device}")
+
+        try:
+            device_interface.raise_if_triton_unavailable(device)
+        except TritonUnavailableError as exc:
+            raise unittest.SkipTest(str(exc)) from exc
+
+
 @requires_triton()
-class KernelTests(torch._inductor.test_case.TestCase):
+class KernelTests(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def _kernel_launched_in_code(self, kernel_name: str, code: str) -> bool:
@@ -3419,7 +3438,7 @@ def forward(self, arg0_1, arg1_1):
 
 
 @requires_triton()
-class KernelTestsSpecializedSemantics(torch._inductor.test_case.TestCase):
+class KernelTestsSpecializedSemantics(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.CUDA
 
     @inductor_config.patch(strict_signed_zero=True)
@@ -3672,7 +3691,7 @@ def _run_triton_kernel_with_imported_symbol_with_custom_name(self, device):
 
 
 @requires_triton()
-class KernelTestsLibdeviceNvidia(torch._inductor.test_case.TestCase):
+class KernelTestsLibdeviceNvidia(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.CUDA
 
     def test_triton_kernel_with_imported_symbol(self, device):
@@ -3683,7 +3702,7 @@ class KernelTestsLibdeviceNvidia(torch._inductor.test_case.TestCase):
 
 
 @requires_triton()
-class KernelTestsLibdeviceIntel(torch._inductor.test_case.TestCase):
+class KernelTestsLibdeviceIntel(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.XPU
 
     def test_triton_kernel_with_imported_symbol(self, device):
@@ -3725,7 +3744,7 @@ if HAS_TRITON:
         return x + y, out_ptr
 
 
-class MutationTests(torch._inductor.test_case.TestCase):
+class MutationTests(_TritonDeviceTestCase):
     # Tests injected below
 
     hw_classification = HardwareClassification.ACCELERATOR
@@ -3937,19 +3956,6 @@ class MutationTests(torch._inductor.test_case.TestCase):
     @onlyAccelerator
     @requires_triton()
     def test_triton_kernel_inference_mode(self, device):
-        try:
-            device_interface = get_interface_for_device(torch.device(device).type)
-        except NotImplementedError as exc:
-            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
-
-        if not device_interface.is_triton_capable(device):
-            raise unittest.SkipTest(f"requires Triton support for {device}")
-
-        try:
-            device_interface.raise_if_triton_unavailable(device)
-        except TritonUnavailableError as exc:
-            raise unittest.SkipTest(str(exc)) from exc
-
         def f(x, y, out):
             n_elements = x.numel()
             grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
@@ -4919,7 +4925,7 @@ class MutationTestsGeneric(torch._inductor.test_case.TestCase):
 
 
 @requires_triton()
-class MutationTestsTritonLauncher(torch._inductor.test_case.TestCase):
+class MutationTestsTritonLauncher(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
@@ -5111,7 +5117,7 @@ if HAS_GPU_DEVICE and HAS_TRITON:
 
 
 @requires_triton()
-class CustomOpTests(torch._inductor.test_case.TestCase):
+class CustomOpTests(_TritonDeviceTestCase):
     """Tests for custom ops wrapping triton kernels"""
 
     hw_classification = HardwareClassification.ACCELERATOR
@@ -6226,7 +6232,7 @@ class CustomOpTestsGeneric(torch._inductor.test_case.TestCase):
 
 
 @requires_triton()
-class CustomOpTestsInterpretMode(torch._inductor.test_case.TestCase):
+class CustomOpTestsInterpretMode(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.CUDA
 
     def test_wrap_triton_triton_interpret_eager(self, device):
@@ -6321,7 +6327,7 @@ else:
 
 
 @requires_triton()
-class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
+class TestUserKernelEpilogueFusion(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.CUDA
 
     @classmethod
@@ -6790,7 +6796,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
 
-if HAS_TRITON and torch.cuda.is_available():
+if HAS_TRITON:
 
     @triton.jit
     def custom_store(ptr, val, mask):
