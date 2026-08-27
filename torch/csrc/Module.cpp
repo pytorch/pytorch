@@ -105,6 +105,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_layouts.h>
+#include <torch/csrc/utils/tensor_list.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
@@ -266,6 +267,7 @@ static PyObject* THPModule_crashIfCsrcASAN(PyObject* module, PyObject* arg) {
       THPUtils_typename(arg));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
   volatile char x[3];
+  // NOLINTNEXTLINE(clang-analyzer-security.ArrayBound)
   x[THPUtils_unpackInt(arg)] = 0;
   // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   return THPUtils_packInt32(x[0]);
@@ -2857,6 +2859,11 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_clear_fake_constant", [](const at::Tensor& fake) {
     auto mode = fake.unsafeGetTensorImpl()->fake_tensor_mode();
     mode->set_constant(fake.getIntrusivePtr(), nullptr);
+  });
+
+  py_module.def("_fake_tensor_to_list", [](const at::Tensor& t) {
+    return py::reinterpret_steal<py::object>(
+        torch::utils::fake_tensor_to_list(t));
   });
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
