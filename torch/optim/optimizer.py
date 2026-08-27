@@ -307,6 +307,9 @@ _maximize_doc = r"""maximize (bool, optional): maximize the objective with respe
 _functional_api_doc = r"""Functional API that performs {optimizer} algorithm computation.
 
 This function updates the provided parameters and optimizer state in place.
+The caller must initialize and retain optimizer state. Unless intentionally
+constructing a differentiable update with a supported ``differentiable=True``
+argument, call this function under :class:`torch.no_grad`.
 See :ref:`functional-optimizer-api` for the common functional optimizer
 contract and examples, and :class:`~torch.optim.{optimizer}` for algorithm
 details."""

@@ -2,8 +2,8 @@
 
 Functional optimizer APIs give callers complete control over the parameters,
 gradients, and optimizer state. They are not pure functions; they update
-parameters and optimizer-state tensors in place. See 
-:ref:`functional-optimizer-api` for their common contract and usage examples.
+parameters and optimizer-state tensors in place. See
+{ref}`functional-optimizer-api` for their common contract and usage examples.
 
 ```{eval-rst}
 .. automodule:: torch.optim.functional

@@ -138,11 +138,17 @@ training system may apply an update as soon as a gradient becomes available, or
 a caller may choose a different storage dtype for optimizer state to save memory.
 
 Functional optimizer calls update parameters and state tensors according to the
-respective algorithm in place; they are not pure functions. Each tensor list is
-positional, so entries at the same index must be respective to the same parameter.
-When using these functional optimizer APIs, the caller has full control and
-responsibility for creating and retaining state, filtering parameters without
-gradients from every list consistently, and saving and restoring that state.
+respective algorithm in place; they are not pure functions and do not initialize
+optimizer state. Call them under {class}`torch.no_grad` unless intentionally
+constructing a differentiable update with an API that supports
+``differentiable=True``. Each tensor list is positional, so entries at the same
+index must correspond to the same parameter.
+
+The caller has full control and responsibility for creating and retaining state,
+filtering parameters without gradients from every list consistently, and saving
+and restoring that state. Most APIs receive step counters as singleton tensors
+and update them in place, except {func}`torch.optim.functional.sparse_adam` 
+which has step represented by a Python number.
 
 The public functional optimizer APIs are exposed uniformly from
 {mod}`torch.optim.functional`:

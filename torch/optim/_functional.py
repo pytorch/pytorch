@@ -80,4 +80,13 @@ def sparse_adam(
         param.add_(make_sparse(-step_size * numer.div_(denom)))
 
 
-sparse_adam.__doc__ = _functional_api_doc.format(optimizer="SparseAdam")
+sparse_adam.__doc__ = (
+    _functional_api_doc.format(optimizer="SparseAdam")
+    + r"""
+
+.. note::
+    ``state_steps`` must contain the current step value for each parameter.
+    This function reads these values but does not increment them; the caller must
+    increment each step before the corresponding update.
+"""
+)

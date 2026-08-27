@@ -7,10 +7,7 @@ from . import _functional as F
 from .optimizer import _maximize_doc, _params_doc, _to_scalar, Optimizer, ParamsT
 
 
-__all__ = ["SparseAdam", "sparse_adam"]
-
-sparse_adam = F.sparse_adam
-sparse_adam.__module__ = "torch.optim.sparse_adam"
+__all__ = ["SparseAdam"]
 
 
 class SparseAdam(Optimizer):
