@@ -280,6 +280,8 @@ exclude_patterns = [
     'torch/headeronly/util/MathConstants.h',
     'torch/headeronly/util/overflows.h',
     'torch/headeronly/cpu/vec/zmath.h',
+    'torch/headeronly/cpu/vec/vec_base.h',
+    'torch/headeronly/cpu/vec/vec128/vec128_float_neon.h',
     'torch/headeronly/native/Math.h',
 ]
 init_command = [

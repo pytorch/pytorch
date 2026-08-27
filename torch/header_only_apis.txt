@@ -120,14 +120,32 @@ is_instantiation_of
 is_stateless_lambda
 is_type_condition
 
-# aten/src/ATen/cpu/vec/vec.h
+# torch/headeronly/cpu/vec/vec_base.h
 Vectorized
-clamp_min
-convert
-loadu
+is_floating_point
+is_floating_point_v
+is_reduced_floating_point
+is_reduced_floating_point_v
+is_vec_specialized_for
+is_vec_specialized_for_v
 maximum
 minimum
+clamp
+clamp_min
+clamp_max
+convert
+cast
+flip
+transpose_mxn
+loadu
 size
+
+# torch/headeronly/cpu/vec/vec128/vec128_float_neon.h
+blend
+blendv
+exp_u20
+fexp_u20
+erf
 
 # torch/headeronly/cpu/vec/vec_half.h
 float2half_scalar
