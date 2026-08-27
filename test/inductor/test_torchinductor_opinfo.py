@@ -33,34 +33,33 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_CI,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
-    MI200_ARCH,
-    TEST_MKL,
-    TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
-    HardwareClassification,
     isRocmArchAnyOf,
+    MI200_ARCH,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
+    TEST_MKL,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
-    HAS_XPU_AND_TRITON,
     has_triton,
+    HAS_XPU_AND_TRITON,
     maybe_skip_size_asserts,
 )
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_leaves, tree_map
-
 
 try:
     try:
@@ -178,13 +177,11 @@ def print_seen():
     for device_type in sorted({device_type for device_type, _ in seen_failed}):
         expected_failures[device_type]
         nl = "\n"
-        print(
-            f"""
+        print(f"""
 inductor_expected_failures_single_sample[\"{device_type}\"] = {{
 {nl.join(expected_failures[device_type])}
 }}
-"""
-        )
+""")
 
 
 if COLLECT_EXPECT:
@@ -311,7 +308,6 @@ intentionally_not_handled = {
 # This is only fixed when this config is set
 # We should eventually always turn it on
 import torch._functorch.config as functorch_config
-
 
 if not functorch_config.view_replay_for_aliased_outputs:
     intentionally_not_handled['("as_strided", "partial_views")'] = {
@@ -1372,7 +1368,9 @@ class TestInductorOpInfo(TestCase):
             in inductor_expected_failures_single_sample[device_type].get(op_name, set())
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
-        ].get(op_name, set()):
+        ].get(
+            op_name, set()
+        ):
             test_expect = ExpectedTestResult.XFAILURE
         else:
             test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
