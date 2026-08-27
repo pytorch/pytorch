@@ -212,7 +212,7 @@ class ReplicateTest(MultiProcContinuousTest):
             device: Device to run the test on. Typically "cuda:0", "npu:0", etc.
         """
 
-        device = torch.device(device)
+        device = torch.device(f"{device}:{self.rank % getattr(torch, device).device_count()}")
         model = Net().to(device)
         replicate_model = deepcopy(model)
 
@@ -241,7 +241,7 @@ class ReplicateTest(MultiProcContinuousTest):
             device: Device to run the test on. Typically "cuda:0", "npu:0", etc.
         """
 
-        device = torch.device(device)
+        device = torch.device(f"{device}:{self.rank % getattr(torch, device).device_count()}")
         model = Net().to(device)
         replicate_model = deepcopy(model)
 
