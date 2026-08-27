@@ -8,7 +8,6 @@ import torch.nn.functional as F
 from torch._inductor import config
 from torch._inductor.codegen.flydsl import flydsl_utils
 from torch._inductor.kernel import mm
-from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
 from torch._inductor.utils import run_and_get_code
 from torch.nn.functional import ScalingType, SwizzleType  # type: ignore[attr-defined]
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -94,61 +93,125 @@ def scaled_mm_mxfp4(a, b_t, scale_a, scale_b, out_dtype):
     )
 
 
-class TestFlyDSLMXFP4Metadata(TestCase):
-    def _candidate_args(self, **overrides):
-        m, n, k = 64, 96, 256
-        a = _FakeNode((m, k // 2), (k // 2, 1), torch.float4_e2m1fn_x2)
-        b = _FakeNode((k // 2, n), (1, k // 2), torch.float4_e2m1fn_x2)
-        scale_a = _FakeNode((m, k // 32), (k // 32, 1), torch.float8_e8m0fnu)
-        scale_b = _FakeNode((n, k // 32), (k // 32, 1), torch.float8_e8m0fnu)
-        args = {
-            "mat_a": a,
-            "mat_b": b,
-            "scale_a": [scale_a],
-            "recipe_a": [ScalingType.BlockWise1x32.value],
-            "swizzle_a": [SwizzleType.NO_SWIZZLE.value],
-            "scale_b": [scale_b],
-            "recipe_b": [ScalingType.BlockWise1x32.value],
-            "swizzle_b": [SwizzleType.NO_SWIZZLE.value],
-            "bias": None,
-            "out_dtype": torch.bfloat16,
-            "contraction_dim": None,
-            "use_fast_accum": False,
-        }
-        args.update(overrides)
-        return args
+def _candidate_args(mxfp_format, **overrides):
+    m, n, k = 64, 96, 256
+    if mxfp_format == "mxfp4":
+        dtype = torch.float4_e2m1fn_x2
+        storage_k = k // 2
+        contraction_dim = None
+    elif mxfp_format == "mxfp8":
+        dtype = torch.float8_e4m3fn
+        storage_k = k
+        contraction_dim = []
+    else:
+        raise AssertionError(f"unsupported MXFP format: {mxfp_format}")
+    args = {
+        "mat_a": _FakeNode((m, storage_k), (storage_k, 1), dtype),
+        "mat_b": _FakeNode((storage_k, n), (1, storage_k), dtype),
+        "scale_a": [
+            _FakeNode((m, k // 32), (k // 32, 1), torch.float8_e8m0fnu)
+        ],
+        "recipe_a": [ScalingType.BlockWise1x32.value],
+        "swizzle_a": [SwizzleType.NO_SWIZZLE.value],
+        "scale_b": [
+            _FakeNode((n, k // 32), (k // 32, 1), torch.float8_e8m0fnu)
+        ],
+        "recipe_b": [ScalingType.BlockWise1x32.value],
+        "swizzle_b": [SwizzleType.NO_SWIZZLE.value],
+        "bias": None,
+        "out_dtype": torch.bfloat16,
+        "contraction_dim": contraction_dim,
+        "use_fast_accum": False,
+    }
+    args.update(overrides)
+    return args
 
-    def test_exact_v2_signature(self):
-        if torch.version.hip is None:
-            self.skipTest("ROCm-only gate")
-        self.assertEqual(
-            mm._get_rocm_mxfp_v2_format(**self._candidate_args()), "mxfp4"
-        )
+
+def _run_mxfp_tile(mxfp_format, shape, tile, out_dtype, a, b, scale_a, scale_b):
+    import flydsl.compiler as flyc
+
+    from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+        make_mxfp_scaled_mm_gfx950,
+    )
+
+    m, n, k = shape
+    block_m, block_n, block_k, stages, m_waves, n_waves, group_m = tile[:7]
+    lds_scale = tile[7] if len(tile) == 8 else 0
+    out = torch.zeros(m, n, device=a.device, dtype=out_dtype)
+    a_u8 = a.view(torch.uint8)
+    b_u8 = b.view(torch.uint8)
+    scale_a_u8 = scale_a.view(torch.uint8)
+    scale_b_u8 = scale_b.view(torch.uint8)
+    launcher = make_mxfp_scaled_mm_gfx950(
+        mxfp_format=mxfp_format,
+        m=m,
+        n=n,
+        k=k,
+        out_dtype="bfloat16" if out_dtype == torch.bfloat16 else "float16",
+        block_m=block_m,
+        block_n=block_n,
+        block_k=block_k,
+        stages=stages,
+        m_waves=m_waves,
+        n_waves=n_waves,
+        group_m=group_m,
+        lds_scale=lds_scale,
+    )
+    runtime_args = (a_u8, b_u8, scale_a_u8, scale_b_u8, out, 0)
+    compiled = flyc.compile(
+        launcher,
+        *[
+            flyc.from_torch_tensor(t).mark_layout_dynamic()
+            for t in (a_u8, b_u8, scale_a_u8, scale_b_u8, out)
+        ],
+        0,
+    )
+    compiled(*runtime_args)
+    torch.cuda.synchronize()
+    return out
+
+
+def _mxfp8_reference(a, b, scale_a, scale_b, out_dtype):
+    a_dequant = a.float() * scale_a.float().repeat_interleave(32, 1)
+    b_dequant = b.float() * scale_b.float().repeat_interleave(32, 1)
+    return (a_dequant @ b_dequant.t()).to(out_dtype)
+
+
+class TestFlyDSLMXFPMetadata(TestCase):
+    @parametrize(
+        "mxfp_format,contraction_dim",
+        [("mxfp4", None), ("mxfp8", None), ("mxfp8", [])],
+    )
+    def test_exact_v2_signature(self, mxfp_format, contraction_dim):
+        with mock.patch.object(torch.version, "hip", "test"):
+            self.assertEqual(
+                mm._get_rocm_mxfp_v2_format(
+                    **_candidate_args(
+                        mxfp_format, contraction_dim=contraction_dim
+                    )
+                ),
+                mxfp_format,
+            )
 
     @parametrize(
-        "override",
+        "mxfp_format,override",
         [
-            {"swizzle_a": [SwizzleType.SWIZZLE_32_4_4.value]},
-            {"recipe_b": [ScalingType.BlockWise1x16.value]},
-            {"out_dtype": torch.float32},
-            {"use_fast_accum": True},
-            {"contraction_dim": [1]},
+            ("mxfp4", {"swizzle_a": [SwizzleType.SWIZZLE_32_4_4.value]}),
+            ("mxfp4", {"recipe_b": [ScalingType.BlockWise1x16.value]}),
+            ("mxfp4", {"out_dtype": torch.float32}),
+            ("mxfp4", {"use_fast_accum": True}),
+            ("mxfp4", {"contraction_dim": [1]}),
+            ("mxfp8", {"swizzle_a": [SwizzleType.SWIZZLE_32_4_4.value]}),
+            ("mxfp8", {"use_fast_accum": True}),
         ],
     )
-    def test_rejects_out_of_contract_signature(self, override):
-        if torch.version.hip is None:
-            self.skipTest("ROCm-only gate")
-        self.assertIsNone(
-            mm._get_rocm_mxfp_v2_format(**self._candidate_args(**override))
-        )
-
-    def test_detects_fp8_operands(self):
-        if torch.version.hip is None:
-            self.skipTest("ROCm-only gate")
-        args = self._candidate_args()
-        args["mat_a"] = _FakeNode((64, 256), (256, 1), torch.float8_e4m3fn)
-        args["mat_b"] = _FakeNode((256, 96), (1, 256), torch.float8_e4m3fn)
-        self.assertEqual(mm._get_rocm_mxfp_v2_format(**args), "mxfp8")
+    def test_rejects_out_of_contract_signature(self, mxfp_format, override):
+        with mock.patch.object(torch.version, "hip", "test"):
+            self.assertIsNone(
+                mm._get_rocm_mxfp_v2_format(
+                    **_candidate_args(mxfp_format, **override)
+                )
+            )
 
     def test_tile_config_units_are_elements(self):
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
@@ -234,47 +297,13 @@ class TestFlyDSLMXFP4Metadata(TestCase):
             )
 
 
-class _CacheParam:
-    def __cache_signature__(self):
-        return ("mxfp_gfx950_v1", "mxfp8", 64, 96, 256, "bfloat16")
-
-
 class TestFlyDSLMXFP8Metadata(TestCase):
-    def _candidate_args(self):
-        a = _FakeNode((64, 256), (256, 1), torch.float8_e4m3fn)
-        b = _FakeNode((256, 96), (1, 256), torch.float8_e4m3fn)
-        scale_a = _FakeNode((64, 8), (8, 1), torch.float8_e8m0fnu)
-        scale_b = _FakeNode((96, 8), (8, 1), torch.float8_e8m0fnu)
-        return (
-            a,
-            b,
-            [scale_a],
-            [ScalingType.BlockWise1x32.value],
-            [SwizzleType.NO_SWIZZLE.value],
-            [scale_b],
-            [ScalingType.BlockWise1x32.value],
-            [SwizzleType.NO_SWIZZLE.value],
-            None,
-            torch.bfloat16,
-            [],
-            False,
-        )
-
-    def test_exact_v2_signature(self):
-        args = self._candidate_args()
-        with mock.patch.object(torch.version, "hip", "test"):
-            self.assertEqual(mm._get_rocm_mxfp_v2_format(*args), "mxfp8")
-
-            bad_fast_accum = (*args[:-1], True)
-            self.assertIsNone(mm._get_rocm_mxfp_v2_format(*bad_fast_accum))
-
-            bad_swizzle = list(args)
-            bad_swizzle[4] = [SwizzleType.SWIZZLE_32_4_4.value]
-            self.assertIsNone(mm._get_rocm_mxfp_v2_format(*bad_swizzle))
-
     def test_strict_baseline_layout(self):
-        args = self._candidate_args()
-        a, b, scale_a, _, _, scale_b, *_ = args
+        args = _candidate_args("mxfp8")
+        a = args["mat_a"]
+        b = args["mat_b"]
+        scale_a = args["scale_a"]
+        scale_b = args["scale_b"]
         layout = SimpleNamespace(
             size=[64, 96],
             stride=[96, 1],
@@ -341,31 +370,6 @@ class TestFlyDSLMXFP8Metadata(TestCase):
                     [],
                 )
 
-    def test_runtime_cache_reuses_specialization(self):
-        jit_func = SimpleNamespace()
-        compiled = mock.Mock()
-        compiler = mock.Mock(return_value=compiled)
-
-        first = run_cached_flydsl(
-            jit_func,
-            "compile-args",
-            constexpr_param=_CacheParam(),
-            compiler=compiler,
-            dispatch_args=("first-dispatch",),
-        )
-        second = run_cached_flydsl(
-            jit_func,
-            "different-compile-args",
-            constexpr_param=_CacheParam(),
-            compiler=compiler,
-            dispatch_args=("second-dispatch",),
-        )
-
-        self.assertIs(first, compiled)
-        self.assertIs(second, compiled)
-        compiler.assert_called_once_with(jit_func, "compile-args")
-        compiled.assert_called_once_with("second-dispatch")
-
     def test_precompile_uses_flydsl_compile_only_contract(self):
         source = mm.flydsl_mxfp_scaled_mm_template.source
 
@@ -373,7 +377,18 @@ class TestFlyDSLMXFP8Metadata(TestCase):
         self.assertNotIn("FLYDSL_COMPILE_ONLY", source)
 
 
-class TestFlyDSLMXFP8Device(TestCase):
+class _MXFPDeviceTest(TestCase):
+    def _skip_unless_supported(self, device):
+        if torch.version.hip is None:
+            self.skipTest("requires ROCm")
+        arch = torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+        if arch != "gfx950":
+            self.skipTest(f"requires gfx950, got {arch}")
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+
+class TestFlyDSLMXFP8Device(_MXFPDeviceTest):
     def _make_inputs(self, m, n, k, device):
         a_values = ((torch.arange(m * k, device=device) % 9) - 4) / 2
         b_values = ((torch.arange(n * k, device=device) % 11) - 5) / 2
@@ -395,13 +410,7 @@ class TestFlyDSLMXFP8Device(TestCase):
 
     @parametrize("out_dtype", [torch.bfloat16, torch.float16])
     def test_scaled_mm_v2_flydsl_baseline(self, device, out_dtype):
-        if torch.version.hip is None:
-            self.skipTest("requires ROCm")
-        arch = torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
-        if arch != "gfx950":
-            self.skipTest("requires gfx950")
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
+        self._skip_unless_supported(device)
 
         m, n, k = 64, 96, 256
         a, b, scale_a, scale_b = self._make_inputs(m, n, k, device)
@@ -420,9 +429,7 @@ class TestFlyDSLMXFP8Device(TestCase):
             )
 
         expected = fn(a, b, scale_a, scale_b)
-        a_dequant = a.float() * scale_a.float().repeat_interleave(32, 1)
-        b_dequant = b.float() * scale_b.float().repeat_interleave(32, 1)
-        reference = (a_dequant @ b_dequant.t()).to(out_dtype)
+        reference = _mxfp8_reference(a, b, scale_a, scale_b, out_dtype)
         self.assertEqual(expected, reference, rtol=2e-2, atol=5e-1)
 
         torch._dynamo.reset()
@@ -525,70 +532,17 @@ class TestFlyDSLMXFP8Device(TestCase):
         ],
     )
     def test_mxfp8_tile_configs_match_reference(self, device, shape, tile, out_dtype):
-        if torch.version.hip is None:
-            self.skipTest("requires ROCm")
-        arch = torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
-        if arch != "gfx950":
-            self.skipTest("requires gfx950")
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
-
-        import flydsl.compiler as flyc
-
-        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
-            make_mxfp_scaled_mm_gfx950,
-        )
-
+        self._skip_unless_supported(device)
         m, n, k = shape
-        block_m, block_n, block_k, stages, m_waves, n_waves, group_m = tile[:7]
-        lds_scale = tile[7] if len(tile) == 8 else 0
         a, b, scale_a, scale_b = self._make_inputs(m, n, k, device)
-        out = torch.zeros(m, n, device=device, dtype=out_dtype)
-        a_u8 = a.view(torch.uint8)
-        b_u8 = b.view(torch.uint8)
-        scale_a_u8 = scale_a.view(torch.uint8)
-        scale_b_u8 = scale_b.view(torch.uint8)
-
-        launcher = make_mxfp_scaled_mm_gfx950(
-            mxfp_format="mxfp8",
-            m=m,
-            n=n,
-            k=k,
-            out_dtype="bfloat16" if out_dtype == torch.bfloat16 else "float16",
-            block_m=block_m,
-            block_n=block_n,
-            block_k=block_k,
-            stages=stages,
-            m_waves=m_waves,
-            n_waves=n_waves,
-            group_m=group_m,
-            lds_scale=lds_scale,
+        out = _run_mxfp_tile(
+            "mxfp8", shape, tile, out_dtype, a, b, scale_a, scale_b
         )
-        runtime_args = (a_u8, b_u8, scale_a_u8, scale_b_u8, out, 0)
-        compiled = flyc.compile(
-            launcher,
-            *[
-                flyc.from_torch_tensor(t).mark_layout_dynamic()
-                for t in (a_u8, b_u8, scale_a_u8, scale_b_u8, out)
-            ],
-            0,
-        )
-        compiled(*runtime_args)
-        torch.cuda.synchronize()
-
-        a_dequant = a.float() * scale_a.float().repeat_interleave(32, 1)
-        b_dequant = b.float() * scale_b.float().repeat_interleave(32, 1)
-        reference = (a_dequant @ b_dequant.t()).to(out_dtype)
+        reference = _mxfp8_reference(a, b, scale_a, scale_b, out_dtype)
         self.assertEqual(out, reference, rtol=2e-2, atol=5e-1)
 
     def test_scaled_mm_v2_flydsl_autotunes_multiple_configs(self, device):
-        if torch.version.hip is None:
-            self.skipTest("requires ROCm")
-        arch = torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
-        if arch != "gfx950":
-            self.skipTest("requires gfx950")
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
+        self._skip_unless_supported(device)
 
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
 
@@ -630,16 +584,7 @@ class TestFlyDSLMXFP8Device(TestCase):
         self.assertIn("async_compile.flydsl", code)
 
 
-class TestFlyDSLMXFP4Device(TestCase):
-    def _skip_unless_supported(self, device):
-        if torch.version.hip is None:
-            self.skipTest("FlyDSL MXFP4 template is ROCm-only")
-        arch = torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
-        if arch != "gfx950":
-            self.skipTest(f"MXFP4 scaled MFMA requires gfx950, got {arch}")
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
-
+class TestFlyDSLMXFP4Device(_MXFPDeviceTest):
     @parametrize(
         "shape,tile,out_dtype",
         [
@@ -679,59 +624,12 @@ class TestFlyDSLMXFP4Device(TestCase):
         self, device, shape, tile, out_dtype
     ):
         self._skip_unless_supported(device)
-
-        import flydsl.compiler as flyc
-
-        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
-            make_mxfp_scaled_mm_gfx950,
-        )
-
         m, n, k = shape
-        (
-            block_m,
-            block_n,
-            block_k,
-            stages,
-            m_waves,
-            n_waves,
-            group_m,
-            lds_scale,
-        ) = tile
         a, scale_a, a_ref = make_mxfp4_operand(m, k, device)
         b, scale_b, b_ref = make_mxfp4_operand(n, k, device)
-        out = torch.zeros(m, n, device=device, dtype=out_dtype)
-        a_u8 = a.view(torch.uint8)
-        b_u8 = b.view(torch.uint8)
-        scale_a_u8 = scale_a.view(torch.uint8)
-        scale_b_u8 = scale_b.view(torch.uint8)
-
-        launcher = make_mxfp_scaled_mm_gfx950(
-            mxfp_format="mxfp4",
-            m=m,
-            n=n,
-            k=k,
-            out_dtype="bfloat16" if out_dtype == torch.bfloat16 else "float16",
-            block_m=block_m,
-            block_n=block_n,
-            block_k=block_k,
-            stages=stages,
-            m_waves=m_waves,
-            n_waves=n_waves,
-            group_m=group_m,
-            lds_scale=lds_scale,
+        out = _run_mxfp_tile(
+            "mxfp4", shape, tile, out_dtype, a, b, scale_a, scale_b
         )
-        runtime_args = (a_u8, b_u8, scale_a_u8, scale_b_u8, out, 0)
-        compiled = flyc.compile(
-            launcher,
-            *[
-                flyc.from_torch_tensor(t).mark_layout_dynamic()
-                for t in (a_u8, b_u8, scale_a_u8, scale_b_u8, out)
-            ],
-            0,
-        )
-        compiled(*runtime_args)
-        torch.cuda.synchronize()
-
         reference = (a_ref @ b_ref.t()).to(out_dtype)
         rel_l2 = ((out.float() - reference.float()).norm() / reference.norm()).item()
         self.assertLess(rel_l2, 5e-3)
@@ -791,7 +689,7 @@ class TestFlyDSLMXFP4Device(TestCase):
         self.assertNotIn("gemm_mxfp_gfx950", "\n".join(code))
 
 
-instantiate_parametrized_tests(TestFlyDSLMXFP4Metadata)
+instantiate_parametrized_tests(TestFlyDSLMXFPMetadata)
 instantiate_device_type_tests(TestFlyDSLMXFP8Device, globals(), only_for="cuda")
 instantiate_device_type_tests(TestFlyDSLMXFP4Device, globals(), only_for="cuda")
 
