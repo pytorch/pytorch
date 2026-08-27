@@ -4,24 +4,6 @@ import torch.distributed as dist
 from torch.autograd.function import Function
 
 
-def _is_current_stream_capturing():
-    r"""Return whether the current accelerator's stream is capturing a graph.
-
-    There is no unified torch.accelerator equivalent yet, so look up
-    is_current_stream_capturing on the current accelerator's own module
-    (e.g. torch.cuda, torch.xpu) by the same naming convention those modules
-    already follow. Backends without graph-capture support (or without this
-    function) safely fall through to False.
-    """
-    accelerator = torch.accelerator.current_accelerator(check_available=True)
-    if accelerator is None:
-        return False
-    is_capturing = getattr(
-        torch.get_device_module(accelerator.type), "is_current_stream_capturing", None
-    )
-    return is_capturing() if is_capturing is not None else False
-
-
 class SyncBatchNorm(Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
