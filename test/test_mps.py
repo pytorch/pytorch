@@ -16283,6 +16283,9 @@ class TestConsistency(TestCaseMPS):
             mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample, opt_dtype)
 
             atol, rtol = self._compute_tolerances(op, dtype)
+            # Forward is bit-exact; backward may include inexact broadcast reductions.
+            if op.name == "nextafter":
+                atol, rtol = 0, 0
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
                mps_sample.kwargs.get("mode") == "bilinear" and
                mps_sample.kwargs.get("recompute_scale_factor") is True and
