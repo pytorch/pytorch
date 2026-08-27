@@ -1036,8 +1036,13 @@ __global__ void tile_reduce_kernel(
   // Use one-shot pull to reduce the tile
   uint64_t flag = 0;
   constexpr auto algo = nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI;
-  nvshmemx::tile_sum_reduce_block<decltype(block_src_tensor), decltype(block_dst_tensor), decltype(boundary), algo>(
+  #if NVSHMEM_VENDOR_VERSION >= 30519
+    nvshmemx::tile_sum_rooted_reduce_block<decltype(block_src_tensor), decltype(block_dst_tensor), decltype(boundary), algo>(
       team, block_src_tensor, block_dst_tensor, start_coord, boundary, root, flag /* unused */);
+  #else
+    nvshmemx::tile_sum_reduce_block<decltype(block_src_tensor), decltype(block_dst_tensor), decltype(boundary), algo>(
+      team, block_src_tensor, block_dst_tensor, start_coord, boundary, root, flag /* unused */);
+  #endif
 
   // Wait for the operation to complete
   nvshmemx::tile_collective_wait<algo>(team, flag /* unused */);
