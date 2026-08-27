@@ -95,6 +95,10 @@
 #   ACL_ROOT_DIR             Arm Compute Library location (read from env in
 #                            cmake/Modules/FindACL.cmake)
 #   LIBRARY_PATH / LD_LIBRARY_PATH   searched for libraries (compiler/linker native)
+#   CAFFE2_CUSTOM_PROTOC_EXECUTABLE  host protoc to use instead of the one built
+#                            from third_party/protobuf. Required when cross-compiling,
+#                            where the built protoc targets an architecture the build
+#                            host cannot execute (see cmake/ProtoBuf.cmake)
 #
 # Handled outside this module (NOT forwarded here; see also the everyday knobs
 # above, which are all handled via pyproject.toml or natively):
@@ -143,6 +147,7 @@ set(_ENV_PASSTHROUGH
   MKLDNN_CPU_RUNTIME
   MSVC_Z7_OVERRIDE
   CAFFE2_USE_MSVC_STATIC_RUNTIME
+  CAFFE2_CUSTOM_PROTOC_EXECUTABLE
   Numa_INCLUDE_DIR
   Numa_LIBRARIES
   ONNX_ML

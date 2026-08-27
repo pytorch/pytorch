@@ -144,6 +144,27 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
   python -mpip install --extra-index-url https://pypi.riseproject.dev/simple \
       build "scikit-build-core>=1.0" packaging six numpy==1.26.4
 
+  # third_party/protobuf (v21.12) would build a protoc for the target, which this
+  # x86_64 host cannot execute, and the workflow no longer registers qemu-riscv64
+  # with binfmt_misc -- that went away with the EC2 build path in #189113. Supply a
+  # host protoc rather than restoring emulation: it is the cross-compilation path
+  # cmake/ProtoBuf.cmake documents, and what conda-forge does for the same reason.
+  #
+  # The version must track third_party/protobuf, because protoc-generated sources
+  # have to stay compatible with the libprotobuf compiled for the target.
+  #
+  # The pixi bootstrap is temporary. It is here rather than in the image so that
+  # iterating on this cross build does not rehash .ci/docker and rebuild every CI
+  # image. Once the build is green this moves into the Dockerfile as an apt install
+  # of protobuf-compiler -- Ubuntu noble ships 3.21.12, the same version -- and the
+  # bootstrap goes away. The image has wget but no curl, which the installer handles.
+  export PIXI_HOME="${HOME}/.pixi"
+  export PIXI_VERSION=v0.70.2
+  export PIXI_NO_PATH_UPDATE=1
+  wget -qO- https://pixi.sh/install.sh | bash
+  "${PIXI_HOME}/bin/pixi" global install "libprotobuf==3.21.12"
+  export CAFFE2_CUSTOM_PROTOC_EXECUTABLE="${PIXI_HOME}/bin/protoc"
+
 elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export USE_CUDA=0
   export USE_MKLDNN=0
