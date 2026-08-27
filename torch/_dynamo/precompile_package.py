@@ -1158,11 +1158,50 @@ _VALIDATION_PASSES = 4
 
 
 def _autograd_cache_bypasses() -> int:
-    """How many graphs AOTAutogradCache declined. Nonzero means the artifact is
-    empty because the cache refused the graph, not because of the grad mode."""
+    """How many graphs AOTAutogradCache declined.
+
+    Capture pins bypass_autograd_cache_key, so this no longer counts graphs the
+    cache refused to RECORD -- rendering re-enters AOTAutograd outside that
+    config and bypasses there routinely. It is a diagnostic, not a diagnosis.
+    """
     from torch._dynamo.utils import counters
 
     return counters["aot_autograd"].get("autograd_cache_bypass", 0)
+
+
+def _missing_backends_message(total: int, missing: Sequence[object]) -> str:
+    """Why some compiled subgraphs never reached the artifact.
+
+    Reports the recorded/total split rather than asserting nothing was
+    recorded: a single missing id is fatal here, and saying so as "never
+    recorded" reads as total failure when most of the capture succeeded.
+    """
+    shown = ", ".join(str(b) for b in missing[:8])
+    if len(missing) > 8:
+        shown += f", ... ({len(missing) - 8} more)"
+    bypasses = _autograd_cache_bypasses()
+    bypass_note = (
+        f" It bypassed {bypasses} time(s) here, which rendering does for any "
+        "graph the cache cannot key, and which does not by itself explain a gap."
+        if bypasses
+        else ""
+    )
+    return (
+        f"Precompilation recorded {total - len(missing)} of {total} compiled "
+        f"backend(s), so {len(missing)} graph(s) would reach the artifact with "
+        f"no code behind them: {shown}. Capture pins functorch's "
+        "bypass_autograd_cache_key, so AOTAutograd keys every graph it lowers "
+        "and no longer declines to record one it cannot address."
+        + bypass_note
+        + " A gap therefore means a graph whose backward never compiled, which "
+        "is a forward-only capture with grad enabled. Pass training=True to "
+        "lower the backward eagerly (the joint trace synthesizes tangents, so "
+        "no loss is needed), capture under torch.no_grad() / "
+        "torch.inference_mode() for an inference artifact, or run .backward() "
+        "inside the capture block. Re-run with "
+        "TORCH_LOGS=+torch._functorch._aot_autograd to see each graph as it "
+        "lowers."
+    )
 
 
 def _grad_snapshot(
@@ -2345,20 +2384,13 @@ class PrecompileSession:
         except RuntimeError as e:
             if "is not found in the given backends" not in str(e):
                 raise
+            recorded = set(self._backend_artifacts)
+            if self._backend == "eager":
+                recorded |= set(self._package.cached_backends)
+            entry = self._package.cache_entry()
+            missing = [b for b in entry.backend_ids if b not in recorded]
             raise PackageError(
-                "Precompilation captured graphs but their compiled backends were "
-                "never recorded, so there is nothing to serialize. AOTAutograd "
-                f"records the bundled artifact only when its cache accepts the "
-                f"graph, and it bypassed {_autograd_cache_bypasses()} time(s) "
-                "here. The two things that cause that are a graph the cache "
-                "refuses -- re-run with TORCH_LOGS=+torch._functorch._aot_autograd "
-                "to see the reason at the offending graph -- and a capture whose "
-                "backward never compiles, which is a forward-only capture with "
-                "grad enabled. For the second, pass training=True to lower the "
-                "backward eagerly (the joint trace synthesizes tangents, so no "
-                "loss is needed), capture under torch.no_grad() / "
-                "torch.inference_mode() for an inference artifact, or run "
-                ".backward() inside the capture block."
+                _missing_backends_message(len(entry.backend_ids), missing)
             ) from e
         log.info("precompile: saved %s to %s", summary, path)
         return summary
@@ -2429,19 +2461,7 @@ class PrecompileSession:
         missing = [b for b in entry.backend_ids if b not in collected]
         if missing:
             raise PackageError(
-                "Precompilation captured graphs but their compiled backends were "
-                "never recorded, so there is nothing to serialize. AOTAutograd "
-                f"records the bundled artifact only when its cache accepts the "
-                f"graph, and it bypassed {_autograd_cache_bypasses()} time(s) "
-                "here. The two things that cause that are a graph the cache "
-                "refuses -- re-run with TORCH_LOGS=+torch._functorch._aot_autograd "
-                "to see the reason at the offending graph -- and a capture whose "
-                "backward never compiles, which is a forward-only capture with "
-                "grad enabled. For the second, pass training=True to lower the "
-                "backward eagerly (the joint trace synthesizes tangents, so no "
-                "loss is needed), capture under torch.no_grad() / "
-                "torch.inference_mode() for an inference artifact, or run "
-                ".backward() inside the capture block."
+                _missing_backends_message(len(entry.backend_ids), missing)
             )
         return {str(b): collected[b] for b in entry.backend_ids}
 
