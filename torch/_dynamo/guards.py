@@ -4420,12 +4420,7 @@ class GuardsStatePickler(pickle.Pickler):
 
     @classmethod
     def _unpickle_cell(cls, val: Any) -> Any:
-        def _() -> Any:
-            return val
-
-        if _.__closure__ is None:
-            raise AssertionError("Closure must not be None when unpickling cell")
-        return _.__closure__[0]
+        return types.CellType(val)
 
     @classmethod
     def _unpickle_named_tuple_type(

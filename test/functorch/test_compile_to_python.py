@@ -274,6 +274,23 @@ class TestAOTCompileToPython(TestCase):
         actual.sum().backward()
         self.assertEqual(actual_x.grad, torch.ones_like(actual_x))
 
+    @parametrize("value", [float("inf"), float("-inf")])
+    def test_passthrough_source_infinite_float(self, value):
+        from torch._inductor.standalone_compile import _passthrough_source
+
+        graph = fx.Graph()
+        graph.output(value)
+        source = _passthrough_source(fx.GraphModule({}, graph))
+        self.assertIsNotNone(source)
+        self.assertEqual(_exec(source)([]), value)
+
+    def test_passthrough_source_nan(self):
+        from torch._inductor.standalone_compile import _passthrough_source
+
+        graph = fx.Graph()
+        graph.output(float("nan"))
+        self.assertIsNone(_passthrough_source(fx.GraphModule({}, graph)))
+
     def test_training_serializes_observed_tangent_mask(self):
         def flat_fn(flat):
             return [flat[0].sin(), flat[1].sin()]

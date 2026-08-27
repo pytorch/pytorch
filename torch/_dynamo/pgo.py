@@ -200,6 +200,9 @@ class CodeState:
 
 _INIT_CODE_STATE: defaultdict[CodeId, CodeState] | None = None
 _CODE_STATE: defaultdict[CodeId, CodeState] | None = None
+# All specialization updates go through get_code_state(). Context-local overrides keep
+# capture isolated from concurrent compiles; user-created threads do not inherit them and
+# are outside Dynamo's supported capture model.
 _CODE_STATE_OVERRIDE: ContextVar[defaultdict[CodeId, CodeState] | None] = ContextVar(
     "dynamo_pgo_code_state_override", default=None
 )

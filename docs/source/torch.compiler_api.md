@@ -89,7 +89,15 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       capture and runtime, and (2) only explicit inputs vary in ways that would cause a
       recompile. Guards that only enforce the first promise are omitted. By default,
       every portable input-derived guard is retained, including invariant guards needed
-      to reject an unseen input variation.
+      to reject an unseen input variation. Distinct tensor inputs must not share or
+      overlap storage at capture or runtime. An explicit input must not
+      also be reachable through globals or other environment state; statically visible
+      identity relations are rejected during capture, and dynamic native indirection is
+      outside the supported contract. Input pytree structures must be serializable so
+      these checks can be reconstructed at runtime. User-defined code must access Python
+      module objects (``types.ModuleType``) through statically visible attribute paths
+      rather than pass or alias them as values. Python functions that assign or delete
+      globals are rejected.
 
       Each retained guard is rebuilt independently from its frozen capture snapshot.
       An environment-only guard that cannot be rebuilt is omitted with its dependent
@@ -111,7 +119,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       rebound at load, while recursive literal globals and defaults are captured by
       value. Top-level defaults must also be recursive literals; mutable or user-defined
       values must be passed explicitly rather than used as defaults. Tensor-valued
-      defaults and globals are rejected because every tensor must be an explicit input.
+      defaults and tensor-valued globals referenced by user-defined code are rejected
+      because user-owned tensors must be explicit inputs.
       Compiled graph bodies and kernels remain Python source. The eager backend
       supports higher-order graphs such as ``torch.cond``, ``torch.while_loop``,
       non-reentrant activation checkpointing, ``vmap``, autocast, and grad-mode regions.
@@ -139,9 +148,11 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       AOTAutograd forward and backward, bridged by an emitted
       ``torch.autograd.Function``; eager segments retain differentiable ATen operations.
       Outputs retain their ``grad_fn``, so a later ``backward()`` runs the captured
-      backward. Training works across captured recompilations and graph breaks. Only
-      first-order backward is supported; tensor-subclass and ``BackwardState`` training
-      graphs are rejected.
+      backward. Serving pins grad mode to ``training``: inference artifacts run with
+      gradients disabled even inside ``torch.enable_grad()``, while training artifacts
+      enable gradients even inside ``torch.no_grad()``. Training works across captured
+      recompilations and graph breaks. Only first-order backward is supported;
+      tensor-subclass and ``BackwardState`` training graphs are rejected.
 
    With ``tracer="make_fx"``, if ``fn`` runs a backward, the artifact re-runs the whole
    forward and backward and scatters the resulting parameter gradients onto the runtime

@@ -3,6 +3,7 @@ import contextvars
 import copy
 import cProfile
 import functools
+import hashlib
 import importlib
 import inspect
 import io
@@ -62,6 +63,130 @@ def _precompile_dynamo_torch_sin(x):
 
 def _precompile_dynamo_global_tensor(x):
     return x + _GLOBAL_TENSOR
+
+
+def _precompile_dynamo_imported_module_identity(x):
+    import _precompile_identity_module
+
+    return x + 1 if x is _precompile_identity_module.TOKEN else x - 1
+
+
+def _precompile_dynamo_imported_callable_identity(x):
+    import _precompile_identity_module
+
+    return x + 1 if x is _precompile_identity_module.CALLABLE() else x - 1
+
+
+def _precompile_dynamo_imported_nested_callable_identity(x):
+    import _precompile_identity_module
+
+    return x + 1 if x is _precompile_identity_module.SUBMODULE.CALLABLE() else x - 1
+
+
+def _precompile_dynamo_imported_dynamic_identity(x):
+    import _precompile_identity_module
+
+    return x + 1 if x is _precompile_identity_module.DYNAMIC else x - 1
+
+
+def _precompile_dynamo_imported_module_alias_identity(x):
+    import torch as local_torch
+
+    alias = local_torch
+    return x + 1 if x is alias._precompile_identity_token else x - 1
+
+
+def _precompile_dynamo_dotted_import_identity(x):
+    import _precompile_identity_package.sub.mod as identity_module
+
+    return x + 1 if x is identity_module.TOKEN else x - 1
+
+
+_DYNAMO_UNRELATED_IMPORT_RECEIVER = types.SimpleNamespace(SECRET=3)
+
+
+def _precompile_dynamo_imported_unrelated_attribute(x):
+    import _precompile_identity_module
+
+    return (
+        x + _DYNAMO_UNRELATED_IMPORT_RECEIVER.SECRET + _precompile_identity_module.USED
+    )
+
+
+def _precompile_dynamo_import_shadowed_in_nested_scope(x):
+    import _precompile_identity_module
+
+    def helper(_precompile_identity_module, value):
+        return value + _precompile_identity_module.SECRET
+
+    return (
+        helper(_DYNAMO_UNRELATED_IMPORT_RECEIVER, x)
+        + _precompile_identity_module.USED * 0
+    )
+
+
+def _precompile_dynamo_library_object_identity(x):
+    return torch._precompile_reviewlib.helper(torch._precompile_reviewlib.HOLDER, x)
+
+
+def _precompile_dynamo_library_nested_helper_identity(x):
+    return torch._precompile_reviewlib.outer(x)
+
+
+def _precompile_dynamo_library_container_helper_identity(x):
+    return torch._precompile_reviewlib.container_outer(x)
+
+
+def _precompile_dynamo_library_partial_helper_identity(x):
+    return torch._precompile_reviewlib.partial_outer(x)
+
+
+def _precompile_dynamo_library_callable_helper_identity(x):
+    return torch._precompile_reviewlib.callable_outer(x)
+
+
+def _precompile_dynamo_library_bound_partial_identity(x):
+    return torch._precompile_reviewlib.bound_partial_outer(x)
+
+
+def _precompile_dynamo_library_keyword_partial_identity(x):
+    return torch._precompile_reviewlib.keyword_partial_outer(x)
+
+
+def _precompile_dynamo_library_property_callable_identity(x):
+    return torch._precompile_reviewlib.property_callable_outer(x)
+
+
+def _precompile_dynamo_library_factory_identity(x):
+    return torch._precompile_reviewlib.factory_outer(x)
+
+
+def _precompile_dynamo_library_module_value_identity(x):
+    return torch._precompile_reviewlib.module_outer(x)
+
+
+def _precompile_dynamo_library_dynamic_module_identity(x):
+    return torch._precompile_reviewlib.dynamic_module_outer(x)
+
+
+def _precompile_dynamo_library_direct_method_identity(x):
+    return torch._precompile_reviewlib.direct_method_outer(x)
+
+
+def _precompile_dynamo_library_direct_property_identity(x):
+    return torch._precompile_reviewlib.direct_property_outer(x)
+
+
+def _precompile_dynamo_library_late_import_identity(x):
+    return torch._precompile_latelib.outer(x)
+
+
+def _precompile_dynamo_metadata_helper(x):
+    return x + 1
+
+
+def _precompile_dynamo_calls_metadata_helper(x):
+    return _precompile_dynamo_metadata_helper(x)
 
 
 def _precompile_dynamo_construct_relu(x):
@@ -609,6 +734,72 @@ def _precompile_dynamo_aliasing(a, b):
     return a * b
 
 
+def _precompile_dynamo_rebinds_storage(a, b):
+    a.set_(b)
+    return a + 1
+
+
+class _PrecompileDynamoTensorBox:
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+
+
+class _PrecompileDynamoTensorList(list):
+    def __init__(self, hidden):
+        super().__init__()
+        self.hidden = hidden
+
+
+def _precompile_dynamo_box_aliasing(box):
+    box.a.add_(1)
+    return box.a * box.b
+
+
+def _precompile_dynamo_mapping_aliasing(values):
+    values["a"].add_(1)
+    return values["a"] * values["b"]
+
+
+def _precompile_dynamo_list_subclass_aliasing(values, other):
+    values.hidden.add_(1)
+    return values.hidden * other
+
+
+class _PrecompileDynamoInputGetitem:
+    def __getitem__(self, x):
+        return x + 1 if x is _DYNAMO_TENSOR_DEFAULT else x - 1
+
+
+class _PrecompileDynamoInputObjectBox:
+    def __init__(self):
+        self.inner = _PrecompileDynamoInputGetitem()
+
+
+def _precompile_dynamo_input_getitem(obj, x):
+    return obj[x]
+
+
+def _precompile_dynamo_nested_input_getitem(box, x):
+    return box.inner[x]
+
+
+_DYNAMO_INPUT_OBJECT_GLOBAL = [_DYNAMO_TENSOR_DEFAULT]
+
+
+class _PrecompileDynamoInputStateGlobalAlias:
+    def __init__(self, token):
+        self.token = token
+
+    def __getitem__(self, x):
+        return x + 1 if self.token is _DYNAMO_INPUT_OBJECT_GLOBAL[0] else x - 1
+
+
+class _PrecompileDynamoInputList(list):
+    def __getitem__(self, index):
+        return _DYNAMO_TENSOR_DEFAULT
+
+
 def _precompile_dynamo_dict_order(x, values):
     for value in values.values():
         x = x * value + 1
@@ -1107,6 +1298,23 @@ def _precompile_dynamo_cellvar(x, scale):
 
 
 _PRECOMPILE_DYNAMO_MUTATED_GLOBAL = 0
+_PRECOMPILE_DYNAMO_INPUT_GLOBAL = None
+
+
+def _precompile_dynamo_stores_input_global(x):
+    global _PRECOMPILE_DYNAMO_INPUT_GLOBAL
+    _PRECOMPILE_DYNAMO_INPUT_GLOBAL = x
+    return x + 1
+
+
+def _precompile_dynamo_helper_stores_input_global(x):
+    global _PRECOMPILE_DYNAMO_INPUT_GLOBAL
+    _PRECOMPILE_DYNAMO_INPUT_GLOBAL = x
+    return x
+
+
+def _precompile_dynamo_calls_global_mutating_helper(x):
+    return _precompile_dynamo_helper_stores_input_global(x) + 1
 
 
 @torch._dynamo.disable
@@ -4348,9 +4556,25 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "code_hash|does not match|tracer"):
             torch.compiler.precompile.load(dynamo_code, make_fx_cache)
 
-    def test_tracer_dynamo_corrupt_cache_bundle_degrades(self):
-        from unittest import mock
+    def test_tracer_dynamo_mismatched_code_cache_pair_rejected(self):
+        code, _ = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(3),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        _, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(5),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        with self.assertRaisesRegex(
+            PrecompileError, "cache does not match python_code"
+        ):
+            torch.compiler.precompile.load(code, cache)
 
+    def test_tracer_dynamo_corrupt_cache_bundle_degrades(self):
         x = torch.randn(4)
         code, cache = torch.compiler.precompile(
             _precompile_dynamo_dynamic,
@@ -4362,22 +4586,15 @@ class TestPrecompile(TestCase):
         blob["artifact"] = [b"corrupt"]
         buffer = io.BytesIO()
         torch.save(blob, buffer)
-        with (
-            mock.patch.object(
-                torch.compiler,
-                "load_cache_artifacts",
-                side_effect=RuntimeError("corrupt bundle"),
-            ),
-            self.assertLogs("torch._precompile", level="WARNING") as logs,
-        ):
+        with self.assertLogs("torch.compiler._cache", level="WARNING") as logs:
             loaded = torch.compiler.precompile.load(code, buffer.getvalue())
         self.assertTrue(
-            any("could not prime the cache" in line for line in logs.output)
+            any("Failed to un-pickle cache artifacts" in line for line in logs.output)
         )
         self.assertEqual(loaded(x), _precompile_dynamo_dynamic(x))
 
     def test_tracer_dynamo_rejects_torch_version_skew(self):
-        code, _ = torch.compiler.precompile(
+        code, cache = torch.compiler.precompile(
             _precompile_dynamo_dynamic,
             example_inputs=[(torch.randn(4),)],
             tracer="dynamo",
@@ -4392,7 +4609,7 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(
             PrecompileError, "produced by torch different-build"
         ):
-            exec(compile(mismatched, "<artifact>", "exec"), {"__name__": "_artifact"})
+            torch.compiler.precompile.load(mismatched, cache)
 
     def test_tracer_dynamo_rejects_partial_cleanly(self):
         def fn(x, scale):
@@ -4683,6 +4900,25 @@ class TestPrecompile(TestCase):
         finally:
             _PRECOMPILE_DYNAMO_MUTATED_GLOBAL = 0
 
+    @parametrize(
+        "fn",
+        (
+            _precompile_dynamo_stores_input_global,
+            _precompile_dynamo_calls_global_mutating_helper,
+        ),
+    )
+    def test_tracer_dynamo_rejects_input_global_mutation_before_capture(self, fn):
+        global _PRECOMPILE_DYNAMO_INPUT_GLOBAL
+        _PRECOMPILE_DYNAMO_INPUT_GLOBAL = None
+        with self.assertRaisesRegex(NotImplementedError, "cannot mutate globals"):
+            torch.compiler.precompile(
+                fn,
+                example_inputs=[(torch.randn(4),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+        self.assertIsNone(_PRECOMPILE_DYNAMO_INPUT_GLOBAL)
+
     def test_tracer_dynamo_rejects_dynamic_disabled_globals(self):
         with self.assertRaisesRegex(NotImplementedError, "dynamic global access"):
             torch.compiler.precompile(
@@ -4848,6 +5084,122 @@ class TestPrecompile(TestCase):
             actual = loaded(actual_shared, actual_shared)
             self.assertEqual(actual, expected)
             self.assertEqual(actual_shared, expected_shared)
+
+    def test_tracer_dynamo_rejects_storage_alias_topology_change(self):
+        left_base = torch.ones(5)
+        right_base = torch.ones(5)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_aliasing,
+            example_inputs=[(left_base[:4], right_base[1:])],
+            tracer="dynamo",
+        )
+
+        for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
+            shared = torch.ones(5)
+            with self.assertRaisesRegex(PrecompileError, "storage alias"):
+                loaded(shared[:4], shared[1:])
+
+            shared_buffer = bytearray(20)
+            left = torch.frombuffer(shared_buffer, dtype=torch.float32, count=4)
+            right = torch.frombuffer(
+                shared_buffer, dtype=torch.float32, count=4, offset=4
+            )
+            with self.assertRaisesRegex(PrecompileError, "storage alias"):
+                loaded(left, right)
+
+        shared = torch.ones(5)
+        with self.assertRaisesRegex(PrecompileError, "storage alias"):
+            torch.compiler.precompile(
+                _precompile_dynamo_aliasing,
+                example_inputs=[
+                    (torch.ones(4), torch.ones(4)),
+                    (shared[:4], shared[1:]),
+                ],
+                tracer="dynamo",
+            )
+
+        with self.assertRaisesRegex(PrecompileError, "storage alias"):
+            torch.compiler.precompile(
+                _precompile_dynamo_aliasing,
+                example_inputs=[(shared[:4], shared[1:])],
+                tracer="dynamo",
+            )
+
+        shared_buffer = bytearray(20)
+        left = torch.frombuffer(shared_buffer, dtype=torch.float32, count=4)
+        right = torch.frombuffer(shared_buffer, dtype=torch.float32, count=4, offset=4)
+        with self.assertRaisesRegex(PrecompileError, "storage alias"):
+            torch.compiler.precompile(
+                _precompile_dynamo_aliasing,
+                example_inputs=[(left, right)],
+                tracer="dynamo",
+            )
+
+        with self.assertRaisesRegex(PrecompileError, "storage alias"):
+            torch.compiler.precompile(
+                _precompile_dynamo_box_aliasing,
+                example_inputs=[(_PrecompileDynamoTensorBox(shared[:4], shared[1:]),)],
+                tracer="dynamo",
+            )
+
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_box_aliasing,
+            example_inputs=[
+                (_PrecompileDynamoTensorBox(torch.ones(4), torch.ones(4)),)
+            ],
+            tracer="dynamo",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        shared = torch.ones(5)
+        with self.assertRaisesRegex(PrecompileError, "storage alias"):
+            loaded(_PrecompileDynamoTensorBox(shared[:4], shared[1:]))
+
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_mapping_aliasing,
+            example_inputs=[
+                (types.MappingProxyType({"a": torch.ones(4), "b": torch.ones(4)}),)
+            ],
+            tracer="dynamo",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        shared = torch.ones(5)
+        with self.assertRaisesRegex(PrecompileError, "storage alias"):
+            loaded(types.MappingProxyType({"a": shared[:4], "b": shared[1:]}))
+
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_list_subclass_aliasing,
+            example_inputs=[
+                (_PrecompileDynamoTensorList(torch.ones(4)), torch.ones(4))
+            ],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        other = torch.ones(4)
+        values = _PrecompileDynamoTensorList(torch.ones(4))
+        values.hidden.set_(other)
+        with self.assertRaisesRegex(PrecompileError, "storage alias"):
+            loaded(values, other)
+
+        shared = torch.ones(4)
+        with self.assertRaisesRegex(PrecompileError, "storage alias"):
+            torch.compiler.precompile(
+                _precompile_dynamo_list_subclass_aliasing,
+                example_inputs=[(_PrecompileDynamoTensorList(shared[:]), shared[:])],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_storage_contract_precedes_input_mutation(self):
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_rebinds_storage,
+            example_inputs=[(torch.ones(4), torch.full((4,), 2.0))],
+            tracer="dynamo",
+        )
+        for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
+            left = torch.ones(4)
+            right = torch.full((4,), 2.0)
+            self.assertEqual(loaded(left, right), torch.full((4,), 3.0))
 
     def test_tracer_dynamo_rejects_input_global_identity_guard(self):
         x = torch.randn(4)
@@ -5052,6 +5404,30 @@ class TestPrecompile(TestCase):
                 backend="eager",
             )
 
+    @parametrize(
+        "fn,obj",
+        (
+            (_precompile_dynamo_input_getitem, _PrecompileDynamoInputGetitem()),
+            (
+                _precompile_dynamo_nested_input_getitem,
+                _PrecompileDynamoInputObjectBox(),
+            ),
+            (
+                _precompile_dynamo_input_getitem,
+                _PrecompileDynamoInputStateGlobalAlias(_DYNAMO_TENSOR_DEFAULT),
+            ),
+            (_precompile_dynamo_input_getitem, _PrecompileDynamoInputList([0])),
+        ),
+    )
+    def test_tracer_dynamo_rejects_input_object_behavior_alias(self, fn, obj):
+        with self.assertRaisesRegex(PrecompileError, "input callable"):
+            torch.compiler.precompile(
+                fn,
+                example_inputs=[(obj, _DYNAMO_TENSOR_DEFAULT)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
     def test_tracer_dynamo_ignores_unrelated_global_attributes(self):
         token = _DYNAMO_IDENTITY_DESCRIPTOR.unused
         x = torch.randn(3)
@@ -5076,6 +5452,455 @@ class TestPrecompile(TestCase):
                 backend="eager",
             )
 
+    def test_tracer_dynamo_rejects_indirect_global_tensor(self):
+        module_name = "_precompile_indirect_global_tensor"
+        source = textwrap.dedent(
+            """
+            import types
+
+            import torch
+
+            BOX = types.SimpleNamespace(value=torch.randn(3))
+
+            def helper(x):
+                return x + BOX.value
+
+            def fn(x):
+                return helper(x)
+            """
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, f"{module_name}.py")
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(source)
+            sys.path.insert(0, directory)
+            importlib.invalidate_caches()
+            try:
+                fixture = importlib.import_module(module_name)
+                with self.assertRaisesRegex(
+                    PrecompileError, "tensor-valued Python globals"
+                ):
+                    torch.compiler.precompile(
+                        fixture.fn,
+                        example_inputs=[(torch.randn(3),)],
+                        tracer="dynamo",
+                        backend="eager",
+                    )
+            finally:
+                sys.path.remove(directory)
+                sys.modules.pop(module_name, None)
+
+    def test_tracer_dynamo_rejects_imported_input_environment_identity(self):
+        token = torch.randn(3)
+        torch._precompile_identity_token = token
+        module_name = "_precompile_identity_module"
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, f"{module_name}.py")
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(
+                    textwrap.dedent(
+                        """
+                        import types
+
+                        import torch
+
+                        TOKEN = torch._precompile_identity_token
+
+                        class Holder:
+                            def __init__(self, value):
+                                self.value = value
+
+                            def __call__(self):
+                                return self.value
+
+                        CALLABLE = Holder(TOKEN)
+                        SUBMODULE = types.ModuleType("_precompile_identity_submodule")
+                        SUBMODULE.CALLABLE = CALLABLE
+                        USED = 2
+
+                        def __getattr__(name):
+                            if name == "DYNAMIC":
+                                return TOKEN
+                            raise AttributeError(name)
+
+                        def helper(module, x):
+                            return x + 1 if x is module._precompile_identity_token else x - 1
+
+                        def global_module_fn(x):
+                            return helper(torch, x)
+
+                        MODULES = [torch]
+
+                        def global_module_container_fn(x):
+                            return helper(MODULES[0], x)
+
+                        def class_helper(cls, x):
+                            return x + 1 if x is cls._precompile_identity_token else x - 1
+
+                        def global_class_fn(x):
+                            return class_helper(torch.nn.Module, x)
+                        """
+                    )
+                )
+            package_name = "_precompile_identity_package"
+            package = os.path.join(directory, package_name)
+            os.makedirs(os.path.join(package, "sub"))
+            for init in (package, os.path.join(package, "sub")):
+                with open(os.path.join(init, "__init__.py"), "w", encoding="utf-8"):
+                    pass
+            with open(
+                os.path.join(package, "sub", "mod.py"), "w", encoding="utf-8"
+            ) as file:
+                file.write("import torch\nTOKEN = torch._precompile_identity_token\n")
+            sys.path.insert(0, directory)
+            importlib.invalidate_caches()
+            torch.nn.Module._precompile_identity_token = token
+            try:
+                fixture = importlib.import_module(module_name)
+                for fn in (
+                    _precompile_dynamo_imported_module_identity,
+                    _precompile_dynamo_imported_callable_identity,
+                    _precompile_dynamo_imported_nested_callable_identity,
+                    _precompile_dynamo_imported_dynamic_identity,
+                ):
+                    with self.assertRaisesRegex(
+                        PrecompileError, "input-derived identity"
+                    ):
+                        torch.compiler.precompile(
+                            fn,
+                            example_inputs=[(token,)],
+                            tracer="dynamo",
+                            backend="eager",
+                        )
+
+                for fn in (
+                    fixture.global_module_fn,
+                    fixture.global_module_container_fn,
+                    fixture.global_class_fn,
+                ):
+                    with self.assertRaisesRegex(
+                        PrecompileError, "input-derived|module object"
+                    ):
+                        torch.compiler.precompile(
+                            fn,
+                            example_inputs=[(token,)],
+                            tracer="dynamo",
+                            backend="eager",
+                        )
+
+                for fn in (
+                    _precompile_dynamo_imported_module_alias_identity,
+                    _precompile_dynamo_dotted_import_identity,
+                ):
+                    with self.assertRaisesRegex(
+                        PrecompileError,
+                        "input-derived identity|locally imported module",
+                    ):
+                        torch.compiler.precompile(
+                            fn,
+                            example_inputs=[(token,)],
+                            tracer="dynamo",
+                            backend="eager",
+                        )
+
+                for fn in (
+                    _precompile_dynamo_imported_unrelated_attribute,
+                    _precompile_dynamo_import_shadowed_in_nested_scope,
+                ):
+                    code, cache = torch.compiler.precompile(
+                        fn,
+                        example_inputs=[(token,)],
+                        tracer="dynamo",
+                        backend="eager",
+                    )
+                    loaded = torch.compiler.precompile.load(code, cache)
+                    x = torch.randn(3)
+                    self.assertEqual(loaded(x), fn(x))
+            finally:
+                sys.path.remove(directory)
+                for imported in (
+                    module_name,
+                    package_name,
+                    f"{package_name}.sub",
+                    f"{package_name}.sub.mod",
+                ):
+                    sys.modules.pop(imported, None)
+                del torch.nn.Module._precompile_identity_token
+                del torch._precompile_identity_token
+
+    def test_tracer_dynamo_ignores_unused_function_metadata_tensor(self):
+        _precompile_dynamo_metadata_helper.unused = torch.randn(3)
+        try:
+            code, cache = torch.compiler.precompile(
+                _precompile_dynamo_calls_metadata_helper,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+            for _, loaded in _default_and_inlined_loaders(code, cache, "eager"):
+                x = torch.randn(3)
+                self.assertEqual(loaded(x), x + 1)
+        finally:
+            del _precompile_dynamo_metadata_helper.unused
+
+    def test_tracer_dynamo_rejects_library_helper_environment_aliases(self):
+        token = torch.randn(3)
+        module = types.ModuleType("torch._precompile_reviewlib")
+        module.token = token
+        exec(
+            textwrap.dedent(
+                """
+                import functools
+                import torch
+
+                TOKEN = token
+
+                class Holder:
+                    def reveal(self):
+                        return TOKEN
+
+                HOLDER = Holder()
+
+                def helper(obj, x):
+                    return x + 1 if x is obj.reveal() else x - 1
+
+                def inner(x):
+                    return x + 1 if x is TOKEN else x - 1
+
+                def outer(x):
+                    return inner(x)
+
+                FUNCTIONS = [inner]
+
+                def container_outer(x):
+                    return FUNCTIONS[0](x)
+
+                PARTIAL = functools.partial(inner)
+
+                def partial_outer(x):
+                    return PARTIAL(x)
+
+                class Callable:
+                    def __call__(self, x):
+                        return inner(x)
+
+                CALLABLE = Callable()
+
+                def callable_outer(x):
+                    return CALLABLE(x)
+
+                class PropertyHolder:
+                    @property
+                    def token(self):
+                        return TOKEN
+
+                def bound_helper(obj, x):
+                    return x + 1 if x is obj.token else x - 1
+
+                BOUND_PARTIAL = functools.partial(bound_helper, PropertyHolder())
+
+                def bound_partial_outer(x):
+                    return BOUND_PARTIAL(x)
+
+                def keyword_bound_helper(x, obj=None):
+                    return x + 1 if x is obj.token else x - 1
+
+                KEYWORD_PARTIAL = functools.partial(
+                    keyword_bound_helper, obj=PropertyHolder()
+                )
+
+                def keyword_partial_outer(x):
+                    return KEYWORD_PARTIAL(x)
+
+                class PropertyCallable:
+                    @property
+                    def token(self):
+                        return TOKEN
+
+                    def __call__(self, x):
+                        return x + 1 if x is self.token else x - 1
+
+                PROPERTY_CALLABLE = PropertyCallable()
+
+                def property_callable_outer(x):
+                    return PROPERTY_CALLABLE(x)
+
+                class Factory:
+                    def __new__(cls, x):
+                        return x + 1 if x is TOKEN_BOX[0] else x - 1
+
+                TOKEN_BOX = [TOKEN]
+
+                class DirectHolder:
+                    def __init__(self, value):
+                        self.value = value
+
+                    def reveal(self):
+                        return self.value
+
+                    @property
+                    def token(self):
+                        return TOKEN_BOX[0]
+
+                DIRECT_HOLDER = DirectHolder(TOKEN)
+
+                def direct_method_outer(x):
+                    return x + 1 if x is DIRECT_HOLDER.reveal() else x - 1
+
+                def direct_property_outer(x):
+                    return x + 1 if x is DIRECT_HOLDER.token else x - 1
+
+                def factory_outer(x):
+                    return Factory(x)
+
+                def module_helper(mod, x):
+                    return x + 1 if x is mod._precompile_review_token else x - 1
+
+                def module_outer(x):
+                    return module_helper(torch, x)
+
+                def __getattr__(name):
+                    if name == "DYNAMIC":
+                        return TOKEN
+                    raise AttributeError(name)
+
+                def dynamic_module_outer(x):
+                    return x + 1 if x is SELF.DYNAMIC else x - 1
+                """
+            ),
+            module.__dict__,
+        )
+        module.SELF = module
+        torch._precompile_reviewlib = module
+        torch._precompile_review_token = token
+        sys.modules[module.__name__] = module
+        try:
+            for fn in (
+                _precompile_dynamo_library_object_identity,
+                _precompile_dynamo_library_nested_helper_identity,
+                _precompile_dynamo_library_container_helper_identity,
+                _precompile_dynamo_library_partial_helper_identity,
+                _precompile_dynamo_library_callable_helper_identity,
+                _precompile_dynamo_library_bound_partial_identity,
+                _precompile_dynamo_library_keyword_partial_identity,
+                _precompile_dynamo_library_property_callable_identity,
+                _precompile_dynamo_library_factory_identity,
+                _precompile_dynamo_library_dynamic_module_identity,
+                _precompile_dynamo_library_direct_method_identity,
+                _precompile_dynamo_library_direct_property_identity,
+            ):
+                with self.subTest(fn=fn.__name__):
+                    with self.assertRaisesRegex(PrecompileError, "input-derived"):
+                        torch.compiler.precompile(
+                            fn,
+                            example_inputs=[(token,)],
+                            tracer="dynamo",
+                            backend="eager",
+                        )
+            with self.assertRaisesRegex(PrecompileError, "input-derived"):
+                torch.compiler.precompile(
+                    _precompile_dynamo_library_module_value_identity,
+                    example_inputs=[(token,)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+        finally:
+            sys.modules.pop(module.__name__, None)
+            del torch._precompile_review_token
+            del torch._precompile_reviewlib
+
+    def test_tracer_dynamo_rejects_library_helper_late_import_alias(self):
+        token = torch.randn(3)
+        module = types.ModuleType("torch._precompile_latelib")
+        inner_module = types.ModuleType("torch._precompile_lateinner")
+        exec(
+            textwrap.dedent(
+                """
+                def inner(x):
+                    import _precompile_late_env
+
+                    return (
+                        x + 1
+                        if x is _precompile_late_env.HOLDER.reveal()
+                        else x - 1
+                    )
+                """
+            ),
+            inner_module.__dict__,
+        )
+        module.inner = inner_module.inner
+        exec(
+            textwrap.dedent(
+                """
+                def outer(x):
+                    return inner(x)
+                """
+            ),
+            module.__dict__,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "_precompile_late_env.py")
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(
+                    textwrap.dedent(
+                        """
+                        import torch
+
+                        class Holder:
+                            def __init__(self, value):
+                                self.value = value
+
+                            def reveal(self):
+                                return self.value
+
+                        HOLDER = Holder(torch._precompile_late_token)
+                        """
+                    )
+                )
+            sys.path.insert(0, directory)
+            importlib.invalidate_caches()
+            torch._precompile_latelib = module
+            torch._precompile_late_token = token
+            sys.modules[module.__name__] = module
+            sys.modules[inner_module.__name__] = inner_module
+            try:
+                with self.assertRaisesRegex(PrecompileError, "locally imported module"):
+                    torch.compiler.precompile(
+                        _precompile_dynamo_library_late_import_identity,
+                        example_inputs=[(token,)],
+                        tracer="dynamo",
+                        backend="eager",
+                    )
+            finally:
+                sys.path.remove(directory)
+                sys.modules.pop("_precompile_late_env", None)
+                sys.modules.pop(module.__name__, None)
+                sys.modules.pop(inner_module.__name__, None)
+                del torch._precompile_late_token
+                del torch._precompile_latelib
+
+    def test_tracer_dynamo_rejects_unserializable_input_contract(self):
+        inp = _UnserializableCtxInput(torch.randn(3), torch.randn(3))
+        with self.assertRaisesRegex(PrecompileError, "serialize the input structure"):
+            torch.compiler.precompile(
+                lambda value: value.a + value.b,
+                example_inputs=[(inp,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+        code, cache = torch.compiler.precompile(
+            lambda values: values[0] + values[1],
+            example_inputs=[([torch.randn(3), torch.randn(3)],)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with self.assertRaisesRegex(
+            PrecompileError, "runtime input structure cannot be serialized"
+        ):
+            loaded(inp)
+
     def test_tracer_dynamo_rejects_tensor_default(self):
         with self.assertRaisesRegex(PrecompileError, "tensor-valued function defaults"):
             torch.compiler.precompile(
@@ -5086,7 +5911,7 @@ class TestPrecompile(TestCase):
             )
 
     def test_tracer_dynamo_rejects_tensor_in_object_default(self):
-        with self.assertRaisesRegex(PrecompileError, "non-literal function defaults"):
+        with self.assertRaisesRegex(PrecompileError, "tensor-valued function defaults"):
             torch.compiler.precompile(
                 _precompile_dynamo_object_default,
                 example_inputs=[(torch.randn(3),)],
@@ -5887,6 +6712,79 @@ class TestPrecompile(TestCase):
             PrecompileError, "missing calling-convention metadata"
         ):
             torch.compiler.precompile.load("x = 1\n", buf.getvalue())
+
+    def test_missing_dynamo_state_rejected(self):
+        x = torch.randn(3)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        code = "\n".join(
+            line
+            for line in code.splitlines()
+            if not line.startswith("_DYNAMO_STATE = ")
+        )
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        blob["code_hash"] = hashlib.sha256(code.encode()).hexdigest()
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        with self.assertRaisesRegex(
+            PrecompileError, "missing calling-convention metadata.*_DYNAMO_STATE"
+        ):
+            torch.compiler.precompile.load(code, buf.getvalue())
+
+    @parametrize(
+        "name,replacement",
+        (
+            ("TRAINING", "TRAINING = 'False'"),
+            ("_DYNAMO_BACKEND_IDS", "_DYNAMO_BACKEND_IDS = 1"),
+            ("_DYNAMO_BACKENDS", "_DYNAMO_BACKENDS = []"),
+            ("_DYNAMO_PYTHON_VERSION", "_DYNAMO_PYTHON_VERSION = ()"),
+            ("_DYNAMO_STATE", "_DYNAMO_STATE = 1"),
+            ("_DYNAMO_TORCH_VERSION", "_DYNAMO_TORCH_VERSION = 1"),
+        ),
+    )
+    def test_invalid_dynamo_metadata_rejected(self, name, replacement):
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(3),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        code = "\n".join(
+            replacement if line.startswith(f"{name} = ") else line
+            for line in code.splitlines()
+        )
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        blob["code_hash"] = hashlib.sha256(code.encode()).hexdigest()
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        with self.assertRaisesRegex(
+            PrecompileError, f"invalid calling-convention metadata.*{name}"
+        ):
+            torch.compiler.precompile.load(code, buf.getvalue())
+
+    def test_invalid_serialized_dynamo_state_rejected(self):
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(3),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        code = "\n".join(
+            "_DYNAMO_STATE = 'not-base64'"
+            if line.startswith("_DYNAMO_STATE = ")
+            else line
+            for line in code.splitlines()
+        )
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        blob["code_hash"] = hashlib.sha256(code.encode()).hexdigest()
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        with self.assertRaisesRegex(PrecompileError, "invalid serialized Dynamo state"):
+            torch.compiler.precompile.load(code, buf.getvalue())
 
     def test_singleton_pickle_deepcopy_roundtrip(self):
         # torch.compiler.precompile is a process-wide singleton; pickle and deepcopy

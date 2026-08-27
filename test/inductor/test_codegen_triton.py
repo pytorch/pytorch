@@ -3,10 +3,11 @@ import ast
 import builtins
 import contextlib
 import plistlib
+import sys
 import unittest
 from collections import namedtuple
 from enum import Enum, Flag, IntEnum, IntFlag
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import sympy
@@ -1176,13 +1177,18 @@ def helper(x):
             _render_constexpr_constants,
         )
 
-        self.assertEqual(
-            _constexpr_source(plistlib.FMT_XML),
-            (
-                "__inductor_constexpr_module_0.PlistFormat['FMT_XML']",
-                ["import plistlib as __inductor_constexpr_module_0"],
-            ),
-        )
+        # plistlib provides a stdlib Enum with a stable importable path.
+        with patch(
+            "importlib.util.find_spec",
+            side_effect=AssertionError("loaded constexpr types need no spec lookup"),
+        ):
+            self.assertEqual(
+                _constexpr_source(plistlib.FMT_XML),
+                (
+                    "__inductor_constexpr_module_0.PlistFormat['FMT_XML']",
+                    ["import plistlib as __inductor_constexpr_module_0"],
+                ),
+            )
         rendered, imports = _render_constexpr_constants({"FORMAT": plistlib.FMT_XML})
         rendered_again, _ = _render_constexpr_constants({"FORMAT": plistlib.FMT_XML})
         self.assertEqual(
@@ -1192,6 +1198,15 @@ def helper(x):
         self.assertEqual(rendered["FORMAT"], rendered_again["FORMAT"])
         self.assertEqual(hash(rendered["FORMAT"]), hash(rendered_again["FORMAT"]))
         self.assertEqual(imports, ["import plistlib as __inductor_constexpr_module_0"])
+
+        module = ModuleType("_ephemeral_constexpr_module")
+        mode = Enum("Mode", {"A": object()}, module=module.__name__)
+        module.Mode = mode
+        sys.modules[module.__name__] = module
+        try:
+            self.assertIsNone(_constexpr_source(mode.A))
+        finally:
+            del sys.modules[module.__name__]
 
         class Mode(IntEnum):
             EVEN = 2
