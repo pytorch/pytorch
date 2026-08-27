@@ -2877,7 +2877,9 @@ class CompileResult(Generic[_T]):
         none_args = none_args.difference(OrderedSet(compile_meta["signature"].keys()))
 
         constant_scope: dict[str, Any] = {}
-        reserved_names = {*arg_names, *self.inductor_meta.get("extra_launcher_args", ())}
+        reserved_names = OrderedSet(
+            [*arg_names, *self.inductor_meta.get("extra_launcher_args", ())]
+        )
         constant_names = itertools.count()
 
         def _bind_constant(constant):
@@ -2892,8 +2894,7 @@ class CompileResult(Generic[_T]):
             try:
                 reconstructed = ast.literal_eval(source)
                 matches = (
-                    type(reconstructed) is type(constant)
-                    and reconstructed == constant
+                    type(reconstructed) is type(constant) and reconstructed == constant
                 )
             except (SyntaxError, ValueError):
                 return _bind_constant(constant)

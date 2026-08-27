@@ -1411,14 +1411,35 @@ class _DynamoPythonBackend:
         cache: bytes | None,
         is_dynamic: bool,
         call: Callable[[list[object]], object],
+        compile_state: Any | None = None,
     ) -> None:
         self.python_code = python_code
         self.cache = cache
         self.is_dynamic = is_dynamic
         self._call = call
+        self._compile_state = compile_state
+        if compile_state is not None:
+            globals_dict = getattr(call, "__globals__", None)
+            if not isinstance(globals_dict, dict):
+                raise AssertionError("training backend call must have Python globals")
+            compile_state.install_capture(globals_dict)
 
     def __call__(self, *args: object) -> object:
         return self._call(list(args))
+
+    def finalize_training(self) -> None:
+        if self._compile_state is None:
+            return
+        globals_dict = getattr(self._call, "__globals__", {})
+        masks = globals_dict.get("_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS", ())
+        try:
+            self.python_code, self.cache = self._compile_state.finalize(tuple(masks))
+        finally:
+            globals_dict["_AOT_BACKWARD_VARIANT_COMPILER"] = None
+            variants = globals_dict.get("_AOT_BACKWARD_VARIANTS")
+            if isinstance(variants, dict):
+                variants.clear()
+            self._compile_state = None
 
 
 def _build_dynamo_eager_graph_source(gm: torch.fx.GraphModule) -> str:
@@ -1552,6 +1573,7 @@ def _dynamo_backend_compiler(
     ) -> _DynamoPythonBackend:
         from torch._functorch import aot_autograd
         from torch._functorch._aot_autograd.to_standalone_python import (
+            _compile_to_python_with_state,
             _graph_has_dynamic_shapes,
         )
 
@@ -1562,6 +1584,7 @@ def _dynamo_backend_compiler(
             namespace: dict[str, object] = {"__name__": "_dynamo_eager_graph"}
             exec(compile(python_code, "<dynamo-eager-graph>", "exec"), namespace)
             call = cast("Callable[[list[object]], object]", namespace["call"])
+            compile_state = None
         else:
             # Dynamo's runtime examples may have concrete tensor sizes while the graph
             # metadata carries the symbolic sizes and sources selected for this variant.
@@ -1570,14 +1593,14 @@ def _dynamo_backend_compiler(
                 for node in gm.graph.nodes
                 if node.op == "placeholder"
             ]
-            python_code, cache = aot_autograd.compile_to_python(
+            python_code, cache, compile_state = _compile_to_python_with_state(
                 gm,
                 graph_inputs,
                 options={"size_asserts": True},
                 grad_enabled=training,
             )
             call = aot_autograd.load_from_python(python_code, cache)
-        return _DynamoPythonBackend(python_code, cache, is_dynamic, call)
+        return _DynamoPythonBackend(python_code, cache, is_dynamic, call, compile_state)
 
     return compile_graph
 
@@ -2617,6 +2640,27 @@ def _precompile_dynamo(
             "capture local variables."
         )
 
+    def contains_tensor(value: object, seen: set[int]) -> bool:
+        if isinstance(value, torch.Tensor):
+            return True
+        value_id = id(value)
+        if value_id in seen:
+            return False
+        seen.add(value_id)
+        if isinstance(value, dict):
+            return any(
+                contains_tensor(item, seen) for pair in value.items() for item in pair
+            )
+        if isinstance(value, (tuple, list, set, frozenset)):
+            return any(contains_tensor(item, seen) for item in value)
+        return False
+
+    if contains_tensor((target.__defaults__, target.__kwdefaults__), set()):
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot serialize tensor-valued function "
+            "defaults; pass every tensor as an explicit example input."
+        )
+
     def is_literal(value: object) -> bool:
         if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):
             return True
@@ -2669,6 +2713,47 @@ def _precompile_dynamo(
             if isinstance(const, CodeType):
                 names.update(loaded_global_names(const))
         return names
+
+    explicit_input_ids = {
+        id(value)
+        for example in examples
+        for value in pytree.tree_leaves((example.args, example.kwargs))
+        if not isinstance(value, (type(None), bool, int, float, complex, str, bytes))
+    }
+
+    def reaches_explicit_input(value: object, seen: set[int]) -> bool:
+        value_id = id(value)
+        if value_id in explicit_input_ids:
+            return True
+        if value_id in seen:
+            return False
+        seen.add(value_id)
+        if isinstance(value, dict):
+            return any(
+                reaches_explicit_input(item, seen)
+                for pair in value.items()
+                for item in pair
+            )
+        if isinstance(value, (tuple, list, set, frozenset)):
+            return any(reaches_explicit_input(item, seen) for item in value)
+        if isinstance(
+            value, (types.FunctionType, types.ModuleType, type, torch.Tensor)
+        ) or not hasattr(value, "__dict__"):
+            return False
+        return any(reaches_explicit_input(item, seen) for item in vars(value).values())
+
+    aliased_globals = [
+        name
+        for name in loaded_global_names(target.__code__)
+        if name in target.__globals__
+        and reaches_explicit_input(target.__globals__[name], set())
+    ]
+    if aliased_globals:
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot preserve an input-derived identity "
+            "relation to the Python environment; pass the value only as an input. "
+            f"Aliased global: {aliased_globals[0]!r}."
+        )
 
     def mutates_globals(code: CodeType) -> bool:
         if any(
@@ -2756,6 +2841,10 @@ def _precompile_dynamo(
     contract_dropped_guards: set[tuple[str, str]] = set()
     capture_errors: list[str] = []
     truncated: set[str] = set()
+    generated_prefixes = ("__compiled_fn_", "__builtins_dict___", "__import_")
+    existing_generated_globals = {
+        name for name in target.__globals__ if name.startswith(generated_prefixes)
+    }
     try:
         accumulated_limit = max(
             torch._dynamo.config.accumulated_recompile_limit, recompile_limit
@@ -2932,6 +3021,10 @@ def _precompile_dynamo(
             with torch.no_grad():
                 for tensor, grad in saved_grads.values():
                     tensor.grad = grad
+
+        for compiled_backend in package.cached_backends.values():
+            if isinstance(compiled_backend, _DynamoPythonBackend):
+                compiled_backend.finalize_training()
 
         cache_entry = package.cache_entry()
         code_entries = cache_entry.codes
@@ -3245,6 +3338,12 @@ def _precompile_dynamo(
 
                     for code in package.region_codes():
                         _clear_cache_entries_for_region(code, region)
+                for name in list(target.__globals__):
+                    if (
+                        name.startswith(generated_prefixes)
+                        and name not in existing_generated_globals
+                    ):
+                        target.__globals__.pop(name, None)
                 pgo_state.clear()
             finally:
                 _DYNAMO_COMPILE_LOCK.release()

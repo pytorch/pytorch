@@ -109,7 +109,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       their defining modules. Disabled functions cannot assign globals or use
       ``globals()``, ``eval()``, or ``exec()``; their importable module globals are
       rebound at load, while recursive literal globals and defaults are captured by
-      value. Compiled graph bodies and kernels remain Python source. The eager backend
+      value. Tensor-valued defaults are rejected because every tensor must be an
+      explicit input. Compiled graph bodies and kernels remain Python source. The eager backend
       supports higher-order graphs such as ``torch.cond``, ``torch.while_loop``,
       non-reentrant activation checkpointing, ``vmap``, autocast, and grad-mode regions.
       Their nested graph bodies are rendered as Python too, while the FX ``Graph``
@@ -244,7 +245,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    ``backend="eager"``) and no weights. You pass the model(s) again at runtime.
    ``fn`` is optional and is used by an installed Dynamo artifact to bind its captured
    package to a live callable. Loaded installed artifacts also support ``unload()`` and
-   the context-manager protocol.
+   the context-manager protocol. Dynamo artifacts are tied to the Python minor version
+   and torch version that produced them; an incompatible load raises
+   :class:`PrecompileError`.
 
    .. warning::
 
