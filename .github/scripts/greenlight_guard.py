@@ -32,6 +32,7 @@ from greenlight_ledger import (
 )
 from greenlight_messages import (
     describe_ledger,
+    FIX_CREDENTIAL,
     FIX_HUMAN,
     FIX_RETRIGGER,
     FIX_TRANSPORT,
@@ -40,8 +41,10 @@ from greenlight_messages import (
     LEDGER_UNREADABLE,
     render_announcement,
     render_refusal,
+    render_transport_announcement,
     render_wait,
     timeout_suffix,
+    transport_timeout_suffix,
 )
 from greenlight_preflight import cannot_review
 
@@ -52,8 +55,14 @@ if TYPE_CHECKING:
     from greenlight_ledger import LedgerState
 
 
-MAX_WAIT = timedelta(minutes=60)
-MAX_WAIT_MINUTES = int(MAX_WAIT.total_seconds() // 60)
+MAX_WAIT_MINUTES = 60
+MAX_WAIT = timedelta(minutes=MAX_WAIT_MINUTES)
+
+# An unreadable ledger gets its own, much shorter budget. The client has already retried
+# in-process, and a ledger that stays down is not the asynchronous reviewer the verdict
+# budget exists for: the hour buys a review time to finish, not a route time to recover.
+TRANSPORT_MAX_WAIT_MINUTES = 15
+TRANSPORT_MAX_WAIT = timedelta(minutes=TRANSPORT_MAX_WAIT_MINUTES)
 
 # greenlight re-dispatches a review that has outlived its own timeout and writes a fresh
 # row when it does, so an older in-flight row is proof that no verdict is coming for this
@@ -120,16 +129,25 @@ class Outcome:
 
 @dataclass
 class GreenlightWaitWindow:
-    """The wait budget for one merge command, carried across ``merge_into`` re-entries.
+    """The wait budgets for one merge command, carried across ``merge_into`` re-entries.
 
-    The budget opens at the first wait rather than when the merge command was issued:
+    A budget opens at its own first wait rather than when the merge command was issued:
     `merge_into` is reached only once CI is green, and pytorch CI routinely runs for
     hours, so a budget anchored at the command would already be spent before the guard
     ever ran once.
+
+    An unreadable ledger runs on a separate, shorter anchor. The two never share one,
+    because a merge deep into a verdict wait would otherwise get no transport budget at
+    all, and an early HUD blip would otherwise still be counted against a fresh one far
+    later. Each budget announces itself once per merge command, so a merge that crosses
+    from one to the other tells the PR the deadline it actually moved to, and a PR never
+    collects more than the two comments.
     """
 
     opened_at: datetime | None = None
+    transport_opened_at: datetime | None = None
     announced: bool = False
+    transport_announced: bool = False
 
     def register_wait(self, now: datetime) -> bool:
         """Record that the guard is waiting. True once the budget is spent."""
@@ -137,11 +155,34 @@ class GreenlightWaitWindow:
             self.opened_at = now
         return now - self.opened_at >= MAX_WAIT
 
+    def register_transport_wait(self, now: datetime) -> bool:
+        """Record that the ledger is unreadable. True once that budget is spent."""
+        if self.transport_opened_at is None:
+            self.transport_opened_at = now
+        return now - self.transport_opened_at >= TRANSPORT_MAX_WAIT
+
+    def clear_transport_wait(self) -> None:
+        """Forget an earlier unreadable ledger, now that one has been read.
+
+        Only the anchor resets. This runs on every successful read, so a flapping ledger
+        would otherwise announce once per failure episode, and a running commentary of
+        bot comments is worse for the PR than one stale heads-up beside a refusal that
+        names the real cause.
+        """
+        self.transport_opened_at = None
+
     def claim_announcement(self) -> bool:
-        """True for the first wait of this merge command only, and never again."""
+        """True for the first verdict wait of this merge command, and never again."""
         if self.announced:
             return False
         self.announced = True
+        return True
+
+    def claim_transport_announcement(self) -> bool:
+        """True for the first unreadable-ledger wait of this merge command only."""
+        if self.transport_announced:
+            return False
+        self.transport_announced = True
         return True
 
 
@@ -245,15 +286,20 @@ def _evaluate_pr(pr: PRUnderMerge, state: LedgerState | None, now: datetime) -> 
     )
 
 
-def _transport_outcome(pr: PRUnderMerge, error: Exception) -> Outcome:
+def _transport_outcome(pr: PRUnderMerge, error: GreenlightLedgerError) -> Outcome:
+    verdict, kind, fix = (
+        (GuardVerdict.DENY, "LEDGER_CREDENTIAL", FIX_CREDENTIAL)
+        if error.fatal
+        else (GuardVerdict.WAIT, "TRANSPORT", FIX_TRANSPORT)
+    )
     return Outcome(
-        GuardVerdict.WAIT,
-        "TRANSPORT",
+        verdict,
+        kind,
         f"greenlight's ledger could not be read: {error}",
         pr.pr_num,
         pr.head_sha,
         LEDGER_UNREADABLE,
-        FIX_TRANSPORT,
+        fix,
     )
 
 
@@ -273,7 +319,7 @@ def evaluate_greenlight_guard(
 ) -> GuardResult:
     """Decide whether the PRs a single merge will land may proceed.
 
-    ``wait_window`` is the merge command's wait budget, shared across every re-entry.
+    ``wait_window`` holds the merge command's wait budgets, shared across every re-entry.
     None means the caller (a force merge) has no retry loop to wait in, so nothing waits.
 
     ``fetch_states`` is resolved here rather than bound as a default argument, so that
@@ -285,35 +331,48 @@ def evaluate_greenlight_guard(
     if not guarded:
         return GuardResult(GuardVerdict.ALLOW)
 
+    on_transport_budget = False
     try:
         states = fetch(repo_full_name, [pr.pr_num for pr in guarded])
     except GreenlightLedgerError as e:
-        # A sustained outage still ends in a refusal once the budget runs out, but a
-        # brief HUD blip must not kill a merge that is otherwise ready to land.
+        # A brief HUD blip must not kill a merge that is otherwise ready to land, so a
+        # retryable failure spends the transport budget first and only a sustained outage
+        # ends in a refusal. A fatal cause has nothing to wait for and refuses now.
         outcomes = [_transport_outcome(pr, e) for pr in guarded]
+        on_transport_budget = not e.fatal
     else:
+        if wait_window is not None:
+            wait_window.clear_transport_wait()
         outcomes = [_evaluate_pr(pr, states.get(pr.pr_num), moment) for pr in guarded]
 
-    unresolved = [o for o in outcomes if o.verdict is not GuardVerdict.ALLOW]
-    if not unresolved:
+    if all(o.verdict is GuardVerdict.ALLOW for o in outcomes):
         return GuardResult(GuardVerdict.ALLOW)
-    if any(o.verdict is GuardVerdict.DENY for o in unresolved):
+    denials = [o for o in outcomes if o.verdict is GuardVerdict.DENY]
+    # Anything neither allowed nor refused holds the merge. Deriving the waits positively
+    # would let a verdict added later match no branch and fall through to the allow above.
+    waits = [
+        o for o in outcomes if o.verdict not in (GuardVerdict.ALLOW, GuardVerdict.DENY)
+    ]
+    if denials:
         # Every unresolved PR in the stack is reported, waits included: the merge is
         # over either way, and fixing only the refusal would just hit the wait next.
         # Refusals lead, because they are the ones the reader has to act on.
-        ordered = sorted(unresolved, key=lambda o: o.verdict is not GuardVerdict.DENY)
-        return GuardResult(GuardVerdict.DENY, render_refusal(ordered))
+        return GuardResult(GuardVerdict.DENY, render_refusal([*denials, *waits]))
 
-    waits = unresolved
     if wait_window is None:
         return GuardResult(GuardVerdict.DENY, render_refusal(waits, FORCE_SUFFIX))
-    if wait_window.register_wait(moment):
-        return GuardResult(
-            GuardVerdict.DENY, render_refusal(waits, timeout_suffix(MAX_WAIT_MINUTES))
-        )
-    comment = (
-        render_announcement(waits, MAX_WAIT_MINUTES, GREENLIGHT_LOGIN)
-        if wait_window.claim_announcement()
-        else ""
+    if on_transport_budget:
+        spent = wait_window.register_transport_wait(moment)
+        suffix = transport_timeout_suffix(TRANSPORT_MAX_WAIT_MINUTES)
+        announcement = render_transport_announcement(waits, TRANSPORT_MAX_WAIT_MINUTES)
+        claim_comment = wait_window.claim_transport_announcement
+    else:
+        spent = wait_window.register_wait(moment)
+        suffix = timeout_suffix(MAX_WAIT_MINUTES)
+        announcement = render_announcement(waits, MAX_WAIT_MINUTES, GREENLIGHT_LOGIN)
+        claim_comment = wait_window.claim_announcement
+    if spent:
+        return GuardResult(GuardVerdict.DENY, render_refusal(waits, suffix))
+    return GuardResult(
+        GuardVerdict.WAIT, render_wait(waits), announcement if claim_comment() else ""
     )
-    return GuardResult(GuardVerdict.WAIT, render_wait(waits), comment)
