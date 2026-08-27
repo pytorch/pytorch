@@ -389,10 +389,10 @@ class BaseUserFunctionVariable(VariableTracker):
     # function (NestedUserFunctionVariable) fills these in; for a VT backed by a
     # real function object they stay None and the slots are read through
     # read_func_slot. annotations is also the cache for a materialized dict.
-    defaults: "VariableTracker | None" = None
-    kwdefaults: "VariableTracker | None" = None
-    closure: "VariableTracker | None" = None
-    annotations: "VariableTracker | None" = None
+    defaults: VariableTracker | None = None
+    kwdefaults: VariableTracker | None = None
+    closure: VariableTracker | None = None
+    annotations: VariableTracker | None = None
 
     def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
@@ -491,17 +491,6 @@ class BaseUserFunctionVariable(VariableTracker):
             d = self.read_func_slot(tx, "__defaults__")
         return d if d is not None else ConstantVariable.create(None)
 
-    def _get_named_attr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        se = tx.output.side_effects
-        if se.has_pending_mutation_of_attr(self, name):
-            return se.load_attr(self, name)
-        val = getattr(self, f"get_{name[2:-2]}")()
-        return ConstantVariable.create(
-            val, source=self.source and AttrSource(self.source, name)
-        )
-
     def _set_type_params(
         self,
         tx: "InstructionTranslatorBase",
@@ -566,15 +555,28 @@ class BaseUserFunctionVariable(VariableTracker):
         "__defaults__": GetSet(_get_defaults, unmodeled_setter),
         "__kwdefaults__": GetSet(_get_kwdefaults, unmodeled_setter),
         "__name__": GetSet(
-            lambda s, tx: s._get_named_attr(tx, "__name__"),
+            getset_load_or_build(
+                lambda s: s.get_name(),
+                "__name__",
+                source=lambda s: s.source and AttrSource(s.source, "__name__"),
+            ),
             _set_name,
         ),
         "__qualname__": GetSet(
-            lambda s, tx: s._get_named_attr(tx, "__qualname__"),
+            getset_load_or_build(
+                lambda s: s.get_qualname(),
+                "__qualname__",
+                source=lambda s: s.source and AttrSource(s.source, "__qualname__"),
+            ),
             _set_qualname,
         ),
         "__code__": GetSet(
-            lambda s, tx: s._get_named_attr(tx, "__code__"), unmodeled_setter
+            getset_load_or_build(
+                lambda s: s.get_code(),
+                "__code__",
+                source=lambda s: s.source and AttrSource(s.source, "__code__"),
+            ),
+            unmodeled_setter,
         ),
         "__dict__": GetSet(
             lambda s, tx: s.get_dict_vt(tx),
@@ -585,11 +587,19 @@ class BaseUserFunctionVariable(VariableTracker):
     }
     tp_members = {
         "__doc__": Member(
-            lambda s, tx: s._get_named_attr(tx, "__doc__"),
+            getset_load_or_build(
+                lambda s: s.get_doc(),
+                "__doc__",
+                source=lambda s: s.source and AttrSource(s.source, "__doc__"),
+            ),
             getset_set("__doc__"),
         ),
         "__module__": Member(
-            lambda s, tx: s._get_named_attr(tx, "__module__"),
+            getset_load_or_build(
+                lambda s: s.get_module(),
+                "__module__",
+                source=lambda s: s.source and AttrSource(s.source, "__module__"),
+            ),
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
@@ -868,6 +878,12 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def read_func_slot(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        # Reads self.fn directly, bypassing side effects: callers (_get_defaults
+        # etc.) only reach here when the corresponding VT field (self.defaults,
+        # self.closure, ...) is still None, i.e. that slot has never been
+        # mutated. A mutation always sets the field directly (see
+        # _set_annotations et al.), so once set this path is never taken again
+        # for that slot.
         return VariableTracker.build(
             tx, getattr(self.fn, name), self.source and AttrSource(self.source, name)
         )
