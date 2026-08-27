@@ -640,14 +640,6 @@ auto GetHipBlasLtTypeStringAndOps() {
   auto b_datatype = HipDataTypeFor<BT>();
   auto in_out_datatype = HipDataTypeFor<CT>();
   std::vector<hipblasLtMatmulHeuristicResult_t> heuristic_result;
-#if ROCM_VERSION == 60400
-  // hipblaslt TT fp32 regression on ROCm 6.4, cannot use
-  if ((a_datatype == HIP_R_32F || b_datatype == HIP_R_32F || in_out_datatype == HIP_R_32F)
-          && (transa_outer == HIPBLAS_OP_T && transb_outer == HIPBLAS_OP_T)) {
-    std::vector<std::pair<std::string, std::unique_ptr<Callable<ParamsT>>>> ignore;
-    return ignore;
-  }
-#endif
 
   hipblasComputeType_t computeType = HipBlasComputeTypeFor<CT>();
   if constexpr (std::is_same_v<CT, float>) {
