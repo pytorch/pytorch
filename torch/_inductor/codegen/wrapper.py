@@ -236,7 +236,7 @@ def _constexpr_source_impl(
             cls_ref = _constexpr_type_ref(type(value), module_aliases, imports)
             return None if cls_ref is None else f"{cls_ref}._make(({body}))"
         return f"({body})"
-    if isinstance(value, OrderedSet):
+    if isinstance(value, (set, OrderedSet)):  # noqa: set_linter
         items = []
         for item in sorted(
             value,
@@ -319,11 +319,21 @@ def _constexpr_source(value: Any) -> tuple[str, list[str]] | None:
 
 
 class _SourceLiteral:
+    # Rendered constexpr mappings holding these are cached (user_defined_kernel_cache)
+    # and may be compared by config-matching code, so equality must be by source.
     def __init__(self, source: str) -> None:
         self.source = source
 
     def __repr__(self) -> str:
         return self.source
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _SourceLiteral):
+            return NotImplemented
+        return self.source == other.source
+
+    def __hash__(self) -> int:
+        return hash(self.source)
 
 
 def _render_constexpr_constants(

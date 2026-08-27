@@ -274,6 +274,23 @@ class TestAOTCompileToPython(TestCase):
         actual.sum().backward()
         self.assertEqual(actual_x.grad, torch.ones_like(actual_x))
 
+    def test_passthrough_source_renders_nonfinite_floats(self):
+        # repr(float("inf")) is "inf", which is not valid Python source; the
+        # passthrough renderer must spell nonfinite floats as float(...) calls.
+        import math
+
+        from torch._inductor.standalone_compile import _passthrough_source
+
+        gm = torch.fx.symbolic_trace(lambda x: (x, float("inf"), float("nan")))
+        source = _passthrough_source(gm)
+        namespace = {}
+        exec(source, namespace)
+        x = torch.randn(2)
+        out = namespace["call"]([x])
+        self.assertIs(out[0], x)
+        self.assertEqual(out[1], float("inf"))
+        self.assertTrue(math.isnan(out[2]))
+
     def test_training_serializes_observed_tangent_mask(self):
         def flat_fn(flat):
             return [flat[0].sin(), flat[1].sin()]
@@ -888,7 +905,6 @@ class TestAOTCompileToPython(TestCase):
             try:
                 AOTAutogradCache.clear()
                 FxGraphCache.clear()
-
                 counters.clear()
                 with (
                     mock.patch.object(

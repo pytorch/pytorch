@@ -25,6 +25,7 @@ expensive autotuning operations when the same kernels are compiled multiple time
 from __future__ import annotations
 
 import dataclasses
+import enum
 import logging
 import os
 import os.path
@@ -330,7 +331,7 @@ class AutotuneCache:
     ) -> None:
         data: dict[str, JsonDataTy] = {
             # pyrefly: ignore [missing-attribute]
-            **config.kwargs,
+            **{key: _json_config_value(val) for key, val in config.kwargs.items()},
             # pyrefly: ignore [missing-attribute]
             "num_warps": config.num_warps,
             # pyrefly: ignore [missing-attribute]
@@ -684,6 +685,13 @@ def _reconstruct_triton_config(
     return triton_config
 
 
+def _json_config_value(value: Any) -> Any:
+    # Enum config kwargs stay real Enum members at runtime (the kernel may consume
+    # e.g. MODE.value), but the JSON caches store the underlying value -- the same
+    # form the generated source used to bake in before Enums round-tripped.
+    return value.value if isinstance(value, enum.Enum) else value
+
+
 def _load_cached_autotuning(
     best_config: dict[str, JsonDataTy],
     configs_hash: str,
@@ -712,8 +720,11 @@ def _load_cached_autotuning(
         matching_configs = [
             cfg
             for cfg in configs
-            # pyrefly: ignore [missing-attribute]
-            if all(val == best_config.get(key) for key, val in cfg.kwargs.items())
+            if all(
+                _json_config_value(val) == best_config.get(key)
+                # pyrefly: ignore [missing-attribute]
+                for key, val in cfg.kwargs.items()
+            )
             # pyrefly: ignore [missing-attribute]
             and cfg.num_warps == best_config.get("num_warps")
             # pyrefly: ignore [missing-attribute]

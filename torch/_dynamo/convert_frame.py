@@ -206,6 +206,10 @@ graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 compile_lock = threading.RLock()
 
+# torch/_precompile.py matches this message to translate the AssertionError below
+# into a PrecompileError; keep them coupled through this constant.
+GUARDS_STATE_NONE_MESSAGE = "check_fn.guards_state must not be None"
+
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
@@ -1963,7 +1967,7 @@ def _compile(
 
         if package is not None:
             if check_fn.guards_state is None:
-                raise AssertionError("check_fn.guards_state must not be None")
+                raise AssertionError(GUARDS_STATE_NONE_MESSAGE)
             package.add_guarded_code(check_fn.guards_state, out_code)
             package.add_inlined_source(output.tracing_context.traced_code)
             package.update_device_type(output.current_tracer.graph)

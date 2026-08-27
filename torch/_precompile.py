@@ -1123,7 +1123,15 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "USER_INPUT_DEVICES",
         "USER_INPUT_BOUNDS",
     }
-    wanted = {"BACKEND", "TRACER", "TRAINING", *make_fx_metadata}
+    # _DYNAMO_BACKEND_SOURCES is intentionally absent: its value is not a plain
+    # literal (each entry is a subscripted string), so ast.literal_eval rejects it.
+    dynamo_metadata = {
+        "TRAINING",
+        "_DYNAMO_PYTHON_VERSION",
+        "_DYNAMO_BACKEND_IDS",
+        "_DYNAMO_STATE",
+    }
+    wanted = {"BACKEND", "TRACER", *make_fx_metadata, *dynamo_metadata}
     found: dict[str, object] = {}
     try:
         tree = ast.parse(python_code)
@@ -1157,9 +1165,10 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
             f"python_code has an unsupported TRACER value {tracer!r}; it does not "
             "look like a compatible torch.compiler.precompile artifact."
         )
-    required = {"BACKEND", "TRACER"}
     if tracer == "make_fx":
         required = {"BACKEND", *make_fx_metadata}
+    else:
+        required = {"BACKEND", "TRACER", *dynamo_metadata}
     missing = required - found.keys()
     if missing:
         raise PrecompileError(
@@ -1167,6 +1176,39 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
             "it does not look like a torch.compiler.precompile artifact."
         )
     return found
+
+
+def _load_dynamo_state(python_code: str) -> dict[str, Any]:
+    """Decode the opaque Dynamo state pickled into a tracer='dynamo' artifact.
+
+    The AST walk (rather than line matching) keeps callers robust to formatting
+    changes in the emitted assignment; it is the read-side counterpart of
+    _build_dynamo_python_source's ``_DYNAMO_STATE = ...`` line.
+    """
+    import ast
+    import base64
+    import pickle
+
+    try:
+        tree = ast.parse(python_code)
+    except SyntaxError as e:
+        raise PrecompileError(
+            f"python_code is not parseable Python ({e}); it does not look like a "
+            "torch.compiler.precompile artifact."
+        ) from e
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "_DYNAMO_STATE"
+        ):
+            encoded = ast.literal_eval(node.value)
+            return pickle.loads(base64.b64decode(encoded))
+    raise PrecompileError(
+        "python_code has no _DYNAMO_STATE assignment; it is not a tracer='dynamo' "
+        "precompile artifact."
+    )
 
 
 def _build_python_source(
@@ -1523,23 +1565,20 @@ def _filter_dynamo_guards(
                 "any example input."
             )
 
-        def try_drop(records: list[Any], index: int) -> bool:
-            if records is kept_aot_guards or records is kept_key_order:
-                return False
-            guard = records[index]
+        # AOT and key-order guard records are input-derived or structurally
+        # required, so only kept_guards is a minimization candidate.
+        def try_drop(index: int) -> bool:
+            guard = kept_guards[index]
             if not guard.name or is_input_source(guard.name):
                 return False
-            candidate = records[:index] + records[index + 1 :]
-            trial_guards = candidate if records is kept_guards else kept_guards
-            trial_aot = candidate if records is kept_aot_guards else kept_aot_guards
-            trial_key_order = candidate if records is kept_key_order else kept_key_order
+            candidate = kept_guards[:index] + kept_guards[index + 1 :]
             try:
                 return (
                     outcomes(
                         state,
-                        guards=trial_guards,
-                        aot_guards=trial_aot,
-                        key_order=trial_key_order,
+                        guards=candidate,
+                        aot_guards=kept_aot_guards,
+                        key_order=kept_key_order,
                     )
                     == baseline
                 )
@@ -1551,14 +1590,13 @@ def _filter_dynamo_guards(
         changed = True
         while changed:
             changed = False
-            for records in (kept_guards, kept_aot_guards, kept_key_order):
-                index = 0
-                while index < len(records):
-                    if try_drop(records, index):
-                        del records[index]
-                        changed = True
-                    else:
-                        index += 1
+            index = 0
+            while index < len(kept_guards):
+                if try_drop(index):
+                    del kept_guards[index]
+                    changed = True
+                else:
+                    index += 1
 
         output_graph = dataclasses.replace(
             state.output_graph,
@@ -1584,7 +1622,10 @@ def _filter_dynamo_guards(
             guard_build_local_state=state.local_state,
         )
         if check_fn.guards_state is None:
-            raise AssertionError("guards_state must not be None")
+            raise PrecompileError(
+                "precompile tracer='dynamo' could not re-serialize its minimized "
+                "guards."
+            )
         filtered_state = load_guards_state(check_fn.guards_state)
         filtered_manager = manager_for(filtered_state)
         filtered_outcomes = [filtered_manager.check(scope) for scope in example_scopes]
@@ -1702,6 +1743,7 @@ def _precompile_dynamo(
     import contextlib
     import dis
     import inspect
+    import pickle
     import types
 
     import torch._functorch.config as functorch_config
@@ -1714,16 +1756,41 @@ def _precompile_dynamo(
         raise NotImplementedError(
             "precompile decompositions are not yet supported with tracer='dynamo'."
         )
+
+    def reaches(
+        value: object, predicate: Callable[[object], bool], seen: set[int]
+    ) -> bool:
+        if predicate(value):
+            return True
+        value_id = id(value)
+        if value_id in seen:
+            return False
+        seen.add(value_id)
+        if isinstance(value, dict):
+            return any(
+                reaches(item, predicate, seen)
+                for pair in value.items()
+                for item in pair
+            )
+        if isinstance(value, (tuple, list, set, frozenset)):
+            return any(reaches(item, predicate, seen) for item in value)
+        if isinstance(
+            value, (types.FunctionType, types.ModuleType, type, torch.Tensor)
+        ) or not hasattr(value, "__dict__"):
+            return False
+        return any(reaches(item, predicate, seen) for item in vars(value).values())
+
     for example in example_inputs:
         if not isinstance(example, tuple):
             raise TypeError(
                 "precompile example_inputs must be a sequence of positional-argument "
                 f"tuples, got {type(example).__name__}."
             )
-        if any(isinstance(arg, torch.nn.Module) for arg in example):
+        if reaches(example, lambda v: isinstance(v, torch.nn.Module), set()):
             raise NotImplementedError(
                 "precompile tracer='dynamo' does not yet support nn.Module arguments "
-                "because Dynamo's module identity guards are not serializable."
+                "(including inside containers) because Dynamo's module identity "
+                "guards are not serializable."
             )
 
     from torch._dynamo.eval_frame import innermost_fn
@@ -1750,26 +1817,22 @@ def _precompile_dynamo(
             "cells; pass captured values as explicit arguments."
         )
 
-    def contains_tensor(value: object, seen: set[int]) -> bool:
-        if isinstance(value, torch.Tensor):
-            return True
-        value_id = id(value)
-        if value_id in seen:
-            return False
-        seen.add(value_id)
-        if isinstance(value, dict):
-            return any(
-                contains_tensor(item, seen) for pair in value.items() for item in pair
-            )
-        if isinstance(value, (tuple, list, set, frozenset)):
-            return any(contains_tensor(item, seen) for item in value)
-        return False
-
-    if contains_tensor((target.__defaults__, target.__kwdefaults__), set()):
+    defaults = (target.__defaults__, target.__kwdefaults__)
+    if reaches(defaults, lambda v: isinstance(v, torch.Tensor), set()):
         raise PrecompileError(
             "precompile tracer='dynamo' cannot serialize tensor-valued function "
             "defaults; pass every tensor as an explicit example input."
         )
+
+    # Defaults travel inside the pickled artifact state; probe them up front so an
+    # unpicklable default is reported as such rather than as a guard/bytecode failure.
+    try:
+        pickle.dumps(defaults)
+    except Exception as e:
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot serialize the function's default "
+            f"values ({type(e).__name__}: {e}); pass them as explicit example inputs."
+        ) from e
 
     def loaded_global_names(code: types.CodeType) -> set[str]:
         names = {
@@ -1791,29 +1854,11 @@ def _precompile_dynamo(
         if not isinstance(value, (type(None), bool, int, float, complex, str, bytes))
     }
 
-    def reaches_input(value: object, seen: set[int]) -> bool:
-        value_id = id(value)
-        if value_id in input_ids:
-            return True
-        if value_id in seen:
-            return False
-        seen.add(value_id)
-        if isinstance(value, dict):
-            return any(
-                reaches_input(item, seen) for pair in value.items() for item in pair
-            )
-        if isinstance(value, (tuple, list, set, frozenset)):
-            return any(reaches_input(item, seen) for item in value)
-        if isinstance(
-            value, (types.FunctionType, types.ModuleType, type, torch.Tensor)
-        ) or not hasattr(value, "__dict__"):
-            return False
-        return any(reaches_input(item, seen) for item in vars(value).values())
-
     aliased_globals = [
         name
         for name in loaded_global_names(target.__code__)
-        if name in target.__globals__ and reaches_input(target.__globals__[name], set())
+        if name in target.__globals__
+        and reaches(target.__globals__[name], lambda v: id(v) in input_ids, set())
     ]
     if aliased_globals:
         raise PrecompileError(
@@ -1964,7 +2009,14 @@ def _precompile_dynamo(
             f"recompile_limit={capture_limit}: {e}"
         ) from e
     except AssertionError as e:
-        if "guards_state must not be None" not in str(e):
+        # torch/_dynamo/convert_frame.py raises this assertion when a kept guard
+        # cannot be serialized into the CompilePackage (non-strict
+        # CheckFunctionManager swallows the PackageError and leaves guards_state
+        # None). Input-derived identity guards (ID_MATCH and friends) survive
+        # keep_serializable_capture_guards, so this is their failure surface.
+        from torch._dynamo.convert_frame import GUARDS_STATE_NONE_MESSAGE
+
+        if GUARDS_STATE_NONE_MESSAGE not in str(e):
             raise
         raise PrecompileError(
             "precompile tracer='dynamo' encountered an identity guard that Dynamo "
@@ -2330,8 +2382,12 @@ class _PrecompileApi:
         THREADING: the inductor lowering step drives process-global compiler state
         and is serialized by an internal lock, so concurrent ``backend="inductor"``
         calls lower one at a time. Dynamo capture is also serialized because it uses
-        process-global frame-evaluation and compilation state. The make_fx capture phase
-        and its ``backend="eager"`` path are NOT serialized.
+        process-global frame-evaluation and compilation state; the lock only covers
+        precompile itself, and the capture temporarily patches process-global Dynamo
+        and functorch config (e.g. ``fail_on_recompile_limit_hit``), so an unrelated
+        ``torch.compile`` on another thread during a capture can observe those patched
+        values. The make_fx capture phase and its ``backend="eager"`` path are NOT
+        serialized.
 
         ``backend`` selects how the captured graph is realized:
 
@@ -2436,8 +2492,9 @@ class _PrecompileApi:
         ``f_c(model, x)``, and that runtime model must match the example model's
         parameter/buffer structure (invariant 2). Arguments are matched POSITIONALLY:
         pass the model(s) and inputs positionally both here and at load time; keyword-
-        argument calling conventions are not supported (a fn that relies on them would
-        surface as a raw arity error). With ``tracer="make_fx"``, if ``fn`` ran a
+        argument calling conventions are not supported (a keyword call raises
+        ``TypeError``; a wrong positional arity raises ``PrecompileError``, on both
+        tracers). With ``tracer="make_fx"``, if ``fn`` ran a
         backward, the resulting parameter gradients are scattered (accumulated) onto
         that runtime model's ``parameters()`` ``.grad`` fields, exactly like eager ``.backward()``,
         so a ``zero_grad()`` / ``optimizer.step()`` loop works unchanged; the artifact

@@ -1242,6 +1242,8 @@ def helper(x):
                 (frozenset({1, 2}), ("frozenset((1, 2,))", [])),
                 name="frozenset",
             ),
+            subtest(({2, 1}, ("{1, 2}", [])), name="set"),
+            subtest((set(), ("set()", [])), name="empty_set"),
         ),
     )
     def test_constexpr_builtin_source(self, value, expected):
@@ -1270,6 +1272,7 @@ def helper(x):
             ),
         )
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_constexpr_enum_imports_do_not_collide(self):
         from torch._inductor.codegen.wrapper import (
             _constexpr_source,
@@ -1409,6 +1412,133 @@ def helper(x):
         actual, code = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(actual, fn(x))
         self.assertNotIn("<Mode.", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_plain_enum_constexpr_in_autotune_config(self):
+        # A non-interchangeable Enum in an autotune config reaches the runtime as
+        # a real Enum member; autotuning (with >1 config) then saves the winner to
+        # the JSON autotune cache, which must store the underlying value.
+        import triton
+        import triton.language as tl
+
+        from torch.distributed.fsdp._common_utils import TrainingState
+
+        @triton.autotune(
+            configs=[
+                triton.Config(
+                    {"MODE": TrainingState.FORWARD_BACKWARD, "BLOCK_SIZE": 64},
+                    num_warps=4,
+                ),
+                triton.Config(
+                    {"MODE": TrainingState.IDLE, "BLOCK_SIZE": 128}, num_warps=4
+                ),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = x + 1
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            output = torch.empty_like(x)
+
+            def grid(meta):
+                return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
+
+            enum_kernel[grid](x, output, x.numel())
+            return output
+
+        x = torch.randn(128, device=GPU_TYPE)
+        actual, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(actual, fn(x))
+        self.assertIn("TrainingState['", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_user_autotune_cache_not_stamped_coordesc(self):
+        # Coordinate descent tuning never runs for USER_AUTOTUNE kernels, so their
+        # cache entries must not claim found_by_coordesc: a warm load would skip
+        # candidate matching and reconstruct a Config whose Enum kwargs degrade to
+        # the raw JSON values.
+        import triton
+        import triton.language as tl
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch.distributed.fsdp._common_utils import TrainingState
+
+        @triton.autotune(
+            configs=[
+                triton.Config(
+                    {"CD_MODE": TrainingState.FORWARD_BACKWARD, "BLOCK_SIZE": 64},
+                    num_warps=4,
+                ),
+                triton.Config(
+                    {"CD_MODE": TrainingState.IDLE, "BLOCK_SIZE": 128}, num_warps=4
+                ),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, CD_MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = x + 1
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            output = torch.empty_like(x)
+
+            def grid(meta):
+                return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
+
+            enum_kernel[grid](x, output, x.numel())
+            return output
+
+        x = torch.randn(128, device=GPU_TYPE)
+        with (
+            inductor_config.patch(coordinate_descent_tuning=True),
+            patch.object(
+                AutotuneCache, "save", autospec=True, side_effect=AutotuneCache.save
+            ) as saves,
+        ):
+            self.assertEqual(torch.compile(fn)(x), fn(x))
+        enum_saves = [c for c in saves.call_args_list if "CD_MODE" in c.args[1].kwargs]
+        self.assertTrue(enum_saves)
+        for call in enum_saves:
+            self.assertFalse(call.kwargs.get("found_by_coordesc", False))
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_autotune_cache_matches_enum_config_kwargs(self):
+        import json
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import (
+            _json_config_value,
+            _load_cached_autotuning,
+        )
+        from torch.distributed.fsdp._common_utils import TrainingState
+
+        cfg = triton.Config(
+            {"MODE": TrainingState.FORWARD_BACKWARD, "BLOCK": 64},
+            num_warps=4,
+            num_stages=2,
+        )
+        data = {key: _json_config_value(val) for key, val in cfg.kwargs.items()}
+        data.update({"num_warps": 4, "num_stages": 2, "configs_hash": "h"})
+        best = json.loads(json.dumps(data))  # must be JSON-representable
+        self.assertIs(_load_cached_autotuning(best, "h", [cfg], {}), cfg)
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_plain_enum_constexpr_in_user_defined_triton_kernel(self):

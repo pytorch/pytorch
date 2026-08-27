@@ -429,17 +429,9 @@ def _build_dynamo_forward():
     defaults = state["defaults"]
     kwdefaults = state["kwdefaults"]
 
-    def make_cell(value):
-        def read():
-            return value
-
-        if read.__closure__ is None:
-            raise AssertionError("expected a closure cell")
-        return read.__closure__[0]
-
     closure_values = state["closure"]
     closure = (
-        tuple(make_cell(value) for value in closure_values)
+        tuple(types.CellType(value) for value in closure_values)
         if closure_values is not None
         else None
     )
@@ -463,7 +455,15 @@ def _build_dynamo_forward():
     signature = inspect.signature(target_function)
 
     def forward(*args):
-        bound = signature.bind(*args)
+        try:
+            bound = signature.bind(*args)
+        except TypeError as e:
+            from torch._precompile import PrecompileError
+
+            raise PrecompileError(
+                f"precompile: {e}; the artifact takes the same positional arguments "
+                "as the traced fn (invariant 2)."
+            ) from e
         bound.apply_defaults()
         local_scope = dict(bound.arguments)
         with torch.set_grad_enabled(TRAINING):

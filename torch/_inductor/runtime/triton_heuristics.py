@@ -1947,12 +1947,17 @@ class CachingAutotuner(KernelInterface):
         TritonBundler.put_winner(launcher.cache_hash)
 
         if self.save_cache_hook:
+            # Only stamp found_by_coordesc when coordesc will actually refine this
+            # kernel; the flag makes warm loads skip candidate matching and
+            # reconstruct the Config from the JSON payload, which loses non-JSON
+            # kwarg values (e.g. Enum constexprs on user autotune kernels).
             self.save_cache_hook(
                 launcher.config,
                 self.autotune_time_taken_ns,
                 found_by_coordesc=self.inductor_meta.get(
                     "coordinate_descent_tuning", False
-                ),
+                )
+                and self._should_coordesc_tune,
                 triton_cache_hash=launcher.cache_hash,
             )
 
@@ -2896,7 +2901,9 @@ class CompileResult(Generic[_T]):
                 matches = (
                     type(reconstructed) is type(constant) and reconstructed == constant
                 )
-            except (SyntaxError, ValueError):
+            except Exception:
+                # literal_eval can also raise TypeError/RecursionError/MemoryError
+                # on pathological reprs; binding the object is always safe.
                 return _bind_constant(constant)
             if matches is not True:
                 return _bind_constant(constant)

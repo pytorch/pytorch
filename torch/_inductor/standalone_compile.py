@@ -4,6 +4,7 @@ import contextlib
 import copy
 import itertools
 import logging
+import math
 import os
 import pickle
 import shutil
@@ -634,6 +635,8 @@ def _passthrough_source(gm: GraphModule) -> str | None:
             return f"({values},)" if len(value) == 1 else f"({values})"
         if isinstance(value, list):
             return f"[{', '.join(render(item) for item in value)}]"
+        if isinstance(value, float) and not math.isfinite(value):
+            return f"float({str(value)!r})"
         if value is None or isinstance(value, (bool, int, float, str)):
             return repr(value)
         raise TypeError
