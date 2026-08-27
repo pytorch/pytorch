@@ -462,14 +462,14 @@ class TestFakePG(TestCase):
         self.assertEqual(out_tensor, in_tensor)
 
     @parametrize("rank", [0, 1])
-    def test_alltoall_base_split_sizes_repeat(self, rank):
+    def test_alltoall_base_output_larger_than_input(self, rank):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
 
-        # Slot 1 (size 6) is larger than the input buffer (size 4),
-        # so the input is repeated to fill it.
+        # out_tensor is larger than in_tensor, values are first
+        # filled with in_tensor then zeros
         in_tensor = torch.arange(4.0).reshape(4, 1)
-        out_tensor = torch.empty(8, 1)
+        out_tensor = torch.full((8, 1), -1.0)
         dist.all_to_all_single(
             out_tensor,
             in_tensor,
@@ -477,17 +477,17 @@ class TestFakePG(TestCase):
             input_split_sizes=[1, 3],
         )
         expected = torch.tensor(
-            [[0.0], [1.0], [0.0], [1.0], [2.0], [3.0], [0.0], [1.0]]
+            [[0.0], [1.0], [2.0], [3.0], [0.0], [0.0], [0.0], [0.0]]
         )
         self.assertEqual(out_tensor, expected)
 
     @parametrize("rank", [0, 1])
-    def test_alltoall_base_split_sizes_truncate(self, rank):
+    def test_alltoall_base_output_smaller_than_input(self, rank):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
 
-        # Each output slot is smaller than the input buffer, so input is
-        # truncated to slot size.
+        # out_tensor is smaller than in_tensor, values are first
+        # filled with values of in_tensor.
         in_tensor = torch.arange(8.0).reshape(8, 1)
         out_tensor = torch.empty(4, 1)
         dist.all_to_all_single(
@@ -496,8 +496,67 @@ class TestFakePG(TestCase):
             output_split_sizes=[1, 3],
             input_split_sizes=[4, 4],
         )
-        expected = torch.tensor([[0.0], [0.0], [1.0], [2.0]])
+        expected = torch.tensor([[0.0], [1.0], [2.0], [3.0]])
         self.assertEqual(out_tensor, expected)
+
+    def test_alltoall_base_empty_output_split_sizes(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(4, 1)
+        out_tensor = torch.empty(4, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            in_tensor,
+            output_split_sizes=[],
+            input_split_sizes=[2, 2],
+        )
+        self.assertEqual(out_tensor, in_tensor)
+
+    def test_alltoall_base_empty_input_split_sizes(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        out_tensor = torch.ones(2, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            torch.empty(0, 1),
+            output_split_sizes=[0, 2],
+            input_split_sizes=[],
+        )
+        self.assertEqual(out_tensor, torch.zeros_like(out_tensor))
+
+    def test_alltoall_base_equal_split_numel_mismatch(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(8.0).reshape(4, 2)
+        out_tensor = torch.empty(4, 1)
+        dist.all_to_all_single(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, torch.arange(4.0).reshape(4, 1))
+
+    def test_alltoall_base_flat_copy_equal_splits(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(4, 1)
+        out_tensor = torch.empty(2, 2)
+        dist.all_to_all_single(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor.view_as(out_tensor))
+
+    def test_alltoall_base_flat_copy_explicit_splits(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(4.0).reshape(2, 2)
+        out_tensor = torch.empty(4, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            in_tensor,
+            output_split_sizes=[2, 2],
+            input_split_sizes=[1, 1],
+        )
+        self.assertEqual(out_tensor, in_tensor.view_as(out_tensor))
 
     def test_alltoall_base_split_size_validation(self):
         store = FakeStore()
@@ -528,17 +587,56 @@ class TestFakePG(TestCase):
                 input_split_sizes=[2, 2],
             )
 
-    def test_alltoall_base_empty_input_with_output(self):
+    def test_alltoall_base_zero_sized_input(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
 
-        with self.assertRaisesRegex(RuntimeError, "inputBuffer is empty"):
-            dist.all_to_all_single(
-                torch.empty(2, 1),
-                torch.empty(0, 1),
-                output_split_sizes=[1, 1],
-                input_split_sizes=[0, 0],
-            )
+        out_tensor = torch.ones(2, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            torch.empty(0, 1),
+            output_split_sizes=[0, 2],
+            input_split_sizes=[0, 0],
+        )
+        self.assertEqual(out_tensor, torch.zeros_like(out_tensor))
+
+    def test_alltoall_base_zero_sized_output(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        out_tensor = torch.empty(0, 1)
+        dist.all_to_all_single(
+            out_tensor,
+            torch.arange(4.0).reshape(4, 1),
+            output_split_sizes=[0, 0],
+            input_split_sizes=[0, 4],
+        )
+        self.assertEqual(out_tensor, torch.empty_like(out_tensor))
+
+    @parametrize("noncontiguous_buffer", ["input", "output"])
+    def test_alltoall_base_requires_contiguous(self, noncontiguous_buffer):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(8.0).reshape(4, 2)
+        out_tensor = torch.empty(4, 2)
+        if noncontiguous_buffer == "input":
+            in_tensor = torch.arange(8.0).reshape(2, 4).t()
+        else:
+            out_tensor = torch.empty(2, 4).t()
+
+        with self.assertRaisesRegex(RuntimeError, "tensor must be contiguous"):
+            dist.all_to_all_single(out_tensor, in_tensor)
+
+    def test_alltoall_base_channels_last(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        in_tensor = torch.arange(32.0).reshape(2, 2, 2, 4)
+        in_tensor = in_tensor.contiguous(memory_format=torch.channels_last)
+        out_tensor = torch.empty_like(in_tensor)
+        dist.all_to_all_single(out_tensor, in_tensor)
+        self.assertEqual(out_tensor, in_tensor)
 
     def test_alltoall_list_size_validation(self):
         store = FakeStore()

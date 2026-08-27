@@ -524,7 +524,7 @@ static RegisterOperators SRCopyOuts({
 
 // On each invocation of this guard, we need to check all of the static
 // information (dtype/device/requires grad/contiguity/static dims),
-// and also the that the symbolic shape dimensions are observed.
+// and also that the symbolic shape dimensions are observed.
 // For any symbolic dimension we need to set its value on its first
 // use and for all subsequent uses check that the values are equal
 static RegisterOperators reg_guard({

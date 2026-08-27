@@ -1060,6 +1060,22 @@ cmake_dependent_option(
   "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
+# Flash Attention needs sm80+; disable it if no resolved arch reaches that.
+if(USE_FLASH_ATTENTION AND USE_CUDA AND NOT USE_ROCM)
+  string(REPLACE " " ";" _flash_attn_archs "${NVCC_FLAGS_EXTRA_readable}")
+  set(_flash_attn_has_sm80 OFF)
+  foreach(_arch IN LISTS _flash_attn_archs)
+    if(_arch MATCHES "^(sm|compute)_([0-9]+)" AND CMAKE_MATCH_2 GREATER_EQUAL 80)
+      set(_flash_attn_has_sm80 ON)
+    endif()
+  endforeach()
+  if(_flash_attn_archs AND NOT _flash_attn_has_sm80)
+    message(STATUS
+      "Disabling USE_FLASH_ATTENTION: it needs a CUDA architecture >= 8.0, "
+      "but the resolved CUDA architectures are '${_flash_attn_archs}'")
+    set(USE_FLASH_ATTENTION OFF)
+  endif()
+endif()
 
 IF(USE_ROCM AND ("gfx942" IN_LIST PYTORCH_ROCM_ARCH OR "gfx950" IN_LIST PYTORCH_ROCM_ARCH))
   message(WARNING "Setting USE_MSLK for gfx942/gfx950 to ON by default, doing ROCM build")

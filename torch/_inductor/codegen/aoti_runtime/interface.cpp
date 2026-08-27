@@ -39,8 +39,8 @@ static thread_local std::string g_aoti_last_error;
             std::to_string(actual_size));                         \
   } while (0)
 
-// AOTInductor uses at::addmm_out, which doesn't supports
-// arguments that requires gradient. For this reason, we
+// AOTInductor uses at::addmm_out, which doesn't support
+// arguments that require gradient. For this reason, we
 // enforce no_grad context for run APIs.
 //
 // A RAII, thread local (!) guard that enables or disables grad mode upon

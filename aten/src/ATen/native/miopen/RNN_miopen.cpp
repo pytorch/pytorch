@@ -7,7 +7,6 @@
 #include <ATen/TensorUtils.h>
 
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -58,6 +57,8 @@ namespace at::native {
 #include <ATen/miopen/Descriptors.h>
 #include <ATen/miopen/Types.h>
 #include <ATen/miopen/Utils.h>
+
+#include <ATen/hip/HIPGeneratorImpl.h>
 
 #include <ATen/TensorUtils.h>
 
