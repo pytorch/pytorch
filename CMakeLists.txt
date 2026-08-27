@@ -519,10 +519,16 @@ cmake_dependent_option(
 cmake_dependent_option(BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
                        OFF "USE_CUDA" OFF)
+
+# gradual rollout of cmake-instrumentation
+set(USE_CMAKE_INSTRUMENTATION_DEFAULT OFF)
+if(NOT USE_CUDA)
+  set(USE_CMAKE_INSTRUMENTATION_DEFAULT ON)
+endif()
 cmake_dependent_option(
   USE_CMAKE_INSTRUMENTATION
   "Use cmake-instrumentation to collect build metrics"
-  ${CPU_INTEL} # AArch64 CI times out when profiling is enabled
+  ${USE_CMAKE_INSTRUMENTATION_DEFAULT}
   "CMAKE_VERSION VERSION_GREATER_EQUAL 4.3"
   OFF
 )
@@ -535,6 +541,7 @@ if(USE_CMAKE_INSTRUMENTATION)
     CALLBACK "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_trace_summary.py" --root "${CMAKE_CURRENT_SOURCE_DIR}" --index
   )
 endif()
+
 cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
                         "CPU_AARCH64" OFF)
 # prioritized text linker, ON by default for AArch64+Linux, option visible to all AArch64, x86 and ppc64le.
