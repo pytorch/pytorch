@@ -5237,6 +5237,65 @@ def forward(self, tangents_1):
         outs[0].sum().backward()
         self.assertEqual(x.grad, x_ref.grad)
 
+    def test_input_mutation_replayed_onto_restricted_view(self):
+        # Functionalization lifts an input mutation out of the graph and replays
+        # it as a tracked copy_, which is stricter than the write it stands in
+        # for. Here the write is an opaque op that declares Tensor(a!) but goes
+        # through .data (no version bump, and its meta kernel writes nothing),
+        # and the target is an input a custom Function returned as-is, which
+        # autograd turns into a view stamped IN_CUSTOM_FUNCTION that refuses
+        # tracked in-place edits. Eager accepts the write; the replay must too.
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, t):
+                return t
+
+            @staticmethod
+            def backward(ctx, g):
+                return g * 3
+
+        def opaque_add_(w, x):
+            w.data.add_(x)
+
+        with torch.library._scoped_library("aotmut", "FRAGMENT") as lib:
+            lib.define("opaque_add_(Tensor(a!) w, Tensor x) -> ()")
+            lib.impl("opaque_add_", opaque_add_, "CompositeExplicitAutograd")
+            lib.impl("opaque_add_", lambda w, x: None, "Meta")
+
+            def body(w, x):
+                torch.ops.aotmut.opaque_add_(w, x)
+                return (w * x).sum()
+
+            def run(backend, restricted):
+                torch._dynamo.reset()
+                torch.manual_seed(0)
+                base = torch.randn(4, requires_grad=True)
+                x = torch.randn(4, requires_grad=True)
+                w = base * 1.0
+                if restricted:
+                    w = Scale.apply(w)
+                f = body if backend is None else torch.compile(body, backend=backend)
+                f(w, x).backward()
+                return base.grad, x.grad, w.detach()
+
+            ref = run(None, True)
+            for backend in ("aot_eager", "inductor"):
+                self.assertEqual(run(backend, True), ref, f"diverged on {backend}")
+
+            # Whether the caller's tensor is such a view is not guarded, so a
+            # graph traced against an ordinary tensor can be handed one later --
+            # for a serialized artifact, in a different process. The choice has
+            # to be made per call, not baked into the epilogue.
+            torch._dynamo.reset()
+            compiled = torch.compile(body, backend="inductor")
+            b1 = torch.randn(4, requires_grad=True)
+            compiled(b1 * 1.0, torch.randn(4, requires_grad=True)).backward()
+            b2 = torch.randn(4, requires_grad=True)
+            compiled(
+                Scale.apply(b2 * 1.0), torch.randn(4, requires_grad=True)
+            ).backward()
+            self.assertIsNotNone(b2.grad)
+
     def test_none_tangent_in_kept_slot_names_the_forward_output(self):
         # A None in a kept tangent slot otherwise surfaces several frames below
         # AOTAutograd as inductor's "expected Tensor() for op: input", naming
