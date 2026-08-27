@@ -144,6 +144,7 @@
 /aten/src/ATen/native/Foreach* @janeyx99
 /aten/src/ATen/native/Fused* @janeyx99
 # /test/test_functional_optim.py
+/torch/foreach/ @janeyx99
 /torch/optim/ @albanD @janeyx99
 #
 # [core_aten_runtime]
@@ -902,7 +903,6 @@
 /.ci/ @pytorch/pytorch-dev-infra
 /.ci/docker/ubuntu-rocm/ @jeffdaily
 /.ci/docker/common/install_roc*.sh @jeffdaily
-/.ci/docker/common/install_miopen.sh @jeffdaily
 /.ci/docker/common/install_amdsmi.sh @jeffdaily
 /.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony
