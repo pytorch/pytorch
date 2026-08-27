@@ -139,6 +139,7 @@ from .package import (
     _BackendId,
     _defining_module_name,
     _DynamoCacheEntry,
+    _lookup_code,
     CompilePackage,
     DynamoStore,
     PrecompileCacheEntry,
@@ -2324,6 +2325,52 @@ def precompile_load(
         recompile_limit=recompile_limit,
         dynamic=dynamic,
     )
+
+
+def validate_cache_entry(
+    fn: Callable[..., object], cache_entry: PrecompileCacheEntry
+) -> None:
+    """Check an entry against THIS host without installing anything.
+
+    An installed artifact does not touch the interpreter until its first served
+    call, which is the right default -- the mutation should happen where the
+    caller can see it -- but it also means every way an artifact can be wrong
+    for the host it landed on surfaces mid-workload rather than at load. This
+    runs the parts that are pure: the torch-version and inlined-source checks
+    that constructing the package performs, and a rebuild of each frame's guard
+    tree, discarded. Backend deserialization stays deferred; it is the one
+    remaining class that still reports late.
+    """
+    from torch._dynamo.package import load_guard_manager, load_guards_state
+
+    package = CompilePackage(
+        _entry_fn_of(fn),
+        cache_entry.dynamo,
+        serialization_guard_filter_fn=default_guard_filter_fn,
+    )
+    problems: list[str] = []
+    for code, entry in package._codes.items():
+        if entry.bypassed:
+            continue
+        target = _lookup_code(entry) if entry.code_source else code
+        # A copy, so building against it cannot write into the user's module.
+        scope = dict(sys.modules[entry.python_module].__dict__)
+        for guarded in entry.guarded_codes:
+            try:
+                load_guard_manager(
+                    load_guards_state(guarded.guards_state), target, scope
+                )
+            except Exception as e:
+                problems.append(
+                    f"{entry.python_module}.{target.co_name}: {type(e).__name__}: {e}"
+                )
+                break
+    if problems:
+        raise PackageError(
+            "precompile: this artifact cannot rebuild its guards on this host, "
+            "so it would fail inside the first served call rather than here:\n  "
+            + "\n  ".join(problems)
+        )
 
 
 def serve_cache_entry(
