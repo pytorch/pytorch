@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyCUDA,
     skipMPS,
     TEST_WITH_ROCM,
 )
@@ -39,8 +40,8 @@ from torch.testing._internal.common_optimizers import (
     TensorTracker,
 )
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     gradcheck,
+    HardwareClassification,
     markDynamoStrictTest,
     parametrize,
     run_tests,
@@ -3105,9 +3106,6 @@ class TestOptimRenewed(TestCase):
             expected,
         )
 
-
-    # In-place rewrite tests (perf/optimizer-memory-eager-loop)
-
     @optims(
         [
             o
@@ -3118,7 +3116,9 @@ class TestOptimRenewed(TestCase):
     )
     @onlyCUDA
     def test_peak_memory_inplace(self, device, dtype, optim_info):
-        """Peak memory budget: in-place rewrites must not exceed
+        """In-place rewrite tests (perf/optimizer-memory-eager-loop).
+
+        Peak memory budget: rewrites must not exceed
         O(param + grad + state + 1 intermediate).
 
         The tight assertion targets the specific path changed by the in-place
@@ -3562,7 +3562,6 @@ class TestOptimRenewed(TestCase):
             opt2.step()
 
             self.assertNotEqual(p1, p2)
-
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
