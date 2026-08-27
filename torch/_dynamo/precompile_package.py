@@ -1220,6 +1220,73 @@ def _missing_backends_message(
     )
 
 
+def _warn_risky_drops(risky: Sequence[tuple[str, str]]) -> None:
+    """Report accepted risky drops, shape-bearing ones first.
+
+    A guard-type-ordered cut is severity blind, and on a large model that is
+    not cosmetic: a capture reporting 652 drops buried its one SEQUENCE_LENGTH
+    and three CONSTANT_MATCHes -- the only types that can bear on shape at all
+    -- behind 392 CLOSURE_MATCHes on function identities.
+
+    Type is as far as this can go. Whether a guarded VALUE can differ at serve
+    time is the question a reader actually has, and the type does not answer
+    it: on that same model all four turned out to be reached through a class or
+    function definition, so they were compile-time constants and no batch could
+    change them. Ordering by type puts the candidates where they can be seen;
+    it does not rank them.
+
+    Measured on stock models: torchvision resnet18 and mobilenet_v3 report
+    none, timm's ViT reports one (a re-exported torch._assert) and
+    transformers' Qwen2 reports 33, nearly all library internals no deployment
+    swaps.
+    """
+    by_type: dict[str, list[str]] = {}
+    for guard_type, name in sorted(risky):
+        by_type.setdefault(guard_type, []).append(name)
+
+    # Grouped rather than a flat cut, and capped PER TYPE: a flat list is
+    # dominated by whichever type happens to be most numerous, which is exactly
+    # how one SEQUENCE_LENGTH stayed invisible behind 26 CONSTANT_MATCHes that
+    # were themselves behind 392 CLOSURE_MATCHes.
+    def render(types: list[str], per_type: int) -> str:
+        parts = []
+        for t in types:
+            names = by_type[t]
+            shown = ", ".join(names[:per_type])
+            more = f", +{len(names) - per_type} more" if len(names) > per_type else ""
+            parts.append(f"{t} x{len(names)}: {shown}{more}")
+        return "; ".join(parts)
+
+    shape_types = [t for t in by_type if t in _SHAPE_BEARING_GUARD_TYPES]
+    other_types = [t for t in by_type if t not in _SHAPE_BEARING_GUARD_TYPES]
+    # Says "could" rather than "can", and points at the distinction that
+    # actually decides it. This is a classification by guard TYPE, and the
+    # question a reader has is whether the guarded VALUE can differ at serve
+    # time -- which the type does not answer. The first four this ordering
+    # surfaced on a real model were all reached through a class or function
+    # definition (__mro__ walks to __defaults__, __code__) and were therefore
+    # compile-time constants that no batch could change. Distinguishing those
+    # properly needs the structured source, not the name.
+    shape_report = (
+        f" COULD BEAR ON SHAPE ({sum(len(by_type[t]) for t in shape_types)}), "
+        f"unlike the rest, so check these first -- but check whether each one "
+        f"can actually differ at serve time: a guard reached through a class or "
+        f"function definition (an __mro__ walk, __defaults__, __code__) is a "
+        f"compile-time constant and cannot: {render(shape_types, 3)}."
+        if shape_types
+        else ""
+    )
+    log.warning(
+        "precompile: %d dropped guard(s) can affect dispatch, so nothing checks "
+        "them at load.%s The rest are identity slots to audit: %s. "
+        "summary().risky_dropped_guards has all of them; this warning appears "
+        "only because require_no_risky_drops=False explicitly accepted them.",
+        len(risky),
+        shape_report,
+        render(other_types, 2) or "none",
+    )
+
+
 def _grad_snapshot(
     fn: object, examples: Sequence[object]
 ) -> dict[torch.Tensor, torch.Tensor | None]:
@@ -2184,30 +2251,8 @@ class PrecompileSession:
                 f"require_no_risky_drops=False to accept the risk explicitly."
             )
         elif summary.risky_dropped_guards:
-            # The caller explicitly accepted the risk. Measured on stock models: torchvision
-            # resnet18 and mobilenet_v3 report none, timm's ViT reports one (a
-            # re-exported torch._assert) and transformers' Qwen2 reports 33,
-            # nearly all of them library internals that no deployment swaps.
-            names = [n for _, n in summary.risky_dropped_guards]
-            # The cut below is in guard-type order and says nothing about
-            # severity: Qwen2's one genuinely config-selected drop sorts past
-            # it, so a truncated report has to say where the rest are.
-            rest = (
-                ""
-                if len(names) <= 8
-                else f" Only the first 8 are shown, cut in guard-type order "
-                f"rather than by severity; summary().risky_dropped_guards has "
-                f"all {len(names)}."
-            )
-            log.warning(
-                "precompile: %d dropped guard(s) can affect dispatch, so nothing "
-                "checks them at load: %s.%s Audit them against "
-                "your deployment; this warning appears only because "
-                "require_no_risky_drops=False explicitly accepted them.",
-                len(names),
-                names[:8],
-                rest,
-            )
+            # The caller explicitly accepted the risk.
+            _warn_risky_drops(summary.risky_dropped_guards)
         if require_complete:
             if summary.guarded_codes == 0:
                 raise PackageError(
@@ -2312,30 +2357,8 @@ class PrecompileSession:
                 f"require_no_risky_drops=False to accept the risk explicitly."
             )
         elif summary.risky_dropped_guards:
-            # The caller explicitly accepted the risk. Measured on stock models: torchvision
-            # resnet18 and mobilenet_v3 report none, timm's ViT reports one (a
-            # re-exported torch._assert) and transformers' Qwen2 reports 33,
-            # nearly all of them library internals that no deployment swaps.
-            names = [n for _, n in summary.risky_dropped_guards]
-            # The cut below is in guard-type order and says nothing about
-            # severity: Qwen2's one genuinely config-selected drop sorts past
-            # it, so a truncated report has to say where the rest are.
-            rest = (
-                ""
-                if len(names) <= 8
-                else f" Only the first 8 are shown, cut in guard-type order "
-                f"rather than by severity; summary().risky_dropped_guards has "
-                f"all {len(names)}."
-            )
-            log.warning(
-                "precompile: %d dropped guard(s) can affect dispatch, so nothing "
-                "checks them at load: %s.%s Audit them against "
-                "your deployment; this warning appears only because "
-                "require_no_risky_drops=False explicitly accepted them.",
-                len(names),
-                names[:8],
-                rest,
-            )
+            # The caller explicitly accepted the risk.
+            _warn_risky_drops(summary.risky_dropped_guards)
         if require_complete:
             if summary.guarded_codes == 0:
                 raise PackageError(
