@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     _DYNAMO_BACKEND_IDS: tuple[str, ...] = ()
     _DYNAMO_BACKEND_SOURCES: tuple[str, ...] = ()
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
+    _DYNAMO_TORCH_VERSION: str = ""
     _DYNAMO_STATE: str = ""
     TRAINING: bool = False
 
@@ -389,25 +390,76 @@ def _build_dynamo_forward():
     import types
 
     import torch
+    import torch.utils._pytree as pytree
+    from torch._precompile import PrecompileError
+
+    if tuple(_DYNAMO_PYTHON_VERSION) != sys.version_info[:2]:
+        raise PrecompileError(
+            "precompile artifact was produced on Python "
+            f"{_DYNAMO_PYTHON_VERSION[0]}.{_DYNAMO_PYTHON_VERSION[1]}, but is "
+            f"being loaded on Python {sys.version_info[0]}.{sys.version_info[1]}."
+        )
+    if _DYNAMO_TORCH_VERSION != torch.__version__:
+        raise PrecompileError(
+            f"precompile artifact was produced by torch {_DYNAMO_TORCH_VERSION}, but "
+            f"is being loaded by torch {torch.__version__}."
+        )
+
     from torch._dynamo.package import (
         load_guard_manager,
         load_guards_state,
         SerializedCode,
     )
 
-    if tuple(_DYNAMO_PYTHON_VERSION) != sys.version_info[:2]:
-        from torch._precompile import PrecompileError
-
+    try:
+        state = pickle.loads(base64.b64decode(_DYNAMO_STATE, validate=True))
+    except Exception as e:
         raise PrecompileError(
-            "precompile artifact was produced on Python "
-            f"{_DYNAMO_PYTHON_VERSION[0]}.{_DYNAMO_PYTHON_VERSION[1]}, but is "
-            f"being loaded on Python {sys.version_info[0]}.{sys.version_info[1]}."
-        )
-
-    state = pickle.loads(base64.b64decode(_DYNAMO_STATE))
+            "precompile artifact has invalid serialized Dynamo state."
+        ) from e
     namespace = globals()
+    namespace.update(state.get("value_globals", {}))
     for alias, module_name in state["import_sources"].items():
         namespace[alias] = importlib.import_module(module_name)
+
+    def has_storage_alias(values):
+        tensors = [
+            value
+            for value in pytree.tree_leaves(values)
+            if isinstance(value, torch.Tensor)
+        ]
+        storage_ranges: dict[tuple[str, int | None], list[tuple[int, int]]] = {}
+        storage_ids: set[tuple[str, int | None, int]] = set()
+        seen_objects: set[int] = set()
+        for tensor in tensors:
+            object_id = id(tensor)
+            if object_id in seen_objects:
+                continue
+            seen_objects.add(object_id)
+            try:
+                storage = tensor.untyped_storage()
+                start = storage.data_ptr()
+                size = storage.nbytes()
+            except RuntimeError as e:
+                raise PrecompileError(
+                    "precompile: cannot verify storage aliasing for this runtime "
+                    "tensor input."
+                ) from e
+            storage_key = (tensor.device.type, tensor.device.index, storage._cdata)
+            if storage_key in storage_ids:
+                return True
+            storage_ids.add(storage_key)
+            if start != 0 and size > 0:
+                storage_ranges.setdefault(
+                    (tensor.device.type, tensor.device.index), []
+                ).append((start, start + size))
+        for ranges in storage_ranges.values():
+            furthest_end = 0
+            for start, end in sorted(ranges):
+                if start < furthest_end:
+                    return True
+                furthest_end = max(furthest_end, end)
+        return False
 
     def make_backend(call):
         def run(*args):
@@ -463,6 +515,11 @@ def _build_dynamo_forward():
     signature = inspect.signature(target_function)
 
     def forward(*args):
+        if has_storage_alias(args):
+            raise PrecompileError(
+                "precompile: storage aliasing between distinct runtime tensor inputs "
+                "is not supported."
+            )
         bound = signature.bind(*args)
         bound.apply_defaults()
         local_scope = dict(bound.arguments)
@@ -470,8 +527,6 @@ def _build_dynamo_forward():
             for manager, function in variants:
                 if manager.check(local_scope):
                     return function(*args)
-        from torch._precompile import PrecompileError
-
         raise PrecompileError(
             f"precompile: no captured Dynamo variant of {target.co_name!r} matches "
             f"this call. Add an example covering it and precompile again; the artifact "
