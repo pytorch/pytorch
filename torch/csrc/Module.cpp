@@ -2803,25 +2803,19 @@ Call this whenever a new thread is created in order to propagate values from
   });
 
   py_module.def("_get_fake_constant", [](const at::Tensor& t) -> py::object {
-    if (!t.defined() || !t.is_fake()) {
-      return py::none();
-    }
+    TORCH_CHECK(t.defined(), "Expected a defined tensor");
+    TORCH_CHECK(t.is_fake(), "Expected a fake tensor");
     auto mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
-    if (mode == nullptr) {
-      return py::none();
-    }
-    auto constant = mode->get_constant(t.unsafeGetTensorImpl());
+    const auto& constant = mode->get_constant(t.unsafeGetTensorImpl());
     if (!constant) {
       return py::none();
     }
-    return py::cast(at::Tensor(std::move(constant)));
+    return py::cast(at::Tensor(constant));
   });
 
   py_module.def("_clear_fake_constant", [](const at::Tensor& fake) {
-    TORCH_CHECK(fake.defined() && fake.is_fake(), "Expected a fake tensor");
     auto mode = fake.unsafeGetTensorImpl()->fake_tensor_mode();
-    TORCH_CHECK(mode != nullptr, "Fake tensor has no FakeTensorMode");
-    mode->clear_constant(fake.getIntrusivePtr());
+    mode->set_constant(fake.getIntrusivePtr(), nullptr);
   });
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
