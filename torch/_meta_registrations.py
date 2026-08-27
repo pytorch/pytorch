@@ -585,6 +585,27 @@ def meta_philox_key_fold_in(key, data):
     return torch.empty_like(key)
 
 
+@register_meta(aten._philox_key_fold_in.Tensor)
+def meta_philox_key_fold_in_tensor(key, data):
+    torch._check(
+        key.dim() >= 1 and key.shape[-1] == 2,
+        lambda: f"_philox_key_fold_in: key must have shape (*batch, 2), got shape {key.shape}",
+    )
+    torch._check(
+        key.dtype == torch.uint64,
+        lambda: f"_philox_key_fold_in: key must have dtype uint64, got {key.dtype}",
+    )
+    torch._check(
+        data.dtype == torch.uint64,
+        lambda: f"_philox_key_fold_in: data must have dtype uint64, got {data.dtype}",
+    )
+    torch._check(
+        data.numel() == 1,
+        lambda: f"_philox_key_fold_in: data must be a single value, got {data.numel()} elements",
+    )
+    return torch.empty_like(key)
+
+
 def _check_philox_distribution_args(op_name, self, key):
     torch._check(
         self.dtype.is_floating_point,

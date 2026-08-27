@@ -104,10 +104,6 @@ from .utils import (
 )
 
 
-if typing.TYPE_CHECKING:
-    from .codegen import PySourceBuilder
-
-
 def _snapshot_external_objects(ctx: Any) -> None:
     """Snapshot the external object registry onto ctx for backward restore."""
     ctx._external_objects = {
@@ -810,18 +806,19 @@ class _RuntimeForwardEpilogue:
 
 
 def _codegen_capture_orig_inputs(
-    buf: "PySourceBuilder",
+    rw_lines: list[str],
     epilogue_args_idx: tuple[int, ...],
 ) -> None:
     if epilogue_args_idx:
         idx_str = ", ".join(f"{i}: args[{i}]" for i in epilogue_args_idx)
-        buf.emit(f"orig_inputs = {{{idx_str}}}", indent=1)
+        rw_lines.append(f"    orig_inputs = {{{idx_str}}}")
     else:
-        buf.emit("orig_inputs = {}", indent=1)
+        rw_lines.append("    orig_inputs = {}")
 
 
 def _codegen_increment_mutation_versions(
-    buf: "PySourceBuilder",
+    rw_lines: list[str],
+    rw_globals: dict[str, object],
     keep_input_mutations: bool,
     runtime_metadata: ViewAndMutationMeta,
 ) -> None:
@@ -829,78 +826,80 @@ def _codegen_increment_mutation_versions(
         keep_input_mutations
         and runtime_metadata.mutated_graph_handled_indices_seen_by_autograd
     ):
-        buf.add_global("_increment_version_", torch.autograd.graph.increment_version)
+        rw_globals["_increment_version_"] = torch.autograd.graph.increment_version
         mut_idx = tuple(runtime_metadata.mutated_graph_handled_indices_seen_by_autograd)
         gen_expr = ", ".join(f"args[{i}]" for i in mut_idx)
-        buf.emit(f"_increment_version_(({gen_expr},))", indent=1)
+        rw_lines.append(f"    _increment_version_(({gen_expr},))")
 
 
 def _codegen_normalize_as_list(
-    buf: "PySourceBuilder", var_name: str, *, indent_level: int
+    lines: list[str], var_name: str, *, indent_level: int
 ) -> None:
-    buf.emit(f"if isinstance({var_name}, tuple):", indent=indent_level)
-    buf.emit(f"{var_name} = list({var_name})", indent=indent_level + 1)
-    buf.emit(f"elif not isinstance({var_name}, list):", indent=indent_level)
-    buf.emit(f"{var_name} = [{var_name}]", indent=indent_level + 1)
+    indent = "    " * indent_level
+    lines.append(f"{indent}if isinstance({var_name}, tuple):")
+    lines.append(f"{indent}    {var_name} = list({var_name})")
+    lines.append(f"{indent}elif not isinstance({var_name}, list):")
+    lines.append(f"{indent}    {var_name} = [{var_name}]")
 
 
 def _codegen_compiled_fn_invocation(
-    buf: "PySourceBuilder",
+    rw_lines: list[str],
+    rw_globals: dict[str, object],
     trace_joint: bool,
     indices_of_inps_to_detach: list[int],
     disable_amp: bool,
 ) -> None:
-    buf.emit("with _first_ctx_():", indent=1)
+    rw_lines.append("    with _first_ctx_():")
     # trace_joint is known at codegen time. Only the joint/training path needs
     # forced view replay; inference wrappers should not touch this TLS state.
     if trace_joint:
-        buf.emit("args_ = list(args)", indent=2)
+        rw_lines.append("        args_ = list(args)")
         for idx in indices_of_inps_to_detach:
-            buf.emit(
-                f"if isinstance(args_[{idx}], torch.Tensor): "
-                f"args_[{idx}] = args_[{idx}].detach()",
-                indent=2,
+            rw_lines.append(
+                f"        if isinstance(args_[{idx}], torch.Tensor): "
+                f"args_[{idx}] = args_[{idx}].detach()"
             )
-        buf.emit(
-            "prev_view_replay_enabled = torch._C._is_view_replay_enabled()", indent=2
+        rw_lines.append(
+            "        prev_view_replay_enabled = torch._C._is_view_replay_enabled()"
         )
-        buf.emit("try:", indent=2)
-        buf.emit("if not prev_view_replay_enabled:", indent=3)
-        buf.emit("torch._C._set_view_replay_enabled(True)", indent=4)
-        buf.emit("with torch.enable_grad():", indent=3)
-        buf.emit("_on_before_call_()", indent=4)
+        rw_lines.append("        try:")
+        rw_lines.append("            if not prev_view_replay_enabled:")
+        rw_lines.append("                torch._C._set_view_replay_enabled(True)")
+        rw_lines.append("            with torch.enable_grad():")
+        rw_lines.append("                _on_before_call_()")
         if disable_amp:
-            buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
-            buf.emit("with _DisableAutocast_():", indent=4)
-            buf.emit("all_outs = _compiled_fn_(args_)", indent=5)
-            _codegen_normalize_as_list(buf, "all_outs", indent_level=5)
+            rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
+            rw_lines.append("                with _DisableAutocast_():")
+            rw_lines.append("                    all_outs = _compiled_fn_(args_)")
+            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=5)
         else:
-            buf.emit("all_outs = _compiled_fn_(args_)", indent=4)
-            _codegen_normalize_as_list(buf, "all_outs", indent_level=4)
-        buf.emit("finally:", indent=2)
-        buf.emit(
-            "if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:",
-            indent=3,
+            rw_lines.append("                all_outs = _compiled_fn_(args_)")
+            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=4)
+        rw_lines.append("        finally:")
+        rw_lines.append(
+            "            if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:"
         )
-        buf.emit(
-            "torch._C._set_view_replay_enabled(prev_view_replay_enabled)", indent=4
+        rw_lines.append(
+            "                torch._C._set_view_replay_enabled(prev_view_replay_enabled)"
         )
     else:
-        buf.emit("grad_enabled = torch.is_grad_enabled()", indent=2)
-        buf.emit("try:", indent=2)
-        buf.emit("if grad_enabled: torch._C._set_grad_enabled(False)", indent=3)
-        buf.emit("_on_before_call_()", indent=3)
+        rw_lines.append("        grad_enabled = torch.is_grad_enabled()")
+        rw_lines.append("        try:")
+        rw_lines.append(
+            "            if grad_enabled: torch._C._set_grad_enabled(False)"
+        )
+        rw_lines.append("            _on_before_call_()")
         if disable_amp:
-            buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
-            buf.emit("with _DisableAutocast_():", indent=3)
-            buf.emit("all_outs = _compiled_fn_(args)", indent=4)
-            _codegen_normalize_as_list(buf, "all_outs", indent_level=4)
+            rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
+            rw_lines.append("            with _DisableAutocast_():")
+            rw_lines.append("                all_outs = _compiled_fn_(args)")
+            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=4)
         else:
-            buf.emit("all_outs = _compiled_fn_(args)", indent=3)
-            _codegen_normalize_as_list(buf, "all_outs", indent_level=3)
-        buf.emit("finally:", indent=2)
-        buf.emit("if grad_enabled: torch._C._set_grad_enabled(True)", indent=3)
-    buf.emit("del args", indent=1)
+            rw_lines.append("            all_outs = _compiled_fn_(args)")
+            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=3)
+        rw_lines.append("        finally:")
+        rw_lines.append("            if grad_enabled: torch._C._set_grad_enabled(True)")
+    rw_lines.append("    del args")
 
 
 # signatures mirror the _RuntimeForwardEpilogue reference methods
@@ -912,49 +911,48 @@ _EpilogueReplayAliasesFn = Callable[[dict[int, Tensor], list[Any]], list[Any]]
 
 
 def _codegen_epilogue(
-    buf: "PySourceBuilder",
+    rw_lines: list[str],
+    rw_globals: dict[str, object],
     runtime_metadata: ViewAndMutationMeta,
     apply_mutations_fn: _EpilogueApplyMutationsFn | None,
     replay_aliases_fn: _EpilogueReplayAliasesFn | None,
     num_mutated_runtime_inps: int,
     expected_outs: int,
 ) -> None:
-    buf.emit(f"if len(all_outs) != {expected_outs}:", indent=1)
-    buf.emit(
-        f'raise AssertionError(f"expected {expected_outs} outputs, '
-        f'got {{len(all_outs)}}")',
-        indent=2,
+    rw_lines.append(f"    if len(all_outs) != {expected_outs}:")
+    rw_lines.append(
+        f'        raise AssertionError(f"expected {expected_outs} outputs, '
+        f'got {{len(all_outs)}}")'
     )
 
     if num_mutated_runtime_inps > 0:
-        buf.emit(f"updated_inputs = all_outs[:{num_mutated_runtime_inps}]", indent=1)
-        buf.emit(f"fw_outs = all_outs[{num_mutated_runtime_inps}:]", indent=1)
-        buf.emit("_apply_mutations_(orig_inputs, updated_inputs)", indent=1)
-        buf.add_global("_apply_mutations_", apply_mutations_fn)
+        rw_lines.append(f"    updated_inputs = all_outs[:{num_mutated_runtime_inps}]")
+        rw_lines.append(f"    fw_outs = all_outs[{num_mutated_runtime_inps}:]")
+        rw_lines.append("    _apply_mutations_(orig_inputs, updated_inputs)")
+        rw_globals["_apply_mutations_"] = apply_mutations_fn
     else:
-        buf.emit("fw_outs = all_outs", indent=1)
+        rw_lines.append("    fw_outs = all_outs")
 
     if runtime_metadata.num_outputs_aliased > 0:
-        buf.add_global("_replay_aliases_", replay_aliases_fn)
-        buf.emit("ret_outs = _replay_aliases_(orig_inputs, fw_outs)", indent=1)
+        rw_globals["_replay_aliases_"] = replay_aliases_fn
+        rw_lines.append("    ret_outs = _replay_aliases_(orig_inputs, fw_outs)")
     else:
-        buf.emit("ret_outs = fw_outs", indent=1)
+        rw_lines.append("    ret_outs = fw_outs")
 
     if runtime_metadata.dynamic_outputs:
-        buf.add_global("_mark_dynamic_", mark_dynamo_propagated_dynamic_indices)
+        rw_globals["_mark_dynamic_"] = mark_dynamo_propagated_dynamic_indices
         for i, o in enumerate(runtime_metadata.output_info):
             if o.dynamic_dims is not None:
                 dims_name = f"_dyn_dims_{i}"
-                buf.add_global(dims_name, o.dynamic_dims)
-                buf.emit(f"_mark_dynamic_(ret_outs[{i}], {dims_name})", indent=1)
+                rw_globals[dims_name] = o.dynamic_dims
+                rw_lines.append(f"    _mark_dynamic_(ret_outs[{i}], {dims_name})")
 
     if runtime_metadata.grad_enabled_mutation is not None:
-        buf.emit(
-            f"torch._C._set_grad_enabled({runtime_metadata.grad_enabled_mutation!r})",
-            indent=1,
+        rw_lines.append(
+            f"    torch._C._set_grad_enabled({runtime_metadata.grad_enabled_mutation!r})"
         )
 
-    buf.emit("return ret_outs", indent=1)
+    rw_lines.append("    return ret_outs")
 
 
 def _create_runtime_wrapper(
@@ -1077,13 +1075,11 @@ def _create_runtime_wrapper(
             artifact_name="mutation_epilogue",
         )
         buf.bind(torch=torch, _unwrap_tensoralias=_unwrap_tensoralias)
-        wrote_body = False
         with buf.indent():
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
                 meta = runtime_metadata.input_info[inpt_idx]
                 if not meta.mutates_data and not meta.mutates_metadata:
                     continue
-                wrote_body = True
                 oi = f"orig_inputs[{inpt_idx}]"
                 ui = f"updated_inputs[{i}]"
                 if meta.mutates_storage_metadata:
@@ -1132,7 +1128,7 @@ def _create_runtime_wrapper(
                             buf.writeline(f"raise RuntimeError({msg_name})")
                         else:
                             buf.writeline(f"{oi}.copy_({ui})")
-            if not wrote_body:
+            if len(buf.lines) == 1:
                 buf.writeline("pass")
 
         codegen_apply_mutations = typing.cast(_EpilogueApplyMutationsFn, buf.build())
@@ -1153,14 +1149,19 @@ def _create_runtime_wrapper(
         artifact_name="runtime_wrapper_orchestration",
     )
     buf.bind(torch=torch)
+    rw_lines = buf.lines
+    rw_globals = buf.globals
 
-    _codegen_capture_orig_inputs(buf, epilogue_args_idx)
-    _codegen_increment_mutation_versions(buf, keep_input_mutations, runtime_metadata)
+    _codegen_capture_orig_inputs(rw_lines, epilogue_args_idx)
+    _codegen_increment_mutation_versions(
+        rw_lines, rw_globals, keep_input_mutations, runtime_metadata
+    )
     _codegen_compiled_fn_invocation(
-        buf, trace_joint, indices_of_inps_to_detach, disable_amp
+        rw_lines, rw_globals, trace_joint, indices_of_inps_to_detach, disable_amp
     )
     _codegen_epilogue(
-        buf,
+        rw_lines,
+        rw_globals,
         runtime_metadata,
         codegen_apply_mutations,
         codegen_alias_fn,
@@ -3247,10 +3248,10 @@ def _codegen_compiled_forward(
             buf.writeline("with _DisableAutocast_():")
             with buf.indent():
                 buf.writeline("fw_outs = _compiled_fw_(list(args))")
-                _codegen_normalize_as_list(buf, "fw_outs", indent_level=2)
+                _codegen_normalize_as_list(buf.lines, "fw_outs", indent_level=2)
         else:
             buf.writeline("fw_outs = _compiled_fw_(list(args))")
-            _codegen_normalize_as_list(buf, "fw_outs", indent_level=1)
+            _codegen_normalize_as_list(buf.lines, "fw_outs", indent_level=1)
 
         buf.writeline("_save_(ctx, fw_outs)")
         buf.writeline("return _finalize_(ctx, fw_outs)")
