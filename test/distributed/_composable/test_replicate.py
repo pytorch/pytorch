@@ -10,11 +10,7 @@ from torch import nn
 from torch.distributed._composable.replicate import replicate
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor import DTensor
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiThreadedTestCase,
@@ -134,43 +130,12 @@ class ReplicateTest(MultiProcContinuousTest):
             torch.manual_seed(iteration)
             input = input[torch.randperm(global_batch_size)]
 
-    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180205")
     def test_replicate_single_module(self, device):
         model = Net().to(device)
         replicate_model = replicate(deepcopy(model))
         self._compare_module(model, replicate_model)
 
-    @requires_capabilities(Capability.distributed.backend)
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179854")
-    @skip_if_lt_x_gpu(2)
-    def test_replicate_ignore_module(self, device):
-        # Seed ensures diff input and thus different local grads across ranks.
-        torch.manual_seed(self.rank)
-        model = Net().to(device)
-        replicate(model, ignored_modules=[model.fc1])
-        # CPU input ensures that replicate can move input to GPU as DDP does.
-        inp = torch.randn(5, 2, device=device) * (self.rank + 1)
-        out = model(inp) * 10
-        out.sum().backward()
-        # FC1 grads should not be synchronized, FC2 and 3 should be.
-        fc1_grad = model.fc1.weight.grad
-        tensor_list = [torch.zeros_like(fc1_grad) for _ in range(dist.get_world_size())]
-        dist.all_gather(tensor_list, fc1_grad)
-        grad, rest = tensor_list[0], tensor_list[1:]
-        for g in rest:
-            self.assertNotEqual(grad, g)
-
-        for dp_grad in [model.fc2.weight.grad, model.fc3.weight.grad]:
-            tensor_list = [
-                torch.zeros_like(dp_grad) for _ in range(dist.get_world_size())
-            ]
-            dist.all_gather(tensor_list, dp_grad)
-            grad, rest = tensor_list[0], tensor_list[1:]
-            for g in rest:
-                self.assertEqual(grad, g)
-
-    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180127"
     )
@@ -182,7 +147,6 @@ class ReplicateTest(MultiProcContinuousTest):
         replicate(replicate_model.fc3)
         self._compare_module(model, replicate_model)
 
-    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180265")
     def test_replicate_with_kwargs(self, device):
         model = Net().to(device)
@@ -191,7 +155,6 @@ class ReplicateTest(MultiProcContinuousTest):
         )
         self._compare_module(model, replicate_model)
 
-    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179746")
     @skip_if_lt_x_gpu(2)
     def test_replicate_device_id(self, device):
@@ -219,7 +182,6 @@ class ReplicateTest(MultiProcContinuousTest):
         replicate_ddp_weakref = replicate.state(model_cuda2)._ddp_weakref()
         self.assertEqual([0], replicate_ddp_weakref.device_ids)
 
-    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176155")
     def test_replicate_wrong_device_id_type(self, device):
         model = Net().to(device)
@@ -238,7 +200,6 @@ class ReplicateTestNoXPU(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         return dist.get_default_backend_for_device(cls.device_type())
 
-    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/179948"
     )
@@ -259,11 +220,38 @@ class ReplicateTestNoXPU(MultiProcContinuousTest):
         a, b = torch.randn(2, 2, device=device), torch.randn(2, 2, device=device)
         model(a, kwarg=b).sum().backward()
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179854")
+        @skip_if_lt_x_gpu(2)
+        def test_replicate_ignore_module(self, device):
+            # Seed ensures diff input and thus different local grads across ranks.
+            torch.manual_seed(self.rank)
+            model = Net().to(device)
+            replicate(model, ignored_modules=[model.fc1])
+            # CPU input ensures that replicate can move input to GPU as DDP does.
+            inp = torch.randn(5, 2, device=device) * (self.rank + 1)
+            out = model(inp) * 10
+            out.sum().backward()
+            # FC1 grads should not be synchronized, FC2 and 3 should be.
+            fc1_grad = model.fc1.weight.grad
+            tensor_list = [torch.zeros_like(fc1_grad) for _ in range(dist.get_world_size())]
+            dist.all_gather(tensor_list, fc1_grad)
+            grad, rest = tensor_list[0], tensor_list[1:]
+            for g in rest:
+                self.assertNotEqual(grad, g)
+
+            for dp_grad in [model.fc2.weight.grad, model.fc3.weight.grad]:
+                tensor_list = [
+                    torch.zeros_like(dp_grad) for _ in range(dist.get_world_size())
+                ]
+                dist.all_gather(tensor_list, dp_grad)
+                grad, rest = tensor_list[0], tensor_list[1:]
+                for g in rest:
+                    self.assertEqual(grad, g)
+
 
 class ReplicateFullyShardInit(ReplicateTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.distributed.fsdp)
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179810")
     @skip_if_lt_x_gpu(2)
     def test_replicate_fully_shard_init(self, device):
@@ -300,7 +288,7 @@ class ReplicateFullyShardInit(ReplicateTest):
 
 instantiate_device_type_tests(ReplicateTest, globals(), except_for="cpu", allow_xpu=True)
 instantiate_device_type_tests(ReplicateTestNoXPU, globals(), except_for="cpu")
-instantiate_device_type_tests(ReplicateFullyShardInit, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(ReplicateFullyShardInit, globals(), except_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
