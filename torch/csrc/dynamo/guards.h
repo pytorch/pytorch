@@ -36,13 +36,15 @@ struct LocalState {
       auto result =
           (ks | dispatch_modifier.included_) - dispatch_modifier.excluded_;
 
+      auto masked_keys = c10::DispatchKeySet(c10::DispatchKey::Fake);
       if (should_mask_python_keys) {
-        result = result -
+        masked_keys = masked_keys |
             c10::DispatchKeySet(
-                     {c10::DispatchKey::Python,
-                      c10::DispatchKey::PythonTLSSnapshot,
-                      c10::DispatchKey::PythonDispatcher});
+                          {c10::DispatchKey::Python,
+                           c10::DispatchKey::PythonTLSSnapshot,
+                           c10::DispatchKey::PythonDispatcher});
       }
+      result = result - masked_keys;
 
       return result;
     } else {
