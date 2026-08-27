@@ -9,6 +9,8 @@ import torch._dynamo
 import torch._functorch
 import torch._inductor
 import torch._inductor.decomposition
+from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch._higher_order_ops import InvokeQuant
 from torch._inductor import config
 from torch._inductor.pattern_matcher import (
@@ -209,6 +211,19 @@ class TestInvokeQuantInductorPrologue(TestCase):
     )
     @config.patch(prologue_fusion=True)
     def test_prologue(self, device):
+        try:
+            device_interface = get_interface_for_device(torch.device(device).type)
+        except NotImplementedError as exc:
+            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
+
+        if not device_interface.is_triton_capable(device):
+            raise unittest.SkipTest(f"requires Triton support for {device}")
+
+        try:
+            device_interface.raise_if_triton_unavailable(device)
+        except TritonUnavailableError as exc:
+            raise unittest.SkipTest(str(exc)) from exc
+
         if not is_big_gpu(torch.device(device)):
             raise unittest.SkipTest("requires large gpu to max-autotune")
 
