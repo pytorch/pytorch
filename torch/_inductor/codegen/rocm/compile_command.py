@@ -97,10 +97,6 @@ def _rocm_compiler_options() -> list[str]:
         "-fPIC",
         "-fvisibility=hidden",
         "-mllvm",
-        "-amdgpu-early-inline-all=true",
-        "-mllvm",
-        "-amdgpu-function-calls=false",
-        "-mllvm",
         "-enable-post-misched=0",
     ]
     if config.rocm.is_debug:
