@@ -109,7 +109,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         # works around issue with skipif<2 and workers with unpredictable #s gpu
         return 2
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
@@ -154,7 +154,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
@@ -209,7 +209,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
@@ -268,7 +268,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
@@ -331,7 +331,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
@@ -394,7 +394,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(
         torch._inductor.config.triton.native_matmul,
@@ -447,7 +447,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
                         correct = func(inputs, **self.get_world_trs())
                         self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_inductor_default_comms_ordering(self, device):
