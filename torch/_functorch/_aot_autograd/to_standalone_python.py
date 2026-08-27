@@ -116,7 +116,8 @@ _COMPILE_LOCK = threading.RLock()
 # We do NOT reimplement any of this. We CAPTURE AOTAutograd's exact codegen'd wrapper
 # source together with the (pre-exec) globals dict each wrapper closed over: a
 # thread-local sink in codegen.py records one GeneratedSource per wrapper.
-# To trigger the capture we run AOTAutograd ourselves (under no_grad, the inference path)
+# To trigger the capture we run AOTAutograd ourselves (under no_grad, the inference path --
+# see compile_to_python's ``grad_enabled`` for the one graph shape that needs grad on)
 # with a capture-only inner compiler: it grabs the dense inner graph and returns a
 # placeholder callable, so AOTAutograd still codegen's the runtime-wrapper chain AROUND
 # that placeholder -- which is what the sink records. Inductor does not run in that pass;
@@ -827,7 +828,12 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     strides has static sizes, and treating it as static would silently specialize the
     artifact to the example strides. (Unbacked symints appearing only in intermediates,
     not on any placeholder, are still missed here, but such a graph fails loudly
-    downstream when emit_value rejects the still-symbolic metadata.)"""
+    downstream when emit_value rejects the still-symbolic metadata.)
+
+    Both metadata keys are checked, like ``_resolve_fake_mode``: make_fx stashes the fake
+    under "val", while a Dynamo graph (which torch.compiler.precompile's dynamo tracer
+    feeds here) stashes it under "example_value" -- reading only "val" would call a
+    dynamic Dynamo graph static and silently specialize it to the example sizes."""
     import torch
 
     def _is_symbolic(v: Any) -> bool:
@@ -836,15 +842,16 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     for node in gm.graph.nodes:
         if node.op != "placeholder":
             continue
-        val = node.meta.get("val")
-        if _is_symbolic(val):
-            return True
-        if isinstance(val, torch.Tensor) and (
-            any(_is_symbolic(s) for s in val.shape)
-            or any(_is_symbolic(s) for s in val.stride())
-            or _is_symbolic(val.storage_offset())
-        ):
-            return True
+        for key in ("val", "example_value"):
+            val = node.meta.get(key)
+            if _is_symbolic(val):
+                return True
+            if isinstance(val, torch.Tensor) and (
+                any(_is_symbolic(s) for s in val.shape)
+                or any(_is_symbolic(s) for s in val.stride())
+                or _is_symbolic(val.storage_offset())
+            ):
+                return True
     return False
 
 
@@ -853,8 +860,20 @@ def compile_to_python(
     example_inputs: Sequence[Any],
     *,
     options: dict[str, Any] | None = None,
+    grad_enabled: bool = False,
 ) -> tuple[str, bytes | None]:
     """Compile ``gm`` to ``(python_code, cache)``; see the module docstring.
+
+    ``grad_enabled`` runs the AOTAutograd capture pass under ``enable_grad`` instead of the
+    default ``no_grad``. Pass it ONLY for a graph that performs autograd INTERNALLY -- a
+    Dynamo graph captured with ``trace_autograd_ops``, whose traced ``torch.autograd.grad``
+    call needs a live autograd graph to differentiate and otherwise fails the capture pass
+    with "element 0 of tensors does not require grad". Such a graph is still an INFERENCE
+    graph at the AOT boundary (its backward lives inside the traced call, so AOTAutograd
+    still emits exactly one forward module). Do NOT pass it for an ordinary graph whose
+    INPUTS require grad: ``no_grad`` is what pins AOTAutograd to the inference path there,
+    and enabling grad would make it emit a joint forward+backward the standalone composer
+    cannot compose.
 
     THREADING: serialized by a process-global lock (``_COMPILE_LOCK``). The wrapper-source
     capture is thread-local, but the AOTAutograd pass and the inner inductor compile both
@@ -950,7 +969,7 @@ def compile_to_python(
             "from_graph" if _graph_has_dynamic_shapes(gm) else "from_example_inputs"
         )
         with (
-            torch.no_grad(),
+            torch.enable_grad() if grad_enabled else torch.no_grad(),
             _standalone_context(gm, shapes_mode, aot=False),
             capture_generated_sources(captured),
         ):
