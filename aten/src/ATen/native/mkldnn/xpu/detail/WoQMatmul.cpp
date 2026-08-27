@@ -32,7 +32,7 @@ void woq_matmul_int4_impl(
   // xxx_usr_md would describe the real layout of inputs
   auto m1_usr_dt = get_onednn_dtype(m1); // e.g., half <==> f16
   auto m2_usr_dt = get_onednn_dtype(m2); // int32 tensor, pack 8 int4
-  auto scale_usr_dt = get_onednn_dtype(scale_); // bf16 or f32
+  auto scale_usr_dt = get_onednn_dtype(scale_); // bf16, fp16, or f32
   auto dst_usr_dt = get_onednn_dtype(dst); // bf16
 
   dnnl::memory::dims m1_usr_dims, m2_usr_dims, scale_usr_dims, dst_usr_dims;
@@ -69,7 +69,7 @@ void woq_matmul_int4_impl(
   // Tell oneDNN the weight dtype we want manipulate is u4,
   // library needs infer how to unpack u4 data based on the m2_usr_md (s32).
   auto m2_dt = dnnl::memory::data_type::u4;
-  auto scale_dt = scale_usr_dt; // bf16 or f32
+  auto scale_dt = scale_usr_dt; // bf16, fp16, or f32
   auto dst_dt = dst_usr_dt;
 
   dnnl::memory::desc m1_md, m2_md, scale_md, dst_md;
@@ -120,12 +120,18 @@ void woq_matmul_int4_impl(
       /* mask */ (1 << 0) + (1 << 1),
       {group_size, 1},
       scale_dt);
-  // Set zero points only for asymmetric quantization.
+  // Set zero point: scalar for symmetric, per-group for asymmetric
   if (zp.has_value()) {
     pattr.set_zero_points(
         DNNL_ARG_WEIGHTS,
         (1 << 0) + (1 << 1),
         {group_size, 1},
+        dnnl::memory::data_type::s8);
+  } else {
+    pattr.set_zero_points(
+        DNNL_ARG_WEIGHTS,
+        /* mask */ 0,
+        {},
         dnnl::memory::data_type::s8);
   }
 
@@ -169,17 +175,24 @@ static inline void set_quant_primitive_attr(
     const Tensor& scale,
     const std::optional<Tensor>& zp,
     const int64_t group_size) {
-  // set scale and zero point for matmul args
+  // set scale for matmul args
   pattr.set_scales(
       DNNL_ARG_WEIGHTS,
       /* mask */ (1 << 0) + (1 << 1),
       {group_size, 1},
       get_onednn_dtype(scale));
+  // set zero point: scalar for symmetric, per-group for asymmetric
   if (zp.has_value()) {
     pattr.set_zero_points(
         DNNL_ARG_WEIGHTS,
         /* mask */ (1 << 0) + (1 << 1),
         {group_size, 1},
+        memory::data_type::s8);
+  } else {
+    pattr.set_zero_points(
+        DNNL_ARG_WEIGHTS,
+        /* mask */ 0,
+        {},
         memory::data_type::s8);
   }
 }
@@ -235,7 +248,7 @@ void woq_matmul_int4_impl_cache(
 #endif
   };
 
-  int64_t zp_group_size = group_size;
+  int64_t zp_group_size = zp.has_value() ? group_size : 1;
   auto device_id = c10::xpu::current_device();
   auto& matmul_ext = matmul_primitive_create_and_cache(
       jd,
@@ -250,7 +263,8 @@ void woq_matmul_int4_impl_cache(
       device_id,
       f_attr,
       group_size,
-      zp_group_size);
+      zp_group_size,
+      static_cast<int>(scale.scalar_type()));
 
   auto& engine = GpuEngineManager::Instance().get_engine();
 
@@ -261,7 +275,7 @@ void woq_matmul_int4_impl_cache(
             get_onednn_md(scale), engine, scale.data_ptr());
       });
 
-  // set zp_md for asymmetric quantization
+  // set zp: per-group for asymmetric, scalar zero for symmetric
   if (zp.has_value()) {
     matmul_ext.set_attribute(
         DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, zp->data_ptr(), [&]() {
@@ -271,6 +285,14 @@ void woq_matmul_int4_impl_cache(
               engine,
               zp->data_ptr());
           return zp_usr_m;
+        });
+  } else {
+    static int8_t zero_val = 0;
+    matmul_ext.set_attribute(
+        DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, &zero_val, [&]() {
+          memory zp_scalar_m(
+              {{1}, memory::data_type::s8, {1}}, engine, &zero_val);
+          return zp_scalar_m;
         });
   }
 
