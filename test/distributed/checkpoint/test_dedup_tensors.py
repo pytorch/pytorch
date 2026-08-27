@@ -6,7 +6,11 @@ import torch
 from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 from torch.distributed.checkpoint.planner import SavePlan, WriteItemType
 from torch.distributed.checkpoint.planner_helpers import _create_write_item_for_tensor
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def create_plan(second_fqn: str) -> SavePlan:
@@ -36,6 +40,8 @@ class TestDedupTensor(TestCase):
     """
     Test class for deduplication of tensor write items across different ranks.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_dedup_shards(self):
         rank0 = create_plan("r0")
