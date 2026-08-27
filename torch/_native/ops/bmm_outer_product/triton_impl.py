@@ -71,14 +71,12 @@ def _bmm_outer_product_cond(
     # a and b are read-only here: the kernel wraps them in ConstTensorWrapper and
     # reads through const_data_ptr(), so copy-on-write inputs are not
     # materialized and need not be excluded.
-    if (
+    return (
         _is_acc_tensor(a)
         and a.device == b.device
         and _is_outer_product(a, b)
         and _is_hip_grid_safe(a, b)
-    ):
-        return True
-    return False
+    )
 
 
 def _register_for_dispatch_key(dispatch_key: str) -> None:
