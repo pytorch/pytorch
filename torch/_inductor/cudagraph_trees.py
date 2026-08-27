@@ -105,7 +105,6 @@ if TYPE_CHECKING:
 
     from torch._guards import CompileId
     from torch._inductor.utils import InputType
-    from torch.cuda import _POOL_HANDLE
     from torch.types import _bool
 
 StorageWeakRefPointer = int
@@ -170,7 +169,7 @@ def _graph_device_interface(device_type: str | None = None) -> type[DeviceInterf
     return get_interface_for_device(device_type or _graph_capture_device_type())
 
 
-def clear_cublass_cache() -> None:
+def clear_cublass_cache(device_type: str) -> None:
     """
     Cublas keeps a persistent workspace allocation for running matmuls. This poses a problem for
     doing warmup within a CUDAGraph private pool because we do not want persistent allocations from
@@ -183,7 +182,7 @@ def clear_cublass_cache() -> None:
     it will be allocated to the cudagraph private pool and accounted for in the allocator for the duration of the
     program. There is no overhead to this on replay since cudagraphs removes allocation overhead.
     """
-    if _graph_capture_device_type() != "cuda":
+    if device_type != "cuda":
         # cublas workspaces are a CUDA-only concern; other backends have
         # nothing to clear here.
         return
@@ -191,18 +190,18 @@ def clear_cublass_cache() -> None:
 
 
 @contextlib.contextmanager
-def clear_cublas_manager() -> Generator[None, None, None]:
+def clear_cublas_manager(device_type: str) -> Generator[None, None, None]:
     "Context manager around clearing cublas caches that will clear on enter and exit"
-    clear_cublass_cache()
+    clear_cublass_cache(device_type)
     try:
         yield
     finally:
-        clear_cublass_cache()
+        clear_cublass_cache(device_type)
 
 
 @contextlib.contextmanager
-def disable_conv_cache_emptying() -> Generator[None, None, None]:
-    if _graph_capture_device_type() != "cuda":
+def disable_conv_cache_emptying(device_type: str) -> Generator[None, None, None]:
+    if device_type != "cuda":
         # cudnn benchmark cache emptying is a CUDA-only concern.
         yield
         return
@@ -215,9 +214,9 @@ def disable_conv_cache_emptying() -> Generator[None, None, None]:
 
 
 @contextlib.contextmanager
-def enable_history_recording() -> Generator[None, None, None]:
+def enable_history_recording(device_type: str) -> Generator[None, None, None]:
     "Turns on history recording in the CUDA Caching Allocator"
-    if _graph_capture_device_type() != "cuda":
+    if device_type != "cuda":
         # Allocator history recording is only wired up for CUDA.
         yield
         return
@@ -231,11 +230,11 @@ def enable_history_recording() -> Generator[None, None, None]:
             torch.cuda.memory._record_memory_history(None)
 
 
-def get_history_recording() -> AbstractContextManager[None]:
+def get_history_recording(device_type: str) -> AbstractContextManager[None]:
     # TODO - remove, prevents cleanup
     if not config.triton.cudagraph_trees_history_recording:
         return contextlib.nullcontext()
-    return enable_history_recording()
+    return enable_history_recording(device_type)
 
 
 class TreeManagerContainer:
@@ -860,8 +859,8 @@ class CUDAWarmupNode:
 
         with (
             self.device_interface.device(self.device_index),
-            disable_conv_cache_emptying(),
-            clear_cublas_manager(),
+            disable_conv_cache_emptying(self.device_type),
+            clear_cublas_manager(self.device_type),
             _use_cuda_memory_pool_manager(
                 self.device_interface,
                 self.device_type,
@@ -872,7 +871,7 @@ class CUDAWarmupNode:
             # NB: must go after _use_cuda_memory_pool_manager which switches the stream
             _update_current_stream_external_object(self.device_interface),
             ControlFlowOpWarmupDispatchMode(),
-            get_history_recording(),
+            get_history_recording(self.device_type),
         ):
             out = self.wrapped_function.model(new_inputs)
 
@@ -1019,7 +1018,7 @@ class CUDAGraphNode:
         id: GraphID,
         parent: CUDAGraphNode | None,
         inputs: list[InputType],
-        cuda_graphs_pool: _POOL_HANDLE,
+        cuda_graphs_pool: tuple[int, int],
         device_index: int,
         stack_traces: StackTraces | None,
         stream: torch.Stream,
@@ -1528,7 +1527,7 @@ class CUDAGraphNode:
             with (
                 preserve_rng_state(),
                 self.device_interface.device(self.device),
-                clear_cublas_manager(),
+                clear_cublas_manager(self.device_type),
                 _use_cuda_memory_pool_manager(
                     self.device_interface,
                     self.device_type,
@@ -1539,7 +1538,7 @@ class CUDAGraphNode:
                 # NB: must go after _use_cuda_memory_pool_manager which switches the stream
                 _update_current_stream_external_object(self.device_interface),
                 ControlFlowOpWarmupDispatchMode(),
-                get_history_recording(),
+                get_history_recording(self.device_type),
             ):
                 static_outputs = model(inputs)
             if len(inputs) != 0:
@@ -1577,7 +1576,7 @@ class CUDAGraphNode:
         with (
             preserve_rng_state(),
             self.device_interface.device(self.device),
-            clear_cublas_manager(),
+            clear_cublas_manager(self.device_type),
             self.device_interface.GraphOps.capture_context(
                 self.graph,
                 self.stream,
@@ -1586,7 +1585,7 @@ class CUDAGraphNode:
             # NB: must go after the capture context which switches the stream
             _update_current_stream_external_object(self.device_interface),
             CUDAGraphCaptureControlFlowOpDispatchMode(),
-            get_history_recording(),
+            get_history_recording(self.device_type),
         ):
             static_outputs = model(inputs)
 
@@ -1932,7 +1931,9 @@ class CUDAGraphNode:
 
         nodes = list(self._path_from_root)
 
-        live_blocks = get_block_addrs(self.cuda_graphs_pool)
+        live_blocks = get_block_addrs(
+            self.cuda_graphs_pool, device_interface=self.device_interface
+        )
 
         live_storage_data_ptrs = OrderedSet[Any]()
         live_storage_weak_ptrs = OrderedSet[Any]()
@@ -2271,10 +2272,14 @@ def get_cudagraph_segments(
     return [segment for segment in segments if segment["segment_pool_id"] == pool_id]
 
 
-def get_block_addrs(pool_id: tuple[int, int], live_only: bool = True) -> list[int]:
+def get_block_addrs(
+    pool_id: tuple[int, int],
+    live_only: bool = True,
+    device_interface: type[DeviceInterface] | None = None,
+) -> list[int]:
     blocks = []
 
-    for segment in get_cudagraph_segments(pool_id) or []:
+    for segment in get_cudagraph_segments(pool_id, device_interface) or []:
         addr = segment["address"]
         for block in segment["blocks"]:
             if block["state"] == "active_allocated" or not live_only:
@@ -2323,6 +2328,10 @@ def check_memory_pool(
         # No snapshot API on this backend: without segment data the
         # divergence cannot be attributed, and reporting every live storage
         # as leaked would be misleading. Skip the debug-only deep check.
+        # (Only reachable for a backend that implements
+        # check_pool_live_allocations but not memory_snapshot — the
+        # check_pool_live_allocations call above already raised
+        # NotImplementedError for a backend that implements neither.)
         return
 
     allocated_not_in_live_storages = {}
@@ -2958,7 +2967,7 @@ class CUDAGraphTreeManager:
         fn = functools.partial(self.run, function_id=id)
 
         # container needs to set clean up when fn dies
-        get_container(self.device_index).add_strong_reference(fn)
+        get_container(self.device_index, self.device_type).add_strong_reference(fn)
         return fn, fn(inputs)
 
     @property
