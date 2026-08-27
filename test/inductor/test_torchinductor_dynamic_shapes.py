@@ -47,6 +47,7 @@ from torch.testing._internal.inductor_utils import (
 )
 from torch.utils._triton import has_triton
 
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
@@ -57,6 +58,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     copy_tests,
     TestFailure,
 )
+
 
 importlib.import_module("filelock")
 
@@ -1343,9 +1345,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
             """Reduce over a dimension with bounded size."""
             # x shape: [batch, features, reduction_dim]
             # reduction_dim is dynamic but bounded to max 128
-            assert (
-                x.shape[2] <= 64
-            ), f"Reduction dim {x.shape[2]} exceeds max 128"  # noqa: S101
+            assert x.shape[2] <= 64, f"Reduction dim {x.shape[2]} exceeds max 128"  # noqa: S101
 
             # Perform reduction (sum) over the last dimension
             result = torch.sum(x * y, dim=2)
