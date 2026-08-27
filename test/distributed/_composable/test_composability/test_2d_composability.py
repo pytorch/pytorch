@@ -46,6 +46,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_fsdp import FSDPTestContinuous, MLP, MLPStack
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     instantiate_parametrized_tests,
     MI200_ARCH,
     parametrize,
@@ -62,11 +63,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 curr_backend = dist.get_default_backend_for_device(device_type)
 
 

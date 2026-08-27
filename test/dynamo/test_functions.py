@@ -36,6 +36,7 @@ from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -45,9 +46,7 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import *  # noqa: F403
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 T = TypeVar("T")
 

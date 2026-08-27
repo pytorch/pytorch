@@ -31,13 +31,14 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TestCase,
 )
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 logger = logging.getLogger(__name__)
 

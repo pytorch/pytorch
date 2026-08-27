@@ -10,11 +10,16 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import checkpoint
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
+    run_tests,
+    TEST_XPU,
+    TestCase,
+)
 from torch.utils.checkpoint import CheckpointError
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 class MemoryDelta(ContextDecorator):

@@ -50,6 +50,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     instantiate_parametrized_tests,
     parametrize,
     skipIfXpu,
@@ -67,7 +68,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
     """
 
-    device = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+    device = ACCELERATOR_TYPE.value or "cpu"
 
     def get_world_trs(self):
         return {

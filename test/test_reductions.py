@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfMPS,
     skipIfTorchDynamo,
+    ACCELERATOR_TYPE,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA,
@@ -31,9 +32,7 @@ from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 # TODO: replace with make_tensor

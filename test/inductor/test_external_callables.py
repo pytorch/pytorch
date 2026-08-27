@@ -5,10 +5,10 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import TEST_XPU
+from torch.testing._internal.common_utils import ACCELERATOR_TYPE, TEST_XPU
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 class MatMulModule(torch.nn.Module):

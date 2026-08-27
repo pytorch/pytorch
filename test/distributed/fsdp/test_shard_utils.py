@@ -7,7 +7,7 @@ from torch.distributed.fsdp._shard_utils import (
     _create_chunk_sharded_tensor,
 )
 from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import ACCELERATOR_TYPE, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -15,7 +15,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 class TestShardUtilsDistributed(FSDPTest):

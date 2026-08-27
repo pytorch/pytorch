@@ -40,6 +40,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_win32,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -55,11 +56,7 @@ except ImportError:
     HAS_TORCHVISION = False
 
 
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 @contextmanager

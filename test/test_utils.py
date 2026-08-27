@@ -12,7 +12,7 @@ import textwrap
 import traceback
 import unittest
 import warnings
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.cuda
@@ -29,6 +29,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+    ACCELERATOR_TYPE,
     IS_FBCODE,
     IS_SANDCASTLE,
     IS_WINDOWS,
@@ -54,9 +55,7 @@ from torch.utils.data import DataLoader
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests  # noqa: PLW0127
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+device_type = cast(str, ACCELERATOR_TYPE.value or "cpu")
 TEST_GPU = torch.xpu.is_available() or torch.cuda.is_available()
 
 from torch.testing._internal.common_utils import run_tests, TestCase

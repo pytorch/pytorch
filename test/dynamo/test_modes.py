@@ -22,16 +22,14 @@ from torch.overrides import (
 from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
 )
-from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.common_utils import ACCELERATOR_TYPE, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 class TestMode(BaseTorchFunctionMode):

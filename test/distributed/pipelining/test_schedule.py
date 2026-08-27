@@ -48,6 +48,7 @@ from torch.distributed.pipelining.schedules import (
 from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     check_leaked_tensors,
     instantiate_parametrized_tests,
     parametrize,
@@ -59,11 +60,7 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
 
-device = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
+device = ACCELERATOR_TYPE.value or "cpu"
 logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 

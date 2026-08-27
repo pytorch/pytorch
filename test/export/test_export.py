@@ -71,6 +71,7 @@ from torch.testing._internal.common_cuda import (
     xfailIfDistributedNotSupported,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     find_library_location,
     IS_FBCODE,
     IS_MACOS,
@@ -127,7 +128,7 @@ except ImportError:
 from torch.export import export
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 torch.library.define("testlib::returns_tensor_symint", "(Tensor x) -> (Tensor, SymInt)")
 torch.library.define(

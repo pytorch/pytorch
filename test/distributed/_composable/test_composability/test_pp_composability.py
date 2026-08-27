@@ -35,6 +35,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -47,11 +48,7 @@ if TYPE_CHECKING:
     from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
 
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 backend = torch.distributed.get_default_backend_for_device(device_type)
 
 

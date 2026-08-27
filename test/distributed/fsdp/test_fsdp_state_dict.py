@@ -61,6 +61,7 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -97,7 +98,7 @@ STATE_DICT_MAPPING = {
     "sharded_state_dict": StateDictType.SHARDED_STATE_DICT,
 }
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 class Model(Module):

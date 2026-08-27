@@ -17,6 +17,7 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -30,7 +31,7 @@ d_hid = 512
 batch_size = 256
 chunks = 8
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 backend = dist.get_default_backend_for_device(device_type)
 
 torch.manual_seed(0)

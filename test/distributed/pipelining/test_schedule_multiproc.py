@@ -42,6 +42,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     check_leaked_tensors,
     instantiate_parametrized_tests,
     parametrize,
@@ -56,7 +57,7 @@ logger = logging.getLogger(__name__)
 d_hid = 512
 batch_size = 64
 torch.manual_seed(0)
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 backend = dist.get_default_backend_for_device(device_type)
 
 

@@ -8,16 +8,14 @@ from torch.distributed.tensor import DeviceMesh, DTensor, Shard
 from torch.distributed.tensor._redistribute import use_min_cost_redistribution_plan
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import ACCELERATOR_TYPE, run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 c10d_functional = torch.ops.c10d_functional
 c10d_ops = torch.ops.c10d
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 class TestCommMode(TestCase):

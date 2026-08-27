@@ -109,6 +109,7 @@ from torch.distributions.utils import (
 from torch.nn.functional import softmax
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     gradcheck,
     load_tests,
     run_tests,
@@ -120,7 +121,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings

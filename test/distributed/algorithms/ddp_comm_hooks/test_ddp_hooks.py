@@ -21,7 +21,11 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -29,11 +33,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 def gpus_for_rank(world_size):

@@ -6,12 +6,11 @@ import torch
 from torch._dynamo.callback import callback_handler, CallbackArgs, CallbackTrigger
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._guards import CompileId
+from torch.testing._internal.common_utils import ACCELERATOR_TYPE
 from torch.testing._internal.triton_utils import HAS_CUDA_AND_TRITON, requires_gpu
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
 
 
 class CallbackTests(TestCase):

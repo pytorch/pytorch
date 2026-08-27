@@ -13,6 +13,7 @@ if not dist.is_available():
 
 from torch.testing._internal.common_distributed import DistributedTestBase, TEST_SKIPS
 from torch.testing._internal.common_utils import (
+    ACCELERATOR_TYPE,
     run_tests,
     skipIfHpu,
     TEST_WITH_DEV_DBG_ASAN,
@@ -26,11 +27,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
+device_type = ACCELERATOR_TYPE.value or "cpu"
+
 device_count = torch.accelerator.device_count()
 
 
