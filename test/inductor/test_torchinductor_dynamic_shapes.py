@@ -28,16 +28,16 @@ from torch.testing._internal.common_device_type import (
     skipIf,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_FBCODE,
     MI350_ARCH,
-    TEST_CUDA_MEM_LEAK_CHECK,
-    TEST_WITH_ASAN,
-    HardwareClassification,
     parametrize,
     serialTest,
     skipIfRocm,
     skipIfRocmArch,
+    TEST_CUDA_MEM_LEAK_CHECK,
+    TEST_WITH_ASAN,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -47,7 +47,6 @@ from torch.testing._internal.inductor_utils import (
     patch_inductor_backend,
 )
 from torch.utils._triton import has_triton
-
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -59,7 +58,6 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     copy_tests,
     TestFailure,
 )
-
 
 importlib.import_module("filelock")
 
@@ -1400,7 +1398,9 @@ class TestInductorDynamic(DynamicShapesTestCase):
             """Reduce over a dimension with bounded size."""
             # x shape: [batch, features, reduction_dim]
             # reduction_dim is dynamic but bounded to max 128
-            assert x.shape[2] <= 64, f"Reduction dim {x.shape[2]} exceeds max 128"  # noqa: S101
+            assert (
+                x.shape[2] <= 64
+            ), f"Reduction dim {x.shape[2]} exceeds max 128"  # noqa: S101
 
             # Perform reduction (sum) over the last dimension
             result = torch.sum(x * y, dim=2)
