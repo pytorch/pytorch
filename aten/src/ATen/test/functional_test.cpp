@@ -45,6 +45,14 @@ TEST(FMapTest, RvalueVectorReusesStorageForSameType) {
   EXPECT_EQ(result, (std::vector<int>{2, 3, 4}));
 }
 
+TEST(FMapTest, RvalueBoolVectorSupportsProxyReferences) {
+  std::vector<bool> inputs{true, false, true};
+
+  auto result = c10::fmap(std::move(inputs), [](bool input) { return !input; });
+
+  EXPECT_EQ(result, (std::vector<bool>{false, true, false}));
+}
+
 TEST(FMapTest, RvalueVectorConsumesElementsWhenCallableAcceptsValue) {
   std::vector<std::unique_ptr<int>> inputs;
   inputs.emplace_back(std::make_unique<int>(3));
@@ -106,4 +114,60 @@ TEST(FMapTest, RvalueVectorConstructorConsumesElements) {
   ASSERT_EQ(result.size(), 2);
   EXPECT_EQ(*result[0], 7);
   EXPECT_EQ(*result[1], 8);
+}
+
+TEST(FMapTest, RvalueVectorConstructorReusesStorageForSameType) {
+  std::vector<int> inputs{1, 2, 3};
+  const auto* data = inputs.data();
+
+  auto result = c10::fmap<int>(std::move(inputs));
+
+  EXPECT_EQ(result.data(), data);
+  EXPECT_EQ(result, (std::vector<int>{1, 2, 3}));
+}
+
+TEST(FilterTest, RvalueVectorReusesStorage) {
+  std::vector<int> inputs{1, 2, 3, 4};
+  const auto* data = inputs.data();
+
+  auto result =
+      c10::filter(std::move(inputs), [](int input) { return input % 2 == 0; });
+
+  EXPECT_EQ(result.data(), data);
+  EXPECT_EQ(result, (std::vector<int>{2, 4}));
+}
+
+TEST(FilterTest, RvalueVectorSupportsMoveOnlyElements) {
+  std::vector<std::unique_ptr<int>> inputs;
+  inputs.emplace_back(std::make_unique<int>(1));
+  inputs.emplace_back(std::make_unique<int>(2));
+  inputs.emplace_back(std::make_unique<int>(3));
+
+  auto result = c10::filter(
+      std::move(inputs),
+      [](const std::unique_ptr<int>& input) { return *input != 2; });
+
+  ASSERT_EQ(result.size(), 2);
+  EXPECT_EQ(*result[0], 1);
+  EXPECT_EQ(*result[1], 3);
+}
+
+TEST(FilterTest, RvalueVectorFallsBackForCopyOnlyElements) {
+  std::vector<CopyOnly> inputs{CopyOnly(1), CopyOnly(2), CopyOnly(3)};
+
+  auto result = c10::filter(
+      std::move(inputs), [](const CopyOnly& input) { return input.value != 2; });
+
+  ASSERT_EQ(result.size(), 2);
+  EXPECT_EQ(result[0].value, 1);
+  EXPECT_EQ(result[1].value, 3);
+}
+
+TEST(FilterTest, RvalueBoolVectorSupportsProxyReferences) {
+  std::vector<bool> inputs{true, false, true};
+
+  auto result =
+      c10::filter(std::move(inputs), [](bool input) { return input; });
+
+  EXPECT_EQ(result, (std::vector<bool>{true, true}));
 }
