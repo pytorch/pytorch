@@ -1085,11 +1085,19 @@ class CacheabilityValidator:
                 # 2. It only checks for ScriptObject, not FakeScriptObject
                 # Fixing it would also bypass AOTAutogradCache (which calls
                 # _check_can_cache), so we'd need to decouple the two first.
-                if node.op == "getattr" and isinstance(
-                    getattr(self.gm, node.target), torch._C.ScriptObject
+                if (
+                    node.op == "getattr"
+                    and isinstance(node.target, str)
+                    and isinstance(
+                        getattr(self.gm, node.target), torch._C.ScriptObject
+                    )
                 ):
                     self.bypass("Can't cache torchbind objects")
-                if include_constants and node.op == "get_attr":
+                if (
+                    include_constants
+                    and node.op == "get_attr"
+                    and isinstance(node.target, str)
+                ):
                     try:
                         attr = self._get_attr(module, node.target)
                     except AttributeError:
