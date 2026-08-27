@@ -721,6 +721,34 @@ class MatmulTest(TestCaseMPS):
         self.assertEqual(lin_cpu.weight.grad, lin_mps.weight.grad.cpu(), atol=1e-3, rtol=1e-4)
         self.assertEqual(x_cpu.grad, x_mps.grad.cpu(), atol=1e-3, rtol=1e-4)
 
+    # #177116 / #193487: on Apple7/8 the MPS matmul kernels can read past the end of both
+    # operands once K >= 32767 (at exactly 32767, by one term). A = 0 and B = 1 sit inside a
+    # buffer of 1000s, so the exact answer is 0 and any over-read shows up as a multiple of 1e6.
+    # macOS 27 fixed the kernel variant used when m or K is not tile-aligned, so only
+    # m = 128, K = 40000 fails there; the other cases cover older macOS.
+    @parametrize("k", [32767, 40000])
+    @parametrize("m", [25, 128])
+    @parametrize("op", ["bmm", "baddbmm", "addbmm", "matmul", "einsum"])
+    def test_batched_matmul_large_K(self, op, m, k):
+        pad = 1 << 20
+        buf = torch.full((m * k + pad + k * m + pad,), 1000.0, device="mps")
+        a = buf[: m * k].view(1, m, k).zero_()
+        b = buf[m * k + pad : m * k + pad + k * m].view(1, k, m).fill_(1.0)
+        expected = torch.zeros(1, m, m)
+        if op == "bmm":
+            out = torch.bmm(a, b)
+        elif op == "baddbmm":
+            expected = torch.randn(1, m, m)
+            out = torch.baddbmm(expected.to("mps"), a, b)
+        elif op == "addbmm":
+            expected = torch.randn(m, m)
+            out = torch.addbmm(expected.to("mps"), a, b)
+        elif op == "matmul":
+            out = a @ b
+        else:
+            out = torch.einsum("bik,bkj->bij", a, b)
+        self.assertEqual(out.cpu(), expected)
+
 class MPSLeakyReluTest(TestCaseMPS):
     def _npLeakyRelu(self, np_features, negative_slope=0.1):
         return np.maximum(np_features, negative_slope * np_features).astype(np_features.dtype)
