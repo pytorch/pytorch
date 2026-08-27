@@ -476,12 +476,11 @@ test_python_smoke_b200() {
       inductor/test_fp8 \
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
+      python_native/test_cutedsl_smoketest \
       inductor/test_torchinductor \
       inductor/test_async_compile \
       inductor/test_nv_universal_gemm \
       inductor/test_fused_attention \
-      inductor/test_cutedsl_grouped_mm \
-      inductor/test_cutedsl_template \
       $PYTHON_TEST_EXTRA_OPTION \
       --upload-artifacts-while-running
 
@@ -505,12 +504,6 @@ test_python_smoke_b200() {
     --pytest-xdist-workers 32
 
   time python test/run_test.py --include test_linalg -k "mm or addmv" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  # Dynamically discover the DSL override tests so new ones are picked up. This
-  # is the only job with CuTeDSL installed, so they skip everywhere else.
-  # shellcheck disable=SC2046
-  time python test/run_test.py \
-    --include $(find test/python_native -name 'test_*.py' -printf '%P\n' | sed 's|\.py$||; s|^|python_native/|' | sort | tr '\n' ' ') \
-    --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
