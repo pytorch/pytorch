@@ -128,40 +128,14 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
     fi
   done
 
-  # Must follow the chown above: the crossenv is root-owned in the image, and the
-  # cross interpreter cannot read cross/pyvenv.cfg until it is handed to jenkins.
-  #
-  # The crossenv is provisioned for the setup.py era, so the scikit-build-core
-  # front end and backend are missing from it. build, scikit-build-core,
-  # packaging and six are pure Python and come from PyPI. numpy needs a riscv64
-  # wheel, which the RISE project index carries; 1.26.4 matches the Python 3.12
-  # pin in .ci/docker/requirements-ci.txt and is the newest one published there
-  # under a plain linux_riscv64 tag, so it does not depend on crossenv resolving
-  # manylinux glibc tags for the target. Pinning also keeps pip from resolving a
-  # newer numpy that only PyPI has, which would cross-build numpy from an sdist.
-  python -mpip install --extra-index-url https://pypi.riseproject.dev/simple \
-      build "scikit-build-core>=1.0" packaging six numpy==1.26.4
-
   # third_party/protobuf (v21.12) would build a protoc for the target, which this
   # x86_64 host cannot execute, and the workflow no longer registers qemu-riscv64
-  # with binfmt_misc -- that went away with the EC2 build path in #189113. Supply a
-  # host protoc rather than restoring emulation: it is the cross-compilation path
-  # cmake/ProtoBuf.cmake documents, and what conda-forge does for the same reason.
-  #
-  # The version must track third_party/protobuf, because protoc-generated sources
-  # have to stay compatible with the libprotobuf compiled for the target.
-  #
-  # The pixi bootstrap is temporary. It is here rather than in the image so that
-  # iterating on this cross build does not rehash .ci/docker and rebuild every CI
-  # image. Once the build is green this moves into the Dockerfile as an apt install
-  # of protobuf-compiler -- Ubuntu noble ships 3.21.12, the same version -- and the
-  # bootstrap goes away. The image has wget but no curl, which the installer handles.
-  export PIXI_HOME="${HOME}/.pixi"
-  export PIXI_VERSION=v0.70.2
-  export PIXI_NO_PATH_UPDATE=1
-  wget -qO- https://pixi.sh/install.sh | bash
-  "${PIXI_HOME}/bin/pixi" global install "libprotobuf==3.21.12"
-  export CAFFE2_CUSTOM_PROTOC_EXECUTABLE="${PIXI_HOME}/bin/protoc"
+  # with binfmt_misc -- that went away with the EC2 build path in #189113. Use the
+  # host protoc from the image instead, which is the cross-compilation path
+  # cmake/ProtoBuf.cmake documents and what conda-forge does for the same reason.
+  # Ubuntu noble ships protobuf-compiler at 3.21.12, matching the vendored copy, so
+  # generated sources stay compatible with the libprotobuf built for the target.
+  export CAFFE2_CUSTOM_PROTOC_EXECUTABLE=/usr/bin/protoc
 
   # SLEEF generates headers with small host tools (mkrename and friends). Its
   # cross-compilation path imports them from NATIVE_BUILD_DIR; the branch keyed on
