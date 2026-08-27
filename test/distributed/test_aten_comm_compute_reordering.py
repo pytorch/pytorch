@@ -129,7 +129,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         # works around issue with skipif<2 and workers with unpredictable #s gpu
         return 2
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_patches())
     def test_sink_waits(self, device):
@@ -164,7 +164,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(out, correct))
             self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_patches())
     def test_raise_comms(self, device):
@@ -205,7 +205,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(out, correct))
             self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_patches())
     def test_sink_waits_raise_comms(self, device):
@@ -260,7 +260,8 @@ graph():
             self.assertTrue(same(out, correct))
             self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
 
-    @requires_capabilities(Capability.compile.inductor)
+    @requires_capabilities(Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_patches())
     def test_schedulable_wait(self, device):
         """Test that if a wait node is scheduable or not."""
@@ -306,7 +307,7 @@ graph():
                     f"Expected _schedulable_wait_node({node.name}) is {expected}"
                 )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_patches())
     def test_reorder_compute_for_overlap_mul(self, device):
@@ -352,7 +353,7 @@ graph():
             self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
             self.assertTrue(same(out_c, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @skipIfRocm
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
@@ -394,7 +395,7 @@ graph():
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_patches())
     def test_inductor_default_comms_ordering(self, device):
@@ -442,7 +443,7 @@ graph():
             # these have no overlap opportunities
             self.assertEqual(counters["inductor"]["overlap_scheduling_bad_exposed"], 0)
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     def test_overlap_scheduling_via_config(self, device):
         """Test overlap scheduling enabled via config in post_grad pass."""
@@ -479,7 +480,7 @@ graph():
                 self.assertTrue(same(out, correct))
                 self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     def test_overlap_scheduling_flex_attention_backward(self, device):
         device_type = torch.device(device).type
@@ -553,7 +554,7 @@ graph():
             self.assertIsNotNone(v.grad)
             self.assertIsNotNone(bias.grad)
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_patches())
     def test_custom_estimator_for_non_compute_nodes(self, device):
@@ -639,7 +640,7 @@ def get_bucket_patches(compute_multiplier=1.0):
 class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches())
     def test_basic_all_gather_bucketing(self, device):
@@ -680,7 +681,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(inputs_a, inputs_b, inputs_c, ranks=ranks)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches())
     def test_reduce_scatter_bucketing(self, device):
@@ -716,7 +717,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             # correct = func(inputs_a, inputs_b, inputs_c)
             # self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches())
     def test_no_bucketing_with_dependent_hiding_nodes(self, device):
@@ -759,7 +760,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(inputs_a, inputs_b, ranks=ranks)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches())
     def test_no_bucketing_when_collective_depends_on_hiding_node(self, device):
@@ -798,7 +799,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(inputs, ranks=ranks)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches(2.0))
     def test_bucketing_wait_sink(self, device):
@@ -858,7 +859,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, c, d, ranks=ranks)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches(2.0))
     def test_bucketing_split_for_overlap(self, device):
@@ -929,7 +930,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, c, d, ranks=ranks)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches())
     def test_bucket_exposed_with_hidden_single_overlap(self, device):
@@ -981,7 +982,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, c, ranks=ranks)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches(2.0))
     def test_bucketing_split_for_overlap_blocking_deps_inductor(self, device):
@@ -1062,7 +1063,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, c, d, ranks=ranks)
             self.assertTrue(same(test_out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches())
     def test_custom_estimation_with_fake_tensor_mode(self, device):
@@ -1121,7 +1122,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(inputs_a, inputs_b, ranks=ranks)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     def test_collective_benchmarking_with_real_pg(self, device):
         """Test collective benchmarking with real process group (falls back on fake)."""
@@ -1167,7 +1168,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
                 correct = func(inputs)
                 self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {
@@ -1212,7 +1213,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, c, ranks=ranks)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches())
     def test_basic_all_reduce_bucketing(self, device):
@@ -1249,7 +1250,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, c)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches())
     def test_multiple_hiding_nodes_bucketing(self, device):
@@ -1308,7 +1309,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, ranks=ranks)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {
@@ -1366,7 +1367,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, c, d, ranks=ranks)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {
@@ -1435,7 +1436,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
                 "No-op pad/slice may have been eliminated by remove_noop_ops.",
             )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {
@@ -1740,7 +1741,8 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
 
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor)
+    @requires_capabilities(Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     def test_make_graph_view_and_get_subgraph_by_path(self, device):
         device_type = torch.device(device).type
         from torch._inductor.fx_passes.graph_view import (
@@ -1771,7 +1773,8 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
         )
         self.assertEqual([n.name for n in mixed_nodes], ["layers_0_wq"])
 
-    @requires_capabilities(Capability.compile.inductor)
+    @requires_capabilities(Capability.distributed.backend)
+    @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     def test_make_graph_view_and_get_subgraph_by_path_custom_module_stack_fn(self, device):
         device_type = torch.device(device).type
         from torch._dynamo.functional_export import dynamo_graph_capture_for_export
@@ -1846,7 +1849,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             ],
         )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
@@ -1867,7 +1870,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             device_type=device_type,
         )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     def test_manual_bucketing_reordering_pass_all_gather_no_bucket(self, device):
         device_type = torch.device(device).type
@@ -1887,7 +1890,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             device_type=device_type,
         )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
@@ -1905,7 +1908,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             device_type=device_type,
         )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
@@ -2025,7 +2028,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
                     node.meta.get("bucketing_nn_module_stack_sources", None) is not None
                 )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
@@ -2046,7 +2049,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             device_type=device_type,
         )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {"aten_distributed_optimizations.bucket_mode": "custom_ops_multidtype"}
@@ -2064,7 +2067,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             device_type=device_type,
         )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     def test_manual_bucketing_reordering_pass_reduce_scatter_no_bucket(self, device):
         device_type = torch.device(device).type
@@ -2084,7 +2087,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             device_type=device_type,
         )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     def test_manual_bucketing_reordering_pass_all_reduce_separate_buckets(self, device):
         device_type = torch.device(device).type
@@ -2095,7 +2098,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             device_type=device_type,
         )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     def test_manual_bucketing_reordering_pass_all_reduce_single_bucket(self, device):
         device_type = torch.device(device).type
@@ -2106,7 +2109,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             device_type=device_type,
         )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     def test_manual_bucketing_reordering_pass_all_reduce_no_bucket(self, device):
         device_type = torch.device(device).type
@@ -2117,7 +2120,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             device_type=device_type,
         )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {"aten_distributed_optimizations.bucket_mode": "custom_ops"}
@@ -2167,7 +2170,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             )
             self.assertTrue(same(out, func(a, b, ranks=ranks)))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {"aten_distributed_optimizations.bucket_mode": "custom_ops"}
@@ -2284,7 +2287,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
                 .run(str(gm.graph))
             )
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {"aten_distributed_optimizations.bucket_mode": "custom_ops"}
@@ -2338,7 +2341,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             )
             self.assertTrue(same(out, func(a, b, ranks=ranks)))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {"aten_distributed_optimizations.bucket_mode": "custom_ops"}
@@ -2393,7 +2396,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             ).run(str(li[0]))
             self.assertTrue(same(out, func(a, b)))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {"aten_distributed_optimizations.bucket_mode": "default"}
@@ -2449,7 +2452,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, c, ranks=ranks)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {"aten_distributed_optimizations.bucket_mode": "default"}
@@ -2504,7 +2507,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, c)
             self.assertTrue(same(out, correct))
 
-    @requires_capabilities(Capability.compile.inductor, Capability.distributed.backend)
+    @requires_capabilities(Capability.distributed.backend)
     @unittest.skipIf(not HAS_TRITON, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(
         {"aten_distributed_optimizations.bucket_mode": "custom_ops"}
