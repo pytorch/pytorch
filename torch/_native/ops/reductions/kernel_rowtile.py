@@ -672,13 +672,21 @@ def _launch_itree(trait, trait_key, plan, dt, wrap, N, tag, nouts=1):
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_args())
 
 
-def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
+def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1, out=None):
     """Run the inner-tree order for `x`, one launch per stage of its shape.
 
     Serves any trait: `nouts` projected outputs at the end, and the split shape's intermediate
     partials get one buffer PER TRAIT FIELD (an index or Welford accumulator is not one number).
+    `out` names the result tensors to write into (an aten override already owns its output);
+    they must be 1-D unit-stride, which is what the store's wrap declares.
     """
     M, N = x.shape
+
+    def results():
+        if out is not None:
+            return list(out)
+        return [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
+
     dt = _L.torch2cute[x.dtype]
     # A ragged row's stride is not a vec multiple, so the wide load's alignment is only what the
     # gcd allows -- declaring 16 there would be a lie and the load faults.
@@ -687,7 +695,7 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
         x, align=align, ndim=2, read_only=True
     )
     if itree.shape != "split":
-        outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
+        outs = results()
         wrap = lambda: (  # noqa: E731
             [wrap_in()],
             [_L.cute_tensor_dynM(o, ndim=1) for o in outs],
@@ -707,7 +715,7 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
         [_L.cute_tensor_dynM(p, ndim=1) for p in parts],
     )
     _launch_itree(trait, trait_key, itree, dt, wrap1, N, "rowitree1", nouts)
-    outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
+    outs = results()
     wrap2 = lambda: (  # noqa: E731
         [_L.cute_tensor_dynM(p, ndim=1, read_only=True) for p in parts],
         [_L.cute_tensor_dynM(o, ndim=1) for o in outs],
@@ -716,6 +724,22 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
         trait, trait_key, itree_combine_plan(itree), dt, wrap2, N, "rowitree2", nouts
     )
     return tuple(outs)
+
+
+def reduce_row_itree(trait, trait_key, x, out):
+    """The inner-tree order alone, writing rows of 2D `x` into the 1-D `out`.
+
+    The entry point for an override that has already committed to this order (see
+    ops/reductions/ordered.py) rather than picking a fold per launch shape. False means the
+    order has no plan for this shape and the caller must serve it another way -- it never means
+    the result is wrong or partial.
+    """
+    M, N = x.shape
+    itree = itree_plan(N, M, x.element_size())
+    if itree is None:
+        return False
+    _run_itree(trait, trait_key, x, [out.dtype], itree, out=[out])
+    return True
 
 
 def reduce_row_tile(

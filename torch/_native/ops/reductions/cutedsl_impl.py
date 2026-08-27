@@ -213,15 +213,15 @@ def _out_cond(self, dim, keepdim=False, *, dtype=None, out) -> bool:
 
 
 def _sum_into():
-    from .inner_tree_kernel import inner_tree_sum_into
+    from .ordered import sum_into
 
-    return inner_tree_sum_into
+    return sum_into
 
 
 def _prod_into():
-    from .inner_tree_kernel import inner_tree_prod_into
+    from .ordered import prod_into
 
-    return inner_tree_prod_into
+    return prod_into
 
 
 def _run(self: torch.Tensor, d: int, out_kd: torch.Tensor, reduce_into) -> None:

@@ -304,6 +304,30 @@ class TestSumCuteDSLOverride(TestCase):
         self.assertEqual(self._sha(result), "75d8b1a702344e90")
 
     @skipIfRocm
+    def test_entry_point_bits_at_every_plan_shape(self):
+        # The kernel picks a different shape per N (rows inside one thread, warps over baked
+        # batches, a partials pass plus a combine), and the entry point must carry the same bits
+        # for ALL of them. Asserted through ``x.sum`` rather than by calling the kernel, because
+        # what this catches is a launch-shape preference quietly serving some N another way --
+        # which a tolerance compare cannot see, and which happened at the two largest N here.
+        from torch._native.ops.reductions import inner_tree_kernel as ref
+
+        for m, n in [(64, 32), (8, 4096), (8192, 1024), (671, 100000), (256, 262144)]:
+            for dtype, as_int in (
+                (torch.float32, torch.int32),
+                (torch.float64, torch.int64),
+            ):
+                with self.subTest(m=m, n=n, dtype=dtype):
+                    x = torch.randn(m, n, device="cuda", dtype=dtype)
+                    want = torch.empty(m, device="cuda", dtype=dtype)
+                    ref.inner_tree_sum_into(want, x)
+                    torch.cuda.synchronize()
+                    self.assertTrue(
+                        torch.equal(x.sum(dim=1).view(as_int), want.view(as_int)),
+                        f"({m}, {n}) {dtype}: entry point lost the inner-tree bit pattern",
+                    )
+
+    @skipIfRocm
     def test_bitwise(self):
         for dtype_name, dtype in self._DTYPE_MAP.items():
             if dtype == torch.float8_e4m3fn and not PLATFORM_SUPPORTS_FP8:
@@ -369,7 +393,7 @@ class TestSumCuteDSLOverride(TestCase):
         # are functionally supported but not part of the bitwise contract, so
         # compare to ATen with a low-precision tolerance. Covers the multirow,
         # looped, and two-kernel paths.
-        from torch._native.ops.reductions import inner_tree_kernel
+        from torch._native.ops.reductions import ordered
 
         for m, n in [(64, 32), (8, 4096), (8, 65536)]:
             with self.subTest(m=m, n=n):
@@ -381,9 +405,9 @@ class TestSumCuteDSLOverride(TestCase):
                     ref = x.prod(dim=1)
                 with (
                     mock.patch.object(
-                        inner_tree_kernel,
-                        "inner_tree_prod_into",
-                        wraps=inner_tree_kernel.inner_tree_prod_into,
+                        ordered,
+                        "prod_into",
+                        wraps=ordered.prod_into,
                     ) as prod_into,
                 ):
                     got = x.prod(dim=1)
