@@ -316,6 +316,7 @@ class TestFlyDSLTemplate(TestCase):
             ([64, 128], torch.float16, [129, 1], 0, 64),
             ([64, 128], torch.float16, [128, 1], 1, 64),
             ([64, 128], torch.float16, [128, 1], 0, 63),
+            ([70, 128], torch.bfloat16, [1, 72], 0, 64),
         ),
     )
     def test_mm_gate_rejects_invalid_inputs(self, size, dtype, stride, offset, n):
@@ -343,6 +344,85 @@ class TestFlyDSLTemplate(TestCase):
         ):
             result = mm.get_flydsl_mm_template_kwargs(layout, mat1, mat2, True, True)
             self.assertEqual(result, [])
+
+    def test_mm_gate_accepts_all_layouts(self):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+        from torch._inductor.kernel import mm
+        from torch._inductor.kernel.vendored_templates.flydsl import (
+            kernels as flydsl_kernels,
+        )
+
+        def node(size, stride):
+            return SimpleNamespace(
+                get_size=lambda: size,
+                get_stride=lambda: stride,
+                get_dtype=lambda: torch.bfloat16,
+                get_layout=lambda: SimpleNamespace(offset=0),
+            )
+
+        m = n = 64
+        k = 128
+        layout = SimpleNamespace(
+            stride=[n, 1],
+            dtype=torch.bfloat16,
+            device=torch.device("cpu"),
+        )
+        sizevars = SimpleNamespace(
+            statically_known_equals=lambda x, y: x == y,
+            statically_known_multiple_of=lambda x, y: x % y == 0,
+        )
+        gemm_config = {"TILE_M": 128}
+
+        with (
+            V.set_graph_handler(SimpleNamespace(sizevars=sizevars)),
+            mock.patch.object(mm, "use_flydsl_gemm_template", return_value=True),
+            mock.patch.object(mm, "is_unaligned", return_value=False),
+            mock.patch.object(
+                flydsl_heuristics, "get_gemm_configs", return_value=[gemm_config]
+            ),
+            mock.patch.object(
+                flydsl_heuristics,
+                "is_gemm_config_valid_for_shape",
+                return_value=True,
+            ) as validate,
+            mock.patch.dict(
+                flydsl_kernels.__dict__,
+                {"GEMM_DTYPE_BF16": 2, "GEMM_DTYPE_FP16": 3},
+            ),
+        ):
+            for a_is_transposed, b_is_transposed in (
+                (False, False),
+                (False, True),
+                (True, False),
+                (True, True),
+            ):
+                with self.subTest(
+                    a_is_transposed=a_is_transposed,
+                    b_is_transposed=b_is_transposed,
+                ):
+                    mat1_stride = [1, m] if a_is_transposed else [k, 1]
+                    mat2_stride = [1, k] if b_is_transposed else [n, 1]
+                    result = mm.get_flydsl_mm_template_kwargs(
+                        layout,
+                        node([m, k], mat1_stride),
+                        node([k, n], mat2_stride),
+                        True,
+                        True,
+                    )
+
+                    self.assertEqual(len(result), 1)
+                    self.assertEqual(result[0]["A_IS_TRANSPOSED"], a_is_transposed)
+                    self.assertEqual(result[0]["B_IS_TRANSPOSED"], b_is_transposed)
+                    validate.assert_called_once_with(
+                        m,
+                        n,
+                        k,
+                        2,
+                        gemm_config,
+                        a_is_transposed=a_is_transposed,
+                        b_is_transposed=b_is_transposed,
+                    )
+                    validate.reset_mock()
 
     def test_compiled_cache_keys_on_device_and_param(self):
         jit_func = SimpleNamespace()
@@ -407,11 +487,18 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(compile_calls, 1)
         compiled.assert_called_once_with("second")
 
-    def _assert_compiled_mm(self, a, b, *, expect_flydsl: bool | None = True):
+    def _assert_compiled_mm(
+        self,
+        a,
+        b,
+        *,
+        expect_flydsl: bool | None = True,
+        transpose_rhs: bool = True,
+    ):
         from torch._inductor.utils import run_and_get_code
 
         def fn(lhs, rhs):
-            return torch.mm(lhs, rhs.t())
+            return torch.mm(lhs, rhs.t() if transpose_rhs else rhs)
 
         torch._dynamo.reset()
         result, (code,) = run_and_get_code(torch.compile(fn, backend="inductor"), a, b)
@@ -443,9 +530,57 @@ class TestFlyDSLTemplate(TestCase):
                 b = torch.randn(n, k, device="cuda", dtype=dtype)
                 code = self._assert_compiled_mm(a, b)
                 self.assertIn(".mark_layout_dynamic()", code)
-                self.assertIn("mat2.transpose(0, 1)", code)
+                self.assertNotIn("mat2.transpose(0, 1)", code)
+                self.assertIn("_inductor_tensor_arg(mat2)", code)
                 self.assertIn(".run(", code)
                 self.assertIn("TILE_M: fx.Constexpr", code)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+    )
+    def test_flydsl_gemm_all_layouts_e2e(self):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
+
+        m = n = 64
+        k = 96
+        dtype = torch.bfloat16
+        for a_is_transposed, b_is_transposed in (
+            (False, False),
+            (False, True),
+            (True, False),
+            (True, True),
+        ):
+            layout_name = ("t" if a_is_transposed else "n") + (
+                "t" if b_is_transposed else "n"
+            )
+            with self.subTest(layout=layout_name):
+                a = (
+                    torch.randn(k, m, device="cuda", dtype=dtype).t()
+                    if a_is_transposed
+                    else torch.randn(m, k, device="cuda", dtype=dtype)
+                )
+                b = (
+                    torch.randn(n, k, device="cuda", dtype=dtype).t()
+                    if b_is_transposed
+                    else torch.randn(k, n, device="cuda", dtype=dtype)
+                )
+                code = self._assert_compiled_mm(
+                    a,
+                    b,
+                    transpose_rhs=False,
+                )
+                self.assertIn(
+                    f"A_IS_TRANSPOSED: fx.Constexpr = {a_is_transposed}", code
+                )
+                self.assertIn(
+                    f"B_IS_TRANSPOSED: fx.Constexpr = {b_is_transposed}", code
+                )
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
