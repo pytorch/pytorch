@@ -1361,7 +1361,9 @@ static Tensor make_qtensor(
 // as_strided creates a new TensorImpl but shares the storage so for faketensor
 // we need to copy over the metadata like the device and also the faketensormode
 // pointer
-static void copy_fake_tensor_metadata(const Tensor& self, TensorImpl* result) {
+static void maybe_copy_fake_tensor_metadata(
+    const Tensor& self,
+    TensorImpl* result) {
   if (!self.is_fake()) {
     return;
   }
@@ -1383,7 +1385,7 @@ Tensor as_strided_tensorimpl(
       self.key_set(),
       self.dtype());
   setStrided(result, size, stride, storage_offset);
-  copy_fake_tensor_metadata(self, result.unsafeGetTensorImpl());
+  maybe_copy_fake_tensor_metadata(self, result.unsafeGetTensorImpl());
   return result;
 }
 
@@ -1418,7 +1420,7 @@ Tensor as_strided_tensorimpl_meta_symint(
   // bases / storage size.
   setStridedUnchecked(
       result, sym_size, sym_stride, std::move(sym_storage_offset));
-  copy_fake_tensor_metadata(self, result.unsafeGetTensorImpl());
+  maybe_copy_fake_tensor_metadata(self, result.unsafeGetTensorImpl());
   return result;
 }
 
@@ -1985,7 +1987,7 @@ static Tensor alias_with_sizes_and_strides(
   } else {
     self_tmp_->set_sizes_and_strides(sizes, strides, self.storage_offset());
   }
-  copy_fake_tensor_metadata(self, self_tmp_);
+  maybe_copy_fake_tensor_metadata(self, self_tmp_);
   return self_;
 }
 

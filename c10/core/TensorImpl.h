@@ -273,15 +273,15 @@ struct C10_API FakeTensorMode {
         allow_meta_(allow_meta),
         prefer_device_type_(prefer_device_type) {}
 
-  // record the real constant a fake tensor was created from; the constant is
-  // stored on the fake's ExtraMeta so it dies with the tensor
+  // record the real constant a fake tensor was created from, or clear it when
+  // constant is nullptr; the constant is stored on the fake's ExtraMeta so it
+  // dies with the tensor
   void set_constant(
       const c10::intrusive_ptr<c10::TensorImpl>& fake_impl,
       c10::intrusive_ptr<c10::TensorImpl> constant);
-  void clear_constant(const c10::intrusive_ptr<c10::TensorImpl>& fake_impl);
 
   // return the real constant a fake tensor was created from, or nullptr
-  c10::intrusive_ptr<c10::TensorImpl> get_constant(
+  const c10::intrusive_ptr<c10::TensorImpl>& get_constant(
       c10::TensorImpl* fake_impl) const;
   // drop constant tracking for fake tensors aliasing this mutated storage
   void invalidate_constant_aliases(c10::StorageImpl* storage_impl);
@@ -1601,7 +1601,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
   // Used as the identity key for FakeTensorMode constant tracking.
-  // This is for FakeTensor only.
   ExtraMeta* maybe_get_extra_meta() const {
     return extra_meta_.get();
   }
