@@ -543,15 +543,10 @@ Tensor _weight_int4pack_mm_xpu(
 
   auto C = at::empty({M, N}, A.options());
 
-  // When scale dtype differs from activation dtype (e.g. fp32 scales with
-  // bf16 activations), bypass the primitive cache because the cache key
-  // does not include scale dtype and would return a stale primitive.
-  bool use_cache = (qScale.dtype() == A.dtype());
-
   // qscale:[K/qGroupSize, N]
   // qzp:[K/qGroupSize, N] (optional, nullptr for symmetric quantization)
   at::native::onednn::woq_matmul_int4(
-      C, A, B, qScale, qZeros, qGroupSize, use_cache);
+      C, A, B, qScale, qZeros, qGroupSize);
 
   return C;
 }
