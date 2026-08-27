@@ -610,7 +610,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         that AOTAutograd returned the first time it was run. It does this by running the various
         post compile steps that AOTAutograd runs on its compiled artifact after running the fw/bw compilers.
 
-        In the inference path, this consists of the Subclass, FunctionalzedRngRuntime, and RuntimeWrappers.
+        In the inference path, this consists of the Subclass, FunctionalizedRngRuntime, and RuntimeWrappers.
         In the autograd path, this consists of AOTAutogradDispatch.post_compile.
 
         The steps here should match exactly the steps that are run in aot_dispatch_base and aot_dispatch_autograd.
@@ -705,10 +705,14 @@ def deserialize_bundled_cache_entry(
     # In the precompile use case, guards are already serialized
     # by dynamo, so we don't need to add them to the environment
     entry.guards_expr = None
-    # TODO: this isn't exactly right, because cudagraphs needs to be a shared config
-    # which is set by compile_fx. But in precompile, we never actually call compile_fx
-    # so we don't have a place to track cudagraphs here.
-    cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
+    serialized_cudagraphs = getattr(entry.compiled_fw.result, "fx_kwargs", {}).get(
+        "cudagraphs"
+    )
+    cudagraphs = BoxedBool(
+        serialized_cudagraphs.value
+        if isinstance(serialized_cudagraphs, BoxedBool)
+        else torch._inductor.config.triton.cudagraphs
+    )
     boxed_forward_device_index = BoxedDeviceIndex(None)
     # We need to make a clean copy of the cache entry
     # in case it needs to be serialized again

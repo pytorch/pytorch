@@ -302,6 +302,281 @@ if HAS_CUDA_AND_TRITON:
             self.run_twc(foo_opt, zeros)
             self.assertEqual(self.get_root_children(), [0, 0])
 
+        def test_cached_tensor_refcount_signatures(self):
+            # Canary for the exact counting arithmetic the cached-tensor
+            # liveness check depends on. If CPython refcount baselines or the
+            # PyObject-preservation coupling (C++ holder => induced Python
+            # incref) ever change, this fails at the source instead of the
+            # liveness check silently misbehaving.
+            import sys
+
+            @torch.compile(mode="reduce-overhead")
+            def f_nograd(x):
+                return (x * 2.0).relu()
+
+            # Phase 1: no autograd anywhere -- pure cache-only baseline.
+            with torch.no_grad():
+                x = torch.randn(64, 64, device="cuda")
+                for _ in range(3):
+                    out = f_nograd(x)
+                    del out
+            node = next(iter(self.get_manager().get_roots()))
+            cached = node.cached_tensor_outputs
+            idxs = [i for i, tn in enumerate(cached) if tn is not None]
+            self.assertTrue(idxs)
+            for i in idxs:
+                # cache list entry + getrefcount's own argument
+                self.assertEqual(sys.getrefcount(cached[i]), 2)
+                # only the Python wrapper holds the impl
+                self.assertEqual(cached[i]._use_count(), 1)
+            # do not hold references into the manager across phases
+            del node, cached, idxs
+
+            @torch.compile(mode="reduce-overhead")
+            def f(x, w):
+                return torch.tanh(x * w).sum()
+
+            x = torch.randn(64, 64, device="cuda", requires_grad=True)
+            w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
+            # warm/record with the same liveness pattern phase 2 uses (loss
+            # dropped before backward), so replay invariants match
+            for _ in range(3):
+                loss = f(x, w)
+                total = loss + 0.0
+                del loss
+                (g,) = torch.autograd.grad(total, x)
+                del total, g
+
+            # Phase 2: pending backward -- one C++ holder (SavedVariable).
+            loss = f(x, w)
+            total = loss + 0.0
+            del loss
+            node = self.get_manager().current_node
+            cached = node.cached_tensor_outputs
+            saved_idxs = [
+                i
+                for i, tn in enumerate(cached)
+                if tn is not None and tn._use_count() > 1
+            ]
+            self.assertTrue(saved_idxs, "expected a SavedVariable-held output")
+            for i in saved_idxs:
+                # wrapper + SavedVariable
+                self.assertEqual(cached[i]._use_count(), 2)
+                # cache + getrefcount arg + preservation-induced incref
+                self.assertEqual(sys.getrefcount(cached[i]), 3)
+            # implication the detach's safety rests on:
+            # refcount == 2 (cache-only) => no C++ holder exists
+            # (index-only loop: binding the tensor to a local would inflate
+            # every measured refcount past 2 and skip the assert vacuously)
+            implication_checked = 0
+            for i in range(len(cached)):
+                if cached[i] is not None and sys.getrefcount(cached[i]) == 2:
+                    self.assertEqual(cached[i]._use_count(), 1)
+                    implication_checked += 1
+            self.assertGreater(implication_checked, 0)
+
+            # backward releases the SavedVariable: counts return to baseline
+            (g,) = torch.autograd.grad(total, x)
+            del total, g
+            for i in saved_idxs:
+                self.assertEqual(cached[i]._use_count(), 1)
+                self.assertEqual(sys.getrefcount(cached[i]), 2)
+
+            # Phase 3: a Python holder -- refcount rises, use_count does not.
+            out = f(x, w)
+            node = self.get_manager().current_node
+            cached = node.cached_tensor_outputs
+            held = [i for i, tn in enumerate(cached) if tn is not None and tn is out]
+            self.assertTrue(held)
+            for i in held:
+                # cache + getrefcount arg + the user's `out` variable
+                self.assertEqual(sys.getrefcount(cached[i]), 3)
+                self.assertEqual(cached[i]._use_count(), 1)
+
+        def test_held_output_backward_after_other_call(self):
+            # A user-held compiled output must keep its grad_fn across other
+            # compiled calls (which trigger cached-tensor liveness checks and
+            # the stale-autograd-meta detach): backward through it afterwards
+            # must work and be numerically exact.
+            @torch.compile(mode="reduce-overhead")
+            def f(x, w):
+                return torch.tanh(x * w).sum()
+
+            @torch.compile(mode="reduce-overhead")
+            def b(y):
+                return y.sum()
+
+            x = torch.randn(64, 64, device="cuda", requires_grad=True)
+            w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
+            y = torch.randn(8, device="cuda")
+
+            for _ in range(3):
+                out = f(x, w)
+                (g,) = torch.autograd.grad(out, x)
+                del out, g
+                out_b = b(y)
+                del out_b
+
+            out = f(x, w)
+            out_b = b(y)
+            del out_b
+            self.assertIsNotNone(out.grad_fn)
+            (g,) = torch.autograd.grad(out, x)
+            x_ref = x.detach().clone().requires_grad_(True)
+            (g_ref,) = torch.autograd.grad(torch.tanh(x_ref * w).sum(), x_ref)
+            self.assertEqual(g, g_ref)
+
+        def test_cross_graph_stale_grad_fn_bounded_growth(self):
+            # Graph-2's stale grad_fn pins graph-1's output (depth 0); the
+            # liveness sweep must still collapse the pin and keep recordings
+            # bounded in forgot-no_grad inference.
+            @torch.compile(mode="reduce-overhead")
+            def f1(x, w):
+                return torch.tanh(x @ w)
+
+            @torch.compile(mode="reduce-overhead")
+            def f2(y, w2):
+                return torch.tanh(y @ w2).mean()
+
+            w = torch.nn.Parameter(torch.randn(128, 128, device="cuda"))
+            w2 = torch.nn.Parameter(torch.randn(128, 128, device="cuda"))
+            x = torch.randn(32, 128, device="cuda")
+
+            for _ in range(4):
+                out = f2(f1(x, w), w2)
+                del out
+
+            graphs_before = self.get_manager().new_graph_id().id
+            for _ in range(8):
+                out = f2(f1(x, w), w2)
+                del out
+            self.assertEqual(self.get_manager().new_graph_id().id, graphs_before + 1)
+
+        def test_severed_backward_rerecord_repro(self):
+            # Production repro: another root fn runs the liveness sweep while
+            # a backward is pending, then a static-input move forces that
+            # backward to re-record. Saved activations must keep the forward
+            # path alive; historically it was abandoned, raising "Detected N
+            # tensor(s) in the cudagraph pool not tracked as outputs" (or
+            # silently corrupting gradients).
+            @torch.compile(mode="reduce-overhead")
+            def a(x, w):
+                return torch.tanh(x * w).sum()
+
+            # b must not allocate pool blocks that could land on a's freed
+            # activation addresses: a pure reduction on a tiny tensor
+            @torch.compile(mode="reduce-overhead")
+            def b(y):
+                return y.sum()
+
+            # a uses the large-block pool while b stays in the small-block
+            # pool, so their segments never overlap and b cannot clobber
+            # a severed saved activations
+            x = torch.randn(1024, 512, device="cuda", requires_grad=True)
+            w = torch.nn.Parameter(torch.randn(1024, 512, device="cuda"))
+            y = torch.randn(8, device="cuda")
+
+            def a_iter(move_w=False):
+                loss = a(x, w)
+                total = loss + 0.0
+                del loss
+                if move_w:
+                    # b's invocation abandons a's path (its saved activations
+                    # are refcount-discounted), then the static input move
+                    # forces a's backward to re-record off its forward's tree
+                    out_b = b(y)
+                    del out_b
+                    w.data = w.data.clone()
+                (g,) = torch.autograd.grad(total, x)
+                del total
+                return g
+
+            for _ in range(3):
+                a_iter()
+            for _ in range(3):
+                out_b = b(y)
+                del out_b
+                a_iter()
+
+            skips_before = counters["inductor"]["cudagraph_skips"]
+            g = a_iter(move_w=True)
+            # the pending backward's SavedVariable preserves liveness, so the
+            # forward path is never abandoned mid-generation: no severing, no
+            # cudagraph skip
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], skips_before)
+            # the eager fallback must be numerically correct
+            x_ref = x.detach().clone().requires_grad_(True)
+            (g_ref,) = torch.autograd.grad(torch.tanh(x_ref * w).sum(), x_ref)
+            self.assertEqual(g, g_ref)
+            # and no backward may have recorded as a fresh root
+            from torch._inductor.cudagraph_trees import CompilationMode
+
+            mgr = self.get_manager()
+            for fid, nodes in mgr.roots.items():
+                for nd in nodes:
+                    self.assertNotEqual(
+                        mgr.id_to_mode[fid],
+                        CompilationMode.BACKWARD,
+                        msg=f"backward recorded as root node {nd.id.id}",
+                    )
+
+        def test_mark_step_overrides_pending_backward(self):
+            # an explicit generation advance declares prior outputs dead even
+            # with a backward pending (user override beats SavedVariable
+            # liveness): the next replay rebinds the cached output impl to the
+            # new invocation, so differentiating the stale handle raises
+            # rather than the pending backward pinning the old path alive
+            @torch.compile(mode="reduce-overhead")
+            def f(x, w):
+                return torch.tanh(x * w).sum()
+
+            x = torch.randn(64, 64, device="cuda", requires_grad=True)
+            w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
+            for _ in range(3):
+                loss = f(x, w)
+                (g,) = torch.autograd.grad(loss, x)
+                del loss, g
+
+            loss = f(x, w)
+            torch.compiler.cudagraph_mark_step_begin()
+            x2 = torch.randn(64, 64, device="cuda", requires_grad=True)
+            loss2 = f(x2, w)
+            with self.assertRaisesRegex(
+                RuntimeError, "not have been used in the graph"
+            ):
+                torch.autograd.grad(loss, x)
+            # the new invocation's backward is intact and exact
+            (g2,) = torch.autograd.grad(loss2, x2)
+            x_ref = x2.detach().clone().requires_grad_(True)
+            (g_ref,) = torch.autograd.grad(torch.tanh(x_ref * w).sum(), x_ref)
+            self.assertEqual(g2, g_ref)
+
+        def test_grad_accumulation_microbatch_numerics(self):
+            # within one generation, each microbatch's pending backward keeps
+            # its saved activations alive (tree growth, never severing):
+            # accumulated grads must match eager exactly
+            @torch.compile(mode="reduce-overhead")
+            def f(x, w):
+                return torch.tanh(x * w).sum()
+
+            w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
+            xs = [torch.randn(64, 64, device="cuda") for _ in range(2)]
+            for _ in range(3):
+                losses = [f(x, w) for x in xs]
+                for loss in losses:
+                    loss.backward()
+                del losses, loss
+                w.grad = None
+
+            losses = [f(x, w) for x in xs]
+            for loss in losses:
+                loss.backward()
+            del losses, loss
+            w_ref = w.detach().clone().requires_grad_(True)
+            for x in xs:
+                torch.tanh(x * w_ref).sum().backward()
+            self.assertEqual(w.grad, w_ref.grad)
+
         def test_multithreaded_cudagraph_trees(self):
             import queue
             import threading
@@ -504,6 +779,8 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(result, fn(x, y))
             code = codes[0]
+            self.assertIn("def repeated_subgraph0(", code)
+            self.assertGreater(code.count("repeated_subgraph0("), 1)
             self.assertIn("def partition_0(args):", code)
             for match in re.finditer(r"def partition_\d+\(args\):", code):
                 partition_body = _module_def_body(code, match.group())
@@ -512,6 +789,37 @@ if HAS_CUDA_AND_TRITON:
             for _ in range(3):
                 self.assertEqual(opt_fn(x, y), fn(x, y))
             self.assertIsNotNone(self.get_manager())
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", True)
+        @config.patch("triton.cudagraphs", True)
+        @config.patch("triton.slow_path_cudagraph_asserts", True)
+        def test_invoke_subgraph_region_cudagraph_lowering_disabled_body_skips(self):
+            """Verify a lowering-level disable reason prevents region capture."""
+            torch.cuda.empty_cache()
+            pool = torch.cuda.MemPool()
+
+            @torch.compiler.nested_compile_region
+            def g(y):
+                with torch.cuda.use_mem_pool(pool):
+                    return torch.sin(y) + 1
+
+            x = torch.randn(10, 4, device="cuda")
+            opt_fn = torch.compile(g, fullgraph=True)
+            result, codes = run_and_get_code(lambda: opt_fn(x))
+            self.assertEqual(result, g(x))
+            self.assertIn("def repeated_subgraph0(", codes[0])
+            self.assertGreater(codes[0].count("repeated_subgraph0("), 1)
+            for match in re.finditer(r"def partition_\d+\(args\):", codes[0]):
+                self.assertNotIn(
+                    "repeated_subgraph0(", _module_def_body(codes[0], match.group())
+                )
+
+            for _ in range(2):
+                self.assertEqual(opt_fn(x), g(x))
+
+            self.assertIsNone(self.get_manager())
 
         @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
         @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
@@ -548,6 +856,8 @@ if HAS_CUDA_AND_TRITON:
             result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), x, y)
 
             self.assertEqual(result, fn(x, y))
+            self.assertIn("def repeated_subgraph0(", codes[0])
+            self.assertGreater(codes[0].count("repeated_subgraph0("), 1)
             self.assertIn("def partition_0(args):", codes[0])
             for match in re.finditer(r"def partition_\d+\(args\):", codes[0]):
                 self.assertNotIn(
@@ -581,6 +891,8 @@ if HAS_CUDA_AND_TRITON:
             result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), x, y)
 
             self.assertEqual(result, fn(x, y))
+            self.assertIn("def repeated_subgraph0(", codes[0])
+            self.assertGreater(codes[0].count("repeated_subgraph0("), 1)
             self.assertIn("def partition_0(args):", codes[0])
             for match in re.finditer(r"def partition_\d+\(args\):", codes[0]):
                 self.assertNotIn(
@@ -591,21 +903,340 @@ if HAS_CUDA_AND_TRITON:
         @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
         @config.patch("graph_partition", True)
         @config.patch("triton.cudagraphs", True)
+        def test_invoke_subgraph_nested_region_cudagraph_opt_out(self):
+            """Verify an inner region's cudagraph opt-out prevents outer capture."""
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": False}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def inner(y):
+                return torch.sin(y)
+
+            @torch.compiler.nested_compile_region
+            def outer(y):
+                return torch.cos(inner(y))
+
+            x = torch.randn(10, 4, device="cuda")
+            opt_fn = torch.compile(outer, fullgraph=True)
+            for _ in range(3):
+                self.assertEqual(opt_fn(x), outer(x))
+
+            self.assertIsNone(self.get_manager())
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", True)
+        @config.patch("triton.cudagraphs", False)
+        def test_invoke_subgraph_region_cudagraph_opt_in(self):
+            """Verify a region can enable cudagraphs while the enclosing graph is off."""
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(y):
+                return torch.sin(y)
+
+            def fn(x, y):
+                return torch.cos(x) + g(y)
+
+            x = torch.randn(10, 4, device="cuda")
+            y = torch.randn(10, 4, device="cuda")
+            opt_fn = torch.compile(fn, fullgraph=True)
+            result, codes = run_and_get_code(lambda: opt_fn(x, y))
+
+            self.assertEqual(result, fn(x, y))
+            partition_bodies = [
+                _module_def_body(codes[0], match.group())
+                for match in re.finditer(r"def partition_\d+\(args\):", codes[0])
+            ]
+            self.assertEqual(len(partition_bodies), 1)
+            self.assertIn("repeated_subgraph0(", partition_bodies[0])
+            self.assertNotIn("triton_poi_fused_cos", partition_bodies[0])
+
+            for _ in range(3):
+                self.assertEqual(opt_fn(x, y), fn(x, y))
+            manager = self.get_manager()
+            self.assertIsNotNone(manager)
+            self.assertGreater(len(tuple(manager.get_roots())), 0)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @dynamo_config.patch("caching_precompile", True)
+        @torch._functorch.config.patch(
+            {
+                "enable_autograd_cache": True,
+                "bundled_autograd_cache": True,
+                "strict_autograd_cache": True,
+            }
+        )
+        @config.patch(
+            {
+                "fx_graph_cache": True,
+                "fx_graph_remote_cache": False,
+                "graph_partition": True,
+                "triton.cudagraphs": False,
+            }
+        )
+        def test_invoke_subgraph_region_cudagraph_opt_in_bundled_cache(self):
+            from torch._dynamo.package import DynamoCache
+            from torch._dynamo.precompile_context import PrecompileContext
+            from torch._inductor.codecache import PyCodeCache
+            from torch._inductor.cudagraph_trees import reset_cudagraph_trees
+            from torch._inductor.utils import clear_caches, fresh_cache
+            from torch.compiler._cache import CacheArtifactManager
+
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(y):
+                return torch.sin(y)
+
+            def fn(x, y):
+                return torch.cos(x) + g(y)
+
+            x = torch.randn(10, 4, device="cuda")
+            y = torch.randn(10, 4, device="cuda")
+            with fresh_cache():
+                counters.clear()
+                AOTAutogradCache.clear()
+                FxGraphCache.clear()
+                CacheArtifactManager.clear()
+                opt_fn = torch.compile(fn, fullgraph=True)
+                for _ in range(3):
+                    result = opt_fn(x, y)
+                    self.assertEqual(result, fn(x, y))
+                artifacts = torch.compiler.save_cache_artifacts()
+                self.assertIsNotNone(artifacts)
+                artifact_bytes, cache_info = artifacts
+                self.assertEqual(len(cache_info.precompile_artifacts), 1)
+                self.assertGreater(counters["aot_autograd"]["autograd_cache_miss"], 0)
+
+                del result
+                torch._dynamo.reset()
+                reset_cudagraph_trees()
+                self.assertIsNone(
+                    torch._inductor.cudagraph_trees.get_manager(
+                        create_if_none_exists=False
+                    )
+                )
+                AOTAutogradCache.clear()
+                DynamoCache.clear()
+                FxGraphCache.clear()
+                PrecompileContext.clear()
+                PyCodeCache.cache_clear(purge=True)
+                CacheArtifactManager.clear()
+                clear_caches()
+                torch.compiler.load_cache_artifacts(artifact_bytes)
+                counters.clear()
+
+                with torch.compiler.set_stance("fail_on_recompile"):
+                    opt_fn = torch.compile(fn, fullgraph=True)
+                    for _ in range(3):
+                        result = opt_fn(x, y)
+                        self.assertEqual(result, fn(x, y))
+                self.assertGreater(counters["dynamo_cache"]["dynamo_cache_hit"], 0)
+                self.assertEqual(counters["dynamo_cache"]["dynamo_cache_miss"], 0)
+
+            manager = torch._inductor.cudagraph_trees.get_manager(
+                create_if_none_exists=False
+            )
+            self.assertIsNotNone(manager)
+            self.assertGreater(len(tuple(manager.get_roots())), 0)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("freezing", True)
+        @config.patch("graph_partition", True)
+        @config.patch("triton.cudagraphs", True)
+        def test_invoke_subgraph_region_cudagraph_opt_in_with_freezing(self):
+            """Verify freezing keeps top-level cudagraph opt-out work inline."""
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(y):
+                return torch.sin(y)
+
+            @torch._dynamo.override_cudagraphs(fwd=False)
+            def fn(x, y):
+                return torch.cos(x) + g(y)
+
+            x = torch.randn(10, 4, device="cuda")
+            y = torch.randn(10, 4, device="cuda")
+            with torch.no_grad():
+                opt_fn = torch.compile(fn, fullgraph=True)
+                result, codes = run_and_get_code(lambda: opt_fn(x, y))
+                self.assertEqual(result, fn(x, y))
+                partition_bodies = [
+                    _module_def_body(codes[0], match.group())
+                    for match in re.finditer(r"def partition_\d+\(args\):", codes[0])
+                ]
+                self.assertEqual(len(partition_bodies), 1)
+                self.assertIn("repeated_subgraph0(", partition_bodies[0])
+                self.assertNotIn("triton_poi_fused_cos", partition_bodies[0])
+
+                for _ in range(3):
+                    self.assertEqual(opt_fn(x, y), fn(x, y))
+            self.assertIsNotNone(self.get_manager())
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", True)
+        @parametrize("top_level_cudagraphs", (False, True))
+        def test_invoke_subgraph_region_backward_cudagraph_opt_in(
+            self, top_level_cudagraphs
+        ):
+            """Verify a region can enable cudagraphs only for its backward."""
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": False},
+                bw_inductor_config_patches={"triton.cudagraphs": True},
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def fn(x):
+                return torch.sin(x)
+
+            with config.patch("triton.cudagraphs", top_level_cudagraphs):
+                opt_fn = torch.compile(fn, fullgraph=True)
+                x = torch.randn(10, 4, device="cuda", requires_grad=True)
+                result = opt_fn(x)
+                self.assertIsNone(self.get_manager())
+                result.sum().backward()
+                self.assertEqual(result, fn(x))
+                self.assertEqual(x.grad, torch.cos(x))
+
+                for _ in range(2):
+                    x = torch.randn(10, 4, device="cuda", requires_grad=True)
+                    result = opt_fn(x)
+                    result.sum().backward()
+                    self.assertEqual(result, fn(x))
+                    self.assertEqual(x.grad, torch.cos(x))
+
+                manager = self.get_manager()
+                self.assertIsNotNone(manager)
+                self.assertGreater(len(tuple(manager.get_roots())), 0)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", True)
+        @parametrize(
+            "top_level_cudagraphs,separate_backward_config",
+            ((False, False), (True, True)),
+        )
+        def test_invoke_subgraph_same_cudagraph_setting_shares_forward_disable(
+            self, top_level_cudagraphs, separate_backward_config
+        ):
+            """Verify an inherited backward respects a forward-level disable."""
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True},
+                bw_inductor_config_patches=(
+                    {"triton.autotune_at_compile_time": False}
+                    if separate_backward_config
+                    else None
+                ),
+            )
+            disabled_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": False}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x):
+                return torch.sin(x)
+
+            @torch.compiler.nested_compile_region(options=disabled_config)
+            def disabled_g(x):
+                return torch.cos(x)
+
+            def fn(x):
+                result = g(x)
+                if top_level_cudagraphs:
+                    result = result + disabled_g(x)
+                return result
+
+            forward_cudagraphs = None
+            forward_has_skipped_partition = None
+            backward_cudagraphs = None
+            backward_override = object()
+            orig_fw = torch._inductor.compile_fx.compile_fx_forward
+            orig_bw = torch._inductor.compile_fx.compile_fx_backward
+
+            def intercept_fw(*args, **kwargs):
+                nonlocal forward_cudagraphs, forward_has_skipped_partition
+                result = orig_fw(*args, **kwargs)
+                forward_cudagraphs = kwargs["compiler_config_extra"].cudagraphs.value
+                forward_has_skipped_partition = getattr(
+                    result, "has_skipped_cudagraph_partition", False
+                )
+                kwargs["compiler_config_extra"].cudagraphs.value = False
+                return result
+
+            def intercept_bw(gm, example_inputs, compiler_config_extra, **kwargs):
+                nonlocal backward_cudagraphs, backward_override
+                backward_override = compiler_config_extra.cudagraphs_bwd_override
+                inner_compile = kwargs["inner_compile"]
+
+                def intercept_inner_compile(*args, **inner_kwargs):
+                    nonlocal backward_cudagraphs
+                    backward_cudagraphs = inner_kwargs["cudagraphs"].value
+                    return inner_compile(*args, **inner_kwargs)
+
+                kwargs["inner_compile"] = intercept_inner_compile
+                return orig_bw(gm, example_inputs, compiler_config_extra, **kwargs)
+
+            x = torch.randn(10, 4, device="cuda", requires_grad=True)
+            with (
+                config.patch("triton.cudagraphs", top_level_cudagraphs),
+                mock.patch(
+                    "torch._inductor.compile_fx.compile_fx_forward", intercept_fw
+                ),
+                mock.patch(
+                    "torch._inductor.compile_fx.compile_fx_backward", intercept_bw
+                ),
+            ):
+                torch.compile(fn, fullgraph=True)(x).sum().backward()
+
+            self.assertIs(forward_cudagraphs, True)
+            self.assertEqual(forward_has_skipped_partition, top_level_cudagraphs)
+            self.assertIsNone(backward_override)
+            self.assertIs(backward_cudagraphs, False)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", True)
+        @config.patch("triton.cudagraphs", False)
         def test_invoke_subgraph_unannotated_region_stays_in_partition(self):
-            """Verify an inherited region does not split a safe partition."""
+            """Verify an inherited region stays outside an explicit partition."""
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True}
+            )
 
             @torch.compiler.nested_compile_region
             def g(y):
                 return torch.sin(y)
 
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def captured_g(y):
+                return torch.cos(y)
+
             def fn(x):
-                return torch.tan(g(torch.cos(x)))
+                return torch.tan(g(torch.cos(x))) + captured_g(x)
 
             x = torch.randn(10, 4, device="cuda")
             result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), x)
 
             self.assertEqual(result, fn(x))
             self.assertEqual(get_num_partitions(codes), 1)
+            partition = next(
+                _module_def_body(codes[0], match.group())
+                for match in re.finditer(r"def partition_\d+\(args\):", codes[0])
+            )
+            self.assertNotIn("repeated_subgraph0(", partition)
+            self.assertIn("repeated_subgraph1(", partition)
 
         @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
         @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
@@ -674,6 +1305,8 @@ if HAS_CUDA_AND_TRITON:
             result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), x, y)
 
             self.assertEqual(result, fn(x, y))
+            self.assertIn("def repeated_subgraph0(", codes[0])
+            self.assertGreater(codes[0].count("repeated_subgraph0("), 1)
             self.assertIn("def partition_0(args):", codes[0])
             for match in re.finditer(r"def partition_\d+\(args\):", codes[0]):
                 self.assertNotIn(
@@ -684,9 +1317,12 @@ if HAS_CUDA_AND_TRITON:
         @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
         @config.patch("graph_partition", True)
         @config.patch("triton.cudagraphs", True)
-        @parametrize("many_outputs,expect_capture", [(False, True), (True, False)])
+        @parametrize(
+            "many_outputs,expect_capture,global_min_size",
+            [(False, True, 4), (True, False, 0)],
+        )
         def test_invoke_subgraph_region_cudagraph_min_partition_size_counts_body(
-            self, many_outputs, expect_capture
+            self, many_outputs, expect_capture, global_min_size
         ):
             """Verify profitability counts body kernels, not region outputs."""
             nested_config = get_invoke_subgraph_compile_options(
@@ -713,7 +1349,10 @@ if HAS_CUDA_AND_TRITON:
                     return g(x, w0, w1, w2)
 
             inputs = [torch.randn(8, 8, device="cuda") for _ in range(4)]
-            result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *inputs)
+            with config.patch("triton.cudagraph_min_partition_size", global_min_size):
+                result, codes = run_and_get_code(
+                    torch.compile(fn, fullgraph=True), *inputs
+                )
 
             self.assertEqual(result, fn(*inputs))
             region_captured = any(
@@ -721,6 +1360,39 @@ if HAS_CUDA_AND_TRITON:
                 for match in re.finditer(r"def partition_\d+\(args\):", codes[0])
             )
             self.assertEqual(region_captured, expect_capture)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", True)
+        @config.patch("triton.cudagraphs", True)
+        @config.patch("triton.cudagraph_min_partition_size", 3)
+        def test_invoke_subgraph_min_partition_size_counts_nested_body(self):
+            """Verify profitability counts kernels in a nested region body."""
+
+            @torch.compiler.nested_compile_region
+            def inner(x, w0, w1, w2):
+                return ((x @ w0) @ w1) @ w2
+
+            @torch.compiler.nested_compile_region
+            def outer(x, w0, w1, w2):
+                return inner(x, w0, w1, w2)
+
+            inputs = [torch.randn(8, 8, device="cuda") for _ in range(4)]
+            opt_fn = torch.compile(outer, fullgraph=True)
+            result, codes = run_and_get_code(lambda: opt_fn(*inputs))
+
+            self.assertEqual(result, outer(*inputs))
+            self.assertIn("def repeated_subgraph0_repeated_subgraph0(", codes[0])
+            self.assertEqual(get_num_partitions(codes), 1)
+            partition = next(
+                _module_def_body(codes[0], match.group())
+                for match in re.finditer(r"def partition_\d+\(args\):", codes[0])
+            )
+            self.assertIn("repeated_subgraph0(", partition)
+
+            for _ in range(3):
+                self.assertEqual(opt_fn(*inputs), outer(*inputs))
+            self.assertIsNotNone(self.get_manager())
 
         @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
         @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
@@ -759,11 +1431,50 @@ if HAS_CUDA_AND_TRITON:
         @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
         @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
         @config.patch("graph_partition", True)
-        @config.patch("triton.cudagraphs", True)
+        @config.patch("triton.cudagraphs", False)
+        def test_invoke_subgraph_explicit_multi_output_region_replay(self):
+            """Verify a captured region keeps all of its outputs in one partition."""
+            nested_config = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x):
+                return torch.sin(x), torch.cos(x), torch.tan(x)
+
+            def fn(x):
+                a, b, c = g(x)
+                return a + b + c
+
+            x = torch.randn(8, 8, device="cuda")
+            opt_fn = torch.compile(fn, fullgraph=True)
+            result, codes = run_and_get_code(lambda: opt_fn(x))
+
+            self.assertEqual(result, fn(x))
+            region_partitions = [
+                _module_def_body(codes[0], match.group())
+                for match in re.finditer(r"def partition_\d+\(args\):", codes[0])
+                if "repeated_subgraph0(" in _module_def_body(codes[0], match.group())
+            ]
+            self.assertEqual(len(region_partitions), 1)
+            for output_index in range(3):
+                self.assertRegex(region_partitions[0], rf"= \w+\[{output_index}\]")
+
+            for _ in range(3):
+                self.assertEqual(opt_fn(x), fn(x))
+            self.assertIsNotNone(self.get_manager())
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", True)
+        @config.patch("triton.cudagraphs", False)
         def test_invoke_subgraph_min_size_initializes_wrapper_before_scheduler(self):
             """Verify profitability scheduling has an initialized wrapper."""
             nested_config = get_invoke_subgraph_compile_options(
-                fw_inductor_config_patches={"triton.cudagraph_min_partition_size": 1}
+                fw_inductor_config_patches={
+                    "triton.cudagraph_min_partition_size": 1,
+                    "triton.cudagraphs": True,
+                }
             )
 
             @torch.compiler.nested_compile_region(options=nested_config)
@@ -780,10 +1491,13 @@ if HAS_CUDA_AND_TRITON:
                 autospec=True,
                 side_effect=can_reuse,
             ) as can_reuse_mock:
-                result = torch.compile(g, fullgraph=True)(x)
+                opt_g = torch.compile(g, fullgraph=True)
+                for _ in range(3):
+                    result = opt_g(x)
 
             self.assertEqual(result, g(x))
             self.assertGreater(can_reuse_mock.call_count, 0)
+            self.assertIsNotNone(self.get_manager())
 
         @config.patch("triton.cudagraphs", True)
         @config.patch("triton.cudagraph_skip_dynamic_graphs", True)
@@ -886,7 +1600,11 @@ if HAS_CUDA_AND_TRITON:
             nested_output.inputs = []
             nested_output.mutation_outputs = []
 
-            nested_graph = mock.Mock(operations=[], device_types={"cuda"})
+            nested_graph = mock.Mock(
+                operations=[],
+                device_types={"cuda"},
+                disable_cudagraphs_reason=None,
+            )
             nested_subgraph = object.__new__(ir.Subgraph)
             nested_subgraph.graph = nested_graph
             nested_region = object.__new__(ir.InvokeSubgraph)
@@ -899,7 +1617,9 @@ if HAS_CUDA_AND_TRITON:
             nested_output.inputs = [nested_region]
 
             outer_graph = mock.Mock(
-                operations=[nested_region, nested_output], device_types={"cuda"}
+                operations=[nested_region, nested_output],
+                device_types={"cuda"},
+                disable_cudagraphs_reason=None,
             )
             outer_subgraph = object.__new__(ir.Subgraph)
             outer_subgraph.graph = outer_graph
@@ -938,7 +1658,11 @@ if HAS_CUDA_AND_TRITON:
             consumer.get_free_symbol_uses.return_value = {symbol}
             consumer.get_outputs.return_value = []
 
-            body = mock.Mock(operations=[unsafe_op, consumer], device_types={"cuda"})
+            body = mock.Mock(
+                operations=[unsafe_op, consumer],
+                device_types={"cuda"},
+                disable_cudagraphs_reason=None,
+            )
             subgraph = object.__new__(ir.Subgraph)
             subgraph.graph = body
             region = object.__new__(ir.InvokeSubgraph)
@@ -5411,6 +6135,70 @@ if HAS_CUDA_AND_TRITON:
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_single_captured_partition_saved_activation(self):
+            from torch._inductor.utils import count_tangents, get_static_bw_input_idxs
+
+            forward_partition_count = None
+            forward_has_skipped_partition = None
+            forward_partitioned = None
+            backward_static_input_idxs = None
+            backward_primal_static_idxs = None
+            backward_saved_tensor_count = None
+            orig_fw = torch._inductor.compile_fx.compile_fx_forward
+            orig_bw = torch._inductor.compile_fx.compile_fx_backward
+
+            def intercept_fw(*args, **kwargs):
+                nonlocal forward_partition_count, forward_has_skipped_partition
+                result = orig_fw(*args, **kwargs)
+                if not kwargs["is_inference"]:
+                    forward_partition_count = len(result.partition_maps)
+                    forward_has_skipped_partition = (
+                        result.has_skipped_cudagraph_partition
+                    )
+                return result
+
+            def intercept_bw(gm, example_inputs, compiler_config_extra, **kwargs):
+                nonlocal forward_partitioned
+                nonlocal backward_static_input_idxs, backward_primal_static_idxs
+                nonlocal backward_saved_tensor_count
+                forward_partitioned = compiler_config_extra.forward_is_partitioned.value
+                backward_primal_static_idxs = get_static_bw_input_idxs(gm)
+                backward_saved_tensor_count = count_tangents(gm)
+                inner_compile = kwargs["inner_compile"]
+
+                def intercept_inner_compile(*args, **inner_kwargs):
+                    nonlocal backward_static_input_idxs
+                    backward_static_input_idxs = inner_kwargs["static_input_idxs"]
+                    return inner_compile(*args, **inner_kwargs)
+
+                kwargs["inner_compile"] = intercept_inner_compile
+                return orig_bw(gm, example_inputs, compiler_config_extra, **kwargs)
+
+            def fn(x):
+                inline_activation = x.cpu().cuda()
+                return inline_activation * inline_activation
+
+            x = torch.randn(16, 16, device="cuda", requires_grad=True)
+            with (
+                mock.patch(
+                    "torch._inductor.compile_fx.compile_fx_forward", intercept_fw
+                ),
+                mock.patch(
+                    "torch._inductor.compile_fx.compile_fx_backward", intercept_bw
+                ),
+            ):
+                result = torch.compile(fn, mode="reduce-overhead")(x)
+                result.sum().backward()
+
+            self.assertEqual(forward_partition_count, 1)
+            self.assertTrue(forward_has_skipped_partition)
+            self.assertTrue(forward_partitioned)
+            self.assertEqual(backward_static_input_idxs, backward_primal_static_idxs)
+            self.assertLess(
+                len(backward_static_input_idxs), backward_saved_tensor_count
+            )
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_no_partition_keeps_static(self):
