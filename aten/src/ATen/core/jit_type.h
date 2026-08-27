@@ -384,7 +384,7 @@ struct TORCH_API SymbolicShape {
     for(size_t i = 0; i < *rank; ++i) {
       shape_symbols.push_back(ShapeSymbol::newSymbol());
     }
-    dims_ = shape_symbols;
+    dims_ = std::move(shape_symbols);
   }
 
   // Mix of known and unknown ranks
@@ -398,7 +398,7 @@ struct TORCH_API SymbolicShape {
         shape_symbols.push_back(ShapeSymbol::fromStaticSize(*dim));
       }
     }
-    dims_ = shape_symbols;
+    dims_ = std::move(shape_symbols);
   }
 
   void dump() const;
@@ -411,7 +411,7 @@ struct TORCH_API SymbolicShape {
     for(int64_t dim : dims) {
       shape_symbols.push_back(ShapeSymbol::fromStaticSize(dim));
     }
-    dims_ = shape_symbols;
+    dims_ = std::move(shape_symbols);
   }
 
   ShapeSymbol operator[](size_t i) const {
