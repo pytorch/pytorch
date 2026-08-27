@@ -245,6 +245,39 @@ def _maybe_scoped(loaded):
     return loaded if hasattr(loaded, "__enter__") else contextlib.nullcontext()
 
 
+class _PrecompileAttrCfg:
+    """Discriminated by HASATTR, a slot the invariant policy CAN drop."""
+
+
+def _precompile_attr_branch(cfg, x):
+    if hasattr(cfg, "scale"):
+        return x * 2
+    return x + 1
+
+
+class _PrecompileAccumModel(torch.nn.Module):
+    """Three branches behind a graph break, so each mode is its own variant."""
+
+    def __init__(self):
+        super().__init__()
+        self.l = torch.nn.Linear(8, 4)
+
+    def forward(self, x, mode):
+        y = self.l(x)
+        torch._dynamo.graph_break()
+        if mode == "a":
+            return y.sum() * 2
+        if mode == "b":
+            return y.sum() + 1
+        return y.sum() - 3
+
+
+def _precompile_accum_step(model, x, mode):
+    loss = model(x, mode)
+    loss.backward()
+    return loss
+
+
 def _precompile_grad_step(model, x):
     loss = model(x).sum()
     loss.backward()
@@ -1872,6 +1905,203 @@ class TestPrecompile(TestCase):
                 example_inputs=[(m, x)],
                 keep_example_grads=True,
             )
+
+    def test_precompile_accumulate_folds_in_each_call(self):
+        # precompile() makes its example calls back to back, which is wrong when
+        # they are not independent -- a pipelined training step cannot be called
+        # twice in a row. accumulate() lets the caller keep their loop.
+        model = _PrecompileAccumModel()
+        eager = _PrecompileAccumModel()
+        eager.load_state_dict(model.state_dict())
+        modes = ["a", "b", "c", "a"]
+        xs = [torch.randn(3, 8) for _ in modes]
+        codes = []
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "m.py")
+            cache_path = os.path.join(d, "m.cache")
+            with torch.compiler.precompile.accumulate(
+                _precompile_accum_step,
+                artifact_path=artifact_path,
+                cache_path=cache_path,
+                backend="eager",
+                dynamic=False,
+                training=True,
+                require_complete=False,
+                require_no_risky_drops=False,
+            ) as capture:
+                for x, mode in zip(xs, modes):
+                    model.zero_grad(set_to_none=True)
+                    got = capture(model, x, mode)
+                    eager.zero_grad(set_to_none=True)
+                    want = _precompile_accum_step(eager, x, mode)
+                    # Each call runs for real and hands back its own result.
+                    self.assertEqual(got, want)
+                    # And its gradients: accumulate() makes no call of its own,
+                    # so there is nothing to snapshot and nothing to restore.
+                    self.assertEqual(model.l.weight.grad, eager.l.weight.grad)
+                    codes.append(capture.summary().guarded_codes)
+                self.assertEqual(capture.calls(), len(modes))
+            # Three distinct modes added variants; the repeat of "a" added none.
+            self.assertEqual(codes[3], codes[2])
+            self.assertGreater(codes[2], codes[1])
+            self.assertGreater(codes[1], codes[0])
+
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load(
+                artifact_path=artifact_path, cache_path=cache_path
+            )
+            with _maybe_scoped(loaded):
+                for x, mode in zip(xs, modes):
+                    model.zero_grad(set_to_none=True)
+                    eager.zero_grad(set_to_none=True)
+                    self.assertEqual(
+                        loaded(model, x, mode),
+                        _precompile_accum_step(eager, x, mode),
+                    )
+
+    def test_precompile_accumulate_artifact_is_loadable_after_every_call(self):
+        # There is no finalize step, so a job that dies partway through must
+        # leave a working artifact for the batches it did reach.
+        model = _PrecompileAccumModel()
+        eager = _PrecompileAccumModel()
+        eager.load_state_dict(model.state_dict())
+        x = torch.randn(3, 8)
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "m.py")
+            cache_path = os.path.join(d, "m.cache")
+            with torch.compiler.precompile.accumulate(
+                _precompile_accum_step,
+                artifact_path=artifact_path,
+                cache_path=cache_path,
+                backend="eager",
+                dynamic=False,
+                training=True,
+                require_complete=False,
+                require_no_risky_drops=False,
+            ) as capture:
+                capture(model, x, "a")
+                with open(artifact_path) as f:
+                    partial_code = f.read()
+                with open(cache_path, "rb") as f:
+                    partial_cache = f.read()
+                capture(model, x, "b")
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load(partial_code, partial_cache)
+            with _maybe_scoped(loaded):
+                model.zero_grad(set_to_none=True)
+                eager.zero_grad(set_to_none=True)
+                self.assertEqual(
+                    loaded(model, x, "a"), _precompile_accum_step(eager, x, "a")
+                )
+
+    def test_precompile_accumulate_keeps_the_session_pristine(self):
+        # The artifact is rendered from policy-filtered COPIES. Applying the
+        # policy to the session itself would rewrite each variant's serialized
+        # guards and prune the facts they came from, and since a single variant
+        # is invariant by construction, the pass after call 1 would strip every
+        # at-risk slot of every frame permanently -- so when a later call made
+        # one of them discriminate, the earlier variant would go on matching
+        # calls that belong to the new graph.
+        from torch._dynamo.precompile_package import varying_guard_slots
+
+        model = _PrecompileAccumModel()
+        x = torch.randn(3, 8)
+        with tempfile.TemporaryDirectory() as d:
+            with torch.compiler.precompile.accumulate(
+                _precompile_accum_step,
+                artifact_path=os.path.join(d, "m.py"),
+                cache_path=os.path.join(d, "m.cache"),
+                backend="eager",
+                dynamic=False,
+                training=True,
+                require_complete=False,
+                require_no_risky_drops=False,
+            ) as capture:
+                session = capture._session
+                capture(model, x, "a")
+                after_first = {
+                    k: [set(f) for f in v] for k, v in session._guard_sets.items()
+                }
+                capture(model, x, "b")
+                # Rendering twice did not consume the facts the policy reads.
+                for key, variants in after_first.items():
+                    for i, facts in enumerate(variants):
+                        self.assertTrue(facts <= set(session._guard_sets[key][i]))
+                # And the second mode is visible as discriminating.
+                self.assertTrue(varying_guard_slots(session._guard_sets))
+
+    def test_precompile_accumulate_serves_a_slot_only_a_later_call_makes_vary(self):
+        # The shape that breaks the obvious implementation. On call 1 the frame
+        # has ONE variant, and a slot cannot disagree with itself, so the
+        # invariant policy sees every slot as constant. If the policy were
+        # applied to the capture itself, HASATTR would be stripped from that
+        # variant permanently -- and when call 2 makes it discriminate, the
+        # first variant would go on matching the second call and return the
+        # first call's numbers. Rendering from filtered copies is what keeps it.
+        cfg_with, cfg_without = _PrecompileAttrCfg(), _PrecompileAttrCfg()
+        cfg_with.scale = 2.0
+        x = torch.randn(2, 4)
+        want_with = _precompile_attr_branch(cfg_with, x)
+        want_without = _precompile_attr_branch(cfg_without, x)
+        self.assertNotEqual(want_with[0][0].item(), want_without[0][0].item())
+
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "m.py")
+            cache_path = os.path.join(d, "m.cache")
+            with torch.compiler.precompile.accumulate(
+                _precompile_attr_branch,
+                artifact_path=artifact_path,
+                cache_path=cache_path,
+                backend="eager",
+                dynamic=False,
+                require_complete=False,
+                require_no_risky_drops=False,
+            ) as capture:
+                self.assertEqual(capture(cfg_with, x), want_with)
+                self.assertEqual(capture(cfg_without, x), want_without)
+
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load(
+                artifact_path=artifact_path, cache_path=cache_path
+            )
+            with _maybe_scoped(loaded):
+                self.assertEqual(loaded(cfg_with, x), want_with)
+                self.assertEqual(loaded(cfg_without, x), want_without)
+
+    def test_precompile_accumulate_rejects_make_fx_and_lone_paths(self):
+        with self.assertRaisesRegex(ValueError, "only tracer='dynamo'"):
+            torch.compiler.precompile.accumulate(
+                _precompile_accum_step,
+                artifact_path="a.py",
+                cache_path="a.cache",
+                tracer="make_fx",
+            )
+        with self.assertRaisesRegex(ValueError, "artifact_path without cache_path"):
+            torch.compiler.precompile.accumulate(
+                _precompile_accum_step, artifact_path="a.py", cache_path=None
+            )
+
+    def test_precompile_accumulate_refuses_calls_after_close(self):
+        model = _PrecompileAccumModel()
+        x = torch.randn(3, 8)
+        with tempfile.TemporaryDirectory() as d:
+            capture = torch.compiler.precompile.accumulate(
+                _precompile_accum_step,
+                artifact_path=os.path.join(d, "m.py"),
+                cache_path=os.path.join(d, "m.cache"),
+                backend="eager",
+                dynamic=False,
+                training=True,
+                require_complete=False,
+                require_no_risky_drops=False,
+            )
+            capture(model, x, "a")
+            capture.close()
+            capture.close()  # idempotent
+            with self.assertRaisesRegex(
+                torch.compiler.precompile.PrecompileError, "closed"
+            ):
+                capture(model, x, "b")
 
     def test_precompile_paths_come_in_pairs(self):
         # Half an artifact can never be loaded: the cache carries a sha256 of
