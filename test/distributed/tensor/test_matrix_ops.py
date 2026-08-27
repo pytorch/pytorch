@@ -32,7 +32,11 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     SM90OrLater,
 )
-from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
+from torch.testing._internal.common_device_type import (
+    E4M3_MAX_POS,
+    e4m3_type,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -974,7 +978,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertEqual(result.full_tensor(), expected_nz)
 
 
-class DistMatrixOpsTestCUDA(DTensorTestBase):
+class DistMatrixOpsTestCUDASpecific(DTensorTestBase):
     hw_classification = HardwareClassification.CUDA
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
@@ -1172,14 +1176,21 @@ class DistMatrixOpsTestCUDA(DTensorTestBase):
         self.assertEqual(dist_w2.grad.full_tensor(), w2.grad)
 
 
-instantiate_parametrized_tests(DistMatrixOpsTestCUDA)
-
-DistMatrixOpsTestWithLocalTensor = create_local_tensor_test_class(
-    DistMatrixOpsTest,
+instantiate_device_type_tests(
+    DistMatrixOpsTest, globals(), except_for=("cpu",), allow_xpu=True
 )
 
-DistMatrixOpsTestCUDAWithLocalTensor = create_local_tensor_test_class(
-    DistMatrixOpsTestCUDA,
+instantiate_parametrized_tests(DistMatrixOpsTestCUDASpecific)
+
+for _suffix in ("CUDA", "XPU", "HPU"):
+    _cls_name = f"DistMatrixOpsTest{_suffix}"
+    if _cls_name in globals():
+        globals()[f"{_cls_name}WithLocalTensor"] = create_local_tensor_test_class(
+            globals()[_cls_name],
+        )
+
+DistMatrixOpsTestCUDASpecificWithLocalTensor = create_local_tensor_test_class(
+    DistMatrixOpsTestCUDASpecific,
 )
 
 if __name__ == "__main__":
