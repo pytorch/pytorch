@@ -14778,6 +14778,25 @@ are freshly created instead of aliasing the input.
 )
 
 add_docstr(
+    torch.detach,
+    r"""
+detach(input) -> Tensor
+
+Returns a copy of :attr:`input` that is detached from the autograd graph.
+
+The result shares the same storage as :attr:`input`. Gradients are not
+tracked through this operation.
+
+.. note::
+
+    This is equivalent to :meth:`Tensor.detach`.
+
+Args:
+    {input}
+""".format(**common_args),
+)
+
+add_docstr(
     torch.detach_copy,
     r"""
 Performs the same operation as :func:`torch.detach`, but all output tensors
