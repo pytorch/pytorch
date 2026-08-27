@@ -3348,6 +3348,40 @@ class TestPrecompile(TestCase):
             with self.assertRaisesRegex(RuntimeError, "no captured variant"):
                 loaded(_PrecompileClassB(), x, 1.0)
 
+    def test_installed_artifact_reports_what_it_compiles_at_serve(self):
+        # An installed artifact answers a guard miss by COMPILING, not by
+        # refusing -- a frame reachable only through the frame evaluator has no
+        # other way to run. That is deliberate, but it was invisible: the
+        # generated banner claimed the opposite, and isolate_recompiles gives
+        # the artifact a private cache identity so TORCH_LOGS=recompiles prints
+        # nothing. An artifact quietly serving less of itself looked exactly
+        # like one that was serving.
+        from torch._precompile import _parse_artifact_metadata
+
+        model = _PrecompileBreakingModule().eval()
+        captured, uncovered = torch.randn(3, 8), torch.randn(5, 8)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_attr_entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, captured)],
+            )
+        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
+        # The banner has to describe the mode it was emitted for.
+        self.assertNotIn("Nothing is installed onto your code objects", code)
+        self.assertIn("compiled fresh", code)
+
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            loaded(model, captured)
+            self.assertEqual(loaded.serve_time_compiles(), 0)
+            loaded(model, uncovered)
+            self.assertGreater(loaded.serve_time_compiles(), 0)
+
     def test_capture_runs_each_example_once(self):
         # Learning the guard policy from a throwaway first capture would run
         # every example twice. That is not free: the region below counts its
