@@ -39,13 +39,23 @@ from torch._numpy import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
     from types import TracebackType
-    from typing import Self
+    from typing import Literal, Never, Protocol, Self, TypeAlias
 
     import numpy as _np
     from numpy.typing import ArrayLike, DTypeLike
 
     # Concrete numpy ndarray type (avoids the implicit-any of a bare `ndarray`).
     _NDArray = _np.ndarray[tuple[int, ...], _np.dtype[_np.generic]]
+
+    # A message is either the text itself or a thunk producing it on failure.
+    _Message: TypeAlias = str | Callable[[], str]
+
+    _ForwardingRule: TypeAlias = Literal["always", "module", "once", "location"]
+
+    class _Decorator(Protocol):
+        """A decorator that preserves the signature of the function it wraps."""
+
+        def __call__(self, func: Callable[_P, _R]) -> Callable[_P, _R]: ...
 
 
 _P = ParamSpec("_P")
@@ -95,7 +105,11 @@ IS_PYSTON = hasattr(sys, "pyston_version_info")
 HAS_REFCOUNT = getattr(sys, "getrefcount", None) is not None and not IS_PYSTON
 
 
-def assert_(val: object, msg: object = "") -> None:
+@overload
+def assert_(val: Literal[False], msg: _Message = "") -> Never: ...
+@overload
+def assert_(val: object, msg: _Message = "") -> None: ...
+def assert_(val: object, msg: _Message = "") -> None:
     """
     Assert that works in release mode.
     Accepts callable msg to allow deferring evaluation until failure.
@@ -1242,7 +1256,7 @@ def assert_raises_regex(
 
 def decorate_methods(
     cls: type,
-    decorator: Callable[[Callable[..., object]], object],
+    decorator: _Decorator,
     testmatch: str | re.Pattern[str] | None = None,
 ) -> None:
     """
@@ -2134,7 +2148,7 @@ class suppress_warnings:
             pass
     """
 
-    def __init__(self, forwarding_rule: str = "always") -> None:
+    def __init__(self, forwarding_rule: _ForwardingRule = "always") -> None:
         self._entered = False
 
         # Suppressions are either instance or defined inside one with block:
