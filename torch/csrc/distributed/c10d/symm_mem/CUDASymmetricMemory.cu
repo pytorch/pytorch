@@ -28,6 +28,29 @@
 
 namespace c10d::symmetric_memory {
 
+// Shareable handle spellings, so the rendezvous code below can be written once
+// against `use_fabric_handle` instead of once per vendor per handle type.
+#if defined(USE_ROCM)
+#if ROCM_VERSION >= 71500
+using FabricHandleType = hipMemFabricHandle_t;
+constexpr auto kMemHandleTypeFabric = hipMemHandleTypeFabric;
+#else
+// Unreachable: get_fabric_access() is false below this ROCm version, so
+// handle_type_ never becomes FABRIC_HANDLE. Defined only so that the
+// use_fabric_handle=true instantiation of make_peer_alloc_info still compiles;
+// rendezvous() instantiates both branches unconditionally.
+struct FabricHandleType {
+  unsigned char data[64];
+};
+constexpr auto kMemHandleTypeFabric = hipMemHandleTypePosixFileDescriptor;
+#endif
+constexpr auto kMemHandleTypePosixFd = hipMemHandleTypePosixFileDescriptor;
+#else
+using FabricHandleType = CUmemFabricHandle;
+constexpr auto kMemHandleTypeFabric = CU_MEM_HANDLE_TYPE_FABRIC;
+constexpr auto kMemHandleTypePosixFd = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+#endif
+
 /* Start of CUDASymmetricMemory implementation */
 
 // A set of exchange methods with prefix "CUDASymmetricMemory"
@@ -368,13 +391,22 @@ void* CUDASymmetricMemoryAllocator::alloc(
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemCreate_(&handle, block_size, &prop, 0));
 
 #elif defined(USE_ROCM)
-  handle_type_ = Expandable_Segments_Handle_Type::POSIX_FD;
   hipMemAllocationProp prop = {};
   prop.type = hipMemAllocationTypePinned;
   prop.location.type = hipMemLocationTypeDevice;
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   prop.location.id = device_idx;
-  prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+  bool has_fabric_support = at::cuda::get_fabric_access(device_idx);
+  LOG(INFO) << "CUDASymmetricMemoryAllocator::alloc: has_fabric_support " << has_fabric_support;
+  if (handle_type_ == Expandable_Segments_Handle_Type::UNSPECIFIED) {
+    handle_type_ = has_fabric_support ? Expandable_Segments_Handle_Type::FABRIC_HANDLE : Expandable_Segments_Handle_Type::POSIX_FD;
+  }
+  // The handle type is fixed at creation: hipMemAllocationProp carries a single
+  // handle type rather than a mask, and ROCm rejects any combined value.
+  prop.requestedHandleType =
+      handle_type_ == Expandable_Segments_Handle_Type::POSIX_FD
+      ? kMemHandleTypePosixFd
+      : kMemHandleTypeFabric;
 
   size_t granularity;
   C10_CUDA_CHECK(hipMemGetAllocationGranularity(
@@ -700,13 +732,11 @@ template <bool use_fabric_handle>
 c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
     c10::intrusive_ptr<Block> block,
     const std::string& group_name) {
-#if defined(USE_ROCM)
-  using BlockHandleType = int;
-#else
   using BlockHandleType =
-      std::conditional_t<use_fabric_handle, CUmemFabricHandle, int>;
-#endif
-  BlockHandleType block_handle;
+      std::conditional_t<use_fabric_handle, FabricHandleType, int>;
+  // Value-initialized: ROCm's exporter writes only the leading 16 bytes of the
+  // 64-byte fabric handle, and the whole struct is all-gathered to every rank.
+  BlockHandleType block_handle{};
   c10::cuda::CUDAGuard guard(block->device_idx);
   if constexpr (!use_fabric_handle) {
     LOG(INFO) << "using posix fd to import symmetric memory handles.";
@@ -734,14 +764,13 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
       &block_handle,
       block->alloc_ref->handle,
-      use_fabric_handle ? CU_MEM_HANDLE_TYPE_FABRIC
-                        : CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
+      use_fabric_handle ? kMemHandleTypeFabric : kMemHandleTypePosixFd,
       0));
 #elif defined(USE_ROCM)
   C10_CUDA_CHECK(hipMemExportToShareableHandle(
       &block_handle,
       block->alloc_ref->handle,
-      hipMemHandleTypePosixFileDescriptor,
+      use_fabric_handle ? kMemHandleTypeFabric : kMemHandleTypePosixFd,
       0));
 #else
   TORCH_CHECK(
@@ -822,14 +851,22 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
           import_err_msg(rank, r, reqs));
     }
 #elif defined(USE_ROCM)
-    C10_CUDA_CHECK(hipMemImportFromShareableHandle(
-        &handles[r],
+    // The two handle types differ in calling convention, not just in the type
+    // tag: ROCm dereferences the argument for a fabric handle but casts it by
+    // value for an fd.
+    if constexpr (use_fabric_handle) {
+      C10_CUDA_CHECK(hipMemImportFromShareableHandle(
+          &handles[r], &imported_handles[r], kMemHandleTypeFabric));
+    } else {
+      C10_CUDA_CHECK(hipMemImportFromShareableHandle(
+          &handles[r],
 #if ROCM_VERSION >= 70100
-        reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
+          reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
 #else
-        (void*)(uintptr_t) & (imported_handles[r]),
+          (void*)(uintptr_t) & (imported_handles[r]),
 #endif
-        hipMemHandleTypePosixFileDescriptor));
+          kMemHandleTypePosixFd));
+    }
 #else
     TORCH_CHECK(
         false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");

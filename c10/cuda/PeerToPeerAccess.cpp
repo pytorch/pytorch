@@ -5,6 +5,8 @@
 #include <c10/cuda/CUDAGuard.h>
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
+#elif defined(USE_ROCM)
+#include <hip/hip_runtime_api.h>
 #endif
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
@@ -158,6 +160,73 @@ bool isFabricSupported() {
   return true;
 }
 
+#elif defined(USE_ROCM) && ROCM_VERSION >= 71500
+
+// Fabric handles on ROCm are UALink. Three things must hold: the GPU exposes
+// UALink, the accelerator has been provisioned to a ready state, and the loaded
+// runtime implements the export/import path. Only the first is queryable as a
+// device attribute, and the second is dynamic state checked at export time, so
+// probe the whole cycle instead. This also covers a build made against newer
+// headers than the runtime it ends up loading.
+bool isFabricSupported(c10::DeviceIndex dev) {
+  // hipMemImportFromShareableHandle imports onto the current device.
+  CUDAGuard guard(dev);
+
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypePinned;
+  prop.requestedHandleType = hipMemHandleTypeFabric;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = static_cast<int>(dev);
+
+  // Every step below is expected to fail on most systems, so failures are
+  // returned rather than checked, and the sticky error each one arms must be
+  // consumed here or it surfaces at an unrelated call later.
+  size_t granularity = 0;
+  if (hipMemGetAllocationGranularity(
+          &granularity, &prop, hipMemAllocationGranularityRecommended) !=
+      hipSuccess) {
+    (void)hipGetLastError();
+    return false;
+  }
+
+  // 1. try allocating memory with FABRIC handle type
+  hipMemGenericAllocationHandle_t handle{};
+  if (hipMemCreate(&handle, granularity, &prop, 0) != hipSuccess) {
+    (void)hipGetLastError();
+    LOG(INFO)
+        << "Could not allocate memory with FABRIC handle, falling back to fd handle exchange\n";
+    return false;
+  }
+
+  // 2. check export. An unprovisioned accelerator fails here, not above.
+  hipMemFabricHandle_t shared_handle{};
+  if (hipMemExportToShareableHandle(
+          &shared_handle, handle, hipMemHandleTypeFabric, 0) != hipSuccess) {
+    (void)hipGetLastError();
+    LOG(INFO)
+        << "Could not export FABRIC handle, falling back to fd handle exchange\n";
+    (void)hipMemRelease(handle);
+    return false;
+  }
+
+  // 3. check import
+  hipMemGenericAllocationHandle_t import_handle{};
+  if (hipMemImportFromShareableHandle(
+          &import_handle, &shared_handle, hipMemHandleTypeFabric) !=
+      hipSuccess) {
+    (void)hipGetLastError();
+    LOG(INFO)
+        << "Could not import FABRIC handle, falling back to fd handle exchange\n";
+    (void)hipMemRelease(handle);
+    return false;
+  }
+
+  (void)hipMemRelease(import_handle);
+  (void)hipMemRelease(handle);
+  LOG(INFO) << "using fabric to exchange memory handles\n";
+  return true;
+}
+
 #endif
 } // namespace
 
@@ -212,6 +281,28 @@ bool get_fabric_access(c10::DeviceIndex dev) {
     fabricCliqueId_[dev] = kCliqueIdUnsupported;
     return false;
   }
+#elif defined(USE_ROCM) && ROCM_VERSION >= 71500
+  TORCH_CHECK(
+      num_devices_ >= 0,
+      "p2p access cache not initialized. "
+      "Ensure c10::cuda::detail::init_p2p_access_cache() is called first.");
+  TORCH_CHECK(
+      dev >= 0 && dev < num_devices_,
+      static_cast<int>(dev),
+      " is not a valid device");
+
+  auto& cache = fabricAccessEnabled_[dev];
+  if (cache != -1) {
+    return cache;
+  }
+  // There is no ROCm counterpart to the NVML fabric state query, and no UALink
+  // domain identifier is exposed, so clique_id stays unsupported and
+  // validate_nvlink_fabric_support() degrades to a no-op. Ranks spanning
+  // separate UALink domains therefore fail at import with a driver error rather
+  // than the message naming each rank's host and domain.
+  fabricCliqueId_[dev] = kCliqueIdUnsupported;
+  cache = isFabricSupported(dev) ? 1 : 0;
+  return cache;
 #else
   (void)dev; // Suppress unused parameter warning
   return false;
