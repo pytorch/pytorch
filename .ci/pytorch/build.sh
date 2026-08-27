@@ -13,6 +13,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # shellcheck source=./rocm_utils.sh
   source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
+  export USE_ROCM_KERNEL_ASSERT=1
   export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH};gfx1033"
 
   if command -v sccache >/dev/null; then

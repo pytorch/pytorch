@@ -2123,8 +2123,12 @@ if __name__ == '__main__':
 
     @slowTest
     @unittest.skipIf(
-        not TEST_WITH_ROCM or "USE_ROCM_KERNEL_ASSERT=1" not in torch.__config__.show(),
-        "requires ROCm build with USE_ROCM_KERNEL_ASSERT=ON",
+        not TEST_WITH_ROCM
+        or (
+            "USE_ROCM_KERNEL_ASSERT=1" not in torch.__config__.show()
+            and "USE_ROCM_KERNEL_ASSERT=ON" not in torch.__config__.show()
+        ),
+        "requires ROCm build with USE_ROCM_KERNEL_ASSERT enabled",
     )
     def test_rocm_kernel_assert_percent_in_condition(self):
         # Device assert with '%' in #cond; stderr must include the full condition.
