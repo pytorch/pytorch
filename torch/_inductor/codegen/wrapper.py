@@ -1429,10 +1429,28 @@ class IndexPutFallbackLine(WrapperLine):
             idx.codegen_reference() if idx else self.wrapper.none_str
             for idx in self.indices
         ]
+        # index_put_ takes (self, indices, values, accumulate), but the index
+        # list is spread across inputs and the wrapper hook passes it as a
+        # flattened array, so the profiling metadata is built here rather than
+        # from the node's inputs. Each entry gets its own expression instead of
+        # reusing the one passed to the kernel: a reinterpret view's expression
+        # owns the handle it names, so the same one used in two statements
+        # would be freed by the first.
+        profiling_args = None
+        if V.graph.cpp_wrapper and kernel_profile_enabled():
+            profiling_args = [
+                _profiling_arg_entry(node.inputs[0]),
+                *(_profiling_arg_entry(idx) for idx in self.indices),
+                _profiling_arg_entry(node.inputs[1]),
+                None,
+            ]
 
-        self.wrapper._generate_index_put_fallback(
-            node.get_kernel_name(), x, indices, values, *node.codegen_const_args()
-        )
+        with self.wrapper.profiled_kernel_scope(
+            node.get_kernel_name(), node, profiling_args
+        ):
+            self.wrapper._generate_index_put_fallback(
+                node.get_kernel_name(), x, indices, values, *node.codegen_const_args()
+            )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_index_put_fallback
@@ -1453,16 +1471,37 @@ class ScatterFallbackLine(WrapperLine):
             (x, index) = (t.codegen_reference() for t in node.inputs)
             src = node.constant_args[1]
         device = d.type if (d := node.get_device()) else V.graph.device_type
-        self.wrapper._generate_scatter_fallback(
-            x,
-            [x, node.constant_args[0], index, src],
-            node.cpp_kernel_name,
-            node.python_kernel_name,
-            node.src_is_tensor,
-            node.kwargs["reduce"],
-            node.codegen_kwargs(),
-            device,
-        )
+        kwargs = node.codegen_kwargs()
+        # scatter keeps `dim` in constant_args between its tensors, so the
+        # profiling metadata is built here, in the schema order the wrapper
+        # hook passes: (self, dim, index, src) followed by one entry per
+        # argument codegen_kwargs emits. `src` is a scalar for the value
+        # overloads. Each entry gets its own expression instead of reusing the
+        # one passed to the kernel: a reinterpret view's expression owns the
+        # handle it names, so the same one used in two statements would be
+        # freed by the first.
+        profiling_args = None
+        if V.graph.cpp_wrapper and kernel_profile_enabled():
+            profiling_args = [
+                _profiling_arg_entry(node.inputs[0]),
+                None,
+                _profiling_arg_entry(node.inputs[1]),
+                _profiling_arg_entry(node.inputs[2]) if node.src_is_tensor else None,
+                *([None] * len(kwargs)),
+            ]
+        with self.wrapper.profiled_kernel_scope(
+            node.cpp_kernel_name, node, profiling_args
+        ):
+            self.wrapper._generate_scatter_fallback(
+                x,
+                [x, node.constant_args[0], index, src],
+                node.cpp_kernel_name,
+                node.python_kernel_name,
+                node.src_is_tensor,
+                node.kwargs["reduce"],
+                kwargs,
+                device,
+            )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_scatter_fallback
@@ -5219,6 +5258,56 @@ class PythonWrapperCodegen(CodeGen):
         Mark the end of kernel context guard
         """
         return
+
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        profiling_args: Sequence[str | None] | None = None,
+    ):
+        return
+
+    @contextlib.contextmanager
+    def profiled_kernel_scope(self, kernel_name, node_schedule, profiling_args=None):
+        """Context manager that wraps a kernel call in a RAIIAtenRecordFunctionHandle
+        profiling block when kernel_profile_enabled(), plus a
+        KernelContextGuard when config.cpp.enable_kernel_context_guard is also enabled.
+        On PythonWrapperCodegen the write_* methods are no-ops, so this is
+        effectively a no-op.  CppWrapperCpu overrides those methods, making
+        this context manager emit real profiling wrappers.
+
+        A caller whose codegen reorders the kernel's arguments passes
+        profiling_args itself; otherwise the metadata is derived from
+        node_schedule."""
+        try:
+            if kernel_profile_enabled():
+                self.write_kernel_context_guard_begin()
+                if config.cpp.enable_kernel_context_guard:
+                    self.write_kernel_context_guard(kernel_name, node_schedule)
+                # Deriving the metadata emits codegen for ReinterpretView
+                # arguments, which only the C++ wrapper consumes.
+                if not V.graph.cpp_wrapper:
+                    profiling_args = None
+                elif profiling_args is None:
+                    profiling_args = self._get_extern_kernel_profiling_args(
+                        node_schedule
+                    )
+                self.write_record_function_handle(kernel_name, profiling_args)
+            yield
+        finally:
+            if kernel_profile_enabled():
+                self.write_kernel_context_guard_end()
+
+    @staticmethod
+    def _get_extern_kernel_profiling_args(node_schedule) -> list[str | None] | None:
+        """Profiling metadata for an ExternKernel codegen'd through a dedicated
+        wrapper hook instead of the C shim helper.
+
+        This covers the kernels whose argument order the shared builder already
+        reproduces; the ones that reorder their arguments on the way to the
+        shim supply their own metadata."""
+        if not isinstance(node_schedule, ir.ExternKernel):
+            return None
+        return _get_profiling_args(node_schedule) or None
 
 
 class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):

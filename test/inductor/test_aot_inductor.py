@@ -6800,6 +6800,41 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    def test_kernel_profile_scatter_fallback_arg_order(self):
+        # scatter_reduce keeps `dim` between its tensors:
+        #   (Tensor self, int dim, Tensor index, Tensor src, str reduce,
+        #    *, bool include_self)
+        # Its wrapper hook reorders the node's inputs and constants to reach
+        # that order, so the profiling record has to be built alongside the
+        # call rather than from the node's tensor inputs, which would report
+        # three tensors and no placeholders for a six-argument op.
+        class Model(torch.nn.Module):
+            def forward(self, inp, index, src):
+                # "prod" is not the reduction inductor can inline, so this
+                # lowers to the ATen fallback.
+                return torch.scatter_reduce(inp, 1, index, src, reduce="prod")
+
+        example_inputs = (
+            torch.randn(3, 5, device=self.device),
+            torch.tensor([[0, 1, 2, 0]], device=self.device, dtype=torch.int64),
+            torch.randn(2, 5, device=self.device),
+        )
+
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            self.assertEqual(
+                profiled_ivalue_kinds(code, r"[\w:.]*scatter_reduce[\w:.]*"),
+                ["tensor", "scalar", "tensor", "tensor", "scalar", "scalar"],
+            )
+
+            self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
     def test_aoti_profiler_records_schema_arg_order(self):
         # index_reduce interleaves non-tensor and tensor arguments:
         #   (Tensor self, int dim, Tensor index, Tensor source, str reduce,
@@ -6969,6 +7004,42 @@ class AOTInductorTestsTemplate:
                 example_inputs,
                 dynamic_shapes=dynamic_shapes,
             )
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_kernel_profile_scatter_fallback(self):
+        # Scatter fallback kernels use a separate codegen path
+        # (_generate_scatter_fallback) that must also be wrapped in
+        # KernelContextGuard and RAIIAtenRecordFunctionHandle profiling
+        # blocks when profiling is enabled.  RAIIAtenRecordFunctionHandle
+        # is what actually creates the RecordFunction / External id linkage.
+        class Model(torch.nn.Module):
+            def forward(self, inp, index, src):
+                return torch.scatter(inp, 1, index, src)
+
+        example_inputs = (
+            torch.ones((3, 5), device=self.device, dtype=torch.int64),
+            torch.tensor([[0, 1, 2, 0]], device=self.device, dtype=torch.int64),
+            torch.zeros((2, 5), device=self.device, dtype=torch.int64),
+        )
+
+        with config.patch(
+            {
+                "cpp.enable_kernel_profile": True,
+                "cpp.enable_kernel_context_guard": True,
+            }
+        ):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            FileCheck().check("KernelContextGuard").run(code)
+            # RAIIAtenRecordFunctionHandle creates the RecordFunction that
+            # produces the External id linkage in GPU traces.
+            FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
+
+            self.check_model(Model(), example_inputs)
 
     def test_aoti_user_defined_triton_kernel_profiling(self):
         if self.device != GPU_TYPE or self.device == "mps":
