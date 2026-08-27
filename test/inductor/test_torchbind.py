@@ -13,10 +13,7 @@ from torch._inductor import aot_compile, ir
 from torch._inductor.codecache import WritableTempFile
 from torch._inductor.package import package_aoti
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, skipIfWindows
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
@@ -433,10 +430,9 @@ class TestTorchbindAccelerator(TestCase):
         super().setUp()
         init_torchbind_implementations()
 
-    @onlyAccelerator
     @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
     @torch._inductor.config.patch("graph_partition", True)
-    def test_torchbind_compile_gpu_op_symint_graph_partition(self, device):
+    def test_torchbind_compile_accelerator_op_symint_graph_partition(self, device):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -444,8 +440,8 @@ class TestTorchbindAccelerator(TestCase):
 
             def forward(self, x):
                 a = torch.ops._TorchScriptTesting.takes_foo_tensor_return(self.attr, x)
-                a_cuda = a.to(device=device)
-                return a_cuda + 1
+                a_device = a.to(device=device)
+                return a_device + 1
 
         m = M()
         inputs = (torch.ones(2, 3),)
@@ -455,7 +451,11 @@ class TestTorchbindAccelerator(TestCase):
 
 
 instantiate_device_type_tests(
-    TestTorchbindAccelerator, globals(), allow_xpu=True, except_for="cpu"
+    TestTorchbindAccelerator,
+    globals(),
+    allow_xpu=True,
+    allow_mps=True,
+    except_for="cpu",
 )
 
 
