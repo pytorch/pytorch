@@ -2188,7 +2188,7 @@ raise RuntimeError("device assert did not fire")
             stderr,
             (
                 r"[^\n]+:\d+: assert_mod_kernel: "
-                r"Device-side assertion `x\[0\] % 2 == 0` failed\."
+                r"Device-side assertion `x\[0\] % 2 == 0' failed\."
             ),
             msg=f"expected full HIP-format assert line in stderr, got:\n{stderr}",
         )
