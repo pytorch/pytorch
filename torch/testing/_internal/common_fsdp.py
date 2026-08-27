@@ -22,6 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import checkpoint
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.distributed_c10d import get_default_backend_for_device
 from torch.distributed.fsdp import (
     CPUOffload,
     fully_shard,
