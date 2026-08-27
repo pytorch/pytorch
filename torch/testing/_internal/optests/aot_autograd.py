@@ -5,6 +5,7 @@ import re
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import copy_dynamo_tensor_attributes
+from torch._subclasses.fake_tensor import is_fake_tensor
 from functorch.compile import compiled_function, min_cut_rematerialization_partition, default_partition, nop
 from torch.testing._utils import wrapper_set_seed
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -16,6 +17,7 @@ def _clone_input_for_aot_autograd(x):
     result = torch.clone(x)
     if (
         x.device.type == "cpu"
+        and not is_fake_tensor(x)
         and not is_traceable_wrapper_subclass(x)
         and x.is_pinned()
     ):

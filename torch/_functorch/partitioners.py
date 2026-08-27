@@ -44,7 +44,7 @@ from torch._library.opaque_object import is_opaque_value
 from torch._library.utils import is_builtin
 from torch._logging import LazyString, trace_structured
 from torch._logging._internal import trace_log
-from torch._subclasses.fake_tensor import extract_tensor_metadata
+from torch._subclasses.fake_tensor import extract_tensor_metadata, is_fake_tensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
@@ -1695,9 +1695,7 @@ def default_partition(
     distributed_enabled = torch.distributed.is_available()
 
     def is_tensor(node: fx.Node) -> bool:
-        return "tensor_meta" in node.meta or isinstance(
-            node.meta.get("val"), torch._subclasses.FakeTensor
-        )
+        return "tensor_meta" in node.meta or is_fake_tensor(node.meta.get("val"))
 
     def is_multi_output(node: fx.Node) -> bool:
         return (
