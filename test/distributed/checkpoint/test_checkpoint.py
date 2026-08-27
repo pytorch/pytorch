@@ -50,10 +50,6 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 )
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-backend = torch.distributed.get_default_backend_for_device(device_type)
-
-
 if TEST_WITH_DEV_DBG_ASAN:
     print(
         "Skip dev-asan as torch + multiprocessing spawn have known issues",
@@ -63,8 +59,9 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestModule(torch.nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, device) -> None:
         super().__init__()
+        self.device_type = torch.device(device).type
         self.sharded: ShardedTensor = sharded_tensor.zeros(self.spec(), 4, 4)
         self.regular = torch.nn.Parameter(torch.ones(4, 4))
         self.extra_sharded: ShardedTensor | None = None
@@ -76,8 +73,8 @@ class TestModule(torch.nn.Module):
         return ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:0/{device_type}:0",
-                f"rank:1/{device_type}:1",
+                f"rank:0/{self.device_type}:0",
+                f"rank:1/{self.device_type}:1",
             ],
         )
 
@@ -89,7 +86,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_capabilities(
         Capability.distributed.backend,
@@ -98,7 +95,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:1/{device_type}:1",
+                f"rank:1/{self.device_type}:1",
             ],
         )
 
@@ -108,18 +105,18 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
 
         self.assertEqual(1, len(st_md.chunks))
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_capabilities(
         Capability.distributed.backend,
     )
     def test_default_metadata(self, device) -> None:
-        device = f"{torch.device(device).type}:{dist.get_rank()}"
+        device = self.current_device
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:0/{device_type}:0",
-                f"rank:1/{device_type}:1",
+                f"rank:0/{device.type}:0",
+                f"rank:1/{device.type}:1",
             ],
         )
 
@@ -316,11 +313,12 @@ class TestDistributedFailure(_FailureTestMixin, ShardedTensorTestBase):
         return ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:{r}/{device_type}:{r}" for r in range(dist.get_world_size())
+                f"rank:{r}/{self.device_type}:{r}"
+                for r in range(dist.get_world_size())
             ],
         )
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_capabilities(
         Capability.distributed.backend,
@@ -334,7 +332,7 @@ class TestDistributedFailure(_FailureTestMixin, ShardedTensorTestBase):
 
         save_state_dict(state_dict, FaultyStorageWriter({}))
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_capabilities(
         Capability.distributed.backend,
@@ -349,7 +347,7 @@ class TestDistributedFailure(_FailureTestMixin, ShardedTensorTestBase):
 
         load_state_dict(state_dict, FaultyStorageReader(metadata, {}))
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(
         Capability.distributed.backend,
@@ -372,7 +370,7 @@ class TestDistributedFailure(_FailureTestMixin, ShardedTensorTestBase):
         self._test_save(state_dict, coordinator=1, fail_set_up_storage_writer=[1])
         self._test_save(state_dict, coordinator=1, fail_finish=[1])
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(
         Capability.distributed.backend,
