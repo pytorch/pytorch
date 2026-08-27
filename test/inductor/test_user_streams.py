@@ -7,6 +7,8 @@ assignments on nodes, including stream utilities, event management, and codegen.
 
 from __future__ import annotations
 
+import functools
+import inspect
 import re
 import unittest
 from types import SimpleNamespace
@@ -14,6 +16,8 @@ from types import SimpleNamespace
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.metrics
+from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import CompileCounterWithBackend, extract_graph, normalize_gm
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.codegen.wrapper import (
@@ -39,11 +43,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
 )
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    TEST_WITH_ROCM,
-    xfailIfNoAcceleratorTriton,
-)
+from torch.testing._internal.common_utils import HardwareClassification, TEST_WITH_ROCM
+from torch.utils._triton import has_triton
 
 
 def _extract_wrapper_body(code):
@@ -116,6 +117,46 @@ def _extract_wrapper_body(code):
 
 def _count_generated_stream_contexts(code):
     return len(re.findall(r"(?m)^\s*with (?:default_stream|stream\d+):", code))
+
+
+def xfailIfNoAcceleratorTriton(test_func):
+    if inspect.isclass(test_func):
+        for name in list(vars(test_func)):
+            method = getattr(test_func, name)
+            if name.startswith("test") and callable(method):
+                setattr(test_func, name, xfailIfNoAcceleratorTriton(method))
+        return test_func
+
+    @functools.wraps(test_func)
+    def wrapper(*args, **kwargs):
+        device = kwargs.get("device")
+        if device is None and args:
+            device = getattr(args[0], "device_type", None)
+
+        reason = None
+        if not has_triton():
+            reason = "Triton not available"
+        elif device is not None:
+            try:
+                device_interface = get_interface_for_device(torch.device(device).type)
+            except NotImplementedError:
+                reason = f"Triton not available for {device}"
+            else:
+                if not device_interface.is_triton_capable(device):
+                    reason = f"Triton not available for {device}"
+                else:
+                    try:
+                        device_interface.raise_if_triton_unavailable(device)
+                    except TritonUnavailableError as exc:
+                        reason = str(exc)
+
+        if reason is not None:
+            import pytest
+
+            pytest.xfail(reason)
+        return test_func(*args, **kwargs)
+
+    return wrapper
 
 
 class TestStreamUtils(InductorTestCase):
@@ -2040,6 +2081,7 @@ class GraphModule(torch.nn.Module):
                 f"sum consumer {inp} does not route through synchronize_event barrier",
             )
 
+    @xfailIfNoAcceleratorTriton
     def test_barrier_deps_exclude_nodes_defined_after_sync(self):
         """A get_attr constant first used after the barrier is not a barrier dep.
 
