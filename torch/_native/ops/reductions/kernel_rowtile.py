@@ -1,27 +1,22 @@
-# The vectorized ROW reduction: reduce the contiguous last dim of a (M, N) input with
-# `tpr` threads per row, on the shared tile datapath (tile.py).
+# ROW reductions: launch policy for tile.TileReduce on the row axis (reduce the contiguous
+# last dim of a (M, N) input). The kernel body lives in tile.py -- this module owns the
+# measured launch shapes, the narrow-row gates, and the plan cache.
 #
 # Covers 1 or 2 outputs and either a final projection or raw stage-1 partials (which is what
 # makes it reusable as the cross-CTA driver's stage 1), with a ROLLED chunk loop so ONE
-# compiled kernel serves every N in a vec class -- tpr is a multiple of WARP and
-# rows_per_block = nt // tpr, both compile-time, while N itself arrives as a runtime arg.
+# compiled kernel serves every N in a vec class -- tpr and nt are compile-time while N itself
+# arrives as a runtime arg.
 #
-# The launch shape (tpr, nt) is the only tuned part, and it is DATA below: a measured ladder
-# plus a one-row override for the reduce-all case, both of which pick from the same set of
-# legal rungs.
-
 import math
 from typing import NamedTuple
 
-import cutlass
-import cutlass.cute as cute
-from cutlass import const_expr, Int32
+from cutlass import Int32
 
 import torch
 
 from .._cutedsl import launch as _L
 from .._cutedsl.plan_cache import cached_plan
-from .._cutedsl.traits import block_reduce, WARP
+from .._cutedsl.traits import WARP
 from . import tile
 
 
@@ -117,93 +112,16 @@ def single_row_config(N: int, dtype_width: int, nfields: int = 1, hw=None):
     return _RowConfig(tpr=rungs[-1], nt=rungs[-1])
 
 
-class RowTile:
-    def __init__(self, trait, dtype, N, tpr, nt, nouts=1, final=True, unroll=4):
-        if tpr % WARP or tpr > nt or nt % tpr:
-            raise ValueError(
-                f"tpr must be a multiple of {WARP} dividing nt: {tpr=} {nt=}"
-            )
-        self.trait = trait
-        self.dtype = dtype
-        self.N = N
-        self.tpr = tpr
-        self.nt = nt
-        self.nouts = nouts
-        self.final = final
-        self.unroll = unroll
-        self.rows_per_block = nt // tpr
-        self.warps_per_row = tpr // WARP
-        # loads=1: the fold is ROLLED, so the static per-thread load count is unused and the
-        # MAX_UNROLL bound is trivially met -- tile is here for `vec` and the lane mapping.
-        isz = dtype.width // 8
-        self.tm = tile.TileMap(N, isz, tpr, 1)
-        self.vec = self.tm.vec
-
-    @property
-    def cache_sig(self):
-        # N is ABSENT: the rolled loop takes it at runtime, so one kernel serves the vec class.
-        t = self.trait.nfields
-        return (self.vec, self.tpr, self.nt, self.nouts, self.final, self.unroll, t)
-
-    @cute.jit
-    def __call__(self, mX, mOuts: list, nchunks, nwaves, project_n, stream):
-        self.kernel(mX, mOuts, nchunks, nwaves, project_n).launch(
-            grid=[cute.ceil_div(mX.shape[0], const_expr(self.rows_per_block)), 1, 1],
-            block=[const_expr(self.nt), 1, 1],
-            stream=stream,
-        )
-
-    @cute.kernel
-    def kernel(self, mX, mOuts: list, nchunks, nwaves, project_n):
-        tx, _, _ = cute.arch.thread_idx()
-        bx, _, _ = cute.arch.block_idx()
-        trait = self.trait
-        row = Int32(bx) * const_expr(self.rows_per_block) + Int32(
-            tx // const_expr(self.tpr)
-        )
-        lane = Int32(tx % const_expr(self.tpr))
-        # Rows past the end clamp to row 0 so every load stays in range; the store is dropped.
-        alive = row < Int32(mX.shape[0])
-        rs = row if alive else Int32(0)
-        acc = tile.fold_row_rolled(
-            trait, mX, rs, self.tm, lane, nchunks, nwaves, const_expr(self.unroll)
-        )
-        acc = tile.merge_lanes(trait, acc, self.tm)
-        if const_expr(self.warps_per_row > 1):
-            smem = cutlass.utils.SmemAllocator()
-            bufs = [
-                smem.allocate_tensor(
-                    trait.fdtypes[f],
-                    cute.make_layout(self.rows_per_block * self.warps_per_row),
-                    byte_alignment=8,
-                )
-                for f in range(trait.nfields)
-            ]
-            acc = block_reduce(
-                trait,
-                acc,
-                bufs,
-                const_expr(self.warps_per_row),
-                const_expr(self.rows_per_block),
-            )
-        # project OUTSIDE the store branch: binding a dynamic value inside a dynamic `if` is
-        # rejected by the DSL (see kernel_general's final store for the same shape).
-        if const_expr(self.final):
-            res = trait.project(acc, trait.acc(project_n))
-            if lane == 0 and alive:
-                if const_expr(self.nouts == 1):
-                    mOuts[0][row] = mOuts[0].element_type(res)
-                else:
-                    for k in cutlass.range_constexpr(self.nouts):
-                        mOuts[k][row] = mOuts[k].element_type(res[k])
-        else:
-            if lane == 0 and alive:
-                for f in cutlass.range_constexpr(trait.nfields):
-                    mOuts[f][row] = trait.fdtypes[f](acc[f])
-
-
 def reduce_row_tile(
-    trait, trait_key, x, out_dtypes, nouts=1, tpr=None, nt=None, final=True, unroll=None
+    trait,
+    trait_key,
+    x,
+    out_dtypes,
+    nouts=1,
+    tpr=None,
+    nt=None,
+    final=True,
+    unroll=None,
 ):
     """Tile-based row reduction: reduce the contiguous last dim of a 2D `x` -> (M,).
 
@@ -224,22 +142,40 @@ def reduce_row_tile(
     nt = max(tpr, cfg.nt) if nt is None else nt
     nt -= nt % tpr  # rows_per_block must be whole
     dt = _L.torch2cute[x.dtype]
-    op = RowTile(trait, dt, N, tpr, nt, nouts, final, unroll)
+    op = tile.TileReduce(
+        trait,
+        dt,
+        "row",
+        N,
+        tpr=tpr,
+        nt=nt,
+        nouts=nouts,
+        final=final,
+        unroll=unroll,
+    )
 
     # final -> nouts projected results; stage 1 -> one RAW partial buffer per trait field
     ndst = nouts if final else trait.nfields
     outs = [torch.empty(M, device=x.device, dtype=dt) for dt in out_dtypes[:ndst]]
-    align = tile.align_bytes(N, x.element_size())
     nchunks = Int32(N // op.vec)
     nwaves = Int32(math.ceil((N // op.vec) / tpr))
+    # Declared alignment is what lets the load stage emit the wide instruction; tile owns the
+    # derivation so it cannot be forgotten here (it was, and cost 3x). The fold takes N at
+    # RUNTIME, so this wraps with BOTH extents dynamic (N carrying divisibility=vec so the
+    # wide load survives) and one compiled kernel serves the whole vec class.
+    align = tile.align_bytes(N, x.element_size())
 
     def _wrap():
+        # q/npar belong to the COL axis: None, not a dummy value -- an unused Int32 param
+        # costs real time (see tile.TileReduce.kernel).
         return (
-            _L.cute_tensor_dynMN(x, op.vec, align=align, read_only=True),
+            [_L.cute_tensor_dynMN(x, op.vec, align=align, read_only=True)],
             [_L.cute_tensor_dynM(o, ndim=1) for o in outs],
             nchunks,
             nwaves,
             Int32(N),
+            None,
+            None,
             _stream(),
         )
 
