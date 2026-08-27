@@ -244,8 +244,7 @@ static PyObject* THPModule_initExtension(
   libshm_init(path.c_str());
 
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
-  if (!module)
-    throw python_error(); // @allow-raw-throw
+  TORCH_CHECK_PYTHON(module);
 
   THPStorage_postInit(module);
   THPAutograd_initFunctions();
@@ -702,9 +701,7 @@ static PyObject* THPModule_torchDeviceToDLDevice(
   auto dl_device = at::torchDeviceToDLDevice(device);
 
   auto tuple = PyTuple_New(2);
-  if (!tuple) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(tuple);
 
   PyTuple_SET_ITEM(tuple, 0, THPUtils_packInt64(dl_device.device_type));
   PyTuple_SET_ITEM(tuple, 1, THPUtils_packInt64(dl_device.device_id));
@@ -1136,8 +1133,7 @@ static PyObject* THPModule_setSDPUseCuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
-      "set_sdp_use_cudnn expects a bool, "
-      "but got %s",
+      "set_sdp_use_cudnn expects a bool, but got ",
       THPUtils_typename(arg));
   at::globalContext().setSDPUseCuDNN(Py_IsTrue(arg));
   Py_RETURN_NONE;
@@ -1691,16 +1687,13 @@ static PyObject* THPModule_getAllDtypes(PyObject* _unused, PyObject* noargs) {
   };
 
   THPObjectPtr result(PyList_New(0));
-  if (!result)
-    throw python_error();
+  TORCH_CHECK_PYTHON(result);
   for (auto scalar_type : all_scalar_types) {
     if (c10::isQIntType(scalar_type) || is_subbyte_dummy(scalar_type)) {
       continue;
     }
     auto* dtype = reinterpret_cast<PyObject*>(torch::getTHPDtype(scalar_type));
-    if (PyList_Append(result.get(), dtype) < 0) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(PyList_Append(result.get(), dtype) >= 0);
   }
   return result.release();
   END_HANDLE_TH_ERRORS

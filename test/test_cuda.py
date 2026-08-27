@@ -40,6 +40,7 @@ from torch.testing._internal.common_cuda import (
     _create_scaling_case,
     _get_torch_cuda_version,
     blas_library_context,
+    has_device_side_assert,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     PLATFORM_SUPPORTS_WORKQUEUE_CONFIG,
     SM70OrLater,
@@ -1403,6 +1404,53 @@ print(t.is_pinned())
             self.assertEqual(a, b)
             self.assertEqual(torch.cuda.initial_seed(), 2)
 
+    def _check_lazy_call_reentrant_no_deadlock(self, script):
+        # Separate process: a regression deadlocks the interpreter (non-reentrant lock).
+        # The pass path exits quickly regardless of the limit; the timeout only
+        # bounds failure detection, so keep it generous for slow CI.
+        timeout_sec = 60
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+            )
+        except subprocess.TimeoutExpired as e:
+            self.fail(
+                f"lazy_call reentrancy subprocess did not finish within {timeout_sec}s "
+                "(likely deadlock in torch.cuda._lazy_call); "
+                f"cmd={e.cmd!r}"
+            )
+        self.assertEqual(
+            proc.returncode,
+            0,
+            msg=f"stdout={proc.stdout!r}\nstderr={proc.stderr!r}",
+        )
+        self.assertIn("done", proc.stdout)
+
+    def test_lazy_call_reentrant_set_rng_state_does_not_deadlock(self):
+        # Reentrant _lazy_call after CUDA is initialized.
+        script = (
+            "import torch; "
+            "torch.cuda.init(); "
+            "state = torch.cuda.get_rng_state(); "
+            "torch.cuda._lazy_call(lambda: torch.cuda.set_rng_state(state)); "
+            "print('done')"
+        )
+        self._check_lazy_call_reentrant_no_deadlock(script)
+
+    def test_lazy_call_reentrant_queued_does_not_deadlock(self):
+        # Reentrant _lazy_call from a queued callback while _lazy_init drains
+        # _queued_calls with _initialization_lock held.
+        script = (
+            "import torch; "
+            "torch.cuda._lazy_call(lambda: torch.cuda.manual_seed(42)); "
+            "torch.cuda.init(); "
+            "print('done')"
+        )
+        self._check_lazy_call_reentrant_no_deadlock(script)
+
     def test_specify_improper_device_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             fname = os.path.join(tmpdir, "tempfile.pt")
@@ -1968,17 +2016,7 @@ except RuntimeError as e:
         except subprocess.TimeoutExpired:
             p.kill()
             out, err = p.communicate()
-        expected_messages = [
-            "device-side assert triggered",  # CUDA
-            "Assertion",  # CUDA
-            "HSA_STATUS_ERROR_EXCEPTION",  # ROCm with TORCH_USE_HIP_DSA
-            "Device-side assertion",  # ROCm with TORCH_USE_HIP_DSA
-            # ROCm without TORCH_USE_HIP_DSA returns a launch failure instead
-            # of a proper device-side assertion, but still catches the error
-            "hipErrorLaunchFailure",
-            "unspecified launch failure",
-        ]
-        self.assertTrue(any(msg in out or msg in err for msg in expected_messages))
+        self.assertTrue(has_device_side_assert(out) or has_device_side_assert(err))
 
     @unittest.skipIf(
         not TEST_CUDAMALLOCASYNC, "requires the cudaMallocAsync allocator backend"
@@ -2069,16 +2107,8 @@ class TestThatContainsCUDAAssertFailure(TestCase):
 if __name__ == '__main__':
     run_tests()
 """)
-        # CUDA raises cudaErrorAssert (710) with "device-side assert triggered"
-        # ROCm with TORCH_USE_HIP_DSA raises a proper device-side assertion
-        # ROCm without TORCH_USE_HIP_DSA raises hipErrorLaunchFailure (719)
-        # which still catches the error but with less specific messaging
-        is_cuda_assert = "device-side assert triggered" in stderr
-        is_hip_assert = "hipErrorLaunchFailure" in stderr
-        is_hip_assert = is_hip_assert or "unspecified launch failure" in stderr
-        is_hip_assert = is_hip_assert or "HSA_STATUS_ERROR_EXCEPTION" in stderr
         self.assertTrue(
-            is_cuda_assert or is_hip_assert,
+            has_device_side_assert(stderr),
             lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
         )
 
@@ -2731,6 +2761,10 @@ torch.cuda.synchronize()
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        not torch.cuda.get_arch_list(),
+        "torch was built without CUDA kernels (GPU sections stripped)",
     )
     def test_graph_scalar_assignment(self):
         x = torch.zeros(2, 2, device="cuda")
@@ -6971,7 +7005,6 @@ class TestCudaAllocator(TestCase):
                 "throw_on_cudamalloc_oom:False,per_process_memory_fraction:1.0"
             )
 
-    @skipIfRocmVersionAtLeast([7, 14])
     def test_allocator_backend(self):
         def subprocess_env():
             if IS_WINDOWS:
@@ -7218,7 +7251,6 @@ print(value, end="")
         finally:
             random.setstate(state)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_nvml_get_handler(self):
         if not torch.version.hip:
@@ -7226,12 +7258,10 @@ print(value, end="")
         else:
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_device_memory_used(self):
         """
@@ -7265,17 +7295,14 @@ print(value, end="")
             # test the order of magnitude
             self.assertTrue(num_bytes // 32 <= mem_bytes <= num_bytes * 32)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_raw_amdsmi_device_count(self):

@@ -403,6 +403,62 @@ class TestMaxAutotune(TestCase):
                 guard_or_false.assert_called_once_with(condition)
                 statically_known_true.assert_not_called()
 
+    def test_tma_descriptor_max_offset_fits_in_int32(self):
+        from torch._inductor.utils import _tma_descriptor_max_offset_fits_in_int32
+
+        # G=128, N=16384, K=5120: reported to overflow when selecting
+        # the TMA grouped-mm path -- (G - 1) * (N * K) exceeds int32
+        # even though G, N, and K each individually fit.
+        mat = mock.Mock()
+        mat.get_size.return_value = [128, 16384, 5120]
+        mat.get_stride.return_value = [16384 * 5120, 5120, 1]
+        self.assertFalse(_tma_descriptor_max_offset_fits_in_int32(mat))
+
+        mat.get_size.return_value = [16, 16384, 5120]
+        mat.get_stride.return_value = [16384 * 5120, 5120, 1]
+        self.assertTrue(_tma_descriptor_max_offset_fits_in_int32(mat))
+
+    def test_tma_descriptor_max_offset_fits_in_int32_uses_expected_guarding(self):
+        from torch._inductor.utils import _tma_descriptor_max_offset_fits_in_int32
+
+        gm = make_fx(lambda: torch.zeros(2, 3))()
+        graph = GraphLowering(gm)
+        size0 = sympy.Symbol("s0", integer=True, nonnegative=True)
+        stride0 = sympy.Symbol("st0", integer=True, nonnegative=True)
+        mat = mock.Mock()
+        mat.get_size.return_value = [size0]
+        mat.get_stride.return_value = [stride0]
+        condition = sympy.Le((size0 - 1) * stride0, torch.iinfo(torch.int32).max)
+
+        with V.set_graph_handler(graph):
+            with (
+                mock.patch.object(
+                    V.graph.sizevars, "statically_known_true", return_value=True
+                ) as statically_known_true,
+                mock.patch.object(
+                    V.graph.sizevars, "guard_or_false", return_value=True
+                ) as guard_or_false,
+            ):
+                self.assertTrue(
+                    _tma_descriptor_max_offset_fits_in_int32(mat, add_guards=False)
+                )
+                statically_known_true.assert_called_once_with(condition)
+                guard_or_false.assert_not_called()
+
+            with (
+                mock.patch.object(
+                    V.graph.sizevars, "statically_known_true", return_value=True
+                ) as statically_known_true,
+                mock.patch.object(
+                    V.graph.sizevars, "guard_or_false", return_value=True
+                ) as guard_or_false,
+            ):
+                self.assertTrue(
+                    _tma_descriptor_max_offset_fits_in_int32(mat, add_guards=True)
+                )
+                guard_or_false.assert_called_once_with(condition)
+                statically_known_true.assert_not_called()
+
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
@@ -1881,6 +1937,58 @@ class TestMaxAutotune(TestCase):
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
+    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
+    def test_decompose_k_shape_keeps_mm_template_when_exhaustive(self, search_space):
+        """On a shape where decompose_k applies even at threshold_multiple=2, tuned_mm
+        drops the plain mm template to save autotuning time -- except under EXHAUSTIVE,
+        where the user asked for every choice."""
+        a, b = self._make_matrices(
+            M=32,
+            K=32768,
+            N=64,
+            dtype=torch.bfloat16,
+            device=GPU_TYPE,
+            requires_grad=False,
+        )
+
+        names: list[str] = []
+
+        def record(choices):
+            names.extend(c.name for c in choices)
+            return choices
+
+        torch._dynamo.reset()
+        add_preprocessing_fn(record)
+        try:
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "ATEN,TRITON",
+                    "max_autotune_gemm_search_space": search_space,
+                    # keeps the exhaustive space from dominating test runtime
+                    "test_configs.max_mm_configs": 1,
+                    **_DECOMPOSE_K_PATCH_ROCM,
+                }
+            ):
+                torch.compile(lambda x, y: x @ y)(a, b)
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        # the shape must actually be in decompose_k territory, else the test is vacuous
+        self.assertTrue(any(n.startswith("decompose_k") for n in names), names)
+        plain_mm = [n for n in names if n.startswith("triton_mm")]
+        if search_space == "EXHAUSTIVE":
+            self.assertTrue(plain_mm, f"mm_template dropped under EXHAUSTIVE: {names}")
+        else:
+            self.assertFalse(plain_mm, f"mm_template should be skipped: {names}")
+
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
@@ -3196,6 +3304,70 @@ class TestMaxAutotune(TestCase):
             result = torch.compile(mm)(a, b)
 
         torch.testing.assert_close(result, torch.mm(a, b), rtol=1e-2, atol=1e-2)
+
+    @fresh_cache()
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
+    @unittest.skipIf(
+        not SM90OrLater, "Requires SM90+ (H100/B200) for sufficient GPU memory"
+    )
+    @largeTensorTest("6 GB", device=GPU_TYPE)
+    def test_max_autotune_grouped_mm_large_input_tensor_int64_indexing(self):
+        def grouped_mm(a, b, offs):
+            return torch._grouped_mm(a, b.transpose(-2, -1), offs=offs)
+
+        # G*N*K == 2**31: smallest size triggering int64 INDEX_DTYPE
+        # while max_offset (== numel - 1) still fits int32, so TMA
+        # stays enabled.
+        G, M, N, K = 8, 128, 16384, 16384
+        a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(G, N, K, device=GPU_TYPE, dtype=torch.bfloat16)
+        offs = torch.arange(M // G, M + 1, M // G, device=GPU_TYPE, dtype=torch.int32)
+
+        self.assertEqual(b.numel(), 2**31)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": r"^triton_grouped_mm",
+            }
+        ):
+            result = torch.compile(grouped_mm)(a, b, offs)
+
+        torch.testing.assert_close(result, grouped_mm(a, b, offs), rtol=1e-2, atol=1e-2)
+
+    @fresh_cache()
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
+    @unittest.skipIf(
+        not SM90OrLater, "Requires SM90+ (H100/B200) for sufficient GPU memory"
+    )
+    @largeTensorTest("6 GB", device=GPU_TYPE)
+    def test_max_autotune_grouped_mm_large_input_tensor_tma_disabled(self):
+        # Grouped mm whose TMA descriptor max offset exceeds
+        # int32_max; USE_TMA_LOAD must be disabled and the non-TMA
+        # fallback still correct.
+        def grouped_mm(a, b, offs):
+            return torch._grouped_mm(a, b.transpose(-2, -1), offs=offs)
+
+        G, M, N, K = 8, 128, 16384, 16512
+        a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(G, N, K, device=GPU_TYPE, dtype=torch.bfloat16)
+        offs = torch.arange(M // G, M + 1, M // G, device=GPU_TYPE, dtype=torch.int32)
+
+        self.assertGreater(b.numel(), 2**31)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": r"^triton_grouped_mm",
+            }
+        ):
+            result = torch.compile(grouped_mm)(a, b, offs)
+
+        torch.testing.assert_close(result, grouped_mm(a, b, offs), rtol=1e-2, atol=1e-2)
 
     @fresh_cache()
     @skipIfXpu
@@ -5753,6 +5925,16 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
         "test_persistent_tma_epilogue_fusion_store_cache": "Epilogue fusion disabled in async pipelining",
+        # grouped_mm's input_gen_fns forces
+        # return_multi_template=False, so do_autotuning() takes its
+        # pipelined-only branch and returns None instead of timings,
+        # crashing min(timings, ...). Pre-existing bug, not test-
+        # specific -- hits any input_gen_fns op under
+        # pipeline_max_autotune_gemm=True.
+        "test_max_autotune_grouped_mm_large_input_tensor_int64_indexing": "grouped_mm's input_gen_fns forces return_multi_template=False, "
+        "which do_autotuning's pipelined branch does not handle",
+        "test_max_autotune_grouped_mm_large_input_tensor_tma_disabled": "grouped_mm's input_gen_fns forces return_multi_template=False, "
+        "which do_autotuning's pipelined branch does not handle",
     }
 
     @classmethod
