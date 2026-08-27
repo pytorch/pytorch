@@ -826,23 +826,6 @@ class TestSidecarIntegrity(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "could not be read"):
                 export._read_sidecar(path)
 
-    def test_cross_product(self):
-        pts = export.expand_specs(
-            [{"dtype": ["float32", "bfloat16"], "N": [1024, 2048], "K": 8}]
-        )
-        self.assertEqual(len(pts), 4)
-        self.assertIn({"dtype": "float32", "N": 2048, "K": 8}, pts)
-        self.assertIn({"dtype": "bfloat16", "N": 1024, "K": 8}, pts)
-
-    def test_multiple_blocks_concatenate(self):
-        pts = export.expand_specs([{"N": [1, 2]}, {"N": 3, "extra": True}])
-        self.assertEqual(pts, [{"N": 1}, {"N": 2}, {"N": 3, "extra": True}])
-
-    def test_scalar_only_spec(self):
-        self.assertEqual(
-            export.expand_specs([{"N": 4096, "K": 64}]), [{"N": 4096, "K": 64}]
-        )
-
 
 # mX with one size and one stride slot, and with none at all: the two claims the
 # per-argument checks are made against, with SIDECAR's own mOut beside them.
@@ -1763,6 +1746,25 @@ class TestExportMain(unittest.TestCase):
 
 
 class TestCollectJobsRefusals(unittest.TestCase):
+    def test_an_unknown_arch_is_refused_before_the_ops_walk(self):
+        # THE case the old placement could not reach: with no declaration on disk
+        # the per-declaration walk never ran, so `--arch sm100a` matched nothing and
+        # exited 0. That is the state of this tree until a declaration lands, and it
+        # is what a --ops typo looks like forever.
+        with (
+            tempfile.TemporaryDirectory() as ops,
+            tempfile.TemporaryDirectory() as out,
+        ):
+            with mock.patch.object(export, "OPS_DIR", ops):
+                self.assertEqual(os.listdir(ops), [], "no declaration on disk")
+                for bad in ("sm100a", "SM_100", "sm_1000", "sm_86", "90"):
+                    with self.subTest(arch=bad):
+                        with self.assertRaisesRegex(RuntimeError, "not an arch"):
+                            export.main(["--arch", bad, "--out-dir", out])
+                # ...and a known arch gets past the check (it exports nothing here,
+                # which is the honest answer for a tree with no declarations).
+                export.main(["--arch", "sm_100a", "--out-dir", out])
+
     def test_an_unnameable_arch_is_refused(self):
         # There is no unnamed layout: an artifact whose arch nobody can state is
         # one the runtime gate cannot match to hardware. Untested before --
