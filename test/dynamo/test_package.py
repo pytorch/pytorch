@@ -1,16 +1,13 @@
 # Owner(s): ["module: dynamo"]
 
-import functools
 import gc
 import importlib
 import os
 import sys
 import tempfile
-import types
 import unittest
 
 import torch
-import torch._dynamo.package as dynamo_package
 import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
@@ -40,27 +37,6 @@ def compute_loss_helper(x):
 
 def compiled_region_with_backend_id_for_package_test():
     return __compiled_fn_0_00000000_0000_0000_0000_000000000000()  # noqa: F821
-
-
-class _PackageDescriptorHolder:
-    @property
-    def getter_only(self):
-        def inner(x):
-            return x + 1
-
-        return inner(2)
-
-    @functools.cached_property
-    def cached(self):
-        return 3
-
-    @property
-    def pair(self):
-        return 1
-
-    @pair.setter
-    def set_pair(self, value):
-        self._value = value
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -109,40 +85,6 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
         cache_entry = package.cache_entry()
         self.assertEqual(cache_entry.codes[0].backend_ids, [backend_id])
-
-    @parametrize(
-        "kind", ("getter", "nested_getter", "cached_property", "renamed_setter")
-    )
-    def test_code_under_a_descriptor_resolves(self, kind):
-        import ast
-
-        holder = _PackageDescriptorHolder
-        nested = next(
-            const
-            for const in holder.getter_only.fget.__code__.co_consts
-            if isinstance(const, types.CodeType)
-        )
-        code = {
-            "getter": holder.getter_only.fget.__code__,
-            "nested_getter": nested,
-            "cached_property": holder.cached.func.__code__,
-            "renamed_setter": holder.set_pair.fset.__code__,
-        }[kind]
-        qualname, source = dynamo_package._get_code_source(code)
-        obj = sys.modules[holder.__module__]
-        for part in qualname.split("."):
-            obj = getattr(obj, part)
-        for part in source.split("."):
-            if not part:
-                continue
-            if part.endswith("]"):
-                index_begin = part.rfind("[")
-                obj = getattr(obj, part[:index_begin])[
-                    ast.literal_eval(part[index_begin + 1 : -1])
-                ]
-            else:
-                obj = getattr(obj, part)
-        self.assertIs(obj, code)
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
@@ -541,8 +483,8 @@ def add(x, y):
         self._save_and_reload(expected_backends=2, expected_dynamo=2)
 
         # These should exist because of populate_caches
-        package1 = DynamoCache.load_and_install_package(fn, -1)
-        package2 = DynamoCache.load_and_install_package(fn2, -1)
+        package1 = DynamoCache.load_and_install_package(fn)
+        package2 = DynamoCache.load_and_install_package(fn2)
 
         with torch.compiler.set_stance("fail_on_recompile"):
             result1 = compiled_fn1(arg1)
@@ -577,34 +519,6 @@ def add(x, y):
 
         torch._dynamo.reset()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
-
-    @parametrize("device", ("cpu", "cuda", "xpu"))
-    @parametrize("isolate_recompiles", (False, True))
-    @torch._dynamo.config.patch(caching_precompile=True)
-    def test_automatic_dynamo_serves_an_isolate_recompiles_context(
-        self, device, isolate_recompiles
-    ):
-        def fn(x):
-            return x.sin() + x.cos()
-
-        if device == "cuda" and not HAS_CUDA_AND_TRITON:
-            raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU_AND_TRITON:
-            raise unittest.SkipTest("Requires XPU/Triton")
-
-        arg = torch.randn(3, 2, device=device)
-        expected = fn(arg)
-        torch.compile(  # noqa: UNSPECIFIED_BACKEND
-            fn, isolate_recompiles=isolate_recompiles
-        )(arg)
-        DynamoCache.clear()
-        self._save_and_reload(expected_backends=1, expected_dynamo=1)
-
-        warm = torch.compile(  # noqa: UNSPECIFIED_BACKEND
-            fn, isolate_recompiles=isolate_recompiles
-        )
-        with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(warm(arg), expected)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)

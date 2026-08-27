@@ -300,6 +300,7 @@ class TestAOTCompileToPython(TestCase):
         source, final_cache = state.finalize(tuple(masks))
         self.assertIn("2: (_inner_call_bw_0", source)
         self.assertIn("_AOT_DEFAULT_BACKWARD_VARIANT = None", source)
+        self.assertIn("KeptTangentInfo", source)
         loaded = load_from_python(source, final_cache)
         run_x = x.detach().clone().requires_grad_()
         run_y = y.detach().clone().requires_grad_()

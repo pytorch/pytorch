@@ -24,11 +24,8 @@ import pickle
 import platform
 import shutil
 import sys
-import threading
 import types
-import uuid
-import weakref
-from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
 from typing import Any, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
@@ -47,7 +44,6 @@ from .utils import CleanupHook, counters, dynamo_timed, increment_frame
 
 
 logger = logging.getLogger(__name__)
-_PACKAGE_INSTALL_LOCK = threading.RLock()
 
 
 if TYPE_CHECKING:
@@ -55,21 +51,6 @@ if TYPE_CHECKING:
 
 
 _CODE_CACHE = WeakIdKeyDictionary()
-_INSTALLER_REGISTRY_LOCK = threading.Lock()
-_GLOBAL_BINDINGS: WeakIdKeyDictionary = WeakIdKeyDictionary()
-_ABSENT_GLOBAL = object()
-
-
-@dataclasses.dataclass(frozen=True)
-class _InstalledGlobal:
-    name: str
-    value: object
-
-
-@dataclasses.dataclass
-class _GlobalBinding:
-    value: object
-    owners: weakref.WeakSet["CompilePackage"]
 
 
 def _code_cache(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -174,14 +155,6 @@ _BackendId = NewType("_BackendId", str)  # __compiled_fn
 _FunctionId = NewType("_FunctionId", str)  # __resume_at
 
 
-@dataclasses.dataclass
-class _PreparedInstall:
-    """The pure work for install(), computed early by prepare()."""
-
-    backends: dict[_BackendId, Any]
-    managers: dict[tuple[types.CodeType, int], "GuardManagerWrapper"]
-
-
 def _backend_ids_from_code(code: types.CodeType) -> Iterator[_BackendId]:
     for name in code.co_names:
         if is_compiled_fn_name(name):
@@ -264,35 +237,6 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
-    bypass_reason: str | None = None
-
-
-def _resume_global_renames(
-    entries: Iterable[_DynamoCodeCacheEntry], install_token: str
-) -> dict[str, str]:
-    renames: dict[str, str] = {}
-    for entry in entries:
-        if not entry.install_to_global:
-            continue
-        digest = hashlib.sha256(pickle.dumps(entry.python_code)).hexdigest()[:16]
-        for name in entry.function_names:
-            renames[name] = f"{name}_{digest}_{install_token}"
-    return renames
-
-
-def _rename_globals(code: types.CodeType, renames: dict[str, str]) -> types.CodeType:
-    if not renames:
-        return code
-    consts = tuple(
-        _rename_globals(const, renames) if isinstance(const, types.CodeType) else const
-        for const in code.co_consts
-    )
-    names = tuple(renames.get(name, name) for name in code.co_names)
-    if names == code.co_names and all(
-        new is old for new, old in zip(consts, code.co_consts)
-    ):
-        return code
-    return code.replace(co_names=names, co_consts=consts)
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
@@ -338,22 +282,6 @@ def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
     )
 
 
-def _descriptor_functions(obj: Any) -> list[tuple[str, Any]]:
-    if isinstance(obj, property):
-        return [
-            (name, fn)
-            for name, fn in (
-                ("fget", obj.fget),
-                ("fset", obj.fset),
-                ("fdel", obj.fdel),
-            )
-            if fn is not None
-        ]
-    if isinstance(obj, functools.cached_property):
-        return [("func", obj.func)]
-    return []
-
-
 def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     """
     Given a code object, return a fully qualified name which will be used as
@@ -378,11 +306,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             if not hasattr(toplevel, part):
                 _raise_resolution_error(code, toplevel)
             toplevel = getattr(toplevel, part)
-            if (
-                inspect.isfunction(toplevel)
-                or inspect.ismethod(toplevel)
-                or _descriptor_functions(toplevel)
-            ):
+            if inspect.isfunction(toplevel) or inspect.ismethod(toplevel):
                 break
     seen = set()
 
@@ -401,10 +325,6 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             for i, const in enumerate(obj.co_consts):
                 if (res := _find_code_source(const)) is not None:
                     return f".co_consts[{i}]{res}"
-
-        for attr, wrapped in _descriptor_functions(obj):
-            if (res := _find_code_source(wrapped)) is not None:
-                return f".{attr}{res}"
 
         if inspect.ismethod(obj):
             if (res := _find_code_source(obj.__func__)) is not None:
@@ -448,14 +368,6 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                     try:
                         value = getattr(obj, name)
                     except AttributeError:
-                        continue
-                    wrapped = _descriptor_functions(value)
-                    if wrapped:
-                        for attr, fn in wrapped:
-                            if (res := _find_code_source(fn)) is not None:
-                                if fn.__name__ != name:
-                                    _raise_resolution_error(code, toplevel)
-                                return f".{attr}{res}"
                         continue
                     if not (
                         inspect.isfunction(value)
@@ -719,21 +631,12 @@ class CompilePackage:
         fn: Callable[..., Any] | None,
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
-        serialization_guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]]
-        | None = None,
     ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
-        self._observed_scopes: dict[types.CodeType, list[dict[str, object]]] = {}
-        self._live_guard_leaves: dict[int, list[frozenset[tuple[str, str, str]]]] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
-        self._installed_globals: dict[types.ModuleType, list[_InstalledGlobal]] = {}
-        self._installed_precompile_codes: list[types.CodeType] = []
-        self._installed_precompile_region_id = -1
-        self._installed_precompile_probe: types.CodeType | None = None
-        self._install_owner = object()
-        self._prepared: _PreparedInstall | None = None
+        self._installed_globals: dict[types.ModuleType, list[str]] = {}
         # device_type that model compiled with.
         self._device_type = "cpu"
 
@@ -741,11 +644,10 @@ class CompilePackage:
         self._cached_backends: dict[_BackendId, Any] = {}
         self._source_info: SourceInfo = SourceInfo(inlined_sources=set())
         self._resume_codes: set[types.CodeType] = set()
-        self._install_token = uuid.uuid4().hex
-        self.serialization_guard_filter_fn = serialization_guard_filter_fn
         self._initialized = False
         if fn is not None:
             self.initialize(fn, dynamo, ignore_inlined_sources)
+            self.uninstall()
             self.validate()
 
     def is_initialized(self) -> bool:
@@ -851,9 +753,7 @@ class CompilePackage:
         )
 
     @contextlib.contextmanager
-    def code_context(
-        self, code: types.CodeType, local_scope: dict[str, object] | None = None
-    ) -> Generator[None, None, None]:
+    def code_context(self, code: types.CodeType) -> Generator[None, None, None]:
         if self._current_entry is not None:
             raise AssertionError("_current_entry is already set in code_context")
 
@@ -863,8 +763,6 @@ class CompilePackage:
             self._add_user_function(code)
 
         entry = self._codes[code]
-        if local_scope is not None:
-            self._observed_scopes.setdefault(code, []).append(dict(local_scope))
         self._current_entry = entry
         try:
             yield
@@ -872,19 +770,10 @@ class CompilePackage:
             entry.has_compile_id = True
             self._current_entry = None
 
-    def observed_scopes(self) -> list[list[dict[str, object]]]:
-        return [self._observed_scopes.get(code, []) for code in self._codes]
-
-    def live_guard_leaves(
-        self, entry: _DynamoCodeCacheEntry
-    ) -> Sequence[frozenset[tuple[str, str, str]]]:
-        return self._live_guard_leaves.get(id(entry), ())
-
     def add_guarded_code(
         self,
         guards_state: bytes,
         dynamo_code: types.CodeType,
-        live_guard_leaves: frozenset[tuple[str, str, str]] = frozenset(),
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_guarded_code")
@@ -895,9 +784,6 @@ class CompilePackage:
             dynamo_code=SerializedCode.from_code_object(dynamo_code),
         )
         self._current_entry.guarded_codes.append(guarded_code_entry)
-        self._live_guard_leaves.setdefault(id(self._current_entry), []).append(
-            live_guard_leaves
-        )
         for backend_id in _backend_ids_from_code(dynamo_code):
             self._add_backend_id(backend_id)
 
@@ -914,11 +800,10 @@ class CompilePackage:
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
         self._device_type = _graph_device_type(graph)
 
-    def bypass_current_entry(self, reason: str = "") -> None:
+    def bypass_current_entry(self) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
-        self._current_entry.bypass_reason = reason or None
 
     def add_resume_function(
         self,
@@ -976,71 +861,22 @@ class CompilePackage:
         # so that hook must not delete it once its code object is collected.
         CleanupHook.disown(module.__dict__, name)
         module.__dict__[name] = value
-        installed = _InstalledGlobal(name, value)
-        self._installed_globals.setdefault(module, []).append(installed)
-        with _INSTALLER_REGISTRY_LOCK:
-            by_name = _GLOBAL_BINDINGS.setdefault(module, {})
-            stack = by_name.setdefault(name, [])
-            if not stack or stack[-1].value is not value:
-                stack.append(_GlobalBinding(value, weakref.WeakSet()))
-            stack[-1].owners.add(self)
+        self._installed_globals.setdefault(module, []).append(name)
 
     def uninstall(self) -> None:
-        from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_owner
+        from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
-        with _PACKAGE_INSTALL_LOCK:
-            if self._innermost_fn is None:
-                raise AssertionError("_innermost_fn is not set in uninstall")
-            for module, installed_globals in self._installed_globals.items():
-                for installed in installed_globals:
-                    with _INSTALLER_REGISTRY_LOCK:
-                        by_name = _GLOBAL_BINDINGS.get(module) or {}
-                        stack = by_name.get(installed.name) or []
-                        for binding in stack:
-                            if (
-                                binding.value is installed.value
-                                and self in binding.owners
-                            ):
-                                binding.owners.discard(self)
-                                break
-                        stack[:] = [binding for binding in stack if binding.owners]
-                        survivor = stack[-1].value if stack else _ABSENT_GLOBAL
-                        if not stack:
-                            by_name.pop(installed.name, None)
-                    current = module.__dict__.get(installed.name, _ABSENT_GLOBAL)
-                    if survivor is _ABSENT_GLOBAL:
-                        if current is installed.value:
-                            del module.__dict__[installed.name]
-                    elif current is installed.value or current is _ABSENT_GLOBAL:
-                        module.__dict__[installed.name] = survivor
+        if self._innermost_fn is None:
+            raise AssertionError("_innermost_fn is not set in uninstall")
+        for module, names in self._installed_globals.items():
+            for name in names:
+                module.__dict__.pop(name, None)
 
-            self._installed_globals = {}
+        self._installed_globals = {}
 
-            for code in self._installed_precompile_codes:
-                _reset_precompile_entries_for_owner(
-                    code, self._installed_precompile_region_id, self._install_owner
-                )
-            self._installed_precompile_codes = []
-            self._installed_precompile_region_id = -1
-            self._installed_precompile_probe = None
+        _reset_precompile_entries(self._innermost_fn.__code__)
 
-    def region_codes(self) -> tuple[types.CodeType, ...]:
-        return (*self._codes, *self._installed_precompile_codes)
-
-    def installed_entries_dropped(self) -> bool:
-        from torch._C._dynamo.eval_frame import _has_precompile_entries
-
-        probe = self._installed_precompile_probe
-        return probe is not None and not _has_precompile_entries(
-            probe, self._installed_precompile_region_id
-        )
-
-    def install(
-        self,
-        backends: dict[_BackendId, Any],
-        *,
-        isolate_recompiles_id: int = -1,
-    ) -> None:
+    def install(self, backends: dict[_BackendId, Any]) -> None:
         """
         Sync the package states to the compiled function. This includes the following actions:
           1. Clean up the previously installed states.
@@ -1052,166 +888,113 @@ class CompilePackage:
         from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
 
-        prepared = self._prepared
-        self._prepared = None
-        with _PACKAGE_INSTALL_LOCK:
-            self.uninstall()
-            self._installed_precompile_region_id = isolate_recompiles_id
-            renames = _resume_global_renames(self._codes.values(), self._install_token)
-            for code, entry in self._codes.items():
-                context = (
-                    _compile_frame_context(code)
-                    if entry.has_compile_id
-                    else contextlib.nullcontext()
-                )
-                with context:
-                    module = sys.modules[entry.python_module]
-                    for alias, module_name in entry.import_sources.items():
-                        self._install_global(
-                            module, alias, importlib.import_module(module_name)
-                        )
-                    target_code = code
-                    if entry.install_to_global:
-                        for function_name in entry.function_names:
-                            function_name = renames.get(function_name, function_name)
-                            if code.co_freevars:
-                                f_globals = module.__dict__
-                                fn_name = function_name
+        self.uninstall()
+        for code, entry in self._codes.items():
+            context = (
+                _compile_frame_context(code)
+                if entry.has_compile_id
+                else contextlib.nullcontext()
+            )
+            with context:
+                module = sys.modules[entry.python_module]
+                for alias, module_name in entry.import_sources.items():
+                    self._install_global(
+                        module, alias, importlib.import_module(module_name)
+                    )
+                target_code = code
+                if entry.install_to_global:
+                    for function_name in entry.function_names:
+                        if code.co_freevars:
+                            # Resume functions with freevars need a factory
+                            # that takes a closure tuple, matching
+                            # install_resume_function_global in output_graph.py.
+                            f_globals = module.__dict__
+                            fn_name = function_name
 
-                                def _make_fn(
-                                    closure: tuple[types.CellType, ...],
-                                    _code: types.CodeType = code,
-                                    _globals: dict[str, Any] = f_globals,
-                                    _name: str = fn_name,
-                                ) -> types.FunctionType:
-                                    return types.FunctionType(
-                                        _code, _globals, _name, None, closure
-                                    )
-
-                                self._install_global(module, function_name, _make_fn)
-                            else:
-                                fn = types.FunctionType(
-                                    code, module.__dict__, function_name
+                            def _make_fn(
+                                closure: tuple[types.CellType, ...],
+                                _code: types.CodeType = code,
+                                _globals: dict[str, Any] = f_globals,
+                                _name: str = fn_name,
+                            ) -> types.FunctionType:
+                                return types.FunctionType(
+                                    _code, _globals, _name, None, closure
                                 )
-                                self._install_global(module, function_name, fn)
-                    if entry.code_source:
-                        target_code = _lookup_code(entry)
 
-                    if entry.bypassed:
-                        continue
-
-                    input_codes.add(target_code)
-                    if target_code not in self._installed_precompile_codes:
-                        self._installed_precompile_codes.append(target_code)
-                    for backend_id in entry.backend_ids:
-                        if backend_id not in backends:
-                            raise RuntimeError(
-                                f"Backend {backend_id} is not found in the given backends"
-                            )
-                        if prepared is not None:
-                            backend = prepared.backends[backend_id]
+                            self._install_global(module, function_name, _make_fn)
                         else:
-                            with dynamo_timed(
-                                "after_deserialization", phase_name="backend_compile"
-                            ):
-                                backend = backends[backend_id].after_deserialization()
+                            fn = types.FunctionType(
+                                code, module.__dict__, function_name
+                            )
+                            self._install_global(module, function_name, fn)
+                if entry.code_source:
+                    target_code = _lookup_code(entry)
+
+                if entry.bypassed:
+                    # If the entry is bypassed, do not install backends
+                    # or guarded codes.
+                    continue
+
+                input_codes.add(target_code)
+                for backend_id in entry.backend_ids:
+                    if backend_id not in backends:
+                        raise RuntimeError(
+                            f"Backend {backend_id} is not found in the given backends"
+                        )
+                    with dynamo_timed(
+                        "after_deserialization", phase_name="backend_compile"
+                    ):
+                        backend = backends[backend_id].after_deserialization()
                         self._install_global(
                             module,
                             backend_id,
                             torch._dynamo.disable(backend),
                         )
 
-                    if not entry.guarded_codes:
-                        if self._installed_precompile_region_id < 0:
-                            torch._dynamo.eval_frame.skip_code(target_code)
-                        else:
-                            from torch._C._dynamo.eval_frame import (
-                                _FrameAction,
-                                _FrameExecStrategy,
-                                set_code_region_exec_strategy,
-                            )
+                if len(entry.guarded_codes) == 0:
+                    # Dynamo generates empty graph for trivial functions, should just skip them
+                    # in these cases.
+                    torch._dynamo.eval_frame.skip_code(target_code)
 
-                            set_code_region_exec_strategy(
-                                target_code,
-                                self._installed_precompile_region_id,
-                                _FrameExecStrategy(
-                                    _FrameAction.SKIP, _FrameAction.SKIP
-                                ),
-                            )
-
-                    for index, guarded_code in enumerate(entry.guarded_codes):
-                        with dynamo_timed("precompile_load_guards"):
-                            guards_state = load_guards_state(guarded_code.guards_state)
-                        runtime_global_scope = sys.modules[entry.python_module].__dict__
-                        if (
-                            builtin_dict_name
-                            := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
-                        ):
-                            CleanupHook.disown(runtime_global_scope, builtin_dict_name)
-                            builtins_dict = get_builtins_dict(runtime_global_scope)
-                            if builtin_dict_name in runtime_global_scope:
-                                if (
-                                    runtime_global_scope[builtin_dict_name]
-                                    is not builtins_dict
-                                ):
-                                    raise AssertionError(
-                                        f"Builtins dict mismatch for key '{builtin_dict_name}'"
-                                    )
-                            else:
-                                runtime_global_scope[builtin_dict_name] = builtins_dict
-                        if not isinstance(
-                            guards_state, torch._dynamo.guards.GuardsState
-                        ):
-                            raise AssertionError(
-                                f"Expected GuardsState, got {type(guards_state)}"
-                            )
-                        guard_manager = (
-                            prepared.managers.get((target_code, index))
-                            if prepared is not None
-                            else None
-                        )
-                        if guard_manager is None:
-                            with dynamo_timed("precompile_build_guards"):
-                                guard_manager = load_guard_manager(
-                                    guards_state, target_code, runtime_global_scope
+                for guarded_code in entry.guarded_codes:
+                    with dynamo_timed("precompile_load_guards"):
+                        guards_state = load_guards_state(guarded_code.guards_state)
+                    runtime_global_scope = sys.modules[entry.python_module].__dict__
+                    # The installed builtins dict might be absent from the runtime
+                    # while loading guards. Populate it if it's missing.
+                    if (
+                        builtin_dict_name
+                        := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+                    ):
+                        # A pre-reset compile's CleanupHook may still own this
+                        # name even when we're about to leave its value alone
+                        # below (same dict object every compile in this
+                        # module), so it must not delete it once collected.
+                        CleanupHook.disown(runtime_global_scope, builtin_dict_name)
+                        builtins_dict = get_builtins_dict(runtime_global_scope)
+                        if builtin_dict_name in runtime_global_scope:
+                            if (
+                                runtime_global_scope[builtin_dict_name]
+                                is not builtins_dict
+                            ):
+                                raise AssertionError(
+                                    f"Builtins dict mismatch for key '{builtin_dict_name}'"
                                 )
-                        _load_precompile_entry(
-                            target_code,
-                            guard_manager,
-                            _rename_globals(
-                                SerializedCode.to_code_object(guarded_code.dynamo_code),
-                                renames,
-                            ),
-                            self._installed_precompile_region_id,
-                            self._install_owner,
+                        else:
+                            runtime_global_scope[builtin_dict_name] = builtins_dict
+                    if not isinstance(guards_state, torch._dynamo.guards.GuardsState):
+                        raise AssertionError(
+                            f"Expected GuardsState, got {type(guards_state)}"
                         )
-                        if self._installed_precompile_probe is None:
-                            self._installed_precompile_probe = target_code
-
-    def prepare(self, backends: dict[_BackendId, Any]) -> None:
-        """Do install()'s pure work now and leave it for install() to consume.
-
-        Backend deserialization and guard construction can reject an artifact that
-        does not fit this host, but neither operation mutates interpreter state. Moving
-        them to load time surfaces those failures before the first served call without
-        paying for the work twice.
-        """
-        managers = {}
-        for code, entry in self._codes.items():
-            if entry.bypassed or not entry.guarded_codes:
-                continue
-            target_code = _lookup_code(entry) if entry.code_source else code
-            runtime_global_scope = sys.modules[entry.python_module].__dict__
-            for index, guarded_code in enumerate(entry.guarded_codes):
-                guards_state = load_guards_state(guarded_code.guards_state)
-                managers[(target_code, index)] = load_guard_manager(
-                    guards_state, target_code, runtime_global_scope
-                )
-        deserialized = {}
-        for backend_id, artifact in backends.items():
-            with dynamo_timed("after_deserialization", phase_name="backend_compile"):
-                deserialized[backend_id] = artifact.after_deserialization()
-        self._prepared = _PreparedInstall(backends=deserialized, managers=managers)
+                    with dynamo_timed("precompile_build_guards"):
+                        guard_manager = load_guard_manager(
+                            guards_state, target_code, runtime_global_scope
+                        )
+                    _load_precompile_entry(
+                        target_code,
+                        guard_manager,
+                        SerializedCode.to_code_object(guarded_code.dynamo_code),
+                    )
 
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
@@ -1493,9 +1276,7 @@ class DiskDynamoCache(DiskDynamoStore):
         counters["dynamo_cache"]["dynamo_cache_miss"] += 1
         return None
 
-    def load_and_install_package(
-        self, fn: Callable[..., Any], isolate_recompiles_id: int = -1
-    ) -> CompilePackage | None:
+    def load_and_install_package(self, fn: Callable[..., Any]) -> CompilePackage | None:
         """
         Load directly into a package and install backends
         """
@@ -1504,9 +1285,7 @@ class DiskDynamoCache(DiskDynamoStore):
             return None
         else:
             package = CompilePackage(fn, results.dynamo)
-            package.install(
-                results.backends, isolate_recompiles_id=isolate_recompiles_id
-            )
+            package.install(results.backends)
             return package
 
     def path_prefix(self) -> str:

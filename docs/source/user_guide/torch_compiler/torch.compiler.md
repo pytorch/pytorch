@@ -35,47 +35,11 @@ might be used interchangeably in this documentation.
 :::
 
 `torch.compiler` also includes an ahead-of-time API, `torch.compiler.precompile`. It
-captures a whole computation from positional-argument tuples in `example_inputs` -- with
-the model(s) included in each tuple, e.g.
-`precompile(lambda model, x: model(x), example_inputs=[(model, x)])` -- and lowers it to
-a runnable Python source string plus an acceleration cache. Make-fx artifacts are
-self-contained. Dynamo artifacts may import modules referenced by transformed globals;
-installed artifacts also import the defining Python modules.
-For compatibility, positional arguments after the callable still describe one example
-call; they cannot be combined with `example_inputs`.
-Reload the artifact with `torch.compiler.precompile.load`; since no weights are baked in,
-you pass the model again at runtime. The optional `tracer="dynamo"` path accepts several
-example calls and retains the guarded recompilations they trigger, including
-automatically dynamic graphs. Use `torch.compiler.ExampleInput(args=..., kwargs=...)`
-for a call with keyword arguments. Its serialized guard records are filtered while
-preserving how every example dispatches. The contract requires the Python environment,
-including globals and context-manager state, to remain semantically unchanged and allows
-recompilation-causing variation only through explicit inputs. Environment-only guards may
-therefore be omitted, while every portable input-derived guard is retained by default.
-Explicitly filtering an input guard is a risky drop and requires opting out of the default
-safety gate. Guards are rebuilt from frozen capture state and checked for predicate drift
-before the artifact is emitted. Breaking an unchecked environment assumption can silently
-miscompute. Tensor, scalar, Python-container, and `nn.Module` arguments are supported.
-Graph breaks and
-closure-free `torch._dynamo.disable` functions are preserved; top-level closures and
-nested functions that capture locals are not yet supported. The eager backend also
-preserves higher-order graphs such as `torch.cond`, `torch.while_loop`, non-reentrant
-checkpointing, `vmap`, autocast, and grad-mode regions without symbolically retracing
-them at load. Captured nested frames that cannot be reached by a source-only dispatcher
-use an isolated installed artifact. Loading prepares its backends and guards, its first
-call installs them, and `unload()` removes them; it can also be scoped with `with`.
-An uncovered call compiles with a warning and increments `serve_time_compiles()`. A
-standalone artifact instead rejects calls outside its captured guard sets. With
-`training=True`, both eager and Inductor artifacts retain autograd history; Inductor
-graphs include readable compiled forward and backward code. This training mode works
-across captured recompilations, graph breaks, and supported tensor subclasses. Each
-example's real backward compiles and records an integer bitmask whose set bits identify
-undefined output tangents, and Inductor serializes the matching backward variants
-without passing `None` to a kernel Tensor input. A pattern absent from the examples is
-rejected at runtime. If the examples only run forwards, only the all-tangents-present
-backward is covered. `PrecompileSummary` reports coverage and dropped guards, while the
-`require_*` options let callers reject incomplete or insufficiently guarded captures.
-See the {ref}`API reference <torch.compiler_api>` for details.
+captures a whole computation `fn(*example_inputs)` -- with the model(s) passed among
+`example_inputs`, e.g. `precompile(lambda model, x: model(x), model, x)` -- and lowers it
+to a self-contained, runnable Python source string plus an acceleration cache. Reload the
+artifact with `torch.compiler.precompile.load`; since no weights are baked in, you pass
+the model again at runtime. See the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}
 `torch.compile` may not support recently released major versions of Python.

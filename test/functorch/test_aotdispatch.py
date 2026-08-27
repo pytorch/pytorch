@@ -1041,6 +1041,186 @@ def forward(self, primals_1):
             1,
         )
 
+    def test_unresolved_none_tangent_names_the_forward_output(self):
+        import torch._functorch._aot_autograd.graph_compile as graph_compile
+        import torch._functorch._aot_autograd.runtime_wrappers as runtime_wrappers
+
+        def fn(x):
+            y = torch.sin(x)
+            return y[0:4], y[4:8], y.detach(), x * 3
+
+        torch._dynamo.reset()
+        x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
+        with (
+            patch.object(
+                runtime_wrappers, "_dealias_marked_returns", lambda raw, marked: None
+            ),
+            patch.object(
+                graph_compile,
+                "_retrace_backward_for_undefined_grad_outputs",
+                lambda *args: None,
+            ),
+            patch.object(
+                runtime_wrappers,
+                "_specialize_bw_module_for_undefined_grad_outputs",
+                lambda *args: None,
+            ),
+            patch.object(
+                runtime_wrappers, "_grad_output_prototype", lambda *args: None
+            ),
+        ):
+            outputs = torch.compile(fn, backend="inductor")(x)
+            with self.assertRaisesRegex(
+                RuntimeError, "handed a non-Tensor for a tangent it requires"
+            ) as cm:
+                outputs[3].sum().backward()
+
+        msg = str(cm.exception)
+        self.assertIn("tangent index         : 1", msg)
+        self.assertIn("received              : None (type NoneType", msg)
+        self.assertIn("IntermediateBaseAOTOutput(base_of=PlainAOTOutput(idx=0))", msg)
+        self.assertIn("that slot holds       : intermediate base 0", msg)
+        self.assertIn("user output index     : 0", msg)
+        self.assertIn("OutputType.alias_of_intermediate_save_as_output", msg)
+        self.assertIn("its requires_grad     : True", msg)
+        self.assertIn("its dtype             : torch.float32", msg)
+        self.assertIn("This slot is case (2) or (3)", msg)
+
+    @parametrize("fallback", ("retrace", "structural", "materialize"))
+    def test_none_tangent_resolution_precedes_diagnostic(self, fallback):
+        import torch._functorch._aot_autograd.graph_compile as graph_compile
+        import torch._functorch._aot_autograd.runtime_wrappers as runtime_wrappers
+
+        def fn(x):
+            y = torch.sin(x)
+            return y[0:4], y[4:8], y.detach(), x * 3
+
+        def unexpected_fallback(*args):
+            self.fail(f"unexpected fallback for {fallback}")
+
+        torch._dynamo.reset()
+        x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch.object(
+                    runtime_wrappers,
+                    "_dealias_marked_returns",
+                    lambda raw, marked: None,
+                )
+            )
+            if fallback == "retrace":
+                stack.enter_context(
+                    patch.object(
+                        runtime_wrappers,
+                        "_specialize_bw_module_for_undefined_grad_outputs",
+                        unexpected_fallback,
+                    )
+                )
+                stack.enter_context(
+                    patch.object(
+                        runtime_wrappers,
+                        "_materialize_missing_tangent_args",
+                        unexpected_fallback,
+                    )
+                )
+            else:
+                stack.enter_context(
+                    patch.object(
+                        graph_compile,
+                        "_retrace_backward_for_undefined_grad_outputs",
+                        lambda *args: None,
+                    )
+                )
+            if fallback == "structural":
+                stack.enter_context(
+                    patch.object(
+                        runtime_wrappers,
+                        "_materialize_missing_tangent_args",
+                        unexpected_fallback,
+                    )
+                )
+            elif fallback == "materialize":
+                stack.enter_context(
+                    patch.object(
+                        runtime_wrappers,
+                        "_specialize_bw_module_for_undefined_grad_outputs",
+                        lambda *args: None,
+                    )
+                )
+            torch.compile(fn, backend="inductor")(x)[3].sum().backward()
+
+        self.assertEqual(x.grad, torch.full_like(x, 3))
+
+    def test_none_tangent_error_reports_non_differentiable_dtype(self):
+        # Integer outputs are normally pruned before tangent processing, so drive
+        # this diagnostic classification directly.
+        from torch._functorch._aot_autograd.descriptors import (
+            PlainAOTOutput,
+            TangentAOTInput,
+        )
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _non_tensor_tangent_error,
+            KeptTangentInfo,
+        )
+
+        info = KeptTangentInfo(
+            grad_out_idx=(0, 2),
+            dtype=(torch.float32, torch.int64),
+            num_mutated_inputs=0,
+            num_outputs=3,
+            num_intermediate_bases=0,
+            output_type=("non_alias",) * 3,
+            output_requires_grad=(True, False, True),
+            output_requires_grad_for_backward=(True, False, True),
+        )
+        msg = str(
+            _non_tensor_tangent_error(
+                None, 1, TangentAOTInput(PlainAOTOutput(idx=2)), "1/0", "here\n", info
+            )
+        )
+        self.assertIn("user output index     : 2", msg)
+        self.assertIn("its dtype             : torch.int64", msg)
+        self.assertIn("torch.int64 is not a differentiable dtype", msg)
+        self.assertIn("This error occurred in compiled graph [1/0].", msg)
+        self.assertIn("The forward output was created here:\nhere", msg)
+
+    def test_none_tangent_subclass_attribute_without_kept_slot_is_accepted(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import AOTDispatchAutograd
+        from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+
+        # Recursive subclass attributes do not identify a top-level tangent slot.
+        tangent, flat = AOTDispatchAutograd.process_runtime_tangent(
+            None, PlainTensorMeta(0)
+        )
+        self.assertIsNone(tangent)
+        self.assertEqual(flat, [None])
+
+    def test_none_tangent_for_a_dropped_slot_still_passes_through(self):
+        def fn(x, lengths):
+            y = torch.sin(x)
+            return (
+                y[0:4],
+                y[4:8],
+                lengths * 2,
+                lengths > 1,
+                (x * 2).detach(),
+                x[0:2],
+                x * 3,
+            )
+
+        def run(fn, x, lengths):
+            outputs = fn(x, lengths)
+            (outputs[0].sum() + outputs[1].sum() + outputs[6].sum()).backward()
+            return x.grad
+
+        torch._dynamo.reset()
+        lengths = torch.arange(4)
+        x_ref = torch.randn(8, requires_grad=True)
+        expected = run(fn, x_ref, lengths)
+        x = x_ref.detach().clone().requires_grad_(True)
+        actual = run(torch.compile(fn, backend="inductor"), x, lengths)
+        self.assertEqual(actual, expected)
+
     @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=False)
     def test_unused_differentiable_outputs_pruning_kill_switch(self):
         bw_graphs = []
@@ -7250,12 +7430,9 @@ def forward(self, primals_1, tangents_1):
         # - 5 original outputs (sb is a tuple, gets expanded to 2 symints)
         # - 8 saved outputs for backward: 5 tensors, 3 symints
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 13))
-        # in the bwd graph, 10 inputs (grad outs) because:
-        # - The fwd graph had 13 outputs
-        # - 1 was a view of an input, which gets regenerated outside of the graph
-        #   and doesn't participate in the backward
-        # - 2 user outs were symints (b.size()), which don't get tangents in the backward
-        self.assertEqual(get_num_ins_outs(bw_graph), (10, 4))
+        # The real backward does not use mm2, so its tangent and the saved values used
+        # only by that branch are pruned from the specialized backward.
+        self.assertEqual(get_num_ins_outs(bw_graph), (5, 4))
         _, fw_graph_out_nodes = get_ins_outs(fw_graph)
         self.assertEqual(
             # fw outputs include b.size() which expands to 2 symints,
@@ -7313,7 +7490,9 @@ def forward(self, primals_1, tangents_1):
         bw_graph = bw_graph_cell[0]
 
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 12))
-        self.assertEqual(get_num_ins_outs(bw_graph), (9, 4))
+        # The real backward does not use mm2, so its tangent and the saved values used
+        # only by that branch are pruned from the specialized backward.
+        self.assertEqual(get_num_ins_outs(bw_graph), (4, 4))
         _, fw_graph_out_nodes = get_ins_outs(fw_graph)
         self.assertEqual(
             # fw outputs include b.size() which expands to 2 symints,
@@ -9888,6 +10067,46 @@ def forward(self, primals_1, tangents_1):
             torch.ops.aten.sum.dim_IntList,
             [node.target for node in compiled_autograd_graphs[0].graph.nodes],
         )
+
+    def test_compiled_autograd_unresolved_none_tangent_diagnostic(self):
+        import torch._dynamo.compiled_autograd as compiled_autograd_impl
+        import torch._functorch._aot_autograd.graph_compile as graph_compile
+        import torch._functorch._aot_autograd.runtime_wrappers as runtime_wrappers
+        from torch._dynamo import compiled_autograd
+
+        def fn(x):
+            y = torch.sin(x)
+            return y[0:4], y[4:8], y.detach(), x * 3
+
+        torch._dynamo.reset()
+        x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
+        with (
+            patch.object(
+                runtime_wrappers, "_dealias_marked_returns", lambda raw, marked: None
+            ),
+            patch.object(
+                graph_compile,
+                "_retrace_backward_for_undefined_grad_outputs",
+                lambda *args: None,
+            ),
+            patch.object(
+                compiled_autograd_impl,
+                "_specialize_bw_module_for_undefined_grad_outputs",
+                lambda *args: None,
+            ),
+            patch.object(
+                runtime_wrappers, "_grad_output_prototype", lambda *args: None
+            ),
+        ):
+            outputs = torch.compile(fn, backend="aot_eager")(x)
+            with (
+                compiled_autograd._enable(lambda gm: gm),
+                torch.autograd.set_multithreading_enabled(False),
+                self.assertRaisesRegex(
+                    RuntimeError, "handed a non-Tensor for a tangent it requires"
+                ),
+            ):
+                outputs[3].sum().backward()
 
     def test_backward_epilogue_compiled_autograd_subclass(self):
         from torch.testing._internal.two_tensor import TwoTensor

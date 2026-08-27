@@ -512,6 +512,10 @@ class ViewAndMutationMeta:
     # This list is generated after calling make_runtime_safe().
     traced_tangent_metas: list[Any] | None = None
 
+    # Same length and order as traced_tangents. Retained for runtime diagnostics
+    # after the fake traced tangents themselves are discarded.
+    traced_tangent_dtypes: list[torch.dtype | None] | None = None
+
     num_symints_saved_for_bw: int | None = None
 
     # See Note [Activations with no version counter checks in eager]
@@ -741,7 +745,8 @@ class ViewAndMutationMeta:
         There are various fields in ViewAndMutationMeta that aren't serializable. This function is called after all tracing
         is completed to simplify certain fields in the metadata so that they can be safely cached.
 
-        Doing so may lose information (in the case of traced_tangents), but none of the information is needed at runtime.
+        Doing so may lose information from traced_tangents while retaining the
+        runtime-safe summaries needed by the wrappers.
         """
         # TODO: This function is only a best effort: there are other fields that may not be cache safe
         # (i.e., there's no guarantee that tensor_flatten() returns a serializable result), or that
@@ -749,6 +754,10 @@ class ViewAndMutationMeta:
         if self.traced_tangent_metas is not None:
             raise AssertionError(
                 "traced_tangent_metas should be None before calling make_runtime_safe"
+            )
+        if self.traced_tangent_dtypes is not None:
+            raise AssertionError(
+                "traced_tangent_dtypes should be None before calling make_runtime_safe"
             )
 
         def extract_metadata(t: object) -> tuple[Sequence[str], object] | None:
@@ -764,6 +773,10 @@ class ViewAndMutationMeta:
                 return None
 
         self.traced_tangent_metas = [extract_metadata(t) for t in self.traced_tangents]
+        self.traced_tangent_dtypes = [
+            t.dtype if isinstance(t, torch.Tensor) else None
+            for t in self.traced_tangents
+        ]
         # Clear traced tangents at runtime
         self.traced_tangents = []
         for inp_meta in self.subclass_inp_meta:

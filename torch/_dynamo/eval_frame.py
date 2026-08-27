@@ -457,17 +457,6 @@ def _get_cache_entries_for_region(
     )
 
 
-def _clear_cache_entries_for_region(
-    code: types.CodeType | Callable[..., Any],
-    isolate_recompiles_id: int,
-) -> None:
-    if callable(code):
-        code = code.__code__
-    torch._C._dynamo.eval_frame._clear_cache_entries_for_region(
-        code, isolate_recompiles_id
-    )
-
-
 def _get_total_cache_entry_count(
     code: types.CodeType | Callable[..., Any],
 ) -> int:
@@ -1009,10 +998,7 @@ class _TorchDynamoContext:
                         self._package.initialize(
                             fn_key, result.dynamo, ignore_inlined_sources=False
                         )
-                        self._package.install(
-                            result.backends,
-                            isolate_recompiles_id=self._isolate_recompiles_id,
-                        )
+                        self._package.install(result.backends)
                     except RuntimeError:
                         log.warning(
                             "Failed to load entry from dynamo cache", exc_info=True

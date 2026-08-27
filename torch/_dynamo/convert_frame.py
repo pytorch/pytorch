@@ -152,13 +152,7 @@ from .symbolic_convert import (
     SpeculationLog,
 )
 from .trace_rules import is_numpy
-from .types import (
-    ConvertFrameReturn,
-    FrameAction,
-    FrameExecStrategy,
-    GuardFilterEntry,
-    wrap_guarded_code,
-)
+from .types import ConvertFrameReturn, FrameAction, FrameExecStrategy, wrap_guarded_code
 from .utils import (
     _get_error_on_graph_break,
     chromium_event_timed,
@@ -1014,11 +1008,6 @@ class DynamoOutput:
         save: bool = False,
         cache_entries: list[CacheEntry] | None = None,
         strict_error: bool = False,
-        serialization_guard_filter_fn: collections.abc.Callable[
-            [collections.abc.Sequence[GuardFilterEntry]],
-            collections.abc.Sequence[bool],
-        ]
-        | None = None,
     ) -> CheckFunctionManager:
         output_graph = self.tracer_output.output_graph
         if output_graph is None:
@@ -1039,26 +1028,14 @@ class DynamoOutput:
 
         if not fx_experimental_config.translation_validation:
             return self._build_guards(
-                code,
-                output_graph,
-                cache_entries,
-                hooks,
-                save,
-                strict_error,
-                serialization_guard_filter_fn,
+                code, output_graph, cache_entries, hooks, save, strict_error
             )
 
         from torch.fx.experimental.validator import bisect, ValidationException
 
         try:
             return self._build_guards(
-                code,
-                output_graph,
-                cache_entries,
-                hooks,
-                save,
-                strict_error,
-                serialization_guard_filter_fn,
+                code, output_graph, cache_entries, hooks, save, strict_error
             )
         except ValidationException:
             bisect(output_graph.shape_env)
@@ -1072,11 +1049,6 @@ class DynamoOutput:
         hooks: Hooks | None,
         save: bool,
         strict_error: bool,
-        serialization_guard_filter_fn: collections.abc.Callable[
-            [collections.abc.Sequence[GuardFilterEntry]],
-            collections.abc.Sequence[bool],
-        ]
-        | None,
     ) -> CheckFunctionManager:
         return CheckFunctionManager(
             code,
@@ -1084,7 +1056,6 @@ class DynamoOutput:
             cache_entries,
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
-            serialization_guard_filter_fn=serialization_guard_filter_fn,
             save_guards=save,
             strict_error=strict_error,
         )
@@ -1988,25 +1959,12 @@ def _compile(
                 hooks=hooks,
                 save=package is not None,
                 cache_entries=cache_entries,
-                serialization_guard_filter_fn=(
-                    package.serialization_guard_filter_fn
-                    if package is not None
-                    else None
-                ),
-                strict_error=(
-                    package is not None
-                    and package.serialization_guard_filter_fn is not None
-                ),
             )
 
         if package is not None:
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
-            package.add_guarded_code(
-                check_fn.guards_state,
-                out_code,
-                check_fn.guard_manager.leaf_fingerprint(),
-            )
+            package.add_guarded_code(check_fn.guards_state, out_code)
             package.add_inlined_source(output.tracing_context.traced_code)
             package.update_device_type(output.current_tracer.graph)
 
@@ -2031,9 +1989,7 @@ def _compile(
 
     metrics_context = get_metrics_context()
     package_code_context = (
-        package.code_context(code, locals)
-        if package is not None
-        else contextlib.nullcontext()
+        package.code_context(code) if package is not None else contextlib.nullcontext()
     )
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),

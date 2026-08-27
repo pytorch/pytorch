@@ -778,10 +778,7 @@ class TensorVariable(VariableTracker):
             )
         ):
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
-            if result.is_python_constant():
-                result = result.clone(source=AttrSource(self.source, name))
-            else:
-                result.source = AttrSource(self.source, name)
+            result.source = AttrSource(self.source, name)
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
