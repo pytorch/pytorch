@@ -4321,6 +4321,17 @@ class GuardsStatePickler(pickle.Pickler):
             ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
 
+            # The grad rides along with its tensor, so serialize it the same
+            # way the tensor itself is (as a meta tensor); otherwise a guarded
+            # tensor with a populated .grad pickles the grad as _Missing, which
+            # _unpickle_tensor cannot assign back.
+            if isinstance(obj.grad, torch.Tensor):
+                self.guard_tree_values.setdefault(id(obj.grad), obj.grad)
+                # missing_values is checked before guard_tree_values, so a grad
+                # that is also an unguarded local-scope leaf would still pickle
+                # as _Missing; serializing it as a meta tensor is strictly more
+                # faithful for that leaf too.
+                self.missing_values.pop(id(obj.grad), None)
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
                 obj.device,

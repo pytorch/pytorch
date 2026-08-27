@@ -50,8 +50,11 @@ of those values; graph breaks, closures, and `nn.Module` arguments are not suppo
 With `training=True` and the Inductor backend, Dynamo graphs
 include readable compiled forward and backward code, so served outputs retain a
 `grad_fn` and can be passed to `backward()`. This training mode works across captured
-recompilations and rejects output-tangent patterns not observed during capture. See the
-{ref}`API reference <torch.compiler_api>` for details.
+recompilations and rejects output-tangent patterns not observed during capture. Passing
+`artifact_path`/`cache_path` switches `precompile` into stateful capture: each call runs
+its example for real inside a loop the caller owns, returns that call's result plus an
+opaque `state` to pass back in, and rewrites an always-loadable artifact on disk. See
+the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}
 `torch.compile` may not support recently released major versions of Python.

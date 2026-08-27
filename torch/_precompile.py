@@ -222,6 +222,7 @@ it.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 import logging
@@ -241,7 +242,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -1389,13 +1390,46 @@ class _DynamoPythonBackend:
     def __call__(self, *args: object) -> object:
         return self._call(list(args))
 
-    def finalize_training(self) -> None:
+    def _finalize_masks(self) -> tuple[int, ...]:
+        globals_dict = getattr(self._call, "__globals__", {})
+        observed = globals_dict.get("_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS", ())
+        # Always cover the ordinary all-tangents-defined backward (mask 0): a
+        # caller who only ran partial backwards between stateful calls must not
+        # regress the rewritten artifact's default path.
+        return (0, *sorted(set(observed) - {0}))
+
+    def finalize_training(self, keep_capture: bool = False) -> None:
+        # keep_capture snapshots the training module (finalize is a pure compose
+        # over the variants recorded so far) while leaving the live variant
+        # compiler hook installed, so a stateful capture can keep accumulating.
         if self._compile_state is None:
             return
         globals_dict = getattr(self._call, "__globals__", {})
-        masks = globals_dict.get("_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS", ())
+        masks = self._finalize_masks()
+        if keep_capture:
+            try:
+                self.python_code, self.cache = self._compile_state.finalize(masks)
+            except Exception:
+                # A mask whose deferred compile fails must not poison every later
+                # rebuild (it stays in the observed set forever): drop it from
+                # this snapshot with a warning. Serving that pattern then fails
+                # like any unobserved pattern.
+                compiled = set(self._compile_state._observed_variants)
+                usable = tuple(mask for mask in masks if mask in compiled)
+                if set(usable) == set(masks):
+                    raise
+                log.warning(
+                    "precompile stateful snapshot could not compile tangent "
+                    "mask(s) %s; the rewritten artifact covers only %s.",
+                    sorted(set(masks) - set(usable)),
+                    list(usable) or [0],
+                )
+                self.python_code, self.cache = self._compile_state.finalize(
+                    usable or (0,)
+                )
+            return
         try:
-            self.python_code, self.cache = self._compile_state.finalize(tuple(masks))
+            self.python_code, self.cache = self._compile_state.finalize(masks)
         finally:
             globals_dict["_AOT_BACKWARD_VARIANT_COMPILER"] = None
             variants = globals_dict.get("_AOT_BACKWARD_VARIANTS")
@@ -1732,21 +1766,16 @@ def _dynamo_cache_bytes(
     return buf.getvalue()
 
 
-def _precompile_dynamo(
+def _validate_dynamo_capture(
     fn: Callable[..., object],
     example_inputs: Sequence[tuple[object, ...]],
-    *,
-    backend: str,
     decompositions: dict | None,
-    training: bool,
-) -> tuple[str, bytes]:
-    import contextlib
+) -> Callable[..., object]:
+    """Reject unsupported dynamo-capture inputs; return the innermost target fn."""
     import dis
     import inspect
     import pickle
     import types
-
-    import torch._functorch.config as functorch_config
 
     if not example_inputs:
         raise ValueError(
@@ -1794,16 +1823,6 @@ def _precompile_dynamo(
             )
 
     from torch._dynamo.eval_frame import innermost_fn
-    from torch._dynamo.exc import (
-        BackendCompilerFailed,
-        FailOnRecompileLimitHit,
-        PackageError,
-        RecompileError,
-        Unsupported,
-    )
-    from torch._dynamo.guards import CheckFunctionManager
-    from torch._dynamo.package import CompilePackage
-    from torch._dynamo.pgo import _new_code_state, _use_code_state
 
     target = innermost_fn(fn)
     if not inspect.isfunction(target):
@@ -1866,6 +1885,13 @@ def _precompile_dynamo(
             "the Python environment; pass the value only as an input. Aliased global: "
             f"{aliased_globals[0]!r}."
         )
+    return target
+
+
+def _make_dynamo_capture_target(
+    target: Callable[..., object],
+) -> Callable[..., object]:
+    import types
 
     capture_globals = dict(target.__globals__)
     capture_target = types.FunctionType(
@@ -1878,118 +1904,69 @@ def _precompile_dynamo(
     capture_target.__kwdefaults__ = target.__kwdefaults__
     capture_target.__module__ = target.__module__
     capture_target.__qualname__ = target.__qualname__
+    return capture_target
 
-    def keep_serializable_capture_guards(guards: Sequence[Any]) -> list[bool]:
-        unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-        return [
-            not (
-                guard.is_global
-                and (
-                    guard.guard_type in unsupported
-                    or any(kind in unsupported for kind in guard.derived_guard_types)
-                )
-            )
-            for guard in guards
-        ]
 
-    _DYNAMO_COMPILE_LOCK.acquire()
-    package: CompilePackage | None = None
-    pgo_state = _new_code_state()
-    capture_stack = contextlib.ExitStack()
-    capture_limit = max(torch._dynamo.config.recompile_limit, len(example_inputs) + 1)
-    try:
-        package = CompilePackage(capture_target)
-        capture_stack.enter_context(
-            torch._dynamo.config.patch(
-                accumulated_recompile_limit=max(
-                    torch._dynamo.config.accumulated_recompile_limit,
-                    capture_limit,
-                ),
-                fail_on_recompile_limit_hit=True,
+def _keep_serializable_capture_guards(guards: Sequence[Any]) -> list[bool]:
+    from torch._dynamo.guards import CheckFunctionManager
+
+    unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+    return [
+        not (
+            guard.is_global
+            and (
+                guard.guard_type in unsupported
+                or any(kind in unsupported for kind in guard.derived_guard_types)
             )
         )
-        capture_stack.enter_context(
+        for guard in guards
+    ]
+
+
+@contextlib.contextmanager
+def _dynamo_capture_context(
+    pgo_state: Any, training: bool, capture_limit: int
+) -> Iterator[None]:
+    import torch._functorch.config as functorch_config
+    from torch._dynamo.pgo import _use_code_state
+
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(
+            torch._dynamo.config.patch(
+                accumulated_recompile_limit=max(
+                    torch._dynamo.config.accumulated_recompile_limit, capture_limit
+                ),
+                fail_on_recompile_limit_hit=True,
+                # Otherwise every capture compile records the private package
+                # into the process-global PrecompileContext (DynamoCache).
+                caching_precompile=False,
+            )
+        )
+        stack.enter_context(
             functorch_config.patch(
                 bundled_autograd_cache=True,
                 bypass_autograd_cache_key=True,
                 force_non_lazy_backward_lowering=training,
             )
         )
-        capture_stack.enter_context(_use_code_state(pgo_state))
-        capture_stack.enter_context(torch.inference_mode(False))
-        capture_stack.enter_context(torch.set_grad_enabled(training))
-        compiled = torch._dynamo.optimize(
-            backend=_dynamo_backend_compiler(backend, training),
-            nopython=True,
-            guard_filter_fn=keep_serializable_capture_guards,
-            package=package,
-            dynamic=None,
-            recompile_limit=capture_limit,
-            isolate_recompiles=True,
-        )(capture_target)
-        for example in example_inputs:
-            compiled(*example)
+        stack.enter_context(_use_code_state(pgo_state))
+        stack.enter_context(torch.inference_mode(False))
+        stack.enter_context(torch.set_grad_enabled(training))
+        yield
 
-        for compiled_backend in package.cached_backends.values():
-            if isinstance(compiled_backend, _DynamoPythonBackend):
-                compiled_backend.finalize_training()
 
-        cache_entry = package.cache_entry()
-        active_codes = [code for code in cache_entry.codes if not code.bypassed]
-        if len(active_codes) != 1:
-            raise PrecompileError(
-                "precompile tracer='dynamo' does not support graph breaks or separately "
-                "compiled nested frames yet."
-            )
-        code = active_codes[0]
-        if code.install_to_global or not code.guarded_codes:
-            raise PrecompileError(
-                "precompile tracer='dynamo' did not capture a runnable entry frame."
-            )
-        filtered_guard_states = _filter_dynamo_guards(
-            capture_target, code.guarded_codes, example_inputs
-        )
+@contextlib.contextmanager
+def _translate_dynamo_capture_errors(capture_limit: int) -> Iterator[None]:
+    from torch._dynamo.exc import (
+        BackendCompilerFailed,
+        FailOnRecompileLimitHit,
+        PackageError,
+        RecompileError,
+        Unsupported,
+    )
 
-        compiled_backends = []
-        for backend_id in code.backend_ids:
-            compiled_backend = package.cached_backends.get(backend_id)
-            if not isinstance(compiled_backend, _DynamoPythonBackend):
-                raise PrecompileError(
-                    "precompile tracer='dynamo' encountered a graph that could not be "
-                    "represented as standalone Python source."
-                )
-            compiled_backends.append(compiled_backend)
-
-        state: dict[str, Any] = {
-            "code": code.python_code,
-            "python_module": code.python_module,
-            "import_sources": dict(code.import_sources),
-            "defaults": capture_target.__defaults__,
-            "kwdefaults": capture_target.__kwdefaults__,
-            "closure": None,
-            "variants": [
-                {
-                    "guards_state": guards_state,
-                    "dynamo_code": guarded.dynamo_code,
-                }
-                for guarded, guards_state in zip(
-                    code.guarded_codes, filtered_guard_states
-                )
-            ],
-        }
-        backend_ids = [str(backend_id) for backend_id in code.backend_ids]
-        python_code = _build_dynamo_python_source(
-            backend=backend,
-            training=training,
-            state=state,
-            backend_ids=backend_ids,
-            compiled_backends=compiled_backends,
-        )
-        return python_code, _dynamo_cache_bytes(
-            python_code,
-            backend,
-            [compiled.cache for compiled in compiled_backends],
-        )
+    try:
+        yield
     except Unsupported as e:
         raise PrecompileError(
             "precompile tracer='dynamo' does not support graph breaks yet; capture must "
@@ -2006,14 +1983,15 @@ def _precompile_dynamo(
     except (FailOnRecompileLimitHit, RecompileError) as e:
         raise PrecompileError(
             "precompile tracer='dynamo' could not capture every example before "
-            f"recompile_limit={capture_limit}: {e}"
+            f"recompile_limit={capture_limit}; pass a larger recompile_limit. "
+            f"Dynamo reported: {e}"
         ) from e
     except AssertionError as e:
         # torch/_dynamo/convert_frame.py raises this assertion when a kept guard
         # cannot be serialized into the CompilePackage (non-strict
         # CheckFunctionManager swallows the PackageError and leaves guards_state
         # None). Input-derived identity guards (ID_MATCH and friends) survive
-        # keep_serializable_capture_guards, so this is their failure surface.
+        # _keep_serializable_capture_guards, so this is their failure surface.
         from torch._dynamo.convert_frame import GUARDS_STATE_NONE_MESSAGE
 
         if GUARDS_STATE_NONE_MESSAGE not in str(e):
@@ -2022,17 +2000,388 @@ def _precompile_dynamo(
             "precompile tracer='dynamo' encountered an identity guard that Dynamo "
             "cannot serialize yet (for example a module or callable guard)."
         ) from e
+
+
+def _make_dynamo_capture_optimizer(
+    capture_target: Callable[..., object],
+    package: Any,
+    backend: str,
+    training: bool,
+    capture_limit: int,
+) -> tuple[Callable[..., object], Callable[..., object]]:
+    compile_graph = _dynamo_backend_compiler(backend, training)
+    compiled = torch._dynamo.optimize(
+        backend=compile_graph,
+        nopython=True,
+        guard_filter_fn=_keep_serializable_capture_guards,
+        package=package,
+        dynamic=None,
+        recompile_limit=capture_limit,
+        isolate_recompiles=True,
+    )(capture_target)
+    if compiled is capture_target:
+        # torch._dynamo.optimize returned its null decorator: capture would
+        # silently run eager and fail later with a misleading error.
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot capture because Dynamo is "
+            "disabled in this process (TORCHDYNAMO_DISABLE or a compiler "
+            "kill switch)."
+        )
+    return compiled, compile_graph
+
+
+def _build_dynamo_artifact(
+    package: Any,
+    capture_target: Callable[..., object],
+    example_inputs: Sequence[tuple[object, ...]],
+    *,
+    backend: str,
+    training: bool,
+    keep_capture: bool = False,
+) -> tuple[str, bytes]:
+    """Render the package's accumulated capture as (python_code, cache) bytes.
+
+    A pure read of the live package (plus, for training, a snapshot compose of
+    the backward variants recorded so far when keep_capture is set), so a
+    stateful capture can rebuild after every example call.
+    """
+    for compiled_backend in package.cached_backends.values():
+        if isinstance(compiled_backend, _DynamoPythonBackend):
+            compiled_backend.finalize_training(keep_capture=keep_capture)
+
+    cache_entry = package.cache_entry()
+    active_codes = [code for code in cache_entry.codes if not code.bypassed]
+    if len(active_codes) != 1:
+        raise PrecompileError(
+            "precompile tracer='dynamo' does not support graph breaks or separately "
+            "compiled nested frames yet."
+        )
+    code = active_codes[0]
+    if code.install_to_global or not code.guarded_codes:
+        raise PrecompileError(
+            "precompile tracer='dynamo' did not capture a runnable entry frame."
+        )
+    filtered_guard_states = _filter_dynamo_guards(
+        capture_target, code.guarded_codes, example_inputs
+    )
+
+    compiled_backends = []
+    for backend_id in code.backend_ids:
+        compiled_backend = package.cached_backends.get(backend_id)
+        if not isinstance(compiled_backend, _DynamoPythonBackend):
+            raise PrecompileError(
+                "precompile tracer='dynamo' encountered a graph that could not be "
+                "represented as standalone Python source."
+            )
+        compiled_backends.append(compiled_backend)
+
+    dynamo_state: dict[str, Any] = {
+        "code": code.python_code,
+        "python_module": code.python_module,
+        "import_sources": dict(code.import_sources),
+        "defaults": capture_target.__defaults__,
+        "kwdefaults": capture_target.__kwdefaults__,
+        "closure": None,
+        "variants": [
+            {
+                "guards_state": guards_state,
+                "dynamo_code": guarded.dynamo_code,
+            }
+            for guarded, guards_state in zip(code.guarded_codes, filtered_guard_states)
+        ],
+    }
+    backend_ids = [str(backend_id) for backend_id in code.backend_ids]
+    python_code = _build_dynamo_python_source(
+        backend=backend,
+        training=training,
+        state=dynamo_state,
+        backend_ids=backend_ids,
+        compiled_backends=compiled_backends,
+    )
+    return python_code, _dynamo_cache_bytes(
+        python_code,
+        backend,
+        [compiled.cache for compiled in compiled_backends],
+    )
+
+
+def _teardown_dynamo_capture(
+    package: Any,
+    capture_target: Callable[..., object],
+    pgo_state: Any,
+    backend_fn: Callable[..., object] | None = None,
+) -> None:
+    from torch._dynamo.eval_frame import cached_backends
+    from torch._dynamo.utils import guard_failures
+
+    try:
+        if package is not None:
+            package.uninstall()
     finally:
         try:
-            capture_stack.close()
+            torch._dynamo.reset_code(capture_target.__code__)
         finally:
-            try:
-                if package is not None:
-                    package.uninstall()
-                torch._dynamo.reset_code(capture_target.__code__)
-                pgo_state.clear()
-            finally:
-                _DYNAMO_COMPILE_LOCK.release()
+            pgo_state.clear()
+            # Recompile logging strong-keys the capture code object in this
+            # module-level registry, transitively pinning the whole session
+            # (including the copied fn globals); pop it so the session can be
+            # garbage collected without a torch._dynamo.reset().
+            guard_failures.pop(capture_target.__code__, None)
+            if backend_fn is not None:
+                cached_backends.pop(id(backend_fn), None)
+
+
+def _precompile_dynamo(
+    fn: Callable[..., object],
+    example_inputs: Sequence[tuple[object, ...]],
+    *,
+    backend: str,
+    decompositions: dict | None,
+    training: bool,
+    recompile_limit: int | None = None,
+) -> tuple[str, bytes]:
+    from torch._dynamo.package import CompilePackage
+    from torch._dynamo.pgo import _new_code_state
+
+    target = _validate_dynamo_capture(fn, example_inputs, decompositions)
+    capture_target = _make_dynamo_capture_target(target)
+    capture_limit = (
+        recompile_limit
+        if recompile_limit is not None
+        else max(torch._dynamo.config.recompile_limit, len(example_inputs) + 1)
+    )
+    with _DYNAMO_COMPILE_LOCK:
+        package = None
+        backend_fn = None
+        pgo_state = _new_code_state()
+        try:
+            with (
+                _dynamo_capture_context(pgo_state, training, capture_limit),
+                _translate_dynamo_capture_errors(capture_limit),
+            ):
+                package = CompilePackage(capture_target)
+                compiled, backend_fn = _make_dynamo_capture_optimizer(
+                    capture_target, package, backend, training, capture_limit
+                )
+                for example in example_inputs:
+                    compiled(*example)
+                return _build_dynamo_artifact(
+                    package,
+                    capture_target,
+                    example_inputs,
+                    backend=backend,
+                    training=training,
+                )
+        finally:
+            _teardown_dynamo_capture(package, capture_target, pgo_state, backend_fn)
+
+
+class _PrecompileDynamoState:
+    """Opaque accumulated capture state for stateful ``torch.compiler.precompile``.
+
+    Returned by (and passed back to) precompile calls that give
+    ``artifact_path``/``cache_path``. It owns the live Dynamo capture session:
+    the cloned capture function with its installed code caches, the
+    CompilePackage new variants accumulate into, the optimize wrapper (whose
+    isolate-recompiles bucket keeps earlier variants visible to later calls),
+    the isolated PGO state that drives automatic dynamic shapes across calls,
+    and every example tuple seen so far (guard minimization re-checks all of
+    them on every rebuild, so their tensors stay alive for the state's
+    lifetime). Treat it as opaque: it is process-local and not serializable.
+    Call :meth:`close` when done capturing -- Dynamo's recompile-logging
+    registry otherwise pins the session until ``torch._dynamo.reset()``. Do
+    not call ``torch._dynamo.reset()`` between calls that share a state: later
+    calls may raise, or silently duplicate variants in the rewritten artifact.
+    """
+
+    def __init__(
+        self,
+        *,
+        target: Callable[..., object],
+        capture_target: Callable[..., object],
+        package: Any,
+        pgo_state: Any,
+        backend: str,
+        training: bool,
+        capture_limit: int,
+    ) -> None:
+        self.target = target
+        self.capture_target = capture_target
+        self.package = package
+        self.pgo_state = pgo_state
+        self.backend = backend
+        self.training = training
+        self.capture_limit = capture_limit
+        self.compiled: Callable[..., object] | None = None
+        self.backend_fn: Callable[..., object] | None = None
+        self.examples: list[tuple[object, ...]] = []
+        self.closed = False
+
+    def close(self) -> None:
+        """Release the capture session (installed code caches and registries).
+
+        Idempotent. A closed state cannot be resumed; artifact files written by
+        earlier calls remain valid. Without close(), the session (including its
+        copy of the fn's globals) stays pinned by Dynamo's process-global
+        recompile-logging registry until ``torch._dynamo.reset()``.
+        """
+        if self.closed:
+            return
+        self.closed = True
+        self.compiled = None
+        self.examples.clear()
+        with _DYNAMO_COMPILE_LOCK:
+            _teardown_dynamo_capture(
+                self.package, self.capture_target, self.pgo_state, self.backend_fn
+            )
+
+    def __repr__(self) -> str:
+        status = ", closed" if self.closed else ""
+        return (
+            f"<torch.compiler.precompile dynamo state: {len(self.examples)} "
+            f"example call(s), backend={self.backend!r}, "
+            f"training={self.training}{status}>"
+        )
+
+
+def _write_dynamo_artifact_files(
+    python_code: str, cache: bytes, artifact_path: str, cache_path: str
+) -> None:
+    # Two-phase: write both temp files first, then rename back to back, so the
+    # window in which a crash leaves a mismatched (code_hash-rejected) pair on
+    # disk is two renames, not a full cache write.
+    import os
+
+    renames = []
+    for path, data, mode in (
+        (artifact_path, python_code, "w"),
+        (cache_path, cache, "wb"),
+    ):
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, mode) as f:
+            f.write(data)
+        renames.append((tmp, path))
+    for tmp, path in renames:
+        os.replace(tmp, path)
+
+
+def _precompile_dynamo_stateful(
+    fn: Callable[..., object],
+    example_inputs: Sequence[tuple[object, ...]],
+    *,
+    backend: str,
+    decompositions: dict | None,
+    training: bool,
+    recompile_limit: int | None,
+    state: _PrecompileDynamoState | None,
+    artifact_path: str,
+    cache_path: str,
+) -> tuple[object, _PrecompileDynamoState]:
+    from torch._dynamo.package import CompilePackage
+    from torch._dynamo.pgo import _new_code_state
+
+    target = _validate_dynamo_capture(fn, example_inputs, decompositions)
+    with _DYNAMO_COMPILE_LOCK:
+        fresh = state is None
+        if state is None:
+            capture_limit = (
+                recompile_limit
+                if recompile_limit is not None
+                else max(torch._dynamo.config.recompile_limit, len(example_inputs) + 1)
+            )
+            capture_target = _make_dynamo_capture_target(target)
+            state = _PrecompileDynamoState(
+                target=target,
+                capture_target=capture_target,
+                package=CompilePackage(capture_target),
+                pgo_state=_new_code_state(),
+                backend=backend,
+                training=training,
+                capture_limit=capture_limit,
+            )
+        else:
+            if not isinstance(state, _PrecompileDynamoState):
+                raise TypeError(
+                    "precompile state must be the state returned by a previous "
+                    f"stateful precompile call, got {type(state).__name__}."
+                )
+            if state.closed:
+                raise ValueError(
+                    "precompile cannot resume a closed state; start fresh with "
+                    "state=None."
+                )
+            mismatches = [
+                f"{name}={got!r} (the state was created with {want!r})"
+                for name, got, want in (
+                    ("backend", backend, state.backend),
+                    ("training", training, state.training),
+                )
+                if got != want
+            ]
+            if recompile_limit is not None and recompile_limit != state.capture_limit:
+                mismatches.append(
+                    f"recompile_limit={recompile_limit!r} (the state was created "
+                    f"with {state.capture_limit!r})"
+                )
+            if target is not state.target:
+                mismatches.append(
+                    "fn (a state resumes only the function that created it)"
+                )
+            if mismatches:
+                raise ValueError(
+                    "precompile cannot resume a state under different settings; "
+                    "that would produce a mixed artifact: "
+                    + "; ".join(mismatches)
+                    + "."
+                )
+        try:
+            with (
+                _dynamo_capture_context(state.pgo_state, training, state.capture_limit),
+                _translate_dynamo_capture_errors(state.capture_limit),
+            ):
+                if state.compiled is None:
+                    state.compiled, state.backend_fn = _make_dynamo_capture_optimizer(
+                        state.capture_target,
+                        state.package,
+                        backend,
+                        training,
+                        state.capture_limit,
+                    )
+                results = []
+                for example in example_inputs:
+                    results.append(state.compiled(*example))
+                    state.examples.append(example)
+                try:
+                    python_code, cache = _build_dynamo_artifact(
+                        state.package,
+                        state.capture_target,
+                        state.examples,
+                        backend=backend,
+                        training=training,
+                        keep_capture=True,
+                    )
+                except PrecompileError as e:
+                    if fresh:
+                        raise
+                    # The failing variant stays in the accumulated capture, so
+                    # rebuilding will keep failing; say so instead of implying
+                    # the state can make further progress.
+                    raise PrecompileError(
+                        f"{e} The accumulated capture can no longer be rendered, "
+                        "so further calls on this state will fail the same way; "
+                        "the last successfully written artifact files remain "
+                        "valid. close() the state and precompile again without "
+                        "the offending example."
+                    ) from e
+            _write_dynamo_artifact_files(python_code, cache, artifact_path, cache_path)
+        except BaseException:
+            # A fresh call that failed returns no state, so tear its session
+            # down; a resumed call leaves the state (and the last successfully
+            # written artifact) intact.
+            if fresh:
+                state.close()
+            raise
+        return (results[0] if len(results) == 1 else results), state
 
 
 class PrecompiledModule:
@@ -2356,7 +2705,11 @@ class _PrecompileApi:
         tracer: str = "make_fx",
         decompositions: dict | None = None,
         training: bool = False,
-    ) -> tuple[str, bytes]:
+        state: _PrecompileDynamoState | None = None,
+        artifact_path: str | None = None,
+        cache_path: str | None = None,
+        recompile_limit: int | None = None,
+    ) -> tuple[str, bytes] | tuple[object, _PrecompileDynamoState]:
         """Ahead-of-time precompile ``fn`` against ``example_inputs``.
 
         .. note::
@@ -2444,6 +2797,42 @@ class _PrecompileApi:
         graph can recompile into a symbolic graph when a later tuple changes a dimension.
         The symbolic graphs and their input-derived dispatch guards are retained in the
         artifact.
+
+        STATEFUL CAPTURE (``tracer="dynamo"`` only): pass ``artifact_path`` and
+        ``cache_path`` to capture incrementally from a loop the caller owns::
+
+            state = None
+            for batch in batches:
+                result, state = torch.compiler.precompile(
+                    step,
+                    example_inputs=[(batch,)],
+                    state=state,
+                    artifact_path="step.py",
+                    cache_path="step.cache",
+                    tracer="dynamo",
+                )
+
+        Every call runs its example tuples for real, records whatever guarded
+        variants they newly exercise into the returned opaque ``state``
+        (``state=None`` starts fresh; passing a returned state resumes -- with
+        the same fn, ``backend``, ``training``, and ``recompile_limit``, else
+        the call raises rather than produce a mixed artifact), REWRITES the
+        artifact and cache files atomically, and returns this call's example
+        result(s) instead of ``(python_code, cache)`` -- the single result for
+        one example tuple, a list for several. The files on disk are always a
+        loadable artifact for everything captured so far. A call whose guards
+        all hit adds nothing; guard minimization is re-run over every example
+        seen so far on each rebuild, so the state keeps all example tuples
+        alive, and later calls see earlier variants because the state carries
+        one isolate-recompiles bucket and one PGO record across calls (a
+        dimension that varies between calls recompiles into a symbolic graph
+        exactly as it would within one call). ``recompile_limit`` caps the
+        variants per capture (default: ``torch._dynamo.config.recompile_limit``
+        or the example count, whichever is larger; accumulating captures should
+        pass an explicit budget). The state is process-local and not
+        serializable; call ``state.close()`` when done capturing to release the
+        session, and do not call ``torch._dynamo.reset()`` between calls that
+        share a state (later calls may raise or duplicate variants).
 
         With ``tracer="make_fx"``, dynamic shapes are opt-in via
         ``torch._dynamo.decorators.mark_unbacked``
@@ -2541,13 +2930,38 @@ class _PrecompileApi:
                 "precompile training=True currently requires tracer='dynamo' and "
                 "backend='inductor'."
             )
+        stateful = (
+            state is not None or artifact_path is not None or cache_path is not None
+        )
+        if (stateful or recompile_limit is not None) and tracer != "dynamo":
+            raise ValueError(
+                "precompile state, artifact_path, cache_path, and recompile_limit "
+                "require tracer='dynamo'."
+            )
+        if stateful and (artifact_path is None or cache_path is None):
+            raise ValueError(
+                "precompile stateful mode requires both artifact_path and cache_path."
+            )
         if tracer == "dynamo":
+            if stateful:
+                return _precompile_dynamo_stateful(
+                    fn,
+                    example_inputs,
+                    backend=backend,
+                    decompositions=decompositions,
+                    training=training,
+                    recompile_limit=recompile_limit,
+                    state=state,
+                    artifact_path=cast(str, artifact_path),
+                    cache_path=cast(str, cache_path),
+                )
             return _precompile_dynamo(
                 fn,
                 example_inputs,
                 backend=backend,
                 decompositions=decompositions,
                 training=training,
+                recompile_limit=recompile_limit,
             )
         compiled = PrecompiledModule(
             fn, backend=backend, tracer=tracer, decompositions=decompositions

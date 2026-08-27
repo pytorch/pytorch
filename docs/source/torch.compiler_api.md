@@ -50,7 +50,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *example_args, example_inputs=None, backend="inductor", tracer="make_fx", decompositions=None, training=False)
+.. py:function:: precompile(fn, *example_args, example_inputs=None, backend="inductor", tracer="make_fx", decompositions=None, training=False, state=None, artifact_path=None, cache_path=None, recompile_limit=None)
 
    Ahead-of-time precompile ``fn`` against example inputs, returning a self-contained,
    runnable Python source string plus an acceleration cache as ``(python_code, cache)``.
@@ -129,6 +129,24 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param training: If ``True``, capture a differentiable Dynamo/Inductor artifact whose
        outputs can be passed to ``backward()``. Defaults to ``False`` and currently
        requires ``tracer="dynamo"`` and ``backend="inductor"``.
+   :param state: Opaque accumulated-capture state for stateful capture
+       (``tracer="dynamo"`` only). ``None`` starts fresh; passing the state returned
+       by a previous call resumes it. A resumed call must use the same ``fn``,
+       ``backend``, ``training``, and ``recompile_limit`` as the state, else it
+       raises rather than produce a mixed artifact. The state is process-local and
+       not serializable.
+   :param artifact_path: With ``cache_path``, enables stateful capture: every call
+       runs its example tuples for real, adds whatever guarded variants they newly
+       exercise, atomically rewrites the artifact files at these paths (they are
+       always a loadable artifact for everything captured so far), and returns
+       ``(result, state)`` -- this call's example result(s) plus the accumulated
+       state -- instead of ``(python_code, cache)``.
+   :param cache_path: Where the binary acceleration cache is rewritten on every
+       stateful call; see ``artifact_path``.
+   :param recompile_limit: Cap on captured variants per Dynamo capture
+       (``tracer="dynamo"`` only). Defaults to ``torch._dynamo.config.recompile_limit``
+       or the example count, whichever is larger; captures that accumulate across
+       many calls should pass an explicit budget.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string (the
        single source of truth for the calling convention) and a binary acceleration
        cache (no weights, no calling-convention metadata; it carries a small
@@ -165,6 +183,19 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        f = torch.compiler.precompile.load(python_code, cache)
        x = torch.randn(7, 4, requires_grad=True)
        f(x).sum().backward()  # executes the captured backward kernels
+
+   Stateful capture from a caller-owned loop (the artifact on disk is always
+   loadable, so a job that dies mid-loop leaves a working artifact for the
+   batches captured so far)::
+
+       state = None
+       for batch in batches:
+           result, state = torch.compiler.precompile(
+               step, example_inputs=[(batch,)], state=state,
+               artifact_path="step.py", cache_path="step.cache",
+               tracer="dynamo", training=True, recompile_limit=256,
+           )
+           # result is this call's real step output; run the training loop on it.
 ```
 
 ```{eval-rst}
