@@ -463,13 +463,16 @@ Tensor& do_metal_addmm(const Tensor& self,
                        const Scalar& alpha,
                        const Scalar& beta,
                        const Tensor& bias) {
-  if (beta.isFloatingPoint() && alpha.isFloatingPoint() && beta.toDouble() == 0 && alpha.toDouble() == 1) {
+  const bool beta_is_zero = beta.toComplexDouble() == 0.0;
+  if (beta_is_zero && alpha.toComplexDouble() == 1.0) {
     return do_metal_mm(self, other, output);
   }
   // Handle conjugated inputs by creating resolved copies
   auto self_ = self.is_conj() ? self.resolve_conj() : self;
   auto other_ = other.is_conj() ? other.resolve_conj() : other;
-  auto bias_ = bias.is_conj() ? bias.resolve_conj() : bias;
+  // beta == 0 ignores the bias, nan/inf included (matches CPU/CUDA and the graph path)
+  auto bias_ =
+      beta_is_zero ? at::zeros({}, bias.options()).expand_as(output) : (bias.is_conj() ? bias.resolve_conj() : bias);
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
@@ -515,7 +518,9 @@ Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
   // Handle conjugated inputs by creating resolved copies
   auto batch1_ = batch1.is_conj() ? batch1.resolve_conj() : batch1;
   auto batch2_ = batch2.is_conj() ? batch2.resolve_conj() : batch2;
-  auto bias_ = bias.is_conj() ? bias.resolve_conj() : bias;
+  // beta == 0 ignores the bias, nan/inf included (matches CPU/CUDA and the graph path)
+  auto bias_ =
+      beta.toComplexDouble() == 0.0 ? at::zeros({}, bias.options()) : (bias.is_conj() ? bias.resolve_conj() : bias);
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
@@ -647,15 +652,7 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
     return has_large_size_or_stride;
   }
 
-  // On Apple7/8, MPSGraph intermittently corrupts matmuls with a reduction
-  // dimension over 2^15 when both output dimensions use the matrix kernels;
-  // whether a given call misbehaves depends on allocator/session state, and
-  // fully contiguous operands are affected too. Apple9+ handles this
-  // correctly.
-  static const bool is_affected_gpu = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
-  constexpr int64_t min_matrix_dim = 16;
-  return is_affected_gpu && self.size(1) > max_stride_size && self.size(0) >= min_matrix_dim &&
-      other.size(1) >= min_matrix_dim;
+  return mps::mps_matmul_overreads_k(self.size(0), self.size(1), other.size(1));
 }
 
 } // anonymous namespace
@@ -1198,8 +1195,9 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
     return result;
   }
 
-  // Use Metal kernels for integer and complex types
-  if (c10::isIntegralType(batch1.scalar_type(), true) || c10::isComplexType(batch1.scalar_type())) {
+  // Use Metal kernels for integer and complex types, and for shapes the MPS kernels get wrong
+  if (c10::isIntegralType(batch1.scalar_type(), true) || c10::isComplexType(batch1.scalar_type()) ||
+      mps::mps_matmul_overreads_k(batch1.size(1), batch1.size(2), batch2.size(2))) {
     return do_metal_addbmm_or_baddbmm(input, batch1, batch2, alpha, beta, result, opType == BADDBMM_OP_TYPE);
   }
 
@@ -1556,6 +1554,10 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   // Same pre-macOS-15 crack as use_metal_mm: an output with a storage offset
   // is gathered into a temporary that nothing scatters back.
   if (needsGather(result)) {
+    return do_metal_bmm(batch1, batch2, result);
+  }
+  // MPS on Apple7/8 reads past the operands on long reductions; see mps_matmul_overreads_k.
+  if (mps::mps_matmul_overreads_k(batch1.size(1), batch1.size(2), batch2.size(2))) {
     return do_metal_bmm(batch1, batch2, result);
   }
 
