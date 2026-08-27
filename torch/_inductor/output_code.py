@@ -874,12 +874,18 @@ class CompiledFxGraph(OutputCode):
             return
 
         set_tracing_context_output_strides(example_inputs, self)
-        if graph_kwargs["cudagraphs"] is None:
-            raise AssertionError("graph_kwargs['cudagraphs'] must not be None")
         if graph_kwargs["is_backward"] is None:
             raise AssertionError("graph_kwargs['is_backward'] must not be None")
         is_backward = graph_kwargs["is_backward"]
-        cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
+        # The backward override is serialized with the FX graph so cache hits
+        # do not reuse the forward-derived decision.
+        cudagraphs_bwd_override = self.fx_kwargs.get("cudagraphs_bwd_override")
+        if is_backward and cudagraphs_bwd_override is not None:
+            cudagraphs = BoxedBool(cudagraphs_bwd_override)
+        else:
+            if graph_kwargs["cudagraphs"] is None:
+                raise AssertionError("graph_kwargs['cudagraphs'] must not be None")
+            cudagraphs = graph_kwargs["cudagraphs"]
 
         # When a CUDAGraphPolicy is set and it says not to wrap this
         # inner CompiledFxGraph (e.g. because wrapping happens at the

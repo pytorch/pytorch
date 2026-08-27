@@ -967,6 +967,7 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
 
 class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
+    cudagraphs_bwd_override: bool | None
     static_input_idxs: Sequence[int]
     is_backward: bool
     graph_id: int | None
@@ -2968,6 +2969,11 @@ def compile_fx_backward(
             for i in candidate_idxs
             if placeholders[i].meta.get("is_static_input", True)
         ]
+        cudagraph_kwargs: _CompileFxKwargs = {}
+        if compiler_config_extra.cudagraphs_bwd_override is not None:
+            cudagraph_kwargs["cudagraphs_bwd_override"] = (
+                compiler_config_extra.cudagraphs_bwd_override
+            )
         with (
             (
                 config.patch(get_cpp_wrapper_config())
@@ -2984,6 +2990,7 @@ def compile_fx_backward(
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
                 boxed_forward_device_index=compiler_config_extra.forward_device,
+                **cudagraph_kwargs,
             )
 
 
