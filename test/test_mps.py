@@ -1760,11 +1760,15 @@ class TestMPS(TestCaseMPS):
 
     def test_baddbmm_beta_zero_ignores_input(self):
         # When beta == 0 the input/bias must be ignored entirely. nan/inf in it
-        # must not be propagated. Regression test for: #187521.
-        for dtype in [torch.float32, torch.float16, torch.bfloat16]:
+        # must not be propagated. Regression test for: #187521 and for #194442
+        # also probes the complex path
+        for dtype in [torch.float32, torch.float16, torch.bfloat16, torch.complex64]:
             batch1 = torch.randn(8, 77, 64, dtype=dtype, device="mps")
             batch2 = torch.randn(8, 64, 77, dtype=dtype, device="mps")
-            for bad in [float("nan"), float("inf"), float("-inf")]:
+            bad_values = [float("nan"), float("inf"), float("-inf")]
+            if dtype.is_complex:
+                bad_values = [complex(v, v) for v in bad_values]
+            for bad in bad_values:
                 inp = torch.full((8, 77, 77), bad, dtype=dtype, device="mps")
                 out = torch.baddbmm(inp, batch1, batch2, beta=0, alpha=0.125)
                 self.assertFalse(out.isnan().any() or out.isinf().any(),
