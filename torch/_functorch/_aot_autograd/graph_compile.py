@@ -2394,6 +2394,7 @@ def _backward_placeholder_key(node: torch.fx.Node) -> tuple[str, str]:
     return "name", str(node.target)
 
 
+@torch._dynamo.disable
 def _retrace_backward_for_undefined_grad_outputs(
     trace_info: AOTAutogradTraceInfo,
     aot_config: AOTConfig,
@@ -2419,8 +2420,11 @@ def _retrace_backward_for_undefined_grad_outputs(
         metadata.traced_tangents[index] = None
 
     retrace_config = dataclasses.replace(aot_config, cache_info=None)
+    fake_mode = detect_fake_mode(trace_info.flat_args)
+    fake_mode_context = fake_mode if fake_mode is not None else nullcontext()
     with (
         torch.enable_grad(),
+        fake_mode_context,
         maybe_skip_decompose(retrace_config) as graph_capture_config,
     ):
         graph, joint_inputs, _, maybe_subclass_meta = aot_dispatch_autograd_graph(
