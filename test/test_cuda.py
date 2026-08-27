@@ -870,8 +870,17 @@ print(t.is_pinned())
                     archs.append("gfx950")
                 if ROCM_VERSION >= (7, 13):
                     archs.extend(["gfx1100", "gfx1101", "gfx1151"])
-                gcn_arch_name = torch.cuda.get_device_properties(0).gcnArchName
-                hipblaslt_preferred = any(arch in gcn_arch_name for arch in archs)
+                if ROCM_VERSION >= (7, 14):
+                    archs.append("gfx1250")
+                # blasDefaultBackend() only prefers hipblaslt when every visible
+                # device matches, so device 0 alone is not enough.
+                gcn_arch_names = [
+                    torch.cuda.get_device_properties(i).gcnArchName
+                    for i in range(torch.cuda.device_count())
+                ]
+                hipblaslt_preferred = all(
+                    any(arch in name for arch in archs) for name in gcn_arch_names
+                )
                 if hipblaslt_preferred:
                     self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
                 else:

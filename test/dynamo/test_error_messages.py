@@ -1124,6 +1124,14 @@ from user code:
                 tensors = torch.clamp(tensors, min=-clamp_value, max=clamp_value)
             return tensors
 
+        def post_munge(s):
+            # Python 3.11 attributes the conditional jump to the whole if body.
+            return s.replace(
+                "\n        clamp_value = torch.finfo(tensors.dtype).max - offset"
+                "\n        tensors = torch.clamp(tensors, min=-clamp_value, max=clamp_value)",
+                "",
+            )
+
         self.assertExpectedInlineMunged(
             Unsupported,
             lambda: torch.compile(
@@ -1144,6 +1152,7 @@ Data-dependent branching
 from user code:
    File "test_error_messages.py", line N, in cast_overflow_tensors
     if tensors.isinf().any() or tensors.isnan().any():""",
+            post_munge=post_munge,
         )
 
     # Test that the bytecode source attribution is correct with VariableTracker
@@ -1442,6 +1451,43 @@ from user code:
 
 """,
         )
+
+    def _backend_compiler_failed_traceback(self):
+        def bad_backend(gm, example_inputs):
+            raise TypeError("'NoneType' object is not iterable")
+
+        def fn(x):
+            return x + 1
+
+        # assertRaises suppresses the traceback, so manually catch
+        try:
+            torch.compile(fn, backend=bad_backend, fullgraph=True)(torch.ones(1))
+        except BackendCompilerFailed as exc:
+            return "".join(
+                traceback.format_exception(type(exc), exc, exc.__traceback__)
+            )
+
+        self.fail("expected BackendCompilerFailed")
+
+    def test_backend_compiler_failed_traceback(self):
+        msg = self._backend_compiler_failed_traceback()
+
+        self.assertIn("BackendCompilerFailed: backend='bad_backend' raised:", msg)
+        self.assertIn("TypeError: 'NoneType' object is not iterable", msg)
+        self.assertIn("in bad_backend", msg)
+        self.assertIn("output_graph.py", msg)
+        self.assertNotIn("convert_frame.py", msg)
+        self.assertNotIn("symbolic_convert.py", msg)
+        self.assertIn("Set TORCHDYNAMO_VERBOSE=1 for the full Dynamo stack trace", msg)
+
+    @torch._dynamo.config.patch(verbose=True)
+    def test_backend_compiler_failed_traceback_verbose(self):
+        msg = self._backend_compiler_failed_traceback()
+
+        self.assertIn("in bad_backend", msg)
+        self.assertIn("convert_frame.py", msg)
+        self.assertIn("symbolic_convert.py", msg)
+        self.assertNotIn("TORCHDYNAMO_VERBOSE=1", msg)
 
     @make_logging_test(graph_breaks=True)
     def test_graph_break_in_loop(self, records):

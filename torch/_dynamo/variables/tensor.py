@@ -769,7 +769,17 @@ class TensorVariable(VariableTracker):
             )
         ):
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
-            result.source = AttrSource(self.source, name)
+            if result.is_python_constant():
+                # ConstantVariable.create(None) is a process-wide singleton, and
+                # method_attr_grad hands it back for a pending `p.grad = None`; a
+                # source written onto it leaks into every later compile. Non-constants
+                # keep the in-place write: .data's tracker is AttributeMutationNew,
+                # which __init__ rejects a source for.
+                result = result.clone(
+                    source=AttrSource(self.source, name), source_location=None
+                )
+            else:
+                result.source = AttrSource(self.source, name)
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
