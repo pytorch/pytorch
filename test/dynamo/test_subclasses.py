@@ -1226,6 +1226,79 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         self.assertEqual(res_exp, res_act)
         self.assertEqual(x0, x1)
 
+    # https://github.com/pytorch/pytorch/issues/193932
+    @torch._functorch.config.patch(check_custom_op_aliasing=True)
+    def test_bare_subclass_matmul(self):
+        # matmul lowers to an extern kernel, so the compiled code re-enters
+        # dispatch with the subclass input still wrapped.
+        class Bare(torch.Tensor):
+            pass
+
+        def fn(t):
+            return t @ t.t()
+
+        x = torch.randn(4, 4)
+        res_exp = fn(x.as_subclass(Bare))
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        res_act = opt_fn(x.as_subclass(Bare))
+        self.assertEqual(res_exp, res_act)
+        self.assertIsInstance(res_act, Bare)
+
+    # https://github.com/pytorch/pytorch/issues/193932
+    @torch._functorch.config.patch(check_custom_op_aliasing=True)
+    def test_bare_subclass_matmul_aot_eager(self):
+        # Same failure without inductor: aten.t.default re-enters dispatch under
+        # AOTAutograd's runtime wrapper.
+        class Bare(torch.Tensor):
+            pass
+
+        def fn(t):
+            return t @ t.t()
+
+        x = torch.randn(4, 4)
+        res_exp = fn(x.as_subclass(Bare))
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res_act = opt_fn(x.as_subclass(Bare))
+        self.assertEqual(res_exp, res_act)
+        self.assertIsInstance(res_act, Bare)
+
+    def test_analyze_custom_op_mode_subclass_deferral(self):
+        # Pins the deferral predicate directly, so the coverage does not depend on a
+        # backend lowering to an op that re-enters dispatch.
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _AnalyzeCustomOpInputOutputMode,
+        )
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+
+        class Bare(torch.Tensor):
+            pass
+
+        x = torch.randn(4, 4)
+        bare_inp = x.as_subclass(Bare)
+        two_inp = TwoTensor(x, torch.randn(4, 4))
+        with _AnalyzeCustomOpInputOutputMode():
+            # No __torch_dispatch__ to defer to, so the mode has to handle this itself.
+            bare_out = torch.ops.aten.add.Tensor(bare_inp, 1)
+            # A subclass that has one must still be deferred to.
+            two_out = torch.ops.aten.add.Tensor(two_inp, 1)
+        self.assertIsInstance(bare_out, Bare)
+        self.assertIsInstance(two_out, TwoTensor)
+        # Deferral is the mode returning NotImplemented, which the assertion above
+        # cannot tell apart from the mode handling the op itself.
+        self.assertIs(
+            _AnalyzeCustomOpInputOutputMode().__torch_dispatch__(
+                torch.ops.aten.add.Tensor, (TwoTensor,), (two_inp, 1)
+            ),
+            NotImplemented,
+        )
+        # A fake tensor must be handled here, not deferred to: FakeTensor returns
+        # NotImplemented itself while its own mode is on the stack.
+        with FakeTensorMode() as fake_mode:
+            fake_inp = fake_mode.from_tensor(x)
+            with _AnalyzeCustomOpInputOutputMode():
+                fake_out = torch.ops.aten.add.Tensor(fake_inp, 1)
+        self.assertIsInstance(fake_out, FakeTensor)
+
     # ACT (AsyncCollectiveTensor) can be constructed directly, so the guard
     # relaxation for ACT inputs is exercised here on CPU without a process group.
     # The end-to-end path with a real collective + inductor is covered by
@@ -2228,6 +2301,57 @@ class GraphModule(torch.nn.Module):
             res1 = opt_fn(4)
             self.assertEqual(ref0, res0)
             self.assertEqual(ref1, res1)
+
+    def test_is_pinned_respects_torch_dispatch(self):
+        class PinnedOverrideTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @staticmethod
+            def __new__(cls, elem):
+                out = torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    elem.shape,
+                    strides=elem.stride(),
+                    storage_offset=elem.storage_offset(),
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
+                )
+                out.elem = elem
+                return out
+
+            def __tensor_flatten__(self):
+                return ["elem"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+                return PinnedOverrideTensor(inner_tensors["elem"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten.is_pinned.default:
+                    return True
+
+                def unwrap(x):
+                    return x.elem if isinstance(x, cls) else x
+
+                kwargs = {} if kwargs is None else kwargs
+                out = func(
+                    *pytree.tree_map(unwrap, args),
+                    **pytree.tree_map(unwrap, kwargs),
+                )
+                return pytree.tree_map(
+                    lambda x: cls(x) if isinstance(x, torch.Tensor) else x,
+                    out,
+                )
+
+        def fn(x):
+            return x.is_pinned()
+
+        x = PinnedOverrideTensor(torch.randn(2, device="meta"))
+        self.assertTrue(fn(x))
+        self.assertTrue(torch.compile(fn, backend="eager")(x))
 
     def test_wrapper_subclass_guards_on_inner_tensor(self):
         # Holds an inner tensor, that has a distinct shape from the outer wrapper tensor.
