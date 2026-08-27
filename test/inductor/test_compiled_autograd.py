@@ -3583,12 +3583,10 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         expected_logs = [
             "CompiledFunctionBackward0",
             "aot0_primals_2",
-            "aot0_tangents_2",
             "aot0_tangents_1",
             "aot0_sin",
             "aot0_cos",
             "aot0_mul",
-            "aot0_add_1",
             "aot0_trace_wrapped",
             "aot0_cos_1",
             "aot0_mul_1",
@@ -3808,8 +3806,9 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_26], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_2, unwrap_maybe_dynamic_int_3], True, 6)]);  getitem_26 = unwrap_maybe_dynamic_int_2 = unwrap_maybe_dynamic_int_3 = None
         getitem_27 = validate_outputs_1[0];  validate_outputs_1 = None
 
-        getitem_28 = hooks[0];  getitem_28 = None
-        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], [], (getitem_27,));  getitem_1 = getitem_2 = getitem_27 = None
+        getitem_28 = hooks[0]
+        getattr_1 = getitem_28._aot_grad_output_prototype_objects;  getitem_28 = None
+        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], [], (getitem_27,), getattr_1);  getitem_1 = getitem_2 = getitem_27 = getattr_1 = None
         aot0_primals_1 = call_aot_bwd_prologue[0]
         aot0_primals_2 = call_aot_bwd_prologue[1]
         aot0_tangents_1 = call_aot_bwd_prologue[2]
@@ -4488,6 +4487,38 @@ class CompiledAutograd1(torch.nn.Module):
         try:
             run_case()
             run_case()
+        finally:
+            dist.destroy_process_group()
+
+    @unittest.skipIf(
+        not HAS_DTENSOR,
+        "DTensor/FakePG requires distributed build",
+    )
+    def test_dtensor_unused_output_fallback(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        try:
+            mesh = DeviceMesh("cpu", torch.arange(2))
+
+            @torch.compile(backend="aot_eager", fullgraph=True)
+            def fn(x, y):
+                return x.sin(), y.std()
+
+            def run():
+                x = DTensor.from_local(
+                    torch.randn(4), mesh, [Shard(0)], run_check=False
+                ).requires_grad_()
+                y = DTensor.from_local(
+                    torch.randn(4), mesh, [Shard(0)], run_check=False
+                ).requires_grad_()
+                fn(x, y)[0].sum().backward()
+                self.assertIsInstance(x.grad, DTensor)
+                self.assertIsNone(y.grad)
+
+            run()
+            torch._dynamo.reset()
+            with compiled_autograd._enable(make_compiler_fn(backend="aot_eager")):
+                run()
         finally:
             dist.destroy_process_group()
 

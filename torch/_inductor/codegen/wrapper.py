@@ -130,7 +130,8 @@ def _constexpr_constant(value: Any) -> Any:
     if isinstance(value, list):
         return [_constexpr_constant(item) for item in value]
     if isinstance(value, tuple) and hasattr(value, "_fields"):
-        return type(value)._make(_constexpr_constant(item) for item in value)
+        make = getattr(type(value), "_make")  # noqa: B009
+        return make(_constexpr_constant(item) for item in value)
     if isinstance(value, tuple):
         return tuple(_constexpr_constant(item) for item in value)
     if isinstance(value, enum.Enum) and isinstance(
@@ -235,7 +236,7 @@ def _constexpr_source_impl(
             cls_ref = _constexpr_type_ref(type(value), module_aliases, imports)
             return None if cls_ref is None else f"{cls_ref}._make(({body}))"
         return f"({body})"
-    if isinstance(value, set):
+    if isinstance(value, OrderedSet):
         items = []
         for item in sorted(
             value,
@@ -3998,9 +3999,7 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
-        config_dicts = [
-            _constexpr_constant(config_to_dict(cfg)) for cfg in configs
-        ]
+        config_dicts = [_constexpr_constant(config_to_dict(cfg)) for cfg in configs]
         precomputed_grids = inductor_meta.get("precomputed_grids", [])
         rendered_mappings, constexpr_imports = _render_constexpr_mappings(
             [
