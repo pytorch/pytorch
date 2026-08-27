@@ -8,7 +8,7 @@ import unittest
 import torch
 from torch._dynamo.source import LocalSource
 from torch._environment import is_fbcode
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     RelaxedUnspecConstraint,
@@ -102,7 +102,7 @@ class TestSparseProp(TestCase):
         super().setUp()
 
     def assertEqualMeta(self, x, y):
-        self.assertIsInstance(x, FakeTensor)
+        self.assertTrue(is_fake_tensor(x))
         self.assertIsInstance(y, torch.Tensor)
 
         # Convert expected value to meta for comparison.

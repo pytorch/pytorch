@@ -64,6 +64,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_caches, fresh_cache
 from torch._library import capture_triton
 from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
@@ -83,6 +84,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
+    skipIfCppFakeTensor,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
@@ -2225,6 +2227,7 @@ class TestFxGraphCache(TestCase):
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @skipIfCppFakeTensor("no nestedtensor support")
     def test_cache_with_nt(self):
         def gen_nt(r):
             values = torch.randn(r, 16)
@@ -3066,7 +3069,10 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         self.assertEqual(seen_ignore_shape_env, [True])
         self.assertIsNot(seen_fake_modes[0], fake_mode)
-        self.assertIsInstance(seen_fake_modes[0], FakeTensorMode)
+        self.assertIs(
+            maybe_get_fake_mode(seen_fake_modes[0].from_tensor(torch.ones(1))),
+            seen_fake_modes[0],
+        )
         self.assertIsNotNone(seen_fake_modes[0].shape_env)
 
     def test_dynamic_shapes_from_graph_tensor_subclass_fake_mode(self):
@@ -3089,7 +3095,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         self.assertIsInstance(value_node, torch.fx.Node)
         output_example_value = value_node.meta["example_value"]
         self.assertIsInstance(output_example_value, TwoTensor)
-        fake_mode = output_example_value.a.fake_mode
+        fake_mode = maybe_get_fake_mode(output_example_value.a)
+        self.assertIsNotNone(fake_mode)
 
         seen_fake_modes = []
 
@@ -3765,7 +3772,12 @@ class TestFxGraphCacheHashing(TestCase):
         pickler = FxGraphCachePickler(gm)
         with torch._subclasses.FakeTensorMode():
             # Verify that FakeTensors get pickled into a TensorMetadata:
-            data = pickler.dumps(torch.randn(1))
+            with mock.patch.object(
+                pickler,
+                "_reduce_constant_tensor",
+                side_effect=AssertionError("fake tensor serialized as a constant"),
+            ):
+                data = pickler.dumps(torch.randn(1))
             self.assertIsInstance(pickle.loads(data), TensorMetadata)
 
             # Different shapes:
