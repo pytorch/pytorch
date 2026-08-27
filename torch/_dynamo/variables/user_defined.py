@@ -5114,24 +5114,6 @@ class UserDefinedListVariable(UserDefinedObjectVariable, ListVariable):
         super().__init__(value, items=items if items is not None else [], **kwargs)
         self._base_methods = list_methods
 
-    @property
-    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
-        # The composite mutation_type (ValueAndAttributeMutation*) is shared with
-        # this view so content mutations recorded here flow through the object's
-        # own mutation_type.  source must agree with the New/Existing kind (see
-        # VariableTracker.__init__); self.source is assigned late for new objects,
-        # so derive it from the mutation_type rather than reading it directly.
-        source = (
-            self.source
-            if isinstance(self.mutation_type, ValueMutationExisting)
-            else None
-        )
-        return ListVariable(
-            self.items,
-            mutation_type=self.mutation_type,
-            source=source,
-        )
-
     def tp_init_impl(
         self,
         tx: "InstructionTranslatorBase",
