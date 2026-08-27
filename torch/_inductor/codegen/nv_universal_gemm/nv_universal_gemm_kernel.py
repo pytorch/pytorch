@@ -571,7 +571,12 @@ def _init_efc_jit(kernel, epilogue_args):
     object. We replicate just those two steps so that disk-cached artifacts can
     be rewrapped without recompiling the CuTe DSL kernel.
     """
-    from cutlass.operators.providers.cutedsl.evt.common_efc import EFC
+    try:
+        # `nvidia-cutlass-operators>=0.2.0` have `efc` not `common_efc`
+        from cutlass.operators.providers.cutedsl.evt.efc import EFC
+    except ModuleNotFoundError:
+        from cutlass.operators.providers.cutedsl.evt.common_efc import EFC
+
     from cutlass.operators.utils.tensor import TensorWrapper
 
     efc = kernel.impl.efc

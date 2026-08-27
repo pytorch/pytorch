@@ -7,7 +7,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
-#include <ATen/ops/_sparse_mm_reduce_impl_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/abs_native.h>
 #include <ATen/ops/asin.h>
@@ -71,8 +70,6 @@
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/trunc.h>
 #include <ATen/ops/trunc_native.h>
-#include <ATen/ops/is_pinned_native.h>
-#include <ATen/ops/_pin_memory_native.h>
 #endif
 
 namespace at::native {
