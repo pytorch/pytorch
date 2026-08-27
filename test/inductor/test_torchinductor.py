@@ -19168,6 +19168,34 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(6, 4, device=GPU_TYPE).t().contiguous().t(),))
 
+    @skip_if_halide  # no logical-index argreduce support
+    @skip_if_pallas  # no logical-index argreduce support
+    def test_argmax_argmin_fused_producer_channels_last(self):
+        # https://github.com/pytorch/pytorch/issues/193751
+        # The producer's output buffer may be materialized with a permuted
+        # stride order (or inlined), so the arg-reduce must report the
+        # logical row-major index, not the physical iteration index.
+        def fn(x):
+            return (
+                torch.argmax(torch.mean(x, dim=-1)),
+                torch.argmax(torch.sum(x, dim=-1)),
+                torch.argmax(torch.amax(x, dim=-1)),
+                torch.argmax(torch.var(x, dim=-1)),
+                torch.argmax(torch.logsumexp(x, dim=-1)),
+                torch.argmin(torch.prod(x, dim=-1)),
+                torch.argmax(x * 2),
+            )
+
+        x4d = torch.randn(4, 4, 8, 8, device=self.device).to(
+            memory_format=torch.channels_last
+        )
+        self.common(fn, (x4d,), check_lowp=False)
+
+        x5d = torch.randn(2, 3, 4, 5, 6, device=self.device).to(
+            memory_format=torch.channels_last_3d
+        )
+        self.common(fn, (x5d,), check_lowp=False)
+
     @skip_if_halide
     @requires_gpu_and_triton
     def test_unbacked_float_item(self):
