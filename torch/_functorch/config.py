@@ -41,6 +41,10 @@ fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", "1") != "0"
 # but it is on by default for aot_eager.
 debug_assert = False
 
+# Preserve undefined user grad outputs and specialize AOTAutograd backward graphs
+# around them. Disable this to restore the previous zero-materialization behavior.
+aot_autograd_prune_unused_outputs = True
+
 debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", "0") != "0"
 
 # See # NOTE [Export custom triton op]

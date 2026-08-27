@@ -35,10 +35,28 @@ from torch.testing._internal.common_utils import (
 # A module-level (global) model + a function referencing it, to exercise the
 # constant-tensor guard against a baked global.
 _GLOBAL_TENSOR = torch.randn(3)
+_DYNAMO_INPUT_GLOBAL = torch.randn(3)
+_DYNAMO_TENSOR_DEFAULT = torch.randn(3)
 
 
 def _precompile_dynamo_dynamic(x):
     return x.sin() + x.shape[0]
+
+
+def _precompile_dynamo_torch_sin(x):
+    return torch.sin(x)
+
+
+def _precompile_dynamo_input_global_identity(x):
+    return x + 1 if x is _DYNAMO_INPUT_GLOBAL else x - 1
+
+
+def _precompile_dynamo_tensor_default(x, bias=_DYNAMO_TENSOR_DEFAULT):
+    return x + bias
+
+
+def _precompile_dynamo_varargs(*xs):
+    return xs[0] + xs[1]
 
 
 def _precompile_dynamo_dynamic_branch(x):
@@ -1221,20 +1239,174 @@ class TestPrecompile(TestCase):
             )
             self.assertEqual(torch.compiler.precompile.load(code, cache)(m, x), m(x))
 
+    def test_positional_example_inputs_remain_supported(self):
+        x = torch.randn(4)
+        y = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            lambda left, right: left + right, x, y, backend="eager"
+        )
+        self.assertEqual(torch.compiler.precompile.load(code, cache)(x, y), x + y)
+
+        with self.assertRaisesRegex(TypeError, "both positional examples and"):
+            torch.compiler.precompile(
+                lambda t: t + 1,
+                x,
+                example_inputs=[(x,)],
+                backend="eager",
+            )
+
+    def test_zero_argument_call_remains_supported(self):
+        code, cache = torch.compiler.precompile(lambda: 3, backend="eager")
+        self.assertEqual(torch.compiler.precompile.load(code, cache)(), 3)
+
+    @parametrize("tracer", ("make_fx", "dynamo"))
+    def test_example_inputs_require_tuples(self, tracer):
+        with self.assertRaisesRegex(TypeError, "positional-argument tuples"):
+            torch.compiler.precompile(
+                lambda t: t + 1,
+                example_inputs=[[torch.randn(4)]],
+                tracer=tracer,
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_filters_torch_global_guards_before_serializing(self):
+        x = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertEqual(torch.compiler.precompile.load(code, cache)(x), torch.sin(x))
+
+    def test_tracer_dynamo_training_flag_controls_grad_mode(self):
+        x = torch.randn(4, requires_grad=True)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            backend="eager",
+            training=False,
+        )
+        with torch.enable_grad():
+            self.assertFalse(
+                torch.compiler.precompile.load(code, cache)(x).requires_grad
+            )
+
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_torch_sin,
+            example_inputs=[(x,)],
+            tracer="dynamo",
+            training=True,
+        )
+        with torch.no_grad():
+            out = torch.compiler.precompile.load(code, cache)(x)
+        self.assertTrue(out.requires_grad)
+
+    def test_tracer_dynamo_rejects_input_global_alias(self):
+        with self.assertRaisesRegex(PrecompileError, "aliases the Python environment"):
+            torch.compiler.precompile(
+                _precompile_dynamo_input_global_identity,
+                example_inputs=[(_DYNAMO_INPUT_GLOBAL,)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_tensor_default(self):
+        with self.assertRaisesRegex(PrecompileError, "tensor-valued function defaults"):
+            torch.compiler.precompile(
+                _precompile_dynamo_tensor_default,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_varargs_dispatch(self):
+        x = torch.randn(4)
+        y = torch.randn(4)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_varargs,
+            example_inputs=[(x, y)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertEqual(torch.compiler.precompile.load(code, cache)(x, y), x + y)
+
+    def test_tracer_dynamo_captures_more_than_default_recompile_limit(self):
+        x = torch.randn(4)
+        examples = [(x, value) for value in range(9)]
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_scalar,
+            example_inputs=examples,
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        for args in examples:
+            self.assertEqual(loaded(*args), _precompile_dynamo_scalar(*args))
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_tracer_dynamo_capture_does_not_leak_auto_dynamic_state(self):
+        dynamic_code, _ = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(2, 4),), (torch.randn(3, 4),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertIn("DYNAMIC_GRAPH_COUNT = 1", dynamic_code)
+
+        static_code, static_cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(5, 4),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        self.assertIn("DYNAMIC_GRAPH_COUNT = 0", static_code)
+        x = torch.randn(5, 4)
+        self.assertEqual(
+            torch.compiler.precompile.load(static_code, static_cache)(x),
+            _precompile_dynamo_dynamic(x),
+        )
+
+    def test_tracer_dynamo_capture_cleans_generated_globals(self):
+        module_globals = sys.modules[__name__].__dict__
+        prefixes = ("__compiled_fn_", "__builtins_dict___", "__import_")
+        before = {
+            name for name in module_globals if any(name.startswith(p) for p in prefixes)
+        }
+        torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(4),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        after = {
+            name for name in module_globals if any(name.startswith(p) for p in prefixes)
+        }
+        self.assertEqual(after, before)
+
+    def test_tracer_dynamo_load_does_not_copy_unrelated_module_globals(self):
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_dynamic,
+            example_inputs=[(torch.randn(4),)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertNotIn("_GLOBAL_TENSOR", loaded._loaded_forward.__globals__)
+
     @parametrize("num_examples", [0, 2])
     def test_make_fx_requires_one_example_input(self, num_examples):
         x = torch.randn(4)
-        with self.assertRaisesRegex(AssertionError, "exactly one example input tuple"):
+        message = "at least one" if num_examples == 0 else "exactly one"
+        with self.assertRaisesRegex(ValueError, message):
             torch.compiler.precompile(
                 lambda t: t + 1,
                 example_inputs=[(x,)] * num_examples,
                 backend="eager",
             )
-
-    def test_example_inputs_is_keyword_only(self):
-        x = torch.randn(4)
-        with self.assertRaises(TypeError):
-            torch.compiler.precompile(lambda t: t + 1, [(x,)])
 
     def test_example_input_supports_make_fx_positional_args_only(self):
         x = torch.randn(4)
@@ -1379,7 +1551,7 @@ class TestPrecompile(TestCase):
 
         self.assertIn("TRAINING = True", code)
         self.assertIn("DYNAMIC_GRAPH_COUNT = 1", code)
-        self.assertIn("class _CompiledFunction(torch.autograd.Function):", code)
+        self.assertIn("class _CompiledFunction_s0(torch.autograd.Function):", code)
         self.assertIn("_inner_call_fw", code)
         self.assertIn("_inner_call_bw", code)
         for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
@@ -1638,9 +1810,8 @@ class TestPrecompile(TestCase):
             training=True,
         )
 
-        self.assertEqual(
-            code.count("class _CompiledFunction(torch.autograd.Function):"), 2
-        )
+        self.assertIn("class _CompiledFunction_s0(torch.autograd.Function):", code)
+        self.assertIn("class _CompiledFunction_s1(torch.autograd.Function):", code)
         for _, loaded in _default_and_inlined_loaders(code, cache, "inductor"):
             actual_input = torch.randn(4, requires_grad=True)
             ref_input = actual_input.detach().clone().requires_grad_()

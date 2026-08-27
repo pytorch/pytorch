@@ -385,6 +385,7 @@ def _build_dynamo_forward():
     """
     import base64
     import importlib
+    import inspect
     import pickle
     import sys
     import types
@@ -398,7 +399,9 @@ def _build_dynamo_forward():
     )
 
     if tuple(_DYNAMO_PYTHON_VERSION) != sys.version_info[:2]:
-        raise ValueError(
+        from torch._precompile import PrecompileError
+
+        raise PrecompileError(
             "precompile artifact was produced on Python "
             f"{_DYNAMO_PYTHON_VERSION[0]}.{_DYNAMO_PYTHON_VERSION[1]}, but is "
             f"being loaded on Python {sys.version_info[0]}.{sys.version_info[1]}."
@@ -534,15 +537,6 @@ def _build_dynamo_forward():
                         )
 
     for code_state in state.codes:
-        module = sys.modules.get(code_state.python_module)
-        if module is None:
-            try:
-                module = importlib.import_module(code_state.python_module)
-            except ImportError:
-                module = None
-        if module is not None:
-            for name, value in vars(module).items():
-                namespace.setdefault(name, value)
         for alias, (module_name, path) in code_state.global_bindings.items():
             value = importlib.import_module(module_name)
             for attr in path:
@@ -701,7 +695,8 @@ def _build_dynamo_forward():
                     compiled = self.compiled
                     self.active_calls += 1
                 try:
-                    return compiled(*args, **kwargs)
+                    with torch.set_grad_enabled(TRAINING):
+                        return compiled(*args, **kwargs)
                 except torch._dynamo.exc.BackendCompilerFailed as e:
                     from torch._precompile import PrecompileError
 
@@ -764,16 +759,14 @@ def _build_dynamo_forward():
             manager = load_guard_manager(guards_state, target, namespace)
             code = SerializedCode.to_code_object(guarded.dynamo_code)
             guarded_variants.append((manager, code))
-        arg_names = target.co_varnames[: target.co_argcount]
-
         def bind(closure=None):
+            target_function = types.FunctionType(
+                target, namespace, target.co_name, defaults, closure
+            )
+            if kwdefaults:
+                target_function.__kwdefaults__ = dict(kwdefaults)
             if not guarded_variants:
-                function = types.FunctionType(
-                    target, namespace, target.co_name, defaults, closure
-                )
-                if kwdefaults:
-                    function.__kwdefaults__ = dict(kwdefaults)
-                return function
+                return target_function
 
             variants = []
             for manager, code in guarded_variants:
@@ -783,16 +776,12 @@ def _build_dynamo_forward():
                 if kwdefaults:
                     function.__kwdefaults__ = dict(kwdefaults)
                 variants.append((manager, function))
+            signature = inspect.signature(target_function)
 
             def dispatch(*args, **kwargs):
-                local_scope = dict(zip(arg_names, args))
-                if defaults:
-                    for name, value in zip(arg_names[-len(defaults) :], defaults):
-                        local_scope.setdefault(name, value)
-                if kwdefaults:
-                    for name, value in kwdefaults.items():
-                        local_scope.setdefault(name, value)
-                local_scope.update(kwargs)
+                bound = signature.bind(*args, **kwargs)
+                bound.apply_defaults()
+                local_scope = dict(bound.arguments)
                 for manager, function in variants:
                     if manager.check(local_scope):
                         return function(*args, **kwargs)
@@ -822,6 +811,7 @@ def _build_dynamo_forward():
 
     def forward(*args, **kwargs):
         check_input_contract(args, kwargs)
-        return entry(*args, **kwargs)
+        with torch.set_grad_enabled(TRAINING):
+            return entry(*args, **kwargs)
 
     return forward
