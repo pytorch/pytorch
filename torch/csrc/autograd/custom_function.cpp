@@ -403,7 +403,7 @@ static optional_variable_list _process_backward_mode_ad(
   int num_diff_outputs = 0;
 
   for (const auto i : c10::irange(num_outputs)) {
-    // We put a undefined_input placeholder for outputs that are not tensor and
+    // We put an undefined_input placeholder for outputs that are not tensor and
     // for when the output tensor is not differentiable (see below)
     if (!raw_outputs[i].has_value()) {
       if (cdata) {
