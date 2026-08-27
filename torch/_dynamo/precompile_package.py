@@ -821,10 +821,10 @@ class _PrecompileBackend:
         if self.serving:
             self.serve_time_compiles += 1
             log.warning(
-                "precompile: serving compiled a NEW graph for %s -- no captured "
-                "variant matched this call, so the artifact is serving less than "
-                "it was measured to. Recapture with an example that covers it.",
-                getattr(gm, "_orig_mod", gm).__class__.__name__,
+                "precompile: serving compiled a NEW graph -- no captured variant "
+                "matched this call, so the artifact is serving less than it was "
+                "measured to. Recapture with an example that covers it.%s",
+                _identify_graph(gm),
             )
         if self._keep_graphs:
             backend_id = gm.meta.get("backend_id") or getattr(gm, "_backend_id", None)
@@ -1218,6 +1218,31 @@ def _missing_backends_message(
         "TORCH_LOGS=+torch._functorch._aot_autograd to see each graph as it "
         "lowers."
     )
+
+
+def _identify_graph(gm: torch.fx.GraphModule) -> str:
+    """Name a graph well enough to find it, from inside a backend.
+
+    The module class alone does not: every graph a model produces reports the
+    same one, so a capture that recompiled nine graphs at serve time said
+    "GraphModule" nine times. The compile id keys tlparse, the backend id keys
+    the artifact, and the first node carrying a stack trace names the user line
+    -- including, for a continuation, the resume frame Dynamo minted for it,
+    which is the only thing that tells one break in a chain from another.
+    """
+    parts: list[str] = []
+    compile_id = torch._guards.CompileContext.current_compile_id()
+    if compile_id is not None:
+        parts.append(f"compile id {compile_id}")
+    backend_id = gm.meta.get("backend_id") or getattr(gm, "_backend_id", None)
+    if backend_id is not None:
+        parts.append(f"backend id {backend_id}")
+    for node in gm.graph.nodes:
+        if node.op not in ("placeholder", "output") and node.stack_trace:
+            first = node.stack_trace.strip().splitlines()[0].strip()
+            parts.append(f"first traced at {first}")
+            break
+    return f" Graph: {'; '.join(parts)}." if parts else ""
 
 
 def _warn_risky_drops(risky: Sequence[tuple[str, str]]) -> None:
