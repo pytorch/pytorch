@@ -12,19 +12,19 @@
 namespace c10_complex_math {
 namespace _detail {
 c10::complex<float> sqrt(const c10::complex<float>& in) {
-  return torch::headeronly::complex_math_detail::sqrt(in);
+  return ::torch::headeronly::complex_math_detail::sqrt(in);
 }
 
 c10::complex<double> sqrt(const c10::complex<double>& in) {
-  return torch::headeronly::complex_math_detail::sqrt(in);
+  return ::torch::headeronly::complex_math_detail::sqrt(in);
 }
 
 c10::complex<float> acos(const c10::complex<float>& in) {
-  return torch::headeronly::complex_math_detail::acos(in);
+  return ::torch::headeronly::complex_math_detail::acos(in);
 }
 
 c10::complex<double> acos(const c10::complex<double>& in) {
-  return torch::headeronly::complex_math_detail::acos(in);
+  return ::torch::headeronly::complex_math_detail::acos(in);
 }
 
 } // namespace _detail
