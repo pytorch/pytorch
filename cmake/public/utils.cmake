@@ -446,7 +446,8 @@ function(torch_compile_options libname)
     # templated classes crossing library boundary get duplicated (but identical)
     # definitions. It's easier to just disable it.
     target_compile_options(${libname} PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>)
+        $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>
+        $<$<COMPILE_LANGUAGE:CUDA>: -Xcompiler -fvisibility=hidden>)
   endif()
 
 endfunction()

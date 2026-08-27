@@ -1150,6 +1150,7 @@ elseif(USE_CUDA)
   endif()
   if(BUILD_LAZY_CUDA_LINALG)
     add_library(torch_cuda_linalg ${ATen_CUDA_LINALG_SRCS})
+    torch_compile_options(torch_cuda_linalg)  # see cmake/public/utils.cmake
     target_compile_definitions(torch_cuda_linalg PRIVATE USE_CUDA BUILD_LAZY_CUDA_LINALG)
     # Library order is important during static linking
     # `torch::magma` should be mentioned before other CUDA
