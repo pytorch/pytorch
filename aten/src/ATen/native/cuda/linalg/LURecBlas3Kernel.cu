@@ -94,7 +94,6 @@ struct LUWorkspace {
   LUWorkspace(const Tensor& input, int nb, bool compute_pivots) {
     int batch_count = cuda_int_cast(batchCount(input), "batchCount");
     int m = cuda_int_cast(input.size(-2), "input.size(-2)");
-    int n = cuda_int_cast(input.size(-1), "input.size(-1)");
 
     // Pointer arrays for cuBLAS batched TRSM (64-bit addresses)
     buffer = at::empty({2, batch_count}, input.options().dtype(at::kLong));
