@@ -16,10 +16,7 @@ from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._library.fake_class_registry import FakeScriptObject
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     set_default_dtype,
@@ -1101,7 +1098,6 @@ user_stack=None)
 class GuardManagerAcceleratorTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
     def test_default_device_guard(self, device):
         root = RootGuardManager()
         foo = 1
@@ -1114,7 +1110,6 @@ class GuardManagerAcceleratorTests(torch._dynamo.test_case.TestCase):
         finally:
             torch.set_default_device(None)
 
-    @onlyAccelerator
     def test_call_function_no_args_guard(self, device):
         root = RootGuardManager()
         device = torch.device(device)
@@ -1126,7 +1121,13 @@ class GuardManagerAcceleratorTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard(2))
 
 
-instantiate_device_type_tests(GuardManagerAcceleratorTests, globals())
+instantiate_device_type_tests(
+    GuardManagerAcceleratorTests,
+    globals(),
+    except_for="cpu",
+    allow_mps=True,
+    allow_xpu=True,
+)
 
 
 class TypePropagationTests(torch._dynamo.test_case.TestCase):
@@ -1230,8 +1231,6 @@ class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
 
 
 class RecursiveDictTagTests(torch._dynamo.test_case.TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         super().setUp()
         self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
@@ -1243,6 +1242,8 @@ class RecursiveDictTagTests(torch._dynamo.test_case.TestCase):
 
 
 class TagSafetyChecks(RecursiveDictTagTests):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
@@ -1519,6 +1520,8 @@ class TagSafetyChecks(RecursiveDictTagTests):
 
 
 class RecursiveDictGuardTests(RecursiveDictTagTests):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_disabling(self):
         class Mod(torch.nn.Module):
             def __init__(self):
