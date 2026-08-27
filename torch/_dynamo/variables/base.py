@@ -478,13 +478,31 @@ def store_attr_mutation(
     se.store_attr(item, name, value_to_store)
 
 
-def getset_load_or_build(accessor: Callable[[Any], Any], name: str) -> Getter:
-    """Getter that builds a VT from the raw value returned by `accessor`."""
+def load_pending_mutation(
+    tx: InstructionTranslatorBase, self: Any, name: str
+) -> VariableTracker | None:
+    """Returns the pending side-effect mutation of `self`'s attribute `name`,
+    or None if there isn't one. Shared by every writable getter that must
+    prefer an in-progress mutation over re-deriving the value from source."""
+    se = tx.output.side_effects
+    if se.has_pending_mutation_of_attr(self, name):
+        return se.load_attr(self, name)
+    return None
+
+
+def getset_load_or_build(
+    accessor: Callable[[Any], Any],
+    name: str,
+    source: Callable[[Any], Source | None] = lambda self: None,
+) -> Getter:
+    """Getter that builds a VT from the raw value returned by `accessor`,
+    attaching the Source returned by `source` (defaults to sourceless)."""
 
     def getter(self, tx: InstructionTranslatorBase) -> VariableTracker:
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
-            return tx.output.side_effects.load_attr(self, name)
-        return VariableTracker.build(tx, accessor(self))
+        pending = load_pending_mutation(tx, self, name)
+        if pending is not None:
+            return pending
+        return VariableTracker.build(tx, accessor(self), source(self))
 
     return getter
 
