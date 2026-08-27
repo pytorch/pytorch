@@ -1884,9 +1884,13 @@ std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args.
   return detail::generic_to_tuple_impl<std::tuple<Args...>>(vals, Indices{});
 }
 
-// note: when adding a case here you should also add a
-// toX method to IValue. These named methods are much more discoverable
-// than the to templated function.
+// NOTE: when adding a case here you should also add a toX method to IValue.
+// These named methods are much more discoverable than the templated function.
+//
+// NOTE: the implementation is sensitive to the order of this list. If multiple
+// entries refer to the same type, only the first entry prevails. For example,
+// on platforms where `unsigned long` == `uint64_t`, we will silently ignore the
+// entry corresponding to `unsigned long`.
 
 #define TORCH_FORALL_CONVERSIONS(_)                                            \
   _(at::Tensor, toTensor)                                                      \
@@ -1955,7 +1959,7 @@ inline T IValue::to() && {
 }
 
 template <typename T>
-inline c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to() const& {
+inline typename c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to() const& {
   using return_type = c10::detail::ivalue_to_const_ref_overload_return<T>::type;
 #define DEFINE_BRANCH(type, converter)                                         \
   if constexpr (std::is_same_v<T, type>) {                                     \
