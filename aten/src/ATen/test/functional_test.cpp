@@ -88,9 +88,7 @@ TEST(FMapTest, RvalueVectorPrefersRvalueOverload) {
 }
 
 TEST(FMapTest, RvalueVectorFallsBackForCopyOnlyByValueCallable) {
-  std::vector<CopyOnly> inputs;
-  inputs.emplace_back(5);
-  inputs.emplace_back(6);
+  std::vector<CopyOnly> inputs{CopyOnly(5), CopyOnly(6)};
 
   auto result = c10::fmap(
       std::move(inputs), [](CopyOnly input) { return input.value; });
