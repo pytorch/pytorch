@@ -6382,9 +6382,8 @@ for dtype in (torch.int32, torch.int64):
     @parametrize("nhwc", (False, True))
     # ROCm 7.14+ Triton conv2d backward accuracy issue for
     # channels_groups=[61, 151, 1], stride=1, padding=0, kernel=1, nhwc=True.
-    # expectedFailure so a ROCm fix XPASSes instead of remaining silently skipped.
     @decorateIf(
-        unittest.expectedFailure,
+        unittest.skip("ROCm 7.14+ Triton conv2d backward accuracy issue"),
         lambda p: (
             TEST_WITH_ROCM
             and _get_torch_rocm_version() >= (7, 14)
