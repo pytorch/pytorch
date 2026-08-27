@@ -42,8 +42,11 @@ driver, so kernels build on GPU-less machines. The arch is per-COMPILE
 state: CuTeDSL takes a --gpu-arch option, which outranks CUTE_DSL_ARCH
 (base_dsl/dsl.py prefers compile_options.gpu_arch over envar.arch), and
 Triton gets a fixed-target driver per export. So a single pool serves
-every (point, arch) job. Every arch nests under <out-dir>/<arch>/ to
-keep each tree independently linkable.
+every (point, arch) job. A multi-arch fan-out nests each arch under
+<out-dir>/<arch>/ to keep the trees independently linkable; a single arch
+still lands flat in <out-dir>. The next commit of this stack makes that
+uniform -- until it does, two single-arch runs into one --out-dir
+accumulate both arches, where the arch-free prefix used to overwrite.
 CuTeDSL needs one warmup compile per process for this to work; see
 tools/native_aot/cutedsl_warmup.py.
 
@@ -215,9 +218,7 @@ def _arch_tag(arch: str) -> str:
     return arch.replace("_", "", 1)
 
 
-def _effective_arch(
-    arch: str | None, tc: toolchains.Toolchain | None = None
-) -> str | None:
+def _effective_arch(arch: str | None) -> str | None:
     """The arch the artifacts are really compiled for: the explicit one if
     given, else whatever a toolchain's own env var selects
     (Toolchain.ARCH_ENV_VAR, e.g. CUTE_DSL_ARCH), else the local device.
@@ -230,10 +231,11 @@ def _effective_arch(
     variable are told apart; comparing the raw --arch value left both at None and
     the second skipped every point.
 
-    ``tc`` is omitted when choosing a directory, before any builder (and so kind)
-    exists, and the variable is then taken from whichever registered kind declares
-    one -- only CuTeDSL today. Two kinds naming different variables have no single
-    answer, and picking one would make the directory depend on registry order."""
+    Takes no toolchain, and that is the invariant rather than an omission: once a
+    kind's arch variable is refused rather than honoured, resolution is --arch or
+    the device, neither of which varies by kind. A resolver that consulted one
+    could answer differently for two kinds in a single export, which is exactly how
+    a tree came to disagree with its own sidecars."""
     if arch:
         return arch
     # An arch variable with no --arch is REFUSED, not honoured: it is per-kind, so
@@ -248,25 +250,14 @@ def _effective_arch(
         if k.ARCH_ENV_VAR and os.getenv(k.ARCH_ENV_VAR)
     }
     if named:
-        example = sorted(named.items())[0][1]
+        listed = ", ".join(f"{k}={v}" for k, v in sorted(named.items()))
         raise RuntimeError(
-            "arch variable(s) "
-            + ", ".join(f"{k}={v}" for k, v in sorted(named.items()))
-            + " are set but --arch is not. They are per-toolchain, so they cannot "
-            "name the arch for every kind in one export; pass --arch "
-            f"(e.g. --arch {example}) to state it once."
+            f"{listed} {'is' if len(named) == 1 else 'are'} set but --arch is not. "
+            f"A toolchain's arch variable is per-kind, so it cannot name the arch "
+            f"for every kind in one export; pass --arch (e.g. --arch "
+            f"{named[min(named)]}) to state it once."
         )
     return _detected_arch()
-
-
-def _claimed_spelling(arch: str, claimed: tuple[str, ...]) -> str | None:
-    """The spelling in ``claimed`` for ``arch``'s capability, or None.
-
-    Prefers the arch-conditional spelling when a declaration lists both, matching
-    the generator's tie-break: it is what the kernels were written against."""
-    want = decl.cc_of(arch)
-    same_cc = [a for a in claimed if decl.cc_of(a) == want]
-    return min(same_cc, key=lambda a: (not a.endswith("a"), a)) if same_cc else None
 
 
 def export_point(
@@ -309,7 +300,7 @@ def export_point(
     # Arch-qualifying the prefix is what lets several arches ship in one library:
     # every exported C symbol derives from it, so two arches sharing one are
     # duplicate definitions at link time.
-    effective_arch = _effective_arch(arch, tc)
+    effective_arch = _effective_arch(arch)
     if effective_arch:
         b["prefix"] = f"{b['prefix']}__{_arch_tag(effective_arch)}"
     prefix = b["prefix"]
@@ -509,8 +500,8 @@ def _job_needed(job, force: bool) -> bool:
     comparison guards the cases where the RECORDED arch differs from what this run
     resolves to: artifacts predating arch identity, and a tree carried between
     machines. Both must re-export, since the recorded arch is what the runtime gate
-    is built from. Compared through _effective_arch, so both sides resolve
-    --arch, the toolchain's env var and the local device identically."""
+    is built from. Compared through _effective_arch, so the recorded value and this
+    run's are resolved the same way -- --arch, else the local device."""
     if force:
         return True
     _, _, point, out_dir, arch = job
@@ -525,7 +516,7 @@ def _job_needed(job, force: bool) -> bool:
         if sc.get("version") != SIDECAR_VERSION or "kind" not in sc:
             return True
         tc = toolchains.get_toolchain(sc["kind"])
-        if sc.get("spec") == spec and sc.get("arch") == _effective_arch(arch, tc):
+        if sc.get("spec") == spec and sc.get("arch") == _effective_arch(arch):
             # The sidecar is the skip marker, but it is not proof the
             # artifacts it describes are still on disk: anything that
             # removes a .o/.h without its .json (a partial clean, an
@@ -583,11 +574,11 @@ def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
 # tcgen05/wgmma) in b200-native-aot.yml, plain "10.0" elsewhere and in the
 # manywheel lists. Omitting either silently exports nothing there.
 #
-# sm_103/sm_103a are deliberately absent: nothing names 10.3, sm_100 SASS
-# is forward-compatible to it, and _arch_gate compares only the CUDA
-# major -- so an sm_103 artifact would pass the gate on a 10.0 device and
-# then fail the module load instead of declining. Re-add with a
-# major+minor gate.
+# sm_103/sm_103a are deliberately absent: no release or CI arch list names
+# 10.3, and sm_100 SASS is forward-compatible to it, so nothing is lost by
+# leaving it out. Selection is by full capability (major AND minor), so a
+# 10.3 device declines sm_100 kernels rather than loading them -- adding
+# 10.3 is a line here plus hardware to test it on.
 EXPORTABLE_ARCHES = ("sm_100", "sm_100a")
 
 
