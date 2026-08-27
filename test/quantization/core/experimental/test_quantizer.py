@@ -10,6 +10,8 @@ import unittest
 import random
 
 class TestQuantizer(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     r""" Tests quantize_APoT result on random 1-dim tensor
         and hardcoded values for b, k by comparing to uniform quantization
         (non-uniform quantization reduces to uniform for k = 1)
@@ -18,8 +20,6 @@ class TestQuantizer(unittest.TestCase):
         * b: 8
         * k: 1
     """
-
-    hw_classification = HardwareClassification.GENERIC
 
     def test_quantize_APoT_rand_k1(self):
         # generate random size of tensor2quantize between 1 -> 20
