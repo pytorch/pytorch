@@ -405,6 +405,69 @@ True
 True
 ```
 
+To inspect tensors exposed as saved values by autograd nodes across a graph, you
+can traverse {attr}`~torch.autograd.graph.Node.next_functions` starting from an
+output tensor's ``grad_fn``:
+
+```python
+def iter_saved_tensors(tensor):
+    if tensor.grad_fn is None:
+        return
+
+    seen = set()
+    stack = [tensor.grad_fn]
+
+    while stack:
+        node = stack.pop()
+
+        if node in seen:
+            continue
+        seen.add(node)
+
+        for attr in dir(node):
+            if not attr.startswith("_saved_"):
+                continue
+
+            value = getattr(node, attr)
+
+            if isinstance(value, torch.Tensor):
+                yield node, attr, value
+            elif isinstance(value, (tuple, list)):
+                for i, item in enumerate(value):
+                    if isinstance(item, torch.Tensor):
+                        yield node, f"{attr}[{i}]", item
+
+        for next_node, _ in node.next_functions:
+            if next_node is not None:
+                stack.append(next_node)
+```
+
+For example:
+
+```python
+x = torch.randn(4, requires_grad=True)
+loss = torch.relu(x * x).sum()
+
+for node, name, tensor in iter_saved_tensors(loss):
+    print(node.name(), name, tensor.shape, tensor.device)
+```
+
+This can help identify values retained by autograd nodes for backward. The
+``_saved_*`` attributes are implementation details intended here only for
+debugging and educational inspection, and they do not necessarily expose every
+Tensor retained by an implementation. In particular, this example does not
+inspect arbitrary values stored by a custom {class}`~torch.autograd.Function`.
+
+The returned entries represent saved tensor slots rather than unique memory
+allocations. The same Tensor, or multiple Tensors sharing the same storage, may
+therefore appear more than once.
+
+Accessing a ``_saved_*`` attribute unpacks the saved value. If the Tensor was
+packed using {class}`~torch.autograd.graph.saved_tensors_hooks`, inspection may
+invoke the corresponding unpack hook even after the hooks context has exited.
+Saved tensors are also normally released after backward, so inspect them before
+backward unless the graph is retained.
+
 You can also define how these saved tensors should be packed / unpacked using hooks.
 A common application is to trade compute for memory by saving those intermediary results
 to disk or to CPU instead of leaving them on the GPU. This is especially useful if you
