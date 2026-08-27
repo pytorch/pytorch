@@ -752,7 +752,13 @@ class TestAbiValidation(unittest.TestCase):
             ),
         ):
             with self.subTest(case=label):
-                self._refuses(header, r"claims \d+ dynamic_\w+ slot")
+                # Each side named as its own: the sidecar's key and the header's
+                # member differ (dynamic_sizes against dynamic_shapes), and one
+                # message using a single name for both is what sent a reader looking
+                # for a sidecar key that does not exist.
+                self._refuses(
+                    header, r"sidecar's dynamic_(sizes|strides) claims \d+ slot"
+                )
 
     def test_a_missing_member_must_match_a_zero_claim(self):
         # The DSL omits the array entirely at zero slots, so absent means zero --
@@ -911,8 +917,9 @@ class TestAbiValidation(unittest.TestCase):
             "  int32_t dynamic_shapes[2];\n  int64_t dynamic_strides[2];\n"
             f"}} {p}_Tensor_mX_t;\n" + self._struct("mOut", shapes=2, strides=1),
             # The tag form IS readable now, so this refuses on the real problem --
-            # the header declares slots the sidecar claims none of.
-            r"claims 0 dynamic_\w+ slot",
+            # the header declares slots the sidecar claims none of, named as the
+            # SIDECAR's key (the header's own spelling is checked beside it).
+            r"sidecar's dynamic_\w+ claims 0 slot",
             tensor_args=_MX_NO_SLOTS,
         )
         # ...and where the declaration genuinely cannot be parsed, a zero claim is
