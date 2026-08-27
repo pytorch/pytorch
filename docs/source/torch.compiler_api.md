@@ -87,7 +87,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       stored as opaque inline data because they have no Python-source representation.
       This initial path accepts a Python function with positional tensor/scalar arguments
       and containers of those values; closures and ``nn.Module`` arguments are not
-      supported yet because their identity guards are not serializable.
+      supported yet because their identity guards are not serializable. Function defaults
+      must be recursive immutable literals; mutable or user-defined values must be passed
+      explicitly rather than used as defaults. Tensor-valued globals are also rejected
+      because every tensor must be an explicit input.
 
       Pass ``training=True`` with ``tracer="dynamo"`` and ``backend="inductor"`` to
       capture differentiable graphs. Each compiled segment contains readable Inductor

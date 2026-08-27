@@ -47,6 +47,9 @@ environment as an unchecked invariant between capture and runtime; changing that
 environment can silently run a specialization captured for the old state. Initial
 support is for Python functions with positional tensor/scalar arguments and containers
 of those values; graph breaks, closures, and `nn.Module` arguments are not supported yet.
+Function defaults must be recursive immutable literals; mutable or user-defined values
+must be passed explicitly rather than used as defaults. Tensor-valued globals are also
+rejected because every tensor must be an explicit input.
 With `training=True` and the Inductor backend, Dynamo graphs
 include readable compiled forward and backward code, so served outputs retain a
 `grad_fn` and can be passed to `backward()`. This training mode works across captured
