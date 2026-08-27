@@ -326,6 +326,8 @@ void TensorImpl::release_resources() {
   }
   if (extra_meta_) {
     extra_meta_->fake_constant_.reset();
+    extra_meta_->real_tensor_.reset();
+    extra_meta_->fake_item_memo_.reset();
     extra_meta_->fake_tensor_mode_.reset();
   }
 }
@@ -663,7 +665,6 @@ void TensorImpl::copy_generic_tensor_metadata(
   // policy is NOT (you have no Python object to dispatch to!)
   // NB: subclass relevant policy doesn't have to be copied; the
   // constructor sets this up
-
   dest_impl->refresh_sizes_strides_policy();
   dest_impl->refresh_layout_policy();
   dest_impl->refresh_device_policy();
@@ -945,13 +946,13 @@ void TensorImpl::set_sizes_and_strides(
 
   has_symbolic_sizes_strides_ = true;
   refresh_sizes_strides_policy();
-  if (!extra_meta_) {
-    extra_meta_ = std::make_unique<ExtraMeta>();
-    extra_meta_->symbolic_shape_meta_ =
+  auto& extra_meta{get_extra_meta()};
+  if (extra_meta.symbolic_shape_meta_ == nullptr) {
+    extra_meta.symbolic_shape_meta_ =
         std::make_unique<c10::SymbolicShapeMeta>();
-    extra_meta_->symbolic_shape_meta_->strides_valid_ = !is_sparse();
+    extra_meta.symbolic_shape_meta_->strides_valid_ = !is_sparse();
     if (!storage_offset.has_value()) {
-      extra_meta_->symbolic_shape_meta_->storage_offset_ = storage_offset_;
+      extra_meta.symbolic_shape_meta_->storage_offset_ = storage_offset_;
     }
   }
 
@@ -963,6 +964,7 @@ void TensorImpl::set_sizes_and_strides(
 
   refresh_numel();
   refresh_contiguous();
+  symbolic_shape_meta().refresh_materialized();
 }
 
 void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
@@ -992,6 +994,7 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
   refresh_numel();
   empty_tensor_restride_symint(
       MemoryFormat::Contiguous); // calls refresh_contiguous()
+  symbolic_shape_meta().refresh_materialized();
 }
 
 void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
@@ -1038,6 +1041,7 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
   // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
   // exclusive see #24090
   refresh_contiguous();
+  sym_shape_meta.refresh_materialized();
   // hard code some known true settings, for unbacked case
   // TODO: avoid chundering into the guards for computing these
   switch (memory_format) {
