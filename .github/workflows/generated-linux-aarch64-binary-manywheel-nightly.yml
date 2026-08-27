@@ -158,7 +158,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
-      BUILD_NAME_SUFFIX: "-cpu-aarch64"
+      BUILD_NAME_SUFFIX: "-cpu"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -189,44 +189,44 @@ jobs:
       # matrix below downloads.
       - uses: actions/upload-artifact@v4.4.0
         with:
-          name: manywheel-py3_10-cpu-aarch64
+          name: manywheel-py3_10-cpu
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cpu-aarch64/*
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_10-cpu/*
       - uses: actions/upload-artifact@v4.4.0
         with:
-          name: manywheel-py3_11-cpu-aarch64
+          name: manywheel-py3_11-cpu
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cpu-aarch64/*
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_11-cpu/*
       - uses: actions/upload-artifact@v4.4.0
         with:
-          name: manywheel-py3_12-cpu-aarch64
+          name: manywheel-py3_12-cpu
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cpu-aarch64/*
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_12-cpu/*
       - uses: actions/upload-artifact@v4.4.0
         with:
-          name: manywheel-py3_13-cpu-aarch64
+          name: manywheel-py3_13-cpu
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cpu-aarch64/*
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_13-cpu/*
       - uses: actions/upload-artifact@v4.4.0
         with:
-          name: manywheel-py3_14-cpu-aarch64
+          name: manywheel-py3_14-cpu
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cpu-aarch64/*
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_14-cpu/*
       - uses: actions/upload-artifact@v4.4.0
         with:
-          name: manywheel-py3_14t-cpu-aarch64
+          name: manywheel-py3_14t-cpu
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cpu-aarch64/*
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_14t-cpu/*
       - uses: actions/upload-artifact@v4.4.0
         with:
-          name: manywheel-py3_15-cpu-aarch64
+          name: manywheel-py3_15-cpu
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cpu-aarch64/*
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_15-cpu/*
       - uses: actions/upload-artifact@v4.4.0
         with:
-          name: manywheel-py3_15t-cpu-aarch64
+          name: manywheel-py3_15t-cpu
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cpu-aarch64/*
+          path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cpu/*
 
   manywheel-cuda-aarch64-cu126-build:
     name: manywheel-cuda-aarch64-cu126-build
@@ -514,7 +514,7 @@ jobs:
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda-aarch64-13_4"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.0rc1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.25.0.15; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.0rc1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -599,7 +599,7 @@ jobs:
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_10-cpu-aarch64"
+            build_name: "manywheel-py3_10-cpu"
             runs_on: "l-arm64g3-16-62"
           - desired_python: "3.11"
             desired_cuda: "cpu"
@@ -607,7 +607,7 @@ jobs:
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_11-cpu-aarch64"
+            build_name: "manywheel-py3_11-cpu"
             runs_on: "l-arm64g3-16-62"
           - desired_python: "3.12"
             desired_cuda: "cpu"
@@ -615,7 +615,7 @@ jobs:
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_12-cpu-aarch64"
+            build_name: "manywheel-py3_12-cpu"
             runs_on: "l-arm64g3-16-62"
           - desired_python: "3.13"
             desired_cuda: "cpu"
@@ -623,7 +623,7 @@ jobs:
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_13-cpu-aarch64"
+            build_name: "manywheel-py3_13-cpu"
             runs_on: "l-arm64g3-16-62"
           - desired_python: "3.14"
             desired_cuda: "cpu"
@@ -631,7 +631,7 @@ jobs:
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_14-cpu-aarch64"
+            build_name: "manywheel-py3_14-cpu"
             runs_on: "l-arm64g3-16-62"
           - desired_python: "3.14t"
             desired_cuda: "cpu"
@@ -639,7 +639,7 @@ jobs:
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_14t-cpu-aarch64"
+            build_name: "manywheel-py3_14t-cpu"
             runs_on: "l-arm64g3-16-62"
           - desired_python: "3.15"
             desired_cuda: "cpu"
@@ -647,7 +647,7 @@ jobs:
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_15-cpu-aarch64"
+            build_name: "manywheel-py3_15-cpu"
             runs_on: "l-arm64g3-16-62"
           - desired_python: "3.15t"
             desired_cuda: "cpu"
@@ -655,7 +655,7 @@ jobs:
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_15t-cpu-aarch64"
+            build_name: "manywheel-py3_15t-cpu"
             runs_on: "l-arm64g3-16-62"
     with:
       PYTORCH_ROOT: /pytorch
@@ -1062,56 +1062,56 @@ jobs:
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_10-cpu-aarch64"
+            build_name: "manywheel-py3_10-cpu"
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_11-cpu-aarch64"
+            build_name: "manywheel-py3_11-cpu"
           - desired_python: "3.12"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_12-cpu-aarch64"
+            build_name: "manywheel-py3_12-cpu"
           - desired_python: "3.13"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_13-cpu-aarch64"
+            build_name: "manywheel-py3_13-cpu"
           - desired_python: "3.14"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_14-cpu-aarch64"
+            build_name: "manywheel-py3_14-cpu"
           - desired_python: "3.14t"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_14t-cpu-aarch64"
+            build_name: "manywheel-py3_14t-cpu"
           - desired_python: "3.15"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_15-cpu-aarch64"
+            build_name: "manywheel-py3_15-cpu"
           - desired_python: "3.15t"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu-aarch64"
             docker_image: "manylinux2_28_aarch64-builder"
             docker_image_tag_prefix: "cpu-aarch64"
-            build_name: "manywheel-py3_15t-cpu-aarch64"
+            build_name: "manywheel-py3_15t-cpu"
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
