@@ -3622,7 +3622,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(c1, c2)
         self.assertEqual(c1, c3)
 
-    def test_cudagraphs_bwd_override_omitted_when_unset(self):
+    def test_optional_cudagraph_kwargs_omitted_when_unset(self):
         gm = torch.fx.symbolic_trace(lambda tangents_1: (tangents_1,))
         compiler_config_extra = compile_fx.create_compiler_config_extra(gm)
         captured_kwargs = {}
@@ -3637,6 +3637,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             compile_fx.compile_fx_backward(gm, [torch.ones(1)], compiler_config_extra)
 
         self.assertNotIn("cudagraphs_bwd_override", captured_kwargs)
+        self.assertNotIn("cudagraph_partition_only_regions", captured_kwargs)
         self.assertNotIn(
             "cudagraphs_bwd_override",
             autograd_cache.create_fx_config(compiler_config_extra),

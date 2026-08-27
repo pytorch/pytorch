@@ -968,6 +968,8 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
 class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
     cudagraphs_bwd_override: bool | None
+    # Restrict graph partitioning to explicitly annotated regions.
+    cudagraph_partition_only_regions: bool
     static_input_idxs: Sequence[int]
     is_backward: bool
     graph_id: int | None
@@ -1783,6 +1785,12 @@ class _InProcessFxCompile(FxCompile):
                     inputs_to_check=inputs_to_check,
                     fx_wrapper=fx_wrapper,
                     get_decomp_fn=get_decomp_fn,
+                    use_cudagraph_partition=(
+                        bool(cudagraphs) and config.graph_partition
+                    ),
+                    cudagraph_partition_only_regions=graph_kwargs.get(
+                        "cudagraph_partition_only_regions", False
+                    ),
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
@@ -2019,7 +2027,10 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = (
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
-                                V.graph.device_node_mapping
+                                V.graph.device_node_mapping,
+                                use_cudagraph_partition=(
+                                    bool(cudagraphs) and config.graph_partition
+                                ),
                             )
                         )
 
