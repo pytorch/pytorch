@@ -987,4 +987,12 @@ def adam(
     )
 
 
-adam.__doc__ = _functional_api_doc.format(optimizer="Adam")
+adam.__doc__ = (
+    _functional_api_doc.format(optimizer="Adam")
+    + r"""
+
+.. note::
+    With ``fused=True``, CUDA supports FP32 parameters and gradients with
+    BF16 moment buffers. See :ref:`functional-adamw-bf16-state` for an example.
+"""
+)
