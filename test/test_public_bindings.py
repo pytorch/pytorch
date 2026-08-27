@@ -413,6 +413,17 @@ class TestPublicBindings(TestCase):
             "torch.utils.tensorboard._utils",
         }
 
+        # Skip modules that failed only due to a missing optional
+        # third-party dependency (optree, tensorboard, ...); this varies
+        # by environment, unlike a missing torch.* module.
+        missing_optional_deps = {
+            mod
+            for mod, exc in failures
+            if isinstance(exc, ModuleNotFoundError)
+            and exc.name is not None
+            and not exc.name.startswith("torch")
+        }
+
         errors = []
         for mod, exc in failures:
             # Prefixes for modules whose top-level imports pull in optional
@@ -428,6 +439,11 @@ class TestPublicBindings(TestCase):
                 "torch._vendor.quack",
                 "torch.profiler._cupti.",
             )
+            # Match by module name: pkgutil's onerror also records a
+            # generic ImportError for the same package.
+            if mod in missing_optional_deps:
+                continue
+
             if (
                 mod in private_allowlist
                 or (mod.startswith("torch._native.ops.") and "triton" in mod)
