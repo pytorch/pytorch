@@ -1676,26 +1676,12 @@ def unload_xpu_triton_pyds() -> None:
         driver_mod = sys.modules["triton.runtime.driver"]
         if hasattr(driver_mod.driver.active, "utils"):
             utils_cls = type(driver_mod.driver.active.utils)
-            if hasattr(utils_cls, "instance"):
-                del utils_cls.instance
-            elif hasattr(utils_cls, "_instance"):
+            if hasattr(utils_cls, "_instance"):
                 utils_cls._instance = None
-            # Note: intentionally NOT `del driver_mod.driver.active.utils`
-            # here. Empirically (see intel/torch-xpu-ops#4950), deleting this
-            # cached instance attribute drops the refcount of the native
-            # spirv_utils "utils" object to zero right here (the class-level
-            # singleton above was just cleared, so this is its last live
-            # reference), which triggers an immediate, synchronous native
-            # deallocation - unloading spirv_utils.pyd - while we may still be
-            # executing Python/native code originating from that very module's
-            # call stack. On Windows this can unmap the DLL out from under a
-            # function it defines (e.g. its own tp_dealloc) while that function
-            # is still on the stack, causing a fatal access violation. Clearing
-            # only the class-level singleton avoids this: the object is left to
-            # be dropped normally (and safely) by refcounting/GC once nothing
-            # else references it, at the cost of not proactively unloading the
-            # DLL here (same trade-off already accepted below via
-            # ignore_errors=is_windows() for files that stay locked).
+            # Do NOT `del driver_mod.driver.active.utils` as it's the last
+            # reference to the native spirv_utils, so deleting it unloads
+            # spirv_utils.pyd synchronously and can crash if native pyd
+            # code from is still on stack (see intel/torch-xpu-ops#4950)
 
     gc.collect()
 
