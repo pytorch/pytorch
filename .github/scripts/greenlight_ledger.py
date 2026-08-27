@@ -41,6 +41,7 @@ IN_FLIGHT_STATUSES = frozenset({STATUS_AI_REVIEW_STARTED, STATUS_AI_REVIEW_DISPA
 TERMINAL_STATUSES = frozenset({STATUS_LAND, STATUS_NO_LAND})
 
 LEDGER_URL = "https://hud.pytorch.org/api/greenlight/pr_state"
+LEDGER_TOKEN_ENV = "HUD_API_TOKEN"
 
 # The route rejects longer batches. ghstack stacks never come close, but a rejected
 # batch fails closed and would block a merge that nobody can unblock.
@@ -59,7 +60,17 @@ class LedgerState:
 
 
 class GreenlightLedgerError(RuntimeError):
-    pass
+    """A ledger read that failed, and whether waiting could still help.
+
+    ``fatal`` marks a cause no amount of retrying clears, so the guard refuses the merge
+    rather than spending a wait budget on a ledger that will stay unreadable. Everything
+    the retry loop raises is non-fatal, status codes included: a 4xx arriving at this
+    client most likely came from an intermediary, and the code does not say who sent it.
+    """
+
+    def __init__(self, message: str, *, fatal: bool = False) -> None:
+        super().__init__(message)
+        self.fatal = fatal
 
 
 def parse_utc_timestamp(raw: str) -> datetime:
@@ -74,23 +85,66 @@ def parse_utc_timestamp(raw: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _authority(state: LedgerState) -> tuple[datetime, int, bool]:
+    """Ranks the rows offered for one PR; the greatest is the one the gate obeys.
+
+    The route's LIMIT 1 BY pr_number should make a second row for a PR impossible, so
+    this only ever runs on a payload that has already broken its contract. The newest row
+    wins, then the later run, then the row that does not say LAND, so no tie is ever
+    resolved in favour of allowing a merge. Two rows can share a version, because
+    differently formatted timestamps normalize to the same instant.
+    """
+    return (state.version, state.run_id, state.status != STATUS_LAND)
+
+
+def _keep_authoritative(states: dict[int, LedgerState], state: LedgerState) -> None:
+    previous = states.get(state.pr_number)
+    if previous is None or _authority(state) > _authority(previous):
+        states[state.pr_number] = state
+
+
 def _parse_states(payload: Any) -> dict[int, LedgerState]:
     states: dict[int, LedgerState] = {}
     for row in payload["states"]:
-        state = LedgerState(
-            pr_number=int(row["pr_number"]),
-            status=str(row["status"]),
-            head_sha=str(row["head_sha"]),
-            run_id=int(row["run_id"]),
-            version=parse_utc_timestamp(str(row["version"])),
+        _keep_authoritative(
+            states,
+            LedgerState(
+                pr_number=int(row["pr_number"]),
+                status=str(row["status"]),
+                head_sha=str(row["head_sha"]),
+                run_id=int(row["run_id"]),
+                version=parse_utc_timestamp(str(row["version"])),
+            ),
         )
-        states[state.pr_number] = state
     return states
+
+
+def _read_token() -> str:
+    """The ledger credential, validated so that no failure can ever quote its value.
+
+    ``http.client`` puts the raw header value in the ``ValueError`` it raises over a
+    malformed one, and the guard renders whatever the read raised into a public PR
+    comment, which GitHub does not mask the way it masks workflow logs.
+    """
+    raw = os.getenv(LEDGER_TOKEN_ENV, "")
+    token = raw.strip()
+    if not token:
+        # Dev Infra restores a missing secret and inspects a blank one, so a variable
+        # that is present but holds nothing usable must not be reported as absent.
+        cause = "holds only whitespace" if raw else "is not set"
+        raise GreenlightLedgerError(f"{LEDGER_TOKEN_ENV} {cause}", fatal=True)
+    if not (token.isascii() and token.isprintable()):
+        raise GreenlightLedgerError(
+            f"{LEDGER_TOKEN_ENV} holds characters that cannot be sent in an HTTP header",
+            fatal=True,
+        )
+    return token
 
 
 def _fetch_batch(
     repo_full_name: str, pr_numbers: list[int], sleep: Callable[[float], None]
 ) -> dict[int, LedgerState]:
+    token = _read_token()
     query = urllib.parse.urlencode(
         {"repo": repo_full_name, "prNumbers": ",".join(str(n) for n in pr_numbers)}
     )
@@ -100,7 +154,7 @@ def _fetch_batch(
             return _parse_states(
                 gh_fetch_url(
                     f"{LEDGER_URL}?{query}",
-                    headers={"x-hud-internal-bot": os.getenv("HUD_API_TOKEN", "")},
+                    headers={"x-hud-internal-bot": token},
                     reader=json.load,
                 )
             )
@@ -117,9 +171,10 @@ def _fetch_batch(
                 # The guard turns the raised error into a one-line message for the PR,
                 # so this is the only place the stack of the real failure is visible.
                 traceback.print_exc()
+    # The cause leads, because the guard renders this message as the refusal's headline.
     raise GreenlightLedgerError(
-        f"could not read the greenlight ledger for {repo_full_name} PRs {pr_numbers} "
-        f"after {_NUM_RETRIES} attempts: {type(last_error).__name__}: {last_error}"
+        f"{type(last_error).__name__}: {last_error} ({_NUM_RETRIES} attempts for "
+        f"{repo_full_name} PRs {pr_numbers})"
     ) from last_error
 
 
@@ -135,5 +190,8 @@ def fetch_ledger_states(
     ordered = list(pr_numbers)
     for start in range(0, len(ordered), _MAX_PRS_PER_REQUEST):
         batch = ordered[start : start + _MAX_PRS_PER_REQUEST]
-        states.update(_fetch_batch(repo_full_name, batch, wait))
+        # Merged row by row rather than with `update`: nothing stops two batches from
+        # carrying a row for the same PR, and a later batch must not win on position.
+        for state in _fetch_batch(repo_full_name, batch, wait).values():
+            _keep_authoritative(states, state)
     return states
