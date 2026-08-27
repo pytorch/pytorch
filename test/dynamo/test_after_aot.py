@@ -24,7 +24,11 @@ from torch._dynamo.repro.after_aot import (
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
+from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
+    IS_FBCODE,
+    TEST_CUDA,
+)
 from torch.utils._traceback import report_compile_source_on_error
 from torch.utils._triton import has_triton
 
@@ -448,8 +452,8 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         result = _get_compile_args(gm, args)
         # Should NOT be the same object — metadata was extracted
         self.assertIsNot(result, args)
-        # First element should be a FakeTensor (not a concrete tensor)
-        self.assertIsInstance(result[0], torch._subclasses.FakeTensor)
+        # First element should be a fake tensor (not a concrete tensor)
+        self.assertTrue(torch._subclasses.fake_tensor.is_fake_tensor(result[0]))
         # Second element should be a SymInt (not a concrete int)
         self.assertIsInstance(result[1], torch.SymInt)
 
@@ -536,19 +540,22 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         args = [torch.randn(4), torch.randn(4)]
         gm = make_fx(f, tracing_mode="real")(*args)
 
-        # Verify that real-mode tracing creates FakeTensors with
-        # different FakeTensorModes in placeholder metadata
+        # Verify that real-mode tracing creates fake tensors in placeholder
+        # metadata.
         placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
-        fake_modes = set()
-        for n in placeholders:
-            val = n.meta.get("val")
-            if isinstance(val, torch._subclasses.FakeTensor):
-                fake_modes.add(id(val.fake_mode))
-        self.assertGreater(len(fake_modes), 1, "Expected different FakeTensorModes")
+        self.assertTrue(
+            all(
+                torch._subclasses.fake_tensor.is_fake_tensor(n.meta.get("val"))
+                for n in placeholders
+            )
+        )
 
         # BUG: manually extracting FakeTensors causes mode mismatch
         fake_args = [n.meta["val"] for n in placeholders]
-        with self.assertRaisesRegex(Exception, "fake mode.*doesn't match"):
+        error_message = expectedIfCppFakeTensor(
+            "Mixing fake modes", "fake mode.*doesn't match"
+        )
+        with self.assertRaisesRegex(Exception, error_message):
             compile_fx_inner(gm, fake_args)
 
         # FIX: _get_compile_args returns concrete args for real mode

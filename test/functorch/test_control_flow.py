@@ -25,6 +25,7 @@ from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.switch import switch
 from torch._higher_order_ops.while_loop import while_loop
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
     FunctionalTensor,
@@ -36,6 +37,7 @@ from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     decorateIf,
+    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -8147,11 +8149,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                     val = node.meta.get("val")
                     if isinstance(val, tuple):
                         for v in val:
-                            yield v.fake_mode.shape_env
+                            yield maybe_get_fake_mode(v).shape_env
                     elif isinstance(val, torch.SymInt):
                         yield val.node.shape_env
                     else:
-                        yield val.fake_mode.shape_env
+                        yield maybe_get_fake_mode(val).shape_env
 
         for shape_env in _node_shape_env_iter(symbolic_traced_graph):
             self.assertTrue(shape_env is graph_shape_env)
@@ -11045,7 +11047,56 @@ class GraphModule(torch.nn.Module):
 
             self.assertExpectedInline(
                 normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
-                """\
+                expectedIfCppFakeTensor(
+                    """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
+        clone: "f32[3, 3]" = torch.ops.aten.clone.default(tangents_1, memory_format = torch.contiguous_format);  tangents_1 = None
+        zeros_like: "f32[3]" = torch.ops.aten.zeros_like.default(primals_3, pin_memory = False)
+        zeros_like_1: "f32[3, 3]" = torch.ops.aten.zeros_like.default(primals_2, pin_memory = False)
+        while_loop_cond_graph_1 = self.while_loop_cond_graph_1
+        while_loop_body_graph_1 = self.while_loop_body_graph_1
+        zeros: "i64[]" = torch.ops.aten.zeros.default([], dtype = torch.int64, device = device(type='cpu'), pin_memory = False)
+        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_1, while_loop_body_graph_1, (zeros, clone, zeros_like, zeros_like_1), (cat, primals_3, primals_2));  while_loop_cond_graph_1 = while_loop_body_graph_1 = zeros = clone = zeros_like = zeros_like_1 = cat = primals_3 = primals_2 = None
+        getitem_2: "f32[3, 3]" = while_loop[1]
+        getitem_3: "f32[3]" = while_loop[2]
+        getitem_4: "f32[3, 3]" = while_loop[3];  while_loop = None
+        return (getitem_2, getitem_4, getitem_3)
+
+    class while_loop_cond_graph_1(torch.nn.Module):
+        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
+            sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0);  arg4_1 = None
+
+            lt: "b8[]" = torch.ops.aten.lt.Scalar(arg0_1, sym_size_int_1);  arg0_1 = sym_size_int_1 = None
+            return lt
+
+    class while_loop_body_graph_1(torch.nn.Module):
+        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
+            sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0)
+
+            rsub: "i64[]" = torch.ops.aten.rsub.Scalar(arg0_1, sym_size_int_1);  sym_size_int_1 = None
+            sub_1: "i64[]" = torch.ops.aten.sub.Tensor(rsub, 1);  rsub = None
+            _local_scalar_dense: "Sym(u7)" = torch.ops.aten._local_scalar_dense.default(sub_1);  sub_1 = None
+            select: "f32[3, 3]" = torch.ops.aten.select.int(arg4_1, 0, _local_scalar_dense);  arg4_1 = _local_scalar_dense = None
+            t: "f32[3, 3]" = torch.ops.aten.t.default(arg6_1);  arg6_1 = None
+            t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
+            mm: "f32[3, 3]" = torch.ops.aten.mm.default(arg1_1, t_1);  t_1 = None
+            t_2: "f32[3, 3]" = torch.ops.aten.t.default(arg1_1)
+            mm_1: "f32[3, 3]" = torch.ops.aten.mm.default(t_2, select);  t_2 = None
+            t_3: "f32[3, 3]" = torch.ops.aten.t.default(mm_1);  mm_1 = None
+            sum_1: "f32[1, 3]" = torch.ops.aten.sum.dim_IntList(arg1_1, [0], True)
+            view: "f32[3]" = torch.ops.aten.view.default(sum_1, [3]);  sum_1 = None
+            t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
+            mul_3: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
+            mul_4: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
+            add_6: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_4);  mm = mul_4 = None
+            add_7: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_6, mul_3);  add_6 = mul_3 = None
+            add_8: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+            add_9: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
+            add_10: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
+            return (add_8, add_7, add_9, add_10)
+""",
+                    """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
         clone: "f32[3, 3]" = torch.ops.aten.clone.default(tangents_1, memory_format = torch.contiguous_format);  tangents_1 = None
@@ -11093,6 +11144,7 @@ class GraphModule(torch.nn.Module):
             add_11: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
             return (add_9, add_8, add_10, add_11)
 """,
+                ),
             )
 
     def test_input_output_alias(self):

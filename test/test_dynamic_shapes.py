@@ -47,6 +47,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -4412,7 +4413,25 @@ class TestUbackedOps(TestCase):
         aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         self.assertExpectedInline(
             aot_graphs,
-            """\
+            expectedIfCppFakeTensor(
+                """\
+def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", arg3_1: "i64[u1][s7]cpu"):
+        ge: "Sym(u1 >= 0)" = arg1_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
+        _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
+        ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+        pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
+        eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
+        view: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense])
+        view_1: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense])
+        view_2: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
+        clone: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.clone.default(view_2);  view_2 = None
+        mul_13: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
+        mul_18: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
+        return (mul_13, mul_18, clone)""",
+                """\
 def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", arg3_1: "i64[u1][s7]cpu"):
         ge: "Sym(u1 >= 0)" = arg1_1 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
@@ -4429,6 +4448,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         mul_11: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
         mul_14: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
         return (mul_11, mul_14, clone)""",
+            ),
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -4453,7 +4473,25 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         self.assertExpectedInline(
             aot_graphs,
-            """\
+            expectedIfCppFakeTensor(
+                """\
+def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]cpu"):
+        ge: "Sym(u1 >= 0)" = arg1_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
+        _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
+        ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+        pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
+        eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
+        view: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
+        view_1: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
+        view_2: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
+        clone: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.clone.default(view_2);  view_2 = None
+        mul_8: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
+        mul_13: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
+        return (mul_8, mul_13, clone)""",
+                """\
 def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]cpu"):
         ge: "Sym(u1 >= 0)" = arg1_1 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
@@ -4470,6 +4508,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         mul_6: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
         mul_9: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
         return (mul_6, mul_9, clone)""",
+            ),
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -5018,7 +5057,17 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         output = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         self.assertExpectedInline(
             output,
-            """\
+            expectedIfCppFakeTensor(
+                """\
+        ge: "Sym(u0 >= 0)" = arg0_1 >= 0;  arg0_1 = None
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
+        ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0;  arg1_1 = None
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+        clone: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.clone.default(arg2_1, memory_format = torch.contiguous_format);  arg2_1 = None
+        add_6: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+        mul_10: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add_6, 100);  add_6 = None
+        return (mul_10,)""",
+                """\
         ge: "Sym(u0 >= 0)" = arg0_1 >= 0;  arg0_1 = None
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
         ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0;  arg1_1 = None
@@ -5027,6 +5076,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         add_3: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.add.Tensor(clone, 1);  clone = None
         mul_6: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add_3, 100);  add_3 = None
         return (mul_6,)""",
+            ),
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -5047,7 +5097,16 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         # No clone this time since input is contiguous.
         self.assertExpectedInline(
             output,
-            """\
+            expectedIfCppFakeTensor(
+                """\
+        ge: "Sym(u0 >= 0)" = arg0_1 >= 0;  arg0_1 = None
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
+        ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0;  arg1_1 = None
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+        add: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.add.Tensor(arg2_1, 1);  arg2_1 = None
+        mul_7: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add, 100);  add = None
+        return (mul_7,)""",
+                """\
         ge: "Sym(u0 >= 0)" = arg0_1 >= 0;  arg0_1 = None
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
         ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0;  arg1_1 = None
@@ -5055,6 +5114,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         add: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.add.Tensor(arg2_1, 1);  arg2_1 = None
         mul_5: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(add, 100);  add = None
         return (mul_5,)""",
+            ),
             ignore_comments=True,
             ignore_empty_lines=True,
         )
