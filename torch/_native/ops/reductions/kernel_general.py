@@ -416,7 +416,18 @@ def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
     # (warp_reduce shuffles across a full warp), so a row fewer than WARP vec-chunks wide
     # leaves most of each warp with nothing to load -- 25% lane utilization at N=32. tpr=1
     # gives each row one thread, needs no cross-lane merge, and so serves any nouts / trait.
-    if rt.narrow_row(N, x.element_size(), x.shape[0]):
+    #
+    # NOT when the reproducible order is on. tpr is a LAUNCH-SHAPE preference and the order
+    # supersedes those by definition -- it derives its own thread map from N. Passing tpr here
+    # made reduce_row_tile decline the order (its gate requires tpr is None), so a narrow row
+    # silently returned the default order's bits while claiming ATen's: MEASURED as DIFFERS at
+    # (524288, 16) and (524288, 128) through the aten entry point, invisible to the golden-hash
+    # test because that calls the fold directly with tpr=None. Honouring it costs 40.2 -> 68.0us
+    # at N=128 (and nothing at N=16 or N=256), which is still faster than ATen's own kernel there.
+    if (
+        rt.narrow_row(N, x.element_size(), x.shape[0])
+        and not rt.inner_tree_order_enabled()
+    ):
         return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts, tpr=1)
     if _oneshot_ok(x):
         return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
