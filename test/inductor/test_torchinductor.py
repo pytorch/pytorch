@@ -5077,9 +5077,10 @@ for dtype in (torch.int32, torch.int64):
             cfn(input, mat, vec)
 
     # https://github.com/pytorch/pytorch/issues/98979
-    @skipCUDAIfDeviceType(True, "cuda failed for float64 linear")
     @skipIfXpu(msg="Double and complex datatype matmul is not supported in oneDNN")
     def test_linear_float64(self):
+        if torch.device(self.device).type == "cuda":
+            raise unittest.SkipTest("cuda failed for float64 linear")
         _dtype = torch.float64
         ctx = (
             contextlib.nullcontext()
