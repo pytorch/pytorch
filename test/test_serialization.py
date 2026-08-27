@@ -1266,6 +1266,9 @@ class TestSerialization(TestCase, SerializationMixin):
 
     # SECURITY: This prevents malformed pickles from exposing uninitialized
     # pybind11 objects. Do not remove this regression test.
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "torch.distributed not available"
+    )
     def test_weights_only_newobj_requires_build(self):
         from torch.distributed.tensor import Shard
 
