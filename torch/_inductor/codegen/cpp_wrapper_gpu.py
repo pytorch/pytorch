@@ -617,6 +617,9 @@ class DeferredTritonCallWrapper:
             f" {kernel_name}_result.shared_mem,"
             f" kernel_args_, stream_"
         )
+        launch_pdl = str((self.triton_meta or {}).get("launch_pdl", False)).lower()
+        if wrapper.device == "cuda":
+            common_launch_args = f"{common_launch_args}, {launch_pdl}"
         # stream_ comes from the generated wrapper signature on both JIT and
         # AOTI sides.
         launch_kernel_args = [
@@ -626,7 +629,6 @@ class DeferredTritonCallWrapper:
             f"{kernel_name}_result.num_warps",
             f"{kernel_name}_result.shared_mem",
         ]
-
         # kernel_args_ is consumed by both JIT and AOT launchKernel calls.
         prefix.writeline(f"void* kernel_args_[] = {{{call_args_str}}};")
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
@@ -649,6 +651,7 @@ class DeferredTritonCallWrapper:
                     *launch_kernel_args,
                     "kernel_args_",
                     "stream_",
+                    *([launch_pdl] if wrapper.device == "cuda" else []),
                 ],
                 num_warps=f"{kernel_name}_result.num_warps",
                 shared_mem=f"{kernel_name}_result.shared_mem",
@@ -919,6 +922,9 @@ class DeferredTritonCallWrapper:
             "kernel_args_",
             "stream_",
         ]
+        if wrapper.device == "cuda":
+            launch_pdl = str(triton_meta.get("launch_pdl", False)).lower()
+            launch_kernel_args.append(launch_pdl)
 
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
