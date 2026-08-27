@@ -9,6 +9,8 @@ import unittest
 
 import torch
 import torch._inductor.async_compile
+from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
@@ -22,6 +24,21 @@ from torch.utils._triton import has_triton
 @unittest.skipIf(not has_triton(), "requires Triton")
 class TestTritonWrapper(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        device = cls.get_primary_device()
+        try:
+            device_interface = get_interface_for_device(torch.device(device).type)
+        except NotImplementedError as exc:
+            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
+        if not device_interface.is_triton_capable(device):
+            raise unittest.SkipTest(f"requires Triton support for {device}")
+        try:
+            device_interface.raise_if_triton_unavailable(device)
+        except TritonUnavailableError as exc:
+            raise unittest.SkipTest(str(exc)) from exc
 
     def setUp(self):
         super().setUp()
