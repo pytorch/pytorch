@@ -17,9 +17,8 @@ from .gemm_gfx950 import (
     buffer_load_lds_inline,
     GEMM_DTYPE_FP16,
     GemmGfx950Param,
-    GFX950_DMA_BYTES,
-    GFX950_WAVE_SIZE,
 )
+from .grouped_gemm_gfx950_config import GFX950_DMA_BYTES, GFX950_WAVE_SIZE
 
 
 def _grouped_swizzle_tile(param, num_pid_m, num_pid_n, local_tile, grid, tiles_before):
@@ -32,7 +31,7 @@ def _grouped_swizzle_tile(param, num_pid_m, num_pid_n, local_tile, grid, tiles_b
     # BlockSwizzle maps pid % NUM_XCDS to hardware XCD assignment. In the
     # persistent grouped loop local_tile = blockIdx.x + j * grid - tiles_before,
     # so local_tile % NUM_XCDS tracks blockIdx.x only when both grid and
-    # tiles_before are NUM_XCDS-aligned. Otherwise fall back to M-major tile
+    # tiles_before are NUM_XCDS-aligned. Otherwise fall back to N-major tile
     # order so concurrent CTAs share bid_n and reuse the same B tile.
     xcd_aligned = ((grid % num_xcds) == 0) & ((tiles_before % num_xcds) == 0)
     if const_expr(isinstance(xcd_aligned, bool)):
@@ -42,7 +41,7 @@ def _grouped_swizzle_tile(param, num_pid_m, num_pid_n, local_tile, grid, tiles_b
         NUM_XCDS=num_xcds,
         NUM_PIDS_THRESHOLD=256,
         GROUP_M=param.group_m,
-        M_MAJOR_FALLBACK=True,
+        N_MAJOR_FALLBACK=True,
     )
     swizzled_m, swizzled_n = block_swizzle.swizzle(num_pid_m, num_pid_n, local_tile)
     if const_expr(isinstance(xcd_aligned, bool)):
@@ -51,44 +50,6 @@ def _grouped_swizzle_tile(param, num_pid_m, num_pid_n, local_tile, grid, tiles_b
         xcd_aligned.select(swizzled_m, bid_m),
         xcd_aligned.select(swizzled_n, bid_n),
     )
-
-
-def get_grouped_gemm_persistent_grid_size(
-    param: GemmGfx950Param,
-    total_m: int,
-    n: int,
-    group_count: int,
-    device_properties,
-) -> int:
-    num_cus = device_properties.multi_processor_count
-    if total_m <= 0 or n <= 0 or group_count <= 0:
-        return 1
-
-    smem_bytes = (
-        param.stages
-        * (param.block_m + param.block_n)
-        * param.block_k
-        * param.in_data_bytes
-    )
-    smem_bytes = max(smem_bytes, param.block_m * param.block_n * param.out_data_bytes)
-    shared_memory_per_cu = device_properties.shared_memory_per_multiprocessor
-    max_threads_per_cu = device_properties.max_threads_per_multi_processor
-    resource_blocks_per_cu = min(
-        max(shared_memory_per_cu // smem_bytes, 1),
-        max(max_threads_per_cu // param.block_threads, 1),
-    )
-
-    light_tile = param.block_m <= 64 and param.block_n <= 128
-    n_tiles = (n - 1) // param.block_n + 1
-    if light_tile:
-        blocks_per_cu = min(1 << (resource_blocks_per_cu.bit_length() - 1), 8)
-    else:
-        blocks_per_cu = 2 if resource_blocks_per_cu >= 2 else 1
-    nonempty_groups_upper = min(group_count, total_m)
-    m_tiles_upper = (
-        nonempty_groups_upper + (total_m - nonempty_groups_upper) // param.block_m
-    )
-    return max(1, min(num_cus * blocks_per_cu, m_tiles_upper * n_tiles))
 
 
 def make_grouped_gemm_gfx950_kernel_name(param: GemmGfx950Param) -> str:

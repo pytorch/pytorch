@@ -204,15 +204,15 @@ def make_gemm_gfx950_kernel_name(param: GemmGfx950Param) -> str:
 
 
 class BlockSwizzle:
-    def __init__(self, NUM_XCDS, NUM_PIDS_THRESHOLD, GROUP_M, M_MAJOR_FALLBACK=False):
+    def __init__(self, NUM_XCDS, NUM_PIDS_THRESHOLD, GROUP_M, N_MAJOR_FALLBACK=False):
         self.NUM_XCDS = NUM_XCDS
         self.NUM_PIDS_THRESHOLD = NUM_PIDS_THRESHOLD
         self.GROUP_M = GROUP_M
-        self.M_MAJOR_FALLBACK = M_MAJOR_FALLBACK
+        self.N_MAJOR_FALLBACK = N_MAJOR_FALLBACK
 
     @flyc.jit
     def swizzle(self, num_pid_m, num_pid_n, pid):
-        if const_expr(self.M_MAJOR_FALLBACK):
+        if const_expr(self.N_MAJOR_FALLBACK):
             simple_m = pid % num_pid_m
             simple_n = pid // num_pid_m
         else:
