@@ -5,6 +5,74 @@ import torch
 from torch.nn.modules.utils import _pair, _single, _triple
 
 
+def _conv_input(
+    input_size,
+    weight,
+    grad_output,
+    stride,
+    padding,
+    dilation,
+    groups,
+    output_padding,
+    ntuple,
+):
+    """Shared body of :func:`conv1d_input`, :func:`conv2d_input` and :func:`conv3d_input`."""
+    stride, padding = ntuple(stride), ntuple(padding)
+    dilation, output_padding = ntuple(dilation), ntuple(output_padding)
+
+    if not any(output_padding):
+        input = grad_output.new_empty(1).expand(input_size)
+        return torch.ops.aten.convolution_backward(
+            grad_output,
+            input,
+            weight,
+            None,
+            stride,
+            padding,
+            dilation,
+            False,
+            [0],
+            groups,
+            (True, False, False),
+        )[0]
+
+    # A transposed convolution with a non-zero output_padding produces a shape no
+    # forward convolution produces, so convolution_backward has nothing to check
+    # input_size against and rejects it. Ask it instead for the gradient a
+    # zero-padded convolution would give, which is the uncropped one, and take the
+    # window the transposed convolution takes out of it: padding off the front, and
+    # zeros past the end for whatever output_padding reaches beyond it.
+    kernel_size = weight.shape[2:]
+    uncropped = [
+        (out - 1) * s + d * (k - 1) + 1
+        for out, s, d, k in zip(grad_output.shape[2:], stride, dilation, kernel_size)
+    ]
+    input = grad_output.new_empty(1).expand(list(input_size[:2]) + uncropped)
+    grad_input = torch.ops.aten.convolution_backward(
+        grad_output,
+        input,
+        weight,
+        None,
+        stride,
+        (0,) * len(uncropped),
+        dilation,
+        False,
+        [0],
+        groups,
+        (True, False, False),
+    )[0]
+
+    tail_pad = []
+    for dim in reversed(range(len(uncropped))):
+        available = uncropped[dim] - padding[dim]
+        tail_pad += [0, max(0, input_size[2 + dim] - available)]
+    grad_input = torch.constant_pad_nd(grad_input, tail_pad, 0)
+    for dim in range(len(uncropped)):
+        grad_input = grad_input.narrow(2 + dim, padding[dim], input_size[2 + dim])
+    return grad_input
+
+
+
 def conv1d_input(
     input_size,
     weight,
@@ -13,6 +81,7 @@ def conv1d_input(
     padding=0,
     dilation=1,
     groups=1,
+    output_padding=0,
 ):
     r"""Compute the gradient of conv1d with respect to the input of the convolution.
 
@@ -27,6 +96,9 @@ def conv1d_input(
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+        output_padding (int or tuple, optional): Additional size added to one side of each
+            dimension of the output shape, matching the transposed convolution argument of
+            the same name. Default: 0
 
     Examples::
 
@@ -38,21 +110,17 @@ def conv1d_input(
         >>> F.grad.conv1d_input(input.shape, weight, grad_output)
 
     """
-    input = grad_output.new_empty(1).expand(input_size)
-
-    return torch.ops.aten.convolution_backward(
-        grad_output,
-        input,
+    return _conv_input(
+        input_size,
         weight,
-        None,
-        _single(stride),
-        _single(padding),
-        _single(dilation),
-        False,
-        [0],
+        grad_output,
+        stride,
+        padding,
+        dilation,
         groups,
-        (True, False, False),
-    )[0]
+        output_padding,
+        _single,
+    )
 
 
 def conv1d_weight(
@@ -111,6 +179,7 @@ def conv2d_input(
     padding=0,
     dilation=1,
     groups=1,
+    output_padding=0,
 ):
     r"""Compute the gradient of conv2d with respect to the input of the convolution.
 
@@ -125,6 +194,9 @@ def conv2d_input(
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+        output_padding (int or tuple, optional): Additional size added to one side of each
+            dimension of the output shape, matching the transposed convolution argument of
+            the same name. Default: 0
 
     Examples::
 
@@ -136,21 +208,17 @@ def conv2d_input(
         >>> F.grad.conv2d_input(input.shape, weight, grad_output)
 
     """
-    input = grad_output.new_empty(1).expand(input_size)
-
-    return torch.ops.aten.convolution_backward(
-        grad_output,
-        input,
+    return _conv_input(
+        input_size,
         weight,
-        None,
-        _pair(stride),
-        _pair(padding),
-        _pair(dilation),
-        False,
-        [0],
+        grad_output,
+        stride,
+        padding,
+        dilation,
         groups,
-        (True, False, False),
-    )[0]
+        output_padding,
+        _pair,
+    )
 
 
 def conv2d_weight(
@@ -209,6 +277,7 @@ def conv3d_input(
     padding=0,
     dilation=1,
     groups=1,
+    output_padding=0,
 ):
     r"""Compute the gradient of conv3d with respect to the input of the convolution.
 
@@ -223,6 +292,9 @@ def conv3d_input(
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+        output_padding (int or tuple, optional): Additional size added to one side of each
+            dimension of the output shape, matching the transposed convolution argument of
+            the same name. Default: 0
 
     Examples::
 
@@ -234,21 +306,17 @@ def conv3d_input(
         >>> F.grad.conv3d_input(input.shape, weight, grad_output)
 
     """
-    input = grad_output.new_empty(1).expand(input_size)
-
-    return torch.ops.aten.convolution_backward(
-        grad_output,
-        input,
+    return _conv_input(
+        input_size,
         weight,
-        None,
-        _triple(stride),
-        _triple(padding),
-        _triple(dilation),
-        False,
-        [0],
+        grad_output,
+        stride,
+        padding,
+        dilation,
         groups,
-        (True, False, False),
-    )[0]
+        output_padding,
+        _triple,
+    )
 
 
 def conv3d_weight(
