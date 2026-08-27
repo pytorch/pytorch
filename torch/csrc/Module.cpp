@@ -1133,8 +1133,7 @@ static PyObject* THPModule_setSDPUseCuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
-      "set_sdp_use_cudnn expects a bool, "
-      "but got %s",
+      "set_sdp_use_cudnn expects a bool, but got ",
       THPUtils_typename(arg));
   at::globalContext().setSDPUseCuDNN(Py_IsTrue(arg));
   Py_RETURN_NONE;
@@ -2722,6 +2721,13 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
+  py_module.def("_is_pybind11_type", [](py::handle cls) {
+    if (!PyType_Check(cls.ptr())) {
+      return false;
+    }
+    auto* type = reinterpret_cast<PyTypeObject*>(cls.ptr());
+    return !py::detail::all_type_info(type).empty();
+  });
 
   // Serialized access to the process environment. Prefer these over Python's
   // os.environ/os.getenv when torch is loaded: they share c10's env mutex, so

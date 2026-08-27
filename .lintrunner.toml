@@ -18,6 +18,7 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
     'torch/_vendor/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
@@ -134,6 +135,7 @@ include_patterns = [
 exclude_patterns = [
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
     'torch/_vendor/**',
 ]
 command = [
@@ -259,12 +261,9 @@ exclude_patterns = [
     'c10/mobile/CPUProfilingAllocator.cpp',
     'c10/util/accumulate.h',
     'c10/util/ApproximateClock.cpp',
-    'c10/util/BFloat16-math.h',
     'c10/util/generic_math.h',
     'c10/util/IntrusiveList.h',
-    'c10/util/irange.h',
     'c10/util/llvmMathExtras.h',
-    'c10/util/MathConstants.h',
     'c10/util/NetworkFlow.cpp',
     'c10/util/order_preserving_flat_hash_map.h',
     'c10/util/overflows.h',
@@ -276,6 +275,9 @@ exclude_patterns = [
     'torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp',
     'torch/headeronly/util/bit_cast.h',
     'torch/headeronly/util/complex.h',
+    'torch/headeronly/util/BFloat16-math.h',
+    'torch/headeronly/util/irange.h',
+    'torch/headeronly/util/MathConstants.h',
 ]
 init_command = [
     'python3',
@@ -320,11 +322,13 @@ include_patterns = [
     'torch/headeronly/macros/Export.h',
     'torch/headeronly/macros/Macros.h',
     'torch/headeronly/util/BFloat16.h',
+    'torch/headeronly/util/BFloat16-math.h',
     'torch/headeronly/util/Half.h',
     'torch/headeronly/util/TypeSafeSignMath.h',
     'torch/headeronly/util/bit_cast.h',
     'torch/headeronly/util/complex.h',
     'torch/headeronly/util/floating_point_utils.h',
+    'torch/headeronly/util/irange.h',
 ]
 exclude_patterns = [
     '**/fb/**',
@@ -514,7 +518,6 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
-    '.ci/docker/common/install_rocm_drm.sh',
     '.lintrunner.toml',
     '**/*.patch',
 ]
@@ -586,17 +589,25 @@ include_patterns = [
     '**/*.h',
 ]
 exclude_patterns = [
-    # Vendored upstream code - permanent, not debt.
+    # Vendored: raw throws are upstream's call, not ours.
+    'c10/util/flat_hash_map.h',  # skarupke/flat_hash_map
     'third_party/concurrentqueue/**',
-    # Pre-existing violations; burn down over time. Nothing may be added here.
-    'aten/src/**',
-    'c10/util/**',
-    'test/cpp/**',
-    'test/cpp_extensions/**',
+    # Fork of flat_hash_map. Also: at()'s out_of_range becomes KeyError in
+    # jit/python/python_dict.cpp, so converting it breaks TorchScript dicts.
+    'c10/util/order_preserving_flat_hash_map.h',
+    # These headers are also compiled by qnnpack's own test/ and bench/ targets,
+    # which link the c10-free pytorch_qnnpack static lib, so pulling in
+    # c10/util/Exception.h would break those builds. AlignedAllocator.h has a
+    # second reason: its bad_alloc reaches Python as MemoryError.
+    'aten/src/ATen/native/quantized/cpu/qnnpack/**',
+    # Converting these changes the Python-visible exception type, so they get
+    # their own PR later in this stack.
+    'c10/util/SmallVector.cpp',  # length_error -> ValueError, bad_alloc -> MemoryError
+    'c10/util/StringUtil.cpp',  # range_error -> ValueError
+    # Burned down later in this stack. Nothing may be added here.
     'torch/csrc/distributed/**',
     'torch/csrc/inductor/**',
     'torch/csrc/jit/**',
-    'torch/csrc/utils/**',
 ]
 command = [
     'python3',
@@ -1257,6 +1268,7 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
     'torch/utils/model_dump/preact.mjs',
     # Generated: mirrors the label names on GitHub verbatim
     'tools/linter/adapters/pytorch_labels.json',
@@ -1640,6 +1652,7 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
     'torch/_vendor/**',
     'test/cpython/**',
     'test/test_torchfuzz_repros.py',
@@ -1854,6 +1867,7 @@ include_patterns = [
 exclude_patterns = [
     'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
     'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+    'torch/_inductor/kernel/vendored_templates/flydsl/kernels/**',
 ]
 is_formatter = false
 
@@ -1896,6 +1910,16 @@ command = [
 ]
 include_patterns = [
     'torch/header_only_apis.txt',
+    'test/cpp/aoti_abi_check/*.cpp',
+    'test/cpp/aoti_abi_check/cuda/*.cu',
+    'tools/linter/adapters/header_only_linter.py',
+    # headers the listed APIs are filed under
+    'torch/headeronly/**',
+    'c10/util/TypeCast.h',
+    'c10/util/complex.h',
+    'c10/util/generic_math.h',
+    'aten/src/ATen/core/PhiloxRNGEngine.h',
+    'aten/src/ATen/cpu/vec/**',
 ]
 is_formatter = false
 
