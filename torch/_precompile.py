@@ -2745,15 +2745,42 @@ def _write_artifact(
     python_code: str,
     cache: bytes,
 ) -> None:
-    """Write the matched (python_code, cache) pair, creating parent directories."""
-    for path in (artifact_path, cache_path):
-        parent = os.path.dirname(os.fspath(path))
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-    with open(artifact_path, "w", encoding="utf-8") as f:
-        f.write(python_code)
-    with open(cache_path, "wb") as f:
-        f.write(cache)
+    """Write the matched (python_code, cache) pair, creating parent directories.
+
+    Both halves are written beside their targets and renamed into place, rather
+    than truncated where they lie. The pair only loads together -- the cache
+    carries a sha256 of exactly the python_code it was emitted with -- so a
+    process that dies mid-write would otherwise leave a new artifact paired with
+    the previous cache, which refuses to load. An accumulating capture rewrites
+    on every call and its whole promise is that the files on disk are always a
+    working artifact, so at hundreds of megabytes that window is the failure it
+    is meant to protect against. Two renames are not one atomic step, but they
+    close the window from the length of the write to the gap between them.
+    """
+    written = []
+    try:
+        for path, payload in ((artifact_path, python_code), (cache_path, cache)):
+            parent = os.path.dirname(os.fspath(path))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            tmp = os.fspath(path) + ".tmp"
+            mode, encoding = (
+                ("wb", None) if isinstance(payload, bytes) else ("w", "utf-8")
+            )
+            with open(tmp, mode, encoding=encoding) as f:
+                f.write(payload)  # type: ignore[arg-type]
+                f.flush()
+                os.fsync(f.fileno())
+            written.append((tmp, path))
+    except BaseException:
+        for tmp, _ in written:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        raise
+    for tmp, path in written:
+        os.replace(tmp, path)
 
 
 def _read_artifact(

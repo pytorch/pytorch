@@ -1503,6 +1503,9 @@ class PrecompileSession:
         self._kept_guards: set[tuple[str, str]] = set()
         self._risky_dropped_guards: set[tuple[str, str]] = set()
         self._capture_errors: list[str] = []
+        # How many capture errors predate the current cycle. Always 0 for a
+        # one-shot capture, which has exactly one cycle.
+        self._gate_error_mark = 0
         self._recorded_exception_keys: set[tuple[type[BaseException], str]] = set()
         # (co_name, co_filename, co_firstlineno) -> one fact set per compilation
         self._guard_sets: dict[tuple[str, str, int], list[frozenset[_GuardFact]]] = {}
@@ -1611,6 +1614,7 @@ class PrecompileSession:
         # resumable session does re-enter, and _call refuses to run while it is
         # set, so clearing it here is what makes the second cycle work at all.
         self._closing = False
+        self._gate_error_mark = len(self._capture_errors)
         if self._stack is not None:
             raise RuntimeError("PrecompileSession is already active")
         grads: dict[torch.Tensor, torch.Tensor | None] = {}
@@ -1976,12 +1980,12 @@ class PrecompileSession:
         there for what re-running this would destroy.
         """
         dropped = self._run_guard_policy(list(self._package.code_entries()))
-        self._policy_dropped_guards |= dropped
         # Not "risky": the policy is the caller stating that the environment is
         # fixed and every variation is in the inputs, so a slot that never
         # varied is out of the artifact's declared domain rather than an
-        # unchecked hazard.
-        self._kept_guards -= dropped
+        # unchecked hazard. summary() subtracts these from the kept set, so the
+        # kept set itself stays as the filters recorded it.
+        self._policy_dropped_guards |= dropped
         keep_only = varying_guard_slots(self._guard_sets)
 
         def survives(guard_type: str, name: str) -> bool:
@@ -2023,7 +2027,11 @@ class PrecompileSession:
         structure and not the serialized guard payloads.
         """
         codes = copy.deepcopy(list(self._package.code_entries()))
-        self._run_guard_policy(codes)
+        # REPLACED, not unioned. keep_only grows as calls add variants, so a
+        # slot dropped by an earlier render can survive a later one, and a
+        # cumulative set would keep reporting it as dropped from an artifact
+        # that carries it. This is the drops in the file being written now.
+        self._policy_dropped_guards = self._run_guard_policy(codes)
         return codes
 
     def _run_guard_policy(self, code_entries: list[Any]) -> set[tuple[str, str]]:
@@ -2322,7 +2330,7 @@ class PrecompileSession:
         return _summarize(
             self._package.cache_entry(),
             self._dropped_guards,
-            self._kept_guards,
+            self._kept_guards - self._policy_dropped_guards,
             self._policy_dropped_guards,
             risky,
             self._package.truncated_frames,
@@ -2348,10 +2356,15 @@ class PrecompileSession:
         if not self._prune_invariant_guards:
             self._drop_unrebuildable_guards()
         summary = self.summary()
-        if require_complete and summary.capture_errors:
+        # On a resumable session, only the errors THIS cycle raised. A call that
+        # failed already raised to the caller, who saw it and carried on; making
+        # every later render refuse over it would freeze the artifact at the
+        # last good call for the rest of the loop.
+        fresh_errors = list(summary.capture_errors)[self._gate_error_mark :]
+        if require_complete and fresh_errors:
             raise PackageError(
                 "Precompilation is incomplete because capture raised: "
-                f"{list(summary.capture_errors)}. Re-run every example successfully, "
+                f"{fresh_errors}. Re-run every example successfully, "
                 "or pass require_complete=False to save the partial artifact."
             )
         if require_no_dropped_guards and summary.dropped_guards:
