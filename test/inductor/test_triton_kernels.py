@@ -240,10 +240,7 @@ class _TritonDeviceTestCase(torch._inductor.test_case.TestCase):
             raise unittest.SkipTest(str(exc)) from exc
 
 
-@requires_triton()
-class KernelTests(_TritonDeviceTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
+class _KernelTestsBase(_TritonDeviceTestCase):
     def _kernel_launched_in_code(self, kernel_name: str, code: str) -> bool:
         if inductor_config.cpp_wrapper:
             return f"launchKernel({kernel_name}" in code
@@ -272,6 +269,11 @@ class KernelTests(_TritonDeviceTestCase):
             f"expected triton.compile options to include "
             f"{name}={expected_value!r}, got {options!r}",
         )
+
+
+@requires_triton()
+class KernelTests(_KernelTestsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
     def test_triton_kernel_with_kernel_param(self, device):
@@ -316,6 +318,114 @@ class KernelTests(_TritonDeviceTestCase):
 
         self.assertIsNone(_re.search(r"\b__dunder_add_kernel_0\b", code))
         self.assertIsNotNone(_re.search(r"\b_dunder_add_kernel_0\b", code))
+
+
+@requires_triton()
+class KernelTestsArgReductionSemantics(_KernelTestsBase):
+    hw_classification = HardwareClassification.CUDA
+
+    @inductor_config.patch(strict_signed_zero=True)
+    def test_dim_max_min_reuse_argreduce_value(self, device):
+        dtypes = [torch.float32, torch.float16]
+        if torch.cuda.is_bf16_supported(including_emulation=False):
+            dtypes.append(torch.bfloat16)
+
+        for op, indexed_helper, value_helper, selected_value in (
+            (torch.max, "max_with_index", "max2", 100.0),
+            (torch.min, "min_with_index", "min2", -100.0),
+        ):
+            torch._dynamo.reset()
+
+            def fn(x):
+                return op(x, -1)
+
+            for dtype in dtypes:
+                x = torch.randn(8, 4097, dtype=dtype, device=device)
+                x[:, 4095] = selected_value
+                expected_values, expected_indices = fn(x)
+                with fresh_cache():
+                    actual, codes = run_and_get_code(torch.compile(fn, dynamic=True), x)
+                actual_values, actual_indices = actual
+
+                self.assertEqual(actual_values, expected_values)
+                self.assertEqual(actual_indices, expected_indices)
+
+                source = "\n".join(codes)
+                self.assertEqual(source.count(f"triton_helpers.{indexed_helper}"), 1)
+                self.assertNotIn(f"triton_helpers.{value_helper}", source)
+
+                torch._dynamo.reset()
+
+                def value_only(x):
+                    return op(x, -1).values
+
+                with fresh_cache():
+                    actual_values, value_codes = run_and_get_code(
+                        torch.compile(value_only, dynamic=True), x
+                    )
+
+                self.assertEqual(actual_values, expected_values)
+
+                value_source = "\n".join(value_codes)
+                self.assertEqual(
+                    value_source.count(f"triton_helpers.{indexed_helper}"), 1
+                )
+                self.assertNotIn(f"triton_helpers.{value_helper}", value_source)
+                self.assertEqual(value_source.count("tl.store("), 1)
+
+        x = torch.tensor([[0.0, -0.0], [-0.0, 0.0]], device=device)
+        for op in (torch.max, torch.min):
+            torch._dynamo.reset()
+
+            def fn(x):
+                return op(x, -1)
+
+            expected_values, expected_indices = fn(x)
+            with fresh_cache():
+                actual_values, actual_indices = torch.compile(fn, dynamic=True)(x)
+
+            self.assertEqual(
+                torch.signbit(actual_values), torch.signbit(expected_values)
+            )
+            self.assertEqual(actual_indices, expected_indices)
+
+            torch._dynamo.reset()
+
+            def value_only(x):
+                return op(x, -1).values
+
+            expected_values = value_only(x)
+            with fresh_cache():
+                actual_values = torch.compile(value_only, dynamic=True)(x)
+
+            self.assertEqual(
+                torch.signbit(actual_values), torch.signbit(expected_values)
+            )
+
+        for value_op, index_op in (
+            (torch.amax, torch.argmax),
+            (torch.amin, torch.argmin),
+        ):
+            torch._dynamo.reset()
+
+            def separate_value_and_index(x):
+                return value_op(x, -1), index_op(x, -1)
+
+            expected_values, expected_indices = separate_value_and_index(x)
+            with fresh_cache():
+                actual_values, actual_indices = torch.compile(
+                    separate_value_and_index, dynamic=True
+                )(x)
+
+            self.assertEqual(
+                torch.signbit(actual_values), torch.signbit(expected_values)
+            )
+            self.assertEqual(actual_indices, expected_indices)
+
+
+@requires_triton()
+class KernelTestsCompilation(_KernelTestsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
     def test_triton_kernel_ill_formed(self, device):
@@ -706,6 +816,74 @@ def forward(self, x_1, output_1):
         else:
             self.assertEqual(output_code.count('float("nan")'), 0)
             self.assertEqual(output_code.count("float('nan')"), 0)
+
+
+@requires_triton()
+class KernelTestsFloatingPointRewrites(_KernelTestsBase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_fp_self_sub_rewrite_preserves_nonfinite_semantics(self, device):
+        def fn(x):
+            a = x * x
+            return a - a
+
+        x = torch.randn(1024, device=device)
+        out, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(out, torch.zeros_like(out), atol=0, rtol=0)
+        self.assertIn("tl.where", code)
+        self.assertIn("libdevice.isinf", code)
+        self.assertNotIn("'enable_fp_fusion': False", code)
+
+        special = torch.tensor(
+            [float("nan"), float("inf"), -float("inf"), 2.0],
+            device=device,
+        )
+        expected = fn(special)
+        actual = torch.compile(fn, fullgraph=True)(special)
+        torch.testing.assert_close(actual, expected, equal_nan=True)
+
+    @common_utils.parametrize("per_subkernel", [False, True])
+    def test_combo_fp_self_sub_rewrite(self, device, per_subkernel):
+        def fn(a, b):
+            c = a * a
+            return c - c, b + 1
+
+        a, b = (torch.rand(1024, device=device) for _ in range(2))
+        with inductor_config.patch(
+            {
+                "combo_kernels": True,
+                "benchmark_combo_kernel": False,
+                "combo_kernel_per_subkernel_blocks": per_subkernel,
+                "combo_kernel_max_distance": -1,
+                "combo_kernel_peak_memory_increase_gb": None,
+                "combo_kernel_peak_memory_pct_threshold": None,
+            }
+        ):
+            metrics.reset()
+            actual, (code,) = run_and_get_code(torch.compile(fn), a, b)
+
+        self.assertEqual(actual, fn(a, b), atol=0, rtol=0)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        self.assertIn("'combo_grid_meta':", code)
+        self.assertIn("tl.where", code)
+        self.assertNotIn("'enable_fp_fusion': False", code)
+
+    def test_duplicate_mse_loss_operands_are_zero(self, device):
+        torch.manual_seed(0)
+        x = torch.randn(10000, device=device)
+
+        for op in (F.gelu, F.mish):
+
+            def fn(x, op=op):
+                return F.mse_loss(op(x), op(x), reduction="none").max()
+
+            actual = torch.compile(fn, fullgraph=True)(x)
+            self.assertEqual(actual, torch.zeros_like(actual), atol=0, rtol=0)
+
+
+@requires_triton()
+class KernelTestsRuntime(_KernelTestsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
     @common_utils.parametrize("grad_fn", [torch.no_grad, torch.enable_grad])
@@ -3347,6 +3525,46 @@ def forward(self, arg0_1, arg1_1):
         expected = torch.compile(fn, fullgraph=True)(345)
         self.assertEqual(actual, expected)
 
+
+@requires_triton()
+class KernelTestsInlineAsm(_KernelTestsBase):
+    hw_classification = HardwareClassification.CUDA
+
+    @inductor_config.patch({"triton.autotune_at_compile_time": True})
+    @parametrize("quotes", ["single", "double"])
+    def test_kernel_inline_asm(self, device, quotes):
+        if torch.version.cuda:
+            kernel = (
+                kernel_inline_asm_single_quotes
+                if quotes == "single"
+                else kernel_inline_asm_double_quotes
+            )
+        else:
+            kernel = (
+                kernel_inline_asm_rocm_single_quotes
+                if quotes == "single"
+                else kernel_inline_asm_rocm_double_quotes
+            )
+
+        # https://github.com/pytorch/pytorch/issues/155006
+        def fn(inp):
+            sz = inp.size(0)
+            x = torch.empty(sz, device=device)
+            BLOCK_SIZE = 32
+            grid = (triton.cdiv(sz, BLOCK_SIZE),)
+            kernel[grid](inp, x, sz, BLOCK_SIZE)
+            return x
+
+        inp = torch.randn(345, device=device)
+        actual = fn(inp)
+        expected = torch.compile(fn, fullgraph=True)(inp)
+        self.assertEqual(actual, expected)
+
+
+@requires_triton()
+class KernelTestsPrecisionAndConstexpr(_KernelTestsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyAccelerator
     @inductor_config.patch("emulate_precision_casts", True)
     def test_triton_kernel_emulate_precision_unaffected(self, device):
@@ -3435,197 +3653,6 @@ def forward(self, arg0_1, arg1_1):
         self.assertIn("stride", ttir_str)
         self.assertNotIn("BLOCK_SIZE", ttir_str)
         self.assertNotIn("maybe_param", ttir_str)
-
-
-@requires_triton()
-class KernelTestsSpecializedSemantics(_TritonDeviceTestCase):
-    hw_classification = HardwareClassification.CUDA
-
-    @inductor_config.patch(strict_signed_zero=True)
-    def test_dim_max_min_reuse_argreduce_value(self, device):
-        dtypes = [torch.float32, torch.float16]
-        if torch.cuda.is_bf16_supported(including_emulation=False):
-            dtypes.append(torch.bfloat16)
-
-        for op, indexed_helper, value_helper, selected_value in (
-            (torch.max, "max_with_index", "max2", 100.0),
-            (torch.min, "min_with_index", "min2", -100.0),
-        ):
-            torch._dynamo.reset()
-
-            def fn(x):
-                return op(x, -1)
-
-            for dtype in dtypes:
-                x = torch.randn(8, 4097, dtype=dtype, device=device)
-                x[:, 4095] = selected_value
-                expected_values, expected_indices = fn(x)
-                with fresh_cache():
-                    actual, codes = run_and_get_code(torch.compile(fn, dynamic=True), x)
-                actual_values, actual_indices = actual
-
-                self.assertEqual(actual_values, expected_values)
-                self.assertEqual(actual_indices, expected_indices)
-
-                source = "\n".join(codes)
-                self.assertEqual(source.count(f"triton_helpers.{indexed_helper}"), 1)
-                self.assertNotIn(f"triton_helpers.{value_helper}", source)
-
-                torch._dynamo.reset()
-
-                def value_only(x):
-                    return op(x, -1).values
-
-                with fresh_cache():
-                    actual_values, value_codes = run_and_get_code(
-                        torch.compile(value_only, dynamic=True), x
-                    )
-
-                self.assertEqual(actual_values, expected_values)
-
-                value_source = "\n".join(value_codes)
-                self.assertEqual(
-                    value_source.count(f"triton_helpers.{indexed_helper}"), 1
-                )
-                self.assertNotIn(f"triton_helpers.{value_helper}", value_source)
-                self.assertEqual(value_source.count("tl.store("), 1)
-
-        x = torch.tensor([[0.0, -0.0], [-0.0, 0.0]], device=device)
-        for op in (torch.max, torch.min):
-            torch._dynamo.reset()
-
-            def fn(x):
-                return op(x, -1)
-
-            expected_values, expected_indices = fn(x)
-            with fresh_cache():
-                actual_values, actual_indices = torch.compile(fn, dynamic=True)(x)
-
-            self.assertEqual(
-                torch.signbit(actual_values), torch.signbit(expected_values)
-            )
-            self.assertEqual(actual_indices, expected_indices)
-
-            torch._dynamo.reset()
-
-            def value_only(x):
-                return op(x, -1).values
-
-            expected_values = value_only(x)
-            with fresh_cache():
-                actual_values = torch.compile(value_only, dynamic=True)(x)
-
-            self.assertEqual(
-                torch.signbit(actual_values), torch.signbit(expected_values)
-            )
-
-        for value_op, index_op in (
-            (torch.amax, torch.argmax),
-            (torch.amin, torch.argmin),
-        ):
-            torch._dynamo.reset()
-
-            def separate_value_and_index(x):
-                return value_op(x, -1), index_op(x, -1)
-
-            expected_values, expected_indices = separate_value_and_index(x)
-            with fresh_cache():
-                actual_values, actual_indices = torch.compile(
-                    separate_value_and_index, dynamic=True
-                )(x)
-
-            self.assertEqual(
-                torch.signbit(actual_values), torch.signbit(expected_values)
-            )
-            self.assertEqual(actual_indices, expected_indices)
-
-    def test_fp_self_sub_rewrite_preserves_nonfinite_semantics(self, device):
-        def fn(x):
-            a = x * x
-            return a - a
-
-        x = torch.randn(1024, device=device)
-        out, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
-        self.assertEqual(out, torch.zeros_like(out), atol=0, rtol=0)
-        self.assertIn("tl.where", code)
-        self.assertIn("libdevice.isinf", code)
-        self.assertNotIn("'enable_fp_fusion': False", code)
-
-        special = torch.tensor(
-            [float("nan"), float("inf"), -float("inf"), 2.0],
-            device=device,
-        )
-        expected = fn(special)
-        actual = torch.compile(fn, fullgraph=True)(special)
-        torch.testing.assert_close(actual, expected, equal_nan=True)
-
-    @common_utils.parametrize("per_subkernel", [False, True])
-    def test_combo_fp_self_sub_rewrite(self, device, per_subkernel):
-        def fn(a, b):
-            c = a * a
-            return c - c, b + 1
-
-        a, b = (torch.rand(1024, device=device) for _ in range(2))
-        with inductor_config.patch(
-            {
-                "combo_kernels": True,
-                "benchmark_combo_kernel": False,
-                "combo_kernel_per_subkernel_blocks": per_subkernel,
-                "combo_kernel_max_distance": -1,
-                "combo_kernel_peak_memory_increase_gb": None,
-                "combo_kernel_peak_memory_pct_threshold": None,
-            }
-        ):
-            metrics.reset()
-            actual, (code,) = run_and_get_code(torch.compile(fn), a, b)
-
-        self.assertEqual(actual, fn(a, b), atol=0, rtol=0)
-        self.assertEqual(metrics.generated_kernel_count, 1)
-        self.assertIn("'combo_grid_meta':", code)
-        self.assertIn("tl.where", code)
-        self.assertNotIn("'enable_fp_fusion': False", code)
-
-    def test_duplicate_mse_loss_operands_are_zero(self, device):
-        torch.manual_seed(0)
-        x = torch.randn(10000, device=device)
-
-        for op in (F.gelu, F.mish):
-
-            def fn(x, op=op):
-                return F.mse_loss(op(x), op(x), reduction="none").max()
-
-            actual = torch.compile(fn, fullgraph=True)(x)
-            self.assertEqual(actual, torch.zeros_like(actual), atol=0, rtol=0)
-
-    @inductor_config.patch({"triton.autotune_at_compile_time": True})
-    @parametrize("quotes", ["single", "double"])
-    def test_kernel_inline_asm(self, device, quotes):
-        if torch.version.cuda:
-            kernel = (
-                kernel_inline_asm_single_quotes
-                if quotes == "single"
-                else kernel_inline_asm_double_quotes
-            )
-        else:
-            kernel = (
-                kernel_inline_asm_rocm_single_quotes
-                if quotes == "single"
-                else kernel_inline_asm_rocm_double_quotes
-            )
-
-        # https://github.com/pytorch/pytorch/issues/155006
-        def fn(inp):
-            sz = inp.size(0)
-            x = torch.empty(sz, device=device)
-            BLOCK_SIZE = 32
-            grid = (triton.cdiv(sz, BLOCK_SIZE),)
-            kernel[grid](inp, x, sz, BLOCK_SIZE)
-            return x
-
-        inp = torch.randn(345, device=device)
-        actual = fn(inp)
-        expected = torch.compile(fn, fullgraph=True)(inp)
-        self.assertEqual(actual, expected)
 
 
 def _run_triton_kernel_with_imported_symbol(self, device):
@@ -5273,6 +5300,106 @@ class CustomOpTests(_TritonDeviceTestCase):
         self.assertEqual(status[-1], False)
         self.assertEqual(z, (x + y) * 2)
 
+
+@requires_triton()
+class CustomOpTestsInterpretMode(_TritonDeviceTestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_wrap_triton_triton_interpret_eager(self, device):
+        script = """
+import os
+os.environ["TRITON_INTERPRET"] = "1"
+
+import torch
+import triton
+import triton.language as tl
+from torch.library import wrap_triton
+
+
+@triton.jit
+def add_kernel(
+    in_ptr0,
+    in_ptr1,
+    out_ptr,
+    n_elements,
+    BLOCK_SIZE: "tl.constexpr",
+):
+    pid = tl.program_id(axis=0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    x = tl.load(in_ptr0 + offsets, mask=mask)
+    y = tl.load(in_ptr1 + offsets, mask=mask)
+    output = x + y
+    tl.store(out_ptr + offsets, output, mask=mask)
+
+
+@triton.autotune(configs=[triton.Config({"BLOCK_SIZE": 16})], key=[])
+@triton.jit
+def autotuned_add_kernel(
+    in_ptr0,
+    in_ptr1,
+    out_ptr,
+    n_elements,
+    BLOCK_SIZE: "tl.constexpr",
+):
+    pid = tl.program_id(axis=0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    x = tl.load(in_ptr0 + offsets, mask=mask)
+    y = tl.load(in_ptr1 + offsets, mask=mask)
+    output = x + y
+    tl.store(out_ptr + offsets, output, mask=mask)
+
+
+def add(x, y):
+    output = torch.empty_like(x)
+    n_elements = output.numel()
+
+    def grid(meta):
+        return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+    wrap_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+    return output
+
+
+def autotuned_add(x, y):
+    output = torch.empty_like(x)
+    n_elements = output.numel()
+
+    def grid(meta):
+        return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+    wrap_triton(autotuned_add_kernel)[grid](x, y, output, n_elements)
+    return output
+
+
+x = torch.randn(1024, device=os.environ["PYTORCH_TEST_DEVICE"])
+torch.testing.assert_close(add(x, x), x + x)
+torch.testing.assert_close(autotuned_add(x, x), x + x)
+
+
+class Wrapper:
+    fn = add_kernel
+
+
+try:
+    wrap_triton(Wrapper())
+except RuntimeError as exc:
+    assert "wrap_triton only works" in str(exc)
+else:
+    raise AssertionError("wrap_triton accepted an arbitrary .fn wrapper")
+"""
+
+        env = {**os.environ, "PYTORCH_TEST_DEVICE": device}
+        subprocess.run([sys.executable, "-c", script], check=True, env=env)
+
+
+@requires_triton()
+class CustomOpTestsRuntime(_TritonDeviceTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyAccelerator
     @common_utils.parametrize(
         "variant", ["triton_kernel", "custom_op", "mutable_custom_op"]
@@ -6232,101 +6359,6 @@ class CustomOpTestsGeneric(torch._inductor.test_case.TestCase):
 
 
 @requires_triton()
-class CustomOpTestsInterpretMode(_TritonDeviceTestCase):
-    hw_classification = HardwareClassification.CUDA
-
-    def test_wrap_triton_triton_interpret_eager(self, device):
-        script = """
-import os
-os.environ["TRITON_INTERPRET"] = "1"
-
-import torch
-import triton
-import triton.language as tl
-from torch.library import wrap_triton
-
-
-@triton.jit
-def add_kernel(
-    in_ptr0,
-    in_ptr1,
-    out_ptr,
-    n_elements,
-    BLOCK_SIZE: "tl.constexpr",
-):
-    pid = tl.program_id(axis=0)
-    block_start = pid * BLOCK_SIZE
-    offsets = block_start + tl.arange(0, BLOCK_SIZE)
-    mask = offsets < n_elements
-    x = tl.load(in_ptr0 + offsets, mask=mask)
-    y = tl.load(in_ptr1 + offsets, mask=mask)
-    output = x + y
-    tl.store(out_ptr + offsets, output, mask=mask)
-
-
-@triton.autotune(configs=[triton.Config({"BLOCK_SIZE": 16})], key=[])
-@triton.jit
-def autotuned_add_kernel(
-    in_ptr0,
-    in_ptr1,
-    out_ptr,
-    n_elements,
-    BLOCK_SIZE: "tl.constexpr",
-):
-    pid = tl.program_id(axis=0)
-    block_start = pid * BLOCK_SIZE
-    offsets = block_start + tl.arange(0, BLOCK_SIZE)
-    mask = offsets < n_elements
-    x = tl.load(in_ptr0 + offsets, mask=mask)
-    y = tl.load(in_ptr1 + offsets, mask=mask)
-    output = x + y
-    tl.store(out_ptr + offsets, output, mask=mask)
-
-
-def add(x, y):
-    output = torch.empty_like(x)
-    n_elements = output.numel()
-
-    def grid(meta):
-        return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-    wrap_triton(add_kernel)[grid](x, y, output, n_elements, 16)
-    return output
-
-
-def autotuned_add(x, y):
-    output = torch.empty_like(x)
-    n_elements = output.numel()
-
-    def grid(meta):
-        return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-    wrap_triton(autotuned_add_kernel)[grid](x, y, output, n_elements)
-    return output
-
-
-x = torch.randn(1024, device=os.environ["PYTORCH_TEST_DEVICE"])
-torch.testing.assert_close(add(x, x), x + x)
-torch.testing.assert_close(autotuned_add(x, x), x + x)
-
-
-class Wrapper:
-    fn = add_kernel
-
-
-try:
-    wrap_triton(Wrapper())
-except RuntimeError as exc:
-    assert "wrap_triton only works" in str(exc)
-else:
-    raise AssertionError("wrap_triton accepted an arbitrary .fn wrapper")
-"""
-
-        env = {**os.environ, "PYTORCH_TEST_DEVICE": device}
-        subprocess.run([sys.executable, "-c", script], check=True, env=env)
-
-
-@requires_triton()
 class TestUserKernelEpilogueFusion(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -6822,7 +6854,35 @@ instantiate_device_type_tests(
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    KernelTestsSpecializedSemantics,
+    KernelTestsCompilation,
+    globals(),
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    KernelTestsRuntime,
+    globals(),
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    KernelTestsPrecisionAndConstexpr,
+    globals(),
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    KernelTestsArgReductionSemantics,
+    globals(),
+    only_for=("cuda",),
+)
+instantiate_device_type_tests(
+    KernelTestsFloatingPointRewrites,
+    globals(),
+    only_for=("cuda",),
+)
+instantiate_device_type_tests(
+    KernelTestsInlineAsm,
     globals(),
     only_for=("cuda",),
 )
@@ -6839,6 +6899,12 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     CustomOpTests,
+    globals(),
+    except_for=("cpu", "hpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    CustomOpTestsRuntime,
     globals(),
     except_for=("cpu", "hpu"),
     allow_xpu=True,
