@@ -85,13 +85,6 @@ size_hints_regex = re.compile(
     r"size_hints=(\{.*?\})",
 )
 
-# Anchor the closing parenthesis to the function definition so literal options
-# containing parentheses do not truncate an option-bearing decorator.
-triton_jit_decorator_regex = re.compile(
-    r"^@triton\.jit(?:\(.*?\))?\n(?=def )",
-    re.MULTILINE | re.DOTALL,
-)
-
 
 def _pycodecache_kernel_compile_env() -> dict[str, str | None]:
     env_vars = [
@@ -528,9 +521,11 @@ class AsyncCompile:
                 else:
                     size_hints_str = str(None)
 
-                decorator = triton_jit_decorator_regex.search(source_code)
+                # Generated modules may contain JIT helpers before the function
+                # being compiled, so anchor the lookup hash to its definition.
+                kernel_start = source_code.find(f"def {kernel_name}(")
                 triton_src = (
-                    source_code[decorator.end() :] if decorator else source_code
+                    source_code[kernel_start:] if kernel_start >= 0 else source_code
                 )
                 from torch._inductor.runtime.triton_heuristics import (
                     generate_lookup_hash_from_source_code,

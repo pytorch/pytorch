@@ -389,6 +389,10 @@ def triton_user_kernel(in_ptr0, XBLOCK: tl.constexpr):
 """
         source_code = f"""\
 size_hints={{'x': 32}}
+@triton.jit(noinline=True)
+def triton_user_kernel_helper(value):
+    return value + 1
+
 @triton.jit(noinline=True, do_not_specialize=('in_ptr0',))
 {triton_src}"""
         fn_hash = generate_lookup_hash_from_source_code(str({"x": 32}), triton_src)
@@ -410,7 +414,9 @@ size_hints={{'x': 32}}
             AsyncCompile().triton("triton_user_kernel", source_code)
 
         extra_config = process_pool.submit.call_args.args[3]
-        self.assertEqual(extra_config["autotune_lookup_table"], {fn_hash: lookup_config})
+        self.assertEqual(
+            extra_config["autotune_lookup_table"], {fn_hash: lookup_config}
+        )
 
     @requires_gpu()
     @requires_triton()
