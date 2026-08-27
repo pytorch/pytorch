@@ -1717,6 +1717,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             torch.accelerator.synchronize(device)
             torch._dynamo.reset()
             dist.set_timeout(timedelta(seconds=5), pg)
+            dist.barrier()
 
             if self.rank == 0:
                 with fresh_cache():
