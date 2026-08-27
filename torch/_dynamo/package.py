@@ -25,6 +25,7 @@ import platform
 import shutil
 import sys
 import types
+import zlib
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
 from typing import Any, NewType, Optional, TYPE_CHECKING, Union
@@ -170,12 +171,26 @@ class InlinedSource:
     firstlineno: int
     lastlineno: int
     checksum: str
-    content: str
+    _compressed_content: bytes = dataclasses.field(repr=False)
+
+    @property
+    def content(self) -> str:
+        return zlib.decompress(self._compressed_content).decode()
+
+    def __setstate__(self, state: dict[str, object]) -> None:
+        if "content" in state:
+            state = state.copy()
+            content = state.pop("content")
+            if not isinstance(content, str):
+                raise TypeError(f"Expected content to be str, got {type(content)}")
+            state["_compressed_content"] = zlib.compress(content.encode())
+        for name, value in state.items():
+            object.__setattr__(self, name, value)
 
 
 @functools.cache
-def _get_module_content(module: types.ModuleType) -> str:
-    return inspect.getsource(module)
+def _get_compressed_module_content(module: types.ModuleType) -> bytes:
+    return zlib.compress(inspect.getsource(module).encode())
 
 
 @dataclasses.dataclass
@@ -200,7 +215,7 @@ class SourceInfo:
                 firstlineno=firstlineno,
                 lastlineno=lastlineno,
                 checksum=_hash_source(source),
-                content=_get_module_content(module),
+                _compressed_content=_get_compressed_module_content(module),
             )
         )
 
