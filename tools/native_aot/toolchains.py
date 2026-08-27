@@ -327,12 +327,15 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
             with open(path, encoding="utf-8", errors="replace") as f:
                 header = f.read()
         except FileNotFoundError:
-            # ABSENT, which is not the same as unreadable: OSError is deliberately
-            # not caught, so a permission error or a directory in its place still
-            # raises. Nothing that ships gets here -- export re-exports a point whose
-            # header is missing, and generation refuses a sidecar whose artifacts are
-            # not on disk -- so this is the unit-fixture path, where a sidecar dict
-            # stands in for a tree that was never written.
+            # ABSENT, which is not the same as unreadable: OSError is deliberately not
+            # caught, so a permission error or a directory in its place still raises,
+            # and a header that IS there but cannot be parsed is refused below.
+            #
+            # Returning is not an acceptance. The production caller is generation, and
+            # a missing header there means the artifacts this sidecar describes are
+            # gone -- which generation refuses itself ("not on disk") without emitting
+            # a source, so the state this declines to judge is the state its caller
+            # rejects in the same run.
             return
         header = self._ABI_COMMENT.sub(" ", header)
         prefix = sidecar["prefix"]
