@@ -1187,7 +1187,6 @@ class PrecompileSession:
         dynamic: bool | None = None,
         example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
         invariants: str | None = None,
-        keep_only: frozenset[tuple[str, str]] | None = None,
         training: bool = False,
     ) -> None:
         # Not `example_inputs or ()`: truth-testing the caller's object turns the
@@ -1214,10 +1213,10 @@ class PrecompileSession:
         self._fn = fn
         self._backend = backend
         self._custom_guard_filter = guard_filter_fn is not None
-        # The guard slots that DID vary across the capture; every other slot is
-        # dropped. None means serialize everything serializable, which only the
-        # internal capture entry point uses -- precompile() always passes a set.
-        self._keep_only: frozenset[tuple[str, str]] | None = keep_only
+        # Drop, on exit, every guard slot whose value was identical in every
+        # variant of every frame. Off by default: the capture session API
+        # serializes everything serializable, and precompile() turns it on.
+        self._prune_invariant_guards = False
         # A training capture traces with grad on and lowers the backward
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
@@ -1452,6 +1451,9 @@ class PrecompileSession:
                     with self._state:
                         self._state.notify_all()
         self._recorded_exception_keys.clear()
+        # Before the report, so that it describes the artifact actually written.
+        if self._prune_invariant_guards and exc[0] is None:
+            self._apply_guard_policy()
         if self._invariants_path is None:
             return
         if exc[0] is None:
@@ -1467,6 +1469,95 @@ class PrecompileSession:
                 getattr(exc[0], "__name__", exc[0]),
                 self._invariants_path,
             )
+
+    def _apply_guard_policy(self) -> None:
+        """
+        Drop every guard slot whose fact was identical in every variant of every
+        frame. Such a slot discriminates nothing, and most of an artifact's
+        guards are of that kind: on a 62-frame ranking model, 738 of 1207 slots.
+
+        Which slots those are is only knowable once every variant exists, but
+        guards are serialized per compilation, as each one is produced. So the
+        policy is applied afterwards, by re-serializing each frame's guards from
+        the pickle the capture already made. The pickle rather than the live
+        guards: it IS the value snapshot taken at compile time, and a guarded
+        attribute that the model mutates has moved on since.
+        """
+        from torch._dynamo.guards import CheckFunctionManager
+        from torch._dynamo.output_graph import OutputGraphCommon
+        from torch._dynamo.package import load_guards_state, SerializedCode
+
+        keep_only = varying_guard_slots(self._guard_sets)
+        dropped: set[tuple[str, str]] = set()
+
+        def survives(guard_type: str, name: str) -> bool:
+            # An unmodelled guard never enters _guard_sets, so it was never
+            # shown to be constant -- only never analyzed. This policy drops
+            # what it PROVED invariant, so these stay. SHAPE_ENV is the one
+            # that matters: it carries symbolic shape constraints that no
+            # TENSOR_MATCH repeats.
+            return (
+                guard_type in _UNMODELLED_GUARD_TYPES
+                or guard_type in _SHAPE_BEARING_GUARD_TYPES
+                or (guard_type, _normalize(name)) in keep_only
+            )
+
+        def policy(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+            decisions = []
+            for entry in entries:
+                keep = survives(entry.guard_type, entry.name)
+                if not keep:
+                    dropped.add((entry.guard_type, entry.name))
+                decisions.append(keep)
+            return decisions
+
+        for code_entry in self._package.code_entries():
+            # A bypassed frame has no guards to re-serialize.
+            f_code = None
+            for guarded in code_entry.guarded_codes:
+                if f_code is None:
+                    f_code = SerializedCode.to_code_object(code_entry.python_code)
+                loaded = load_guards_state(guarded.guards_state)
+                try:
+                    pruned = CheckFunctionManager(
+                        f_code,
+                        OutputGraphCommon(loaded.output_graph),
+                        shape_code_parts=loaded.shape_code_parts,
+                        runtime_global_scope=None,
+                        guard_build_local_state=getattr(loaded, "local_state", None),
+                        save_guards=True,
+                        # The pickle holds only guards that already survived the
+                        # default and user filters, so the policy is the whole
+                        # filter here; and a failure is an internal bug, not
+                        # something to bypass silently.
+                        serialization_guard_filter_fn=policy,
+                        strict_error=True,
+                    ).guards_state
+                    if pruned is None:
+                        raise AssertionError("save_guards produced no guards_state")
+                except Exception as e:
+                    raise PackageError(
+                        f"precompile: could not re-serialize the guards of "
+                        f"{code_entry.python_code.co_name} while dropping "
+                        f"invariant ones: {type(e).__name__}: {e}"
+                    ) from e
+                guarded.guards_state = pruned
+
+        self._policy_dropped_guards |= dropped
+        # Not "risky": the policy is the caller stating that the environment is
+        # fixed and every variation is in the inputs, so a slot that never
+        # varied is out of the artifact's declared domain rather than an
+        # unchecked hazard.
+        self._kept_guards -= dropped
+        for key, variants in self._guard_sets.items():
+            self._guard_sets[key] = [
+                frozenset(
+                    f
+                    for f in facts
+                    if not f.enforced or survives(f.guard_type, f.source)
+                )
+                for facts in variants
+            ]
 
     def _recording_filter(
         self,
@@ -1487,45 +1578,10 @@ class PrecompileSession:
         def filter_fn(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
             decisions = inner(entries)
             namespaces = _module_namespaces(entries)
-            # A slot whose fact was identical in every variant of every frame
-            # discriminates nothing, so it is not serialized. Recorded apart
-            # from the ordinary drops, which are "could not be serialized";
-            # these could, and were not wanted.
-            policy_dropped: set[int] = set()
-            if self._keep_only is not None:
-                for i, entry in enumerate(entries):
-                    # An unmodelled guard never enters _guard_sets, so it was
-                    # never shown to be constant -- only never analyzed. This
-                    # policy drops what it PROVED invariant, so these stay.
-                    # SHAPE_ENV is the one that matters: it carries symbolic
-                    # shape constraints that no TENSOR_MATCH repeats.
-                    if entry.guard_type in _UNMODELLED_GUARD_TYPES:
-                        continue
-                    if entry.guard_type in _SHAPE_BEARING_GUARD_TYPES:
-                        continue
-                    if (
-                        decisions[i]
-                        and (
-                            entry.guard_type,
-                            _normalize(entry.name),
-                        )
-                        not in self._keep_only
-                    ):
-                        policy_dropped.add(i)
-                decisions = [
-                    keep and i not in policy_dropped for i, keep in enumerate(decisions)
-                ]
             facts: set[_GuardFact] = set()
             undetermined: set[_GuardFact] = set()
-            for i, (keep, entry) in enumerate(zip(decisions, entries)):
+            for keep, entry in zip(decisions, entries):
                 slot = (entry.guard_type, entry.name)
-                if i in policy_dropped:
-                    # Not "risky": the policy is the caller stating that the
-                    # environment is fixed and every variation is in the inputs,
-                    # so a slot that never varied is out of the artifact's
-                    # declared domain rather than an unchecked hazard.
-                    self._policy_dropped_guards.add(slot)
-                    continue
                 target = self._kept_guards if keep else self._dropped_guards
                 target.add(slot)
                 if not keep and (
@@ -2272,7 +2328,6 @@ def precompile_capture(
     dynamic: bool | None = None,
     example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
     invariants: str | None = None,
-    keep_only: frozenset[tuple[str, str]] | None = None,
     training: bool = False,
 ) -> PrecompileSession:
     r"""Begin capturing ``fn`` into a multi-graph artifact.
@@ -2305,7 +2360,6 @@ def precompile_capture(
         dynamic=dynamic,
         example_inputs=example_inputs,
         invariants=invariants,
-        keep_only=keep_only,
         training=training,
     )
 
