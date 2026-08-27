@@ -95,6 +95,7 @@ def gpu_benchmark_lock(fn: Callable[P, T]) -> Callable[P, T]:
 # Values are callables with signature:
 #   fn(self: Benchmarker, _callable: Callable[..., Any], *, warmup: int, rep: int, **kwargs) -> Any
 _BENCHMARK_DISPATCH: dict[str, Callable[..., Any]] = {}
+_GRAPH_BENCHMARK_DISPATCH: dict[str, Callable[..., Any]] = {}
 
 
 def register_benchmarker(
@@ -122,6 +123,33 @@ def register_benchmarker(
             f"Benchmarker for device_type '{device_type}' already registered"
         )
     _BENCHMARK_DISPATCH[device_type] = fn
+
+
+def register_graph_benchmarker(
+    device_type: str,
+    fn: Callable[..., Any],
+    *,
+    override: bool = False,
+) -> None:
+    """Register a graph benchmark handler for one torch.device.type."""
+    if not isinstance(device_type, str) or not device_type:
+        raise ValueError(
+            "device_type must be a non-empty string matching torch.device.type"
+        )
+    if not callable(fn):
+        raise TypeError("fn must be callable")
+    if not override and device_type in _GRAPH_BENCHMARK_DISPATCH:
+        raise ValueError(
+            f"Graph benchmarker for device_type '{device_type}' already registered"
+        )
+    _GRAPH_BENCHMARK_DISPATCH[device_type] = fn
+
+
+def has_graph_benchmarker(device: str | torch.device) -> bool:
+    resolved_device = torch.device(device) if isinstance(device, str) else device
+    if not isinstance(resolved_device, torch.device):
+        raise TypeError(f"Expected torch.device, got {type(resolved_device)}")
+    return resolved_device.type in _GRAPH_BENCHMARK_DISPATCH
 
 
 def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -353,6 +381,32 @@ class Benchmarker:
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
 
+    def benchmark_gpu_with_graph(
+        self: Self,
+        _callable: Callable[[], Any],
+        *,
+        device: str | torch.device,
+        grad_to_none: list[torch.Tensor] | None = None,
+        **kwargs: Any,
+    ) -> float:
+        resolved_device = torch.device(device) if isinstance(device, str) else device
+        if not isinstance(resolved_device, torch.device):
+            raise TypeError(f"Expected torch.device, got {type(resolved_device)}")
+
+        graph_benchmark_fn = _GRAPH_BENCHMARK_DISPATCH.get(resolved_device.type)
+        if graph_benchmark_fn is None:
+            raise RuntimeError(
+                "No graph benchmarker registered for "
+                f"device_type '{resolved_device.type}'"
+            )
+        return graph_benchmark_fn(
+            self,
+            _callable,
+            grad_to_none=grad_to_none,
+            device_type=resolved_device.type,
+            **kwargs,
+        )
+
     @time_and_count
     @gpu_benchmark_lock
     def benchmark_gpu_with_cuda_graph(
@@ -416,6 +470,18 @@ def _default_xpu_bench(self, f, *, warmup, rep, **kw):
 register_benchmarker("cpu", _default_cpu_bench, override=True)
 register_benchmarker("cuda", _default_cuda_bench, override=True)
 register_benchmarker("xpu", _default_xpu_bench, override=True)
+
+
+def _default_cuda_graph_bench(self, f, *, grad_to_none=None, **kw):
+    kw.pop("device_type", None)
+    return self.benchmark_gpu_with_cuda_graph(
+        f,
+        grad_to_none=grad_to_none,
+        **kw,
+    )
+
+
+register_graph_benchmarker("cuda", _default_cuda_graph_bench, override=True)
 
 
 def _get_callable_device_kernel_time_us(
