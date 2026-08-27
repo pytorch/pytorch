@@ -137,6 +137,8 @@ _SUPPORTED_TREE_MAP_KWARGS = frozenset({"namespace", "none_is_leaf", "is_leaf"})
 _TREE_MAP_ONLY_SUPPORTED_KWARGS = frozenset({"is_leaf"})
 
 _TIME_FUNCTION_NAMES = (
+    "clock_gettime",
+    "clock_gettime_ns",
     "monotonic",
     "monotonic_ns",
     "perf_counter",
@@ -147,12 +149,6 @@ _TIME_FUNCTION_NAMES = (
     "thread_time_ns",
     "time",
     "time_ns",
-)
-
-# Capture the available original functions so monkey-patched replacements keep
-# their normal Dynamo handling.
-_TIME_FUNCTIONS: frozenset[Callable[..., Any]] = frozenset(
-    getattr(time, name) for name in _TIME_FUNCTION_NAMES if hasattr(time, name)
 )
 
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
@@ -2494,7 +2490,13 @@ class SkipFunctionVariable(VariableTracker):
                     "Remove the `torch.compiler.disable` call",
                 ],
             )
-        elif self.value in _TIME_FUNCTIONS:
+        # Module-level C functions keep their defining module in read-only
+        # __self__, so this is unaffected by monkey-patched time attributes.
+        elif (
+            type(self.value) is types.BuiltinFunctionType
+            and self.value.__self__ is time
+            and self.value.__name__ in _TIME_FUNCTION_NAMES
+        ):
             time_fn = cast(Callable[..., Any], self.value)
             fn_name = f"time.{time_fn.__name__}"
             unimplemented(
@@ -2506,6 +2508,7 @@ class SkipFunctionVariable(VariableTracker):
                 ),
                 hints=[
                     f"Move the `{fn_name}()` call outside the compiled function if the graph break is undesirable.",
+                    *graph_break_hints.SUPPORTABLE,
                 ],
             )
         elif self.value is torch._dynamo.graph_break:
