@@ -159,7 +159,9 @@ class FusedTwoStage:
         # is None: a sub-row here is wide enough that the direct load is already coalesced.
         # q/npar are the col axis's split args: None here, since an unused Int32 param is
         # not free (see tile.TileReduce.kernel).
-        s1.kernel([mX], parts, s1_nchunks, s1_nwaves, project_n, None, None).launch(
+        s1.kernel(
+            [mX], parts, None, s1_nchunks, s1_nwaves, project_n, None, None
+        ).launch(
             grid=[cute.ceil_div(mX.shape[0], const_expr(s1.rows_per_block)), 1, 1],
             block=[const_expr(s1.nt), 1, 1],
             stream=stream,

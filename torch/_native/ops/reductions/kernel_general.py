@@ -5,7 +5,7 @@
 # drivers that follow (from_partials). `_reduce()` is the dispatcher every reduction
 # enters: it decodes the geometry and routes to the specialized kernels, each of which
 # wires its own branch in as it is introduced:
-#   contiguous last-dim, smem-fits   -> kernel_rowtile   (one-shot)
+#   contiguous last-dim              -> kernel_rowtile   (one-shot; tpr=1 when narrow)
 #   contiguous last-dim, larger N    -> kernel_xcta      (fused cross-CTA split)
 #   prime / awkward N                -> _two_stage_row   (ragged split, K0 body)
 #   dim-0 (columns)                  -> kernel_coltile   (reduced-axis split)
@@ -580,6 +580,7 @@ def _oneshot_ok(x):
 def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
     # Fast path for reduction of the CONTIGUOUS last dim of a 2D problem. Sub-paths;
     # returns the result tuple, or None if not handled:
+    #   narrow N                  -> one thread per row (kernel_rowtile at tpr=1)
     #   smem-safe, load-bounded N -> one-shot (kernel_rowtile, 1 or 2 outputs)
     #   larger N                  -> fused cross-CTA two-stage (reduce_xcta, 1 or 2)
     # The one-shot needs no index remap (the projected index IS the per-row column); the
@@ -594,6 +595,12 @@ def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
         return None
     from . import kernel_rowtile as rt
 
+    # NARROW rows first: with threads packed onto a row, threads_per_row floors at one WARP
+    # (warp_reduce shuffles across a full warp), so a row fewer than WARP vec-chunks wide
+    # leaves most of each warp with nothing to load -- 25% lane utilization at N=32. tpr=1
+    # gives each row one thread, needs no cross-lane merge, and so serves any nouts / trait.
+    if rt.narrow_row(N, x.element_size(), x.shape[0]):
+        return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts, tpr=1)
     if _oneshot_ok(x):
         return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
     from . import kernel_xcta as xc
