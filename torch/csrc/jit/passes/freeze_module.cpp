@@ -779,7 +779,7 @@ class AttributePropagator {
       }
       TORCH_INTERNAL_ASSERT(node->inputs().size() == 1);
       TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
-      // If input type is not a from aten::fork call then the
+      // If input type is not from an aten::fork call then the
       // aten::wait operator can be deleted.
       if (node->input()->type()->kind() != TypeKind::FutureType) {
         node->output()->replaceAllUsesWith(node->input());
