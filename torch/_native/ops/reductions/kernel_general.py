@@ -1,16 +1,14 @@
-# General CuTeDSL reduction kernel (K0) + the dispatcher for the whole fold-
-# reduction taxonomy. K0 is one @cute.kernel that handles ANY geometry (row,
-# column, n-D, transposed, sliced, reduce-all) via a TensorIterator-derived
-# offset decode -- the correctness floor, and the COMBINE engine for the two-stage
-# drivers that follow (from_partials). `_reduce()` is the dispatcher every reduction
-# enters: it decodes the geometry and routes to the specialized kernels, each of which
-# wires its own branch in as it is introduced:
+# The reduction DISPATCHER, plus the plan that drives the shared kernel's GENERAL axis.
+# Every reduction enters `_reduce()`; it decodes the geometry with TensorIterator and routes
+# to one of the shared body's axes (tile.TileReduce -- the only @cute.kernel in the family):
 #   contiguous last-dim              -> kernel_rowtile   (one-shot; tpr=1 when narrow)
 #   contiguous last-dim, larger N    -> kernel_xcta      (fused cross-CTA split)
 #   prime / awkward N                -> _two_stage_row   (ragged split, K0 body)
 #   dim-0 (columns)                  -> kernel_coltile   (reduced-axis split)
 #   every kept extent 1              -> reduce_all
-#   anything only K0 could serve     -> declined to aten by the cond
+#   any other layout                 -> the GENERAL axis (ReduceBlock below), which
+#                                       addresses by TI offset decode and so needs no
+#                                       reshape: nothing is ever declined for its geometry
 #
 # The trait protocol (init/reduce/combine/shfl_down/project, nfields/fdtypes) and
 # the warp_reduce/block_reduce helpers are REUSED UNCHANGED from reduce_traits.
@@ -72,16 +70,16 @@
 
 import math
 
-import cutlass
-import cutlass.cute as cute
-from cutlass import const_expr, Float32, Float64, Int32, Int64
+from cutlass import Float32, Float64, Int32, Int64
 
 import torch
 from torch._tensor_iterator import reduce_op
 
 from .._cutedsl import launch as _L
 from .._cutedsl.plan_cache import cached_plan
-from .._cutedsl.traits import block_reduce, WARP, warp_reduce
+from .._cutedsl.traits import WARP
+from . import tile
+from .tile import _magic
 
 
 class ReduceBlock:
@@ -128,9 +126,29 @@ class ReduceBlock:
         self.from_partials = from_partials
         self.block = block
         self.num_warps = block // WARP
+        # The BODY is the shared kernel's general axis: one block per output, every thread of
+        # it folding that output through the mixed-radix decode. This class is the plan --
+        # the (extent, stride) pairs, the policy flags and the caches -- and owns no kernel.
+        self.tile = tile.TileReduce(
+            trait,
+            None,
+            "general",
+            0,
+            nt=block,
+            nouts=nouts,
+            final=final,
+            combine=from_partials,
+            npairs_red=self.npairs_red,
+            npairs_kept=self.npairs_kept,
+            gidx_from=gidx_from,
+            flat_tail=flat_tail,
+            ragged_chunk=ragged_chunk,
+        )
 
     @property
     def cache_sig(self):
+        # The body's own signature covers every compile-time policy; this adds nothing but
+        # keeps the tuple shape stable for callers that build keys from it.
         # EVERY value baked into the kernel as a const_expr -- now STRUCTURE only.
         # count / num_o / the pair VALUES / in_base / limit / project_n are RUNTIME
         # launch args (grid comes from the output extent), so one compiled kernel
@@ -164,217 +182,10 @@ class ReduceBlock:
             self.project_n,
         )
 
-    @cute.jit
-    def __call__(
-        self,
-        mIns: list,
-        mOuts: list,
-        rvals: list,
-        kvals: list,
-        count: cutlass.Int32,
-        in_base: cutlass.Int64,
-        limit: cutlass.Int64,
-        project_n: cutlass.Int64,
-        stream,
-    ):
-        # Dynamic grid: read the output row count live so one compile serves any M.
-        self.kernel(mIns, mOuts, rvals, kvals, count, in_base, limit, project_n).launch(
-            grid=[mOuts[0].shape[0], 1, 1], block=[self.block, 1, 1], stream=stream
-        )
-
-    @cute.kernel
-    def kernel(
-        self,
-        mIns: list,
-        mOuts: list,
-        rvals: list,
-        kvals: list,
-        count: cutlass.Int32,
-        in_base: cutlass.Int64,
-        limit: cutlass.Int64,
-        project_n: cutlass.Int64,
-    ):
-        trait = self.trait
-        tidx, _, _ = cute.arch.thread_idx()
-        o, _, _ = cute.arch.block_idx()
-        nfields = const_expr(trait.nfields)
-
-        acc = trait.init()
-        # Base flat input offset for this block's KEPT coordinate (decode o
-        # against the kept dims). 0 kept pairs (reduce-all) -> just in_base.
-        obase = in_base
-        if const_expr(self.npairs_kept > 0):
-            obase = in_base + _decode_offset(o, kvals, self.npairs_kept)
-        # Per-block fold bound rb: normally count; with flat_tail (reduce-all
-        # stage 1, red stride 1 by construction) clamp to the elements left before
-        # `limit` so the overhanging last chunk folds nothing out of range. Runtime
-        # value -> the full-wave count n_full is a DYNAMIC loop trip count.
-        # nonzero only under ragged_chunk -- see gidx_from == "chunk"
-        chunk_base = Int32(0)
-        rb = count
-        if const_expr(self.flat_tail):
-            left = limit - obase
-            c64 = cutlass.Int64(count)
-            left = left if left < c64 else c64  # noqa: FURB136 -- no DSL builtin min
-            zero = cutlass.Int64(0)
-            left = left if left > zero else zero  # noqa: FURB136 -- no DSL builtin max
-            rb = cutlass.Int32(left)
-        elif const_expr(self.ragged_chunk):
-            # RAGGED CHUNK SPLIT (stage 1): the reduced run is cut into chunks of `count`
-            # STEPS each, and its extent need not be a multiple of count -- so the LAST chunk
-            # of every output is short and must fold nothing belonging to the next output.
-            # `limit` carries the reduced EXTENT; the chunk pair is the fastest-varying kept
-            # pair, so its magic quad in kvals yields the chunk index with no runtime divide
-            # (see _magic). One such computation per BLOCK, not per element.
-            #
-            # Counted in STEPS of the reduced axis, not elements, so this is independent of
-            # that axis's stride: a contiguous row split (stride 1, count = chunk columns)
-            # and a column split (stride = row length, count = chunk rows) use it unchanged.
-            q = (cutlass.Int64(o) * kvals[0]) >> kvals[1]
-            c = cutlass.Int64(o) - q * kvals[2]
-            cnt = cutlass.Int64(count)
-            chunk_base = Int32(c * cnt)  # this chunk's first step, for gidx
-            left = limit - c * cnt
-            c64 = cutlass.Int64(count)
-            left = left if left < c64 else c64  # noqa: FURB136 -- no DSL builtin min
-            zero = cutlass.Int64(0)
-            left = left if left > zero else zero  # noqa: FURB136 -- no DSL builtin max
-            rb = cutlass.Int32(left)
-        n_full = rb // const_expr(self.block)
-        reduce_fn = trait.reduce  # local bind: attribute access trips a dyn loop
-        acc_dtype = trait.acc  # accumulator dtype (a compile-time Python class)
-        if const_expr(self.from_partials):
-            # Stage-2: COMBINE pre-reduced accumulator tuples from the per-field
-            # partial buffers. Partials for output o are the contiguous run
-            # [obase, obase+count); obase = o*C decoded from kept_pairs (Int64) -- must
-            # offset by it, else every row reads row 0's partials (multi-row bug).
-            #
-            # count is the partial count (for a huge-N reduce-all split, LARGE -- ~1e5).
-            # A range_constexpr(ceil(count/block)) unroll scaled the compile with count
-            # (count=98125 -> ~384-deep unroll -> ~3s compile; the reduce-all backup's
-            # G-chunk was worse). Same fix as the per-axis fold below: a DYNAMIC
-            # full-wave loop (all-in-range, so the constant valid=True doesn't trip the
-            # IR flattener) + a CONSTEXPR remainder. Compile depth is O(1) in count.
-            # Bind trait attributes to locals -- attribute access on `trait` inside a
-            # dynamic loop trips the IR flattener (like reduce_fn above); nfields is a
-            # small python int so a bare-range comprehension is trace-time unrolled and
-            # leaves no trait access in the loop body (range_constexpr can't appear in a
-            # cutlass.range loop).
-            combine_fn = trait.combine
-            fdtypes = trait.fdtypes
-            nf = const_expr(nfields)
-            r = tidx
-            for _ in cutlass.range(n_full):
-                rr = obase + cutlass.Int64(r)
-                part = tuple(fdtypes[f](mIns[f][rr]) for f in range(nf))
-                acc = combine_fn(acc, part)
-                r = r + const_expr(self.block)
-            # count is a runtime value now, so the remainder pass is always emitted
-            # (predicated; a full-wave count just predicates every lane off).
-            valid = r < rb
-            rr = (obase + cutlass.Int64(r)) if valid else in_base
-            part = tuple(fdtypes[f](mIns[f][rr]) for f in range(nf))
-            merged = combine_fn(acc, part)
-            acc = tuple((merged[f] if valid else acc[f]) for f in range(nf))
-        else:
-            # Per-axis fold (flat_tail included: rb is pre-clamped to the elements
-            # before `limit`, so r < rb already implies off < limit -- the old
-            # per-element off guard collapsed into the rb clamp above). The trip
-            # count n_full is a DYNAMIC value: every full wave is all-in-range, so
-            # the loop guard is the python constant True and a cutlass.range loop
-            # compiles (a dynamic per-element `valid` would trip the IR flattener).
-            # Compile depth is O(1) in count; one predicated remainder pass follows.
-            base_r = tidx
-            for _ in cutlass.range(n_full):
-                # Inline the offset (no intermediate name that the DSL would treat
-                # as loop-carried across iterations). acc and base_r are the only
-                # carried values; both are initialized before the loop. The "flat"
-                # gidx recomputes the decode (single-pair there, so it is one mul).
-                if const_expr(self.gidx_from == "flat"):
-                    acc = reduce_fn(
-                        acc,
-                        acc_dtype(
-                            mIns[0][
-                                obase + _decode_offset(base_r, rvals, self.npairs_red)
-                            ]
-                        ),
-                        Int32(obase + _decode_offset(base_r, rvals, self.npairs_red)),
-                        True,
-                    )
-                elif const_expr(self.gidx_from == "chunk"):
-                    # Chunked row: base_r is the index WITHIN this chunk, so the winning
-                    # column is chunk_base + base_r. Inlined like the others -- binding it
-                    # would make the DSL treat it as loop-carried.
-                    acc = reduce_fn(
-                        acc,
-                        acc_dtype(
-                            mIns[0][
-                                obase + _decode_offset(base_r, rvals, self.npairs_red)
-                            ]
-                        ),
-                        chunk_base + base_r,
-                        True,
-                    )
-                else:
-                    acc = reduce_fn(
-                        acc,
-                        acc_dtype(
-                            mIns[0][
-                                obase + _decode_offset(base_r, rvals, self.npairs_red)
-                            ]
-                        ),
-                        base_r,
-                        True,
-                    )
-                base_r = base_r + const_expr(self.block)
-            # Invalid lanes read in_base (always in range) -- obase itself can be
-            # past the end for an overhanging reduce-all chunk (rb clamped to 0).
-            valid = base_r < rb
-            off = obase + _decode_offset(base_r, rvals, self.npairs_red)
-            off_s = off if valid else in_base
-            val = acc_dtype(mIns[0][off_s])
-            # gidx is the argmax index fed to the trait (Int32 domain): "flat" =
-            # the global flat input offset (reduce-all; fits int32 per-chunk).
-            if const_expr(self.gidx_from == "flat"):
-                acc = reduce_fn(acc, val, Int32(off_s), valid)
-            elif const_expr(self.gidx_from == "chunk"):
-                acc = reduce_fn(acc, val, chunk_base + base_r, valid)
-            else:
-                acc = reduce_fn(acc, val, base_r, valid)
-
-        acc = warp_reduce(trait, acc, WARP)
-        if const_expr(self.num_warps > 1):
-            smem = cutlass.utils.SmemAllocator()
-            bufs = [
-                smem.allocate_tensor(
-                    trait.fdtypes[f], cute.make_layout(self.num_warps), byte_alignment=8
-                )
-                for f in range(nfields)
-            ]
-            acc = block_reduce(trait, acc, bufs, self.num_warps)
-
-        if const_expr(self.final):
-            # project (post-op) applied exactly once; store nouts result(s).
-            # project_n is the TRUE reduction size (= count single-stage; = L for
-            # reduce-all stage 2, where count is just the partial count G). A
-            # runtime value: the Int64 -> acc-dtype convert happens in-kernel.
-            result = trait.project(acc, acc_dtype(project_n))
-            if tidx == 0:
-                if const_expr(self.nouts == 1):
-                    mOuts[0][o] = mOuts[0].element_type(result)
-                else:
-                    for k in cutlass.range_constexpr(self.nouts):
-                        mOuts[k][o] = mOuts[k].element_type(result[k])
-        else:
-            # Cross-CTA stage 1: store the RAW (pre-project) accumulator fields.
-            if tidx == 0:
-                for f in cutlass.range_constexpr(nfields):
-                    mOuts[f][o] = trait.fdtypes[f](acc[f])
-
 
 # ---------------------------------------------------------------------------
-# Host plumbing + the geometry chooser. These build ReduceBlock launches; the
-# kernel above is the only @cute.kernel in the whole library.
+# Host plumbing + the geometry chooser. These build the plans that drive the shared
+# kernel body (tile.TileReduce); nothing here is a kernel.
 # ---------------------------------------------------------------------------
 _cute = _L.cute_tensor
 _stream = _L.stream
@@ -413,13 +224,19 @@ def _geom_args(op):
     # const_expr before; the compiled kernel (keyed on the STRUCTURAL cache_sig
     # alone) now takes these per call. The magic form requires linear indices
     # < 2^31; r and o are Int32 by construction, asserted where count/num_o are set.
+    # The order is tile.TileReduce.__call__'s, after mIns/mOuts. The row/col axes' args
+    # (nwaves, q, npar) are None rather than dummy values: an unused Int32 kernel param is
+    # not free (see tile.TileReduce.kernel).
     return (
+        Int32(op.count),
+        None,
+        Int64(op.project_n),
+        None,
+        None,
         _quads(op.red_pairs),
         _quads(op.kept_pairs),
-        Int32(op.count),
         Int64(op.in_base),
         Int64(op.limit),
-        Int64(op.project_n),
     )
 
 
@@ -435,7 +252,7 @@ def _launch(op, key, ins, outs):
             _COMPILE_CACHE,
             key,
             lambda: _compile(
-                op,
+                op.tile,
                 _cute_list(ins, read_only=True),
                 _cute_list(outs),
                 *_geom_args(op),

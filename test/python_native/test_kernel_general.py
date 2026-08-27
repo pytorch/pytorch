@@ -59,6 +59,34 @@ class TestKernelGeneral(TestCase):
         )
         self.assertEqual(idx, torch.full((8,), 40000, device="cuda", dtype=torch.int32))
 
+    def test_family_has_exactly_one_cute_kernel(self):
+        # The unification's claim, asserted rather than described: every axis compiles from the
+        # SAME body. A second @cute.kernel anywhere in the family means an axis has been forked
+        # back out, which is how a shared prologue, projection and store quietly stop being
+        # shared. Source-level on purpose -- there is nothing to introspect until a launch.
+        import pathlib
+
+        from torch._native.ops import reductions
+
+        root = pathlib.Path(reductions.__file__).parent
+        ours = (
+            "tile.py",
+            "kernel_general.py",
+            "kernel_rowtile.py",
+            "kernel_coltile.py",
+            "kernel_xcta.py",
+        )
+        found = [
+            f"{name}:{i}"
+            for name in ours
+            for i, line in enumerate((root / name).read_text().splitlines(), 1)
+            if line.strip() == "@cute.kernel"
+        ]
+        self.assertEqual(
+            len(found), 1, f"expected one kernel in the family, got {found}"
+        )
+        self.assertTrue(found[0].startswith("tile.py"), f"the body moved: {found}")
+
 
 if __name__ == "__main__":
     run_tests()
