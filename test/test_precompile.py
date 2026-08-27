@@ -365,6 +365,20 @@ def _precompile_reads_module_global(x):
     return x * _LUT_MODULE.LUT.sum()
 
 
+class _PrecompileClassA:
+    def f(self, x):
+        return x * 2
+
+
+class _PrecompileClassB:
+    def f(self, x):
+        return x * 100
+
+
+def _precompile_calls_method(obj, x, k):
+    return obj.f(x) + k
+
+
 def _precompile_reads_flag(x):
     return x * getattr(x, "my_flag", 1)
 
@@ -3309,6 +3323,30 @@ class TestPrecompile(TestCase):
                 _LUT_MODULE.LUT = _LUT_MODULE.LUT.double()
                 with self.assertRaisesRegex(RuntimeError, "no captured variant"):
                     loaded(x)
+
+    def test_a_different_class_is_refused_not_served(self):
+        # The invariant-guard policy drops what held across every captured
+        # variant, and TYPE_MATCH used to be in that set: a graph traced for one
+        # class was served another and returned the first one's answer. There is
+        # no shape to crash on, so nothing caught it -- and it shipped at the
+        # strict defaults, since a policy drop is not a risky drop.
+        x = torch.randn(4)
+        a = _PrecompileClassA()
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_calls_method,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                # Two variants differing only in k, so obj's type never varies.
+                example_inputs=[(a, x, 1.0), (a, x, 2.0)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(a, x, 1.0), _precompile_calls_method(a, x, 1.0))
+            with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                loaded(_PrecompileClassB(), x, 1.0)
 
     def test_capture_runs_each_example_once(self):
         # Learning the guard policy from a throwaway first capture would run
