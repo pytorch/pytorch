@@ -6157,8 +6157,7 @@
 - func: flip(Tensor self, int[] dims) -> Tensor
   variants: function, method
   dispatch:
-    CPU, QuantizedCPU, CUDA, QuantizedCUDA, XPU: flip
-    MPS: flip_mps
+    CPU, QuantizedCPU, CUDA, QuantizedCUDA, XPU, MPS: flip
   autogen: flip.out
   tags: core
 
@@ -6640,6 +6639,13 @@
     CPU: _philox_uniform_cpu_
     CUDA: _philox_uniform_cuda_
   autogen: _philox_uniform, _philox_uniform.out
+
+- func: _philox_randint_(Tensor(a!) self, Tensor key, int? low=None, int? high=None) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CPU: _philox_randint_cpu_
+    CUDA: _philox_randint_cuda_
+  autogen: _philox_randint, _philox_randint.out
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
   dispatch:
@@ -14551,7 +14557,7 @@
   variants: function
   structured_delegate: linalg_vector_norm.out
   dispatch:
-    SparseCPU, SparseCUDA, SparseMPS: linalg_vector_norm_sparse
+    SparseCPU, SparseCUDA, SparseMPS, SparseXPU: linalg_vector_norm_sparse
   tags: reduction
 
 - func: linalg_vector_norm.out(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
@@ -14729,7 +14735,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA, MPS: linalg_polar_out
+    CPU, CUDA, MPS, XPU: linalg_polar_out
 
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
   python_module: linalg
@@ -15199,6 +15205,7 @@
 - func: _safe_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: _safe_softmax
+    XPU: _safe_softmax_xpu
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: _safe_softmax
 
 # Apparently, putting "forward" in the name will cause Python bindings to be skipped, so "fwd" it is.

@@ -14,7 +14,7 @@ namespace at::native {
 
 // custom min and max to be used in logcumsumexp for complex arguments
 template <typename scalar_t, bool min>
-__device__ c10::complex<scalar_t> _logcumsumexp_minmax(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
+__host__ __device__ c10::complex<scalar_t> _logcumsumexp_minmax(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
   scalar_t xr = std::real(x);
   scalar_t yr = std::real(y);
   if (::isnan(yr) || (::isnan(std::imag(y)))) {
@@ -29,7 +29,7 @@ __device__ c10::complex<scalar_t> _logcumsumexp_minmax(const c10::complex<scalar
 }
 
 template <typename scalar_t>
-__device__ scalar_t _log_add_exp_helper(const scalar_t& x, const scalar_t& y) {
+__host__ __device__ scalar_t _log_add_exp_helper(const scalar_t& x, const scalar_t& y) {
   // Reference : https://www.tensorflow.org/api_docs/python/tf/math/cumulative_logsumexp
   // Using the original expression: `at::_isnan(y) ? y : std::min(x, y)` causes an error in ROCM
   auto isnan_x = at::_isnan(x);
@@ -46,7 +46,7 @@ __device__ scalar_t _log_add_exp_helper(const scalar_t& x, const scalar_t& y) {
 }
 
 template <typename scalar_t>
-__device__ c10::complex<scalar_t> _fast_build_exp(const c10::complex<scalar_t>& x) {
+__host__ __device__ c10::complex<scalar_t> _fast_build_exp(const c10::complex<scalar_t>& x) {
   // complex exponential function, but implemented manually to get fast compilation time
   // this function only handles the case where the x is finite (not inf nor nan)
   auto xreal = std::real(x);
@@ -54,21 +54,31 @@ __device__ c10::complex<scalar_t> _fast_build_exp(const c10::complex<scalar_t>& 
   auto exp_x_abs = std::exp(xreal);
   scalar_t sin_ximag;
   scalar_t cos_ximag;
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   c10::cuda::compat::sincos(ximag, &sin_ximag, &cos_ximag);
+#else
+  sin_ximag = std::sin(ximag);
+  cos_ximag = std::cos(ximag);
+#endif
   auto exp_x_real = exp_x_abs * cos_ximag;
   auto exp_x_imag = exp_x_abs * sin_ximag;
   return {exp_x_real, exp_x_imag};
 }
 
 template <typename scalar_t>
-__device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::complex<scalar_t>& x) {
+__host__ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::complex<scalar_t>& x) {
   // complex exponential function, but implemented manually to get fast compilation time
   // this function only handles the case where the real part of x is infinite
   auto ximag = std::imag(x);
   auto exp_x_abs = std::numeric_limits<scalar_t>::infinity();
   scalar_t sin;
   scalar_t cos;
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   c10::cuda::compat::sincos(ximag, &sin, &cos);
+#else
+  sin = std::sin(ximag);
+  cos = std::cos(ximag);
+#endif
   // special case if the angle is exactly the multiple of pi/2
   auto exp_x_real = (cos == 0) ? (scalar_t)0.0 : exp_x_abs * cos;
   auto exp_x_imag = (sin == 0) ? (scalar_t)0.0 : exp_x_abs * sin;
@@ -76,7 +86,7 @@ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::complex<scalar_
 }
 
 template <typename scalar_t>
-__device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
+__host__ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
   c10::complex<scalar_t> min = _logcumsumexp_minmax<scalar_t, /*min=*/true>(x, y);
   c10::complex<scalar_t> max = _logcumsumexp_minmax<scalar_t, /*min=*/false>(x, y);
   scalar_t min_real = std::real(min);
@@ -112,7 +122,7 @@ void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase&
       [&]() {
         using opmath_t = at::opmath_type<scalar_t>;
         scalar_t init = -std::numeric_limits<scalar_t>::infinity();
-        auto log_add_exp = [] C10_DEVICE (const scalar_t x_, const scalar_t y_) -> scalar_t {
+        auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x_, const scalar_t y_) -> scalar_t {
           const opmath_t x{x_}, y{y_};
           return _log_add_exp_helper(x, y);
         };

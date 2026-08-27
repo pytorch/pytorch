@@ -1190,7 +1190,11 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
     return result;
   }
   if ((opType == ADDBMM_OP_TYPE && batch1.size(0) == 0) || batch1.size(2) == 0) {
-    at::mul_out(result, input, wrapped_scalar_tensor(beta));
+    if (beta.toComplexDouble() == 0.0) {
+      result.zero_();
+    } else {
+      at::mul_out(result, input, wrapped_scalar_tensor(beta));
+    }
     return result;
   }
 
