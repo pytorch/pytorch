@@ -5546,30 +5546,60 @@ def arange(
     utils.check_pin_memory(pin_memory)
     device = torch.device(utils.device_or_default(device))
 
-    if isinstance(start, complex):
-        raise AssertionError("arange does not support complex start")
-    if isinstance(end, complex):
-        raise AssertionError("arange does not support complex end")
-    if isinstance(step, complex):
-        raise AssertionError("arange does not support complex step")
+    has_complex = (
+        isinstance(start, complex)
+        or isinstance(end, complex)
+        or isinstance(step, complex)
+    )
 
     # Case: torch.arange(5)
     if end is None:
         end = start
         start = 0
     torch._check(step != 0, lambda: "step must be nonzero")
-    if step > 0:
-        torch._check(
-            end >= start,
-            lambda: "upper bound and lower bound inconsistent with step sign",
-        )
-    elif step < 0:
-        torch._check(
-            end <= start,
-            lambda: "upper bound and lower bound inconsistent with step sign",
-        )
+
+    if has_complex:
+        startc = complex(start)
+        endc = complex(end)
+        stepc = complex(step)
+
+        if stepc.real > 0:
+            torch._check(
+                endc.real >= startc.real,
+                lambda: "upper bound and lower bound inconsistent with step sign in real part",
+            )
+        elif stepc.real < 0:
+            torch._check(
+                endc.real <= startc.real,
+                lambda: "upper bound and lower bound inconsistent with step sign in real part",
+            )
+
+        if stepc.imag > 0:
+            torch._check(
+                endc.imag >= startc.imag,
+                lambda: "upper bound and lower bound inconsistent with step sign in imaginary part",
+            )
+        elif stepc.imag < 0:
+            torch._check(
+                endc.imag <= startc.imag,
+                lambda: "upper bound and lower bound inconsistent with step sign in imaginary part",
+            )
+
+    else:
+        if step > 0:  # type: ignore[operator not supported]
+            torch._check(
+                end >= start,  # type: ignore[operator not supported]
+                lambda: "upper bound and lower bound inconsistent with step sign",
+            )
+        elif step < 0:  # type: ignore[operator not supported]
+            torch._check(
+                end <= start,  # type: ignore[operator not supported]
+                lambda: "upper bound and lower bound inconsistent with step sign",
+            )
 
     def is_finite(x):
+        if isinstance(x, complex):
+            return is_finite(x.real) and is_finite(x.imag)
         return not isinstance(x, FloatWithoutSymFloat) or math.isfinite(x)
 
     torch._check(
@@ -5598,8 +5628,25 @@ def arange(
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
+    elif has_complex:
+        real_length = (
+            math.ceil((endc.real - startc.real) / stepc.real)  # type: ignore[possibly-undefined]
+            if stepc.real != 0  # type: ignore[possibly-undefined]
+            else 1
+        )
+        imag_length = (
+            math.ceil((endc.imag - startc.imag) / stepc.imag)  # type: ignore[possibly-undefined]
+            if stepc.imag != 0  # type: ignore[possibly-undefined]
+            else 1
+        )
+        torch._check(
+            real_length == imag_length,
+            "cannot perform step due to incorrect upper and lower bounds",
+        )
+
+        length = real_length
     else:
-        length = math.ceil((end - start) / step)
+        length = math.ceil((end - start) / step)  # type: ignore[operator not supported]
 
     if is_integer and integer_args:
         return prims.iota(
