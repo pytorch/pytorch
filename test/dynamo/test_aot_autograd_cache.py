@@ -489,6 +489,34 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_autocast_region_inside_the_graph_is_cacheable(self):
+        """
+        An autocast region entered inside the traced region.
+
+        Dynamo lands it as _enter_autocast/_exit_autocast call_function nodes.
+        They are module-level torch functions carrying no state, so the graph
+        must cache rather than bypass -- a bypass drops the bundled artifact for
+        the whole graph, not just the autocast part of it.
+        """
+
+        def fn(x):
+            with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+                return (x @ x).sum()
+
+        a = torch.rand(8, 8)
+        compiled_fn = torch.compile(fn, backend="inductor")
+        self.assertEqual(fn(a), compiled_fn(a))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(fn(a), compiled_fn(a))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     def test_basic(self):
         """
         Verify the interactions between FXGraphCache and AOTAutogradCache.
@@ -3769,6 +3797,24 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             BypassAOTAutogradCache, "Unsupported call_function target"
         ):
             check_cacheable(gm)
+
+    def test_call_method_bypass_names_the_method_and_the_receiver(self):
+        graph = torch.fx.Graph()
+        xs = graph.placeholder("xs")
+        item = graph.call_function(operator.getitem, (xs, 0))
+        graph.output(graph.call_method("size", (item,)))
+        gm = torch.fx.GraphModule({}, graph)
+
+        with self.assertRaises(BypassAOTAutogradCache) as ctx:
+            check_cacheable(gm)
+        message = str(ctx.exception)
+        self.assertIn("'size'", message)
+        self.assertIn("'getitem'", message)
+        self.assertIn("example_value", message)
+        # Read off the Node rather than the receiver's value, these reported
+        # torch.fx.node/None for every graph and named no method at all.
+        self.assertNotIn("torch.fx.node", message)
+        self.assertNotIn("Method name: None", message)
 
     def test_numpy_wrapper_cache_key_does_not_cache_unknown_callable_ids(self):
         torch._dynamo.utils._torch_numpy_callable_cache_key_by_id.cache_clear()
