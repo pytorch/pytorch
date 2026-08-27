@@ -377,9 +377,6 @@ def _cvt_e8m0_rceil_aten(inp: Tensor) -> Tensor:
     For MX format scaling, this extracts the exponent with ceiling rounding.
     Uses satfinite semantics: inf is saturated to 254 (max finite e8m0).
     Accepts float32, float16, or bfloat16 (upcasted to float32 internally).
-
-    This is the eager reference for the cvt_e8m0_rceil Inductor prim; the
-    software fallback in lowering.cvt_e8m0_rceil_lowering mirrors it.
     """
     if inp.dtype not in (torch.float32, torch.float16, torch.bfloat16):
         raise ValueError(
@@ -400,9 +397,5 @@ def _cvt_e8m0_rceil_aten(inp: Tensor) -> Tensor:
 cvt_e8m0_rceil = make_prim(
     "inductor_cvt_e8m0_rceil(Tensor input) -> Tensor",
     _cvt_e8m0_rceil_aten,
-    doc=(
-        "Convert float to e8m0 with ceiling rounding. Uses PTX "
-        "cvt.rp.satfinite.ue8m0x2.f32 on NVIDIA SM100+; falls back to a "
-        "software bit-manipulation path on other devices."
-    ),
+    doc="Convert float to e8m0 with ceiling rounding. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on SM100+.",
 )

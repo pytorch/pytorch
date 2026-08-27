@@ -10,11 +10,7 @@ from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwis
 from torch._inductor import metrics
 from torch._inductor.choices import InductorChoices
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import (
-    fresh_inductor_cache,
-    is_nvidia_sm100_or_later,
-    run_and_get_code,
-)
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
@@ -139,14 +135,26 @@ def _rmsnorm_block_scale_swizzle(x, weight, G):
 
 def _rmsnorm_mxfp8_scale_swizzle(x, weight, G):
     import torch.nn.functional as F
-    from torch._inductor import inductor_prims
 
     B, D = x.shape
     x = F.rms_norm(x, (D,), weight)
     x_groups = x.view(B, D // G, G)
     amax = x_groups.abs().float().amax(dim=-1)
     scale = (amax / 448.0).clamp_min(torch.finfo(torch.float32).tiny)
-    scale_u8 = inductor_prims.cvt_e8m0_rceil(scale)
+    if scale.device.type == "cuda":
+        scale_u8 = inline_asm_elementwise(
+            scale,
+            asm_str="cvt.rp.satfinite.ue8m0x2.f32 $0, 0.0, $1;",
+            constraints="=h,r",
+            dtype=torch.uint16,
+        ).to(torch.uint8)
+    else:
+        scale_bits = scale.view(torch.int32)
+        biased_exp = (scale_bits >> 23) & 0xFF
+        mantissa = scale_bits & 0x7FFFFF
+        scale_u8 = torch.clamp(
+            biased_exp + (mantissa != 0).to(torch.int32), max=254
+        ).to(torch.uint8)
     scale_f32 = torch.ldexp(
         torch.ones_like(scale, dtype=torch.float32),
         scale_u8.to(torch.int32) - 127,
@@ -2860,15 +2868,13 @@ class _InternalsBase:
     @skipIfRocm
     @skipIfXpu(msg="MXFP8 inline asm requires CUDA")
     def test_rmsnorm_mxfp8_scale_swizzle_kernel_form(self):
-        if is_nvidia_sm100_or_later(GPU_TYPE):
-            # SM100+ lowers cvt_e8m0_rceil to the PTX instruction; assert it is
-            # emitted exactly once.
+        if GPU_TYPE == "cuda":
+            if torch.cuda.get_device_capability() < (10, 0):
+                self.skipTest("E8M0 inline PTX requires SM100+")
             extra_checks = FileCheck().check_count(
                 "cvt.rp.satfinite.ue8m0x2.f32", 1, exactly=True
             )
         else:
-            # Non-SM100 GPUs use the software fallback: assert the PTX
-            # instruction is absent on both sides of the mantissa mask.
             extra_checks = (
                 FileCheck()
                 .check_not("cvt.rp.satfinite")

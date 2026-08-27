@@ -9666,9 +9666,7 @@ def prepare_softmax_online(x, dim):
 @register_lowering(inductor_prims.cvt_e8m0_rceil, type_promotion_kind=None)
 def cvt_e8m0_rceil_lowering(inp):
     """
-    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on NVIDIA
-    SM100+ CUDA; every other device/backend (XPU, older CUDA, ROCm, CPU) uses a
-    software bit-manipulation fallback matching the eager reference.
+    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on NVIDIA SM100+.
 
     The PTX instruction takes 2 float32 and outputs 2 e8m0 packed in uint16.
     Currently we pass 0.0 as the second input and only use the low byte result.
@@ -9676,48 +9674,31 @@ def cvt_e8m0_rceil_lowering(inp):
     # TODO: Optimize to process pairs (pack=2) by creating a custom Pointwise
     # that loads adjacent elements, applies PTX to both, and uses a follow-up
     # kernel to extract the packed uint16 results as uint8.
+    if not is_nvidia_sm100_or_later():
+        raise NotImplementedError(
+            "cvt_e8m0_rceil requires NVIDIA SM100+ (Blackwell) for PTX instruction support"
+        )
+
     dtype = inp.get_dtype()
     if dtype not in (torch.float32, torch.float16, torch.bfloat16):
         raise ValueError(
             f"cvt_e8m0_rceil requires float32, float16, or bfloat16 input, got {dtype}"
         )
 
-    # Upcast bf16/fp16 to float32
+    # Upcast bf16/fp16 to float32 for PTX instruction
     if dtype != torch.float32:
         inp = to_dtype(inp, torch.float32)
 
-    device = inp.get_device()
-    if (
-        device is not None
-        and device.type == "cuda"
-        and is_nvidia_sm100_or_later(device)
-    ):
-        fn = functools.partial(
-            ops.inline_asm_elementwise,
-            asm="cvt.rp.satfinite.ue8m0x2.f32 $0, 0.0, $1;",
-            constraints="=h,r",
-            dtype=torch.uint16,
-            is_pure=True,
-            pack=1,
-        )
-        result = make_pointwise(fn)(inp)
-        return to_dtype(result, torch.uint8)
-
-    # Software fallback (e.g. XPU, older CUDA, ROCm, CPU): e8m0 is the biased
-    # exponent (bias 127) with ceiling rounding; inf/nan saturate to the max
-    # finite value 254. Bit manipulation on the float32 bits matches the eager
-    # reference _cvt_e8m0_rceil_aten.
-    inp_bits = to_dtype_bitcast(inp, torch.int32)
-    biased_exp = bitwise_right_shift(inp_bits, 23)
-    biased_exp = bitwise_and(biased_exp, 0xFF)
-    mantissa = bitwise_and(inp_bits, 0x7FFFFF)
-    needs_round_up = lowerings[aten.ne](mantissa, 0)
-    needs_round_up = to_dtype(needs_round_up, torch.int32)
-    e8m0 = add(biased_exp, needs_round_up)
-    # biased_exp is in [0, 255] after & 0xFF, so + {0, 1} is never negative; the
-    # min=0 clamp arm is dead but kept to mirror the eager reference.
-    e8m0 = clamp(e8m0, 0, 254)
-    return to_dtype(e8m0, torch.uint8)
+    fn = functools.partial(
+        ops.inline_asm_elementwise,
+        asm="cvt.rp.satfinite.ue8m0x2.f32 $0, 0.0, $1;",
+        constraints="=h,r",
+        dtype=torch.uint16,
+        is_pure=True,
+        pack=1,
+    )
+    result = make_pointwise(fn)(inp)
+    return to_dtype(result, torch.uint8)
 
 
 @register_lowering(
