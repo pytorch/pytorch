@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 
-import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import FakeProcessGroup, FakeStore
 
