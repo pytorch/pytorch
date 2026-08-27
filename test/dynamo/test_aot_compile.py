@@ -4,6 +4,7 @@ import contextlib
 import copy
 import dataclasses
 import functools
+import hashlib
 import inspect
 import multiprocessing as mp
 import os
@@ -843,6 +844,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         )
 
         expected_content = inspect.getsource(sys.modules[__name__])
+        expected_content_hash = hashlib.sha256(expected_content.encode()).hexdigest()
         source_fields = {field.name for field in dataclasses.fields(InlinedSource)}
         self.assertIn("content", source_fields)
         constructed_source = InlinedSource(
@@ -853,6 +855,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             content=expected_content,
         )
         self.assertEqual(constructed_source.content, expected_content)
+        self.assertEqual(constructed_source.content_hash, expected_content_hash)
 
         def check_source_info(source_info: SourceInfo) -> None:
             self.assertIsInstance(source_info, SourceInfo)
@@ -860,6 +863,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             for source in source_info.inlined_sources:
                 self.assertEqual(source.module, __name__)
                 self.assertEqual(source.content, expected_content)
+                self.assertEqual(source.content_hash, expected_content_hash)
                 self.assertNotIn(expected_content, vars(source).values())
 
         source_info = compiled_fn.source_info()
