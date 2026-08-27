@@ -1,14 +1,11 @@
 #include <c10/util/TypeCast.h>
 
-#include <c10/util/Exception.h>
-
 namespace c10 {
 
+// Export c10::report_overflow as C10_API for libtorch ABI. The throw logic
+// lives in torch::headeronly::report_overflow; this wrapper delegates to it.
 [[noreturn]] void report_overflow(const char* name) {
-  std::ostringstream oss;
-  oss << "value cannot be converted to type " << name << " without overflow";
-  // c10::Error rather than domain_error (issue 33562)
-  TORCH_CHECK(false, std::move(oss).str());
+  torch::headeronly::report_overflow(name);
 }
 
 } // namespace c10
