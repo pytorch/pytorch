@@ -1,12 +1,19 @@
 #pragma once
 
 // Complex number math operations that act as no-ops for other dtypes.
-#include <c10/util/complex.h>
-#include <c10/util/MathConstants.h>
-#include<ATen/NumericUtils.h>
+#include <torch/headeronly/util/complex.h>
+#include <torch/headeronly/util/MathConstants.h>
+#include <torch/headeronly/util/NumericUtils.h>
 
-namespace at::native {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly, native)
+// See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
+
+using torch::headeronly::_isnan;
+using torch::headeronly::complex;
+using torch::headeronly::Half;
+using torch::headeronly::is_complex;
+using torch::headeronly::pi;
 
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
 inline VALUE_TYPE zabs (SCALAR_TYPE z) {
@@ -14,22 +21,22 @@ inline VALUE_TYPE zabs (SCALAR_TYPE z) {
 }
 
 template<>
-inline c10::complex<float> zabs <c10::complex<float>> (c10::complex<float> z) {
-  return c10::complex<float>(std::abs(z));
+inline complex<float> zabs <complex<float>> (complex<float> z) {
+  return complex<float>(std::abs(z));
 }
 
 template<>
-inline float zabs <c10::complex<float>, float> (c10::complex<float> z) {
+inline float zabs <complex<float>, float> (complex<float> z) {
   return std::abs(z);
 }
 
 template<>
-inline c10::complex<double> zabs <c10::complex<double>> (c10::complex<double> z) {
-  return c10::complex<double>(std::abs(z));
+inline complex<double> zabs <complex<double>> (complex<double> z) {
+  return complex<double>(std::abs(z));
 }
 
 template<>
-inline double zabs <c10::complex<double>, double> (c10::complex<double> z) {
+inline double zabs <complex<double>, double> (complex<double> z) {
   return std::abs(z);
 }
 
@@ -41,29 +48,29 @@ inline double zabs <c10::complex<double>, double> (c10::complex<double> z) {
 // Note: `nan` is propagated.
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
 inline VALUE_TYPE angle_impl (SCALAR_TYPE z) {
-  if (at::_isnan(z)) {
+  if (_isnan(z)) {
     return z;
   }
-  return z < 0 ? c10::pi<double> : 0;
+  return z < 0 ? pi<double> : 0;
 }
 
 template<>
-inline c10::complex<float> angle_impl <c10::complex<float>> (c10::complex<float> z) {
-  return c10::complex<float>(std::arg(z), 0.0);
+inline complex<float> angle_impl <complex<float>> (complex<float> z) {
+  return complex<float>(std::arg(z), 0.0);
 }
 
 template<>
-inline float angle_impl <c10::complex<float>, float> (c10::complex<float> z) {
+inline float angle_impl <complex<float>, float> (complex<float> z) {
   return std::arg(z);
 }
 
 template<>
-inline c10::complex<double> angle_impl <c10::complex<double>> (c10::complex<double> z) {
-  return c10::complex<double>(std::arg(z), 0.0);
+inline complex<double> angle_impl <complex<double>> (complex<double> z) {
+  return complex<double>(std::arg(z), 0.0);
 }
 
 template<>
-inline double angle_impl <c10::complex<double>, double> (c10::complex<double> z) {
+inline double angle_impl <complex<double>, double> (complex<double> z) {
   return std::arg(z);
 }
 
@@ -73,22 +80,22 @@ constexpr VALUE_TYPE real_impl (SCALAR_TYPE z) {
 }
 
 template<>
-constexpr c10::complex<float> real_impl <c10::complex<float>> (c10::complex<float> z) {
-  return c10::complex<float>(z.real(), 0.0);
+constexpr complex<float> real_impl <complex<float>> (complex<float> z) {
+  return complex<float>(z.real(), 0.0);
 }
 
 template<>
-constexpr float real_impl <c10::complex<float>, float> (c10::complex<float> z) {
+constexpr float real_impl <complex<float>, float> (complex<float> z) {
   return z.real();
 }
 
 template<>
-constexpr c10::complex<double> real_impl <c10::complex<double>> (c10::complex<double> z) {
-  return c10::complex<double>(z.real(), 0.0);
+constexpr complex<double> real_impl <complex<double>> (complex<double> z) {
+  return complex<double>(z.real(), 0.0);
 }
 
 template<>
-constexpr double real_impl <c10::complex<double>, double> (c10::complex<double> z) {
+constexpr double real_impl <complex<double>, double> (complex<double> z) {
   return z.real();
 }
 
@@ -98,22 +105,22 @@ constexpr VALUE_TYPE imag_impl (SCALAR_TYPE /*z*/) {
 }
 
 template<>
-constexpr c10::complex<float> imag_impl <c10::complex<float>> (c10::complex<float> z) {
-  return c10::complex<float>(z.imag(), 0.0);
+constexpr complex<float> imag_impl <complex<float>> (complex<float> z) {
+  return complex<float>(z.imag(), 0.0);
 }
 
 template<>
-constexpr float imag_impl <c10::complex<float>, float> (c10::complex<float> z) {
+constexpr float imag_impl <complex<float>, float> (complex<float> z) {
   return z.imag();
 }
 
 template<>
-constexpr c10::complex<double> imag_impl <c10::complex<double>> (c10::complex<double> z) {
-  return c10::complex<double>(z.imag(), 0.0);
+constexpr complex<double> imag_impl <complex<double>> (complex<double> z) {
+  return complex<double>(z.imag(), 0.0);
 }
 
 template<>
-constexpr double imag_impl <c10::complex<double>, double> (c10::complex<double> z) {
+constexpr double imag_impl <complex<double>, double> (complex<double> z) {
   return z.imag();
 }
 
@@ -123,18 +130,18 @@ inline TYPE conj_impl (TYPE z) {
 }
 
 template<>
-inline c10::complex<at::Half> conj_impl <c10::complex<at::Half>> (c10::complex<at::Half> z) {
-  return c10::complex<at::Half>{z.real(), -z.imag()};
+inline complex<Half> conj_impl <complex<Half>> (complex<Half> z) {
+  return complex<Half>{z.real(), -z.imag()};
 }
 
 template<>
-inline c10::complex<float> conj_impl <c10::complex<float>> (c10::complex<float> z) {
-  return c10::complex<float>(z.real(), -z.imag());
+inline complex<float> conj_impl <complex<float>> (complex<float> z) {
+  return complex<float>(z.real(), -z.imag());
 }
 
 template<>
-inline c10::complex<double> conj_impl <c10::complex<double>> (c10::complex<double> z) {
-  return c10::complex<double>(z.real(), -z.imag());
+inline complex<double> conj_impl <complex<double>> (complex<double> z) {
+  return complex<double>(z.real(), -z.imag());
 }
 
 template <typename TYPE>
@@ -143,19 +150,19 @@ inline TYPE ceil_impl (TYPE z) {
 }
 
 template <>
-inline c10::complex<float> ceil_impl (c10::complex<float> z) {
-  return c10::complex<float>(std::ceil(z.real()), std::ceil(z.imag()));
+inline complex<float> ceil_impl (complex<float> z) {
+  return complex<float>(std::ceil(z.real()), std::ceil(z.imag()));
 }
 
 template <>
-inline c10::complex<double> ceil_impl (c10::complex<double> z) {
-  return c10::complex<double>(std::ceil(z.real()), std::ceil(z.imag()));
+inline complex<double> ceil_impl (complex<double> z) {
+  return complex<double>(std::ceil(z.real()), std::ceil(z.imag()));
 }
 
 template<typename T>
-inline c10::complex<T> sgn_impl (c10::complex<T> z) {
-  if (z == c10::complex<T>(0, 0)) {
-    return c10::complex<T>(0, 0);
+inline complex<T> sgn_impl (complex<T> z) {
+  if (z == complex<T>(0, 0)) {
+    return complex<T>(0, 0);
   } else {
     return z / zabs(z);
   }
@@ -167,13 +174,13 @@ inline TYPE floor_impl (TYPE z) {
 }
 
 template <>
-inline c10::complex<float> floor_impl (c10::complex<float> z) {
-  return c10::complex<float>(std::floor(z.real()), std::floor(z.imag()));
+inline complex<float> floor_impl (complex<float> z) {
+  return complex<float>(std::floor(z.real()), std::floor(z.imag()));
 }
 
 template <>
-inline c10::complex<double> floor_impl (c10::complex<double> z) {
-  return c10::complex<double>(std::floor(z.real()), std::floor(z.imag()));
+inline complex<double> floor_impl (complex<double> z) {
+  return complex<double>(std::floor(z.real()), std::floor(z.imag()));
 }
 
 template <typename TYPE>
@@ -182,13 +189,13 @@ inline TYPE round_impl (TYPE z) {
 }
 
 template <>
-inline c10::complex<float> round_impl (c10::complex<float> z) {
-  return c10::complex<float>(std::nearbyint(z.real()), std::nearbyint(z.imag()));
+inline complex<float> round_impl (complex<float> z) {
+  return complex<float>(std::nearbyint(z.real()), std::nearbyint(z.imag()));
 }
 
 template <>
-inline c10::complex<double> round_impl (c10::complex<double> z) {
-  return c10::complex<double>(std::nearbyint(z.real()), std::nearbyint(z.imag()));
+inline complex<double> round_impl (complex<double> z) {
+  return complex<double>(std::nearbyint(z.real()), std::nearbyint(z.imag()));
 }
 
 template <typename TYPE>
@@ -197,16 +204,16 @@ inline TYPE trunc_impl (TYPE z) {
 }
 
 template <>
-inline c10::complex<float> trunc_impl (c10::complex<float> z) {
-  return c10::complex<float>(std::trunc(z.real()), std::trunc(z.imag()));
+inline complex<float> trunc_impl (complex<float> z) {
+  return complex<float>(std::trunc(z.real()), std::trunc(z.imag()));
 }
 
 template <>
-inline c10::complex<double> trunc_impl (c10::complex<double> z) {
-  return c10::complex<double>(std::trunc(z.real()), std::trunc(z.imag()));
+inline complex<double> trunc_impl (complex<double> z) {
+  return complex<double>(std::trunc(z.real()), std::trunc(z.imag()));
 }
 
-template <typename TYPE, std::enable_if_t<!c10::is_complex<TYPE>::value, int> = 0>
+template <typename TYPE, std::enable_if_t<!is_complex<TYPE>::value, int> = 0>
 inline TYPE max_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a) || _isnan<TYPE>(b)) {
     return std::numeric_limits<TYPE>::quiet_NaN();
@@ -215,7 +222,7 @@ inline TYPE max_impl (TYPE a, TYPE b) {
   }
 }
 
-template <typename TYPE, std::enable_if_t<c10::is_complex<TYPE>::value, int> = 0>
+template <typename TYPE, std::enable_if_t<is_complex<TYPE>::value, int> = 0>
 inline TYPE max_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a)) {
     return a;
@@ -226,7 +233,7 @@ inline TYPE max_impl (TYPE a, TYPE b) {
   }
 }
 
-template <typename TYPE, std::enable_if_t<!c10::is_complex<TYPE>::value, int> = 0>
+template <typename TYPE, std::enable_if_t<!is_complex<TYPE>::value, int> = 0>
 inline TYPE min_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a) || _isnan<TYPE>(b)) {
     return std::numeric_limits<TYPE>::quiet_NaN();
@@ -235,7 +242,7 @@ inline TYPE min_impl (TYPE a, TYPE b) {
   }
 }
 
-template <typename TYPE, std::enable_if_t<c10::is_complex<TYPE>::value, int> = 0>
+template <typename TYPE, std::enable_if_t<is_complex<TYPE>::value, int> = 0>
 inline TYPE min_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a)) {
     return a;
@@ -246,5 +253,22 @@ inline TYPE min_impl (TYPE a, TYPE b) {
   }
 }
 
-} // end namespace
-} //end at::native
+} // namespace CPU_CAPABILITY
+HIDDEN_NAMESPACE_END(torch, headeronly, native)
+
+namespace at::native {
+inline namespace CPU_CAPABILITY {
+using torch::headeronly::native::zabs;
+using torch::headeronly::native::angle_impl;
+using torch::headeronly::native::real_impl;
+using torch::headeronly::native::imag_impl;
+using torch::headeronly::native::conj_impl;
+using torch::headeronly::native::ceil_impl;
+using torch::headeronly::native::sgn_impl;
+using torch::headeronly::native::floor_impl;
+using torch::headeronly::native::round_impl;
+using torch::headeronly::native::trunc_impl;
+using torch::headeronly::native::max_impl;
+using torch::headeronly::native::min_impl;
+} // namespace CPU_CAPABILITY
+} // namespace at::native

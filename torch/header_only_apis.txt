@@ -127,6 +127,30 @@ size
 float2half_scalar
 half2float_scalar
 
+# torch/headeronly/cpu/vec/zmath.h
+zabs
+angle_impl
+real_impl
+imag_impl
+conj_impl
+max_impl
+min_impl
+
+# torch/headeronly/native/Math.h
+calc_erfinv
+calc_digamma
+calc_i0
+calc_i0e
+calc_i1
+calc_i1e
+calc_igamma
+calc_igammac
+chbevl
+polevl
+zeta
+exp2_impl
+calc_gcd
+
 # torch/headeronly/macros/Export.h
 C10_API
 

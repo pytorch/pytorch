@@ -24,6 +24,7 @@ file(GLOB HEADERONLY_HEADERS CONFIGURE_DEPENDS
     cuda/*.h
     cuda/detail/*.h
     macros/*.h
+    native/**/*.h
     util/*.h
 )
 
