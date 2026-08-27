@@ -115,8 +115,6 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
   export CC="riscv64-linux-gnu-gcc-${GCC_VERSION}"
   export CXX="riscv64-linux-gnu-g++-${GCC_VERSION}"
 
-  export SLEEF_TARGET_EXEC_USE_QEMU=ON
-
   # Restrict chown to the workspace and the cross-compile sysroot/venv we
   # actually write into. The workspace path differs by runner: EC2 docker
   # mounts it at /var/lib/jenkins/workspace and GITHUB_WORKSPACE points at
@@ -164,6 +162,32 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
   wget -qO- https://pixi.sh/install.sh | bash
   "${PIXI_HOME}/bin/pixi" global install "libprotobuf==3.21.12"
   export CAFFE2_CUSTOM_PROTOC_EXECUTABLE="${PIXI_HOME}/bin/protoc"
+
+  # SLEEF generates headers with small host tools (mkrename and friends). Its
+  # cross-compilation path imports them from NATIVE_BUILD_DIR; the branch keyed on
+  # SLEEF_TARGET_EXEC_USE_QEMU instead builds them for the target and runs them
+  # under emulation, which is why that variable used to be set here and why it is
+  # not any more (see the protoc note above -- same missing binfmt_misc).
+  #
+  # The option set mirrors aten/src/ATen/CMakeLists.txt so the native build
+  # produces exactly the tools the cross build then imports; SLEEF_BUILD_TESTS and
+  # friends change which host executables exist, so a mismatch here surfaces later
+  # as a missing IMPORTED_LOCATION.
+  SLEEF_NATIVE_BUILD_DIR="${HOME}/sleef-native"
+  cmake -S third_party/sleef -B "${SLEEF_NATIVE_BUILD_DIR}" -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER=gcc \
+      -DSLEEF_BUILD_SHARED_LIBS=OFF \
+      -DSLEEF_BUILD_DFT=OFF \
+      -DSLEEF_BUILD_GNUABI_LIBS=OFF \
+      -DSLEEF_BUILD_TESTS=OFF \
+      -DSLEEF_BUILD_SCALAR_LIB=OFF \
+      -DSLEEF_DISABLE_OPENMP=ON
+  cmake --build "${SLEEF_NATIVE_BUILD_DIR}"
+
+  # NATIVE_BUILD_DIR is a sleef-internal name, so it is passed as a CMake define
+  # rather than added to the environment forwarding in cmake/EnvVarForwarding.cmake.
+  export SKBUILD_CMAKE_DEFINE="NATIVE_BUILD_DIR=${SLEEF_NATIVE_BUILD_DIR}"
 
 elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export USE_CUDA=0
