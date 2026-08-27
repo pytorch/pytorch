@@ -178,12 +178,15 @@ class B2BGEMMTest(TestCase):
         def f(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
             return torch.mm(torch.mm(m1, m2), m3)
 
+        def f_32(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
+            return f(m1.float(), m2.float(), m3.float()).half()
+
         f_opt = torch.compile(f, dynamic=True)
         A = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
         B = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
         C = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
         res = f_opt(A, B, C)
-        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
+        self.assertEqual(f_32(A, B, C), res, atol=0.1, rtol=0.01)
         self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
 
     @torch._dynamo.config.patch(recompile_limit=32)
