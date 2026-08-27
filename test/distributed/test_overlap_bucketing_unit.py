@@ -22,15 +22,9 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    onlyAccelerator,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
@@ -128,8 +122,6 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
         super().tearDownClass()
         dist.destroy_process_group()
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_can_bucket_independent_collectives(self, device):
         """
         Test that independent collectives with separate hiding nodes CAN bucket.
@@ -205,8 +197,6 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
             graph_str
         )
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_cant_bucket_nested_hiding_intervals(self, device):
         """
         Test that nested hiding intervals prevent bucketing.
@@ -294,8 +284,6 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
             graph_str
         )
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     @parametrize("final_mm_hidden", (True, False))
     def test_cant_bucket_ag_with_rs_hiding_interval_between(self, device, final_mm_hidden):
         """
@@ -407,8 +395,6 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
                 "%all_gather_into_tensor_out", 1, exactly=False
             ).run(graph_str)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_can_bucket_all_reduce(self, device):
         """
         Test that all_reduce operations CAN bucket together.
@@ -482,8 +468,6 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
             "split_with_sizes"
         ).check_count("%mm", 2).run(graph_str)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_manual_bucket_splits_dependent_all_reduce(self, device):
         """Bucketing must split dependent same-key all_reduces, not fuse them.
 
@@ -560,8 +544,6 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
         self.assertEqual(len(all_reduces), 2)
         self.assertEqual(len(cats), 2)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_no_cross_type_bucketing_ar_and_rs(self, device):
         """
         Test that all_reduce and reduce_scatter on the same PG with
@@ -639,8 +621,6 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
         )
         self.assertEqual(len(rs_nodes), 1)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_reduce_scatter_coalesced_mode(self, device):
         """
         Test that 'coalesced' bucket mode uses reduce_scatter_tensor_coalesced
@@ -693,8 +673,6 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
         self.assertIn("reduce_scatter_tensor_coalesced", graph_str)
         self.assertNotIn("cat.default", graph_str)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_all_gather_coalesced_mode_falls_back(self, device):
         """
         Test that 'coalesced' bucket mode falls back to default bucketing
@@ -748,8 +726,6 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
         self.assertIn("cat.default", graph_str)
         self.assertNotIn("all_gather_into_tensor_coalesced", graph_str)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_reduce_scatter_coalesced_mode_single_rs(self, device):
         """
         Test that 'coalesced' bucket mode correctly identifies the collective
@@ -802,8 +778,6 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
         graph_str = str(traced.graph)
         self.assertIn("reduce_scatter_tensor", graph_str)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_can_bucket_multidtype_collectives(self, device):
         """
         Test that all_gathers with different dtypes CAN bucket together.
@@ -888,8 +862,6 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
             graph_str
         )
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_can_bucket_with_multiple_hiding_nodes(self, device):
         """
         Test that collectives with multiple hiding nodes CAN bucket.
@@ -979,8 +951,6 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
             str(traced.graph)
         )
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_can_bucket_with_convert_dtype_as_hiding_nodes(self, device):
         """
         Test that all_gathers can bucket when convert_element_type ops ARE the hiding nodes.
@@ -1069,8 +1039,6 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
         f.check("pre_bucket_all_gather").check("all_gather_into_tensor_out")
         f.run(graph_str)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     @torch._inductor.config.patch(deterministic=True)
     def test_deterministic_mode_no_benchmark_error(self, device):
         """
@@ -1107,8 +1075,6 @@ class TestOverlapPreservingBucketingDevice(InductorTestCase):
         # Should not error in deterministic mode (would have errored before fix)
         schedule_overlap_bucketing(gm)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_assume_bucketed_latency_exceeds_exposed_time(self, device):
         """
         When assume_bucketing_reduces_latency is True and two same-type
@@ -1195,8 +1161,6 @@ class TestCrossPGOverlapDevice(InductorTestCase):
         dist.destroy_process_group(cls.pg2)
         dist.destroy_process_group()
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_cross_pg_prefetch_during_exposed_wait(self, device):
         """
         Test that ag2 on PG2 gets prefetched during exposed wait of ag1 on PG1.
@@ -1268,8 +1232,6 @@ class TestCrossPGOverlapDevice(InductorTestCase):
 
         self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_two_queue_scheduling_off_path_nodes(self, device):
         """
         Test that off-path nodes (reduce_scatters whose results don't block compute)
@@ -1344,8 +1306,6 @@ class TestCrossPGOverlapDevice(InductorTestCase):
             f"Off-path reduce_scatters drifted to end: rs={rs_starts}, mm={mm_positions}, names={node_names}",
         )
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     @torch._inductor.config.patch(
         {"test_configs.assume_bucketing_reduces_latency": False}
     )
@@ -1445,8 +1405,6 @@ class TestFusibleNodeOverlapDevice(InductorTestCase):
         super().tearDownClass()
         dist.destroy_process_group()
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_fusible_nodes_hide_collective(self, device):
         """Test that fusible (non-mm) nodes can hide collectives."""
 
@@ -1499,8 +1457,6 @@ class TestFusibleNodeOverlapDevice(InductorTestCase):
             "sub"
         ).check("wait_tensor").run(graph_str)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_fusion_regions_hide_collective(self, device):
         """Test that fusion regions can hide collectives when enabled."""
 
@@ -1549,8 +1505,6 @@ class TestFusibleNodeOverlapDevice(InductorTestCase):
             "sub"
         ).check("wait_tensor").run(graph_str)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     @parametrize("enable_fusion_regions", [False, True])
     def test_precomputed_estimations_via_custom_runtime(self, device, enable_fusion_regions):
         """Pre-computed estimations from gather_node_runtime_estimations can be
@@ -1626,8 +1580,6 @@ class TestOverlapSchedulingFixesDevice(InductorTestCase):
         super().tearDownClass()
         dist.destroy_process_group()
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_no_self_dependency_cycle_with_dtype_conversion(self, device):
         """
         Test that bucketing collectives with dtype conversion doesn't create
@@ -1708,8 +1660,6 @@ class TestOverlapSchedulingFixesDevice(InductorTestCase):
         result = scheduler.run()
         result.graph.lint()
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_no_cycle_with_fusion_regions_and_bucketing(self, device):
         """Test that fusion regions + bucketing doesn't create cycles."""
 
@@ -1785,8 +1735,6 @@ class TestOverlapSchedulingFixesDevice(InductorTestCase):
         result = scheduler.run()
         result.graph.lint()
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_no_cycle_from_dtype_convert_timeline_deps(self, device):
         """
         Test that transfer_erased_node_deps doesn't create cycles when
@@ -1864,8 +1812,6 @@ class TestOverlapSchedulingFixesDevice(InductorTestCase):
             "Cycle: pre_bucket <-> new_start via data + extra deps",
         )
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_graphsafe_rng_state_with_insert_overlap_deps(self, device):
         from torch._inductor.fx_passes.control_dependencies import control_deps
         from torch._inductor.fx_passes.overlap_scheduling import (
@@ -1935,8 +1881,6 @@ class TestForeachGroupsUnit(InductorTestCase):
 
     """Unit tests for _compute_foreach_groups and _pre_bucket_all_gather foreach optimization."""
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_foreach_groups_correctness(self, device):
         """Test that foreach grouping computes correct groups and copies data correctly."""
         from torch._inductor.fx_passes.bucketing import (
@@ -2280,8 +2224,6 @@ class TestCoalescedCollectiveOverlapDevice(InductorTestCase):
 
         return traced
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_identify_collectives_coalesced(self, device):
         """
         _identify_collectives should register one CollectiveInfo per coalesced
@@ -2315,8 +2257,6 @@ class TestCoalescedCollectiveOverlapDevice(InductorTestCase):
         starts = set(scheduler.wait_to_start.values())
         self.assertEqual(len(starts), 1)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_overlap_scheduler_coalesced_runs(self, device):
         """
         Full overlap scheduler run with coalesced collectives should not crash.
@@ -2349,8 +2289,6 @@ class TestCoalescedCollectiveOverlapDevice(InductorTestCase):
         self.assertIn("reduce_scatter_tensor_coalesced", graph_str)
         self.assertIn("wait_tensor", graph_str)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_gather_node_runtime_estimations_coalesced(self, device):
         """
         gather_node_runtime_estimations should estimate coalesced collectives
@@ -2379,8 +2317,6 @@ class TestCoalescedCollectiveOverlapDevice(InductorTestCase):
         }
         self.assertEqual(len(rs_estimations), 1)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_estimate_fx_collective_size_coalesced(self, device):
         """
         estimate_fx_collective_size should handle coalesced collectives
@@ -2423,8 +2359,6 @@ class TestProfileGuidedEstimatorIntegrationDevice(InductorTestCase):
         super().tearDownClass()
         dist.destroy_process_group()
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_estimator_call_on_fx_graph(self, device):
         """ProfileGuidedEstimator returns estimates for collective and mm nodes in a traced graph."""
         group_name = dist.distributed_c10d._get_default_group().group_name
@@ -2515,8 +2449,6 @@ class TestPreBucketingFsdpCollectivesDevice(InductorTestCase):
         super().tearDownClass()
         dist.destroy_process_group()
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_saturation_model(self, device):
         """IB floor activates for small groups; NVLink uses formula; monotonic."""
         from torch._inductor.comm_analysis import (
@@ -2545,8 +2477,6 @@ class TestPreBucketingFsdpCollectivesDevice(InductorTestCase):
         self.assertGreater(sat_nv, 50 * _MB)
         self.assertLess(sat_nv, 200 * _MB)
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_pre_bucketing_only_merges_fsdp_collectives(self, device):
         """Pre-bucketing merges FSDP all-gathers but leaves TP all-gathers alone."""
         from torch._inductor.fx_passes.bucketing import is_all_gather_into_tensor
@@ -2593,8 +2523,6 @@ class TestPreBucketingFsdpCollectivesDevice(InductorTestCase):
         self.assertEqual(count_ag(fsdp_group), 1)  # 2 merged into 1
         self.assertEqual(count_ag(tp_group), 1)  # TP untouched
 
-    @onlyAccelerator
-    @requires_capabilities(Capability.distributed.backend)
     def test_pre_bucketing_handles_dtype_cast(self, device):
         """Parameter -> dtype cast -> all_gather is identified as FSDP."""
         from torch._inductor.fx_passes.bucketing import is_all_gather_into_tensor
