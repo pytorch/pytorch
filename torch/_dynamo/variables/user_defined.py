@@ -5050,38 +5050,6 @@ class UserDefinedSetVariable(UserDefinedObjectVariable, SetVariable):
         super().__init__(value, items=items if items is not None else [], **kwargs)
         self._base_methods = set_methods
 
-    @property
-    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
-        # A SetVariable view sharing this object's (composite) mutation_type.
-        # source must agree with the New/Existing kind (see
-        # VariableTracker.__init__); self.source is assigned late for new
-        # objects, so derive it from the mutation_type.
-        source = (
-            self.source
-            if isinstance(self.mutation_type, ValueMutationExisting)
-            else None
-        )
-        view = SetVariable([], mutation_type=self.mutation_type, source=source)
-        # Share this object's storage (like the list _base_vt) so mutations made
-        # through the view -- e.g. unbound set.add(self, x), which dispatches via
-        # BuiltinVariable(set) -> _base_vt -- land on self.items rather than a
-        # throwaway dict.  Unlike list, SetVariable.__init__ rebuilds its dict, so
-        # the alias must be reinstated after construction.
-        view.items = self.items
-        view.original_items = self.original_items
-        return view
-
-    def tp_init_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # UDOV.tp_init_impl would vectorcall the C set.__init__ against the
-        # throwaway _base_vt view; route to SetVariable's, which populates this
-        # object's storage in place.
-        return SetVariable.tp_init_impl(self, tx, args, kwargs)
-
     def _new_set(self, items: "Iterable[HashableTracker]") -> "SetVariable":
         # A new set built from a set subclass (union, difference, ...) is a plain
         # set in CPython, not the subclass.  Also avoids SetVariable._new_set's
@@ -5125,24 +5093,13 @@ class UserDefinedFrozensetVariable(UserDefinedObjectVariable, FrozensetVariable)
         super().__init__(value, items=items, init_args=init_args, **kwargs)
         self._base_methods = frozenset_methods
 
-    @property
-    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
-        source = (
-            self.source
-            if isinstance(self.mutation_type, ValueMutationExisting)
-            else None
-        )
-        view = FrozensetVariable([], mutation_type=self.mutation_type, source=source)
-        view.items = self.items
-        view.original_items = self.original_items
-        return view
-
     def tp_init_impl(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        check_positional(tx, self.python_type_name(), len(args), 0, 1)
         return FrozensetVariable.tp_init_impl(self, tx, args, kwargs)
 
     def _new_set(self, items: "Iterable[HashableTracker]") -> "FrozensetVariable":
@@ -5170,24 +5127,6 @@ class UserDefinedListVariable(UserDefinedObjectVariable, ListVariable):
     ) -> None:
         super().__init__(value, items=items if items is not None else [], **kwargs)
         self._base_methods = list_methods
-
-    @property
-    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
-        # The composite mutation_type (ValueAndAttributeMutation*) is shared with
-        # this view so content mutations recorded here flow through the object's
-        # own mutation_type.  source must agree with the New/Existing kind (see
-        # VariableTracker.__init__); self.source is assigned late for new objects,
-        # so derive it from the mutation_type rather than reading it directly.
-        source = (
-            self.source
-            if isinstance(self.mutation_type, ValueMutationExisting)
-            else None
-        )
-        return ListVariable(
-            self.items,
-            mutation_type=self.mutation_type,
-            source=source,
-        )
 
     def tp_init_impl(
         self,
@@ -5241,30 +5180,6 @@ class UserDefinedDequeVariable(UserDefinedObjectVariable, DequeVariable):
         )
         self._base_methods = deque_methods
 
-    @property
-    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
-        # A DequeVariable view sharing this object's (composite) mutation_type
-        # and maxlen.  source must agree with the New/Existing kind (see
-        # VariableTracker.__init__); self.source is assigned late for new
-        # objects, so derive it from the mutation_type.
-        source = (
-            self.source
-            if isinstance(self.mutation_type, ValueMutationExisting)
-            else None
-        )
-        # DequeVariable.__init__ copies items (for maxlen truncation), which
-        # would break the shared-storage invariant the delegation relies on
-        # (e.g. deque.__init__ during construction mutates the view's items).
-        # Alias self.items so the view shares storage, matching ListVariable.
-        view = DequeVariable(
-            [],
-            maxlen=self.maxlen,
-            mutation_type=self.mutation_type,
-            source=source,
-        )
-        view.items = self.items
-        return view
-
     # maxlen is a read-only getset; inherited from DequeVariable.tp_getset
     # (reads self.maxlen directly).
 
@@ -5315,23 +5230,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable, TupleVariable):
         super().__init__(value, items=items, init_args=init_args, **kwargs)
         self.tuple_cls = type(value)
         self._base_methods = tuple_methods
-
-    @property
-    def _base_vt(self) -> VariableTracker:  # type: ignore[bad-override]
-        # A TupleVariable view of this object, sharing its (composite)
-        # mutation_type.  source must agree with the New/Existing kind (see
-        # VariableTracker.__init__); self.source is assigned late for new
-        # objects, so derive it from the mutation_type.
-        source = (
-            self.source
-            if isinstance(self.mutation_type, ValueMutationExisting)
-            else None
-        )
-        return TupleVariable(
-            self.items,
-            mutation_type=self.mutation_type,
-            source=source,
-        )
 
     def resolve_data_descriptor(
         self,
