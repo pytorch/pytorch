@@ -1053,9 +1053,6 @@ def forward(self, primals_1):
         x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
         with (
             patch.object(
-                runtime_wrappers, "_dealias_marked_returns", lambda raw, marked: None
-            ),
-            patch.object(
                 graph_compile,
                 "_retrace_backward_for_undefined_grad_outputs",
                 lambda *args: None,
@@ -1101,13 +1098,6 @@ def forward(self, primals_1):
         torch._dynamo.reset()
         x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
         with ExitStack() as stack:
-            stack.enter_context(
-                patch.object(
-                    runtime_wrappers,
-                    "_dealias_marked_returns",
-                    lambda raw, marked: None,
-                )
-            )
             if fallback == "retrace":
                 stack.enter_context(
                     patch.object(
@@ -10081,9 +10071,6 @@ def forward(self, primals_1, tangents_1):
         torch._dynamo.reset()
         x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
         with (
-            patch.object(
-                runtime_wrappers, "_dealias_marked_returns", lambda raw, marked: None
-            ),
             patch.object(
                 graph_compile,
                 "_retrace_backward_for_undefined_grad_outputs",
