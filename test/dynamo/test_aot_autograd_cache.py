@@ -3636,10 +3636,10 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         ):
             compile_fx.compile_fx_backward(gm, [torch.ones(1)], compiler_config_extra)
 
-        self.assertNotIn("cudagraphs_bwd_override", captured_kwargs)
+        self.assertNotIn("cudagraphs_post_compile_override", captured_kwargs)
         self.assertNotIn("cudagraph_partition_only_regions", captured_kwargs)
         self.assertNotIn(
-            "cudagraphs_bwd_override",
+            "cudagraphs_post_compile_override",
             autograd_cache.create_fx_config(compiler_config_extra),
         )
 
@@ -3652,10 +3652,10 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             compile_fx, "wrap_compiler_debug", return_value=capture_compile_kwargs
         ):
             compile_fx.compile_fx_backward(gm, [torch.ones(1)], compiler_config_extra)
-        self.assertIs(captured_kwargs["cudagraphs_bwd_override"], False)
+        self.assertIs(captured_kwargs["cudagraphs_post_compile_override"], False)
 
         fx_config = autograd_cache.create_fx_config(compiler_config_extra)
-        self.assertIs(fx_config["cudagraphs_bwd_override"], False)
+        self.assertIs(fx_config["cudagraphs_post_compile_override"], False)
 
     def test_to_cacheable_strips_runtime_only_fields(self):
         config = self.default_config()
