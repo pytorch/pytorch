@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     _DYNAMO_BACKENDS: dict[str, Callable[[list[object]], object]] = {}
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
     _DYNAMO_STATE: str = ""
+    TRAINING: bool = False
 
     # The compiled/captured graph's entry point, emitted before the driver.
     def call(flat_inputs: list[object]) -> list[object]: ...
@@ -389,6 +390,7 @@ def _build_dynamo_forward():
     import pickle
     import sys
     import types
+    from typing import Any, cast
 
     import torch
     import torch.utils._pytree as _pytree
@@ -667,9 +669,12 @@ def _build_dynamo_forward():
                         isolate_recompiles=True,
                     )
                     compiled = context(fn)
-                    region = context._isolate_recompiles_id
+                    region = context._isolate_recompiles_id  # type: ignore[attr-defined]
                     try:
-                        package.install(backends, isolate_recompiles_id=region)
+                        package.install(
+                            cast("dict[Any, Any]", backends),
+                            isolate_recompiles_id=region,
+                        )
                     except BaseException:
                         package.uninstall()
                         raise
@@ -685,7 +690,10 @@ def _build_dynamo_forward():
                 with self.state:
                     if self.compiled is None or self.unloading:
                         raise RuntimeError("precompile artifact has been unloaded")
-                    if self.package.installed_entries_dropped():
+                    package = self.package
+                    if package is None:
+                        raise AssertionError("installed artifact was not prepared")
+                    if package.installed_entries_dropped():
                         from torch._precompile import PrecompileError
 
                         raise PrecompileError(
@@ -734,14 +742,16 @@ def _build_dynamo_forward():
                     self.region = -1
                 try:
                     try:
-                        package.uninstall()
+                        if package is not None:
+                            package.uninstall()
                     finally:
                         from torch._C._dynamo.eval_frame import (
                             _clear_cache_entries_for_region,
                         )
 
-                        for code in codes:
-                            _clear_cache_entries_for_region(code, region)
+                        if region >= 0:
+                            for code in codes:
+                                _clear_cache_entries_for_region(code, region)
                 finally:
                     with self.state:
                         self.unloading = False
@@ -759,6 +769,7 @@ def _build_dynamo_forward():
             manager = load_guard_manager(guards_state, target, namespace)
             code = SerializedCode.to_code_object(guarded.dynamo_code)
             guarded_variants.append((manager, code))
+
         def bind(closure=None):
             target_function = types.FunctionType(
                 target, namespace, target.co_name, defaults, closure
