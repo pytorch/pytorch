@@ -44,6 +44,7 @@ from torch._C._dynamo.guards import (
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
@@ -99,8 +100,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    skipCUDAIf as skipCUDAIfDeviceType,
-    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -1346,12 +1345,26 @@ def skip_if_no_accelerator(fn):
     return wrapper
 
 
+def _require_device_triton(device):
+    if not has_triton():
+        raise unittest.SkipTest(f"triton is required for {device}")
+    try:
+        device_interface = get_interface_for_device(torch.device(device).type)
+    except NotImplementedError as exc:
+        raise unittest.SkipTest(f"requires Triton support for {device}") from exc
+    if not device_interface.is_triton_capable(device):
+        raise unittest.SkipTest(f"requires Triton support for {device}")
+    try:
+        device_interface.raise_if_triton_unavailable(device)
+    except TritonUnavailableError as exc:
+        raise unittest.SkipTest(str(exc)) from exc
+
+
 def skip_if_no_accelerator_triton(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
         device = accelerator_device(self.device)
-        if not has_triton():
-            raise unittest.SkipTest(f"triton is required for {device}")
+        _require_device_triton(device)
         return fn(self, *args, **kwargs)
 
     return wrapper
@@ -22580,7 +22593,14 @@ if RUN_GPU:
                 torch.testing.assert_close(a, e)
 
 
-class RNNTest(TestCase):
+class _TritonDeviceTestCase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        _require_device_triton(cls.get_primary_device())
+
+
+class RNNTest(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     class Model(torch.nn.Module):
@@ -22591,8 +22611,6 @@ class RNNTest(TestCase):
         def forward(self, x):
             return self.gru(x)
 
-    @skipCUDAIfDeviceType(not has_triton(), "requires Triton")
-    @skipXPUIf(not has_triton(), "requires Triton")
     def test_rnn_compile_safe(self, device):
         model = self.Model().to(device)
         model = torch.compile(model, backend="inductor")
@@ -22600,11 +22618,9 @@ class RNNTest(TestCase):
         model(x)
 
 
-class NanCheckerTest(TestCase):
+class NanCheckerTest(_TritonDeviceTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipCUDAIfDeviceType(not has_triton(), "requires Triton")
-    @skipXPUIf(not has_triton(), "requires Triton")
     @config.patch("nan_asserts", True)
     def test_nan_checker_pass(self, device):
         def f(x):
@@ -22626,8 +22642,6 @@ class NanCheckerTest(TestCase):
             self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
             self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
 
-    @skipCUDAIfDeviceType(not has_triton(), "requires Triton")
-    @skipXPUIf(not has_triton(), "requires Triton")
     @config.patch("nan_asserts", True)
     def test_nan_checker_fail(self, device):
         def f(x):
