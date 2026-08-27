@@ -125,6 +125,124 @@ for input, target in dataset:
     optimizer.step(closure)
 ```
 
+(functional-optimizer-api)=
+
+## Functional optimizer API
+
+Optimizer classes are the recommended interface for most use cases: they own
+optimizer state, read gradients from parameter ``.grad`` attributes, organize
+parameter groups, and provide state-dict integration. The module-level
+functional optimizer APIs are lower-level building blocks for cases where one
+may want to control those details explicitly. For example, a distributed
+training system may apply an update as soon as a gradient becomes available, or
+a caller may choose a different storage dtype for optimizer state to save memory.
+
+Functional optimizer calls update parameters and state tensors according to the
+respective algorithm in place; they are not pure functions. Each tensor list is
+positional, so entries at the same index must be respective to the same parameter.
+When using these functional optimizer APIs, the caller has full control and
+responsibility for creating and retaining state, filtering parameters without
+gradients from every list consistently, and saving and restoring that state.
+
+They are each located in their respective optimizer's module, such as
+{func}`torch.optim.adamw.adamw`:
+
+| Optimizer | Functional API |
+| --- | --- |
+| {class}`Adadelta` | {func}`torch.optim.adadelta.adadelta` |
+| {class}`Adafactor` | {func}`torch.optim.adafactor.adafactor` |
+| {class}`Adagrad` | {func}`torch.optim.adagrad.adagrad` |
+| {class}`Adam` | {func}`torch.optim.adam.adam` |
+| {class}`Adamax` | {func}`torch.optim.adamax.adamax` |
+| {class}`AdamW` | {func}`torch.optim.adamw.adamw` |
+| {class}`ASGD` | {func}`torch.optim.asgd.asgd` |
+| {class}`Muon` | {func}`torch.optim.muon.muon` |
+| {class}`NAdam` | {func}`torch.optim.nadam.nadam` |
+| {class}`RAdam` | {func}`torch.optim.radam.radam` |
+| {class}`RMSprop` | {func}`torch.optim.rmsprop.rmsprop` |
+| {class}`Rprop` | {func}`torch.optim.rprop.rprop` |
+| {class}`SGD` | {func}`torch.optim.sgd.sgd` |
+| {class}`SparseAdam` | {func}`torch.optim.sparse_adam.sparse_adam` |
+
+{class}`LBFGS` does not currently expose a functional API. Its update is
+coupled to repeated closure evaluations and optional line-search orchestration,
+rather than implemented as a standalone functional kernel.
+
+(functional-adamw-bf16-state)=
+
+### AdamW with BF16 optimizer state
+
+One use of the functional API is storing optimizer state in a lower precision
+dtype to save memory, for example storing AdamW's first- and second-moment
+buffers in BF16 while keeping parameters and gradients in FP32. As seen in
+DeepSeek-V3, this optimization halves the memory occupied by the two moment
+buffers. In particular, PyTorch's fused CUDA implementations for Adam and AdamW
+supports loading the BF16 moments, performing the update in FP32, and storing
+the updated moments back in BF16. This can be combined with BF16 autocast for
+forward and backward while the stored model parameters remain FP32.
+
+The following example keeps the optimizer state outside an
+{class}`~torch.optim.Optimizer` and applies the functional update after
+backward:
+
+```python
+import torch
+from torch.optim.adamw import adamw
+
+model = torch.nn.Linear(16, 4, device="cuda", dtype=torch.float32)
+params = list(model.parameters())
+state = [
+    {
+        "step": torch.zeros((), device=p.device, dtype=torch.float32),
+        "exp_avg": torch.zeros_like(p, dtype=torch.bfloat16),
+        "exp_avg_sq": torch.zeros_like(p, dtype=torch.bfloat16),
+    }
+    for p in params
+]
+
+
+def functional_adamw_step():
+    active = [
+        (p, p_state)
+        for p, p_state in zip(params, state, strict=True)
+        if p.grad is not None
+    ]
+    if not active:
+        return
+
+    with torch.no_grad():
+        adamw(
+            params=[p for p, _ in active],
+            grads=[p.grad for p, _ in active],
+            exp_avgs=[p_state["exp_avg"] for _, p_state in active],
+            exp_avg_sqs=[p_state["exp_avg_sq"] for _, p_state in active],
+            max_exp_avg_sqs=[],
+            state_steps=[p_state["step"] for _, p_state in active],
+            fused=True,
+            amsgrad=False,
+            beta1=0.9,
+            beta2=0.999,
+            lr=1e-3,
+            weight_decay=1e-2,
+            eps=1e-8,
+            maximize=False,
+        )
+
+
+inputs = torch.randn(8, 16, device="cuda")
+with torch.autocast("cuda", dtype=torch.bfloat16):
+    loss = model(inputs).square().mean()
+loss.backward()
+functional_adamw_step()
+model.zero_grad(set_to_none=True)
+```
+
+Note that PyTorch only currently supports this specific mixed-dtype fused CUDA path:
+parameters and gradients must be FP32, the moment buffers must be BF16, and the step
+counters must be FP32 tensors on the same device. If ``amsgrad=True``, the caller
+must also create and pass aligned BF16 ``max_exp_avg_sqs`` buffers. Lower-precision
+moments may affect convergence, so validate the choice for the target workload.
+
 (optimizer-algorithms)=
 
 ## Base class
@@ -149,7 +267,51 @@ for input, target in dataset:
     Optimizer.zero_grad
 ```
 
-## Module-level hooks
+## Optimizer step hooks
+
+Optimizer {meth}`~torch.optim.Optimizer.register_step_pre_hook` and
+{meth}`~torch.optim.Optimizer.register_step_post_hook` hooks are useful for
+observing or coordinating work around an optimizer update without taking
+ownership of its state. Typical uses include profiling, memory tracking, and
+recording events before or after the update. A pre-hook may also replace the
+positional and keyword arguments passed to ``step()``. Use a functional
+optimizer API instead when customization requires directly controlling
+optimizer-state tensors or supplying gradients separately from parameter
+``.grad`` attributes.
+
+The following example records information outside the optimizer before and
+after each update. The returned handles can remove the hooks when they are no
+longer needed.
+
+```python
+import torch
+
+parameter = torch.nn.Parameter(torch.tensor(2.0))
+optimizer = torch.optim.SGD([parameter], lr=0.01)
+events = []
+
+
+def record_before_step(optimizer, args, kwargs):
+    events.append(("before", optimizer.param_groups[0]["lr"]))
+
+
+def record_after_step(optimizer, args, kwargs):
+    events.append(("after", optimizer.param_groups[0]["lr"]))
+
+
+pre_handle = optimizer.register_step_pre_hook(record_before_step)
+post_handle = optimizer.register_step_post_hook(record_after_step)
+
+parameter.grad = torch.tensor(0.1)
+optimizer.step()
+
+pre_handle.remove()
+post_handle.remove()
+```
+
+Use {func}`torch.optim.optimizer.register_optimizer_step_pre_hook` and
+{func}`torch.optim.optimizer.register_optimizer_step_post_hook` to register
+hooks that apply to every optimizer instead of one optimizer instance.
 
 ```{eval-rst}
 .. currentmodule:: torch.optim.optimizer

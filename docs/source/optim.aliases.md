@@ -1,6 +1,10 @@
-# Aliases in torch.optim
+# APIs in optimizer submodules
 
-The following are aliases to their counterparts in ``torch.optim`` in the nested namespaces in which they are defined. For any of these APIs, feel free to use the top-level version in ``torch.optim`` like ``torch.optim.Adam`` or the nested version ``torch.optim.adam.Adam``.
+Optimizer classes are available both from ``torch.optim`` and from the nested
+module in which they are defined. For example, ``torch.optim.Adam`` and
+``torch.optim.adam.Adam`` refer to the same class. Functional optimizer APIs,
+such as ``torch.optim.adam.adam``, are available only from the nested modules.
+See :ref:`functional-optimizer-api` for guidance on using them.
 
 ```{eval-rst}
 .. automodule:: torch.optim.adadelta
@@ -11,6 +15,17 @@ The following are aliases to their counterparts in ``torch.optim`` in the nested
 
     Adadelta
     adadelta
+```
+
+```{eval-rst}
+.. automodule:: torch.optim.adafactor
+.. currentmodule:: torch.optim.adafactor
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+    Adafactor
+    adafactor
 ```
 
 ```{eval-rst}
@@ -79,6 +94,17 @@ The following are aliases to their counterparts in ``torch.optim`` in the nested
 ```
 
 ```{eval-rst}
+.. automodule:: torch.optim.muon
+.. currentmodule:: torch.optim.muon
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+    Muon
+    muon
+```
+
+```{eval-rst}
 .. automodule:: torch.optim.nadam
 .. currentmodule:: torch.optim.nadam
 .. autosummary::
@@ -141,4 +167,5 @@ The following are aliases to their counterparts in ``torch.optim`` in the nested
    :nosignatures:
 
     SparseAdam
+    sparse_adam
 ```

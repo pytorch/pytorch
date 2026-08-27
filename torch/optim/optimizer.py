@@ -304,6 +304,13 @@ _differentiable_doc = r"""differentiable (bool, optional): whether autograd shou
 _maximize_doc = r"""maximize (bool, optional): maximize the objective with respect to the
             params, instead of minimizing (default: False)"""
 
+_functional_api_doc = r"""Functional API that performs {optimizer} algorithm computation.
+
+This function updates the provided parameters and optimizer state in place.
+See :ref:`functional-optimizer-api` for the common functional optimizer
+contract and examples, and :class:`~torch.optim.{optimizer}` for algorithm
+details."""
+
 
 def register_optimizer_step_pre_hook(hook: GlobalOptimizerPreHook) -> RemovableHandle:
     r"""Register a pre hook common to all optimizers.
