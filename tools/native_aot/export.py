@@ -127,12 +127,11 @@ def _file_hash(path: str) -> str:
         return hashlib.sha256(f.read()).hexdigest()[:16]
 
 
-# Loaded modules under these prefixes belong in the source closure and are not
-# caught by the tools/*.py glob below: torch._native is the builder's own
-# closure, torchgen.native_aot the shared declaration machinery, and
-# torch._vendor the vendored DSL packages -- which hold real kernel bodies, so
-# without them an edited body left every closure unchanged and a relink shipped
-# kernels compiled from the old source, unreported.
+# Loaded modules whose CONTENTS decide what an exported artifact means, and which
+# the tools/*.py glob below cannot see: torch._native holds the builders,
+# torchgen.native_aot the declaration machinery they are validated against, and
+# torch._vendor the vendored DSL packages -- kernel bodies included. Editing any of
+# them changes what a re-export would produce, so their hashes belong in the closure.
 _CLOSURE_PREFIXES = ("torch._native", "torch._vendor", "torchgen.native_aot")
 
 # Tool sources that cannot change what an artifact MEANS, so hashing them would
@@ -140,7 +139,7 @@ _CLOSURE_PREFIXES = ("torch._native", "torch._vendor", "torchgen.native_aot")
 # gen_aot_lib.py only consumes sidecars, and build_stage2.py only decides whether
 # stage 2 runs -- it passes no kernel-affecting option, the arch list being read
 # here (see main()).
-_CLOSURE_EXCLUDED = ("gen_aot_lib.py", "build_stage2.py")
+_CLOSURE_EXCLUDED = frozenset({"gen_aot_lib.py", "build_stage2.py"})
 
 
 def source_closure(decl_path: str | None = None) -> dict[str, str]:
@@ -466,7 +465,11 @@ def runtimes_current(sidecar: dict) -> bool:
     Ignorance is not staleness: with none of the kind's distributions installed
     this returns True, which is the generation-only run on a machine without the
     DSL wheels, where re-exporting is impossible anyway."""
-    tc = toolchains.get_toolchain(sidecar.get("kind", "cutedsl"))
+    # sidecar["kind"], not a default: both callers reach here past a schema check
+    # that proves the field (export._job_needed's guard, gen_aot_lib's sidecar
+    # validation), and guessing would judge one toolchain's artifact by another's
+    # compiler versions.
+    tc = toolchains.get_toolchain(sidecar["kind"])
     current = runtime_versions(tc.kind)
     # all() over an empty dict is True, so a kind with no RUNTIME_DISTS takes
     # this arm too: nothing whose version could have changed.
