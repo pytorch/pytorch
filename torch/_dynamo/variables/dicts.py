@@ -753,8 +753,10 @@ class ConstDictVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4643-L4658
         self_, other_ = (other, self) if reverse else (self, other)
         if pydict_check(self_) and pydict_check(other_):
-            new = self_.call_method(tx, "copy", [], {})
-            new.call_method(tx, "update", [other_], {})
+            # dict.__or__ copies and merges via internal helpers, bypassing a
+            # subclass's overridden copy/update.
+            new = ConstDictVariable.dict_copy(self_, tx, [], {})
+            ConstDictVariable.dict_update(new, tx, [other_], {})
             return new
         return ConstantVariable.create(NotImplemented)
 
@@ -764,7 +766,9 @@ class ConstDictVariable(VariableTracker):
         other: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4660-L4667
-        self.call_method(tx, "update", [other], {})
+        # dict.__ior__ merges via the internal helper, bypassing a subclass's
+        # overridden update.
+        ConstDictVariable.dict_update(self, tx, [other], {})
         return self
 
     def mp_ass_subscript_impl(
@@ -971,14 +975,16 @@ class OrderedDictVariable(ConstDictVariable):
         # ref: https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L327-L339
         if not issubclass(other.python_type(), dict):
             return ConstantVariable.create(NotImplemented)
+        # Merge via the internal helper, bypassing a subclass's overridden
+        # copy/update while preserving the OrderedDict subclass type.
         if reverse:
             new = VariableTracker.build(tx, self.python_type()).call_function(
                 tx, [other], {}
             )
-            new.call_method(tx, "update", [self], {})
+            ConstDictVariable.dict_update(new, tx, [self], {})
         else:
-            new = self.call_method(tx, "copy", [], {})
-            new.call_method(tx, "update", [other], {})
+            new = ConstDictVariable.dict_copy(self, tx, [], {})
+            ConstDictVariable.dict_update(new, tx, [other], {})
         return new
 
     def reconstruct(self, codegen: "PyCodegen") -> None:

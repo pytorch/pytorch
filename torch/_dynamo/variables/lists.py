@@ -540,8 +540,10 @@ class BaseListVariable(VariableTracker):
             items = unpack_iterable(tx, args[0])
             self.items.extend(items)
         else:
+            # Use the native append, matching CPython's internal list_extend
+            # which bypasses a subclass's overridden append (e.g. immutable_list).
             unpack_and_apply_fn(
-                tx, args[0], lambda item: self.call_method(tx, "append", [item], {})
+                tx, args[0], lambda item: self.list_append(tx, [item], {})
             )
 
         if len(self.items) > sz:
@@ -633,8 +635,10 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        idx = self.call_method(tx, "index", args, kwargs)
-        self.call_method(tx, "pop", [idx], {})
+        # list.remove locates and deletes via internal helpers, bypassing a
+        # subclass's overridden index/pop.
+        idx = BaseListVariable.list_index(self, tx, args, kwargs)
+        BaseListVariable.list_pop(self, tx, [idx], {})
         return ConstantVariable.create(None)
 
     def list_sort(
@@ -1218,7 +1222,9 @@ class ListVariable(BaseListVariable):
         tx.output.side_effects.mutation(self)
         self.items.clear()
         if len(args) == 1:
-            self.call_method(tx, "extend", args, {})
+            # list.__init__ uses the internal C-level extend, which bypasses a
+            # subclass's overridden extend/append (e.g. fx immutable_list).
+            ListVariable.list_extend(self, tx, args, {})
         return ConstantVariable.create(None)
 
     def call_obj_hasattr(
@@ -1340,7 +1346,8 @@ class ListVariable(BaseListVariable):
     ) -> VariableTracker:
         # Implements PySequence_InPlaceConcat for sequences
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L1464-L1472
-        self.call_method(tx, "extend", [other], {})
+        # Uses the native extend, which bypasses a subclass's overridden extend.
+        ListVariable.list_extend(self, tx, [other], {})
         return self
 
     def is_hashable(self) -> bool:
@@ -1469,6 +1476,22 @@ class DequeVariable(BaseListVariable):
     def python_type(self) -> type:
         return collections.deque
 
+    def _new_list(
+        self,
+        items: list[VariableTracker],
+        mutation_type: MutationType | None = None,
+    ) -> "DequeVariable":
+        # deque repeat (sq_repeat) is the only caller; deque has no slicing.
+        # CPython returns a fresh mutable deque that copies maxlen from the
+        # left operand (__init__ truncates to the last maxlen items). Return a
+        # base deque, matching sq_concat_impl, rather than type(self)(items),
+        # which would misfire on a subclass VT's (value, items) constructor.
+        return DequeVariable(
+            items,
+            maxlen=self.maxlen,
+            mutation_type=ValueMutationNew(),
+        )
+
     def sq_item_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -1536,7 +1559,8 @@ class DequeVariable(BaseListVariable):
     ) -> VariableTracker:
         # Implements PySequence_InPlaceConcat for deque
         # ref: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L572-L584
-        self.call_method(tx, "extend", [other], {})
+        # Uses the native extend, which bypasses a subclass's overridden extend.
+        DequeVariable.extend(self, tx, [other], {})
         return self
 
     def sq_inplace_repeat_impl(
@@ -1685,8 +1709,9 @@ class DequeVariable(BaseListVariable):
             return None
         # NOTE this is inefficient, but the alternative is to represent
         # self.items as a deque, which is a more intrusive change.
+        # Use the native appendleft, bypassing a subclass's overridden appendleft.
         unpack_and_apply_fn(
-            tx, args[0], lambda item: self.call_method(tx, "appendleft", [item], {})
+            tx, args[0], lambda item: DequeVariable.appendleft(self, tx, [item], {})
         )
         self._clamp_maxlen("left")
         return ConstantVariable.create(None)
@@ -1837,7 +1862,9 @@ class DequeVariable(BaseListVariable):
         self.maxlen = new_maxlen
         self.items.clear()
         if iterable is not None:
-            self.call_method(tx, "extend", [iterable], {})
+            # deque_init extends via the native path, bypassing a subclass's
+            # overridden extend.
+            DequeVariable.extend(self, tx, [iterable], {})
         return ConstantVariable.create(None)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
