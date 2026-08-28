@@ -9,6 +9,9 @@ from ..common import (
 
 
 class XPUDeviceOpOverrides(DeviceOpOverrides):
+    def uses_gpu_cpp_wrapper(self) -> bool:
+        return True
+
     def import_get_raw_stream_as(self, name: str) -> str:
         return f"from torch._C import _xpu_getCurrentRawStream as {name}"
 
@@ -20,6 +23,9 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
 
     def device_guard(self, device_idx: DeviceIdx) -> str:
         return f"torch.xpu._DeviceGuard({device_idx})"
+
+    def current_device_idx_expr(self) -> str:
+        return "torch.xpu.current_device()"
 
     def current_stream(self) -> str:
         return "torch.xpu.current_stream()"

@@ -14,7 +14,6 @@
 #include <unordered_set>
 
 #include <ATen/Context.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/env.h>
@@ -25,7 +24,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 
 namespace c10d::nccl2 {
 
@@ -308,7 +306,13 @@ void ProcessGroupNCCL::initFromComm(
 }
 
 void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
-  ensureInitialized(device);
+  checkInitialized();
+  TORCH_CHECK(
+      device == device_,
+      "ProcessGroupNCCL is bound to device ",
+      device_,
+      " but split was requested on ",
+      device);
   auto opts = Options::create(options_c10d_->is_high_priority_stream);
   opts->timeout = options_c10d_->timeout;
   opts->config = cloneNcclConfig(options_c10d_->config);
@@ -341,16 +345,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
       ncclOpts != nullptr,
       "ProcessGroupNCCL::split: opts is not a nccl2 ProcessGroupNCCL::Options");
 
-  // ncclCommSplit is collective over the parent communicator, so the parent
-  // must be initialized before we split. All parent ranks call split(), so a
-  // lazy bootstrap here stays in lockstep. Resolve a device the same way the
-  // lazy collective path does.
-  if (init_state_ != InitializationState::INITIALIZED) {
-    at::Device dev = getBoundDeviceId().has_value()
-        ? getBoundDeviceId().value()
-        : at::Device(at::kCUDA, at::cuda::current_device());
-    ensureInitialized(dev);
-  }
+  checkInitialized();
   checkAndAbortIfTimedOutOrError();
 
   // Determine this rank's color and its rank within the child communicator.
@@ -1721,7 +1716,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
 
   // A synchronous barrier host-blocks the CPU thread in synchronizeInternal(),
   // matching stock ProcessGroupNCCL; async barriers stay stream-ordered.
-  work->hostBlocking_ = !async_op;
+  work->setHostBlocking(!async_op);
 
   // Record start event before NCCL operation
   work->recordStart("barrier");

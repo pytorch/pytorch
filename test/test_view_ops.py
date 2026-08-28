@@ -12,7 +12,6 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
     instantiate_device_type_tests,
-    onlyCPU,
     skipLazy,
     skipMeta,
     skipMPS,
@@ -30,6 +29,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     gradcheck,
     gradgradcheck,
+    HardwareClassification,
     IS_FBCODE,
     numpy_to_torch_dtype_dict,
     run_tests,
@@ -95,6 +95,7 @@ def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
 # Tests ops and indexing to ensure they return views (and new tensors) as
 # appropriate.
 class TestViewOps(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
     def is_view_of(self, base, other):
@@ -472,7 +473,7 @@ class TestViewOps(TestCase):
     def test_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(TypeError):
             torch.imag(t)
 
     @skipLazy
@@ -1104,6 +1105,9 @@ class TestViewOps(TestCase):
             self.assertEqual(result, expected)
             self.assertTrue(result.is_contiguous())
 
+            # The movedim/flatten reference below requires a non-negative dim.
+            gather_dim = gather_dim % x.dim()
+
             # Check that whether result is a view matches the movedim reference implementation
             # Reference: chunks = torch.unflatten(x, 0, [group_size, -1])
             #            ref = torch.flatten(torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1)
@@ -1136,9 +1140,41 @@ class TestViewOps(TestCase):
         test_config((4, 8, 6, 10), group_size=4, gather_dim=2)  # 4D, gather_dim=2
         test_config((4, 8, 6, 10), group_size=4, gather_dim=3)  # 4D, gather_dim=3
         test_config((8, 4, 6), group_size=8, gather_dim=1)  # group_size=8
+        test_config((4, 16), group_size=4, gather_dim=-1)  # negative dim, view case
+        test_config((4, 2, 8), group_size=4, gather_dim=-1)  # negative dim, cat case
+        test_config((4, 8, 16), group_size=4, gather_dim=-3)  # negative dim, no-op case
 
 
 class TestOldViewOps(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @skipIfTorchDynamo("conj bit not implemented in TensorVariable yet")
+    def test_conj_neg_view_numpy_error(self):
+        self.assertRaisesRegex(
+            RuntimeError,
+            "has conjugate bit set",
+            lambda: torch.tensor([1 + 2j]).conj().numpy(),
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "has negative bit set",
+            lambda: torch.tensor([1 + 2j]).conj().imag.numpy(),
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "not supported for conjugate view tensors",
+            lambda: torch.tensor([1 + 2j]).conj().view(torch.float64),
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "not supported for tensors with negative bit set",
+            lambda: torch.tensor([1 + 2j]).conj().imag.view(torch.int32),
+        )
+
+
+class TestOldViewOpsDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipXPUIf(
         True,
         "NotImplementedError with test_ravel, https://github.com/intel/torch-xpu-ops/issues/2358",
@@ -2129,30 +2165,6 @@ class TestOldViewOps(TestCase):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             self.assertEqual(x.view(6).shape, [6])
 
-    @skipIfTorchDynamo("conj bit not implemented in TensorVariable yet")
-    @onlyCPU
-    def test_conj_neg_view_numpy_error(self, device):
-        self.assertRaisesRegex(
-            RuntimeError,
-            "has conjugate bit set",
-            lambda: torch.tensor([1 + 2j]).conj().numpy(),
-        )
-        self.assertRaisesRegex(
-            RuntimeError,
-            "has negative bit set",
-            lambda: torch.tensor([1 + 2j]).conj().imag.numpy(),
-        )
-        self.assertRaisesRegex(
-            RuntimeError,
-            "not supported for conjugate view tensors",
-            lambda: torch.tensor([1 + 2j]).conj().view(torch.float64),
-        )
-        self.assertRaisesRegex(
-            RuntimeError,
-            "not supported for tensors with negative bit set",
-            lambda: torch.tensor([1 + 2j]).conj().imag.view(torch.int32),
-        )
-
     def test_crow_col_indices(self, device):
         crow_indices = (0, 1, 2)
         col_indices = (1, 0)
@@ -2170,7 +2182,7 @@ class TestOldViewOps(TestCase):
 instantiate_device_type_tests(
     TestViewOps, globals(), include_lazy=True, allow_mps=True, allow_xpu=True
 )
-instantiate_device_type_tests(TestOldViewOps, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestOldViewOpsDeviceType, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
