@@ -344,7 +344,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         stream = to_cuda_stream(stream)
         compiled_gemm = compiled_artifact.compiled_obj
 
-        # TVM FFI needs a torch.cuda.Stream, not a raw int handle
+        # TVM FFI needs a torch.cuda.Stream, not a raw stream handle.
         if not isinstance(stream, torch.cuda.Stream):
             stream = torch.cuda.ExternalStream(int(stream))
 

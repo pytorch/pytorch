@@ -39,14 +39,11 @@
 #include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/utils/tensor_dtypes.h>
 
 #include <torch/csrc/autograd/function.h>
 #include <functional>
 #include <memory>
-#include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -79,21 +76,6 @@ inline void check_legacy_fn_attr_access(
       "is a legacy access pattern that is no longer supported. For examples "
       "on how to use new‑style autograd functions, see "
       "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
-}
-
-// TODO: We shouldn't need to call this function because the engine
-// can already persist the errors for us. This still seems to be
-// needed for the DistEngine however.
-//
-// python test/distributed/rpc/test_tensorpipe_agent.py -k
-// test_backward_autograd_engine_error
-//
-// See Note [ Persisting PyErr state across autograd engine threads ]
-void throw_python_error() {
-  python_error err;
-  err.persist();
-  // NOLINTNEXTLINE(hicpp-exception-baseclass)
-  throw std::move(err);
 }
 
 PyObject* materialize_needs_input_grad(THPFunction* self) {

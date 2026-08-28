@@ -5,6 +5,7 @@ import dataclasses
 import importlib
 import logging
 import math
+import operator
 import struct
 import sys
 import unittest
@@ -5701,6 +5702,90 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             "local_reduce_finalize_fn"
         ).run(code)
         self.assertLocalReduceAuxCode(code, group)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_inline_asm_three_outputs(self):
+        m = k = n = 64
+
+        def epilogue_fn(acc):
+            first, second, third = inline_asm_elementwise(
+                acc.float(),
+                asm_str=("mov.f32 $0, $3; add.f32 $1, $3, $3; mul.f32 $2, $3, $3;"),
+                constraints="=f,=f,=f,f",
+                dtype=(torch.float32, torch.float32, torch.float32),
+            )
+            return first + second + third
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        expected_input = (a @ b).float()
+        expected = expected_input * 3 + expected_input.square()
+        self.assertEqual(actual, expected)
+        self.assertEqual(code.count("inline_asm_elementwise_intrinsic("), 1)
+
+    @skipIfNoCuteDSL
+    def test_mm_inline_asm_three_outputs_codegen(self):
+        from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
+            analyze_flex_gemm_epilogue,
+            gemm_node,
+            materialize_flex_gemm_epilogue,
+        )
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+        a.meta["val"] = torch.empty(4, 8)
+        b.meta["val"] = torch.empty(8, 16)
+        acc = graph.call_function(torch.ops.aten.mm.default, (a, b))
+        acc.meta["val"] = torch.empty(4, 16)
+        asm = graph.call_function(
+            inline_asm_elementwise,
+            (acc,),
+            {
+                "asm_str": ("mov.f32 $0, $3; add.f32 $1, $3, $3; mul.f32 $2, $3, $3;"),
+                "constraints": "=f,=f,=f,f",
+                "dtype": (torch.float32, torch.float32, torch.float32),
+            },
+        )
+        asm.meta["val"] = tuple(torch.empty(4, 16) for _ in range(3))
+        outputs = []
+        for index in range(3):
+            output = graph.call_function(operator.getitem, (asm, index))
+            output.meta["val"] = torch.empty(4, 16)
+            outputs.append(output)
+        first_sum = graph.call_function(
+            torch.ops.aten.add.Tensor, (outputs[0], outputs[1])
+        )
+        first_sum.meta["val"] = torch.empty(4, 16)
+        result = graph.call_function(torch.ops.aten.add.Tensor, (first_sum, outputs[2]))
+        result.meta["val"] = torch.empty(4, 16)
+        graph.output(result)
+        graph_module = torch.fx.GraphModule({}, graph)
+        analysis = analyze_flex_gemm_epilogue(
+            graph_module, gemm_node(graph_module, torch.ops.aten.mm.default)
+        )
+        _, source = materialize_flex_gemm_epilogue(graph_module, analysis)
+
+        self.assertEqual(source.count("inline_asm_elementwise_intrinsic("), 1)
+        FileCheck().check("tmp0, tmp1, tmp2 = inline_asm_elementwise_intrinsic(").check(
+            "result_type=(cutlass.Float32, cutlass.Float32, cutlass.Float32)"
+        ).check("tmp3 = (tmp0 + tmp1)").check("tmp4 = (tmp3 + tmp2)").check(
+            "return tmp4"
+        ).run(source)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
