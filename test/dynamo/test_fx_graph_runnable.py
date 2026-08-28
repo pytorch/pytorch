@@ -14,10 +14,7 @@ from torch._inductor.codecache import WritableTempFile
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_FBCODE,
@@ -124,6 +121,10 @@ if has_triton():
     ):
         tl.static_print(f"SCALE={GLOBAL_SCALE_CONSTEXPR}")
         ref_global(x_ptr, output_ptr, n_elements, BLOCK_SIZE)
+
+
+from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 class FxGraphRunnableArtifactFilter(logging.Filter):
@@ -621,7 +622,6 @@ class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @unittest.skipUnless(has_triton(), "Triton not available")
-    @onlyAccelerator
     def test_user_defined_triton_kernel_autotune(self, device):
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
@@ -642,7 +642,6 @@ class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
         self._exec_and_verify_payload()
 
     @unittest.skipUnless(has_triton(), "Triton not available")
-    @onlyAccelerator
     def test_user_defined_triton_kernel(self, device):
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
@@ -657,7 +656,6 @@ class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
         self._exec_and_verify_payload()
 
     @unittest.skipUnless(has_triton(), "Triton not available")
-    @onlyAccelerator
     def test_user_defined_nested_triton_kernel(self, device):
         def subtract_nested(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.empty_like(x)
@@ -674,7 +672,6 @@ class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
         self._exec_and_verify_payload()
 
     @unittest.skipUnless(has_triton(), "Triton not available")
-    @onlyAccelerator
     def test_nested_and_autotuned_same_kernel(self, device):
         def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output1 = torch.empty_like(x)
@@ -697,7 +694,6 @@ class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
         self._exec_and_verify_payload()
 
     @unittest.skipUnless(has_triton(), "Triton not available")
-    @onlyAccelerator
     def test_multi_kernel_nesting_and_global_constexpr(self, device):
         def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             n_elements = x.numel()
@@ -728,7 +724,12 @@ class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
         torch.compile(f)(x, y)  # noqa: UNSPECIFIED_BACKEND
         self._exec_and_verify_payload()
 
-instantiate_device_type_tests(FxGraphRunnableTritonCudaTest, globals())
+instantiate_device_type_tests(
+    FxGraphRunnableTritonCudaTest,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
