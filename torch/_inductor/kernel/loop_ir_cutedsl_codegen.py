@@ -11,6 +11,7 @@ from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
 
+from .gemm_epilogue import GemmEpiloguePlan
 from .gemm_epilogue_codegen import (
     GemmEpilogueCuteDSLKernel,
     GemmEpilogueCuteDSLOpOverrides,
@@ -27,6 +28,7 @@ class LoopIRCuteDSLCodegen:
         self.kernel = GemmEpilogueCuteDSLKernel()
         self.reads: OrderedSet[str] = OrderedSet()
         self.input_values: dict[str, CuteDSLCSEVariable] = {}
+        self.replacements: dict[int, CuteDSLCSEVariable] = {}
         self.accumulator_value = CuteDSLCSEVariable(
             "accum", ValueRanges.unknown(), dtype=torch.float32, shape=(1,)
         )
@@ -45,6 +47,8 @@ class LoopIRCuteDSLCodegen:
         return self.input_values[name]
 
     def lower(self, value: Any) -> Any:
+        if replacement := self.replacements.get(id(value)):
+            return replacement
         if not isinstance(value, GemmEpilogueIRExpression):
             if isinstance(value, tuple):
                 return tuple(self.lower(item) for item in value)
@@ -69,7 +73,7 @@ class LoopIRCuteDSLCodegen:
 
     def render(
         self, buffers: Sequence[ComputedBuffer], fn_name: str
-    ) -> tuple[list[str], list[str], dict[str, str], str]:
+    ) -> GemmEpiloguePlan:
         analysis = GemmEpilogueIRAnalysis.from_buffers(buffers)
         outputs: list[tuple[str, Any]] = []
         if self.accumulator not in self.removed_buffers:
@@ -93,7 +97,13 @@ class LoopIRCuteDSLCodegen:
         source = (
             f"def {fn_name}({params}):\n{body}\n    return {', '.join(result_names)}"
         )
-        return list(self.reads), [name for name, _ in outputs], renames, source
+        return GemmEpiloguePlan(
+            source=source,
+            is_cutedsl=True,
+            reads=tuple(self.reads),
+            writes=tuple(name for name, _ in outputs),
+            renames=renames,
+        )
 
     @classmethod
     def from_buffers(
@@ -102,10 +112,67 @@ class LoopIRCuteDSLCodegen:
         buffers: Sequence[ComputedBuffer],
         removed_buffers: OrderedSet[str],
         fn_name: str,
-    ) -> tuple[list[str], list[str], dict[str, str], str]:
+    ) -> GemmEpiloguePlan:
         codegen = cls(accumulator, removed_buffers)
         with (
             V.set_kernel_handler(codegen.kernel),
             V.set_ops_handler(GemmEpilogueCuteDSLOpOverrides()),
         ):
             return codegen.render(buffers, fn_name)
+
+    @classmethod
+    def consumer_from_buffer(
+        cls,
+        accumulator_name: str,
+        reduction_name: str | None,
+        buffer: ComputedBuffer,
+        fn_name: str,
+        group: int | None = None,
+    ) -> str:
+        removed = OrderedSet((accumulator_name,))
+        if reduction_name is not None:
+            removed.add(reduction_name)
+        codegen = cls(accumulator_name, removed)
+        codegen.accumulator_value = CuteDSLCSEVariable(
+            "accumulator", ValueRanges.unknown(), dtype=torch.float32, shape=(1,)
+        )
+        codegen.accumulator_value.is_scalar_expr = True
+        reduction_value = CuteDSLCSEVariable(
+            "primary_reduction", ValueRanges.unknown(), dtype=torch.float32, shape=(1,)
+        )
+        reduction_value.is_scalar_expr = True
+        analysis = GemmEpilogueIRAnalysis.from_buffers((buffer,))
+        store = analysis.store(buffer.get_name())
+        if store is None:
+            raise NotImplementedError("CuTeDSL reduction consumer has no output")
+        if reduction_name is not None:
+            codegen.input_values[reduction_name] = reduction_value
+        elif group is not None:
+            region = analysis.reduction_region(
+                buffer.get_name(),
+                accumulator_name,
+                group,
+                V.graph.get_dtype(accumulator_name),
+            )
+            if region is None or len(region.reductions) != 1:
+                raise NotImplementedError(
+                    "CuTeDSL consumer needs exactly one synthetic reduction"
+                )
+            codegen.replacements[id(region.reductions[0].source)] = reduction_value
+        with (
+            V.set_kernel_handler(codegen.kernel),
+            V.set_ops_handler(GemmEpilogueCuteDSLOpOverrides()),
+        ):
+            result = codegen.lower(store.value)
+        if reduction_name is not None:
+            codegen.reads.discard(reduction_name)
+        if codegen.reads:
+            raise NotImplementedError(
+                "CuTeDSL reduction consumer cannot capture tensor inputs"
+            )
+        body = [*(f"    {line}" for line in codegen.kernel.body.lines)]
+        body.append(f"    return {result}")
+        return (
+            f"def {fn_name}(accumulator, primary_reduction, _secondary_reduction):\n"
+            + "\n".join(body)
+        )

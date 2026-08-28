@@ -40,7 +40,12 @@ Tensor make_feature_noise(const Tensor& input) {
 }
 
 bool is_fused_kernel_acceptable(const Tensor& input, double p) {
-  return (input.is_cuda() || input.is_xpu() || input.is_lazy() || input.is_privateuseone()) && p > 0 && p < 1 && input.sym_numel() > 0;
+  const bool mps_fused_kernel_acceptable =
+      input.is_mps() && input.is_floating_point() &&
+      input.is_non_overlapping_and_dense();
+  return (input.is_cuda() || mps_fused_kernel_acceptable || input.is_xpu() ||
+          input.is_lazy() || input.is_privateuseone()) &&
+      p > 0 && p < 1 && input.sym_numel() > 0;
 }
 
 // NB: sure, we could have used different overloads here, but I would feel insecure
