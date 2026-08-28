@@ -12,10 +12,11 @@ from onnxscript.onnx_types import FLOAT
 import torch
 from torch.onnx._internal.torchscript_exporter import jit_utils
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestONNXScriptExport(common_utils.TestCase):
-    hw_classification = common_utils.HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.GENERIC
 
     # opset version is
     # 1. local function is supported after opset 15
