@@ -10,14 +10,12 @@ from flydsl.expr.typing import Vector as Vec
 from .flex_attn_utils import (
     fast_exp2,
     is_causal_document_mask_program,
-    load_scalar,
     make_global_view,
     make_mask_buffers,
     make_mask_evaluator,
     schedule_fwd_pv_pipeline,
     schedule_fwd_qk_pipeline,
     schedule_fwd_softmax_pipeline,
-    store_scalar,
 )
 
 _LOG2E = 1.4426950408889634
@@ -415,12 +413,10 @@ def build_flex_attn_fwd_module(
             MaskBuffer3,
         )
 
-        i32_atom = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Int32)
-        f32_atom = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Float32)
         o64 = fx.make_copy_atom(fx.rocdl.BufferCopy64b(), fx.BFloat16)
 
         def load_i32(view, index):
-            return load_scalar(i32_atom, view, index, fx.Int32)
+            return fx.Int32(fx.get_iter(view)[index])
 
         def load_uniform_i32(view, index):
             return fx.gpu.shuffle_idx(load_i32(view, index), 0, 64)
@@ -436,7 +432,7 @@ def build_flex_attn_fwd_module(
         )
 
         def store_f32(view, index, value):
-            store_scalar(f32_atom, view, index, value, fx.Float32)
+            fx.get_iter(view)[index] = value
 
         g128 = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.BFloat16)
         dma128 = fx.make_copy_atom(fx.rocdl.BufferCopyLDS128b(), 128)
