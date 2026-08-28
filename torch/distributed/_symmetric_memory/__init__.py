@@ -699,6 +699,12 @@ def _check_mx_device(operand: torch.Tensor) -> None:
     caller passing the layout its own GEMM wants is told to swizzle, which is the
     wrong advice. Fail clearly instead of computing against the wrong layout.
     """
+    if operand.device.type == "meta":
+        # A trace carries no real device, so this particular check cannot be
+        # evaluated here; the CUDA/XPU dispatch runs it again at execution time.
+        # Every other MXFP8 precondition is shape-based and does hold at trace
+        # time, which is why only this one is skipped.
+        return
     if operand.device.type != "cuda" or torch.version.hip is not None:
         raise ValueError(
             "MXFP8 async-TP is only supported on NVIDIA CUDA devices: it relies "
@@ -787,6 +793,12 @@ def _check_mx_reduce_scatter(
     _check_mx_leading_dim(scatter_dim, "scatter_dim_after_maybe_reshape")
 
     rows = math.prod(A.shape[:-1])
+    if rows % group_size != 0:
+        raise ValueError(
+            f"MXFP8 matmul-reduce-scatter requires {rows} rows to divide evenly "
+            f"across {group_size} ranks. Uneven chunks would split the data and "
+            "the swizzled scale at different points."
+        )
     rows_per_chunk = rows // group_size
     if rows_per_chunk % _MX_SCALE_ROW_ALIGNMENT != 0:
         raise ValueError(
@@ -1431,7 +1443,7 @@ def _fused_all_gather_scaled_matmul_fallback(
         # anyway, so move it as uint8 and view it back.
         scale_dtype = A_scale.dtype
         A_scale = torch.ops._c10d_functional.all_gather_into_tensor(
-            A_scale.contiguous().view(torch.uint8), group_size, group_name
+            A_scale.flatten().contiguous().view(torch.uint8), group_size, group_name
         )
         A_scale = torch.ops._c10d_functional.wait_tensor(A_scale).view(scale_dtype)
     elif scale_mode == _ScaleMode.ROW_WISE_SHARDED:
@@ -1557,7 +1569,7 @@ def _fused_all_gather_scaled_matmul(
         _check_mx_device(A_shard)
         _check_mx_leading_dim(gather_dim, "gather_dim")
         # The fp8 operand dtype is not a usable output dtype for block scaling, so
-        # `out_dtype or A.dtype` would hand cuBLAS an fp8 output and fail deep in
+        # `out_dtype or A_shard.dtype` would hand cuBLAS an fp8 output and fail deep in
         # the heuristic. Default to bf16, which is what the fallback uses.
         out_dtypes = [dt or torch.bfloat16 for dt in out_dtypes]
 

@@ -1449,7 +1449,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         _, A_q, A_sb = _mxfp8_quantize(A)
 
         # 128-aligned shard, but the scale is sized for a different operand
-        with self.assertRaisesRegex(ValueError, "expected .* elements"):
+        with self.assertRaisesRegex(ValueError, r"scale has \d+ elements, expected"):
             torch.ops.symm_mem.fused_all_gather_scaled_matmul(
                 A_q,
                 [B_q.t()],
@@ -1525,6 +1525,70 @@ class AsyncTPTest(MultiProcContinuousTest):
                 rs,
                 torch.bfloat16,
                 False,
+                recipe,
+                swizzle,
+                recipe,
+                swizzle,
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    def test_fused_all_gather_scaled_matmul_mxfp8_meta(self) -> None:
+        """MXFP8 must still be traceable: meta tensors carry no real device.
+
+        The device guard cannot be evaluated at trace time, so it has to be
+        skipped there rather than rejecting the trace outright -- while the
+        shape-based preconditions, which do hold on meta, must still fire.
+        """
+        self._init_process()
+        group = dist.group.WORLD
+
+        recipe = [ScalingType.BlockWise1x32.value]
+        swizzle = [SwizzleType.SWIZZLE_32_4_4.value]
+
+        def meta(*shape, dtype=torch.float8_e4m3fn):
+            return torch.empty(*shape, device="meta", dtype=dtype)
+
+        e8m0 = torch.float8_e8m0fnu
+        A, B = meta(256, 128), meta(64, 128)
+        A_sb, B_sb = meta(1024, dtype=e8m0), meta(512, dtype=e8m0)
+
+        out = _fused_all_gather_scaled_matmul_fallback(
+            A,
+            [B.t()],
+            A_sb,
+            [B_sb],
+            0,
+            group.group_name,
+            [None],
+            [None],
+            [torch.bfloat16],
+            [False],
+            recipe,
+            swizzle,
+            recipe,
+            swizzle,
+        )
+        self.assertEqual(out[1][0].dtype, torch.bfloat16)
+        self.assertEqual(out[1][0].device.type, "meta")
+
+        # shape-based preconditions still apply on the meta path
+        A3 = meta(2, 128, 128)
+        with self.assertRaisesRegex(ValueError, "MXFP8 requires gather_dim=0"):
+            _fused_all_gather_scaled_matmul_fallback(
+                A3,
+                [B.t()],
+                A_sb,
+                [B_sb],
+                1,
+                group.group_name,
+                [None],
+                [None],
+                [torch.bfloat16],
+                [False],
                 recipe,
                 swizzle,
                 recipe,
