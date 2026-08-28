@@ -207,7 +207,11 @@ class TestCuptiNodeTimerCUDA(TestCase):
 
         obs = NodeTimerObserver(
             annotations=ObserverAnnotationSettings(
-                graph_annotation_resolver=lambda nid: "graphregion" if nid else None
+                # The registry's own resolver hands back the node's annotation; the
+                # bucket is its "name".
+                graph_annotation_resolver=lambda nid: (
+                    {"name": "graphregion", "stream": 61} if nid else None
+                )
             )
         )
         if not obs.available:
@@ -262,6 +266,19 @@ class TestCuptiNodeTimerCUDA(TestCase):
         self.assertEqual(len(gnode), len(start))
         self.assertEqual(len(stream), len(start))
         self.assertTrue(bool((end >= start).all()))
+
+
+class TestNodeTimerBucketName(TestCase):
+    """``_bucket_name`` normalizes whatever a graph annotation resolver returns; no CUDA."""
+
+    def test_shapes(self):
+        from torch.profiler._cupti.observers.node_timer import _bucket_name
+
+        self.assertEqual(_bucket_name({"name": "region", "stream": 61}), "region")
+        self.assertEqual(_bucket_name("region"), "region")
+        # No "name" means no named region: the unnamed bucket, not a rendered dict.
+        for unnamed in (None, {}, {"stream": 61}, ""):
+            self.assertEqual(_bucket_name(unnamed), "")
 
 
 if __name__ == "__main__":
