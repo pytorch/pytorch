@@ -37,7 +37,7 @@ def _device_target(cc: int) -> Any:
     return TargetSm.ensure(f"{cc}a")
 
 
-def _epilogue_args_signature(epilogue_args: Any) -> tuple:
+def _epilogue_args_signature(epilogue_args: object) -> tuple:
     """Extract a hashable signature of epilogue args for cache keying.
 
     Two callers with the same `(efc_kernel_name, epilogue_source)` but
@@ -74,7 +74,7 @@ _cache_lock = threading.RLock()
 _kernel_by_name_cache: dict[str, Any] | None = None
 
 
-def _operand_dtype_str(operand: Any) -> str | None:
+def _operand_dtype_str(operand: object) -> str | None:
     """Best-effort cutlass dtype name for a kernel operand or args operand."""
     dtype = getattr(operand, "dtype", None)
     if dtype is None:
@@ -123,7 +123,7 @@ def _get_kernel_cache() -> dict[str, Any]:
     return cache
 
 
-def _operand_sig(operand: Any) -> tuple | None:
+def _operand_sig(operand: object) -> tuple | None:
     """Hashable (dtype, shape, stride, scale-sig, mode, swizzle) signature."""
     if operand is None:
         return None
@@ -149,7 +149,7 @@ def _operand_sig(operand: Any) -> tuple | None:
     return (dtype, tuple(shape), tuple(stride), scale_sig, mode, swizzle)
 
 
-def _partition_sig(args: Any) -> tuple | None:
+def _partition_sig(args: object) -> tuple | None:
     """Signature capturing everything `supports(args)` depends on, or None if
     it can't be fully determined (falls back to a non-memoized scan)."""
     a = _operand_sig(getattr(args, "A", None))
@@ -503,7 +503,7 @@ def ensure_cache_initialized() -> None:
     _get_kernel_cache()
 
 
-_efc_epilogue_cache: dict[tuple[str, str, tuple], Any] = {}
+_efc_epilogue_cache: dict[tuple[str, str, tuple, tuple], Any] = {}
 
 
 def clear_cache() -> None:
@@ -586,6 +586,7 @@ def get_efc_kernel_with_epilogue(
     epilogue_args: Any,
     epilogue_source: str = "",
     base_kernel: Any | None = None,
+    specialization: tuple = (),
 ) -> Any:
     """Get (or create and cache) an EFC kernel bound to a specific epilogue.
 
@@ -602,6 +603,7 @@ def get_efc_kernel_with_epilogue(
         efc_kernel_name,
         epilogue_source,
         _epilogue_args_signature(epilogue_args),
+        specialization,
     )
 
     with _cache_lock:
