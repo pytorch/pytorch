@@ -9,12 +9,7 @@ if os.environ.get("BACKEND") == "nccl":
 
 import torch
 import torch.distributed as dist
-
-
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
-
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 _PRIOR_FP32_PRECISION: str | None = None
 
