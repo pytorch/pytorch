@@ -448,10 +448,9 @@ class TestFileSystem(TestCase):
         reader = FsspecReader(checkpoint_dir, max_gap=262144)
         self.assertEqual(reader.max_gap, 262144)
 
-        # Environment variable override
-        with patch.dict("os.environ", {"TORCH_DCP_MAX_GAP": "524288"}):
-            reader_env = FsspecReader(checkpoint_dir)
-            self.assertEqual(reader_env.max_gap, 524288)
+        # Default is None
+        reader_default = FsspecReader(checkpoint_dir)
+        self.assertIsNone(reader_default.max_gap)
 
 
 if __name__ == "__main__":

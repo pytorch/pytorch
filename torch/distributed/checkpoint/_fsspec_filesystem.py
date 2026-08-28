@@ -200,11 +200,7 @@ class FsspecReader(FileSystemReader):
         self.cpu_workers = max(
             1, cpu_workers if cpu_workers is not None else min(16, os.cpu_count() or 4)
         )
-        env_gap = os.getenv("TORCH_DCP_MAX_GAP")
-        if env_gap is not None and env_gap != "":
-            self.max_gap = int(env_gap)
-        else:
-            self.max_gap = max_gap
+        self.max_gap = max_gap
         self.fs = FileSystem()
         self.path = self.fs.init_path(path, **kwargs)
 
