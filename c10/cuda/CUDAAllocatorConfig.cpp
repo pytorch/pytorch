@@ -5,7 +5,9 @@
 #include <locale>
 #include <sstream>
 
-#include <bit>
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#include <c10/cuda/driver_api.h>
+#endif
 
 namespace c10::cuda::CUDACachingAllocator {
 
@@ -178,7 +180,7 @@ size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
   tokenizer.checkToken(++i, ":");
   size_t val2 = tokenizer.toSizeT(++i);
   TORCH_CHECK_VALUE(
-      std::has_single_bit(val2),
+      llvm::isPowerOf2_64(val2),
       "Number of register threads has to be power of 2, got ",
       val2);
   auto maxThreads = CUDAAllocatorConfig::pinned_max_register_threads();
