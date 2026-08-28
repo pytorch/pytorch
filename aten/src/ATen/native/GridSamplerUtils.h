@@ -140,7 +140,6 @@ inline void check_grid_sampler_3d_backward(
   check_grid_sampler_backward(input, grid, grad_output);
 }
 
-
 // See NOTE [ grid_sampler Native Functions ].
 // cudnn does not support inputs larger than 1024.
 inline bool cond_cudnn_grid_sampler(

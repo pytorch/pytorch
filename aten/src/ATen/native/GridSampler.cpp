@@ -61,13 +61,13 @@ namespace {
     }
     for (const auto i : c10::irange(4)) {
       const scalar_t tap = compute_coordinates(base - 1 + i, size, padding_mode, align_corners);
-      // the comparison, not the cast: a coordinate that is not finite fails both sides
+      // the comparison decides, not the cast: a coordinate that is not finite fails
+      // both sides, where converting it is undefined
       indices[i] = (tap >= 0 && tap < static_cast<scalar_t>(size))
           ? static_cast<index_t>(tap)
           : static_cast<index_t>(-1);
     }
   }
-
 
   template<typename scalar_t>
   Tensor grid_sampler_3d_cpu_impl(const Tensor& input, const Tensor& grid,
@@ -225,7 +225,9 @@ namespace {
                 }
               } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
                 // The taps are placed around the unclipped index, so this branch samples at the
-                // raw x, y, z rather than at the clipped ix, iy, iz above.
+                // raw x, y, z rather than at the clipped ix, iy, iz above. It works in the
+                // accumulate type: the coefficients and the reflection arithmetic need more
+                // precision than a half carries, and CUDA computes every mode in it.
                 opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
                 int64_t x_taps[4], y_taps[4], z_taps[4];
                 resolve_cubic_taps(grid_sampler_unnormalize(static_cast<opmath_t>(x), inp_W, align_corners),

@@ -5531,8 +5531,8 @@ def grid_sample(
     which are used to interpolate the output value ``output[n, :, h, w]``.
     In the case of 5D inputs, ``grid[n, d, h, w]`` specifies the
     ``x``, ``y``, ``z`` pixel locations for interpolating
-    ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest`` or
-    ``bilinear`` interpolation method to sample the input pixels.
+    ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest``,
+    ``bilinear`` or ``bicubic`` interpolation method to sample the input pixels.
 
     :attr:`grid` specifies the sampling pixel locations normalized by the
     :attr:`input` spatial dimensions. Therefore, it should have most values in
@@ -5573,9 +5573,9 @@ def grid_sample(
             ``'bilinear'`` | ``'nearest'`` | ``'bicubic'``. Default: ``'bilinear'``
             When ``mode='bilinear'`` and the input is 5-D, the interpolation mode
             used internally will actually be trilinear. However, when the input is 4-D,
-            the interpolation mode will legitimately be bilinear. The same holds for
-            ``mode='bicubic'``, which is tricubic on a 5-D input: the same separable
-            cubic kernel over the third axis.
+            the interpolation mode will legitimately be bilinear. Likewise
+            ``mode='bicubic'`` is tricubic on a 5-D input, the separable cubic kernel
+            extended over the third axis.
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
