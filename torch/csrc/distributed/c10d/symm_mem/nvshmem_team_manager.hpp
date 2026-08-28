@@ -56,7 +56,7 @@ class TeamManager {
   // Get n teams for a group.
   // The first element of the returned pair is the team pool on host side.
   // The second element of the returned pair is the team pool on device side.
-  // This API must be call with a device guard.
+  // This API must be called with a device guard.
   std::pair<const TeamPool&, nvshmem_team_t*> get_n_teams(
       const std::string& group_name,
       const std::vector<int>& global_ranks,

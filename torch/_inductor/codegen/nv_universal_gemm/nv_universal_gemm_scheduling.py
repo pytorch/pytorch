@@ -516,7 +516,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 capture = NVGemmEpilogueCapture.from_nodes(
                     producer_buffer, (node1, node2)
                 )
-                if self._feed_main_config(capture, allow_softmax=False):
+                if self._feed_main_config(capture):
                     return 0
                 combined_partition = self._partition_local_reductions(capture)
                 if combined_partition.owns(node2.get_nodes()):
@@ -715,7 +715,16 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             scheduler = V.graph.scheduler
             try:
                 reduction_plan = self._schedule_reduction_plan(epilogue_program)
-                finalizers = epilogue_program.reduction_partition.finalizers
+                generated_region_ids = OrderedSet(
+                    id(region)
+                    for region in epilogue_program.generated_reduction_regions
+                )
+                finalizers = tuple(
+                    region.finalizer
+                    for region in epilogue_program.reduction_partition.regions
+                    if id(region) not in generated_region_ids
+                    and region.finalizer is not None
+                )
                 if finalizers:
                     if len(finalizers) != 1:
                         raise NotImplementedError(
@@ -724,11 +733,26 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                     if reduction_plan is None:
                         raise AssertionError("expected generated reduction plan")
                     finalizer = finalizers[0]
+                    analysis = epilogue_program.capture.analysis
+                    if analysis is None:
+                        raise AssertionError("expected captured epilogue analysis")
+                    finalizer_buffer = next(
+                        (
+                            buffer
+                            for buffer in analysis.buffers
+                            if buffer.get_name() == finalizer.output_name
+                        ),
+                        None,
+                    )
+                    if finalizer_buffer is None:
+                        raise AssertionError(
+                            f"missing reduction finalizer buffer {finalizer.output_name}"
+                        )
                     reduction_plan = dataclasses.replace(
                         reduction_plan,
                         finalizer_fn=LoopIRCuteDSLCodegen.finalizer_from_buffer(
                             finalizer.source_name,
-                            finalizer.buffer,
+                            finalizer_buffer,
                             "_local_reduce_finalize",
                         ),
                     )
