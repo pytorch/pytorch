@@ -104,7 +104,7 @@ inline void throw_error_for_complex_autograd(
     const at::Tensor& tensor,
     const char* name) {
   if (tensor.requires_grad()) {
-    TORCH_CHECK(
+    TORCH_CHECK_NOT_IMPLEMENTED(
         !tensor.is_complex(),
         name,
         " does not support automatic differentiation for outputs with complex dtype.");
@@ -401,7 +401,7 @@ namespace impl {
 namespace {
 
 // If run_jit_decomposition were not a member function, we would be able
-// to pass this as a template parameter to c10::Boxedkernel::makeFromFunction.
+// to pass this as a template parameter to c10::BoxedKernel::makeFromFunction.
 // However, member functions cannot be passed this way - instead we wrap our
 // call in this functor so it can be passed to c10::BoxedKernel::makeFromFunctor
 class WrapperFunctor final : public c10::OperatorKernel {

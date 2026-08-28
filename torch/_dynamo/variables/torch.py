@@ -31,7 +31,7 @@ import inspect
 import logging
 import math
 import re
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
@@ -114,10 +114,7 @@ from .torch_function import (
     TensorWithTFOverrideVariable,
     TorchFunctionModeStackVariable,
 )
-from .torch_schema import (
-    torch_function_inplace_param_names,
-    torch_function_mutated_arg_infos,
-)
+from .torch_schema import detect_generator_reconstruction_tensor_mutations
 from .user_defined import UserDefinedTupleVariable
 
 
@@ -162,65 +159,6 @@ def _is_supported_out_tensor_layout(
             false_if_dde=false_if_dde,
         )
     )
-
-
-def _check_generator_reconstruction_tensor_mutation_arg(
-    tx: "InstructionTranslatorBase", var: VariableTracker
-) -> None:
-    if var.is_tensor():
-        tx.output.side_effects.check_allowed_side_effect(var)
-    elif isinstance(var, (TupleVariable, ListVariable)):
-        for item in var.items:
-            _check_generator_reconstruction_tensor_mutation_arg(tx, item)
-
-
-def _is_true_constant(var: VariableTracker) -> bool:
-    return var.is_python_constant() and bool(var.as_python_constant())
-
-
-def _matches_mutated_arg_schema(var: VariableTracker, is_tensor_list: bool) -> bool:
-    if is_tensor_list:
-        return isinstance(var, (TupleVariable, ListVariable))
-    return var.is_tensor()
-
-
-def _resolve_op_overload_packet(
-    tx: "InstructionTranslatorBase",
-    fn: Callable[..., Any],
-    args: Sequence[VariableTracker],
-    kwargs: dict[str, VariableTracker],
-) -> Callable[..., Any]:
-    if not isinstance(fn, torch._ops.OpOverloadPacket):
-        return fn
-
-    overloads = tuple(fn.overloads())
-    if len(overloads) == 1:
-        return getattr(fn, overloads[0])
-
-    proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
-    node_args, node_kwargs = torch.fx.node.map_aggregate(
-        (proxy_args, proxy_kwargs),
-        lambda value: value.node if isinstance(value, torch.fx.Proxy) else value,
-    )
-    fake_args, fake_kwargs = torch._dynamo.utils.get_fake_values_from_nodes(
-        tx,
-        (node_args, node_kwargs),
-        False,
-    )
-    try:
-        overload = torch._C._jit_resolve_packet(
-            fn._qualified_op_name,
-            *fake_args,
-            **fake_kwargs,
-        )
-    except RuntimeError as e:
-        unimplemented(
-            gb_type="Error when attempting to resolve op packet",
-            context="",
-            explanation=str(e),
-            hints=[],
-        )
-    return getattr(fn, overload)
 
 
 supported_ctx_manager_classes = dict.fromkeys(
@@ -695,7 +633,7 @@ class BaseTorchVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare
@@ -1158,7 +1096,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     raise AssertionError(
                         "Expected first argument to accumulate_grad_ to be a tensor"
                     )
-                variable_grad = variable.getattro_impl(tx, "grad")
+                variable_grad = variable.tp_getattro_impl(tx, "grad")
                 updated_grad = tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.accumulate_grad),
                     [variable, variable_grad, new_grad],
@@ -3331,6 +3269,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return ConstDictVariable(items)
             return result
 
+        @register(torch._functorch.eager_transforms._set_tensor_requires_grad)
+        def handle_set_tensor_requires_grad(
+            self, tx: "InstructionTranslatorBase", x: VariableTracker
+        ) -> VariableTracker:
+            # _create_differentiable flips requires_grad in place on the tensor
+            # functorch wrapped for grad/vjp, so re-read x's metadata from the
+            # fake tensor rather than leaving the stale requires_grad=False.
+            result = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch._functorch.eager_transforms._set_tensor_requires_grad,
+                    (x.as_proxy(),),
+                    {},
+                ),
+            )
+            # pyrefly: ignore [missing-attribute]
+            x.synchronize_attributes(tx)
+            return result
+
         @register(torch._functorch.eager_transforms._autograd_grad)
         def handle_functorch_autograd_grad(
             self,
@@ -3395,7 +3353,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         return handlers
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker":
         source = self.source and AttrSource(self.source, name)
@@ -3545,15 +3503,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # prior to tracing, which is essential for creating right
         # guards. So save the shape now, and check later if it has
         # changed. If it has, graph break.
-        is_reconstructing_generator = (
-            tx.output.side_effects.is_reconstructing_generator()
-        )
         saved_out_shapes = None
         out_kwarg_vt = None
         if "out" in kwargs:
             out_kwarg_vt = kwargs["out"]
-            if is_reconstructing_generator:
-                _check_generator_reconstruction_tensor_mutation_arg(tx, out_kwarg_vt)
 
             # e.g., out=(t1, t2, ...)
             if isinstance(out_kwarg_vt, (TupleVariable, ListVariable)):
@@ -3576,34 +3529,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
 
-        if is_reconstructing_generator:
-            schema_fn = _resolve_op_overload_packet(tx, fn_, args, kwargs)
-            mutated_arg_infos = torch_function_mutated_arg_infos(schema_fn)
-            mutated_arg = None
-            for idx, name, is_tensor_list, kwarg_only in mutated_arg_infos:
-                candidate = kwargs.get(name)
-                if candidate is None and not kwarg_only and len(args) > idx:
-                    candidate = args[idx]
-                if candidate is not None and _matches_mutated_arg_schema(
-                    candidate, is_tensor_list
-                ):
-                    mutated_arg = candidate
-                    break
-            if mutated_arg is not None:
-                _check_generator_reconstruction_tensor_mutation_arg(tx, mutated_arg)
-            elif inplace_param_info := torch_function_inplace_param_names(fn_):
-                input_name, inplace_name, inplace_idx = inplace_param_info
-                inplace_arg = kwargs.get(inplace_name)
-                if inplace_arg is None and len(args) > inplace_idx:
-                    inplace_arg = args[inplace_idx]
-                if inplace_arg is not None and _is_true_constant(inplace_arg):
-                    mutated_arg = args[0] if args else kwargs.get(input_name)
-                    if mutated_arg is not None:
-                        _check_generator_reconstruction_tensor_mutation_arg(
-                            tx, mutated_arg
-                        )
-
-        with ctx():
+        with ctx(), detect_generator_reconstruction_tensor_mutations(tx, args, kwargs):
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -4243,9 +4169,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         try:
-            shape = tuple(data.getattro_impl(tx, "shape").as_python_constant())
-            dtype = data.getattro_impl(tx, "dtype").as_python_constant()
-            device = data.getattro_impl(tx, "device").as_python_constant()
+            shape = tuple(data.tp_getattro_impl(tx, "shape").as_python_constant())
+            dtype = data.tp_getattro_impl(tx, "dtype").as_python_constant()
+            device = data.tp_getattro_impl(tx, "device").as_python_constant()
         except NotImplementedError as e:
             unimplemented(
                 gb_type="`torch.nn.Parameter` with non-constant Tensor attributes",
@@ -4392,7 +4318,7 @@ class DispatchKeySetVariable(BaseTorchVariable):
         install_guard(source.make_guard(GuardBuilder.DISPATCH_KEY_SET_MATCH))
         return cls(value, source=source)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl

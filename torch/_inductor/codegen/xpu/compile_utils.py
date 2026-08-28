@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import logging
 import os
 import shutil
@@ -14,13 +15,18 @@ from ..cuda.compile_utils import _cutlass_include_paths
 log = logging.getLogger(__name__)
 
 
+@functools.cache
+def icpx_exist(icpx_path: str | None = "icpx") -> bool:
+    return icpx_path is not None and shutil.which(icpx_path) is not None
+
+
 def _sycl_compiler() -> str:
     # Search order:
     # 0) which icpx
     # 1) config.xpu.oneapi_root
     # 2) ONEAPI_ROOT environment variable
     # 3) default system search PATH.
-    if shutil.which("icpx"):
+    if icpx_exist("icpx"):
         return "icpx"
 
     if os.path.exists(config.xpu.oneapi_root or ""):
@@ -37,8 +43,10 @@ def _sycl_compiler() -> str:
         else:
             os.environ["CPLUS_INCLUDE_PATH"] = oneapi_inclue
         return os.path.realpath(os.path.join(oneapi_root, "bin/icpx"))
-    else:
-        raise RuntimeError("Can not find Intel compiler.")
+
+    # Mirrors _cuda_compiler(): return the bare name and let the compile
+    # subprocess produce the error, so callers can probe with icpx_exist().
+    return "icpx"
 
 
 def _sycl_lib_options() -> list[str]:
