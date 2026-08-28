@@ -11,6 +11,7 @@ from collections import defaultdict, namedtuple, OrderedDict, UserDict
 from collections.abc import Callable
 from functools import partial
 from typing import Any, NamedTuple
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
@@ -22,6 +23,7 @@ import torch.utils.checkpoint
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
+from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     make_dynamo_test,
@@ -985,6 +987,93 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_weakkeydict_attr_proxy_key(self):
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+        root = Root()
+        tracer = _ModuleStackTracer(root)
+        proxy = tracer.proxy_type(root.child, "child")
+        states = weakref.WeakKeyDictionary({proxy: 1})
+
+        def fn(d, key, x):
+            offset = d[key]
+            return key(x) + offset
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(states, proxy, x), opt_fn(states, proxy, x))
+
+        sin_node = next(
+            node for node in backend.graphs[0].graph.nodes if node.name == "sin"
+        )
+        module_paths = [path for path, _ in sin_node.meta["nn_module_stack"].values()]
+        key_source = (
+            "L['args'][1]"
+            if torch._dynamo.config.debug_force_nested_calls
+            else "L['key']"
+        )
+        self.assertEqual(module_paths, [f"{key_source}.get_base()"])
+
+    def test_attr_proxy_cross_scope_reuse_guard(self):
+        class Cell(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.value = torch.tensor(-1.0)
+
+        first = Cell()
+        second = Cell()
+        tracer = _ModuleStackTracer(torch.nn.Module())
+        local_proxy = tracer.proxy_type(first, "local")
+        global_proxy = tracer.proxy_type(first, "global")
+        other_global_proxy = tracer.proxy_type(second, "other")
+
+        def local_proxy_first(proxy, x):
+            proxy.value = x
+            return _attr_proxy_global.value + 1  # noqa: F821
+
+        counter = torch._dynamo.testing.CompileCounter()
+        with patch.dict(
+            local_proxy_first.__globals__, {"_attr_proxy_global": global_proxy}
+        ):
+            opt_fn = torch.compile(local_proxy_first, backend=counter, fullgraph=True)
+
+            self.assertEqual(opt_fn(local_proxy, torch.tensor(2.0)), torch.tensor(3.0))
+            self.assertEqual(counter.frame_count, 1)
+
+            local_proxy_first.__globals__["_attr_proxy_global"] = other_global_proxy
+            first.value = torch.tensor(-1.0)
+            second.value = torch.tensor(-1.0)
+
+            self.assertEqual(opt_fn(local_proxy, torch.tensor(5.0)), torch.tensor(0.0))
+            self.assertEqual(counter.frame_count, 2)
+
+        def global_proxy_first(module, x):
+            _attr_proxy_global.value = x  # noqa: F821
+            return module.value + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        with patch.dict(
+            global_proxy_first.__globals__, {"_attr_proxy_global": global_proxy}
+        ):
+            opt_fn = torch.compile(global_proxy_first, backend=counter, fullgraph=True)
+
+            self.assertEqual(opt_fn(first, torch.tensor(2.0)), torch.tensor(3.0))
+            self.assertEqual(counter.frame_count, 1)
+
+            first.value = torch.tensor(-1.0)
+            second.value = torch.tensor(-1.0)
+
+            self.assertEqual(opt_fn(second, torch.tensor(5.0)), torch.tensor(0.0))
+            self.assertEqual(counter.frame_count, 2)
 
     def test_construct_user_dict_and_return(self):
         def fn(x):
