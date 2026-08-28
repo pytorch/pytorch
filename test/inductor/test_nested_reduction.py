@@ -63,6 +63,7 @@ class TestBase(TestCase):
         torch._dynamo.utils.clear_compilation_metrics()
         self._nested_reduction_ctx = inductor_config.patch(
             {
+                "split_reductions": False,
                 "triton.nested_reduction": True,
                 "loop_ordering_after_fusion": True,
             }
@@ -1754,8 +1755,6 @@ class _NestedReductionBase:
             self.check_numeric(g, (x, z))
         self.assertTrue(saw_staged_reduction)
 
-    # Isolate looped codegen from device-specific split-reduction heuristics.
-    @inductor_config.patch(split_reductions=False)
     def test_looped_standalone_sub_parent_large_group(self):
         if self.force_persistent_outer_reduction is not False:
             self.skipTest("requires a looped reduction")
