@@ -87,6 +87,7 @@ FILES=(
     gemm_blockscaled_interface.py
     gemm_config.py
     gemm_default_epi.py
+    gemm_symmetric.py
     gemm_sm100.py
     gemm_sm120.py
     gemm_sm80.py
