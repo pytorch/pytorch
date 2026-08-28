@@ -6,10 +6,13 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+import traceback
 import unittest
 from collections import namedtuple
 
+import torch
 from torch._logging._internal import TorchLogsFormatter, trace_log
 from torch._native.instrumentation import (
     CompileEvent,
@@ -18,8 +21,11 @@ from torch._native.instrumentation import (
     instrument_helion_kernel,
     instrument_triton_kernel,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
 from torch.testing._internal.logging_utils import log_settings, preserve_log_state
+
+
+_HAS_CUDA = torch.cuda.is_available()
 
 
 # No shared tlparse harness exists in torch (see test/dynamo/test_structured_trace.py,
@@ -698,56 +704,6 @@ def _scan_for_missing_instrumentation(source, label):
     return violations, n_compile_sites
 
 
-# cute.compile must be cached so it is also instrumented: the enclosing
-# function must carry @jit_cache or the combined @instrumented_cutedsl_cache.
-# A raw call elsewhere would compile uncached *and* invisibly to the
-# instrumentation, so it is banned.
-_CACHED_COMPILE_CALL = "cute.compile"
-_CACHE_DECORATORS = ("jit_cache", "instrumented_cutedsl_cache")
-
-
-def _scan_for_raw_cute_compile(source, label):
-    """Return (violations, n_calls) for one Python source string.
-
-    A violation is a ``cute.compile`` call whose nearest enclosing function
-    carries neither ``@jit_cache`` nor ``@instrumented_cutedsl_cache`` (or
-    that sits at module level). ``n_calls`` counts compile calls seen.
-    """
-    tree = ast.parse(source, filename=label)
-    # Map each node to its parent so we can climb to the nearest FunctionDef.
-    parent = {}
-    for node in ast.walk(tree):
-        for child in ast.iter_child_nodes(node):
-            parent[child] = node
-
-    def enclosing_function(node):
-        cur = parent.get(node)
-        while cur is not None:
-            if isinstance(cur, ast.FunctionDef):
-                return cur
-            cur = parent.get(cur)
-        return None
-
-    violations = []
-    n_calls = 0
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and _dotted(node) == _CACHED_COMPILE_CALL):
-            continue
-        n_calls += 1
-        fn = enclosing_function(node)
-        cached = fn is not None and any(
-            d in _decorator_names(fn) for d in _CACHE_DECORATORS
-        )
-        if not cached:
-            where = fn.name if fn is not None else "<module level>"
-            allowed = " or ".join(f"@{d}" for d in _CACHE_DECORATORS)
-            violations.append(
-                f"{label}:{node.lineno} {_CACHED_COMPILE_CALL}() in {where} is "
-                f"not wrapped by {allowed}"
-            )
-    return violations, n_calls
-
-
 class TestInstrumentationCoverage(TestCase):
     """CI guard: every DSL compile site must carry its instrumentation.
 
@@ -860,49 +816,70 @@ class TestInstrumentationCoverage(TestCase):
         self.assertEqual(jit_n, 1)
         self.assertEqual(len(jit_v), 1)
 
-    def test_no_raw_cute_compile_calls(self):
-        # Caching is compulsory for cutedsl compiles: every cute.compile() must
-        # sit inside a function decorated with @jit_cache or the combined
-        # @instrumented_cutedsl_cache. A raw call would be uncached and
-        # invisible to instrumentation.
-        bad = []
-        seen = 0
-        for path in self._ops_files():
-            with open(path) as f:
-                violations, n = _scan_for_raw_cute_compile(
-                    f.read(), os.path.relpath(path)
-                )
-            bad += violations
-            seen += n
+    @unittest.skipUnless(_HAS_CUDA, "cutedsl compile coverage needs CUDA")
+    @skipIfNoCuteDSL
+    def test_every_cute_compile_hits_instrumented_frame(self):
+        # RUNTIME coverage, replacing the static "cute.compile must sit in a @jit_cache
+        # function" scan: patch cute.compile and assert every call that fires has an
+        # instrumentation frame on its stack. That holds whichever way an op is factored --
+        # a per-op decorator, or this stack's shared launch helper reached through
+        # cached_plan(op=...) -- while still catching a genuinely uninstrumented compile,
+        # which the negative control below proves.
+        import cutlass
+        import cutlass.cute as cute
 
-        self.assertTrue(seen, "scan found no cute.compile calls -- test is stale")
-        self.assertEqual(
-            bad,
-            [],
-            "uncached cute.compile() calls:\n" + "\n".join(bad),
-        )
+        from torch._native.instrumentation import _INSTRUMENTED_FRAME_MARKER
+        from torch._native.ops._cutedsl import launch as _L
+        from torch._native.ops._cutedsl.plan_cache import cached_plan
 
-    def test_scan_flags_raw_cute_compile(self):
-        # Meta-test: prove the caching requirement fires, and that both the raw
-        # @jit_cache and the combined decorator satisfy it.
-        raw = "def f():\n    return cute.compile(k)\n"
-        raw_v, raw_n = _scan_for_raw_cute_compile(raw, "<raw>")
-        self.assertEqual(raw_n, 1, "scan didn't see the cute.compile call")
-        self.assertEqual(len(raw_v), 1, "raw cute.compile was NOT flagged")
+        @cute.jit
+        def _noop(x: cutlass.Int32):
+            return x
 
-        module_level = "x = cute.compile(k)\n"
-        ml_v, ml_n = _scan_for_raw_cute_compile(module_level, "<module>")
-        self.assertEqual(ml_n, 1)
-        self.assertEqual(len(ml_v), 1, "module-level cute.compile was NOT flagged")
+        def stack_has_instrumented_frame():
+            f = sys._getframe(1)
+            while f is not None:
+                if f.f_locals.get("_native_dsl_instrumented_frame") is (
+                    _INSTRUMENTED_FRAME_MARKER
+                ):
+                    return True
+                f = f.f_back
+            return False
 
-        for form, deco in (
-            ("jit_cache", "@jit_cache"),
-            ("combined", "@instrumented_cutedsl_cache('aten::x')"),
-        ):
-            src = f"{deco}\ndef f():\n    return cute.compile(k)\n"
-            v, n = _scan_for_raw_cute_compile(src, f"<{form}>")
-            self.assertEqual(n, 1)
-            self.assertEqual(v, [], f"{form}-wrapped cute.compile was wrongly flagged")
+        seen, uninstrumented = [], []
+        real_compile = cute.compile
+
+        def watched_compile(*args, **kwargs):
+            seen.append(1)
+            if not stack_has_instrumented_frame():
+                uninstrumented.append("".join(traceback.format_stack(limit=10)))
+            return real_compile(*args, **kwargs)
+
+        cute.compile = watched_compile
+        try:
+            # The factoring this stack uses: the memo instruments the build, the build
+            # compiles through the shared helper.
+            cached_plan(
+                {},
+                ("guard", 0),
+                lambda: _L.compile(_noop, cutlass.Int32(0)),
+                op="aten::instrumentation_guard",
+            )
+            self.assertEqual(len(seen), 1, "the driver did not reach cute.compile")
+            self.assertEqual(
+                uninstrumented,
+                [],
+                "cute.compile fired without an instrumentation frame on the stack:\n"
+                + "\n".join(uninstrumented),
+            )
+            # Negative control: the same compile with the op= wiring dropped MUST be
+            # flagged, or this test would pass however the code is wired.
+            cached_plan({}, ("guard", 1), lambda: _L.compile(_noop, cutlass.Int32(0)))
+            self.assertEqual(
+                len(uninstrumented), 1, "an uninstrumented compile was NOT flagged"
+            )
+        finally:
+            cute.compile = real_compile
 
 
 if __name__ == "__main__":
