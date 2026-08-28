@@ -1,6 +1,8 @@
-"""Ahead-of-time precompilation (``make_fx`` tracer by default; Dynamo planned).
+"""Ahead-of-time precompilation (``make_fx`` tracer by default; Dynamo available).
 
-    python_code, cache = torch.compiler.precompile(fn, model, *example_inputs)
+    python_code, cache = torch.compiler.precompile(
+        fn, example_inputs=[(model, *example_inputs)]
+    )
     f_c = torch.compiler.precompile.load(python_code, cache)
     out = f_c(model, *example_inputs)   # pass the model again at runtime
 
@@ -9,6 +11,22 @@ ops that run when ``fn`` executes once on the example inputs. It does not analyz
 Python, so it comes with an explicit contract (the programming model): stay inside it
 and the artifact faithfully reproduces ``fn``; step outside it and you get an artifact
 that computes the wrong thing.
+
+With ``tracer="dynamo"``, precompile executes every tuple in ``example_inputs`` and
+captures the guarded specializations and recompilations Dynamo produces. Graph breaks
+are not supported yet. Guards derived from explicit inputs are retained for dispatch;
+guards covering the Python environment may be dropped because that environment is a
+caller-provided invariant. This invariant is unchecked, so changing the environment can
+silently run code specialized for its capture-time state. The artifact never compiles
+after loading; a call that fails every retained guard set raises. Compiled graphs and kernels remain Python source, while
+guard trees and transformed bytecode are stored as opaque inline data.
+
+With ``tracer="dynamo", training=True`` (inductor backend only), every compiled graph
+contains AOTAutograd's forward and backward as readable Inductor source. The served
+output retains its ``grad_fn`` and a later ``backward()`` executes those captured
+backward kernels across captured recompilations. Backward variants are specialized to
+output-tangent patterns observed while running the examples, and an unseen pattern fails
+instead of compiling at runtime.
 
 ``precompile`` returns a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
@@ -27,8 +45,8 @@ it.
 #
 # ``fn`` is the WHOLE computation, e.g. ``lambda model, x: model(x)`` for inference
 # or ``lambda model, x, t: loss_fn(model(x), t).backward()`` for a training step.
-# Among the positional args, the nn.Module arguments have their parameters and
-# buffers lifted to explicit graph inputs (via functional reparametrization), so
+# Within each tuple in example_inputs, the nn.Module arguments have their parameters
+# and buffers lifted to explicit graph inputs (via functional reparametrization), so
 # nothing live is baked in; the remaining args are the runtime inputs. The artifact
 # embeds NO weights -- you pass the model again at runtime.
 #
@@ -197,16 +215,20 @@ it.
 # whole runnable artifact).
 #
 # tracer: the capture front-end, orthogonal to backend. "make_fx" (default) is a
-# non-strict trace and is the only tracer implemented today -- everything above (the
-# invariants, the contract) describes its behavior. "dynamo" is planned (a Dynamo-based
-# front-end that analyzes Python rather than specializing to one traced path) and
-# currently raises NotImplementedError.
+# non-strict trace. "dynamo" analyzes Python bytecode, captures one variant per
+# specialization/recompilation exercised by example_inputs, minimizes guard records
+# while preserving dispatch for those calls, and dispatches among the variants at
+# runtime. It currently requires one full graph (no graph breaks).
 
 from __future__ import annotations
 
+import contextvars
+import gc
 import hashlib
 import io
 import logging
+import sys
+import threading
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 
@@ -222,7 +244,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -240,6 +262,7 @@ __all__: list[str] = []
 # model], invariant 7.
 _CACHE_FORMAT = "torch.compiler.precompile"
 _CACHE_VERSION = 1
+_DYNAMO_COMPILE_LOCK = threading.RLock()
 
 
 # Index into the caller's positional nn.Module arguments (0-based over the modules,
@@ -1084,8 +1107,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     """
     import ast
 
-    wanted = {
-        "BACKEND",
+    make_fx_metadata = {
         "MODULE_POSITIONS",
         "NUM_POSITIONAL_ARGS",
         "PARAM_NAMES",
@@ -1104,7 +1126,44 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "USER_INPUT_DEVICES",
         "USER_INPUT_BOUNDS",
     }
+    wanted = {
+        "BACKEND",
+        "TRACER",
+        "TRAINING",
+        "_DYNAMO_BACKEND_IDS",
+        "_DYNAMO_BACKEND_SOURCES",
+        "_DYNAMO_PYTHON_VERSION",
+        "_DYNAMO_STATE",
+        "_DYNAMO_TORCH_VERSION",
+        *make_fx_metadata,
+    }
     found: dict[str, object] = {}
+
+    def string_sources(node: ast.expr) -> tuple[str, ...]:
+        if not isinstance(node, ast.Tuple):
+            raise ValueError("expected a tuple")
+        sources = []
+        for item in node.elts:
+            if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                sources.append(item.value)
+                continue
+            if not (
+                isinstance(item, ast.Subscript)
+                and isinstance(item.value, ast.Constant)
+                and isinstance(item.value.value, str)
+                and isinstance(item.slice, ast.Slice)
+                and isinstance(item.slice.lower, ast.Constant)
+                and item.slice.lower.value == 1
+                and isinstance(item.slice.upper, ast.UnaryOp)
+                and isinstance(item.slice.upper.op, ast.USub)
+                and isinstance(item.slice.upper.operand, ast.Constant)
+                and item.slice.upper.operand.value == 1
+                and item.slice.step is None
+            ):
+                raise ValueError("expected a string literal")
+            sources.append(item.value.value[1:-1])
+        return tuple(sources)
+
     try:
         tree = ast.parse(python_code)
     except SyntaxError as e:
@@ -1119,7 +1178,17 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         if not isinstance(target, ast.Name):
             continue
         if target.id in wanted:
-            found[target.id] = ast.literal_eval(node.value)
+            try:
+                found[target.id] = (
+                    string_sources(node.value)
+                    if target.id == "_DYNAMO_BACKEND_SOURCES"
+                    else ast.literal_eval(node.value)
+                )
+            except (SyntaxError, ValueError) as e:
+                raise PrecompileError(
+                    f"python_code has invalid calling-convention metadata "
+                    f"{target.id!r}."
+                ) from e
         else:
             # Not a metadata name we consume (the driver section emits only
             # function defs today, but a future artifact revision could add a
@@ -1131,12 +1200,61 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
                 "parsing artifact calling-convention metadata",
                 target.id,
             )
-    missing = wanted - found.keys()
+    tracer = found.get("TRACER", "make_fx")
+    if tracer not in ("make_fx", "dynamo"):
+        raise PrecompileError(
+            f"python_code has an unsupported TRACER value {tracer!r}; it does not "
+            "look like a compatible torch.compiler.precompile artifact."
+        )
+    required = {"BACKEND", "TRACER"}
+    if tracer == "make_fx":
+        required = {"BACKEND", *make_fx_metadata}
+    else:
+        required.update(
+            {
+                "TRAINING",
+                "_DYNAMO_BACKEND_IDS",
+                "_DYNAMO_BACKEND_SOURCES",
+                "_DYNAMO_PYTHON_VERSION",
+                "_DYNAMO_STATE",
+                "_DYNAMO_TORCH_VERSION",
+            }
+        )
+    missing = required - found.keys()
     if missing:
         raise PrecompileError(
             f"python_code is missing calling-convention metadata {sorted(missing)}; "
             "it does not look like a torch.compiler.precompile artifact."
         )
+    if tracer == "dynamo":
+        if type(found["TRAINING"]) is not bool:
+            raise PrecompileError(
+                "python_code has invalid calling-convention metadata 'TRAINING'."
+            )
+        for name in ("_DYNAMO_BACKEND_IDS", "_DYNAMO_BACKEND_SOURCES"):
+            value = found[name]
+            if not (
+                isinstance(value, tuple)
+                and all(isinstance(item, str) for item in value)
+            ):
+                raise PrecompileError(
+                    f"python_code has invalid calling-convention metadata {name!r}."
+                )
+        python_version = found["_DYNAMO_PYTHON_VERSION"]
+        if not (
+            isinstance(python_version, tuple)
+            and len(python_version) == 2
+            and all(type(part) is int for part in python_version)
+        ):
+            raise PrecompileError(
+                "python_code has invalid calling-convention metadata "
+                "'_DYNAMO_PYTHON_VERSION'."
+            )
+        for name in ("_DYNAMO_STATE", "_DYNAMO_TORCH_VERSION"):
+            if not isinstance(found[name], str):
+                raise PrecompileError(
+                    f"python_code has invalid calling-convention metadata {name!r}."
+                )
     return found
 
 
@@ -1293,6 +1411,4908 @@ def _unsupported(reason: str) -> PrecompileError:
     )
 
 
+class _DynamoPythonBackend:
+    """A capture-time callable backed by standalone Python graph source."""
+
+    def __init__(
+        self,
+        python_code: str,
+        cache: bytes | None,
+        is_dynamic: bool,
+        call: Callable[[list[object]], object],
+        compile_state: Any | None = None,
+    ) -> None:
+        self.python_code = python_code
+        self.cache = cache
+        self.is_dynamic = is_dynamic
+        self._call = call
+        self._compile_state = compile_state
+        if compile_state is not None:
+            globals_dict = getattr(call, "__globals__", None)
+            if not isinstance(globals_dict, dict):
+                raise AssertionError("training backend call must have Python globals")
+            compile_state.install_capture(globals_dict)
+
+    def __call__(self, *args: object) -> object:
+        return self._call(list(args))
+
+    def finalize_training(self) -> None:
+        if self._compile_state is None:
+            return
+        globals_dict = getattr(self._call, "__globals__", {})
+        masks = globals_dict.get("_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS", ())
+        try:
+            self.python_code, self.cache = self._compile_state.finalize(tuple(masks))
+        finally:
+            globals_dict["_AOT_BACKWARD_VARIANT_COMPILER"] = None
+            variants = globals_dict.get("_AOT_BACKWARD_VARIANTS")
+            if isinstance(variants, dict):
+                variants.clear()
+            self._compile_state = None
+
+
+def _build_dynamo_eager_graph_source(gm: torch.fx.GraphModule) -> str:
+    """Render one Dynamo FX graph as standalone eager Python source."""
+    get_attrs = list(gm.graph.find_nodes(op="get_attr"))
+    if get_attrs:
+        raise PrecompileError(
+            "precompile tracer='dynamo' with backend='eager' does not yet support "
+            "FX get_attr nodes; use backend='inductor'."
+        )
+
+    from torch.fx.graph import _custom_builtins
+
+    parts = [
+        "# Dynamo captured graph (eager backend).",
+        *(_cb.import_str for _cb in _custom_builtins.values()),
+        gm.code.replace("def forward(", "def _graph_forward(", 1),
+        "",
+        "class _GraphSelf:",
+        "    pass",
+        "",
+        "",
+        "def call(args):",
+        "    return _graph_forward(_GraphSelf(), *args)",
+        "",
+    ]
+    return "\n".join(parts)
+
+
+def _dynamo_backend_compiler(
+    backend: str, training: bool
+) -> Callable[..., _DynamoPythonBackend]:
+    def compile_graph(
+        gm: torch.fx.GraphModule, example_inputs: list[object]
+    ) -> _DynamoPythonBackend:
+        from torch._functorch import aot_autograd
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            _compile_to_python_with_state,
+            _graph_has_dynamic_shapes,
+        )
+
+        is_dynamic = _graph_has_dynamic_shapes(gm)
+        if backend == "eager":
+            python_code = _build_dynamo_eager_graph_source(gm)
+            cache = None
+            namespace: dict[str, object] = {"__name__": "_dynamo_eager_graph"}
+            exec(compile(python_code, "<dynamo-eager-graph>", "exec"), namespace)
+            call = cast("Callable[[list[object]], object]", namespace["call"])
+            compile_state = None
+        else:
+            # Dynamo's runtime examples may have concrete tensor sizes while the graph
+            # metadata carries the symbolic sizes and sources selected for this variant.
+            graph_inputs = [
+                node.meta["example_value"]
+                for node in gm.graph.nodes
+                if node.op == "placeholder"
+            ]
+            python_code, cache, compile_state = _compile_to_python_with_state(
+                gm,
+                graph_inputs,
+                options={"size_asserts": True},
+                grad_enabled=training,
+            )
+            call = aot_autograd.load_from_python(python_code, cache)
+        return _DynamoPythonBackend(python_code, cache, is_dynamic, call, compile_state)
+
+    return compile_graph
+
+
+def _filter_dynamo_guards(
+    target: Callable[..., object],
+    guarded_codes: Sequence[Any],
+    example_inputs: Sequence[tuple[object, ...]],
+) -> list[bytes]:
+    """Drop environment guards while preserving every input-derived guard."""
+    import dataclasses
+    import functools
+    import inspect
+
+    from torch._dynamo.guards import CheckFunctionManager, GuardBuilder
+    from torch._dynamo.output_graph import OutputGraphCommon
+    from torch._dynamo.package import load_guard_manager, load_guards_state
+    from torch._guards import GuardsSet
+    from torch.utils._ordered_set import OrderedSet
+
+    signature = inspect.signature(target)
+    example_scopes: list[dict[str, object]] = []
+    for example in example_inputs:
+        bound = signature.bind(*example)
+        bound.apply_defaults()
+        example_scopes.append(dict(bound.arguments))
+    input_roots = {f"L[{name!r}]" for scope in example_scopes for name in scope}
+
+    def is_input_source(source: str) -> bool:
+        return any(
+            source == root or source.startswith((f"{root}.", f"{root}["))
+            for root in input_roots
+        )
+
+    def fresh_guard(guard: Any, *, final: bool = False) -> Any:
+        create_fn = guard.create_fn
+        if (
+            final
+            and isinstance(create_fn, functools.partial)
+            and create_fn.func is GuardBuilder.TENSOR_MATCH
+        ):
+            create_fn = GuardBuilder.TENSOR_MATCH
+        return dataclasses.replace(
+            guard,
+            create_fn=create_fn,
+            guard_types=None,
+            code_list=None,
+            obj_weakref=None,
+            guarded_class_weakref=None,
+            _hash=None,
+        )
+
+    def manager_for(state: Any, output_graph: Any | None = None) -> Any:
+        if output_graph is not None:
+            state = dataclasses.replace(state, output_graph=output_graph)
+        return load_guard_manager(state, target.__code__, target.__globals__)
+
+    def outcomes(
+        state: Any,
+        *,
+        guards: Sequence[Any],
+        aot_guards: Sequence[Any],
+        key_order: Sequence[Any],
+    ) -> list[bool]:
+        output_graph = dataclasses.replace(
+            state.output_graph,
+            _guards=GuardsSet(OrderedSet(fresh_guard(guard) for guard in guards)),
+            _aotautograd_guards=list(aot_guards),
+            guard_on_key_order=set(key_order),
+        )
+        manager = manager_for(state, output_graph)
+        return [manager.check(scope) for scope in example_scopes]
+
+    filtered_states: list[bytes] = []
+    for guarded in guarded_codes:
+        state = load_guards_state(guarded.guards_state)
+        kept_guards = list(state.output_graph.guards)
+        kept_aot_guards = list(state.output_graph.aotautograd_guards)
+        kept_key_order = sorted(
+            state.output_graph.guard_on_key_order, key=lambda source: source.name
+        )
+        baseline = outcomes(
+            state,
+            guards=kept_guards,
+            aot_guards=kept_aot_guards,
+            key_order=kept_key_order,
+        )
+        matching_scopes = [
+            scope
+            for scope, matches in zip(example_scopes, baseline, strict=True)
+            if matches
+        ]
+        if not matching_scopes:
+            raise PrecompileError(
+                "precompile tracer='dynamo' captured a variant that does not match "
+                "any example input."
+            )
+
+        def try_drop(records: list[Any], index: int) -> bool:
+            if records is kept_aot_guards or records is kept_key_order:
+                return False
+            guard = records[index]
+            if not guard.name or is_input_source(guard.name):
+                return False
+            candidate = records[:index] + records[index + 1 :]
+            trial_guards = candidate if records is kept_guards else kept_guards
+            trial_aot = candidate if records is kept_aot_guards else kept_aot_guards
+            trial_key_order = candidate if records is kept_key_order else kept_key_order
+            try:
+                return (
+                    outcomes(
+                        state,
+                        guards=trial_guards,
+                        aot_guards=trial_aot,
+                        key_order=trial_key_order,
+                    )
+                    == baseline
+                )
+            except Exception:
+                # Some records construct relational checks jointly. If removing one
+                # leaves an invalid manager, it is a required dependency.
+                return False
+
+        changed = True
+        while changed:
+            changed = False
+            for records in (kept_guards, kept_aot_guards, kept_key_order):
+                index = 0
+                while index < len(records):
+                    if try_drop(records, index):
+                        del records[index]
+                        changed = True
+                    else:
+                        index += 1
+
+        output_graph = dataclasses.replace(
+            state.output_graph,
+            local_scope={**state.output_graph.local_scope, **matching_scopes[0]},
+            _guards=GuardsSet(
+                OrderedSet(fresh_guard(guard, final=True) for guard in kept_guards)
+            ),
+            _aotautograd_guards=kept_aot_guards,
+            guard_on_key_order=set(kept_key_order),
+        )
+        shape_code_parts = (
+            state.shape_code_parts
+            if any(guard.create_fn_name() == "SHAPE_ENV" for guard in kept_guards)
+            else None
+        )
+        check_fn = CheckFunctionManager(
+            target.__code__,
+            OutputGraphCommon(output_graph),
+            shape_code_parts=shape_code_parts,
+            runtime_global_scope=target.__globals__,
+            save_guards=True,
+            strict_error=True,
+            guard_build_local_state=state.local_state,
+        )
+        if check_fn.guards_state is None:
+            raise AssertionError("guards_state must not be None")
+        filtered_state = load_guards_state(check_fn.guards_state)
+        filtered_manager = manager_for(filtered_state)
+        filtered_outcomes = [filtered_manager.check(scope) for scope in example_scopes]
+        if filtered_outcomes != baseline:
+            raise PrecompileError(
+                "precompile tracer='dynamo' guard filtering changed captured "
+                "example dispatch."
+            )
+        filtered_states.append(check_fn.guards_state)
+
+    return filtered_states
+
+
+def _dynamo_backend_source_literal(source: str) -> str:
+    escaped = source.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+    return f'    """\n{escaped}\n"""[1:-1],'
+
+
+def _build_dynamo_python_source(
+    *,
+    backend: str,
+    training: bool,
+    state: dict[str, Any],
+    backend_ids: list[str],
+    compiled_backends: list[_DynamoPythonBackend],
+) -> str:
+    import base64
+    import inspect
+    import pickle
+    import sys
+
+    from torch import _precompile_driver as driver
+
+    try:
+        encoded_state = base64.b64encode(pickle.dumps(state)).decode("ascii")
+    except Exception as e:
+        raise PrecompileError(
+            "precompile tracer='dynamo' could not serialize its guards and transformed "
+            f"bytecode ({type(e).__name__}: {e})."
+        ) from e
+
+    dynamic_count = sum(compiled.is_dynamic for compiled in compiled_backends)
+    parts = [
+        '# Generated by torch.compiler.precompile (tracer="dynamo") -- do not edit.',
+        "#",
+        "# The compiled graphs and kernels below remain Python source. Dynamo's guard",
+        "# trees and transformed code objects have no source form, so section 2 stores",
+        "# only minimized dispatch guard state plus bytecode as base64-encoded pickle data.",
+        "",
+        "# " + "=" * 70,
+        "# 1. Capture metadata and compiled Python graph sources",
+        "# " + "=" * 70,
+        f"BACKEND = {backend!r}",
+        'TRACER = "dynamo"',
+        f"TRAINING = {training!r}",
+        f"VARIANT_COUNT = {len(state['variants'])}",
+        f"GRAPH_COUNT = {len(compiled_backends)}",
+        f"DYNAMIC_GRAPH_COUNT = {dynamic_count}",
+        f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}",
+        f"_DYNAMO_TORCH_VERSION = {torch.__version__!r}",
+        f"_DYNAMO_BACKEND_IDS = {tuple(backend_ids)!r}",
+        "# Each block is a standalone backend module. Keep them in separate strings so",
+        "# load can execute each in an isolated namespace without graph-global collisions.",
+        "_DYNAMO_BACKEND_SOURCES = (",
+    ]
+    for index, compiled in enumerate(compiled_backends):
+        parts.append(f"    # Backend graph {index}")
+        parts.append(_dynamo_backend_source_literal(compiled.python_code))
+    parts.extend(
+        [
+            ")",
+            "",
+            "# " + "=" * 70,
+            "# 2. Guard trees and transformed Dynamo bytecode (opaque)",
+            "# " + "=" * 70,
+            f"_DYNAMO_STATE = {encoded_state!r}",
+            "",
+            "# " + "=" * 70,
+            "# 3. Python runtime glue: rebuild guards and dispatch variants",
+            "# " + "=" * 70,
+            inspect.getsource(driver._build_dynamo_forward),
+            "",
+            "forward = _build_dynamo_forward()",
+            "",
+            _DRIVER_MAIN,
+        ]
+    )
+    return "\n".join(parts)
+
+
+def _dynamo_cache_bytes(
+    python_code: str, backend: str, artifacts: list[bytes | None]
+) -> bytes:
+    buf = io.BytesIO()
+    torch.save(
+        {
+            "format": _CACHE_FORMAT,
+            "version": _CACHE_VERSION,
+            "backend": backend,
+            "code_hash": hashlib.sha256(python_code.encode()).hexdigest(),
+            "artifact": artifacts if backend == "inductor" else None,
+        },
+        buf,
+    )
+    return buf.getvalue()
+
+
+def _precompile_dynamo(
+    fn: Callable[..., object],
+    example_inputs: Sequence[tuple[object, ...]],
+    *,
+    backend: str,
+    decompositions: dict | None,
+    training: bool,
+) -> tuple[str, bytes]:
+    import contextlib
+    import dis
+    import functools
+    import importlib
+    import inspect
+    import operator
+    import os
+    import types
+    import weakref
+    from collections import deque
+    from collections.abc import Iterable, Mapping
+    from types import CodeType
+
+    import torch._functorch.config as functorch_config
+
+    def has_storage_alias(values: object) -> bool:
+        tensors = [
+            value
+            for value in pytree.tree_leaves(values)
+            if isinstance(value, torch.Tensor)
+        ]
+        storage_ranges: dict[tuple[str, int | None], list[tuple[int, int]]] = {}
+        storage_ids: set[tuple[str, int | None, int]] = set()
+        seen_objects: set[int] = set()
+        for tensor in tensors:
+            object_id = id(tensor)
+            if object_id in seen_objects:
+                continue
+            seen_objects.add(object_id)
+            try:
+                storage = tensor.untyped_storage()
+                start = storage.data_ptr()
+                size = storage.nbytes()
+            except RuntimeError as e:
+                raise PrecompileError(
+                    "precompile tracer='dynamo' cannot verify storage aliasing for "
+                    "this tensor input."
+                ) from e
+            storage_key = (tensor.device.type, tensor.device.index, storage._cdata)
+            if storage_key in storage_ids:
+                return True
+            storage_ids.add(storage_key)
+            if start != 0 and size > 0:
+                storage_ranges.setdefault(
+                    (tensor.device.type, tensor.device.index), []
+                ).append((start, start + size))
+        for ranges in storage_ranges.values():
+            furthest_end = 0
+            for start, end in sorted(ranges):
+                if start < furthest_end:
+                    return True
+                furthest_end = max(furthest_end, end)
+        return False
+
+    if not example_inputs:
+        raise ValueError(
+            "precompile with tracer='dynamo' requires at least one example input tuple."
+        )
+    if decompositions is not None:
+        raise NotImplementedError(
+            "precompile decompositions are not yet supported with tracer='dynamo'."
+        )
+    if training and torch.is_inference_mode_enabled():
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot capture training=True inside "
+            "torch.inference_mode()."
+        )
+    for example in example_inputs:
+        if not isinstance(example, tuple):
+            raise TypeError(
+                "precompile example_inputs must be a sequence of positional-argument "
+                f"tuples, got {type(example).__name__}."
+            )
+        if any(isinstance(arg, torch.nn.Module) for arg in example):
+            raise NotImplementedError(
+                "precompile tracer='dynamo' does not yet support nn.Module arguments "
+                "because Dynamo's module identity guards are not serializable."
+            )
+        if has_storage_alias(example):
+            raise PrecompileError(
+                "precompile tracer='dynamo' does not support storage aliasing between "
+                "distinct tensor inputs."
+            )
+
+    from torch._dynamo.eval_frame import innermost_fn
+    from torch._dynamo.exc import (
+        BackendCompilerFailed,
+        FailOnRecompileLimitHit,
+        PackageError,
+        RecompileError,
+        Unsupported,
+    )
+    from torch._dynamo.guards import CheckFunctionManager
+    from torch._dynamo.package import CompilePackage
+    from torch._dynamo.pgo import _new_code_state, _use_code_state
+
+    target = innermost_fn(fn)
+    if not inspect.isfunction(target):
+        raise NotImplementedError(
+            "precompile tracer='dynamo' currently requires a Python function and does "
+            "not accept an nn.Module or bound method directly as fn."
+        )
+    if target.__closure__ is not None:
+        raise NotImplementedError(
+            "precompile tracer='dynamo' does not yet support functions with closure "
+            "cells; pass captured values as explicit arguments."
+        )
+
+    def is_literal(value: object) -> bool:
+        if value is None or value is Ellipsis or value is NotImplemented:
+            return True
+        if type(value) in (bool, int, float, complex, str, bytes):
+            return True
+        if type(value) is tuple:
+            return all(is_literal(item) for item in value)
+        if type(value) is frozenset:
+            return all(is_literal(item) for item in value)
+        return False
+
+    def contains_tensor(value: object, seen: set[int]) -> bool:
+        if isinstance(value, torch.Tensor):
+            return True
+        value_id = id(value)
+        if value_id in seen:
+            return False
+        seen.add(value_id)
+        if isinstance(value, dict):
+            return any(
+                contains_tensor(item, seen) for pair in value.items() for item in pair
+            )
+        if isinstance(value, (tuple, list, set, frozenset)):
+            return any(contains_tensor(item, seen) for item in value)
+        return False
+
+    if contains_tensor((target.__defaults__, target.__kwdefaults__), set()):
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot serialize tensor-valued function "
+            "defaults; remove the default and pass every tensor as an explicit input."
+        )
+    defaults = (
+        *(target.__defaults__ or ()),
+        *((target.__kwdefaults__ or {}).values()),
+    )
+    if not all(is_literal(value) for value in defaults):
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot serialize non-literal function defaults; "
+            "remove the default and pass mutable or user-defined values explicitly."
+        )
+
+    def loaded_global_paths(code: types.CodeType) -> list[tuple[str, ...]]:
+        paths = []
+        instructions = list(dis.get_instructions(code))
+        for index, instruction in enumerate(instructions):
+            if instruction.opname not in (
+                "LOAD_GLOBAL",
+                "LOAD_NAME",
+                "LOAD_FROM_DICT_OR_GLOBALS",
+            ) or not isinstance(instruction.argval, str):
+                continue
+            path = [instruction.argval]
+            for following in instructions[index + 1 :]:
+                if following.opname not in ("LOAD_ATTR", "LOAD_METHOD"):
+                    break
+                if not isinstance(following.argval, str):
+                    break
+                path.append(following.argval)
+            paths.append(tuple(path))
+        for constant in code.co_consts:
+            if isinstance(constant, types.CodeType):
+                paths.extend(loaded_global_paths(constant))
+        return paths
+
+    def loaded_local_paths(
+        code: types.CodeType, local_name: str
+    ) -> list[tuple[str, ...]]:
+        paths = []
+        instructions = list(dis.get_instructions(code))
+        for index, instruction in enumerate(instructions):
+            if not instruction.opname.startswith("LOAD_FAST") or (
+                instruction.argval != local_name
+            ):
+                continue
+            path = []
+            for following in instructions[index + 1 :]:
+                if following.opname not in ("LOAD_ATTR", "LOAD_METHOD"):
+                    break
+                if not isinstance(following.argval, str):
+                    break
+                path.append(following.argval)
+            if path:
+                paths.append(tuple(path))
+        return paths
+
+    def loaded_attribute_names(code: types.CodeType) -> set[str]:
+        names = {
+            instruction.argval
+            for instruction in dis.get_instructions(code)
+            if instruction.opname in ("LOAD_ATTR", "LOAD_METHOD")
+            and isinstance(instruction.argval, str)
+        }
+        for constant in code.co_consts:
+            if isinstance(constant, types.CodeType):
+                names.update(loaded_attribute_names(constant))
+        return names
+
+    def mutates_globals(code: types.CodeType) -> bool:
+        return any(
+            instruction.opname in ("STORE_GLOBAL", "DELETE_GLOBAL")
+            for instruction in dis.get_instructions(code)
+        ) or any(
+            mutates_globals(constant)
+            for constant in code.co_consts
+            if isinstance(constant, types.CodeType)
+        )
+
+    if mutates_globals(target.__code__):
+        raise PrecompileError(
+            "precompile tracer='dynamo' Python functions cannot mutate globals."
+        )
+
+    def has_unmodeled_local_access(code: types.CodeType, local_name: str) -> bool:
+        if local_name in code.co_cellvars:
+            return True
+        instructions = list(dis.get_instructions(code))
+        for index, instruction in enumerate(instructions):
+            if not instruction.opname.startswith("LOAD_FAST") or (
+                instruction.argval != local_name
+            ):
+                continue
+            if index + 1 == len(instructions) or instructions[index + 1].opname not in (
+                "LOAD_ATTR",
+                "LOAD_METHOD",
+            ):
+                return True
+        return False
+
+    def object_state_values(value: object) -> list[object]:
+        try:
+            values = list(vars(value).values())
+        except TypeError:
+            values = []
+        if not isinstance(value, type):
+            value_type = type(value)
+            for cls in value_type.__mro__:
+                for descriptor in vars(cls).values():
+                    if not isinstance(descriptor, types.MemberDescriptorType):
+                        continue
+                    try:
+                        values.append(descriptor.__get__(value, value_type))
+                    except AttributeError:
+                        pass
+        values.extend(
+            item
+            for item in gc.get_referents(value)
+            if not isinstance(item, (types.CodeType, types.ModuleType, type))
+        )
+        if isinstance(value, contextvars.ContextVar):
+            try:
+                values.append(value.get())
+            except LookupError:
+                pass
+        elif isinstance(value, contextvars.Context):
+            values.extend(value.values())
+        return values
+
+    def reachable_object_ids(values: Sequence[object]) -> set[int]:
+        stack = list(values)
+        seen: set[int] = set()
+        literal_types = (bool, int, float, complex, str, bytes)
+        while stack:
+            value = stack.pop()
+            if value is None or type(value) in literal_types:
+                continue
+            value_id = id(value)
+            if value_id in seen:
+                continue
+            seen.add(value_id)
+            if isinstance(value, (dict, MappingProxyType)):
+                stack.extend(value.keys())
+                stack.extend(value.values())
+            elif isinstance(value, (tuple, list, set, frozenset)):
+                stack.extend(value)
+            elif isinstance(value, torch.nn.Module):
+                stack.extend(value.modules())
+                stack.extend(value.parameters())
+                stack.extend(value.buffers())
+                stack.extend(object_state_values(value))
+            elif isinstance(value, weakref.ReferenceType):
+                referent = value()
+                if referent is not None:
+                    stack.append(referent)
+                callback = value.__callback__
+                if callback is not None:
+                    stack.append(callback)
+            elif isinstance(value, types.MethodType):
+                stack.extend((value.__func__, value.__self__))
+            elif isinstance(value, types.FunctionType):
+                stack.extend(value.__defaults__ or ())
+                stack.extend((value.__kwdefaults__ or {}).values())
+                stack.extend(value.__dict__.values())
+                for cell in value.__closure__ or ():
+                    try:
+                        stack.append(cell.cell_contents)
+                    except ValueError:
+                        pass
+            elif not isinstance(value, (types.CodeType, type, types.ModuleType)):
+                stack.extend(object_state_values(value))
+        return seen
+
+    input_behavior_names = {"forward", *loaded_attribute_names(target.__code__)}
+    input_ids = reachable_object_ids(
+        [value for example in example_inputs for value in example]
+    )
+
+    def resolve_static_path(
+        root: object, path: tuple[str, ...]
+    ) -> tuple[object, object | None, bool, bool]:
+        def has_custom_getattribute(value: object) -> bool:
+            value_type = type(value)
+            implementation = inspect.getattr_static(
+                value_type, "__getattribute__", None
+            )
+            if isinstance(value, type):
+                return implementation is not type.__getattribute__
+            if isinstance(value, types.ModuleType):
+                return implementation is not types.ModuleType.__getattribute__
+            return implementation is not object.__getattribute__
+
+        value = root
+        receiver = None
+        aliases_input = id(value) in input_ids
+        for attribute in path:
+            receiver = value
+            if isinstance(value, types.FunctionType) and attribute in (
+                "__annotations__",
+                "__closure__",
+                "__defaults__",
+                "__dict__",
+                "__globals__",
+                "__kwdefaults__",
+            ):
+                value = getattr(value, attribute)
+                aliases_input |= id(value) in input_ids
+                continue
+            dynamic_lookup = has_custom_getattribute(receiver)
+            try:
+                value = inspect.getattr_static(value, attribute)
+            except AttributeError:
+                return receiver, None, aliases_input, True
+            aliases_input |= id(value) in input_ids
+            if dynamic_lookup:
+                return receiver, None, aliases_input, True
+        return value, receiver, aliases_input, False
+
+    def referenced_globals(
+        function: types.FunctionType,
+    ) -> list[tuple[str, object, object | None, bool, bool]]:
+        values = []
+        for path in loaded_global_paths(function.__code__):
+            if path[0] not in function.__globals__:
+                continue
+            resolved = resolve_static_path(function.__globals__[path[0]], path[1:])
+            values.append((".".join(path), *resolved))
+        return values
+
+    def is_stable_singleton(value: object) -> bool:
+        return (
+            value is None
+            or type(value) is bool
+            or value is Ellipsis
+            or value is NotImplemented
+        )
+
+    def is_safely_reflexive(value: object, seen: set[int] | None = None) -> bool:
+        if value is None or type(value) in (bool, int, str, bytes):
+            return True
+        if type(value) in (float, complex):
+            return value == value
+        if type(value) in (dict, deque, list, tuple, set, frozenset):
+            seen = set() if seen is None else seen
+            if id(value) in seen:
+                return True
+            seen.add(id(value))
+            if type(value) is dict:
+                items = (
+                    item
+                    for pair in cast("dict[object, object]", value).items()
+                    for item in pair
+                )
+            else:
+                items = iter(cast("Iterable[object]", value))
+            return all(is_safely_reflexive(item, seen) for item in items)
+        if isinstance(value, (functools.partial, functools.partialmethod)):
+            return all(
+                is_safely_reflexive(item, seen)
+                for item in (*value.args, *(value.keywords or {}).values())
+            )
+        return False
+
+    def is_identity_container(value: object) -> bool:
+        return isinstance(
+            value,
+            (dict, MappingProxyType, deque, list, tuple, set, frozenset),
+        )
+
+    def is_identity_mapping(value: object) -> bool:
+        return isinstance(value, (dict, MappingProxyType))
+
+    def is_safely_reflexive_container_lookup(value: object) -> bool:
+        if isinstance(value, (dict, MappingProxyType)):
+            return all(is_safely_reflexive(item) for item in value)
+        if isinstance(value, (deque, list, tuple, set, frozenset)):
+            return all(is_safely_reflexive(item) for item in value)
+        return is_safely_reflexive(value)
+
+    def is_potentially_mutable(value: object) -> bool:
+        if is_stable_singleton(value) or type(value) in (
+            int,
+            float,
+            complex,
+            str,
+            bytes,
+        ):
+            return False
+        if type(value) in (tuple, frozenset):
+            items = cast("Iterable[object]", value)
+            return any(is_potentially_mutable(item) for item in items)
+        return True
+
+    input_objects: dict[int, object] = {}
+    environment_objects: dict[int, object] = {}
+    local_function_codes: dict[int, CodeType] = {}
+    local_function_payloads: dict[
+        int, tuple[bool, bool, frozenset[tuple[str, ...]]]
+    ] = {}
+
+    def environment_value_dependency(
+        value: object,
+    ) -> tuple[bool, bool, frozenset[tuple[str, ...]]]:
+        environment_objects[id(value)] = value
+        markers = {
+            ("<environment-object>", str(id(value))),
+            ("<singleton>",)
+            if is_stable_singleton(value)
+            else ("<identity-unstable>",),
+        }
+        if not is_safely_reflexive(value):
+            markers.add(("<identity-sensitive>",))
+        if is_identity_container(value) and not is_safely_reflexive_container_lookup(
+            value
+        ):
+            markers.add(("<lookup-identity-sensitive>",))
+        if is_identity_mapping(value) and not all(
+            is_safely_reflexive(item) for item in cast("Mapping[object, object]", value)
+        ):
+            markers.add(("<mapping-key-identity-sensitive>",))
+        if is_identity_mapping(value):
+            markers.add(("<mapping>",))
+        if is_potentially_mutable(value):
+            markers.add(("<mutable-environment-object>",))
+        return False, True, frozenset(markers)
+
+    def bytecode_dependencies(
+        code: CodeType,
+        globals_scope: dict[str, object],
+        parameter_dependencies: Mapping[
+            str, tuple[bool, bool, frozenset[tuple[str, ...]]]
+        ]
+        | Sequence[tuple[bool, bool, frozenset[tuple[str, ...]]]]
+        | None = None,
+        active: set[int] | None = None,
+        dependency_scopes: dict[str, dict[str, object]] | None = None,
+    ) -> tuple[
+        bool,
+        set[tuple[str, ...]],
+        tuple[bool, bool, frozenset[tuple[str, ...]]],
+        bool,
+        bool,
+    ]:
+        dependency = tuple[bool, bool, frozenset[tuple[str, ...]]]
+        stack_slot = dependency | None
+        analysis_state = tuple[tuple[stack_slot, ...], dict[str, dependency]]
+        called_globals: set[tuple[str, ...]] = set()
+        return_dependencies: list[dependency] = []
+        found_identity = False
+        call_graph_incomplete = False
+        mutates_environment = False
+        active = set() if active is None else active
+        dependency_scopes = {} if dependency_scopes is None else dependency_scopes
+        scope_key = str(id(globals_scope))
+        dependency_scopes[scope_key] = globals_scope
+        if id(code) in active:
+            return False, set(), (False, True, frozenset()), True, False
+        active.add(id(code))
+
+        def combine(
+            values: Sequence[stack_slot],
+        ) -> tuple[bool, bool, frozenset[tuple[str, ...]]]:
+            present = [value for value in values if value is not None]
+            return (
+                any(value[0] for value in present),
+                any(value[1] for value in present),
+                frozenset(path for value in present for path in value[2]),
+            )
+
+        def merge_dependency(left: stack_slot, right: stack_slot) -> stack_slot:
+            if left is None:
+                return right
+            if right is None:
+                return left
+            return combine((left, right))
+
+        def merge_state(
+            current: analysis_state | None, incoming: analysis_state
+        ) -> tuple[analysis_state, bool]:
+            if current is None:
+                return incoming, True
+            current_stack, current_locals = current
+            incoming_stack, incoming_locals = incoming
+            if len(current_stack) == len(incoming_stack):
+                merged_stack = tuple(
+                    merge_dependency(left, right)
+                    for left, right in zip(current_stack, incoming_stack, strict=True)
+                )
+            else:
+                merged = combine((*current_stack, *incoming_stack))
+                merged_stack = (merged,) * max(len(current_stack), len(incoming_stack))
+            merged_locals = {
+                name: combine(
+                    tuple(
+                        value
+                        for scope in (current_locals, incoming_locals)
+                        if (value := scope.get(name)) is not None
+                    )
+                )
+                for name in current_locals.keys() | incoming_locals.keys()
+            }
+            merged_state = merged_stack, merged_locals
+            return merged_state, merged_state != current
+
+        def environment_dependency(
+            path: tuple[str, ...],
+        ) -> tuple[bool, bool, frozenset[tuple[str, ...]]]:
+            return False, True, frozenset((path,))
+
+        def is_synthetic_path(path: tuple[str, ...]) -> bool:
+            return path[0].startswith("<") and path[0] != "<scope>"
+
+        def scoped_path(path: tuple[str, ...]) -> tuple[str, ...]:
+            return ("<scope>", scope_key, *path)
+
+        def unscoped_path(path: tuple[str, ...]) -> tuple[str, ...]:
+            return path[2:] if path[0] == "<scope>" else path
+
+        def resolve_environment_path(path: tuple[str, ...]) -> tuple[object, bool]:
+            if path[0] == "<environment-object>" and len(path) >= 2:
+                try:
+                    value = environment_objects[int(path[1])]
+                    for attribute in path[2:]:
+                        value = inspect.getattr_static(value, attribute)
+                except (AttributeError, KeyError, ValueError):
+                    return None, False
+                return value, True
+            if is_synthetic_path(path):
+                return None, False
+            resolved_value, _, resolved = resolve_called(path)
+            return resolved_value, resolved
+
+        def has_identity_unstable_environment(value: dependency) -> bool:
+            if not value[1]:
+                return False
+            saw_source = False
+            for path in value[2]:
+                if (
+                    path[0] == "<identity-unstable>"
+                    or path[0] == "<identity-sensitive>"
+                ):
+                    return True
+                if path[0] == "<singleton>":
+                    saw_source = True
+                    continue
+                resolved_value, resolved = resolve_environment_path(path)
+                if not resolved:
+                    continue
+                saw_source = True
+                if not is_stable_singleton(resolved_value):
+                    return True
+            return not saw_source
+
+        def has_identity_sensitive_environment(value: dependency) -> bool:
+            if not value[1]:
+                return False
+            saw_source = False
+            for path in value[2]:
+                if path[0] == "<identity-sensitive>":
+                    return True
+                if path[0] in ("<identity-unstable>", "<singleton>"):
+                    saw_source = True
+                    continue
+                resolved_value, resolved = resolve_environment_path(path)
+                if not resolved:
+                    continue
+                saw_source = True
+                if not is_safely_reflexive(resolved_value):
+                    return True
+            return not saw_source
+
+        def has_lookup_identity_sensitive_environment(value: dependency) -> bool:
+            if not value[1]:
+                return False
+            saw_source = False
+            for path in value[2]:
+                if path[0] == "<lookup-identity-sensitive>":
+                    return True
+                if path[0] in (
+                    "<identity-sensitive>",
+                    "<identity-unstable>",
+                    "<singleton>",
+                ):
+                    continue
+                resolved_value, resolved = resolve_environment_path(path)
+                if not resolved:
+                    continue
+                saw_source = True
+                if not is_safely_reflexive_container_lookup(resolved_value):
+                    return True
+            return not saw_source
+
+        def has_mapping_key_identity_sensitive_environment(
+            value: dependency,
+        ) -> bool:
+            if not value[1]:
+                return False
+            saw_source = False
+            for path in value[2]:
+                if path[0] == "<mapping-key-identity-sensitive>":
+                    return True
+                if is_synthetic_path(path):
+                    continue
+                resolved_value, resolved = resolve_environment_path(path)
+                if not resolved:
+                    continue
+                saw_source = True
+                if is_identity_mapping(resolved_value) and not all(
+                    is_safely_reflexive(item)
+                    for item in cast("Mapping[object, object]", resolved_value)
+                ):
+                    return True
+            return not saw_source
+
+        def has_input_container(value: dependency) -> bool:
+            return value[0] and any(
+                path[0] in ("<input-container>", "<input-container-content>")
+                for path in value[2]
+            )
+
+        def has_input_mapping(value: dependency) -> bool:
+            return value[0] and any(path[0] == "<input-mapping>" for path in value[2])
+
+        def has_identity_sensitive_input_container(value: dependency) -> bool:
+            return value[0] and any(
+                path[0] == "<input-identity-sensitive-container>" for path in value[2]
+            )
+
+        def has_lookup_identity_sensitive_input_container(
+            value: dependency,
+        ) -> bool:
+            return value[0] and any(
+                path[0] == "<input-lookup-identity-sensitive-container>"
+                for path in value[2]
+            )
+
+        def has_identity_sensitive_input_mapping_keys(
+            value: dependency,
+        ) -> bool:
+            return value[0] and any(
+                path[0] == "<input-mapping-key-identity-sensitive>" for path in value[2]
+            )
+
+        def has_environment_container(value: dependency) -> bool:
+            for path in value[2]:
+                if path[0] == "<container>":
+                    return True
+                resolved_value, resolved = resolve_environment_path(path)
+                if resolved and isinstance(
+                    resolved_value,
+                    (dict, MappingProxyType, deque, list, tuple, set, frozenset),
+                ):
+                    return True
+            return False
+
+        def has_environment_mapping(value: dependency) -> bool:
+            for path in value[2]:
+                if path[0] == "<mapping>":
+                    return True
+                resolved_value, resolved = resolve_environment_path(path)
+                if resolved and is_identity_mapping(resolved_value):
+                    return True
+            return False
+
+        def has_mutable_environment_reference(value: dependency) -> bool:
+            if not value[1]:
+                return False
+            for path in value[2]:
+                if path[0] == "<mutable-environment-object>":
+                    return True
+                resolved_value, resolved = resolve_environment_path(path)
+                if resolved and is_potentially_mutable(resolved_value):
+                    return True
+            return False
+
+        def environment_values_satisfy(
+            value: dependency, predicate: Callable[[object], bool]
+        ) -> bool:
+            if not value[1]:
+                return False
+            saw_value = False
+            for path in value[2]:
+                if path[0] == "<environment>":
+                    return False
+                resolved_value, resolved = resolve_environment_path(path)
+                if not resolved:
+                    if not is_synthetic_path(path):
+                        return False
+                    continue
+                saw_value = True
+                if not predicate(resolved_value):
+                    return False
+            return saw_value
+
+        def has_unsafe_environment_behavior(value: dependency) -> bool:
+            return has_mutable_environment_reference(
+                value
+            ) and not environment_values_satisfy(
+                value,
+                lambda item: isinstance(item, torch.Tensor)
+                or type(item)
+                in (dict, MappingProxyType, deque, list, set, frozenset, tuple),
+            )
+
+        def may_have_unguarded_input_alias(left: dependency, right: dependency) -> bool:
+            if not left[0] or not right[0]:
+                return False
+            left_types = {path[1:] for path in left[2] if path[0] == "<input-type>"}
+            right_types = {path[1:] for path in right[2] if path[0] == "<input-type>"}
+            if not left_types or not right_types:
+                return True
+            return any(
+                left_type == right_type and left_type[0] != "tensor"
+                for left_type in left_types
+                for right_type in right_types
+            )
+
+        def has_environment_reference(value: dependency) -> bool:
+            return value[1] and any(
+                path[0]
+                in (
+                    "<environment>",
+                    "<environment-object>",
+                    "<mutable-environment-object>",
+                )
+                or not is_synthetic_path(path)
+                for path in value[2]
+            )
+
+        def extend_path(path: tuple[str, ...], attribute: str) -> tuple[str, ...]:
+            if path[0] in (
+                "<environment-object>",
+                "<mutable-environment-object>",
+            ):
+                return (*path, attribute)
+            if is_synthetic_path(path):
+                return path
+            if len(path) >= 8:
+                return ("<environment>",)
+            return (*path, attribute)
+
+        def input_method_dependency(value: dependency, name: str) -> dependency:
+            paths: set[tuple[str, ...]] = {
+                ("<input-method>", path[1], name)
+                for path in value[2]
+                if path[0] == "<input-object>"
+            }
+            if value[0]:
+                paths.add(("<input>", name))
+            return value[0], False, frozenset(paths)
+
+        def environment_method_dependency(value: dependency, name: str) -> dependency:
+            return (
+                False,
+                value[1],
+                frozenset(
+                    extend_path(path, name)
+                    for path in value[2]
+                    if path[0] == "<environment-object>" or not is_synthetic_path(path)
+                ),
+            )
+
+        def resolve_called(
+            path: tuple[str, ...],
+        ) -> tuple[object | None, dependency | None, bool]:
+            if path[0] == "<input-method>":
+                receiver_value = input_objects.get(int(path[1]))
+                if receiver_value is None:
+                    return None, None, False
+                try:
+                    value = inspect.getattr_static(type(receiver_value), path[2])
+                except AttributeError:
+                    return None, None, False
+                if isinstance(value, (classmethod, staticmethod)):
+                    value = value.__func__
+                receiver_markers: set[tuple[str, ...]] = {
+                    ("<input-object>", path[1]),
+                    (
+                        "<input-type>",
+                        "tensor"
+                        if isinstance(receiver_value, torch.Tensor)
+                        else "value",
+                        type(receiver_value).__module__,
+                        type(receiver_value).__qualname__,
+                    ),
+                }
+                if isinstance(
+                    receiver_value,
+                    (dict, MappingProxyType, deque, list, tuple, set, frozenset),
+                ):
+                    receiver_markers.add(("<input-container>",))
+                    if not is_safely_reflexive(receiver_value):
+                        receiver_markers.add(("<input-identity-sensitive-container>",))
+                    if not is_safely_reflexive_container_lookup(receiver_value):
+                        receiver_markers.add(
+                            ("<input-lookup-identity-sensitive-container>",)
+                        )
+                if is_identity_mapping(receiver_value):
+                    receiver_markers.add(("<input-mapping>",))
+                    if not all(
+                        is_safely_reflexive(item)
+                        for item in cast("Mapping[object, object]", receiver_value)
+                    ):
+                        receiver_markers.add(
+                            ("<input-mapping-key-identity-sensitive>",)
+                        )
+                receiver_dependency = (
+                    True,
+                    False,
+                    frozenset(receiver_markers),
+                )
+                return value, receiver_dependency, True
+            if path[0] == "<environment-object>" and len(path) >= 2:
+                try:
+                    value = environment_objects[int(path[1])]
+                except (KeyError, ValueError):
+                    return None, None, False
+                owner = None
+                try:
+                    for index, attribute in enumerate(path[2:], 2):
+                        owner = value
+                        value = inspect.getattr_static(owner, attribute)
+                        if isinstance(value, staticmethod):
+                            value = value.__func__
+                        elif isinstance(value, classmethod):
+                            value = value.__func__
+                            if index == len(path) - 1:
+                                return (
+                                    value,
+                                    environment_dependency(path[:-1]),
+                                    True,
+                                )
+                        elif (
+                            index == len(path) - 1
+                            and isinstance(value, types.FunctionType)
+                            and not isinstance(owner, (type, types.ModuleType))
+                        ):
+                            return (
+                                value,
+                                environment_dependency(path[:-1]),
+                                True,
+                            )
+                except AttributeError:
+                    return None, None, False
+                if isinstance(value, types.MethodType):
+                    return value.__func__, environment_dependency(path), True
+                if (
+                    owner is not None
+                    and callable(value)
+                    and not isinstance(owner, (type, types.ModuleType))
+                ):
+                    return value, environment_dependency(path[:-1]), True
+                return value, None, True
+            path_globals = globals_scope
+            if path[0] == "<scope>":
+                path_globals = dependency_scopes.get(path[1], {})
+                path = path[2:]
+                if not path:
+                    return None, None, False
+            if len(path) == 2 and path[0] == "super":
+                owner: object | None = None
+                qualname = getattr(code, "co_qualname", None)
+                if isinstance(qualname, str):
+                    owner = path_globals
+                    try:
+                        for name in qualname.split(".")[:-1]:
+                            if name == "<locals>":
+                                return None, None, False
+                            owner = (
+                                owner[name]
+                                if isinstance(owner, dict)
+                                else inspect.getattr_static(owner, name)
+                            )
+                    except (AttributeError, KeyError):
+                        return None, None, False
+                else:
+                    for candidate in path_globals.values():
+                        if not isinstance(candidate, type):
+                            continue
+                        method = inspect.getattr_static(candidate, code.co_name, None)
+                        method = getattr(method, "__func__", method)
+                        if isinstance(method, types.FunctionType) and (
+                            method.__code__ is code
+                        ):
+                            owner = candidate
+                            break
+                if isinstance(owner, type):
+                    for base in owner.__mro__[1:]:
+                        called = inspect.getattr_static(base, path[1], None)
+                        if isinstance(called, (classmethod, staticmethod)):
+                            called = called.__func__
+                        if called is not None:
+                            return called, environment_dependency(path), True
+                return None, None, False
+            if path[0] in path_globals:
+                value = path_globals[path[0]]
+            else:
+                builtins_scope = path_globals.get("__builtins__", {})
+                if isinstance(builtins_scope, types.ModuleType):
+                    builtins_scope = vars(builtins_scope)
+                elif not isinstance(builtins_scope, Mapping):
+                    builtins_scope = {}
+                if path[0] in builtins_scope:
+                    value = builtins_scope[path[0]]
+                else:
+                    try:
+                        value = importlib.import_module(path[0])
+                    except ImportError:
+                        return None, None, False
+            owner = None
+            try:
+                for index, attribute in enumerate(path[1:], 1):
+                    owner = value
+                    value = inspect.getattr_static(owner, attribute)
+                    if isinstance(value, staticmethod):
+                        value = value.__func__
+                    elif isinstance(value, classmethod):
+                        value = value.__func__
+                        if index == len(path) - 1:
+                            return value, environment_dependency(path[:-1]), True
+                    elif (
+                        index == len(path) - 1
+                        and isinstance(value, types.FunctionType)
+                        and not isinstance(owner, (type, types.ModuleType))
+                    ):
+                        return value, environment_dependency(path[:-1]), True
+            except AttributeError:
+                return None, None, False
+            if isinstance(value, types.MethodType):
+                return value.__func__, environment_dependency(path), True
+            if (
+                owner is not None
+                and callable(value)
+                and not isinstance(owner, (type, types.ModuleType))
+            ):
+                return value, environment_dependency(path[:-1]), True
+            return value, None, True
+
+        def python_callables(
+            called: object | None,
+            path: tuple[str, ...],
+            receiver: dependency | None,
+            seen: set[int] | None = None,
+        ) -> list[
+            tuple[
+                types.FunctionType,
+                dependency | None,
+                tuple[object, ...],
+                dict[str, object],
+            ]
+        ]:
+            seen = set() if seen is None else seen
+            if id(called) in seen:
+                return []
+            seen.add(id(called))
+            if isinstance(called, (functools.partial, functools.partialmethod)):
+                function = called.func
+                if isinstance(function, types.MethodType):
+                    function = function.__func__
+                    receiver = environment_dependency(path)
+                if isinstance(function, types.FunctionType):
+                    return [
+                        (
+                            function,
+                            receiver,
+                            called.args,
+                            called.keywords or {},
+                        )
+                    ]
+                called = function
+            if isinstance(called, types.MethodType):
+                return [(called.__func__, environment_dependency(path), (), {})]
+            if isinstance(called, types.FunctionType):
+                return [(called, receiver, (), {})]
+            if isinstance(called, type):
+                constructors: list[
+                    tuple[
+                        types.FunctionType,
+                        dependency | None,
+                        tuple[object, ...],
+                        dict[str, object],
+                    ]
+                ] = []
+                metaclass_call = inspect.getattr_static(type(called), "__call__", None)
+                if isinstance(metaclass_call, types.FunctionType):
+                    constructors.append(
+                        (metaclass_call, environment_dependency(path), (), {})
+                    )
+                for name in ("__new__", "__init__"):
+                    constructor = inspect.getattr_static(called, name, None)
+                    if isinstance(constructor, (classmethod, staticmethod)):
+                        constructor = constructor.__func__
+                    if isinstance(constructor, types.FunctionType):
+                        constructors.append(
+                            (
+                                constructor,
+                                environment_dependency(path)
+                                if name == "__new__"
+                                else (False, False, frozenset()),
+                                (),
+                                {},
+                            )
+                        )
+                return constructors
+            if callable(called) and not isinstance(called, types.ModuleType):
+                call = inspect.getattr_static(type(called), "__call__", None)
+                if isinstance(call, types.FunctionType):
+                    return [(call, environment_dependency(path), (), {})]
+            if isinstance(called, (dict, MappingProxyType)):
+                values = list(called.values())
+            elif isinstance(called, (tuple, list, set, frozenset)):
+                values = list(called)
+            else:
+                values = []
+            if values:
+                candidates = []
+                for value in values:
+                    candidates.extend(python_callables(value, path, None, seen))
+                return candidates
+            return []
+
+        def bind_call_dependencies(
+            function: types.FunctionType,
+            args: Sequence[stack_slot],
+            keyword_names: tuple[str, ...],
+            receiver: dependency | None,
+            bound_positional: tuple[object, ...] = (),
+            bound_keywords: Mapping[str, object] | None = None,
+        ) -> dict[str, dependency]:
+            function_code = function.__code__
+            positional_names = list(
+                function_code.co_varnames[: function_code.co_argcount]
+            )
+            kwonly_start = function_code.co_argcount
+            kwonly_end = kwonly_start + function_code.co_kwonlyargcount
+            kwonly_names = list(function_code.co_varnames[kwonly_start:kwonly_end])
+            bound: dict[str, dependency] = {}
+            positional_index = 0
+            if receiver is not None and positional_names:
+                bound[positional_names[0]] = receiver
+                positional_index = 1
+            for name, value in zip(
+                positional_names[positional_index:], bound_positional
+            ):
+                bound[name] = environment_value_dependency(value)
+            positional_index += len(bound_positional)
+            positional_count = len(args) - len(keyword_names)
+            positional_values = args[:positional_count]
+            bound.update(
+                {
+                    name: value
+                    for name, value in zip(
+                        positional_names[positional_index:], positional_values
+                    )
+                    if value is not None
+                }
+            )
+            remaining = positional_values[
+                max(len(positional_names) - positional_index, 0) :
+            ]
+            next_name = kwonly_end
+            if function_code.co_flags & inspect.CO_VARARGS:
+                bound[function_code.co_varnames[next_name]] = combine(remaining)
+                next_name += 1
+            extra_keywords = []
+            for name, value in zip(keyword_names, args[positional_count:]):
+                if value is None:
+                    continue
+                if name in positional_names or name in kwonly_names:
+                    bound[name] = value
+                else:
+                    extra_keywords.append(value)
+            if function_code.co_flags & inspect.CO_VARKEYWORDS:
+                bound[function_code.co_varnames[next_name]] = combine(extra_keywords)
+            for name, value in (bound_keywords or {}).items():
+                if name in positional_names or name in kwonly_names:
+                    bound.setdefault(name, environment_value_dependency(value))
+            defaults = function.__defaults__ or ()
+            for name, value in zip(
+                positional_names[len(positional_names) - len(defaults) :], defaults
+            ):
+                bound.setdefault(name, environment_value_dependency(value))
+            for name, value in (function.__kwdefaults__ or {}).items():
+                bound.setdefault(name, environment_value_dependency(value))
+            return bound
+
+        def bind_local_function_dependencies(
+            function_code: CodeType,
+            args: Sequence[stack_slot],
+            keyword_names: tuple[str, ...],
+            captured: dependency,
+        ) -> dict[str, dependency]:
+            positional_names = list(
+                function_code.co_varnames[: function_code.co_argcount]
+            )
+            kwonly_start = function_code.co_argcount
+            kwonly_end = kwonly_start + function_code.co_kwonlyargcount
+            kwonly_names = list(function_code.co_varnames[kwonly_start:kwonly_end])
+            positional_count = len(args) - len(keyword_names)
+            bound = {
+                name: value
+                for name, value in zip(positional_names, args[:positional_count])
+                if value is not None
+            }
+            remaining = args[positional_count:]
+            parameter_names = positional_names + kwonly_names
+            bound.update(
+                {
+                    name: value
+                    for name, value in zip(keyword_names, remaining)
+                    if value is not None and name in parameter_names
+                }
+            )
+            next_name = kwonly_end
+            if function_code.co_flags & inspect.CO_VARARGS:
+                bound[function_code.co_varnames[next_name]] = combine(
+                    args[len(positional_names) : positional_count]
+                )
+                next_name += 1
+            if function_code.co_flags & inspect.CO_VARKEYWORDS:
+                bound[function_code.co_varnames[next_name]] = combine(
+                    tuple(
+                        value
+                        for name, value in zip(keyword_names, remaining)
+                        if value is not None and name not in parameter_names
+                    )
+                )
+            for name in (*positional_names, *kwonly_names, *function_code.co_freevars):
+                bound.setdefault(name, captured)
+            return bound
+
+        def keyword_names_for_call(index: int) -> tuple[str, ...]:
+            for previous in reversed(instructions[max(0, index - 4) : index]):
+                if previous.opname == "KW_NAMES" and previous.arg is not None:
+                    names = code.co_consts[previous.arg]
+                elif previous.opname == "LOAD_CONST":
+                    names = previous.argval
+                elif previous.opname not in ("CACHE", "EXTENDED_ARG", "PRECALL"):
+                    break
+                else:
+                    continue
+                if isinstance(names, tuple) and all(
+                    isinstance(name, str) for name in names
+                ):
+                    return names
+                break
+            return ()
+
+        inplace_operator_names = (
+            "iadd",
+            "iand",
+            "iconcat",
+            "ifloordiv",
+            "ilshift",
+            "imatmul",
+            "imod",
+            "imul",
+            "ior",
+            "ipow",
+            "irshift",
+            "isub",
+            "itruediv",
+            "ixor",
+        )
+        mutating_method_names = {
+            "__delattr__",
+            "__delitem__",
+            "__setattr__",
+            "__setitem__",
+            "add",
+            "append",
+            "appendleft",
+            "clear",
+            "difference_update",
+            "discard",
+            "extend",
+            "extendleft",
+            "insert",
+            "intersection_update",
+            "pop",
+            "popitem",
+            "remove",
+            "reverse",
+            "rotate",
+            "setdefault",
+            "sort",
+            "symmetric_difference_update",
+            "update",
+            *(f"__{name}__" for name in inplace_operator_names),
+        }
+        identity_method_names = {
+            "__contains__",
+            "__eq__",
+            "__getitem__",
+            "__ne__",
+            "count",
+            "get",
+            "index",
+        }
+        inplace_operators = tuple(
+            candidate
+            for name in inplace_operator_names
+            if (candidate := getattr(operator, name, None)) is not None
+        )
+        binary_operator_methods = {
+            "+": ("__add__", "__radd__"),
+            "-": ("__sub__", "__rsub__"),
+            "*": ("__mul__", "__rmul__"),
+            "@": ("__matmul__", "__rmatmul__"),
+            "/": ("__truediv__", "__rtruediv__"),
+            "//": ("__floordiv__", "__rfloordiv__"),
+            "%": ("__mod__", "__rmod__"),
+            "**": ("__pow__", "__rpow__"),
+            "<<": ("__lshift__", "__rlshift__"),
+            ">>": ("__rshift__", "__rrshift__"),
+            "&": ("__and__", "__rand__"),
+            "^": ("__xor__", "__rxor__"),
+            "|": ("__or__", "__ror__"),
+            "BINARY_ADD": ("__add__", "__radd__"),
+            "BINARY_SUBTRACT": ("__sub__", "__rsub__"),
+            "BINARY_MULTIPLY": ("__mul__", "__rmul__"),
+            "BINARY_MATRIX_MULTIPLY": ("__matmul__", "__rmatmul__"),
+            "BINARY_TRUE_DIVIDE": ("__truediv__", "__rtruediv__"),
+            "BINARY_FLOOR_DIVIDE": ("__floordiv__", "__rfloordiv__"),
+            "BINARY_MODULO": ("__mod__", "__rmod__"),
+            "BINARY_POWER": ("__pow__", "__rpow__"),
+            "BINARY_LSHIFT": ("__lshift__", "__rlshift__"),
+            "BINARY_RSHIFT": ("__rshift__", "__rrshift__"),
+            "BINARY_AND": ("__and__", "__rand__"),
+            "BINARY_XOR": ("__xor__", "__rxor__"),
+            "BINARY_OR": ("__or__", "__ror__"),
+        }
+        readonly_native_methods: Mapping[type[object], frozenset[str]] = {
+            contextvars.ContextVar: frozenset({"get"}),
+            object: frozenset({"__getattribute__"}),
+            dict: frozenset(
+                {
+                    "__contains__",
+                    "__eq__",
+                    "__getitem__",
+                    "__iter__",
+                    "__len__",
+                    "__ne__",
+                    "__or__",
+                    "__reversed__",
+                    "copy",
+                    "get",
+                    "items",
+                    "keys",
+                    "values",
+                }
+            ),
+            list: frozenset(
+                {
+                    "__add__",
+                    "__contains__",
+                    "__eq__",
+                    "__getitem__",
+                    "__iter__",
+                    "__len__",
+                    "__mul__",
+                    "__ne__",
+                    "__reversed__",
+                    "__rmul__",
+                    "copy",
+                    "count",
+                    "index",
+                }
+            ),
+            deque: frozenset(
+                {
+                    "__add__",
+                    "__contains__",
+                    "__eq__",
+                    "__getitem__",
+                    "__iter__",
+                    "__len__",
+                    "__mul__",
+                    "__ne__",
+                    "__reversed__",
+                    "__rmul__",
+                    "copy",
+                    "count",
+                    "index",
+                }
+            ),
+            tuple: frozenset(
+                {
+                    "__add__",
+                    "__contains__",
+                    "__eq__",
+                    "__getitem__",
+                    "__iter__",
+                    "__len__",
+                    "__mul__",
+                    "__ne__",
+                    "__rmul__",
+                    "count",
+                    "index",
+                }
+            ),
+            MappingProxyType: frozenset(
+                {
+                    "__contains__",
+                    "__eq__",
+                    "__getitem__",
+                    "__iter__",
+                    "__len__",
+                    "__or__",
+                    "__reversed__",
+                    "copy",
+                    "get",
+                    "items",
+                    "keys",
+                    "values",
+                }
+            ),
+            set: frozenset(
+                {
+                    "__and__",
+                    "__contains__",
+                    "__eq__",
+                    "__iter__",
+                    "__len__",
+                    "__ne__",
+                    "__or__",
+                    "__sub__",
+                    "__xor__",
+                    "copy",
+                    "difference",
+                    "intersection",
+                    "isdisjoint",
+                    "issubset",
+                    "issuperset",
+                    "symmetric_difference",
+                    "union",
+                }
+            ),
+        }
+        protocol_consuming_builtins = {
+            abs,
+            all,
+            any,
+            ascii,
+            bin,
+            bool,
+            bytes,
+            complex,
+            dict,
+            dir,
+            float,
+            format,
+            frozenset,
+            hash,
+            hex,
+            int,
+            iter,
+            len,
+            list,
+            max,
+            min,
+            next,
+            oct,
+            print,
+            repr,
+            reversed,
+            round,
+            set,
+            sorted,
+            str,
+            sum,
+            tuple,
+        }
+        native_input_only_callables = {
+            all,
+            any,
+            filter,
+            functools.reduce,
+            map,
+        }
+        environment_retaining_native_callables = (
+            classmethod,
+            functools.partial,
+            functools.partialmethod,
+            memoryview,
+            property,
+            slice,
+            staticmethod,
+            MappingProxyType,
+        )
+        safe_native_free_callables = {
+            callable,
+            getattr,
+            hasattr,
+            id,
+            isinstance,
+            issubclass,
+            operator.contains,
+            operator.countOf,
+            operator.eq,
+            operator.getitem,
+            operator.indexOf,
+            operator.is_,
+            operator.is_not,
+            operator.ne,
+        }
+        native_argument_protocol_methods: Mapping[type[object], frozenset[str]] = {
+            dict: frozenset({"__contains__", "__eq__", "__getitem__", "__ne__", "get"}),
+            MappingProxyType: frozenset(
+                {"__contains__", "__eq__", "__getitem__", "get"}
+            ),
+            list: frozenset(
+                {
+                    "__contains__",
+                    "__eq__",
+                    "__getitem__",
+                    "__mul__",
+                    "__ne__",
+                    "__rmul__",
+                    "count",
+                    "index",
+                }
+            ),
+            deque: frozenset(
+                {
+                    "__contains__",
+                    "__eq__",
+                    "__getitem__",
+                    "__mul__",
+                    "__ne__",
+                    "__rmul__",
+                    "count",
+                    "index",
+                }
+            ),
+            tuple: frozenset(
+                {
+                    "__contains__",
+                    "__eq__",
+                    "__getitem__",
+                    "__mul__",
+                    "__ne__",
+                    "__rmul__",
+                    "count",
+                    "index",
+                }
+            ),
+            set: readonly_native_methods[set] - {"__iter__", "__len__", "copy"},
+        }
+
+        def has_unverified_protocol_value(
+            value: object, seen: set[int] | None = None
+        ) -> bool:
+            if isinstance(value, torch.Tensor) or not is_potentially_mutable(value):
+                return False
+            if isinstance(
+                value,
+                (
+                    functools.partial,
+                    functools.partialmethod,
+                    types.FunctionType,
+                    types.MethodType,
+                ),
+            ):
+                return False
+            seen = set() if seen is None else seen
+            if id(value) in seen:
+                return False
+            seen.add(id(value))
+            if type(value) in (dict, MappingProxyType):
+                return any(
+                    has_unverified_protocol_value(item, seen)
+                    for pair in cast("Mapping[object, object]", value).items()
+                    for item in pair
+                )
+            if type(value) in (deque, list, tuple, set, frozenset):
+                return any(
+                    has_unverified_protocol_value(item, seen)
+                    for item in cast("Iterable[object]", value)
+                )
+            return True
+
+        def has_unsafe_native_arguments(value: dependency) -> bool:
+            return has_mutable_environment_reference(
+                value
+            ) and not environment_values_satisfy(
+                value, lambda item: not has_unverified_protocol_value(item)
+            )
+
+        def environment_container_contents_dependency(
+            value: dependency, kind: str
+        ) -> dependency | None:
+            contents = []
+            seen = set()
+            for path in value[2]:
+                container, resolved = resolve_environment_path(path)
+                if not resolved or id(container) in seen:
+                    continue
+                seen.add(id(container))
+                if type(container) in (dict, MappingProxyType):
+                    mapping = cast("Mapping[object, object]", container)
+                    if kind in ("iteration", "keys"):
+                        selected = mapping.keys()
+                    elif kind == "items":
+                        selected = (item for pair in mapping.items() for item in pair)
+                    else:
+                        selected = mapping.values()
+                elif type(container) in (deque, list, tuple, set, frozenset):
+                    selected = cast("Iterable[object]", container)
+                else:
+                    continue
+                contents.extend(environment_value_dependency(item) for item in selected)
+            if not contents:
+                return None
+            selected = combine(contents)
+            input_paths = frozenset(
+                path for path in value[2] if path[0].startswith("<input")
+            )
+            return (
+                value[0],
+                selected[1],
+                selected[2]
+                | input_paths
+                | (frozenset((("<input-value>",),)) if value[0] else frozenset()),
+            )
+
+        def native_method_result_dependency(
+            called: object, receiver: dependency
+        ) -> dependency | None:
+            name = getattr(called, "__name__", None)
+            if name in ("__getitem__", "get", "values"):
+                result = environment_container_contents_dependency(receiver, "values")
+                if result is not None or name != "get":
+                    return result
+                context_values = []
+                for path in receiver[2]:
+                    context_var, resolved = resolve_environment_path(path)
+                    if not resolved or not isinstance(
+                        context_var, contextvars.ContextVar
+                    ):
+                        continue
+                    try:
+                        context_values.append(
+                            environment_value_dependency(context_var.get())
+                        )
+                    except LookupError:
+                        pass
+                return combine(context_values) if context_values else None
+            if name == "__iter__":
+                return environment_container_contents_dependency(receiver, "iteration")
+            if name == "keys":
+                return environment_container_contents_dependency(receiver, "keys")
+            if name == "items":
+                return environment_container_contents_dependency(receiver, "items")
+            if name == "copy":
+                return receiver
+            return None
+
+        def native_method_uses_argument_protocol(
+            called: object, receiver: dependency
+        ) -> bool:
+            name = getattr(called, "__name__", None)
+            if not isinstance(name, str):
+                return False
+            owner = getattr(called, "__objclass__", None)
+
+            def uses_protocol(value: object) -> bool:
+                methods = native_argument_protocol_methods.get(type(value))
+                if (
+                    methods is None
+                    and isinstance(owner, type)
+                    and isinstance(value, owner)
+                ):
+                    methods = native_argument_protocol_methods.get(owner)
+                return methods is not None and name in methods
+
+            return environment_values_satisfy(receiver, uses_protocol)
+
+        def native_method_protocol_values(value: object, name: str) -> Iterable[object]:
+            if type(value) in (dict, MappingProxyType):
+                mapping = cast("Mapping[object, object]", value)
+                if name in ("__contains__", "__getitem__", "get"):
+                    return mapping.keys()
+                if name in ("__eq__", "__ne__"):
+                    return (item for pair in mapping.items() for item in pair)
+            elif type(value) in (deque, list, tuple) and name in (
+                "__contains__",
+                "__eq__",
+                "__ne__",
+                "count",
+                "index",
+            ):
+                return cast("Iterable[object]", value)
+            elif type(value) is set and name not in ("__iter__", "__len__", "copy"):
+                return cast("Iterable[object]", value)
+            return ()
+
+        def is_readonly_native_method(called: object, receiver: dependency) -> bool:
+            name = getattr(called, "__name__", None)
+            if not isinstance(name, str):
+                return False
+
+            def is_readonly(value: object) -> bool:
+                if isinstance(value, torch.Tensor):
+                    return True
+                allowed = readonly_native_methods.get(type(value), frozenset())
+                owner = getattr(called, "__objclass__", None)
+                if (
+                    name not in allowed
+                    and isinstance(owner, type)
+                    and isinstance(value, owner)
+                ):
+                    allowed = readonly_native_methods.get(owner, frozenset())
+                if name not in allowed:
+                    return False
+                return not any(
+                    has_unverified_protocol_value(item)
+                    for item in native_method_protocol_values(value, name)
+                )
+
+            return environment_values_satisfy(
+                receiver,
+                is_readonly,
+            )
+
+        def record_mutation() -> None:
+            nonlocal mutates_environment
+            mutates_environment = True
+
+        def analyze_binary_behavior(
+            opname: str,
+            argrepr: str,
+            values: Sequence[stack_slot],
+        ) -> bool:
+            pair = dependency_pair(values)
+            if pair is None:
+                return False
+            operator_name = (
+                argrepr.removesuffix("=") if opname == "BINARY_OP" else opname
+            )
+            methods = binary_operator_methods.get(operator_name)
+            if methods is None:
+                return False
+            left, right = pair
+            for receiver, argument, method in (
+                (left, right, methods[0]),
+                (right, left, methods[1]),
+            ):
+                analyze_call(
+                    (
+                        combine(
+                            (
+                                input_method_dependency(receiver, method),
+                                environment_method_dependency(receiver, method),
+                            )
+                        ),
+                    ),
+                    (argument,),
+                )
+            return True
+
+        def analyze_call(
+            callable_values: Sequence[stack_slot],
+            args: Sequence[stack_slot],
+            keyword_names: tuple[str, ...] = (),
+            *,
+            packed: bool = False,
+        ) -> dependency:
+            nonlocal call_graph_incomplete, found_identity, mutates_environment
+            callable_dependency = combine(callable_values)
+            called_globals.update(
+                unscoped_path(path)
+                for path in callable_dependency[2]
+                if not is_synthetic_path(path)
+            )
+            args_dependency = combine(args)
+            call_inputs = args_dependency[0] or callable_dependency[0]
+            result = (
+                call_inputs,
+                args_dependency[1],
+                frozenset(
+                    path
+                    for path in args_dependency[2]
+                    if path[0]
+                    not in (
+                        "<container>",
+                        "<input-container>",
+                        "<input-container-content>",
+                    )
+                )
+                | (frozenset((("<input-value>",),)) if call_inputs else frozenset()),
+            )
+            nested_results = []
+            native_results = []
+            callback_results = []
+            retains_unverified_environment = False
+            for path in callable_dependency[2]:
+                if path[0] == "<local-function>":
+                    try:
+                        function_id = int(path[1])
+                        local_code = local_function_codes[function_id]
+                    except (IndexError, KeyError, ValueError):
+                        call_graph_incomplete = True
+                        continue
+                    captured = local_function_payloads.get(
+                        function_id, (False, False, frozenset())
+                    )
+                    (
+                        nested_identity,
+                        nested_calls,
+                        nested_result,
+                        nested_incomplete,
+                        nested_mutates_environment,
+                    ) = bytecode_dependencies(
+                        local_code,
+                        globals_scope,
+                        bind_local_function_dependencies(
+                            local_code, args, keyword_names, captured
+                        ),
+                        active,
+                        dependency_scopes,
+                    )
+                    found_identity |= nested_identity
+                    call_graph_incomplete |= nested_incomplete
+                    mutates_environment |= nested_mutates_environment
+                    called_globals.update(nested_calls)
+                    nested_results.append(nested_result)
+                    continue
+                if path[0] == "<input>":
+                    method_name = path[-1]
+                    input_container = (
+                        has_input_mapping(callable_dependency)
+                        if method_name in ("__getitem__", "get")
+                        else has_input_container(callable_dependency)
+                    )
+                    input_container_sensitive = (
+                        has_identity_sensitive_input_mapping_keys(callable_dependency)
+                        if method_name in ("__getitem__", "get")
+                        else (
+                            has_identity_sensitive_input_container(callable_dependency)
+                            if method_name in ("__eq__", "__ne__")
+                            else has_lookup_identity_sensitive_input_container(
+                                callable_dependency
+                            )
+                        )
+                    )
+                    if (
+                        method_name in identity_method_names
+                        and input_container
+                        and (
+                            has_identity_sensitive_environment(args_dependency)
+                            or (args_dependency[0] and input_container_sensitive)
+                        )
+                    ):
+                        found_identity = True
+                    continue
+                if path[0] == "<mutable-environment-object>":
+                    if (
+                        len(path) > 1
+                        and path[-1] in mutating_method_names
+                        and has_mutable_environment_reference(callable_dependency)
+                    ):
+                        record_mutation()
+                    continue
+                if is_synthetic_path(path) and path[0] not in (
+                    "<environment-object>",
+                    "<input-method>",
+                ):
+                    continue
+                called, receiver, resolved = resolve_called(path)
+                if called is super:
+                    result = environment_dependency(("super",))
+                    continue
+                if path[-1] in identity_method_names and receiver is not None:
+                    method_name = path[-1]
+                    input_receiver = (
+                        has_input_mapping(receiver)
+                        if method_name in ("__getitem__", "get")
+                        else has_input_container(receiver)
+                    )
+                    input_receiver_sensitive = (
+                        has_identity_sensitive_input_mapping_keys(receiver)
+                        if method_name in ("__getitem__", "get")
+                        else (
+                            has_identity_sensitive_input_container(receiver)
+                            if method_name in ("__eq__", "__ne__")
+                            else has_lookup_identity_sensitive_input_container(receiver)
+                        )
+                    )
+                    environment_receiver = (
+                        has_environment_mapping(receiver)
+                        if method_name in ("__getitem__", "get")
+                        else has_environment_container(receiver)
+                    )
+                    environment_receiver_sensitive = (
+                        has_mapping_key_identity_sensitive_environment(receiver)
+                        if method_name in ("__getitem__", "get")
+                        else (
+                            has_identity_sensitive_environment(receiver)
+                            if method_name in ("__eq__", "__ne__")
+                            else has_lookup_identity_sensitive_environment(receiver)
+                        )
+                    )
+                    found_identity |= (
+                        input_receiver
+                        and (
+                            has_identity_sensitive_environment(args_dependency)
+                            or (args_dependency[0] and input_receiver_sensitive)
+                        )
+                    ) or (
+                        args_dependency[0]
+                        and environment_receiver
+                        and environment_receiver_sensitive
+                    )
+                if (
+                    receiver is not None
+                    and not isinstance(called, types.FunctionType)
+                    and has_mutable_environment_reference(receiver)
+                    and path[-1] in mutating_method_names
+                ):
+                    record_mutation()
+                identity_callable = called
+                if isinstance(
+                    identity_callable, (functools.partial, functools.partialmethod)
+                ):
+                    identity_callable = identity_callable.func
+                if any(
+                    called is candidate
+                    for candidate in environment_retaining_native_callables
+                ) and has_mutable_environment_reference(args_dependency):
+                    retains_unverified_environment = True
+                native_receiver = receiver
+                native_args_dependency = args_dependency
+                if (
+                    isinstance(called, (functools.partial, functools.partialmethod))
+                    and called.args
+                ):
+                    native_receiver = environment_value_dependency(called.args[0])
+                elif (
+                    native_receiver is None
+                    and inspect.ismethoddescriptor(identity_callable)
+                    and args
+                ):
+                    native_receiver = args[0]
+                    native_args_dependency = combine(args[1:])
+                elif (
+                    native_receiver is None
+                    and inspect.isbuiltin(identity_callable)
+                    and (bound_self := getattr(identity_callable, "__self__", None))
+                    is not None
+                    and not isinstance(bound_self, (type, types.ModuleType))
+                ):
+                    native_receiver = environment_value_dependency(bound_self)
+                if (
+                    native_receiver is not None
+                    and (
+                        inspect.ismethoddescriptor(identity_callable)
+                        or inspect.isbuiltin(identity_callable)
+                    )
+                    and has_mutable_environment_reference(native_receiver)
+                    and not is_readonly_native_method(
+                        identity_callable, native_receiver
+                    )
+                ):
+                    record_mutation()
+                if (
+                    native_receiver is not None
+                    and (
+                        result_dependency := native_method_result_dependency(
+                            identity_callable, native_receiver
+                        )
+                    )
+                    is not None
+                ):
+                    native_results.append(result_dependency)
+                if (
+                    native_receiver is not None
+                    and (
+                        inspect.ismethoddescriptor(identity_callable)
+                        or inspect.isbuiltin(identity_callable)
+                    )
+                    and has_environment_reference(native_receiver)
+                    and native_method_uses_argument_protocol(
+                        identity_callable, native_receiver
+                    )
+                    and has_unsafe_native_arguments(native_args_dependency)
+                ):
+                    record_mutation()
+                dynamic_attribute_analyzed = False
+                if called in (getattr, hasattr) and len(args) >= 2:
+                    attribute_names = set()
+                    if args[1] is not None:
+                        for path in args[1][2]:
+                            attribute_name, resolved = resolve_environment_path(path)
+                            if resolved and isinstance(attribute_name, str):
+                                attribute_names.add(attribute_name)
+                    if len(attribute_names) == 1 and args[0] is not None:
+                        attribute_result = analyze_environment_descriptor(
+                            args[0], next(iter(attribute_names))
+                        )
+                        if attribute_result is not None:
+                            native_results.append(attribute_result)
+                        dynamic_attribute_analyzed = True
+                if (
+                    not dynamic_attribute_analyzed
+                    and not isinstance(called, types.FunctionType)
+                    and callable(called)
+                ):
+                    if identity_callable in protocol_consuming_builtins:
+                        if has_unsafe_native_arguments(args_dependency):
+                            record_mutation()
+                    elif (
+                        native_receiver is None
+                        and inspect.isbuiltin(identity_callable)
+                        and identity_callable not in safe_native_free_callables
+                        and identity_callable not in native_input_only_callables
+                        and has_mutable_environment_reference(args_dependency)
+                    ):
+                        record_mutation()
+                    elif (
+                        native_receiver is None
+                        and not is_library_module(
+                            getattr(identity_callable, "__module__", None)
+                        )
+                        and getattr(identity_callable, "__module__", None) != "builtins"
+                        and has_unsafe_native_arguments(
+                            native_args_dependency
+                            if native_receiver is not None
+                            else args_dependency
+                        )
+                    ):
+                        record_mutation()
+                if identity_callable in (all, any):
+                    native_results.append(
+                        (
+                            call_inputs,
+                            False,
+                            frozenset((("<input-value>",),))
+                            if call_inputs
+                            else frozenset(),
+                        )
+                    )
+                if identity_callable in (operator.delitem, operator.setitem):
+                    bound_environment = isinstance(
+                        called, (functools.partial, functools.partialmethod)
+                    ) and bool(called.args)
+                    explicit_receiver = args[0] if args else None
+                    if bound_environment or (
+                        explicit_receiver is not None
+                        and has_environment_reference(explicit_receiver)
+                    ):
+                        record_mutation()
+                if identity_callable in inplace_operators:
+                    bound_receiver = (
+                        environment_value_dependency(called.args[0])
+                        if isinstance(
+                            called, (functools.partial, functools.partialmethod)
+                        )
+                        and called.args
+                        else None
+                    )
+                    explicit_receiver = args[0] if args else None
+                    if (
+                        bound_receiver is not None
+                        and has_mutable_environment_reference(bound_receiver)
+                    ) or (
+                        explicit_receiver is not None
+                        and has_mutable_environment_reference(explicit_receiver)
+                    ):
+                        record_mutation()
+                if called in (delattr, setattr):
+                    explicit_receiver = args[0] if args else None
+                    if explicit_receiver is not None and has_environment_reference(
+                        explicit_receiver
+                    ):
+                        record_mutation()
+                if (
+                    getattr(called, "__module__", None) in ("_heapq", "heapq")
+                    and getattr(called, "__name__", None)
+                    in {
+                        "_heapify_max",
+                        "_heappop_max",
+                        "_heapreplace_max",
+                        "heapify",
+                        "heappop",
+                        "heappush",
+                        "heappushpop",
+                        "heapreplace",
+                    }
+                    and args
+                    and args[0] is not None
+                    and has_mutable_environment_reference(args[0])
+                ):
+                    record_mutation()
+                identity_args = (
+                    combine(
+                        (
+                            args_dependency,
+                            *(
+                                environment_value_dependency(value)
+                                for value in (
+                                    *called.args,
+                                    *(called.keywords or {}).values(),
+                                )
+                            ),
+                        )
+                    )
+                    if isinstance(called, (functools.partial, functools.partialmethod))
+                    else args_dependency
+                )
+                if identity_callable in (
+                    operator.contains,
+                    operator.countOf,
+                    operator.eq,
+                    operator.getitem,
+                    operator.indexOf,
+                    operator.is_,
+                    operator.is_not,
+                    operator.ne,
+                ):
+                    identity_only = identity_callable in (
+                        operator.is_,
+                        operator.is_not,
+                    )
+                    operands = [
+                        environment_value_dependency(value)
+                        for value in (
+                            called.args
+                            if isinstance(
+                                called,
+                                (functools.partial, functools.partialmethod),
+                            )
+                            else ()
+                        )
+                    ]
+                    operands.extend(value for value in args if value is not None)
+                    if len(operands) >= 2:
+                        left, right = operands[:2]
+                        if identity_callable in (operator.eq, operator.ne):
+                            analyze_call(
+                                (environment_method_dependency(left, "__eq__"),),
+                                (right,),
+                            )
+                            analyze_call(
+                                (environment_method_dependency(right, "__eq__"),),
+                                (left,),
+                            )
+                        elif identity_callable is not operator.is_ and (
+                            identity_callable is not operator.is_not
+                        ):
+                            method_name = (
+                                "__getitem__"
+                                if identity_callable is operator.getitem
+                                else (
+                                    "__contains__"
+                                    if identity_callable is operator.contains
+                                    else (
+                                        "count"
+                                        if identity_callable is operator.countOf
+                                        else "index"
+                                    )
+                                )
+                            )
+                            analyze_call(
+                                (environment_method_dependency(left, method_name),),
+                                (right,),
+                            )
+                        if identity_only:
+                            found_identity |= (
+                                (left[0] and has_identity_unstable_environment(right))
+                                or (
+                                    right[0] and has_identity_unstable_environment(left)
+                                )
+                                or may_have_unguarded_input_alias(left, right)
+                            )
+                        elif identity_callable in (operator.eq, operator.ne):
+                            found_identity |= (
+                                (
+                                    left[0]
+                                    and has_identity_sensitive_environment(right)
+                                    and (
+                                        has_input_container(left)
+                                        or has_environment_container(right)
+                                    )
+                                )
+                                or (
+                                    right[0]
+                                    and has_identity_sensitive_environment(left)
+                                    and (
+                                        has_input_container(right)
+                                        or has_environment_container(left)
+                                    )
+                                )
+                                or (
+                                    left[0]
+                                    and right[0]
+                                    and (
+                                        has_identity_sensitive_input_container(left)
+                                        or has_identity_sensitive_input_container(right)
+                                    )
+                                )
+                            )
+                        else:
+                            mapping_lookup = identity_callable is operator.getitem
+                            input_container = (
+                                has_input_mapping(left)
+                                if mapping_lookup
+                                else has_input_container(left)
+                            )
+                            environment_container = (
+                                has_environment_mapping(left)
+                                if mapping_lookup
+                                else has_environment_container(left)
+                            )
+                            environment_container_sensitive = (
+                                has_mapping_key_identity_sensitive_environment(left)
+                                if mapping_lookup
+                                else has_lookup_identity_sensitive_environment(left)
+                            )
+                            input_container_sensitive = (
+                                has_identity_sensitive_input_mapping_keys(left)
+                                if mapping_lookup
+                                else has_lookup_identity_sensitive_input_container(left)
+                            )
+                            found_identity |= (
+                                (
+                                    input_container
+                                    and has_identity_sensitive_environment(right)
+                                )
+                                or (
+                                    right[0]
+                                    and environment_container
+                                    and environment_container_sensitive
+                                )
+                                or (left[0] and right[0] and input_container_sensitive)
+                            )
+                    elif identity_only:
+                        found_identity |= identity_args[0] and (
+                            has_identity_unstable_environment(identity_args)
+                            or may_have_unguarded_input_alias(
+                                identity_args, identity_args
+                            )
+                        )
+                    continue
+                nested_functions = python_callables(called, path, receiver)
+                if isinstance(called, type) and isinstance(
+                    inspect.getattr_static(type(called), "__call__", None),
+                    types.FunctionType,
+                ):
+                    call_graph_incomplete = True
+                if not resolved or (not nested_functions and not callable(called)):
+                    call_graph_incomplete = True
+                    continue
+                if not nested_functions:
+                    result = combine(
+                        (
+                            result,
+                            (
+                                False,
+                                True,
+                                frozenset(
+                                    (
+                                        ("<identity-sensitive>",),
+                                        ("<identity-unstable>",),
+                                    )
+                                ),
+                            ),
+                        )
+                    )
+                    for callback_index, callback_dependency in enumerate(args):
+                        if callback_dependency is None:
+                            continue
+                        callback_paths = [
+                            callback_path
+                            for callback_path in callback_dependency[2]
+                            if callback_path[0] == "<local-function>"
+                            or not is_synthetic_path(callback_path)
+                        ]
+                        if not any(
+                            callback_path[0] == "<local-function>"
+                            or python_callables(
+                                resolve_called(callback_path)[0], callback_path, None
+                            )
+                            for callback_path in callback_paths
+                        ):
+                            continue
+                        callback_args = [
+                            argument
+                            for index, argument in enumerate(args)
+                            if index != callback_index
+                        ]
+                        callback_args = [
+                            environment_container_contents_dependency(
+                                argument, "iteration"
+                            )
+                            or argument
+                            for argument in callback_args
+                            if argument is not None
+                        ]
+                        callback_results.append(
+                            analyze_call(
+                                (callback_dependency,), callback_args, packed=True
+                            )
+                        )
+                    if identity_callable in (map, functools.reduce):
+                        native_results.extend(callback_results)
+                    elif identity_callable is filter and len(args) >= 2:
+                        filtered = args[1]
+                        if filtered is not None:
+                            native_results.append(
+                                environment_container_contents_dependency(
+                                    filtered, "iteration"
+                                )
+                                or filtered
+                            )
+                for (
+                    nested_function,
+                    receiver_dependency,
+                    bound_positional,
+                    bound_keywords,
+                ) in nested_functions:
+                    if is_library_defined_function(nested_function):
+                        continue
+                    if packed:
+                        nested_arg_count = (
+                            nested_function.__code__.co_argcount
+                            + nested_function.__code__.co_kwonlyargcount
+                        )
+                        nested_parameters = dict.fromkeys(
+                            nested_function.__code__.co_varnames[:nested_arg_count],
+                            args_dependency,
+                        )
+                        if receiver_dependency is not None and nested_parameters:
+                            first = next(iter(nested_parameters))
+                            nested_parameters[first] = receiver_dependency
+                        parameter_names = list(nested_parameters)
+                        offset = int(receiver_dependency is not None)
+                        for name, value in zip(
+                            parameter_names[offset:], bound_positional
+                        ):
+                            nested_parameters[name] = environment_value_dependency(
+                                value
+                            )
+                        for name, value in bound_keywords.items():
+                            if name in nested_parameters:
+                                nested_parameters[name] = environment_value_dependency(
+                                    value
+                                )
+                    else:
+                        nested_parameters = bind_call_dependencies(
+                            nested_function,
+                            args,
+                            keyword_names,
+                            receiver_dependency,
+                            bound_positional,
+                            bound_keywords,
+                        )
+                    (
+                        nested_identity,
+                        nested_calls,
+                        nested_result,
+                        nested_incomplete,
+                        nested_mutates_environment,
+                    ) = bytecode_dependencies(
+                        nested_function.__code__,
+                        nested_function.__globals__,
+                        nested_parameters,
+                        active,
+                        dependency_scopes,
+                    )
+                    found_identity |= nested_identity
+                    call_graph_incomplete |= nested_incomplete
+                    mutates_environment |= nested_mutates_environment
+                    called_globals.update(nested_calls)
+                    nested_results.append(nested_result)
+            call_results = [*nested_results, *native_results]
+            if call_results:
+                return combine(call_results)
+            if retains_unverified_environment:
+                return (
+                    result[0],
+                    result[1],
+                    result[2] | frozenset((("<unverified-call-result>",),)),
+                )
+            return result
+
+        def analyze_environment_descriptor(
+            value: dependency, attribute: str
+        ) -> dependency | None:
+            if not has_mutable_environment_reference(value):
+                return None
+            resolved_any = False
+            unverified = False
+            seen = set()
+            results = []
+            for path in value[2]:
+                item, resolved = resolve_environment_path(path)
+                if not resolved:
+                    unverified = (
+                        unverified
+                        or not is_synthetic_path(path)
+                        or (path[0] == "<environment>")
+                    )
+                    continue
+                if id(item) in seen:
+                    continue
+                seen.add(id(item))
+                resolved_any = True
+                item_dependency = environment_value_dependency(item)
+                owner_type = item if isinstance(item, type) else type(item)
+                getattribute = inspect.getattr_static(
+                    owner_type, "__getattribute__", None
+                )
+                if isinstance(getattribute, types.FunctionType):
+                    results.append(
+                        analyze_call(
+                            (environment_value_dependency(getattribute),),
+                            (
+                                item_dependency,
+                                environment_value_dependency(attribute),
+                            ),
+                        )
+                    )
+                try:
+                    descriptor = inspect.getattr_static(owner_type, attribute)
+                except AttributeError:
+                    getattr_fn = inspect.getattr_static(owner_type, "__getattr__", None)
+                    if isinstance(getattr_fn, types.FunctionType):
+                        results.append(
+                            analyze_call(
+                                (environment_value_dependency(getattr_fn),),
+                                (
+                                    item_dependency,
+                                    environment_value_dependency(attribute),
+                                ),
+                            )
+                        )
+                    elif getattr_fn is not None:
+                        unverified = True
+                    continue
+                if isinstance(descriptor, property):
+                    if descriptor.fget is not None:
+                        results.append(
+                            analyze_call(
+                                (environment_value_dependency(descriptor.fget),),
+                                (item_dependency,),
+                            )
+                        )
+                    continue
+                if isinstance(
+                    descriptor,
+                    (
+                        classmethod,
+                        staticmethod,
+                        types.FunctionType,
+                        types.GetSetDescriptorType,
+                        types.MemberDescriptorType,
+                        types.MethodDescriptorType,
+                        types.WrapperDescriptorType,
+                    ),
+                ):
+                    continue
+                descriptor_get = inspect.getattr_static(
+                    type(descriptor), "__get__", None
+                )
+                if isinstance(descriptor_get, types.FunctionType):
+                    results.append(
+                        analyze_call(
+                            (environment_value_dependency(descriptor_get),),
+                            (
+                                environment_value_dependency(descriptor),
+                                item_dependency,
+                                environment_value_dependency(owner_type),
+                            ),
+                        )
+                    )
+                elif descriptor_get is not None:
+                    unverified = True
+            if unverified or not resolved_any:
+                record_mutation()
+            return combine(results) if results else None
+
+        arg_count = code.co_argcount + code.co_kwonlyargcount
+        parameter_names = list(code.co_varnames[:arg_count])
+        next_parameter = arg_count
+        if code.co_flags & inspect.CO_VARARGS:
+            parameter_names.append(code.co_varnames[next_parameter])
+            next_parameter += 1
+        if code.co_flags & inspect.CO_VARKEYWORDS:
+            parameter_names.append(code.co_varnames[next_parameter])
+        input_names = set(parameter_names)
+        initial_locals: dict[str, dependency] = {
+            name: (
+                False,
+                True,
+                frozenset(
+                    (
+                        ("<environment-object>",),
+                        ("<identity-sensitive>",),
+                        ("<identity-unstable>",),
+                    )
+                ),
+            )
+            for name in code.co_freevars
+        }
+        if parameter_dependencies is not None:
+            if isinstance(parameter_dependencies, Mapping):
+                initial_locals.update(parameter_dependencies)
+            else:
+                initial_locals.update(zip(parameter_names, parameter_dependencies))
+        for name in input_names - initial_locals.keys():
+            initial_locals[name] = (
+                True,
+                False,
+                frozenset((("<input-value>",),)),
+            )
+        instructions = list(dis.get_instructions(code))
+
+        def dependency_pair(
+            values: Sequence[stack_slot],
+        ) -> tuple[dependency, dependency] | None:
+            if len(values) != 2:
+                return None
+            left, right = values
+            if left is None or right is None:
+                return None
+            return left, right
+
+        instruction_indices = {
+            instruction.offset: index for index, instruction in enumerate(instructions)
+        }
+        exception_successors: dict[int, list[tuple[int, int, int]]] = {}
+        exception_entries = getattr(dis.Bytecode(code), "exception_entries", ())
+        if exception_entries:
+            for entry in exception_entries:
+                target = instruction_indices.get(entry.target)
+                if target is None:
+                    continue
+                for protected_index, instruction in enumerate(instructions):
+                    if entry.start <= instruction.offset < entry.end:
+                        exception_successors.setdefault(protected_index, []).append(
+                            (target, entry.depth, 1 + int(entry.lasti))
+                        )
+        else:
+            for setup_index, instruction in enumerate(instructions):
+                if not instruction.opname.startswith("SETUP_"):
+                    continue
+                target = instruction_indices.get(cast("int", instruction.argval))
+                if target is None:
+                    continue
+                for protected_index in range(setup_index + 1, target):
+                    exception_successors.setdefault(protected_index, []).append(
+                        (target, 0, 3)
+                    )
+        states: dict[int, analysis_state] = {0: ((), initial_locals)}
+        pending = [0]
+        steps = 0
+        step_limit = max(1024, len(instructions) * 64)
+
+        def enqueue(
+            index: int, stack: list[stack_slot], locals_: dict[str, dependency]
+        ) -> None:
+            if index >= len(instructions):
+                return
+            if len(stack) > code.co_stacksize:
+                merged_stack_value = combine(stack)
+                stack = [merged_stack_value] * code.co_stacksize
+            merged, changed = merge_state(
+                states.get(index), (tuple(stack), dict(locals_))
+            )
+            if changed:
+                states[index] = merged
+                pending.append(index)
+
+        while pending:
+            steps += 1
+            if steps > step_limit:
+                call_graph_incomplete = True
+                called_globals.update(loaded_global_paths(code))
+                break
+            index = pending.pop()
+            stack_tuple, incoming_locals = states[index]
+            stack = list(stack_tuple)
+            locals_ = dict(incoming_locals)
+            instruction = instructions[index]
+            opname = instruction.opname
+
+            for target, depth, extra_slots in exception_successors.get(index, ()):
+                handler_stack = list(stack_tuple[:depth])
+                handler_stack.extend(
+                    (False, True, frozenset()) for _ in range(extra_slots)
+                )
+                enqueue(target, handler_stack, locals_)
+
+            def pop(count: int) -> list[stack_slot]:
+                if count > len(stack):
+                    values = list(stack)
+                    stack.clear()
+                    return values
+                values = stack[-count:] if count else []
+                if count:
+                    del stack[-count:]
+                return values
+
+            if opname == "FORMAT_VALUE":
+                has_format_spec = bool(instruction.arg and instruction.arg & 0x04)
+                value_index = -2 if has_format_spec else -1
+                formatted = stack[value_index] if len(stack) >= -value_index else None
+                if formatted is not None:
+                    conversion = (instruction.arg or 0) & 0x03
+                    method = (
+                        "__format__"
+                        if conversion == 0
+                        else "__str__"
+                        if conversion == 1
+                        else "__repr__"
+                    )
+                    analyze_call(
+                        (
+                            combine(
+                                (
+                                    input_method_dependency(formatted, method),
+                                    environment_method_dependency(formatted, method),
+                                )
+                            ),
+                        ),
+                        (stack[-1],) if has_format_spec else (),
+                    )
+            elif opname in ("BEFORE_WITH", "SETUP_WITH"):
+                manager = stack[-1] if stack else None
+                if manager is not None:
+                    for method in ("__enter__", "__exit__"):
+                        analyze_call(
+                            (
+                                combine(
+                                    (
+                                        input_method_dependency(manager, method),
+                                        environment_method_dependency(manager, method),
+                                    )
+                                ),
+                            ),
+                            (),
+                        )
+
+            if opname in (
+                "LOAD_FAST_LOAD_FAST",
+                "LOAD_FAST_BORROW_LOAD_FAST_BORROW",
+            ):
+                names = cast("tuple[str, str]", instruction.argval)
+                stack.extend(
+                    locals_.get(name, (name in input_names, False, frozenset()))
+                    for name in names
+                )
+                enqueue(index + 1, stack, locals_)
+                continue
+            elif opname == "STORE_FAST_STORE_FAST":
+                names = cast("tuple[str, str]", instruction.argval)
+                for name in names:
+                    values = pop(1)
+                    if values and values[0] is not None:
+                        locals_[name] = values[0]
+                enqueue(index + 1, stack, locals_)
+                continue
+            elif opname == "STORE_FAST_LOAD_FAST":
+                store_name, load_name = cast("tuple[str, str]", instruction.argval)
+                values = pop(1)
+                if values and values[0] is not None:
+                    locals_[store_name] = values[0]
+                stack.append(
+                    locals_.get(
+                        load_name,
+                        (load_name in input_names, False, frozenset()),
+                    )
+                )
+                enqueue(index + 1, stack, locals_)
+                continue
+            elif opname in ("JUMP_IF_FALSE_OR_POP", "JUMP_IF_TRUE_OR_POP"):
+                if (
+                    stack
+                    and stack[-1] is not None
+                    and has_unsafe_environment_behavior(stack[-1])
+                ):
+                    record_mutation()
+                target = instruction_indices.get(cast("int", instruction.argval))
+                if target is not None:
+                    enqueue(target, stack, locals_)
+                pop(1)
+                enqueue(index + 1, stack, locals_)
+                continue
+            if opname == "FOR_ITER":
+                target = instruction_indices.get(cast("int", instruction.argval))
+                exit_stack = list(stack)
+                if exit_stack:
+                    exit_stack.pop()
+                if target is not None:
+                    enqueue(target, exit_stack, locals_)
+                iterator = stack[-1] if stack else (False, False, frozenset())
+                item = (
+                    environment_container_contents_dependency(iterator, "iteration")
+                    if iterator is not None
+                    else None
+                )
+                stack.append(item if item is not None else iterator)
+                enqueue(index + 1, stack, locals_)
+                continue
+            if opname in ("LOAD_GLOBAL", "LOAD_NAME", "LOAD_FROM_DICT_OR_GLOBALS"):
+                effect = dis.stack_effect(instruction.opcode, instruction.arg)
+                stack.extend(None for _ in range(max(effect - 1, 0)))
+                global_name = cast("str", instruction.argval)
+                stack.append(
+                    (
+                        False,
+                        True,
+                        frozenset(
+                            (
+                                scoped_path((global_name,))
+                                if global_name in globals_scope
+                                else (global_name,),
+                            )
+                        ),
+                    )
+                )
+            elif opname.startswith("LOAD_FAST") or opname == "LOAD_DEREF":
+                name = cast("str", instruction.argval)
+                stack.append(
+                    locals_.get(name, (name in input_names, False, frozenset()))
+                )
+            elif opname in ("LOAD_ATTR", "LOAD_METHOD"):
+                origins = pop(1)
+                if not origins:
+                    stack.append((False, False, frozenset()))
+                else:
+                    effect = dis.stack_effect(instruction.opcode, instruction.arg)
+                    stack.extend(None for _ in range(max(effect, 0)))
+                    value = combine(origins)
+                    if any(path[0] == "<unverified-call-result>" for path in value[2]):
+                        record_mutation()
+                    descriptor_result = analyze_environment_descriptor(
+                        value, cast("str", instruction.argval)
+                    )
+                    input_method_paths = frozenset(
+                        (
+                            "<input-method>",
+                            path[1],
+                            cast("str", instruction.argval),
+                        )
+                        for path in value[2]
+                        if path[0] == "<input-object>"
+                    )
+                    stack.append(
+                        descriptor_result
+                        if descriptor_result is not None
+                        else (
+                            value[0],
+                            value[1],
+                            frozenset(
+                                extend_path(path, cast("str", instruction.argval))
+                                for path in value[2]
+                            )
+                            | (
+                                frozenset(
+                                    (("<input>", cast("str", instruction.argval)),)
+                                )
+                                if value[0]
+                                else frozenset()
+                            )
+                            | input_method_paths,
+                        )
+                    )
+            elif opname == "LOAD_SUPER_ATTR":
+                prior = combine(stack)
+                try:
+                    effect = dis.stack_effect(instruction.opcode, instruction.arg)
+                except ValueError:
+                    effect = dis.stack_effect(instruction.opcode)
+                pop(max(1, 1 - effect))
+                stack.append(
+                    (
+                        prior[0],
+                        True,
+                        frozenset((("super", cast("str", instruction.argval)),)),
+                    )
+                )
+            elif opname == "IMPORT_NAME":
+                pop(2)
+                stack.append(
+                    (
+                        False,
+                        True,
+                        frozenset(((cast("str", instruction.argval),),)),
+                    )
+                )
+            elif opname == "IMPORT_FROM":
+                origin = stack[-1] if stack else None
+                value = combine((origin,))
+                stack.append(
+                    (
+                        value[0],
+                        value[1],
+                        frozenset(
+                            extend_path(path, cast("str", instruction.argval))
+                            for path in value[2]
+                        ),
+                    )
+                )
+            elif opname == "LOAD_CONST":
+                constant = instruction.argval
+                if isinstance(constant, CodeType):
+                    local_function_codes[id(constant)] = constant
+                    stack.append(
+                        (
+                            False,
+                            False,
+                            frozenset((("<local-function>", str(id(constant))),)),
+                        )
+                    )
+                elif type(constant) in (
+                    int,
+                    float,
+                    complex,
+                    str,
+                    bytes,
+                    tuple,
+                    frozenset,
+                ):
+                    stack.append(environment_value_dependency(constant))
+                else:
+                    stack.append((False, False, frozenset()))
+            elif opname == "MAKE_FUNCTION":
+                try:
+                    effect = dis.stack_effect(instruction.opcode, instruction.arg)
+                except ValueError:
+                    effect = dis.stack_effect(instruction.opcode)
+                values = pop(max(1, 1 - effect))
+                function_paths = {
+                    path
+                    for value in values
+                    if value is not None
+                    for path in value[2]
+                    if path[0] == "<local-function>"
+                }
+                payload_values = []
+                for value in values:
+                    if value is None:
+                        continue
+                    payload_paths = frozenset(
+                        path for path in value[2] if path[0] != "<local-function>"
+                    )
+                    if value[0] or value[1] or payload_paths:
+                        payload_values.append((value[0], value[1], payload_paths))
+                payload = combine(payload_values)
+                for path in function_paths:
+                    function_id = int(path[1])
+                    local_function_payloads[function_id] = combine(
+                        (local_function_payloads.get(function_id), payload)
+                    )
+                stack.append((False, False, frozenset(function_paths)))
+            elif opname == "SET_FUNCTION_ATTRIBUTE":
+                values = pop(2)
+                attribute = values[0] if values else None
+                function = values[1] if len(values) > 1 else None
+                function_paths = (
+                    frozenset(
+                        path for path in function[2] if path[0] == "<local-function>"
+                    )
+                    if function is not None
+                    else frozenset()
+                )
+                for path in function_paths:
+                    function_id = int(path[1])
+                    local_function_payloads[function_id] = combine(
+                        (local_function_payloads.get(function_id), attribute)
+                    )
+                stack.append((False, False, function_paths))
+            elif opname.startswith("LOAD_"):
+                effect = dis.stack_effect(instruction.opcode, instruction.arg)
+                stack.extend((False, False, frozenset()) for _ in range(max(effect, 0)))
+            elif opname == "PUSH_NULL":
+                stack.append(None)
+            elif opname == "BINARY_SUBSCR":
+                values = pop(2)
+                selected = None
+                if (pair := dependency_pair(values)) is not None:
+                    left, right = pair
+                    analyze_call(
+                        (
+                            combine(
+                                (
+                                    input_method_dependency(left, "__getitem__"),
+                                    environment_method_dependency(left, "__getitem__"),
+                                )
+                            ),
+                        ),
+                        (right,),
+                    )
+                    if (
+                        (
+                            has_input_mapping(left)
+                            and has_identity_sensitive_environment(right)
+                        )
+                        or (
+                            has_identity_sensitive_input_mapping_keys(left) and right[0]
+                        )
+                        or (
+                            right[0]
+                            and has_environment_mapping(left)
+                            and has_mapping_key_identity_sensitive_environment(left)
+                        )
+                    ):
+                        found_identity = True
+                    selected = environment_container_contents_dependency(left, "values")
+                combined = combine(values)
+                stack.append(
+                    selected
+                    if selected is not None
+                    else (
+                        combined[0],
+                        combined[1],
+                        frozenset(
+                            path
+                            for path in combined[2]
+                            if path[0]
+                            not in (
+                                "<container>",
+                                "<input-container>",
+                                "<input-container-content>",
+                            )
+                        )
+                        | (
+                            frozenset((("<input-value>",),))
+                            if combined[0]
+                            else frozenset()
+                        ),
+                    )
+                )
+            elif opname == "IS_OP":
+                values = pop(2)
+                if (pair := dependency_pair(values)) is not None:
+                    left, right = pair
+                    if (
+                        (left[0] and has_identity_unstable_environment(right))
+                        or (right[0] and has_identity_unstable_environment(left))
+                        or may_have_unguarded_input_alias(left, right)
+                    ):
+                        found_identity = True
+                stack.append((False, False, frozenset()))
+            elif opname == "CONTAINS_OP":
+                values = pop(2)
+                if (pair := dependency_pair(values)) is not None:
+                    left, right = pair
+                    analyze_call(
+                        (
+                            combine(
+                                (
+                                    input_method_dependency(right, "__contains__"),
+                                    environment_method_dependency(
+                                        right, "__contains__"
+                                    ),
+                                )
+                            ),
+                        ),
+                        (left,),
+                    )
+                    if (
+                        (
+                            left[0]
+                            and has_environment_container(right)
+                            and has_lookup_identity_sensitive_environment(right)
+                        )
+                        or (
+                            left[0]
+                            and has_lookup_identity_sensitive_input_container(right)
+                        )
+                        or (
+                            has_input_container(right)
+                            and has_lookup_identity_sensitive_environment(left)
+                        )
+                    ):
+                        found_identity = True
+                stack.append((False, False, frozenset()))
+            elif opname == "COMPARE_OP":
+                values = pop(2)
+                if any(
+                    value is not None and has_unsafe_environment_behavior(value)
+                    for value in values
+                ):
+                    record_mutation()
+                if (
+                    instruction.argval in ("==", "!=")
+                    and (pair := dependency_pair(values)) is not None
+                ):
+                    left, right = pair
+                    analyze_call(
+                        (
+                            combine(
+                                (
+                                    input_method_dependency(left, "__eq__"),
+                                    environment_method_dependency(left, "__eq__"),
+                                )
+                            ),
+                        ),
+                        (right,),
+                    )
+                    analyze_call(
+                        (
+                            combine(
+                                (
+                                    input_method_dependency(right, "__eq__"),
+                                    environment_method_dependency(right, "__eq__"),
+                                )
+                            ),
+                        ),
+                        (left,),
+                    )
+                    if (
+                        (
+                            has_input_container(left)
+                            and has_identity_sensitive_environment(right)
+                        )
+                        or (
+                            left[0]
+                            and right[0]
+                            and (
+                                has_identity_sensitive_input_container(left)
+                                or has_identity_sensitive_input_container(right)
+                            )
+                        )
+                        or (
+                            right[0]
+                            and has_environment_container(left)
+                            and has_identity_sensitive_environment(left)
+                        )
+                        or (
+                            has_input_container(right)
+                            and has_identity_sensitive_environment(left)
+                        )
+                        or (
+                            left[0]
+                            and has_environment_container(right)
+                            and has_identity_sensitive_environment(right)
+                        )
+                    ):
+                        found_identity = True
+                stack.append(combine(values))
+            elif opname.startswith("UNARY_"):
+                values = pop(1)
+                if any(
+                    value is not None and has_unsafe_environment_behavior(value)
+                    for value in values
+                ):
+                    record_mutation()
+                stack.append(combine(values))
+            elif opname.startswith("INPLACE_"):
+                values = pop(2)
+                if (
+                    values
+                    and values[0] is not None
+                    and has_environment_reference(values[0])
+                ):
+                    record_mutation()
+                stack.append(combine(values))
+            elif opname.startswith("BINARY_"):
+                values = pop(2)
+                if (
+                    opname == "BINARY_OP"
+                    and isinstance(instruction.argrepr, str)
+                    and instruction.argrepr.endswith("=")
+                    and values
+                    and values[0] is not None
+                    and has_environment_reference(values[0])
+                ) or (
+                    not analyze_binary_behavior(
+                        opname,
+                        instruction.argrepr
+                        if isinstance(instruction.argrepr, str)
+                        else "",
+                        values,
+                    )
+                    and any(
+                        value is not None and has_unsafe_environment_behavior(value)
+                        for value in values
+                    )
+                ):
+                    record_mutation()
+                stack.append(combine(values))
+            elif opname in ("GET_ITER", "GET_YIELD_FROM_ITER"):
+                if (
+                    stack
+                    and stack[-1] is not None
+                    and has_unsafe_environment_behavior(stack[-1])
+                ):
+                    record_mutation()
+            elif opname in ("UNPACK_SEQUENCE", "UNPACK_EX") and isinstance(
+                instruction.arg, int
+            ):
+                values = pop(1)
+                unpacked = combine(values)
+                for method in ("__iter__", "__getitem__"):
+                    analyze_call(
+                        (
+                            combine(
+                                (
+                                    input_method_dependency(unpacked, method),
+                                    environment_method_dependency(unpacked, method),
+                                )
+                            ),
+                        ),
+                        (),
+                    )
+                count = (
+                    instruction.arg
+                    if opname == "UNPACK_SEQUENCE"
+                    else (instruction.arg & 0xFF) + (instruction.arg >> 8) + 1
+                )
+                selected = environment_container_contents_dependency(
+                    unpacked, "iteration"
+                )
+                stack.extend(
+                    selected if selected is not None else unpacked for _ in range(count)
+                )
+            elif opname.startswith("BUILD_") and isinstance(instruction.arg, int):
+                count = instruction.arg
+                if opname == "BUILD_MAP":
+                    count *= 2
+                elif opname == "BUILD_CONST_KEY_MAP":
+                    count += 1
+                values = pop(count)
+                protocol_values = (
+                    values
+                    if opname == "BUILD_SET"
+                    else values[::2]
+                    if opname == "BUILD_MAP"
+                    else ()
+                )
+                if any(
+                    value is not None and has_unsafe_environment_behavior(value)
+                    for value in protocol_values
+                ):
+                    record_mutation()
+                combined = combine(values)
+                markers = {("<container>",)}
+                if combined[0]:
+                    markers.add(("<input-container-content>",))
+                    if opname in ("BUILD_MAP", "BUILD_CONST_KEY_MAP"):
+                        markers.add(("<input-mapping>",))
+                if any(
+                    path[0]
+                    in (
+                        "<input-identity-sensitive>",
+                        "<input-identity-sensitive-container>",
+                    )
+                    for path in combined[2]
+                ):
+                    markers.add(("<input-identity-sensitive-container>",))
+                if any(
+                    path[0]
+                    in (
+                        "<input-identity-sensitive>",
+                        "<input-lookup-identity-sensitive-container>",
+                    )
+                    for path in combined[2]
+                ):
+                    markers.add(("<input-lookup-identity-sensitive-container>",))
+                    if opname in ("BUILD_MAP", "BUILD_CONST_KEY_MAP"):
+                        markers.add(("<input-mapping-key-identity-sensitive>",))
+                if has_identity_sensitive_environment(combined):
+                    markers.add(("<identity-sensitive>",))
+                stack.append(
+                    (
+                        combined[0],
+                        combined[1],
+                        frozenset(markers),
+                    )
+                )
+            elif opname in (
+                "DICT_MERGE",
+                "DICT_UPDATE",
+                "LIST_APPEND",
+                "LIST_EXTEND",
+                "MAP_ADD",
+                "SET_ADD",
+                "SET_UPDATE",
+            ) and isinstance(instruction.arg, int):
+                values = pop(2 if opname == "MAP_ADD" else 1)
+                protocol_values = (
+                    values[:1]
+                    if opname == "MAP_ADD"
+                    else values
+                    if opname
+                    in (
+                        "DICT_MERGE",
+                        "DICT_UPDATE",
+                        "LIST_EXTEND",
+                        "SET_ADD",
+                        "SET_UPDATE",
+                    )
+                    else ()
+                )
+                if any(
+                    value is not None
+                    and (
+                        has_unsafe_native_arguments(value)
+                        if opname in ("DICT_MERGE", "DICT_UPDATE", "SET_UPDATE")
+                        else has_unsafe_environment_behavior(value)
+                    )
+                    for value in protocol_values
+                ):
+                    record_mutation()
+                destination = len(stack) - instruction.arg
+                if destination >= 0:
+                    stack[destination] = merge_dependency(
+                        stack[destination], combine(values)
+                    )
+            elif opname == "LIST_TO_TUPLE":
+                pass
+            elif opname in (
+                "CALL",
+                "CALL_KW",
+                "CALL_FUNCTION",
+                "CALL_FUNCTION_KW",
+                "CALL_METHOD",
+            ) and isinstance(instruction.arg, int):
+                keyword_names = keyword_names_for_call(index)
+                if opname in ("CALL_FUNCTION_KW", "CALL_KW"):
+                    pop(1)
+                if opname == "CALL_METHOD":
+                    args = pop(instruction.arg)
+                    callable_values = pop(2)
+                elif opname in ("CALL", "CALL_KW") and sys.version_info >= (3, 13):
+                    args = pop(instruction.arg)
+                    if stack and stack[-1] is None:
+                        pop(1)
+                    callable_values = pop(1)
+                else:
+                    args = pop(instruction.arg)
+                    callable_values = pop(1)
+                if stack and stack[-1] is None:
+                    pop(1)
+                stack.append(analyze_call(callable_values, args, keyword_names))
+            elif opname == "CALL_FUNCTION_EX":
+                if sys.version_info >= (3, 14):
+                    kwargs = pop(1)
+                else:
+                    kwargs = pop(1) if instruction.arg else []
+                args = pop(1)
+                if sys.version_info >= (3, 13) and stack and stack[-1] is None:
+                    pop(1)
+                callable_values = pop(1)
+                if stack and stack[-1] is None:
+                    pop(1)
+                stack.append(
+                    analyze_call(callable_values, (*args, *kwargs), packed=True)
+                )
+            elif opname == "COPY" and isinstance(instruction.arg, int):
+                index = len(stack) - instruction.arg
+                stack.append(stack[index] if index >= 0 else None)
+            elif opname == "SWAP" and isinstance(instruction.arg, int):
+                index = len(stack) - instruction.arg
+                if index >= 0 and stack:
+                    stack[-1], stack[index] = stack[index], stack[-1]
+            elif opname == "DUP_TOP":
+                stack.append(stack[-1] if stack else None)
+            elif opname == "DUP_TOP_TWO":
+                stack.extend(stack[-2:])
+            elif opname == "ROT_TWO" and len(stack) >= 2:
+                stack[-2], stack[-1] = stack[-1], stack[-2]
+            elif opname in ("ROT_THREE", "ROT_FOUR"):
+                count = 3 if opname == "ROT_THREE" else 4
+                if len(stack) >= count:
+                    merged = combine(stack[-count:])
+                    stack[-count:] = [merged] * count
+            elif opname == "POP_TOP":
+                pop(1)
+            elif opname == "RETURN_VALUE":
+                values = pop(1)
+                if values and values[0] is not None:
+                    return_dependencies.append(values[0])
+                continue
+            elif opname == "RETURN_CONST":
+                return_dependencies.append(
+                    environment_value_dependency(instruction.argval)
+                )
+                continue
+            elif opname == "YIELD_VALUE":
+                values = pop(1)
+                if values and values[0] is not None:
+                    return_dependencies.append(values[0])
+            elif opname.startswith("STORE_FAST"):
+                values = pop(1)
+                if values and values[0] is not None:
+                    locals_[cast("str", instruction.argval)] = values[0]
+            elif opname == "STORE_DEREF":
+                values = pop(1)
+                name = cast("str", instruction.argval)
+                if values and values[0] is not None:
+                    locals_[name] = values[0]
+                if name in code.co_freevars:
+                    record_mutation()
+            elif opname == "DELETE_DEREF":
+                if cast("str", instruction.argval) in code.co_freevars:
+                    record_mutation()
+            elif opname == "STORE_ATTR":
+                values = pop(2)
+                if (
+                    len(values) == 2
+                    and values[1] is not None
+                    and has_environment_reference(values[1])
+                ):
+                    record_mutation()
+            elif opname == "STORE_SUBSCR":
+                values = pop(3)
+                if (
+                    len(values) == 3
+                    and values[1] is not None
+                    and has_environment_reference(values[1])
+                ):
+                    record_mutation()
+            elif opname == "DELETE_ATTR":
+                values = pop(1)
+                if (
+                    values
+                    and values[0] is not None
+                    and has_environment_reference(values[0])
+                ):
+                    record_mutation()
+            elif opname == "DELETE_SUBSCR":
+                values = pop(2)
+                if (
+                    values
+                    and values[0] is not None
+                    and has_environment_reference(values[0])
+                ):
+                    record_mutation()
+            elif opname.startswith("STORE_"):
+                pop(1)
+            elif opname.startswith("POP_JUMP"):
+                pass
+            elif opname in (
+                "CACHE",
+                "EXTENDED_ARG",
+                "KW_NAMES",
+                "NOP",
+                "PRECALL",
+                "RESUME",
+            ):
+                pass
+            else:
+                prior = combine(stack)
+                try:
+                    effect = dis.stack_effect(instruction.opcode, instruction.arg)
+                except ValueError:
+                    effect = dis.stack_effect(instruction.opcode)
+                if effect < 0:
+                    pop(-effect)
+                    if stack:
+                        stack[-1] = merge_dependency(stack[-1], prior)
+                elif effect > 0:
+                    stack.extend(prior for _ in range(effect))
+                elif stack and (prior[0] or prior[1]):
+                    stack[:] = [merge_dependency(value, prior) for value in stack]
+
+            if opname in ("RAISE_VARARGS", "RERAISE"):
+                continue
+            if opname.startswith("POP_JUMP"):
+                if stack and stack[-1] is not None:
+                    if has_unsafe_environment_behavior(stack[-1]):
+                        record_mutation()
+                    analyze_call(
+                        (
+                            combine(
+                                (
+                                    input_method_dependency(stack[-1], "__bool__"),
+                                    environment_method_dependency(
+                                        stack[-1], "__bool__"
+                                    ),
+                                )
+                            ),
+                        ),
+                        (),
+                    )
+                    analyze_call(
+                        (
+                            combine(
+                                (
+                                    input_method_dependency(stack[-1], "__len__"),
+                                    environment_method_dependency(stack[-1], "__len__"),
+                                )
+                            ),
+                        ),
+                        (),
+                    )
+                pop(1)
+                target = instruction_indices.get(cast("int", instruction.argval))
+                if target is not None:
+                    enqueue(target, stack, locals_)
+                enqueue(index + 1, stack, locals_)
+            elif opname.startswith("JUMP_IF"):
+                target = instruction_indices.get(cast("int", instruction.argval))
+                if target is not None:
+                    enqueue(target, stack, locals_)
+                enqueue(index + 1, stack, locals_)
+            elif opname.startswith("JUMP_") or opname in (
+                "JUMP_ABSOLUTE",
+                "JUMP_FORWARD",
+            ):
+                target = instruction_indices.get(cast("int", instruction.argval))
+                if target is not None:
+                    enqueue(target, stack, locals_)
+            else:
+                enqueue(index + 1, stack, locals_)
+        try:
+            for const in code.co_consts:
+                if isinstance(const, CodeType):
+                    closure_dependencies = {
+                        name: combine(
+                            tuple(
+                                state_locals.get(name)
+                                for _, state_locals in states.values()
+                            )
+                        )
+                        for name in const.co_freevars
+                    }
+                    (
+                        nested_identity,
+                        nested_calls,
+                        _,
+                        nested_incomplete,
+                        nested_mutates_environment,
+                    ) = bytecode_dependencies(
+                        const,
+                        globals_scope,
+                        closure_dependencies,
+                        active,
+                        dependency_scopes,
+                    )
+                    found_identity |= nested_identity
+                    call_graph_incomplete |= nested_incomplete
+                    mutates_environment |= nested_mutates_environment
+                    called_globals.update(nested_calls)
+            return (
+                found_identity,
+                called_globals,
+                combine(return_dependencies),
+                call_graph_incomplete,
+                mutates_environment,
+            )
+        finally:
+            active.remove(id(code))
+
+    def environment_contains_tensor(value: object, seen: set[int]) -> bool:
+        if isinstance(value, torch.Tensor):
+            return True
+        value_id = id(value)
+        if value_id in seen:
+            return False
+        seen.add(value_id)
+        if isinstance(value, (dict, MappingProxyType)):
+            children = [item for pair in value.items() for item in pair]
+        elif isinstance(value, (tuple, list, set, frozenset)):
+            children = list(value)
+        elif isinstance(value, types.MethodType):
+            children = [value.__func__, value.__self__]
+        elif isinstance(value, (classmethod, staticmethod)):
+            children = [value.__func__]
+        elif isinstance(value, property):
+            children = [
+                function
+                for function in (value.fget, value.fset, value.fdel)
+                if function is not None
+            ]
+        elif isinstance(value, types.FunctionType):
+            if is_library_module(value.__module__):
+                return False
+            children = [
+                *(value.__defaults__ or ()),
+                *((value.__kwdefaults__ or {}).values()),
+                *(item for _, item, _, _, _ in referenced_globals(value)),
+            ]
+            for cell in value.__closure__ or ():
+                try:
+                    children.append(cell.cell_contents)
+                except ValueError:
+                    pass
+        elif isinstance(value, type):
+            if is_library_module(value.__module__):
+                return False
+            children = [item for cls in value.__mro__ for item in vars(cls).values()]
+        elif isinstance(value, (types.CodeType, types.ModuleType)):
+            return False
+        else:
+            children = object_state_values(value)
+        return any(environment_contains_tensor(child, seen) for child in children)
+
+    def accessed_receiver_contains_tensor(
+        callable_value: object, receiver: object
+    ) -> bool:
+        if isinstance(callable_value, types.MethodType):
+            functions = (callable_value.__func__,)
+        elif isinstance(callable_value, (classmethod, staticmethod)):
+            functions = (callable_value.__func__,)
+        elif isinstance(callable_value, property):
+            functions = tuple(
+                function
+                for function in (
+                    callable_value.fget,
+                    callable_value.fset,
+                    callable_value.fdel,
+                )
+                if function is not None
+            )
+        elif isinstance(callable_value, types.FunctionType):
+            functions = (callable_value,)
+        else:
+            call = inspect.getattr_static(type(callable_value), "__call__", None)
+            functions = (call,) if isinstance(call, types.FunctionType) else ()
+        for function in functions:
+            code = function.__code__
+            if not code.co_argcount:
+                continue
+            for path in loaded_local_paths(code, code.co_varnames[0]):
+                value, _, _, unresolved = resolve_static_path(receiver, path)
+                if not unresolved and environment_contains_tensor(value, set()):
+                    return True
+        return False
+
+    def scan_imported_modules(function: types.FunctionType) -> bool:
+        instructions = list(dis.get_instructions(function.__code__))
+        for index, instruction in enumerate(instructions):
+            if instruction.opname != "IMPORT_NAME" or not isinstance(
+                instruction.argval, str
+            ):
+                continue
+            level = (
+                instructions[index - 2].argval
+                if index >= 2
+                and instructions[index - 2].opname == "LOAD_CONST"
+                and isinstance(instructions[index - 2].argval, int)
+                else 0
+            )
+            if level:
+                raise NotImplementedError(
+                    "precompile tracer='dynamo' cannot analyze relative local imports."
+                )
+            module_name = instruction.argval
+            imported_module = sys.modules.get(module_name)
+            if imported_module is None:
+                raise NotImplementedError(
+                    "precompile tracer='dynamo' cannot analyze a locally imported "
+                    f"module that is not already loaded: {module_name!r}."
+                )
+            following = instructions[index + 1 :]
+            store = next(
+                (
+                    candidate
+                    for candidate in following
+                    if candidate.opname in ("STORE_DEREF", "STORE_FAST", "STORE_NAME")
+                    and isinstance(candidate.argval, str)
+                ),
+                None,
+            )
+            if store is None:
+                raise NotImplementedError(
+                    "precompile tracer='dynamo' cannot analyze a locally imported "
+                    "module used without a local binding."
+                )
+            paths = loaded_local_paths(function.__code__, store.argval)
+            if not paths:
+                raise NotImplementedError(
+                    "precompile tracer='dynamo' cannot analyze a locally imported "
+                    "module passed or aliased as a value; access its attributes directly."
+                )
+            for path in paths:
+                value, receiver, aliases_input, unresolved = resolve_static_path(
+                    imported_module, path
+                )
+                if aliases_input:
+                    return True
+                if unresolved:
+                    if receiver_reaches_input(value, set()):
+                        return True
+                    raise NotImplementedError(
+                        "precompile tracer='dynamo' cannot analyze dynamic attribute "
+                        "access through a locally imported module."
+                    )
+                if reaches_input(value, set(), receiver):
+                    return True
+                if environment_contains_tensor(value, set()) or (
+                    receiver is not None
+                    and accessed_receiver_contains_tensor(value, receiver)
+                ):
+                    raise PrecompileError(
+                        "precompile tracer='dynamo' cannot capture tensor-valued "
+                        "Python globals; pass every tensor as an explicit input. "
+                        f"Referenced local import: {module_name!r}."
+                    )
+        return False
+
+    import_scan_active: set[int] = set()
+
+    def imported_modules_reach_input(function: types.FunctionType) -> bool:
+        function_id = id(function)
+        if function_id in import_scan_active:
+            return False
+        import_scan_active.add(function_id)
+        try:
+            return scan_imported_modules(function)
+        finally:
+            import_scan_active.remove(function_id)
+
+    def is_library_module(module_name: str | None) -> bool:
+        root = (module_name or "").partition(".")[0]
+        return root == "torch" or root in sys.stdlib_module_names
+
+    def is_library_defined_function(function: types.FunctionType) -> bool:
+        code_path = os.path.realpath(function.__code__.co_filename)
+        torch_root = os.path.realpath(os.path.dirname(torch.__file__))
+        try:
+            is_torch_file = os.path.commonpath((torch_root, code_path)) == torch_root
+        except ValueError:
+            is_torch_file = False
+        if is_torch_file:
+            return True
+        if not is_library_module(function.__module__):
+            return False
+        module = sys.modules.get(function.__module__)
+        module_file = getattr(module, "__file__", None)
+        if not isinstance(module_file, str):
+            return False
+        return os.path.realpath(module_file) == code_path
+
+    def dynamic_globals_reach_input(globals_scope: dict[str, object]) -> bool:
+        values = list(globals_scope.values())
+        leaves = []
+        seen_modules = set()
+        while values:
+            value = values.pop()
+            if isinstance(value, types.ModuleType) and not is_library_module(
+                value.__name__
+            ):
+                if id(value) in seen_modules:
+                    continue
+                seen_modules.add(id(value))
+                values.extend(vars(value).values())
+            else:
+                leaves.append(value)
+        return bool(reachable_object_ids(leaves) & input_ids)
+
+    def dynamic_module_access_reaches_input(function: types.FunctionType) -> bool:
+        paths = loaded_global_paths(function.__code__)
+        dynamic_builtin_lookup = any(
+            path[0] in ("getattr", "vars") and path[0] not in function.__globals__
+            for path in paths
+        )
+        modules = []
+        for path in paths:
+            if path[0] not in function.__globals__:
+                continue
+            root = function.__globals__[path[0]]
+            if not isinstance(root, types.ModuleType):
+                continue
+            if dynamic_builtin_lookup or any(
+                name in ("__getattr__", "__getattribute__") for name in path[1:]
+            ):
+                modules.append(root)
+        values = [
+            value
+            for module in modules
+            for value in vars(module).values()
+            if not isinstance(value, (types.CodeType, type, types.ModuleType))
+        ]
+        return bool(reachable_object_ids(values) & input_ids)
+
+    def receiver_reaches_input(
+        receiver: object, seen: set[tuple[int, int | None, int, bool]]
+    ) -> bool:
+        return reaches_input(receiver, seen, scan_receiver=True)
+
+    def reaches_input(
+        value: object,
+        seen: set[tuple[int, int | None, int, bool]],
+        receiver: object | None = None,
+        *,
+        scan_receiver: bool = False,
+    ) -> bool:
+        work = [(value, receiver, scan_receiver, target.__globals__, True)]
+        scanned_receivers: set[tuple[int, int, bool]] = set()
+        dynamic_globals_seen: set[str] = set()
+        dynamic_global_builtins = (
+            ("eval", eval),
+            ("exec", exec),
+            ("getattr", getattr),
+            ("globals", globals),
+            ("attrgetter", operator.attrgetter),
+            ("itemgetter", operator.itemgetter),
+            ("locals", locals),
+            ("methodcaller", operator.methodcaller),
+            ("vars", vars),
+        )
+        while work:
+            value, receiver, scan_receiver, globals_scope, may_enter_external = (
+                work.pop()
+            )
+            if scan_receiver:
+                receiver_key = (id(value), id(globals_scope), may_enter_external)
+                if receiver_key in scanned_receivers:
+                    continue
+                scanned_receivers.add(receiver_key)
+                work.append((value, None, False, globals_scope, may_enter_external))
+                if isinstance(value, types.ModuleType):
+                    module_library = is_library_module(value.__name__)
+                    module_values = (
+                        (vars(value).get("__getattr__"),)
+                        if module_library
+                        else vars(value).values()
+                    )
+                    work.extend(
+                        (
+                            item,
+                            None,
+                            False,
+                            globals_scope,
+                            may_enter_external and not module_library,
+                        )
+                        for item in module_values
+                        if item is not None
+                    )
+                receiver_type = value if isinstance(value, type) else type(value)
+                receiver_library = is_library_module(receiver_type.__module__)
+                work.extend(
+                    (
+                        item,
+                        None,
+                        False,
+                        globals_scope,
+                        may_enter_external and not receiver_library,
+                    )
+                    for cls in receiver_type.__mro__
+                    for item in vars(cls).values()
+                    if not is_library_module(cls.__module__)
+                )
+                continue
+
+            value_id = id(value)
+            receiver_id = None if receiver is None else id(receiver)
+            if value_id in input_ids or receiver_id in input_ids:
+                return True
+            key = (value_id, receiver_id, id(globals_scope), may_enter_external)
+            if key in seen:
+                continue
+            seen.add(key)
+            dynamic_builtin_name = next(
+                (name for name, builtin in dynamic_global_builtins if value is builtin),
+                None,
+            )
+            bound_self = getattr(value, "__self__", None)
+            dynamic_name = getattr(value, "__name__", None)
+            if (
+                dynamic_builtin_name is None
+                and isinstance(bound_self, types.ModuleType)
+                and dynamic_name in ("__getattr__", "__getattribute__")
+            ):
+                dynamic_builtin_name = dynamic_name
+            if may_enter_external and dynamic_builtin_name is not None:
+                if dynamic_globals_reach_input(globals_scope):
+                    return True
+                dynamic_globals_seen.add(dynamic_builtin_name)
+                continue
+            if isinstance(value, dict):
+                items = [item for pair in value.items() for item in pair]
+                if any(id(item) in input_ids for item in items):
+                    return True
+                work.extend(
+                    (item, None, False, globals_scope, may_enter_external)
+                    for item in items
+                )
+            if isinstance(value, (tuple, list, set, frozenset)):
+                if any(id(item) in input_ids for item in value):
+                    return True
+                work.extend(
+                    (item, None, False, globals_scope, may_enter_external)
+                    for item in value
+                )
+            if isinstance(value, weakref.ProxyTypes):
+                if may_enter_external:
+                    return True
+                continue
+            if isinstance(value, weakref.ReferenceType):
+                referent = value()
+                callback = value.__callback__
+                if referent is not None:
+                    work.append(
+                        (referent, None, False, globals_scope, may_enter_external)
+                    )
+                if callback is not None:
+                    work.append(
+                        (callback, None, False, globals_scope, may_enter_external)
+                    )
+                continue
+            if isinstance(value, types.MethodType):
+                work.append(
+                    (
+                        value.__func__,
+                        value.__self__,
+                        False,
+                        globals_scope,
+                        may_enter_external,
+                    )
+                )
+                continue
+            if isinstance(value, classmethod):
+                bound = (
+                    receiver
+                    if isinstance(receiver, type) or receiver is None
+                    else type(receiver)
+                )
+                work.append(
+                    (value.__func__, bound, False, globals_scope, may_enter_external)
+                )
+                continue
+            if isinstance(value, staticmethod):
+                work.append(
+                    (
+                        value.__func__,
+                        None,
+                        False,
+                        globals_scope,
+                        may_enter_external,
+                    )
+                )
+                continue
+            if isinstance(value, property):
+                if value.fget is not None:
+                    work.append(
+                        (
+                            value.fget,
+                            receiver,
+                            False,
+                            globals_scope,
+                            may_enter_external,
+                        )
+                    )
+                continue
+            if isinstance(value, types.FunctionType):
+                if dynamic_module_access_reaches_input(value):
+                    return True
+                function_globals = value.__globals__
+                next_scope = function_globals
+                library_function = function_globals is not target.__globals__ and (
+                    is_library_module(function_globals.get("__name__"))
+                )
+                if imported_modules_reach_input(value):
+                    return True
+                if not library_function and mutates_globals(value.__code__):
+                    raise PrecompileError(
+                        "precompile tracer='dynamo' Python functions cannot mutate globals."
+                    )
+                input_behavior_names.update(loaded_attribute_names(value.__code__))
+                next_may_enter_external = (
+                    may_enter_external and not library_function
+                ) or function_globals is target.__globals__
+                if (
+                    not library_function
+                    and "__globals__" in input_behavior_names
+                    and reachable_object_ids(list(function_globals.values()))
+                    & input_ids
+                ):
+                    return True
+                captured = (
+                    *(value.__defaults__ or ()),
+                    *((value.__kwdefaults__ or {}).values()),
+                    *value.__dict__.values(),
+                    *(value.__annotations__.values() if not library_function else ()),
+                )
+                if any(id(item) in input_ids for item in captured):
+                    return True
+                work.extend(
+                    (
+                        item,
+                        None,
+                        False,
+                        next_scope,
+                        next_may_enter_external,
+                    )
+                    for item in captured
+                )
+                for cell in value.__closure__ or ():
+                    try:
+                        if id(cell.cell_contents) in input_ids:
+                            return True
+                        work.append(
+                            (
+                                cell.cell_contents,
+                                None,
+                                False,
+                                next_scope,
+                                next_may_enter_external,
+                            )
+                        )
+                    except ValueError:
+                        pass
+                dynamic_globals = {
+                    path[0]
+                    for path in loaded_global_paths(value.__code__)
+                    if path[0]
+                    in ("eval", "exec", "getattr", "globals", "locals", "vars")
+                }
+                if dynamic_globals and (next_may_enter_external or library_function):
+                    if library_function:
+                        if dynamic_globals_reach_input(next_scope):
+                            return True
+                    else:
+                        dynamic_globals_seen.update(dynamic_globals)
+                if library_function:
+                    library_values = [
+                        item for _, item, _, _, _ in referenced_globals(value)
+                    ]
+                    if any(
+                        item is builtin
+                        for item in library_values
+                        for _, builtin in dynamic_global_builtins
+                    ) and dynamic_globals_reach_input(next_scope):
+                        return True
+                    if reachable_object_ids(library_values) & input_ids:
+                        return True
+                    work.extend(
+                        (item, None, False, next_scope, False)
+                        for item in library_values
+                    )
+                    continue
+                for (
+                    _,
+                    item,
+                    item_receiver,
+                    aliases_input,
+                    unresolved,
+                ) in referenced_globals(value):
+                    if aliases_input:
+                        return True
+                    work.append(
+                        (
+                            item,
+                            None,
+                            True,
+                            next_scope,
+                            next_may_enter_external,
+                        )
+                        if unresolved
+                        else (
+                            item,
+                            item_receiver,
+                            False,
+                            next_scope,
+                            next_may_enter_external,
+                        )
+                    )
+                if receiver is not None and value.__code__.co_argcount:
+                    local_name = value.__code__.co_varnames[0]
+                    for path in loaded_local_paths(value.__code__, local_name):
+                        item, item_receiver, aliases_input, unresolved = (
+                            resolve_static_path(receiver, path)
+                        )
+                        if aliases_input:
+                            return True
+                        work.append(
+                            (
+                                item,
+                                None,
+                                True,
+                                next_scope,
+                                next_may_enter_external,
+                            )
+                            if unresolved
+                            else (
+                                item,
+                                item_receiver,
+                                False,
+                                next_scope,
+                                next_may_enter_external,
+                            )
+                        )
+                    if has_unmodeled_local_access(value.__code__, local_name):
+                        work.append(
+                            (
+                                receiver,
+                                None,
+                                True,
+                                next_scope,
+                                next_may_enter_external,
+                            )
+                        )
+                continue
+            if receiver is not None:
+                descriptor_get = inspect.getattr_static(type(value), "__get__", None)
+                if descriptor_get is not None:
+                    work.append(
+                        (
+                            descriptor_get,
+                            value,
+                            False,
+                            globals_scope,
+                            may_enter_external,
+                        )
+                    )
+                    work.append(
+                        (receiver, None, True, globals_scope, may_enter_external)
+                    )
+            if isinstance(value, torch.Tensor):
+                continue
+            if isinstance(value, types.ModuleType):
+                value_type = type(value)
+                if value_type is types.ModuleType:
+                    if not is_library_module(value.__name__):
+                        work.extend(
+                            (
+                                item,
+                                None,
+                                False,
+                                globals_scope,
+                                may_enter_external,
+                            )
+                            for item in vars(value).values()
+                        )
+                    continue
+            elif isinstance(value, type):
+                value_type = value
+            else:
+                work.extend(
+                    (item, None, False, globals_scope, may_enter_external)
+                    for item in object_state_values(value)
+                )
+                value_type = type(value)
+            if isinstance(value, type):
+                work.extend(
+                    (item, None, False, globals_scope, may_enter_external)
+                    for cls in value.__mro__
+                    for name, item in vars(cls).items()
+                    if name in ("__class_getitem__", "__init__", "__new__")
+                )
+                work.extend(
+                    (item, value, False, globals_scope, may_enter_external)
+                    for cls in type(value).__mro__
+                    for name, item in vars(cls).items()
+                    if name.startswith("__")
+                    and name.endswith("__")
+                    and name not in ("__del__", "__init__", "__new__")
+                )
+                continue
+            if value_type.__module__ != "builtins":
+                behavior_library = is_library_module(value_type.__module__)
+                work.extend(
+                    (
+                        item,
+                        None,
+                        False,
+                        globals_scope,
+                        may_enter_external and not behavior_library,
+                    )
+                    for cls in value_type.__mro__
+                    if not is_library_module(cls.__module__)
+                    for item in vars(cls).values()
+                )
+                if behavior_library:
+                    work.extend(
+                        (item, value, False, globals_scope, may_enter_external)
+                        for cls in value_type.__mro__
+                        if is_library_module(cls.__module__)
+                        for name, item in vars(cls).items()
+                        if name.startswith("__")
+                        and name.endswith("__")
+                        and name not in ("__del__", "__init__", "__new__")
+                    )
+        if dynamic_globals_seen:
+            names = ", ".join(sorted(dynamic_globals_seen))
+            raise PrecompileError(
+                "precompile tracer='dynamo' cannot preserve an input-derived identity "
+                "that aliases the Python environment through dynamic global access via "
+                f"{names}."
+            )
+        return False
+
+    if imported_modules_reach_input(target):
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot capture an explicit input that aliases "
+            "the Python environment through a locally imported module."
+        )
+    target_references = referenced_globals(target)
+
+    def referenced_python_functions(
+        values: Sequence[object],
+        *,
+        traverse_containers: bool = True,
+        traverse_constructors: bool = False,
+    ) -> list[tuple[types.FunctionType, object | None]]:
+        functions: list[tuple[types.FunctionType, object | None]] = []
+        pending = list(values)
+        seen = set()
+        while pending:
+            value = pending.pop()
+            if id(value) in seen:
+                continue
+            seen.add(id(value))
+            if isinstance(value, types.MethodType):
+                functions.append((value.__func__, value.__self__))
+                continue
+            if isinstance(value, types.FunctionType):
+                functions.append((value, None))
+            elif isinstance(value, functools.partial):
+                function = value.func
+                if isinstance(function, types.MethodType):
+                    functions.append((function.__func__, function.__self__))
+                elif isinstance(function, types.FunctionType):
+                    receiver = value.args[0] if value.args else None
+                    functions.append((function, receiver))
+                else:
+                    pending.append(function)
+                pending.extend(value.args)
+                pending.extend((value.keywords or {}).values())
+            elif isinstance(value, functools.partialmethod):
+                pending.append(value.func)
+                pending.extend(value.args)
+                pending.extend((value.keywords or {}).values())
+            elif isinstance(value, (classmethod, staticmethod)):
+                pending.append(value.__func__)
+            elif isinstance(value, property):
+                pending.extend(
+                    function
+                    for function in (value.fget, value.fset, value.fdel)
+                    if function is not None
+                )
+            elif isinstance(value, type) and traverse_constructors:
+                pending.extend(
+                    constructor
+                    for name in ("__new__", "__init__")
+                    if (constructor := inspect.getattr_static(value, name, None))
+                    is not None
+                )
+            elif callable(value) and not isinstance(value, (type, types.ModuleType)):
+                call = inspect.getattr_static(type(value), "__call__", None)
+                if isinstance(call, types.FunctionType):
+                    functions.append((call, value))
+            elif traverse_containers and isinstance(value, (dict, MappingProxyType)):
+                pending.extend(item for pair in value.items() for item in pair)
+            elif traverse_containers and isinstance(
+                value, (tuple, list, set, frozenset)
+            ):
+                pending.extend(value)
+        return functions
+
+    def validate_no_environment_mutation(
+        functions: Sequence[types.FunctionType],
+    ) -> None:
+        mutation_pending = list(functions)
+        mutation_seen = set()
+        while mutation_pending:
+            function = mutation_pending.pop()
+            if id(function) in mutation_seen:
+                continue
+            mutation_seen.add(id(function))
+            if mutates_globals(function.__code__):
+                raise PrecompileError(
+                    "precompile tracer='dynamo' Python functions cannot mutate globals "
+                    "or invoke unverified behavior on mutable environment objects."
+                )
+            _, called_paths, _, _, mutates_environment = bytecode_dependencies(
+                function.__code__, function.__globals__
+            )
+            called_names = {".".join(path) for path in called_paths}
+            for name, value, receiver, _, _ in referenced_globals(function):
+                if (
+                    name in called_names
+                    and isinstance(value, type)
+                    and isinstance(
+                        inspect.getattr_static(type(value), "__call__", None),
+                        types.FunctionType,
+                    )
+                ):
+                    raise PrecompileError(
+                        "precompile tracer='dynamo' cannot verify an indirect "
+                        "Python call through a user-defined metaclass."
+                    )
+                attribute = name.rsplit(".", 1)[-1]
+                if isinstance(receiver, types.FunctionType) and attribute in (
+                    "__closure__",
+                    "__globals__",
+                ):
+                    raise PrecompileError(
+                        "precompile tracer='dynamo' cannot preserve an input-derived "
+                        "identity or mutation through dynamic function metadata "
+                        f"access via {attribute}."
+                    )
+                for referenced, _ in referenced_python_functions(
+                    [value], traverse_constructors=name in called_names
+                ):
+                    if not is_library_defined_function(referenced):
+                        mutation_pending.append(referenced)
+            if mutates_environment:
+                raise PrecompileError(
+                    "precompile tracer='dynamo' Python functions cannot mutate globals "
+                    "or invoke unverified behavior on mutable environment objects."
+                )
+
+    pending_inputs = [value for example in example_inputs for value in example]
+    seen_inputs = set()
+    while pending_inputs:
+        value = pending_inputs.pop()
+        value_id = id(value)
+        if value_id in seen_inputs:
+            continue
+        seen_inputs.add(value_id)
+        if isinstance(value, torch.Tensor):
+            continue
+        if isinstance(value, (dict, MappingProxyType)):
+            if type(value) not in (dict, MappingProxyType):
+                input_objects[value_id] = value
+            pending_inputs.extend(value.keys())
+            pending_inputs.extend(value.values())
+            continue
+        if isinstance(value, (tuple, list, set, frozenset)):
+            if type(value) not in (tuple, list, set, frozenset):
+                input_objects[value_id] = value
+            pending_inputs.extend(value)
+            continue
+        if isinstance(value, (CodeType, types.FunctionType, types.ModuleType)):
+            continue
+        if isinstance(value, types.GeneratorType):
+            continue
+        if isinstance(value, torch.nn.Module):
+            pending_inputs.extend(value.modules())
+            pending_inputs.extend(value.parameters())
+            pending_inputs.extend(value.buffers())
+        if isinstance(value, type) or type(value).__module__ != "builtins":
+            input_objects[value_id] = value
+        if not isinstance(value, type):
+            pending_inputs.extend(object_state_values(value))
+
+    default_ids = reachable_object_ids(defaults)
+    default_aliases = [
+        name
+        for name, value, _, _, _ in target_references
+        if reachable_object_ids([value]) & default_ids
+    ]
+    if default_aliases:
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot preserve identity between a function "
+            "default and the Python environment. Pass the value explicitly instead. "
+            f"Aliased global: {default_aliases[0]!r}."
+        )
+    aliased_globals = [
+        name
+        for name, value, receiver, aliases_input, unresolved in target_references
+        if aliases_input
+        or (
+            receiver_reaches_input(value, set())
+            if unresolved
+            else reaches_input(value, set(), receiver)
+        )
+    ]
+    if aliased_globals:
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot capture an explicit input that aliases "
+            "the Python environment; pass the value only as an input. Aliased global: "
+            f"{aliased_globals[0]!r}."
+        )
+
+    def is_input_behavior(value: object) -> bool:
+        if isinstance(value, (types.GetSetDescriptorType, types.MemberDescriptorType)):
+            return False
+        return (
+            callable(value)
+            or isinstance(value, (classmethod, property, staticmethod))
+            or inspect.getattr_static(type(value), "__get__", None) is not None
+        )
+
+    selected_input_behaviors = [
+        (behavior, value)
+        for value in input_objects.values()
+        for name in input_behavior_names | {"__call__"}
+        if (behavior := inspect.getattr_static(type(value), name, None)) is not None
+        and is_input_behavior(behavior)
+    ]
+    dunder_input_behaviors = [
+        (behavior, value)
+        for value in input_objects.values()
+        for cls in type(value).__mro__
+        if not is_library_module(cls.__module__)
+        for name, behavior in vars(cls).items()
+        if name.startswith("__")
+        and name.endswith("__")
+        and name not in ("__del__", "__init__", "__new__")
+        and is_input_behavior(behavior)
+    ]
+    input_constructors = [
+        constructor
+        for value in input_objects.values()
+        if isinstance(value, type)
+        for name in ("__new__", "__init__")
+        if (constructor := inspect.getattr_static(value, name, None)) is not None
+    ]
+    mutation_roots = [
+        function
+        for behavior, _ in (*selected_input_behaviors, *dunder_input_behaviors)
+        for function, _ in referenced_python_functions([behavior])
+        if not is_library_defined_function(function)
+    ]
+    mutation_roots.extend(
+        function
+        for constructor in input_constructors
+        for function, _ in referenced_python_functions([constructor])
+        if not is_library_defined_function(function)
+    )
+    validate_no_environment_mutation([target, *mutation_roots])
+    for behavior, _ in dunder_input_behaviors:
+        if reaches_input(behavior, set()):
+            raise PrecompileError(
+                "precompile tracer='dynamo' cannot preserve an input-derived identity "
+                "relation between input behavior and the Python environment."
+            )
+    if dynamic_module_access_reaches_input(target):
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot preserve an input-derived identity "
+            "relation reached through dynamic module attribute access."
+        )
+    tensor_globals = [
+        name
+        for name, value, receiver, _, _ in target_references
+        if environment_contains_tensor(value, set())
+        or (receiver is not None and accessed_receiver_contains_tensor(value, receiver))
+    ]
+    if tensor_globals:
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot capture tensor-valued Python globals; "
+            "pass every tensor as an explicit input. Referenced global: "
+            f"{tensor_globals[0]!r}."
+        )
+    for behavior, behavior_receiver in (
+        *selected_input_behaviors,
+        *dunder_input_behaviors,
+    ):
+        for function, receiver in referenced_python_functions([behavior]):
+            if is_library_defined_function(function):
+                continue
+            owner = receiver if receiver is not None else behavior_receiver
+            if environment_contains_tensor(function, set()) or (
+                owner is not None and accessed_receiver_contains_tensor(function, owner)
+            ):
+                raise PrecompileError(
+                    "precompile tracer='dynamo' cannot serialize tensor-valued input "
+                    "behavior state; pass every tensor as an explicit input."
+                )
+
+    parameter_dependencies: dict[
+        str, tuple[bool, bool, frozenset[tuple[str, ...]]]
+    ] = {}
+    supplied_parameter_counts: dict[str, int] = {}
+    signature = inspect.signature(target)
+    for example in example_inputs:
+        bound = signature.bind_partial(*example)
+        for name, value in bound.arguments.items():
+            supplied_parameter_counts[name] = supplied_parameter_counts.get(name, 0) + 1
+            marker = (
+                "<input-container>" if is_identity_container(value) else "<input-value>"
+            )
+            markers: set[tuple[str, ...]] = {
+                (marker,),
+                (
+                    "<input-type>",
+                    "tensor" if isinstance(value, torch.Tensor) else "value",
+                    type(value).__module__,
+                    type(value).__qualname__,
+                ),
+            }
+            if not is_safely_reflexive(value):
+                markers.add(("<input-identity-sensitive>",))
+                if is_identity_container(value):
+                    markers.add(("<input-identity-sensitive-container>",))
+            if is_identity_container(
+                value
+            ) and not is_safely_reflexive_container_lookup(value):
+                markers.add(("<input-lookup-identity-sensitive-container>",))
+            if is_identity_mapping(value):
+                markers.add(("<input-mapping>",))
+                if not all(
+                    is_safely_reflexive(item)
+                    for item in cast("Mapping[object, object]", value)
+                ):
+                    markers.add(("<input-mapping-key-identity-sensitive>",))
+            markers.update(
+                ("<input-object>", str(object_id))
+                for object_id in reachable_object_ids([value])
+                if object_id in input_objects
+            )
+            previous = parameter_dependencies.get(name)
+            paths = frozenset(markers)
+            parameter_dependencies[name] = (
+                True,
+                False,
+                paths if previous is None else previous[2] | paths,
+            )
+    for name, parameter in signature.parameters.items():
+        if (
+            parameter.default is inspect.Parameter.empty
+            or supplied_parameter_counts.get(name, 0) == len(example_inputs)
+        ):
+            continue
+        default_dependency = environment_value_dependency(parameter.default)
+        previous = parameter_dependencies.get(name)
+        if previous is None:
+            parameter_dependencies[name] = default_dependency
+        else:
+            parameter_dependencies[name] = (
+                previous[0],
+                True,
+                previous[2] | default_dependency[2],
+            )
+    if bytecode_dependencies(
+        target.__code__, target.__globals__, parameter_dependencies
+    )[0]:
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot preserve an input-derived identity "
+            "relation to the Python environment."
+        )
+    value_globals = {
+        name: target.__globals__[name]
+        for name in {path[0] for path in loaded_global_paths(target.__code__)}
+        if name in target.__globals__ and is_literal(target.__globals__[name])
+    }
+
+    capture_globals = dict(target.__globals__)
+    capture_target = types.FunctionType(
+        target.__code__.replace(),
+        capture_globals,
+        target.__name__,
+        target.__defaults__,
+        target.__closure__,
+    )
+    capture_target.__kwdefaults__ = target.__kwdefaults__
+    capture_target.__module__ = target.__module__
+    capture_target.__qualname__ = target.__qualname__
+
+    def keep_serializable_capture_guards(guards: Sequence[Any]) -> list[bool]:
+        unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+        return [
+            not (
+                guard.is_global
+                and (
+                    guard.guard_type in unsupported
+                    or any(kind in unsupported for kind in guard.derived_guard_types)
+                )
+            )
+            for guard in guards
+        ]
+
+    _DYNAMO_COMPILE_LOCK.acquire()
+    package: CompilePackage | None = None
+    pgo_state = _new_code_state()
+    capture_stack = contextlib.ExitStack()
+    capture_limit = max(torch._dynamo.config.recompile_limit, len(example_inputs) + 1)
+    try:
+        package = CompilePackage(capture_target)
+        capture_stack.enter_context(
+            torch._dynamo.config.patch(
+                accumulated_recompile_limit=max(
+                    torch._dynamo.config.accumulated_recompile_limit,
+                    capture_limit,
+                ),
+                fail_on_recompile_limit_hit=True,
+            )
+        )
+        capture_stack.enter_context(
+            functorch_config.patch(
+                bundled_autograd_cache=True,
+                bypass_autograd_cache_key=True,
+                force_non_lazy_backward_lowering=training,
+            )
+        )
+        capture_stack.enter_context(_use_code_state(pgo_state))
+        capture_stack.enter_context(torch.set_grad_enabled(training))
+        compiled = torch._dynamo.optimize(
+            backend=_dynamo_backend_compiler(backend, training),
+            nopython=True,
+            guard_filter_fn=keep_serializable_capture_guards,
+            package=package,
+            dynamic=None,
+            recompile_limit=capture_limit,
+            isolate_recompiles=True,
+        )(capture_target)
+        for example in example_inputs:
+            compiled(*example)
+
+        for compiled_backend in package.cached_backends.values():
+            if isinstance(compiled_backend, _DynamoPythonBackend):
+                compiled_backend.finalize_training()
+
+        cache_entry = package.cache_entry()
+        active_codes = [code for code in cache_entry.codes if not code.bypassed]
+        if len(active_codes) != 1:
+            raise PrecompileError(
+                "precompile tracer='dynamo' does not support graph breaks or separately "
+                "compiled nested frames yet."
+            )
+        code = active_codes[0]
+        if code.install_to_global or not code.guarded_codes:
+            raise PrecompileError(
+                "precompile tracer='dynamo' did not capture a runnable entry frame."
+            )
+        filtered_guard_states = _filter_dynamo_guards(
+            capture_target, code.guarded_codes, example_inputs
+        )
+
+        compiled_backends = []
+        for backend_id in code.backend_ids:
+            compiled_backend = package.cached_backends.get(backend_id)
+            if not isinstance(compiled_backend, _DynamoPythonBackend):
+                raise PrecompileError(
+                    "precompile tracer='dynamo' encountered a graph that could not be "
+                    "represented as standalone Python source."
+                )
+            compiled_backends.append(compiled_backend)
+
+        state: dict[str, Any] = {
+            "code": code.python_code,
+            "python_module": code.python_module,
+            "import_sources": dict(code.import_sources),
+            "value_globals": value_globals,
+            "defaults": capture_target.__defaults__,
+            "kwdefaults": capture_target.__kwdefaults__,
+            "closure": None,
+            "variants": [
+                {
+                    "guards_state": guards_state,
+                    "dynamo_code": guarded.dynamo_code,
+                }
+                for guarded, guards_state in zip(
+                    code.guarded_codes, filtered_guard_states
+                )
+            ],
+        }
+        backend_ids = [str(backend_id) for backend_id in code.backend_ids]
+        python_code = _build_dynamo_python_source(
+            backend=backend,
+            training=training,
+            state=state,
+            backend_ids=backend_ids,
+            compiled_backends=compiled_backends,
+        )
+        return python_code, _dynamo_cache_bytes(
+            python_code,
+            backend,
+            [compiled.cache for compiled in compiled_backends],
+        )
+    except Unsupported as e:
+        raise PrecompileError(
+            "precompile tracer='dynamo' does not support graph breaks yet; capture must "
+            f"produce one full graph. Dynamo reported: {e}"
+        ) from e
+    except BackendCompilerFailed as e:
+        if isinstance(e.inner_exception, PrecompileError):
+            raise e.inner_exception from e
+        raise
+    except PackageError as e:
+        raise PrecompileError(
+            f"precompile tracer='dynamo' could not serialize the capture: {e}"
+        ) from e
+    except (FailOnRecompileLimitHit, RecompileError) as e:
+        raise PrecompileError(
+            "precompile tracer='dynamo' could not capture every example before "
+            f"recompile_limit={capture_limit}: {e}"
+        ) from e
+    except AssertionError as e:
+        if "guards_state must not be None" not in str(e):
+            raise
+        raise PrecompileError(
+            "precompile tracer='dynamo' encountered an identity guard that Dynamo "
+            "cannot serialize yet (for example a module or callable guard)."
+        ) from e
+    finally:
+        try:
+            capture_stack.close()
+        finally:
+            try:
+                if package is not None:
+                    package.uninstall()
+                torch._dynamo.reset_code(capture_target.__code__)
+                pgo_state.clear()
+            finally:
+                _DYNAMO_COMPILE_LOCK.release()
+
+
 class PrecompiledModule:
     """Internal holder for a precompiled computation / a loaded runnable."""
 
@@ -1373,15 +6393,20 @@ class PrecompiledModule:
         obj._loaded_forward = forward
         return obj
 
-    def _compile(self, args: tuple[object, ...]) -> None:
-        # make_fx is the only implemented tracer; "dynamo" is a planned alternative
-        # capture front-end. Reject it here (the single capture-dispatch point) before
-        # running fn, so the failure is clear rather than a wrong default.
+    def _compile(self, example_inputs: Sequence[tuple[object, ...]]) -> None:
+        # The Dynamo path is handled directly by _PrecompileApi; this holder implements
+        # only the make_fx calling convention.
         if self._tracer != "make_fx":
             raise NotImplementedError(
                 f"precompile tracer={self._tracer!r} is not implemented yet; use "
                 "tracer='make_fx' (the default)."
             )
+        if len(example_inputs) != 1:
+            raise ValueError(
+                "precompile with tracer='make_fx' requires exactly one example "
+                "input tuple."
+            )
+        args = example_inputs[0]
         if self._backend == "eager" and _has_unbacked_marks(args):
             raise NotImplementedError(
                 "precompile: mark_unbacked (dynamic shapes) is only supported with "
@@ -1603,10 +6628,12 @@ class _PrecompileApi:
     def __call__(
         self,
         fn: Callable[..., object],
-        *example_inputs: object,
+        *example_args: object,
+        example_inputs: Sequence[tuple[object, ...]] | None = None,
         backend: str = "inductor",
         tracer: str = "make_fx",
         decompositions: dict | None = None,
+        training: bool = False,
     ) -> tuple[str, bytes]:
         """Ahead-of-time precompile ``fn`` against ``example_inputs``.
 
@@ -1621,10 +6648,20 @@ class _PrecompileApi:
         contract; read Note [precompile programming model] before using it. The artifact
         faithfully reproduces ``fn`` only for callers that uphold that contract.
 
+        ``example_inputs`` is a sequence of positional-argument tuples for ``fn``.
+        For compatibility, positional arguments after ``fn`` describe one example call;
+        they cannot be combined with ``example_inputs``.
+        The outer sequence supports capture front-ends that can specialize one artifact
+        from multiple calls. The ``make_fx`` tracer accepts exactly one tuple because it
+        records only one execution; ``dynamo`` executes every tuple and records the
+        guarded recompilations they trigger. The Dynamo artifact retains serialized
+        input-derived guards and treats the Python environment as invariant.
+
         THREADING: the inductor lowering step drives process-global compiler state
         and is serialized by an internal lock, so concurrent ``backend="inductor"``
-        calls lower one at a time. The make_fx capture phase and the ``backend="eager"``
-        path are NOT serialized.
+        calls lower one at a time. Dynamo capture is also serialized because it uses
+        process-global frame-evaluation and compilation state. The make_fx capture phase
+        and its ``backend="eager"`` path are NOT serialized.
 
         ``backend`` selects how the captured graph is realized:
 
@@ -1645,26 +6682,57 @@ class _PrecompileApi:
         ``tracer`` selects the capture front-end:
 
         - ``"make_fx"`` (default): a NON-STRICT make_fx trace -- it records the ATen ops
-          that actually run when ``fn`` executes once on the example inputs and does not
-          analyze your Python, so control flow and shapes are specialized to the example
-          (the source of the programming-model contract). The only tracer implemented
-          today.
-        - ``"dynamo"``: planned (a Dynamo-based front-end that analyzes the Python);
-          raises ``NotImplementedError`` for now.
+          that actually run when ``fn`` executes once on the sole example-input tuple
+          and does not analyze your Python, so control flow and shapes are specialized
+          to the example (the source of the programming-model contract).
+        - ``"dynamo"``: analyze a Python function's bytecode and capture every guarded
+          specialization/recompilation exercised by ``example_inputs``. The emitted
+          artifact retains guards derived from explicit inputs. Guards covering the
+          Python environment may be removed because that environment is required to be
+          unchanged between capture and runtime. This assumption is unchecked, so
+          changing the environment can silently run code specialized for its capture-time
+          state. Distinct tensor inputs must not share or overlap storage, an explicit
+          input must not also be reachable through the Python environment, and functions
+          that mutate globals are rejected. Recursive literal globals are captured by
+          value, but a default cannot share identity with a global. A call that fails every
+          retained input guard set raises instead of compiling at runtime. This initial
+          path requires one full graph (graph breaks are rejected), a function without
+          closure cells, and positional tensor/scalar arguments or containers of those
+          values (``nn.Module`` arguments are not supported yet). Artifacts are tied to
+          the Python minor and torch version used to produce them.
 
         ``decompositions`` is an optional decomposition table (a dict mapping each
         ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
         ``decomposition_table`` during capture, so you can control how ATen ops are
-        broken down in the captured graph. Defaults to ``None`` (make_fx's default).
+        broken down in the captured graph. Defaults to ``None`` (make_fx's default) and
+        is not yet supported with ``tracer="dynamo"``.
 
-        Dynamic shapes are opt-in via ``torch._dynamo.decorators.mark_unbacked``
+        ``training=True`` is supported with ``tracer="dynamo"`` and
+        ``backend="inductor"``. Capture runs with grad enabled, and each compiled graph
+        carries a readable AOTAutograd forward and backward bridged by an emitted
+        ``torch.autograd.Function``. A served output therefore retains its ``grad_fn``;
+        calling ``backward()`` executes the precompiled backward kernels. The input
+        tensors that require gradients must do so in every example and at runtime.
+        Each example's actual backward records its output-tangent presence pattern; an
+        unseen pattern raises instead of compiling during serving. If the examples only
+        run forwards, only the all-tangents-present backward is covered.
+
+        With ``tracer="dynamo"``, shape variation across ``example_inputs`` uses
+        Dynamo's ordinary automatic dynamic-shape policy: for example, a static first
+        graph can recompile into a symbolic graph when a later tuple changes a dimension.
+        The symbolic graphs and their input-derived dispatch guards are retained in the
+        artifact.
+
+        With ``tracer="make_fx"``, dynamic shapes are opt-in via
+        ``torch._dynamo.decorators.mark_unbacked``
         (inductor backend only), NOT a precompile kwarg: mark dims on the inputs before
-        calling, e.g. ``mark_unbacked(x, 0); precompile(fn, model, x)`` frees ``x``'s
-        batch dim. Marked dims are captured as UNBACKED symints, which cannot be guarded
-        on, so one artifact serves any runtime size of them (invariant 3); a graph that
-        needs to guard on / specialize a marked dim fails at capture with a
-        ``PrecompileError``. Dims sharing a ``shape_id`` reuse one symbol (equal by
-        construction); ``min``/``max`` become runtime asserts. Other dims stay static.
+        calling, e.g. ``mark_unbacked(x, 0); precompile(fn,
+        example_inputs=[(model, x)])`` frees ``x``'s batch dim. Marked dims are captured
+        as UNBACKED symints, which cannot be guarded on, so one artifact serves any
+        runtime size of them (invariant 3); a graph that needs to guard on / specialize
+        a marked dim fails at capture with a ``PrecompileError``. Dims sharing a
+        ``shape_id`` reuse one symbol (equal by construction); ``min``/``max`` become
+        runtime asserts. Other dims stay static.
         Dims that MUST be equal at runtime (e.g. two inputs combined by a broadcast that
         requires equal sizes, ``model(a) + model(b)``) MUST be given a SHARED ``shape_id``
         so a mismatch is rejected; marking two such dims INDEPENDENTLY currently bakes a
@@ -1683,7 +6751,7 @@ class _PrecompileApi:
         ``fn`` is the whole computation, e.g.::
 
             python_code, cache = torch.compiler.precompile(
-                lambda model, x: model(x), model, x
+                lambda model, x: model(x), example_inputs=[(model, x)]
             )
 
 
@@ -1691,19 +6759,21 @@ class _PrecompileApi:
                 loss_fn(model(x), t).backward()  # or return autograd.grad(...)
 
 
-            python_code, cache = torch.compiler.precompile(train_step, model, x, t)
+            python_code, cache = torch.compiler.precompile(
+                train_step, example_inputs=[(model, x, t)]
+            )
 
-        Among ``example_inputs``, the ``nn.Module`` arguments have their params/buffers
-        lifted to graph inputs (no weights are baked into the artifact -- invariant 1);
-        the rest are the runtime inputs. The reloaded callable is invoked with the SAME
-        argument structure -- pass the model(s) again at runtime, e.g.
+        Within each tuple in ``example_inputs``, the ``nn.Module`` arguments have their
+        params/buffers lifted to graph inputs (no weights are baked into the artifact --
+        invariant 1); the rest are the runtime inputs. The reloaded callable is invoked
+        with the SAME argument structure -- pass the model(s) again at runtime, e.g.
         ``f_c(model, x)``, and that runtime model must match the example model's
         parameter/buffer structure (invariant 2). Arguments are matched POSITIONALLY:
         pass the model(s) and inputs positionally both here and at load time; keyword-
         argument calling conventions are not supported (a fn that relies on them would
-        surface as a raw arity error). If ``fn`` ran a backward, the
-        resulting parameter gradients are scattered (accumulated) onto that runtime
-        model's ``parameters()`` ``.grad`` fields, exactly like eager ``.backward()``,
+        surface as a raw arity error). With ``tracer="make_fx"``, if ``fn`` ran a
+        backward, the resulting parameter gradients are scattered (accumulated) onto
+        that runtime model's ``parameters()`` ``.grad`` fields, exactly like eager ``.backward()``,
         so a ``zero_grad()`` / ``optimizer.step()`` loop works unchanged; the artifact
         returns ``fn``'s own result (``None`` for a bare ``.backward()`` step), not the
         grads (invariant 5).
@@ -1713,14 +6783,28 @@ class _PrecompileApi:
         are supported -- AOTAutograd's prelude/epilogue is composed into the artifact
         (invariant 4), as is functionalized RNG. Caller responsibilities NOT checked
         here (see the Note): the runtime model must be structurally identical to the
-        example, and control flow / shapes are specialized to ``example_inputs``
-        (invariants 2 and 3). Violations that ARE checked raise ``PrecompileError``: a
-        tensor baked
-        as a constant (invariant 1), effectful ops (invariant 4), and -- for the
+        example, and control flow / shapes are specialized to the sole ``make_fx``
+        example tuple (invariants 2 and 3). Violations that ARE checked raise
+        ``PrecompileError``: a tensor baked as a constant (invariant 1), effectful ops
+        (invariant 4), and -- for the
         inductor backend -- a runtime input whose stride / memory format differs from
         the example's (invariant 6).
         """
         torch._C._log_api_usage_once("torch.compiler.precompile")
+        if example_inputs is None:
+            example_inputs = [tuple(example_args)]
+        elif example_args:
+            raise TypeError(
+                "precompile cannot take both positional examples and example_inputs."
+            )
+        if len(example_inputs) == 0:
+            raise ValueError("precompile requires at least one example input tuple.")
+        for example in example_inputs:
+            if not isinstance(example, tuple):
+                raise TypeError(
+                    "precompile example_inputs must be a sequence of positional-"
+                    f"argument tuples, got {type(example).__name__}."
+                )
         if backend not in ("inductor", "eager"):
             raise ValueError(
                 f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
@@ -1728,6 +6812,19 @@ class _PrecompileApi:
         if tracer not in ("make_fx", "dynamo"):
             raise ValueError(
                 f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
+            )
+        if training and (tracer != "dynamo" or backend != "inductor"):
+            raise NotImplementedError(
+                "precompile training=True currently requires tracer='dynamo' and "
+                "backend='inductor'."
+            )
+        if tracer == "dynamo":
+            return _precompile_dynamo(
+                fn,
+                example_inputs,
+                backend=backend,
+                decompositions=decompositions,
+                training=training,
             )
         compiled = PrecompiledModule(
             fn, backend=backend, tracer=tracer, decompositions=decompositions
@@ -1776,6 +6873,21 @@ class _PrecompileApi:
         # artifact and to read BACKEND for the cache-pairing check below.
         meta = _parse_artifact_metadata(python_code)
         backend = cast(str, meta["BACKEND"])
+        tracer = cast(str, meta.get("TRACER", "make_fx"))
+        if tracer == "dynamo":
+            python_version = cast(tuple[int, int], meta["_DYNAMO_PYTHON_VERSION"])
+            if python_version != sys.version_info[:2]:
+                raise PrecompileError(
+                    "precompile artifact was produced on Python "
+                    f"{python_version[0]}.{python_version[1]}, but is being loaded on "
+                    f"Python {sys.version_info[0]}.{sys.version_info[1]}."
+                )
+            torch_version = cast(str, meta["_DYNAMO_TORCH_VERSION"])
+            if torch_version != torch.__version__:
+                raise PrecompileError(
+                    f"precompile artifact was produced by torch {torch_version}, but "
+                    f"is being loaded by torch {torch.__version__}."
+                )
 
         # weights_only=True is safe (plain str/int/bytes dict). The inner artifact bytes
         # are the inductor save_cache_artifacts bundle, used below to prime the kernel
@@ -1836,16 +6948,24 @@ class _PrecompileApi:
             # acceleration is the warm kernel cache. This is a pure acceleration: a stale /
             # cross-torch-version / corrupt bundle that fails to load just leaves the caches
             # cold, and python_code JITs -- same result, no crash.
-            try:
-                torch.compiler.load_cache_artifacts(artifact)
-            except Exception as e:
-                log.warning(
-                    "torch.compiler.precompile.load could not prime the cache from the "
-                    "artifact bundle (%s: %s); it is likely stale or from a different "
-                    "torch build. Falling back to JIT from python_code.",
-                    type(e).__name__,
-                    e,
-                )
+            artifacts = (
+                artifact
+                if tracer == "dynamo" and isinstance(artifact, (list, tuple))
+                else [artifact]
+            )
+            for artifact_bundle in artifacts:
+                if artifact_bundle is None:
+                    continue
+                try:
+                    torch.compiler.load_cache_artifacts(artifact_bundle)
+                except Exception as e:
+                    log.warning(
+                        "torch.compiler.precompile.load could not prime the cache from "
+                        "an artifact bundle (%s: %s); it is likely stale or from a "
+                        "different torch build. Falling back to JIT from python_code.",
+                        type(e).__name__,
+                        e,
+                    )
         # Run the driver inlined in python_code. It carries the full calling convention and
         # runtime safety checks (subclass wrap/unwrap, param/buffer lifting, grad harvest,
         # input/model validation) and JITs the kernels -- which hit the primed cache when
