@@ -155,9 +155,18 @@ def compile_shader(source: str):
 
     if not hasattr(torch._C, "_mps_compileShader"):
         raise RuntimeError("MPS is not available")
+    torch_root = Path(__file__).parent.parent
+    # A packaged install stages the headers under torch/include, but an
+    # editable install runs straight from the source checkout, where they are
+    # still at the repository root. Search both so `#include <c10/metal/...>`
+    # resolves either way.
+    include_dirs = [torch_root / "include"]
+    source_root = torch_root.parent
+    if (source_root / "c10" / "metal").is_dir():
+        include_dirs += [source_root, source_root / "aten" / "src"]
     source = _embed_headers(
         [l + "\n" for l in source.split("\n")],
-        [Path(__file__).parent.parent / "include"],
+        include_dirs,
         set(),
     )
     return torch._C._mps_compileShader(source)
