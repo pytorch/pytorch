@@ -26,8 +26,9 @@
 # compiled stage-1 shape per vec class serves every N, not one per N.
 #
 # INDEX traits (argmax/argmin) are DECLINED here: the reshape makes a sub-row's chunk
-# index row % C, so rebasing its column to the global one is awkward. K0's single-kernel
-# path serves them until a cross-CTA split that carries the absolute index lands.
+# index row % C, so rebasing its column to the global one is awkward. They are served by
+# kernel_general._two_stage_row's ragged split, whose gidx_from="chunk" carries the
+# absolute reduced index by construction (measured 1.29-3.17x of ATen).
 
 import math
 from typing import NamedTuple
@@ -306,8 +307,9 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
         return None
     s = N // C
     # INDEX traits are declined here: stage 1 would have to rebase its within-sub-row column
-    # to the global one, which the reshape makes awkward (the chunk index is row % C). K0
-    # serves them instead -- one block per row, but the index needs no remap there.
+    # to the global one, which the reshape makes awkward (the chunk index is row % C). They
+    # are served by _two_stage_row's ragged split instead, whose gidx_from="chunk" already
+    # carries the absolute reduced index -- measured 1.29-3.17x of ATen. See kernel_general.
     if getattr(trait, "has_index", False):
         return None
     svec = math.gcd(s, 128 // (elsize * 8))  # the sub-row's OWN vec class
