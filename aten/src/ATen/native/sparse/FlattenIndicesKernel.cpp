@@ -2,8 +2,6 @@
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/sparse/FlattenIndicesCommon.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/AccumulateType.h>
 
 namespace at::native {
 
