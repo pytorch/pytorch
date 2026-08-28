@@ -38,22 +38,28 @@ might be used interchangeably in this documentation.
 captures a whole computation from positional-argument tuples in `example_inputs` -- with
 the model(s) included in each tuple, e.g.
 `precompile(lambda model, x: model(x), example_inputs=[(model, x)])` -- and lowers it to
-a self-contained, runnable Python source string plus an acceleration cache. Reload the
-artifact with `torch.compiler.precompile.load`; since no weights are baked in, you pass
-the model again at runtime. The optional `tracer="dynamo"` path accepts several example
-tuples and retains the guarded recompilations they trigger, including automatically
-dynamic graphs. It retains guards derived from explicit inputs and treats the Python
-environment as an unchecked invariant between capture and runtime; changing that
-environment can silently run a specialization captured for the old state. Initial
-support is for Python functions with positional tensor/scalar arguments and containers
-of those values; graph breaks, closures, and `nn.Module` arguments are not supported yet.
-Function defaults must be recursive immutable literals; mutable or user-defined values
-must be passed explicitly rather than used as defaults. Tensor-valued globals are also
-rejected because every tensor must be an explicit input.
-With `training=True` and the Inductor backend, Dynamo graphs
-include readable compiled forward and backward code, so served outputs retain a
-`grad_fn` and can be passed to `backward()`. This training mode works across captured
-recompilations and rejects output-tangent patterns not observed during capture. See the
+a runnable Python source string plus an acceleration cache. Make-fx artifacts are
+self-contained. Dynamo artifacts may import modules referenced by transformed globals;
+installed artifacts also import the defining Python modules.
+Reload the artifact with `torch.compiler.precompile.load`; since no weights are baked in,
+you pass the model again at runtime. The optional `tracer="dynamo"` path accepts several
+example calls and retains the guarded recompilations they trigger, including
+automatically dynamic graphs. Use `torch.compiler.ExampleInput(args=..., kwargs=...)`
+for a call with keyword arguments. Its serialized guard records are minimized while
+preserving how every example dispatches. It retains guards derived from runtime inputs
+and treats the Python environment as an unchecked invariant between capture and runtime;
+changing it can silently run a specialization captured for the old state. Tensor,
+scalar, Python-container, and `nn.Module` arguments are supported. Graph breaks and
+closure-free `torch._dynamo.disable` functions are preserved; top-level closures and
+nested functions that capture locals are not yet supported. Function defaults must be
+recursive immutable literals; mutable or user-defined values must be passed explicitly.
+Tensor-valued globals are also rejected because every tensor must be an explicit input.
+Captured nested frames that cannot be reached by a source-only dispatcher use an
+isolated installed artifact; it installs lazily, can be scoped with `with`, and exposes
+`unload()`. With `training=True`,
+Dynamo/Inductor graphs include readable compiled forward and backward code, so served
+outputs retain a `grad_fn` and can be passed to `backward()`. This training mode works
+across captured recompilations and graph breaks. See the
 {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}

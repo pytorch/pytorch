@@ -2,16 +2,16 @@
 
 Nothing here is imported or run by torch at runtime, and the generated artifacts never
 import this module. Instead torch._precompile emits these function bodies VERBATIM (via
-inspect.getsource, on the to_python_code / emit path only) into the self-contained
-python_code string, after the calling-convention metadata and the compiled/captured
-graph. Authoring the driver as real code -- instead of a hand-written string literal --
-lets pyrefly / ruff / IDEs type-check and navigate the load-bearing driver logic that
-would otherwise be invisible inside a string (and drops the wall of ``# noqa: F821``).
+inspect.getsource, on the to_python_code / emit path only) into the python_code string,
+after the calling-convention metadata and the compiled/captured graph. Authoring the
+driver as real code -- instead of a hand-written string literal -- lets pyrefly / ruff /
+IDEs type-check and navigate the load-bearing driver logic that would otherwise be
+invisible inside a string (and drops the wall of ``# noqa: F821``).
 
-Keeping python_code self-contained and version-frozen (its behavior is hashed via
-code_hash, invariant 7) still holds: the artifact carries the driver TEXT, it does not
-import it, so there is no torch-version skew. The emit path runs getsource in-process
-where torch source is present; load() never touches this module.
+Keeping the driver version-frozen (its behavior is hashed via code_hash, invariant 7)
+still holds: the artifact carries the driver TEXT, it does not import it, so there is no
+torch-version skew. The emit path runs getsource in-process where torch source is
+present; load() never touches this module.
 
 The names the emitted bodies read from the artifact's own namespace -- the metadata
 constants, the ``_torch`` / ``_pytree`` import aliases, and the graph's ``call`` -- are
@@ -32,6 +32,8 @@ import torch.utils._pytree as _pytree
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     # Calling-convention metadata the emitted driver reads from the artifact namespace,
     # where torch._precompile._build_metadata_section emits each as a literal assignment
     # ahead of the driver. Bound here with placeholder values (not bare annotations) so
@@ -54,7 +56,7 @@ if TYPE_CHECKING:
     USER_INPUT_DEVICES: list[str | None] = []
     USER_INPUT_BOUNDS: list[dict[int, tuple[int | None, int | None]] | None] = []
     _DYNAMO_BACKEND_IDS: tuple[str, ...] = ()
-    _DYNAMO_BACKEND_SOURCES: tuple[str, ...] = ()
+    _DYNAMO_BACKENDS: dict[str, Callable[[list[object]], object]] = {}
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
     _DYNAMO_TORCH_VERSION: str = ""
     _DYNAMO_STATE: str = ""
@@ -378,9 +380,10 @@ def _build_dynamo_forward():
     """Rebuild Dynamo's guards and transformed bytecode into a standalone dispatcher.
 
     The compiled graph sources stay ordinary Python in the artifact. Only the minimized
-    Dynamo dispatch guards and transformed code objects are opaque, because neither has
-    a source form. There is no compiler behind this dispatcher: a miss against every
-    retained guard set raises instead of compiling another specialization.
+    Dynamo dispatch guards, transformed entry/resume code objects, and embedded disabled
+    functions are opaque because none has a source form. There is no compiler behind
+    this dispatcher: a miss against every retained guard set raises instead of compiling
+    another specialization.
     """
     import base64
     import importlib
@@ -388,9 +391,10 @@ def _build_dynamo_forward():
     import pickle
     import sys
     import types
+    from typing import Any, cast
 
     import torch
-    import torch.utils._pytree as pytree
+    import torch.utils._pytree as _pytree
     from torch._precompile import PrecompileError
 
     if tuple(_DYNAMO_PYTHON_VERSION) != sys.version_info[:2]:
@@ -417,17 +421,21 @@ def _build_dynamo_forward():
         raise PrecompileError(
             "precompile artifact has invalid serialized Dynamo state."
         ) from e
+    from torch.compiler._precompile_types import _DynamoArtifactState
+
+    if not isinstance(state, _DynamoArtifactState):
+        raise PrecompileError(
+            "precompile artifact has invalid serialized Dynamo state."
+        )
     namespace = dict(globals())
-    namespace.update(state.get("value_globals", {}))
-    for alias, module_name in state["import_sources"].items():
-        namespace[alias] = importlib.import_module(module_name)
 
     def has_storage_alias(values):
-        tensors = [
-            value
-            for value in pytree.tree_leaves(values)
-            if isinstance(value, torch.Tensor)
-        ]
+        leaves = _pytree.tree_leaves(values)
+        tensors = [leaf for leaf in leaves if isinstance(leaf, torch.Tensor)]
+        for leaf in leaves:
+            if isinstance(leaf, torch.nn.Module):
+                tensors.extend(leaf.parameters())
+                tensors.extend(leaf.buffers())
         storage_ranges: dict[tuple[str, int | None], list[tuple[int, int]]] = {}
         storage_ids: set[tuple[str, int | None, int]] = set()
         seen_objects: set[int] = set()
@@ -461,76 +469,424 @@ def _build_dynamo_forward():
                 furthest_end = max(furthest_end, end)
         return False
 
+    def check_input_contract(args, kwargs):
+        from torch._precompile import PrecompileError
+
+        if has_storage_alias((args, kwargs)):
+            raise PrecompileError(
+                "precompile: storage aliasing between distinct runtime tensor inputs "
+                "is not supported by the captured Dynamo artifact."
+            )
+        contract = state.input_contract
+        if contract is None:
+            return
+
+        def module_signature(module):
+            tensors = [
+                ("parameter", name, tensor)
+                for name, tensor in module.named_parameters(remove_duplicate=False)
+            ]
+            tensors.extend(
+                ("buffer", name, tensor)
+                for name, tensor in module.named_buffers(remove_duplicate=False)
+            )
+            aliases = {}
+            metadata = []
+            for kind, name, tensor in tensors:
+                alias = aliases.setdefault(id(tensor), len(aliases))
+                metadata.append(
+                    (
+                        kind,
+                        name,
+                        alias,
+                        tuple(tensor.shape),
+                        tuple(tensor.stride()),
+                        str(tensor.dtype),
+                        str(tensor.device),
+                        tensor.requires_grad,
+                    )
+                )
+            return (
+                type(module).__module__,
+                type(module).__qualname__,
+                module.training,
+                tuple(metadata),
+            )
+
+        leaves, spec = _pytree.tree_flatten((args, kwargs))
+        serialized_spec = _pytree.treespec_dumps(spec)
+        variant = next(
+            (
+                candidate
+                for candidate in contract.variants
+                if candidate.spec == serialized_spec
+            ),
+            None,
+        )
+        if variant is None:
+            from torch._precompile import PrecompileError
+
+            raise PrecompileError(
+                "precompile: runtime inputs have a different structure from the "
+                "captured Dynamo examples."
+            )
+        for index, (value, expected) in enumerate(
+            zip(leaves, variant.leaves, strict=True)
+        ):
+            if expected is None:
+                continue
+            if expected["kind"] == "module":
+                if not isinstance(value, torch.nn.Module):
+                    from torch._precompile import PrecompileError
+
+                    raise PrecompileError(
+                        f"precompile: runtime input leaf {index} is not an nn.Module."
+                    )
+                if module_signature(value) not in expected["variants"]:
+                    from torch._precompile import PrecompileError
+
+                    raise PrecompileError(
+                        f"precompile: runtime module input leaf {index} has a "
+                        "different type, training mode, parameter/buffer structure, "
+                        "shape, layout, dtype, device, or requires_grad contract."
+                    )
+                continue
+            if not isinstance(value, torch.Tensor):
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    f"precompile: runtime input leaf {index} is not a tensor."
+                )
+            actual_type = (type(value).__module__, type(value).__qualname__)
+            checks = (
+                ("type", actual_type),
+                ("dtype", str(value.dtype)),
+                ("device", str(value.device)),
+                ("requires_grad", value.requires_grad),
+            )
+            for name, actual in checks:
+                wanted = expected[name]
+                if wanted is not None and actual != wanted:
+                    from torch._precompile import PrecompileError
+
+                    raise PrecompileError(
+                        f"precompile: runtime input leaf {index} has {name} "
+                        f"{actual!r}, expected {wanted!r}."
+                    )
+            shape = expected["shape"]
+            stride = expected["stride"]
+            if shape is not None and len(value.shape) != len(shape):
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    f"precompile: runtime input leaf {index} has rank "
+                    f"{value.dim()}, expected {len(shape)}."
+                )
+            if shape is not None:
+                for dim, wanted in enumerate(shape):
+                    if wanted is not None and value.shape[dim] != wanted:
+                        from torch._precompile import PrecompileError
+
+                        raise PrecompileError(
+                            f"precompile: runtime input leaf {index} has shape "
+                            f"{tuple(value.shape)}, expected dim {dim} to be {wanted}."
+                        )
+            if stride is not None:
+                for dim, wanted in enumerate(stride):
+                    if wanted is not None and value.stride(dim) != wanted:
+                        from torch._precompile import PrecompileError
+
+                        raise PrecompileError(
+                            f"precompile: runtime input leaf {index} has stride "
+                            f"{tuple(value.stride())}, expected dim {dim} to be "
+                            f"{wanted}."
+                        )
+
+    for code_state in state.codes:
+        for alias, (module_name, path) in code_state.global_bindings.items():
+            value = importlib.import_module(module_name)
+            for attr in path:
+                value = getattr(value, attr)
+            namespace[alias] = value
+        namespace.update(code_state.value_globals)
+        for alias, module_name in code_state.import_sources.items():
+            namespace[alias] = importlib.import_module(module_name)
+
     def make_backend(call):
         def run(*args):
             return call(list(args))
 
         return torch._dynamo.disable(run)
 
-    for index, (backend_id, source) in enumerate(
-        zip(_DYNAMO_BACKEND_IDS, _DYNAMO_BACKEND_SOURCES)
-    ):
-        backend_namespace = {"__name__": f"_precompiled_backend_{index}"}
-        exec(
-            compile(source, f"<precompile-backend-{index}>", "exec"),
-            backend_namespace,
-        )
-        namespace[backend_id] = make_backend(backend_namespace["call"])
+    backend_calls = {}
+    for backend_id in _DYNAMO_BACKEND_IDS:
+        backend_call = make_backend(_DYNAMO_BACKENDS[backend_id])
+        backend_calls[backend_id] = backend_call
+        namespace[backend_id] = backend_call
 
-    target = SerializedCode.to_code_object(state["code"])
-    defaults = state["defaults"]
-    kwdefaults = state["kwdefaults"]
-
-    def make_cell(value):
-        def read():
-            return value
-
-        if read.__closure__ is None:
-            raise AssertionError("expected a closure cell")
-        return read.__closure__[0]
-
-    closure_values = state["closure"]
-    closure = (
-        tuple(make_cell(value) for value in closure_values)
-        if closure_values is not None
-        else None
-    )
-    variants = []
-    for guarded in state["variants"]:
-        guards_state = load_guards_state(guarded["guards_state"])
-        manager = load_guard_manager(guards_state, target, namespace)
-        code = SerializedCode.to_code_object(guarded["dynamo_code"])
+    for global_name, function_state in state.disabled_functions.items():
+        function_globals = dict(namespace)
+        for name, module_name in function_state.module_globals.items():
+            function_globals[name] = importlib.import_module(module_name)
+        function_globals.update(function_state.value_globals)
         function = types.FunctionType(
-            code, namespace, target.co_name, defaults, closure
+            SerializedCode.to_code_object(function_state.code),
+            function_globals,
+            function_state.name,
+            function_state.defaults,
         )
-        if kwdefaults:
-            function.__kwdefaults__ = dict(kwdefaults)
-        variants.append((manager, function))
+        if function_state.kwdefaults:
+            function.__kwdefaults__ = dict(function_state.kwdefaults)
+        function_globals[global_name] = function
+        namespace[global_name] = function
 
-    target_function = types.FunctionType(
-        target, namespace, target.co_name, defaults, closure
-    )
-    if kwdefaults:
-        target_function.__kwdefaults__ = dict(kwdefaults)
-    signature = inspect.signature(target_function)
+    if state.serving_mode == "installed":
+        import threading
 
-    def forward(*args):
-        if has_storage_alias(args):
-            raise PrecompileError(
-                "precompile: storage aliasing between distinct runtime tensor inputs "
-                "is not supported."
+        from torch._dynamo.package import CompilePackage
+
+        if state.package is None:
+            raise AssertionError("installed Dynamo artifact has no package")
+
+        class SourceBackendArtifact:
+            def __init__(self, function):
+                self.function = function
+
+            def after_deserialization(self):
+                return self.function
+
+        backends = {
+            backend_id: SourceBackendArtifact(function)
+            for backend_id, function in backend_calls.items()
+        }
+
+        def entry_function():
+            code_state = state.codes[0]
+            try:
+                module = importlib.import_module(code_state.python_module)
+            except ImportError as e:
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    "precompile: this installed artifact needs its defining module "
+                    f"{code_state.python_module!r} to be importable."
+                ) from e
+            code = SerializedCode.to_code_object(code_state.code)
+            function = types.FunctionType(
+                code,
+                module.__dict__,
+                code.co_name,
+                code_state.defaults,
             )
-        bound = signature.bind(*args)
-        bound.apply_defaults()
-        local_scope = dict(bound.arguments)
+            if code_state.kwdefaults:
+                function.__kwdefaults__ = dict(code_state.kwdefaults)
+            return function
+
+        class InstalledArtifact:
+            def __init__(self):
+                self.fn = None
+                self.compiled = None
+                self.package = None
+                self.region = -1
+                self.codes = ()
+                self.state = threading.Condition()
+                self.active_calls = 0
+                self.unloading = False
+
+            def _rebind(self, fn):
+                with self.state:
+                    if self.compiled is not None:
+                        from torch._precompile import PrecompileError
+
+                        raise PrecompileError(
+                            "precompile: this artifact is already installed; pass "
+                            "fn= to load() before the first call."
+                        )
+                    self.fn = fn
+
+            def _ensure(self):
+                with self.state:
+                    if self.unloading:
+                        raise RuntimeError("precompile artifact is being unloaded")
+                    if self.compiled is not None:
+                        return
+                    fn = entry_function() if self.fn is None else self.fn
+                    entry = fn.forward if isinstance(fn, torch.nn.Module) else fn
+
+                    def fail_backend(gm, inputs):
+                        from torch._precompile import PrecompileError
+
+                        raise PrecompileError(
+                            "precompile: no captured Dynamo variant matches this "
+                            "call. Add an example covering it and precompile again."
+                        )
+
+                    package = CompilePackage(
+                        entry,
+                        state.package,
+                        ignore_inlined_sources=True,
+                    )
+                    context = torch._dynamo.optimize(
+                        fail_backend,
+                        package=package,
+                        dynamic=None,
+                        isolate_recompiles=True,
+                    )
+                    compiled = context(fn)
+                    region = context._isolate_recompiles_id  # type: ignore[attr-defined]
+                    try:
+                        package.install(
+                            cast("dict[Any, Any]", backends),
+                            isolate_recompiles_id=region,
+                        )
+                    except BaseException:
+                        package.uninstall()
+                        raise
+                    self.fn = fn
+                    self.compiled = compiled
+                    self.package = package
+                    self.region = region
+                    self.codes = package.region_codes()
+
+            def __call__(self, *args, **kwargs):
+                self._ensure()
+                check_input_contract(args, kwargs)
+                with self.state:
+                    if self.compiled is None or self.unloading:
+                        raise RuntimeError("precompile artifact has been unloaded")
+                    package = self.package
+                    if package is None:
+                        raise AssertionError("installed artifact was not prepared")
+                    if package.installed_entries_dropped():
+                        from torch._precompile import PrecompileError
+
+                        raise PrecompileError(
+                            "precompile: torch._dynamo.reset() cleared this loaded "
+                            "artifact; load it again before calling it."
+                        )
+                    compiled = self.compiled
+                    self.active_calls += 1
+                try:
+                    with torch.set_grad_enabled(TRAINING):
+                        return compiled(*args, **kwargs)
+                except torch._dynamo.exc.BackendCompilerFailed as e:
+                    from torch._precompile import PrecompileError
+
+                    if isinstance(e.inner_exception, PrecompileError):
+                        raise e.inner_exception from e
+                    raise
+                finally:
+                    with self.state:
+                        self.active_calls -= 1
+                        if not self.active_calls:
+                            self.state.notify_all()
+
+            def __enter__(self):
+                self._ensure()
+                return self
+
+            def __exit__(self, *exc):
+                self.unload()
+
+            def unload(self):
+                with self.state:
+                    while self.unloading:
+                        self.state.wait()
+                    if self.compiled is None:
+                        return
+                    self.unloading = True
+                    while self.active_calls:
+                        self.state.wait()
+                    package = self.package
+                    codes = self.codes
+                    region = self.region
+                    self.compiled = None
+                    self.package = None
+                    self.codes = ()
+                    self.region = -1
+                try:
+                    try:
+                        if package is not None:
+                            package.uninstall()
+                    finally:
+                        from torch._C._dynamo.eval_frame import (
+                            _clear_cache_entries_for_region,
+                        )
+
+                        if region >= 0:
+                            for code in codes:
+                                _clear_cache_entries_for_region(code, region)
+                finally:
+                    with self.state:
+                        self.unloading = False
+                        self.state.notify_all()
+
+        return InstalledArtifact()
+
+    def prepare_code(code_state):
+        target = SerializedCode.to_code_object(code_state.code)
+        defaults = code_state.defaults
+        kwdefaults = code_state.kwdefaults
+        guarded_variants = []
+        for guarded in code_state.variants:
+            guards_state = load_guards_state(guarded.guards_state)
+            manager = load_guard_manager(guards_state, target, namespace)
+            code = SerializedCode.to_code_object(guarded.dynamo_code)
+            guarded_variants.append((manager, code))
+
+        def bind(closure=None):
+            target_function = types.FunctionType(
+                target, namespace, target.co_name, defaults, closure
+            )
+            if kwdefaults:
+                target_function.__kwdefaults__ = dict(kwdefaults)
+            if not guarded_variants:
+                return target_function
+
+            variants = []
+            for manager, code in guarded_variants:
+                function = types.FunctionType(
+                    code, namespace, target.co_name, defaults, closure
+                )
+                if kwdefaults:
+                    function.__kwdefaults__ = dict(kwdefaults)
+                variants.append((manager, function))
+            signature = inspect.signature(target_function)
+
+            def dispatch(*args, **kwargs):
+                bound = signature.bind(*args, **kwargs)
+                bound.apply_defaults()
+                local_scope = dict(bound.arguments)
+                for manager, function in variants:
+                    if manager.check(local_scope):
+                        return function(*args, **kwargs)
+                from torch._precompile import PrecompileError
+
+                raise PrecompileError(
+                    f"precompile: no captured Dynamo variant of {target.co_name!r} "
+                    f"matches this call. Add an example covering it and precompile "
+                    f"again; the artifact contains {len(variants)} guarded variant(s)."
+                )
+
+            return dispatch
+
+        return target, bind
+
+    main_state, *resume_states = state.codes
+    for code_state in resume_states:
+        target, bind = prepare_code(code_state)
+        function = bind if target.co_freevars else bind()
+        for name in code_state.function_names:
+            namespace[name] = function
+
+    target, bind = prepare_code(main_state)
+    if target.co_freevars:
+        raise AssertionError("main Dynamo frame must not have free variables")
+    entry = bind()
+
+    def forward(*args, **kwargs):
+        check_input_contract(args, kwargs)
         with torch.set_grad_enabled(TRAINING):
-            for manager, function in variants:
-                if manager.check(local_scope):
-                    return function(*args)
-        raise PrecompileError(
-            f"precompile: no captured Dynamo variant of {target.co_name!r} matches "
-            f"this call. Add an example covering it and precompile again; the artifact "
-            f"contains {len(variants)} guarded variant(s)."
-        )
+            return entry(*args, **kwargs)
 
     return forward
