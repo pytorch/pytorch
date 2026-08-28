@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_FBCODE,
     IS_WINDOWS,
     run_tests,
@@ -123,6 +124,8 @@ def _test_export_helper(self, dtype, op):
 
 
 class TestExportOpInfo(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps(export_failures | fake_export_failures)
     @unittest.skipIf(IS_FBCODE, "tests broken with unexpected successes internally")
@@ -146,6 +149,8 @@ selected_op_db = [op for op in op_db if op.name in selected_ops]
 
 
 class TestExportOnFakeCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     # In CI, this test runs on a CUDA machine with cuda build
     # We set CUDA_VISIBLE_DEVICES="" to simulate a CPU machine with cuda build
     # Running this on all ops in op_db is too slow, so we only run on a selected subset
