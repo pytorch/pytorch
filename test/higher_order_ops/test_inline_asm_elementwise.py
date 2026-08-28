@@ -472,30 +472,6 @@ class TestInlineAsmElementwiseInputValidation(TestCase):
                 dtype=torch.float32,
             )
 
-    def test_error_constraint_mismatch(self):
-        x = torch.randn(100, dtype=torch.float32)
-        y = torch.randn(100, dtype=torch.float32)
-        with self.assertRaises(ValueError):
-            inline_asm_elementwise(
-                x,
-                y,
-                asm_str="v_add_f32 $0, $1, $2"
-                if torch.version.hip
-                else "add.f32 $0, $1, $2;",
-                constraints="=v,v" if torch.version.hip else "=f,f",
-                dtype=torch.float32,
-            )
-
-    def test_error_multiple_output_constraint_mismatch(self):
-        x = torch.arange(8, dtype=torch.int32)
-        with self.assertRaisesRegex(ValueError, "Expected 2 output constraint"):
-            inline_asm_elementwise(
-                x,
-                asm_str="mov.b32 $0, $1;",
-                constraints="=r,r",
-                dtype=(torch.int32, torch.int32),
-            )
-
 
 class TestInlineAsmElementwiseErrors(TestCase):
     """CUDA-specific tests for error handling."""
@@ -508,6 +484,20 @@ class TestInlineAsmElementwiseErrors(TestCase):
             inline_asm_elementwise(
                 x,
                 asm_str="v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
+                constraints="=v,v" if torch.version.hip else "=f,f",
+                dtype=torch.float32,
+            )
+
+    def test_error_constraint_mismatch(self, device):
+        x = torch.randn(100, device=device, dtype=torch.float32)
+        y = torch.randn(100, device=device, dtype=torch.float32)
+        with self.assertRaises(ValueError):
+            inline_asm_elementwise(
+                x,
+                y,
+                asm_str="v_add_f32 $0, $1, $2"
+                if torch.version.hip
+                else "add.f32 $0, $1, $2;",
                 constraints="=v,v" if torch.version.hip else "=f,f",
                 dtype=torch.float32,
             )
@@ -535,6 +525,16 @@ class TestInlineAsmElementwiseErrors(TestCase):
                 x,
                 asm_str="mov.b32 $0, $2; mov.b32 $1, $2;",
                 constraints="=r,=r,r",
+                dtype=(torch.int32, torch.int32),
+            )
+
+    def test_error_multiple_output_constraint_mismatch(self, device):
+        x = torch.arange(8, device=device, dtype=torch.int32)
+        with self.assertRaisesRegex(ValueError, "Expected 2 output constraint"):
+            inline_asm_elementwise(
+                x,
+                asm_str="mov.b32 $0, $1;",
+                constraints="=r,r",
                 dtype=(torch.int32, torch.int32),
             )
 
