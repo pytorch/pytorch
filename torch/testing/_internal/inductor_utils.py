@@ -379,10 +379,7 @@ def _quantize_blockwise(
     scale_expanded = scale.repeat_interleave(min_outer, dim=0).repeat_interleave(
         min_inner, dim=1
     )
-    x_fp8 = _to_fp8_saturated(
-        x / scale_expanded,  # Ensures that scaling doesn't cause inf/nan values
-        float8_dtype,
-    )
+    x_fp8 = _to_fp8_saturated(x * scale_expanded, float8_dtype)
     inverse_scale = scale.reciprocal()
     return x_fp8, inverse_scale
 

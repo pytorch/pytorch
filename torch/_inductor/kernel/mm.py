@@ -1288,15 +1288,20 @@ def tuned_scaled_mm_v2(
         return fallback()
 
     # BlockWise128x128 cuBLAS scales pad the K-dim blocks to a multiple of 4.
-    # _normalize_blockwise_scale strips that pad, but only when K is statically
-    # known; with a dynamic K it cannot prove the cuBLAS layout and would hand
-    # the padded layout to the Triton template, which indexes it unpadded.
-    # Defer to the eager op, which handles the cuBLAS layout natively.
-    if (
-        ScalingType.BlockWise128x128
-        in (ScalingType(recipe_a[0]), ScalingType(recipe_b[0]))
-        and PythonWrapperCodegen.statically_known_int_or_none(mat_a.get_size()[1])
-        is None
+    # _normalize_blockwise_scale strips that pad, but only when the relevant
+    # shapes are statically known; with a dynamic K or output dim (M for A,
+    # N for B) it cannot prove the cuBLAS layout and no-ops, handing the padded
+    # layout to the Triton template, which indexes it unpadded. Defer to the
+    # eager op, which handles the cuBLAS layout natively.
+    def _is_dynamic(sz) -> bool:
+        return PythonWrapperCodegen.statically_known_int_or_none(sz) is None
+
+    if ScalingType(recipe_a[0]) == ScalingType.BlockWise128x128 and (
+        _is_dynamic(mat_a.get_size()[0]) or _is_dynamic(mat_a.get_size()[1])
+    ):
+        return fallback()
+    if ScalingType(recipe_b[0]) == ScalingType.BlockWise128x128 and (
+        _is_dynamic(mat_b.get_size()[1]) or _is_dynamic(mat_b.get_size()[0])
     ):
         return fallback()
 
