@@ -28,6 +28,7 @@
 # -- that count grows with N, and a linear chain folds in the same order however it is rolled.
 
 import math
+from typing import Any
 
 import cutlass
 import cutlass.cute as cute
@@ -734,7 +735,10 @@ class TileReduce:
         flat_tail=False,
         ragged_chunk=False,
         order="linear",
-        itree=None,
+        # duck-typed like `trait`: the plan's type belongs to the DRIVER above
+        # this module (kernel_rowtile._ItreePlan), so naming it here would invert
+        # the dependency.
+        itree: Any = None,
     ):
         if axis not in ("row", "col", "general"):
             raise ValueError(f"axis must be 'row', 'col' or 'general', got {axis!r}")
@@ -796,7 +800,7 @@ class TileReduce:
         # the general axis loads one element at a time (an arbitrary stride pattern has no
         # width to exploit), so it has no tile and no vector
         if axis == "row":
-            self.vec = self.tm.vec if order == "linear" else itree.vec
+            self.vec = self.tilemap.vec if order == "linear" else itree.vec
         else:
             self.vec = 1 if axis == "general" else vec
         # one output per thread on the row axis (its lanes are merged first); `vec` adjacent
@@ -805,6 +809,14 @@ class TileReduce:
         self.rows_per_block = nt // tpr
         self.warps_per_row = tpr // WARP  # 0 at tpr == 1: nothing to merge
         self.tiler = (nt, N)  # TMA box: nt whole rows
+
+    @property
+    def tilemap(self):
+        # Only a LINEAR row fold carries one tile: the inner-tree order keeps a tile per batch
+        # in its plan, and the col/general axes have none at all.
+        if self.tm is None:
+            raise AssertionError(f"no tile on the {self.axis} axis")
+        return self.tm
 
     @property
     def cache_sig(self):
@@ -925,7 +937,7 @@ class TileReduce:
         it = self.itree
         nf = const_expr(trait.nfields)
         op, ident = leaf_op(trait), identity(trait)
-        warp_writes = None
+        warp_writes = []  # empty when one warp covers the row: nothing to stage
         if const_expr(it.wpr // max(it.kchunk, 1) > 1):
             # One staging buffer PER FIELD: an index trait's position and a Welford count are
             # different dtypes, so they cannot share a tensor.
@@ -1162,6 +1174,8 @@ class TileReduce:
         trait = self.trait
         chunk_base = Int32(0)  # nonzero only under ragged_chunk, for gidx_from "chunk"
         batch_idx = None  # split shape only: which batch of the row this block folds
+        # inner-tree order only: its (lane, warp) thread map, set from the plan below
+        lane_w = warp_id = row_in_block = None
         if const_expr(self.order == "inner_tree"):
             # (lane, warp) rather than (lane, row): `wpr` warps cooperate on one row, and
             # `rows_per_block` such groups share the block.
