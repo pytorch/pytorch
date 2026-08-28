@@ -18,6 +18,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_rng_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/dlconvertor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/extension_backend_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/functional_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/half_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/index_kernel_utils_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/ivalue_test.cpp

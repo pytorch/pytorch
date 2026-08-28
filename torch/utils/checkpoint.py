@@ -458,8 +458,8 @@ def checkpoint(
 
     .. warning::
 
-        The ``use_reentrant`` parameter should be passed explicitly. In version
-        2.9 we will raise an exception if ``use_reentrant`` is not passed.
+        The ``use_reentrant`` parameter should be passed explicitly. In a future
+        release, we will raise an exception if ``use_reentrant`` is not passed.
         If you are using the ``use_reentrant=True`` variant, please refer to the
         note below for important considerations and potential limitations.
 
@@ -523,7 +523,7 @@ def checkpoint(
         use_reentrant(bool):
             specify whether to use the activation checkpoint variant that
             requires reentrant autograd. This parameter should be passed
-            explicitly. In version 2.9 we will raise an exception if
+            explicitly. In a future release, we will raise an exception if
             ``use_reentrant`` is not passed. If ``use_reentrant=False``,
             ``checkpoint`` will use an implementation that does not require
             reentrant autograd. This allows ``checkpoint`` to support additional
@@ -635,7 +635,7 @@ def _checkpoint_impl(
     if use_reentrant is None:
         warnings.warn(
             "torch.utils.checkpoint: the use_reentrant parameter should be "
-            "passed explicitly. Starting in PyTorch 2.9, calling checkpoint "
+            "passed explicitly. In a future release, calling checkpoint "
             "without use_reentrant will raise an exception. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
@@ -708,8 +708,8 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
     be saved for re-running the segment in the backward pass.
 
     .. warning::
-        The ``use_reentrant`` parameter should be passed explicitly. In version
-        2.9 we will raise an exception if ``use_reentrant`` is not passed.
+        The ``use_reentrant`` parameter should be passed explicitly. In a future
+        release, we will raise an exception if ``use_reentrant`` is not passed.
         If you are using the ``use_reentrant=True` variant, please see
         :func:`~torch.utils.checkpoint.checkpoint` for
         the important considerations and limitations of this variant. It is
@@ -750,7 +750,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
         warnings.warn(
             "torch.utils.checkpoint.checkpoint_sequential: the use_reentrant "
             "parameter should be passed explicitly. "
-            "In version 2.9 we will raise an exception if use_reentrant "
+            "In a future release, we will raise an exception if use_reentrant "
             "is not passed. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
@@ -1705,6 +1705,29 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
 
     Use this with `torch.utils.checkpoint.checkpoint` to control which
     operations are recomputed during the backward pass.
+
+    .. note::
+
+        This API expresses selective activation checkpointing policies at the
+        level of individual ATen operators. If you would rather define
+        save/recompute decisions over regions of source code, we recommend
+        trying the separate
+        `torch_remat <https://github.com/meta-pytorch/remat>`_ package. Its
+        region-based API lets you:
+
+        * assign different policies to different uses of the same operator;
+        * apply policies to arbitrary multi-operation code, including custom
+          :class:`torch.autograd.Function` implementations, without wrapping
+          the region in a custom operator;
+        * in eager mode, retain only tensors needed for backward or subsequent
+          recomputation instead of caching every output of a selected
+          operator; and
+        * avoid the eager-mode ``TorchDispatchMode`` overhead of per-operator
+          policies.
+
+        ``torch_remat`` also provides eager-mode tracing and memory diagnostics
+        for named regions, while its core save/recompute policy works with
+        :func:`torch.compile`.
 
     Args:
         policy_fn_or_list (Callable or List):
