@@ -737,15 +737,43 @@ class SideEffects:
         if isinstance(item.mutation_type, (AttributeMutationNew, ValueMutationNew)):
             return True
 
-        if isinstance(item, variables.UserDefinedObjectVariable):
-            # Checks if the underlying dict or tuple vt has been modified
-            return item in self.store_attr_mutations or item.is_base_vt_modified(self)
+        # A UserDefinedDictVariable/UserDefinedSetVariable is itself a
+        # ConstDictVariable/SetVariable (MI), so its content-modified state is
+        # self-contained (items vs. original_items) and doesn't depend on
+        # mutation_type/store_attr_mutations tracking.
+        if (
+            isinstance(
+                item,
+                (variables.UserDefinedDictVariable, variables.UserDefinedSetVariable),
+            )
+            and item.has_new_items()
+        ):
+            return True
 
+        # UserDefinedListVariable/UserDefinedDequeVariable have no self-diff
+        # (no original_items/has_new_items on BaseListVariable), so fall back
+        # to whether mutation() was ever called on them -- mutation() records
+        # var.source in mutated_sources unconditionally, unlike
+        # store_attr_mutations (attribute-axis only) or ValueMutationExisting
+        # (a mutation_type this AttributeMutationExisting object doesn't have).
+        if (
+            isinstance(
+                item,
+                (variables.UserDefinedListVariable, variables.UserDefinedDequeVariable),
+            )
+            and item.source is not None
+            and item.source in self.mutated_sources
+        ):
+            return True
+
+        # Either axis counts: a value-axis content mutation (is_modified on
+        # ValueMutationExisting) or an attribute-axis store.
+        modified = False
+        if isinstance(item.mutation_type, ValueMutationExisting):
+            modified = item.mutation_type.is_modified
         if self.is_attribute_mutation(item):
-            return item in self.store_attr_mutations
-        if item.mutation_type is None:
-            raise AssertionError(f"mutation_type is None for {item} in is_modified")
-        return item.mutation_type.is_modified  # type: ignore[attr-defined]
+            modified = modified or item in self.store_attr_mutations
+        return modified
 
     def _track_obj(
         self,
@@ -830,11 +858,14 @@ class SideEffects:
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, collections.defaultdict):
             variable_cls = variables.DefaultDictVariable
+        elif issubclass(user_cls, collections.OrderedDict):
+            # OrderedDict-backed store + move_to_end / popitem(last=).
+            variable_cls = variables.UserDefinedOrderedDictVariable
         elif issubclass(user_cls, dict):
-            # Includes collections.OrderedDict and its subclasses; the
-            # UserDefinedDictVariable picks an OrderedDict-backed store.
             variable_cls = variables.UserDefinedDictVariable
-        elif issubclass(user_cls, (set, frozenset)):
+        elif issubclass(user_cls, frozenset):
+            variable_cls = variables.UserDefinedFrozensetVariable
+        elif issubclass(user_cls, set):
             variable_cls = variables.UserDefinedSetVariable
         elif issubclass(user_cls, tuple):
             if is_namedtuple_cls(user_cls):
@@ -1567,7 +1598,8 @@ class SideEffects:
 
 @register_side_effect_replay_handler(
     name="list_mutation",
-    matcher=lambda ctx: isinstance(ctx.var, variables.ListVariable),
+    matcher=lambda ctx: isinstance(ctx.var, variables.ListVariable)
+    and not isinstance(ctx.var, variables.UserDefinedObjectVariable),
     priority=90,
 )
 def _codegen_list_mutation(ctx: SideEffectReplayContext) -> None:
@@ -1591,7 +1623,8 @@ def _codegen_list_mutation(ctx: SideEffectReplayContext) -> None:
 
 @register_side_effect_replay_handler(
     name="deque_mutation",
-    matcher=lambda ctx: isinstance(ctx.var, variables.lists.DequeVariable),
+    matcher=lambda ctx: isinstance(ctx.var, variables.lists.DequeVariable)
+    and not isinstance(ctx.var, variables.UserDefinedObjectVariable),
     priority=80,
 )
 def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
@@ -1638,7 +1671,11 @@ def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
     name="const_dict_or_set_mutation",
     matcher=lambda ctx: isinstance(
         ctx.var, (variables.ConstDictVariable, variables.SetVariable)
-    ),
+    )
+    # A UserDefined dict (is-a ConstDictVariable under MI) has both a content and
+    # an attribute compartment; it is replayed by the composite attribute handler
+    # instead.  Set UDOVs keep this content-only path.
+    and not isinstance(ctx.var, variables.UserDefinedDictVariable),
     priority=70,
 )
 def _codegen_const_dict_or_set_mutation(ctx: SideEffectReplayContext) -> None:
@@ -1773,8 +1810,8 @@ def _codegen_user_defined_dict_mutation(ctx: SideEffectReplayContext) -> None:
 
     # Reconstruct all items - _manual_dict_setitem clears dict_to first, so we
     # need every key/value, not just the ones that differ from original_items.
-    var._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
-    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
+    var.should_reconstruct_all = True
+    cg(var, allow_cache=False)  # Don't codegen via source
     cg.extend_output(
         [
             create_instruction("STORE_FAST", argval=varname_map["dict_from"]),
@@ -1791,9 +1828,7 @@ def _codegen_user_defined_dict_mutation(ctx: SideEffectReplayContext) -> None:
             create_instruction("POP_TOP"),
         ]
     )
-    ctx.log(
-        var._base_vt  # pyrefly: ignore[bad-argument-type]
-    )
+    ctx.log(var)
 
 
 def _codegen_user_defined_list_mutation(ctx: SideEffectReplayContext) -> None:
@@ -1814,7 +1849,7 @@ def _codegen_user_defined_list_mutation(ctx: SideEffectReplayContext) -> None:
         ]
     )
 
-    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
+    cg(var, allow_cache=False)  # Don't codegen via source
     cg.extend_output(
         [
             create_instruction("STORE_FAST", argval=varname_map["list_from"]),
@@ -1831,9 +1866,7 @@ def _codegen_user_defined_list_mutation(ctx: SideEffectReplayContext) -> None:
             create_instruction("POP_TOP"),
         ]
     )
-    ctx.log(
-        var._base_vt  # pyrefly: ignore[bad-argument-type]
-    )
+    ctx.log(var)
 
 
 def _codegen_user_defined_deque_mutation(ctx: SideEffectReplayContext) -> None:
@@ -1854,7 +1887,7 @@ def _codegen_user_defined_deque_mutation(ctx: SideEffectReplayContext) -> None:
         ]
     )
 
-    cg(var._base_vt, allow_cache=False)  # Don't codegen via source
+    cg(var, allow_cache=False)  # Don't codegen via source
     cg.extend_output(
         [
             create_instruction("STORE_FAST", argval=varname_map["deque_from"]),
@@ -1871,9 +1904,7 @@ def _codegen_user_defined_deque_mutation(ctx: SideEffectReplayContext) -> None:
             create_instruction("POP_TOP"),
         ]
     )
-    ctx.log(
-        var._base_vt  # pyrefly: ignore[bad-argument-type]
-    )
+    ctx.log(var)
 
 
 def _skip_attribute_mutation_replay(var: VariableTracker) -> bool:
@@ -1916,26 +1947,22 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
     if _skip_attribute_mutation_replay(var):
         return
 
-    if (
-        isinstance(var, variables.UserDefinedDictVariable)
-        and side_effects.is_modified(
-            var._base_vt  # pyrefly: ignore[bad-argument-type]
-        )
-        and var._base_vt.has_new_items()  # type: ignore[union-attr]
-    ):
+    # Dict content-modification is self-contained (items vs. original_items),
+    # so it doesn't need the mutation_type dance that list/deque still do.
+    if isinstance(var, variables.UserDefinedDictVariable) and var.has_new_items():
         _codegen_user_defined_dict_mutation(ctx)
-    elif isinstance(
-        var, variables.UserDefinedListVariable
-    ) and side_effects.is_modified(
-        var._base_vt  # pyrefly: ignore[bad-argument-type]
-    ):
-        _codegen_user_defined_list_mutation(ctx)
-    elif isinstance(
-        var, variables.UserDefinedDequeVariable
-    ) and side_effects.is_modified(
-        var._base_vt  # pyrefly: ignore[bad-argument-type]
-    ):
-        _codegen_user_defined_deque_mutation(ctx)
+    else:
+        mt = var.mutation_type
+        if isinstance(mt, AttributeMutationNew):
+            contents_modified = True
+        elif isinstance(mt, AttributeMutationExisting):
+            contents_modified = side_effects.is_modified(var)
+        else:
+            contents_modified = False
+        if isinstance(var, variables.UserDefinedListVariable) and contents_modified:
+            _codegen_user_defined_list_mutation(ctx)
+        elif isinstance(var, variables.UserDefinedDequeVariable) and contents_modified:
+            _codegen_user_defined_deque_mutation(ctx)
 
     # Applying mutations involves two steps: 1) Push all reconstructed objects
     # onto the stack. 2) Call STORE_ATTR to apply the mutations.
