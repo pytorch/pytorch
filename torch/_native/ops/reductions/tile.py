@@ -716,13 +716,24 @@ class TileReduce:
         )
         # the general axis loads one element at a time (an arbitrary stride pattern has no
         # width to exploit), so it has no tile and no vector
-        self.vec = self.tm.vec if axis == "row" else (1 if axis == "general" else vec)
+        if axis == "row":
+            self.vec = self.tilemap.vec
+        else:
+            self.vec = 1 if axis == "general" else vec
         # one output per thread on the row axis (its lanes are merged first); `vec` adjacent
         # columns, each with its own accumulator, on the col axis
         self.nslots = self.vec if axis == "col" else 1
         self.rows_per_block = nt // tpr
         self.warps_per_row = tpr // WARP  # 0 at tpr == 1: nothing to merge
         self.tiler = (nt, N)  # TMA box: nt whole rows
+
+    @property
+    def tilemap(self):
+        # Set only for a fold that takes ONE tile for the whole row. The col axis derives its
+        # `vec` from the driver rather than from a load width, so it carries no tile at all.
+        if self.tm is None:
+            raise AssertionError(f"no tile on the {self.axis} axis")
+        return self.tm
 
     @property
     def cache_sig(self):
