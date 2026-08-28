@@ -1287,6 +1287,12 @@ def pixel_shuffle(self: Tensor, upscale_factor: int):
         self.dim() >= 3,
         lambda: f"pixel_shuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
     )
+    # Matches the eager check; without it the division below raises
+    # ZeroDivisionError for upscale_factor=0.
+    torch._check(
+        upscale_factor > 0,
+        lambda: f"pixel_shuffle expects a positive upscale_factor, but got {upscale_factor}",
+    )
     batch = self.shape[:-3]
     C_out = self.shape[-3] // upscale_factor**2
     HW_out = (self.shape[-2] * upscale_factor, self.shape[-1] * upscale_factor)
@@ -1314,6 +1320,12 @@ def pixel_unshuffle(self: Tensor, downscale_factor: int):
     torch._check(
         self.dim() >= 3,
         lambda: f"pixel_unshuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
+    )
+    # Matches the eager check; without it the division below raises
+    # ZeroDivisionError for downscale_factor=0.
+    torch._check(
+        downscale_factor > 0,
+        lambda: f"pixel_unshuffle expects a positive downscale_factor, but got {downscale_factor}",
     )
     batch = self.shape[:-3]
     C_out = self.shape[-3] * downscale_factor**2
