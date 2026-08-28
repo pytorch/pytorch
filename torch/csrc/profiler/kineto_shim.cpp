@@ -430,7 +430,7 @@ void toggleCollectionDynamic(const bool enable) {
 #ifdef USE_KINETO
   // TODO: We may want to consider adding another input arg for this function
   // if we want to support turning off certain devices and keeping others on.
-  // For now, we can keep it simple at have it turn off all tracing of "CUDA"
+  // For now, we can keep it simple and have it turn off all tracing of "CUDA"
   // devices
   libkineto::api().activityProfiler().toggleCollectionDynamic(enable);
 #endif // USE_KINETO
