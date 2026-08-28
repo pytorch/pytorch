@@ -5126,17 +5126,19 @@ class UserDefinedListVariable(UserDefinedObjectVariable, ListVariable):
         # list, so every subclass tolerates them there.
         if sys.version_info >= (3, 11) and type(self.value).__new__ is list.__new__:
             no_keywords(tx, "list", kwargs)
-        # Delegate to the underlying list VT explicitly. Routing through
-        # call_method("__init__") instead would re-enter this override, since
-        # __init__ is a tp_init slot.
-        method = self._maybe_get_baseclass_method("__init__")
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            return self._base_vt.tp_init_impl(tx, args, {})
-        return super().tp_init_impl(tx, args, {})
+        # UDOV.tp_init_impl would vectorcall the C list.__init__. Route to
+        # ListVariable's, which populates this object's storage in place.
+        return ListVariable.tp_init_impl(self, tx, args, {})
+
+    def _new_list(
+        self,
+        items: list[VariableTracker],
+        mutation_type: MutationType | None = None,
+    ) -> "ListVariable":
+        # A slice of a list subclass is a plain list in CPython, not the
+        # subclass. Also avoids BaseListVariable._new_list's type(self)(items),
+        # which would misfire on this class's (value, items) constructor.
+        return ListVariable(list(items), mutation_type=ValueMutationNew())
 
 
 class UserDefinedDequeVariable(UserDefinedObjectVariable, DequeVariable):
@@ -5214,6 +5216,17 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable, TupleVariable):
         super().__init__(value, items=items, init_args=init_args, **kwargs)
         self.tuple_cls = type(value)
         self._base_methods = tuple_methods
+
+    def _new_list(
+        self,
+        items: list[VariableTracker],
+        mutation_type: MutationType | None = None,
+    ) -> "TupleVariable":
+        # A slice of a tuple subclass (including namedtuple, structseq) is a
+        # plain tuple in CPython, not the subclass. Also avoids
+        # BaseListVariable._new_list's type(self)(items), which would misfire
+        # on this class's (value, items) constructor.
+        return TupleVariable(list(items), mutation_type=ValueMutationNew())
 
     def resolve_data_descriptor(
         self,
