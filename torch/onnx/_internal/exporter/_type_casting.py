@@ -25,7 +25,7 @@ def get_float4_shape(tensor: torch.Tensor) -> tuple[int, ...]:
     The float4_e2m1fn_x2 type is a shell type described in
     https://github.com/pytorch/pytorch/issues/146414.
 
-    the shell dtype is takes up 1 byte per element and semantically represents
+    the shell dtype takes up 1 byte per element and semantically represents
     two fp4 values packed into 1 byte. Semantically it represents (*tensor.shape[:-1], tensor.shape[-1]*2)
     fp4 elements.
     """
