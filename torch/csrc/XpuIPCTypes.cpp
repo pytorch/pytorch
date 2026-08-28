@@ -119,6 +119,10 @@ class XpuIPCSentData final {
     ipc_event_ = std::move(ipc_event);
   }
 
+  void set_export_handle_owner(std::shared_ptr<void> handle_owner) {
+    export_handle_owner_ = std::move(handle_owner);
+  }
+
  private:
   std::string handle_;
   uint64_t offset_;
@@ -126,6 +130,7 @@ class XpuIPCSentData final {
   at::DataPtr original_ptr_;
   at::Device device_;
   std::shared_ptr<XpuIpcEvent> ipc_event_;
+  std::shared_ptr<void> export_handle_owner_;
 };
 
 struct XpuIPCSentDataLimbo final {
@@ -475,6 +480,7 @@ XpuSharedStorage ShareXpuStorage(const at::Storage& storage) {
   auto sent_data = static_cast<XpuIPCSentData*>(storage.data_ptr().get_context());
   sent_data->set_original_ptr(std::move(old_data_ptr));
   sent_data->set_ipc_event(std::move(ipc_event));
+  sent_data->set_export_handle_owner(std::move(shandle.handle_owner));
 
   shared.ref_counter_handle = sent_data->handle();
   shared.ref_counter_offset = sent_data->offset();

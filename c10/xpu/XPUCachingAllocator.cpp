@@ -1859,11 +1859,100 @@ namespace xpu_ipc {
 
 #if C10_XPU_HAS_SYCL_IPC_MEMORY
 
+using SyclIpcExportHandle =
+    sycl::ext::oneapi::experimental::ipc_memory::handle;
 using SyclIpcHandle =
     sycl::ext::oneapi::experimental::ipc_memory::handle_data_t;
 
+class ExportedIpcHandle final {
+ public:
+  ExportedIpcHandle(SyclIpcExportHandle handle, sycl::context context)
+      : handle_(std::move(handle)), context_(std::move(context)) {}
+
+  ~ExportedIpcHandle() {
+    try {
+      sycl::ext::oneapi::experimental::ipc_memory::put(handle_, context_);
+    } catch (const std::exception& e) {
+      TORCH_WARN("XPU IPC put failed: ", e.what());
+    }
+  }
+
+  std::string serialize() const {
+    const auto handle_data = handle_.data();
+    return std::string(
+        reinterpret_cast<const char*>(handle_data.data()),
+        handle_data.size());
+  }
+
+ private:
+  SyclIpcExportHandle handle_;
+  sycl::context context_;
+};
+
+class ExportedIpcHandleCache : public std::enable_shared_from_this<ExportedIpcHandleCache> {
+ public:
+  std::shared_ptr<ExportedIpcHandle> getOrCreate(
+      void* base_ptr,
+      c10::DeviceIndex device,
+      const sycl::context& context) {
+    const auto key = makeKey(base_ptr, device);
+    if (auto cached = lookupCached(key)) {
+      return cached;
+    }
+
+    auto created = std::make_shared<ExportedIpcHandle>(
+        sycl::ext::oneapi::experimental::ipc_memory::get(base_ptr, context),
+        context);
+    return publish(key, std::move(created));
+  }
+
+ private:
+  static std::string makeKey(void* base_ptr, c10::DeviceIndex device) {
+    return std::to_string(reinterpret_cast<uintptr_t>(base_ptr)) + ":" +
+        std::to_string(device);
+  }
+
+  std::shared_ptr<ExportedIpcHandle> lookupCached(const std::string& key) {
+    std::lock_guard<std::mutex> lock(cache_mutex_);
+    auto it = key_to_handle_.find(key);
+    if (it == key_to_handle_.end()) {
+      return nullptr;
+    }
+
+    if (auto cached = it->second.lock()) {
+      return cached;
+    }
+
+    key_to_handle_.erase(it);
+    return nullptr;
+  }
+
+  std::shared_ptr<ExportedIpcHandle> publish(
+      const std::string& key,
+      std::shared_ptr<ExportedIpcHandle> created) {
+    std::lock_guard<std::mutex> lock(cache_mutex_);
+    auto it = key_to_handle_.find(key);
+    if (it != key_to_handle_.end()) {
+      if (auto cached = it->second.lock()) {
+        return cached;
+      }
+    }
+
+    key_to_handle_[key] = created;
+    return created;
+  }
+
+  std::mutex cache_mutex_;
+  ska::flat_hash_map<std::string, std::weak_ptr<ExportedIpcHandle>> key_to_handle_;
+};
+
 class IpcMemoryCache : public std::enable_shared_from_this<IpcMemoryCache> {
  public:
+  struct OpenedIpcMapping {
+    void* ptr;
+    std::shared_ptr<sycl::context> context;
+  };
+
   std::shared_ptr<void> getOrOpenHandle(
       const SyclIpcHandle& handle_data,
       c10::DeviceIndex device) {
@@ -1873,14 +1962,15 @@ class IpcMemoryCache : public std::enable_shared_from_this<IpcMemoryCache> {
       return cached;
     }
 
-    void* raw_ptr = openHandle(handle_data, device);
-    return publish(handle_key, device, raw_ptr);
+    OpenedIpcMapping opened = openHandle(handle_data, device);
+    return publish(handle_key, device, std::move(opened));
   }
 
  private:
   struct CacheEntry {
     c10::DeviceIndex device{-1};
     void* ptr{nullptr};
+    std::shared_ptr<sycl::context> context;
     std::weak_ptr<void> wp;
   };
 
@@ -1906,17 +1996,19 @@ class IpcMemoryCache : public std::enable_shared_from_this<IpcMemoryCache> {
     return nullptr;
   }
 
-  void* openHandle(const SyclIpcHandle& handle_data, c10::DeviceIndex device) {
+  OpenedIpcMapping openHandle(
+      const SyclIpcHandle& handle_data,
+      c10::DeviceIndex device) {
     c10::DeviceGuard guard(c10::Device(c10::kXPU, device));
     auto& current_queue = xpu::getCurrentXPUStream(device).queue();
-    sycl::context ctx = current_queue.get_context();
+    auto context = std::make_shared<sycl::context>(current_queue.get_context());
     sycl::device dev = current_queue.get_device();
 
     auto open_once = [&]() {
       void* p = sycl::ext::oneapi::experimental::ipc_memory::open(
-          handle_data, ctx, dev);
+          handle_data, *context, dev);
       TORCH_CHECK(p != nullptr, "Failed to open XPU IPC handle");
-      return p;
+      return OpenedIpcMapping{p, context};
     };
 
     try {
@@ -1931,36 +2023,47 @@ class IpcMemoryCache : public std::enable_shared_from_this<IpcMemoryCache> {
   std::shared_ptr<void> publish(
       const std::string& handle_key,
       c10::DeviceIndex device,
-      void* raw_ptr) {
+      OpenedIpcMapping opened) {
     std::lock_guard<std::mutex> lock(cache_mutex_);
 
     auto existing = handle_to_ptr_.find(handle_key);
     if (existing != handle_to_ptr_.end() && existing->second.device == device) {
       if (auto cached = existing->second.wp.lock()) {
-        closeHandle(device, raw_ptr, "XPU IPC close of duplicate mapping failed: ");
+        closeHandle(
+            device,
+            opened.ptr,
+            *opened.context,
+            "XPU IPC close of duplicate mapping failed: ");
         return cached;
       }
     }
 
-    auto shared_ptr = makeManagedPtr(raw_ptr, device, handle_key);
-    handle_to_ptr_[handle_key] = CacheEntry{device, raw_ptr, shared_ptr};
+    auto shared_ptr =
+        makeManagedPtr(opened.ptr, device, handle_key, opened.context);
+    handle_to_ptr_[handle_key] =
+        CacheEntry{device, opened.ptr, opened.context, shared_ptr};
     return shared_ptr;
   }
 
   std::shared_ptr<void> makeManagedPtr(
       void* raw_ptr,
       c10::DeviceIndex device,
-      const std::string& handle_key) {
+      const std::string& handle_key,
+      std::shared_ptr<sycl::context> context) {
     std::weak_ptr<IpcMemoryCache> self = weak_from_this();
     return std::shared_ptr<void>(
-        raw_ptr, [self, device, handle_key](void* ptr) {
+        raw_ptr, [self, device, handle_key, context](void* ptr) {
           if (auto cache = self.lock()) {
-            cache->release(handle_key, device, ptr);
+            cache->release(handle_key, device, ptr, context);
           }
         });
   }
 
-  void release(const std::string& handle_key, c10::DeviceIndex device, void* ptr) {
+  void release(
+      const std::string& handle_key,
+      c10::DeviceIndex device,
+      void* ptr,
+      const std::shared_ptr<sycl::context>& context) {
     {
       std::lock_guard<std::mutex> lock(cache_mutex_);
       auto it = handle_to_ptr_.find(handle_key);
@@ -1968,13 +2071,17 @@ class IpcMemoryCache : public std::enable_shared_from_this<IpcMemoryCache> {
         handle_to_ptr_.erase(it);
       }
     }
-    closeHandle(device, ptr, "XPU IPC close failed: ");
+    closeHandle(device, ptr, *context, "XPU IPC close failed: ");
   }
 
-  static void closeHandle(c10::DeviceIndex device, void* ptr, const char* error_prefix) {
+  static void closeHandle(
+      c10::DeviceIndex device,
+      void* ptr,
+      const sycl::context& context,
+      const char* error_prefix) {
     try {
       c10::DeviceGuard guard(c10::Device(c10::kXPU, device));
-      sycl::ext::oneapi::experimental::ipc_memory::close(ptr);
+      sycl::ext::oneapi::experimental::ipc_memory::close(ptr, context);
     } catch (const std::exception& e) {
       TORCH_WARN(error_prefix, e.what());
     }
@@ -1986,6 +2093,8 @@ class IpcMemoryCache : public std::enable_shared_from_this<IpcMemoryCache> {
 
 static std::shared_ptr<IpcMemoryCache> ipc_memory_cache =
     std::make_shared<IpcMemoryCache>();
+static std::shared_ptr<ExportedIpcHandleCache> ipc_exported_handle_cache =
+  std::make_shared<ExportedIpcHandleCache>();
 
 #endif // C10_XPU_HAS_SYCL_IPC_MEMORY
 
@@ -2273,15 +2382,13 @@ class NativeCachingAllocator : public XPUAllocator {
       c10::DeviceGuard guard(c10::Device(c10::kXPU, block->device));
       auto& current_queue = xpu::getCurrentXPUStream(block->device).queue();
       sycl::context ctx = current_queue.get_context();
-      auto handle = sycl::ext::oneapi::experimental::ipc_memory::get(
-          base_ptr, ctx);
-      auto handle_data = handle.data();
+        auto handle_owner = xpu_ipc::ipc_exported_handle_cache->getOrCreate(
+          base_ptr, block->device, ctx);
 
       return {
           storage_offset_bytes,
-          std::string(
-              reinterpret_cast<const char*>(handle_data.data()),
-              handle_data.size())};
+          handle_owner->serialize(),
+          std::move(handle_owner)};
     } catch (const std::exception& e) {
       TORCH_CHECK(false, "Failed to get XPU IPC handle: ", e.what());
     }

@@ -20,6 +20,7 @@ C10_DECLARE_REGISTRY(FreeXPUMemoryCallbacksRegistry, FreeMemoryCallback);
 struct ShareableHandle {
   std::ptrdiff_t offset;
   std::string handle;
+  std::shared_ptr<void> handle_owner;
 };
 
 class XPUAllocator : public DeviceAllocator {
