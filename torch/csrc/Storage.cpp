@@ -6,15 +6,12 @@
 
 #include <ATen/mps/MPSDevice.h>
 #include <c10/core/CPUAllocator.h>
-#include <c10/core/RefcountedDeleter.h>
-#include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/StorageMethods.h>
 #include <torch/csrc/StorageSharing.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/copy_utils.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pyobject_preservation.h>
@@ -454,8 +451,7 @@ bool THPStorage_init(PyObject* module) {
 void THPStorage_postInit(PyObject* module) {
   THPStorageClass = reinterpret_cast<PyTypeObject*>(
       PyObject_GetAttrString(module, "UntypedStorage"));
-  if (!THPStorageClass)
-    throw python_error();
+  TORCH_CHECK_PYTHON(THPStorageClass);
 }
 
 void THPStorage_assertNotNull(THPStorage* storage) {
