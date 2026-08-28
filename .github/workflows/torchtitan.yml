@@ -60,8 +60,8 @@ jobs:
       - get-cuda-version
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-py3-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-py3.12-gcc11-torchtitan
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-cudnn9-py3.12-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 8.9 9.0 10.0'
       runner: linux.24xlarge.memory
@@ -72,7 +72,7 @@ jobs:
           { config: "torchtitan_features_integration", shard: 1, num_shards: 1, runner: "linux.g5.48xlarge.nvidia.gpu" },
           { config: "torchtitan_models_integration", shard: 1, num_shards: 1, runner: "linux.g5.48xlarge.nvidia.gpu" }
         ]}
-      python-version: "3.10"
+      python-version: "3.12"
       compiler: gcc11
       cuda-version: ${{ needs.get-cuda-version.outputs.stable-cuda }}
     secrets: inherit
@@ -85,10 +85,10 @@ jobs:
       - get-label-type
       - get-cuda-version
     with:
-      build-environment: linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-py3-gcc11
+      build-environment: ${{ needs.build.outputs.build-environment }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
-      python-version: "3.10"
+      python-version: "3.12"
       compiler: gcc11
       cuda-version: ${{ needs.get-cuda-version.outputs.stable-cuda }}
     secrets: inherit
