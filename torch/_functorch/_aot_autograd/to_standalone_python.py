@@ -189,6 +189,14 @@ def _known_helper_table() -> dict[int, tuple[str, str]]:
     table: dict[int, tuple[str, str]] = {
         id(torch): ("import torch", "torch"),
         id(rt.normalize_as_list): (f"{_RT} normalize_as_list", "normalize_as_list"),
+        id(rt._dealias_marked_returns): (
+            f"{_RT} _dealias_marked_returns",
+            "_dealias_marked_returns",
+        ),
+        id(rt._replay_input_mutation): (
+            f"{_RT} _replay_input_mutation",
+            "_replay_input_mutation",
+        ),
         id(rt.mark_dynamo_propagated_dynamic_indices): (
             f"{_RT} mark_dynamo_propagated_dynamic_indices",
             "mark_dynamo_propagated_dynamic_indices",
@@ -1359,13 +1367,11 @@ def _compose_training_module(
     outer_blocks = [splice(gen) for gen in outer_wrappers]
 
     fw_metadata_src = emit_value(spec.fw_metadata, imports)
-    rng_src = emit_value(
-        _rw._AutogradRngStateTracker(
-            num_rng=spec.fw_metadata.num_graphsafe_rng_states,
-            graphsafe_idx=spec.fw_metadata.graphsafe_rng_state_index,
-            device=spec.fw_metadata.graphsafe_rng_device,
-        ),
-        imports,
+    rng_src = (
+        "_AutogradRngStateTracker("
+        f"num_rng={spec.fw_metadata.num_graphsafe_rng_states!r}, "
+        f"graphsafe_idx={spec.fw_metadata.graphsafe_rng_state_index!r}, "
+        f"device={emit_value(spec.fw_metadata.graphsafe_rng_device, imports)})"
     )
     backward_output_dependencies = _rw._backward_output_tangent_dependencies(
         bw_gm, spec.fw_metadata
@@ -1400,14 +1406,23 @@ def _compose_training_module(
         else:
             exact_variants.append(f"    {variant.undefined_grad_out_mask!r}: {value},")
     variants_src = "\n".join(["_AOT_BACKWARD_VARIANTS = {", *exact_variants, "}"])
+    cache_static_grad_output_prototypes = _rw._has_static_plain_grad_output_metadata(
+        spec.fw_metadata
+    )
+    dynamic_grad_output_prototype_index = _rw._single_plain_grad_output_prototype_index(
+        spec.fw_metadata
+    )
     imports |= {
         "import contextlib",
         "import torch",
         "import weakref",
+        "from torch._functorch import config as _functorch_config",
         "from torch._functorch._aot_autograd.runtime_wrappers import "
-        "_AutogradSavedState, _mask_pruned_backward_outputs, "
+        "_AutogradRngStateTracker, _AutogradSavedState, "
+        "_mask_pruned_backward_outputs, "
         "_pruned_backward_output_indices_from_dependencies, "
-        "_set_grad_output_prototypes, _snapshot_external_objects, "
+        "_set_grad_output_prototypes, "
+        "_snapshot_external_objects, "
         "index_to_external_object_weakref",
         "from torch._functorch._aot_autograd.standalone_runtime import "
         "normalize_as_list",
@@ -1425,13 +1440,56 @@ _rng_state = {rng_src}
 _BACKWARD_OUTPUT_DEPENDENCIES = {backward_output_dependencies_src}
 _AOT_OBSERVED_UNDEFINED_TANGENT_MASKS = set()
 _AOT_BACKWARD_VARIANT_COMPILER = None
+_AOT_CACHE_STATIC_GRAD_OUTPUT_PROTOTYPES = {cache_static_grad_output_prototypes!r}
+_AOT_GRAD_OUTPUT_PROTOTYPE_CACHE = [None]
+_AOT_DYNAMIC_GRAD_OUTPUT_PROTOTYPE_INDEX = {dynamic_grad_output_prototype_index!r}
+_AOT_DYNAMIC_GRAD_OUTPUT_PROTOTYPE_CACHE = [None]
 _NUM_FORWARD_RETURNS = {spec.fw_metadata.num_forward_returns}
 _DISABLE_AMP = {spec.disable_amp!r}
 
 
+def _aot_grad_output_prototype_cache_key(value):
+    if type(value) is not torch.Tensor or value.layout is not torch.strided:
+        return None
+    size = tuple(value.size())
+    stride = tuple(value.stride())
+    if not all(type(dim) is int for dim in (*size, *stride)):
+        return None
+    return size, stride, value.dtype, value.device
+
+
 def _finalize(ctx, fw_outs):
     raw_returns = list(fw_outs[:_NUM_FORWARD_RETURNS])
-    _set_grad_output_prototypes(ctx, raw_returns, _fw_metadata)
+    cached = _AOT_GRAD_OUTPUT_PROTOTYPE_CACHE[0]
+    dynamic_key = None
+    if (
+        cached is None
+        and not _AOT_CACHE_STATIC_GRAD_OUTPUT_PROTOTYPES
+        and _AOT_DYNAMIC_GRAD_OUTPUT_PROTOTYPE_INDEX is not None
+        and _functorch_config.aot_autograd_prune_unused_outputs
+    ):
+        dynamic_key = _aot_grad_output_prototype_cache_key(
+            raw_returns[_AOT_DYNAMIC_GRAD_OUTPUT_PROTOTYPE_INDEX]
+        )
+        dynamic_cache = _AOT_DYNAMIC_GRAD_OUTPUT_PROTOTYPE_CACHE[0]
+        if dynamic_cache is not None and dynamic_cache[0] == dynamic_key:
+            cached = dynamic_cache[1]
+    if (
+        cached is not None
+        and _functorch_config.aot_autograd_prune_unused_outputs
+    ):
+        ctx._aot_prune_unused_outputs_enabled = True
+        ctx.set_materialize_grads(False)
+        (
+            ctx._aot_grad_output_prototypes,
+            ctx._aot_grad_output_prototype_objects,
+        ) = cached
+    else:
+        state = _set_grad_output_prototypes(ctx, raw_returns, _fw_metadata)
+        if _AOT_CACHE_STATIC_GRAD_OUTPUT_PROTOTYPES and state is not None:
+            _AOT_GRAD_OUTPUT_PROTOTYPE_CACHE[0] = state
+        elif dynamic_key is not None and state is not None:
+            _AOT_DYNAMIC_GRAD_OUTPUT_PROTOTYPE_CACHE[0] = dynamic_key, state
     ctx.mark_non_differentiable(*_transform_raw_returns(raw_returns))
     ctx._materialize_non_diff_grads = False
     _snapshot_external_objects(ctx)

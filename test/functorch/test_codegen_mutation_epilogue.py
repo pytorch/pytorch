@@ -3,10 +3,10 @@
 """
 Tests for codegen'ing the mutation epilogue in _create_runtime_wrapper.
 
-The codegen'd mutation epilogue emits one of as_strided_(), copy_(),
-or detach().copy_() per mutated input, with the branch resolved at codegen
-time from each input's mutation metadata (mutates_metadata, mutates_data,
-is_leaf).
+The codegen'd mutation epilogue emits either as_strided_(),
+_replay_input_mutation(), or detach().copy_() per mutated input, with the branch
+resolved at codegen time from each input's mutation metadata (mutates_metadata,
+mutates_data, is_leaf).
 
 Tests that exercise data-only mutations use torch.compile (dynamo handles
 metadata mutations in-graph, so only data mutations reach the epilogue).
@@ -61,8 +61,8 @@ class TestCodegenMutationEpilogue(TestCase):
 
     def test_single_data_mutation(self):
         """
-        Single input data mutation via mul_. Codegen should emit a direct
-        copy_() for this input.
+        Single input data mutation via mul_. Codegen should replay it through
+        the shared mutation helper.
         """
         with self._capture_codegen_source("mutation_epilogue") as captured:
 
@@ -86,12 +86,12 @@ class TestCodegenMutationEpilogue(TestCase):
             1,
             "Expected mutation_epilogue codegen artifact to be emitted",
         )
-        self.assertIn("copy_", captured[0])
+        self.assertIn("_replay_input_mutation", captured[0])
 
     def test_multiple_data_mutations(self):
         """
-        Multiple inputs mutated. Codegen should emit a copy_() per mutated
-        input, with non-mutated inputs skipped entirely.
+        Multiple inputs mutated. Codegen should emit one mutation replay per
+        mutated input, with non-mutated inputs skipped entirely.
         """
         with self._capture_codegen_source("mutation_epilogue") as captured:
 
@@ -118,7 +118,7 @@ class TestCodegenMutationEpilogue(TestCase):
             1,
             "Expected mutation_epilogue codegen artifact to be emitted",
         )
-        self.assertIn("copy_", captured[0])
+        self.assertEqual(captured[0].count("_replay_input_mutation"), 2)
 
     def test_leaf_mutation_under_no_grad(self):
         """
@@ -178,9 +178,9 @@ class TestCodegenMutationEpilogue(TestCase):
     )
     def test_data_and_metadata_mutation(self):
         """
-        Both data and metadata mutated (transpose_ then mul_). Codegen
-        should emit as_strided_() followed by copy_(). Uses aot_function
-        directly because dynamo handles metadata mutations in-graph.
+        Both data and metadata mutated (transpose_ then mul_). Codegen should
+        emit as_strided_() followed by the shared mutation helper. Uses
+        aot_function directly because dynamo handles metadata mutations in-graph.
         """
         with self._capture_codegen_source("mutation_epilogue") as captured:
 
@@ -200,7 +200,7 @@ class TestCodegenMutationEpilogue(TestCase):
 
         self.assertEqual(len(captured), 1)
         self.assertIn("as_strided_", captured[0])
-        self.assertIn("copy_", captured[0])
+        self.assertIn("_replay_input_mutation", captured[0])
 
     def test_no_mutation_no_epilogue(self):
         """
