@@ -4,11 +4,9 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/core/grad_mode.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/core/ScalarType.h>
@@ -19,6 +17,7 @@
 #include <c10/util/string_view.h>
 
 #include <algorithm>
+#include <vector>
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
@@ -191,27 +190,92 @@ inline int aotriton_max_hdim() {
 // check_head_dim_size_flash because it changes the backend selection logic for
 // FA, which can break certain workloads that rely on the behavior of rejecting
 // FA for hdim_qk != hdim_vo
+bool check_fa4_constraints(sdp_params const& params, bool debug) {
+#if USE_ROCM_ATTENTION
+  return true;
+#else
+  if (!at::globalContext().userEnabledFA4SDP()) {
+    return true;
+  }
+
+  const auto* dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major != 9 && dprop->major != 10) {
+    if (debug) {
+      TORCH_WARN("FA4 requires compute capability 9.0 or 10.0.");
+    }
+    return false;
+  }
+  if (params.dropout != 0.0) {
+    if (debug) {
+      TORCH_WARN("FA4 does not support dropout.");
+    }
+    return false;
+  }
+  return true;
+#endif
+}
+
+#if !USE_ROCM_ATTENTION
+bool check_head_dim_size_fa4(sdp_params const& params) {
+  const auto query_size_last = params.query.sym_size(-1);
+  const auto key_size_last = params.key.sym_size(-1);
+  const auto value_size_last = params.value.sym_size(-1);
+  if (query_size_last != key_size_last) {
+    return false;
+  }
+
+  const auto* dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major == 9) {
+    return query_size_last > 0 && query_size_last <= 256 &&
+        value_size_last > 0 && value_size_last <= 256;
+  }
+  if (dprop->major == 10) {
+    const bool standard_head_dims = query_size_last > 0 &&
+        query_size_last <= 128 && value_size_last > 0 &&
+        value_size_last <= 128;
+    const bool deepseek_head_dims =
+        query_size_last == 192 && value_size_last == 128;
+    const bool head_dim_256 =
+        query_size_last == 256 && value_size_last == 256;
+    return standard_head_dims || deepseek_head_dims || head_dim_256;
+  }
+  return false;
+}
+#endif
+
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
+  const auto query_size_last = params.query.sym_size(-1);
+  const auto key_size_last = params.key.sym_size(-1);
+  const auto value_size_last = params.value.sym_size(-1);
+  bool supported_head_dim;
 #if USE_ROCM_ATTENTION
   if (at::cuda::device_count() == 0) {
     return false;
   }
   const auto max_size = c10::SymInt(aotriton_max_hdim());
+  supported_head_dim =
+      query_size_last == key_size_last && query_size_last == value_size_last &&
+      query_size_last <= max_size;
 #else
-  // All head_dim sizes must be equal and less than 256
-  const auto max_size = c10::SymInt(256);
+  supported_head_dim = at::globalContext().userEnabledFA4SDP()
+      ? check_head_dim_size_fa4(params)
+      : query_size_last == key_size_last &&
+          query_size_last == value_size_last && query_size_last <= 256;
 #endif
-  const auto query_size_last = params.query.sym_size(-1);
-  const auto key_size_last = params.key.sym_size(-1);
-  const auto value_size_last = params.value.sym_size(-1);
-  bool same_head_dim_size =
-      query_size_last == key_size_last && query_size_last == value_size_last;
-  if (!(same_head_dim_size && (query_size_last <= max_size))) {
+  if (!supported_head_dim) {
     if (debug) {
+#if USE_ROCM_ATTENTION
+      const char* requirement = caller_is_meff
+          ? "Efficient attention on ROCM requires q,k,v to have the same last dimension and to be less than or equal to 256."
+          : "Flash attention requires q,k,v to have the same last dimension and to be less than or equal to 256.";
+#else
+      const char* requirement = at::globalContext().userEnabledFA4SDP()
+          ? "FA4 does not support the provided head dimensions."
+          : "Flash attention requires q,k,v to have the same last dimension and to be less than or equal to 256.";
+#endif
       TORCH_WARN(
-          caller_is_meff ? "Efficient attention on ROCM" : "Flash attention",
-          " requires q,k,v to have the same last dimension and to be less than or equal to 256.",
+          requirement,
           " Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
@@ -641,6 +705,18 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   }
   auto head_dim_limit = 128;
   auto dprops = at::cuda::getCurrentDeviceProperties();
+  if (TORCH_GUARD_OR_FALSE(s_q.sym_eq(1)) &&
+      is_cudnn_attention_decode_disabled()) {
+    if (debug) {
+      TORCH_WARN(
+          "cuDNN SDPA decode is disabled on SM ",
+          dprops->major,
+          ".",
+          dprops->minor,
+          " for cuDNN versions 9.19-9.25.0 (except 9.24.1)");
+    }
+    return false;
+  }
   const bool is_sm90_or_sm10x =
       (dprops->major == 9 && !dprops->minor) || dprops->major == 10;
   const bool is_unsupported_sm107 =
@@ -928,6 +1004,30 @@ bool check_cudnn_deterministic(const sdp_params& params, bool debug) {
 
 } // namespace
 
+// See #193893 and #194927 for reasoning
+// TODO: Remove this and all associated calls/imports when fixed
+bool is_cudnn_attention_decode_disabled() {
+#if AT_CUDNN_ENABLED() && defined(CUDNN_VERSION)
+  static const std::vector<bool> disabled_by_device = [] {
+    const auto cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
+    std::vector<bool> disabled(at::cuda::device_count());
+    // cuDNN versions 9.19-9.25.0 (except 9.24.1) on SM 10.x and 11.x are disabled
+    // This check also allows possible future 9.24 patch versions without a rewrite
+    if (cudnn_version < 91900 || cudnn_version > 92500 || (cudnn_version > 92400 && cudnn_version < 92500)) {
+      return disabled;
+    }
+    for (const auto device : c10::irange(at::cuda::device_count())) {
+      const auto* dprops = at::cuda::getDeviceProperties(device);
+      disabled[device] = dprops->major == 10 || dprops->major == 11;
+    }
+    return disabled;
+  }();
+  return disabled_by_device.at(at::cuda::current_device());
+#else
+  return false;
+#endif
+}
+
 bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
 #if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || !defined(CUDNN_VERSION)
   if (debug) {
@@ -1020,6 +1120,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_all_tensors_on_device,
       check_tensor_shapes,
       check_for_attn_mask,
+      check_fa4_constraints,
       check_head_dim_size_flash<false /*caller_is_meff*/>,
       check_flash_attention_hardware_support,
       check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120,
