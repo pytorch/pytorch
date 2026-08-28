@@ -261,12 +261,9 @@ exclude_patterns = [
     'c10/mobile/CPUProfilingAllocator.cpp',
     'c10/util/accumulate.h',
     'c10/util/ApproximateClock.cpp',
-    'c10/util/BFloat16-math.h',
     'c10/util/generic_math.h',
     'c10/util/IntrusiveList.h',
-    'c10/util/irange.h',
     'c10/util/llvmMathExtras.h',
-    'c10/util/MathConstants.h',
     'c10/util/NetworkFlow.cpp',
     'c10/util/order_preserving_flat_hash_map.h',
     'c10/util/overflows.h',
@@ -278,6 +275,9 @@ exclude_patterns = [
     'torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp',
     'torch/headeronly/util/bit_cast.h',
     'torch/headeronly/util/complex.h',
+    'torch/headeronly/util/BFloat16-math.h',
+    'torch/headeronly/util/irange.h',
+    'torch/headeronly/util/MathConstants.h',
 ]
 init_command = [
     'python3',
@@ -322,11 +322,13 @@ include_patterns = [
     'torch/headeronly/macros/Export.h',
     'torch/headeronly/macros/Macros.h',
     'torch/headeronly/util/BFloat16.h',
+    'torch/headeronly/util/BFloat16-math.h',
     'torch/headeronly/util/Half.h',
     'torch/headeronly/util/TypeSafeSignMath.h',
     'torch/headeronly/util/bit_cast.h',
     'torch/headeronly/util/complex.h',
     'torch/headeronly/util/floating_point_utils.h',
+    'torch/headeronly/util/irange.h',
 ]
 exclude_patterns = [
     '**/fb/**',
@@ -516,7 +518,6 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
-    '.ci/docker/common/install_rocm_drm.sh',
     '.lintrunner.toml',
     '**/*.patch',
 ]

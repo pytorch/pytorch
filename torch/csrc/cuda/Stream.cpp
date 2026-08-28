@@ -1,14 +1,9 @@
 #include <pybind11/pybind11.h>
-#include <torch/csrc/Device.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/cuda/Module.h>
 #include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 
-#include <c10/cuda/CUDAGuard.h>
-
-#include <cuda_runtime_api.h>
 #include <structmember.h>
 
 PyObject* THCPStreamClass = nullptr;
