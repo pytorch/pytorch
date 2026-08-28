@@ -1881,15 +1881,10 @@ class MultiProcContinuousTest(TestCase):
         # and we expect LOCAL_RANK set by torchrun. Setting it lets init_device_mesh set the device without
         # issuing a warning
         os.environ["LOCAL_RANK"] = str(rank)
-        backend = cls.backend_str()
-        # Some tests oversubscribe GPUs before per-test device-count skips run.
-        is_nccl = backend in ("nccl", "nccl2", "nccl-lazy")
-        if is_nccl and world_size > torch.accelerator.device_count():
-            os.environ["NCCL_MULTI_RANK_GPU_ENABLE"] = "1"
         store = c10d.FileStore(rdvz_file, world_size)
         # create nccl processgroup with opts
         c10d.init_process_group(
-            backend=backend,
+            backend=cls.backend_str(),
             world_size=world_size,
             rank=rank,
             store=store,
@@ -1927,6 +1922,11 @@ class MultiProcContinuousTest(TestCase):
         cls.world_size = world_size
 
         # Initialize the process group
+        # Some tests override _init_pg and oversubscribe before per-test skips run.
+        backend = cls.backend_str()
+        is_nccl = backend in ("nccl", "nccl2", "nccl-lazy")
+        if is_nccl and world_size > torch.accelerator.device_count():
+            os.environ["NCCL_MULTI_RANK_GPU_ENABLE"] = "1"
         init_skip_reason = None
         try:
             cls._init_pg(rank, world_size, rdvz_file)
