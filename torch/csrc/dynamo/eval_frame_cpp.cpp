@@ -9,7 +9,6 @@
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/dynamo/stackref_bridge.h>
-#include <torch/csrc/utils/python_compat.h>
 
 #include <algorithm>
 #include <optional>
