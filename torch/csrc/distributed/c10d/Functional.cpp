@@ -1,12 +1,9 @@
 #include <c10/core/DispatchKey.h>
 #include <torch/csrc/autograd/custom_function.h>
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
-#include <torch/csrc/jit/frontend/schema_type_parser.h>
-#include <torch/custom_class_detail.h>
 #include <utility>
 
 namespace {
