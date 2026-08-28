@@ -791,6 +791,29 @@ class CrossThreadWaitTest(TestCase):
         # Verify work was removed from registry
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
+    def test_wait_tensors_consumes_shared_work(self) -> None:
+        dist.init_process_group(backend="fake", rank=0, world_size=2)
+        try:
+            outputs = torch.ops._c10d_functional.all_reduce_coalesced(
+                [torch.rand(2, 2), torch.rand(2, 2)],
+                "sum",
+                "0",
+            )
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
+
+            torch.ops._c10d_functional.wait_tensors(outputs)
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+        finally:
+            dist.destroy_process_group()
+
+    def test_wait_tensors_empty_raises(self) -> None:
+        msg = "wait_tensors requires at least one tensor"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.ops._c10d_functional.wait_tensors([])
+        fake_mode = torch._subclasses.FakeTensorMode()
+        with fake_mode, self.assertRaisesRegex(RuntimeError, msg):
+            torch.ops._c10d_functional.wait_tensors([])
+
 
 class PyWorkTest(TestCase):
     """
@@ -984,6 +1007,26 @@ class CompileTestCPU(TestCase):
         self._test_inductor_all_reduce_cpu(cpp_wrapper=False)
         self._test_inductor_all_reduce_cpu(cpp_wrapper=True)
 
+    @fresh_cache()
+    def test_inductor_all_reduce_coalesced_cpu(self):
+        def func(args: list[torch.Tensor]) -> list[torch.Tensor]:
+            return funcol.all_reduce_coalesced([arg + 42 for arg in args], "avg", "0")
+
+        args = [torch.rand(4, 4) for _ in range(2)]
+        compiled = torch.compile(func)
+        _, (code,) = run_and_get_code(compiled, args)
+        self.assertIn("torch.ops._c10d_functional.wait_tensors.default", code)
+
+        torch._dynamo.reset()
+        with (
+            torch._inductor.config.patch({"cpp_wrapper": True}),
+            self.assertRaisesRegex(
+                torch._inductor.exc.InductorError,
+                "wait_tensors is not supported with C\\+\\+ wrapper/AOTInductor",
+            ),
+        ):
+            torch.compile(func)(args)
+
 
 class CompileTest(TestCase):
     def setUp(self):
@@ -1068,10 +1111,8 @@ class CompileTest(TestCase):
             bufs = [arg + 42 for arg in args]
             # Expect in-place with inductor allocated buf
             ar0 = funcol.all_reduce_coalesced(bufs, "avg", "0")
-            ar0 = [funcol.wait_tensor(out) for out in ar0]
             # Expect no in-place with graph input
             ar1 = funcol.all_reduce_coalesced(args, "avg", "0")
-            ar1 = [funcol.wait_tensor(out) for out in ar1]
             return ar0, ar1
 
         args = [torch.rand(4, 4, device=self.device.type) for _ in range(2)]
@@ -1092,21 +1133,15 @@ class CompileTest(TestCase):
             .check(
                 f"torch.ops._c10d_functional.all_reduce_coalesced_.default([{buf1}, {buf3}]"
             )
-            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf0}")
-            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf2}")
-            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf1}")
-            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf3}")
+            .check(f"torch.ops._c10d_functional.wait_tensors.default([{buf0}, {buf2}])")
+            .check(f"torch.ops._c10d_functional.wait_tensors.default([{buf1}, {buf3}])")
             # Expect no extra copy on return
             .check(f"return ({buf0}, {buf2}, {buf1}, {buf3}, )")
             .run(code)
         )
-        if "= torch.ops._c10d_functional.wait_tensor.default" in code:
-            raise AssertionError(
-                "Expected wait_tensor return value to not be used in code"
-            )
+        if "= torch.ops._c10d_functional.wait_tensors.default" in code:
+            raise AssertionError("Expected wait_tensors to have no return value")
 
-        # Test aoti
-        out = AOTIRunnerUtil.run(func, (args,))  # noqa: F841
         torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1242,9 +1277,7 @@ class CompileTest(TestCase):
     @fresh_cache()
     def test_inductor_all_gather_into_tensor_coalesced(self):
         def func(args: list[torch.Tensor]) -> torch.Tensor:
-            ag0 = funcol.all_gather_single_coalesced(args, "0")
-            ag0 = [funcol.wait_tensor(out) for out in ag0]
-            return ag0
+            return funcol.all_gather_single_coalesced(args, "0")
 
         args = [torch.rand(4, 4, device=self.device.type) for _ in range(4)]
         compiled = torch.compile(func)
@@ -1259,17 +1292,15 @@ class CompileTest(TestCase):
             .check("buf2 = buf0[1]")
             .check("buf3 = buf0[2]")
             .check("buf4 = buf0[3]")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf4")
+            .check(
+                "torch.ops._c10d_functional.wait_tensors.default"
+                "([buf1, buf2, buf3, buf4])"
+            )
             # Expect no extra copy on return
             .check("return (buf1, buf2, buf3, buf4, )")
             .run(code)
         )
 
-        # Test aoti
-        out = AOTIRunnerUtil.run(func, (args,))  # noqa: F841
         torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1343,11 +1374,9 @@ class CompileTest(TestCase):
     @fresh_cache()
     def test_inductor_reduce_scatter_tensor_coalesced(self):
         def func(args: list[torch.Tensor]) -> torch.Tensor:
-            rs0 = funcol.reduce_scatter_single_coalesced(
+            return funcol.reduce_scatter_single_coalesced(
                 args, "avg", [0] * len(args), "0"
             )
-            rs0 = [funcol.wait_tensor(out) for out in rs0]
-            return rs0
 
         args = [torch.rand(4, 4, device=self.device.type) for _ in range(4)]
         compiled = torch.compile(func)
@@ -1362,17 +1391,15 @@ class CompileTest(TestCase):
             .check("buf2 = buf0[1]")
             .check("buf3 = buf0[2]")
             .check("buf4 = buf0[3]")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf4")
+            .check(
+                "torch.ops._c10d_functional.wait_tensors.default"
+                "([buf1, buf2, buf3, buf4])"
+            )
             # Expect no extra copy on return
             .check("return (buf1, buf2, buf3, buf4, )")
             .run(code)
         )
 
-        # Test aoti
-        AOTIRunnerUtil.run(func, (args,))
         torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
