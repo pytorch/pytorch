@@ -29,7 +29,6 @@
 #include <torch/csrc/profiler/orchestration/python_tracer.h>
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <optional>
@@ -1033,7 +1032,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     return;
   }
 
-#if defined(Py_GIL_DISABLED) && !defined(IS_PYTHON_3_14_PLUS)
+#if defined(Py_GIL_DISABLED) && !IS_PYTHON_3_14_PLUS
   TORCH_WARN(
       "The PyTorch profiler is not thread-safe on Python 3.13t. "
       "Please use Python 3.14t or later.");
