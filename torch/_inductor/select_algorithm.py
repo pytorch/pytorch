@@ -2632,11 +2632,29 @@ class GeneratedCodeCache:
         ):
             return None
 
+        # def_kernel deduplicates kernel arguments by buffer name, so inputs
+        # with identical layouts can still generate different code depending
+        # on which of them alias the same buffer, e.g. mm(x, x) (one kernel
+        # arg) vs mm(a, b) (two). Key the aliasing structure name-insensitively.
+        #
+        # def_kernel also drops inputs found in V.graph.removed_buffers or in
+        # kernel.prologue_fused_inputs, but neither needs keying: the cache is
+        # only read and written while lowering generates autotune choices, and
+        # both sets are populated only later, during scheduling, whose template
+        # renders (SIMDScheduling.codegen_template via make_kernel_render)
+        # bypass this cache entirely.
+        names = [node.get_name() for node in input_nodes]
+        first_seen: dict[str, int] = {}
+        input_aliasing = tuple(
+            first_seen.setdefault(name, i) for i, name in enumerate(names)
+        )
+
         return repr(
             {
                 "input_nodes": [
                     layout_key(input.get_layout()) for input in input_nodes
                 ],
+                "input_aliasing": input_aliasing,
                 "num_stages": num_stages,
                 "num_warps": num_warps,
                 "prefix_args": prefix_args,
@@ -3474,6 +3492,9 @@ class ExternKernelCaller(ChoiceCaller):
         self.has_out_variant = has_out_variant
         self.gm = choice.gm
         self.bmreq: BenchmarkRequest | None = None
+        # Per-op dynamic-dims mask stamped by choices.py to drive TunableOp
+        # wildcard persistence during autotune; only extern (aten) callers use it.
+        self.tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None
 
         from torch._inductor.autotune_process import (
             ExternKernelBenchmarkRequest,
@@ -3529,6 +3550,14 @@ class ExternKernelCaller(ChoiceCaller):
             raise AssertionError("self.bmreq must not be None")
         # pyrefly: ignore[missing-attribute]
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
+        mask = self.tunable_dyn_dims_mask
+        # TunableOp only exists in CUDA/ROCm builds; gate on the output device
+        # so a non-empty mask on a CPU op does not hit a missing _C binding.
+        if mask is not None and any(mask) and out.is_cuda:
+            with torch.cuda.tunable.dynamic_dims_mask(
+                M=mask[0], N=mask[1], K=mask[2], BATCH=mask[3]
+            ):
+                return self.bmreq.benchmark(*args, out=out)
         return self.bmreq.benchmark(*args, out=out)
 
     def benchmark_collective(self, *args, out):
@@ -4978,7 +5007,11 @@ class AlgorithmSelectorCache(PersistentCache):
             }
 
         extern_choice = next(
-            (choice for choice in choices if cls._is_extern(choice)),
+            (
+                choice
+                for choice in choices
+                if cls._uses_layout_preserving_inputs(choice)
+            ),
             None,
         )
         extern_input_nodes = input_nodes
@@ -4992,7 +5025,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
             extern_input_nodes = extern_choice.input_nodes
 
-            if extern_choice.name == "addmm":
+            if cls._is_extern(extern_choice) and extern_choice.name == "addmm":
                 unique_example_inputs_extern = addmm_unique_example_inputs_extern()
 
         example_inputs = list(unique_example_inputs.values())
@@ -5108,11 +5141,27 @@ class AlgorithmSelectorCache(PersistentCache):
     def _is_extern(choice: ChoiceCaller) -> bool:
         return isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
 
+    @staticmethod
+    def _uses_layout_preserving_inputs(choice: ChoiceCaller) -> bool:
+        """Return whether benchmark inputs must preserve their original layout.
+
+        In-process template benchmarks use these tensors when generated kernels
+        consume runtime layout metadata. Subprocess reconstruction currently
+        preserves sizes and strides, but not nonzero storage offsets.
+        """
+        from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplateCaller
+
+        return AlgorithmSelectorCache._is_extern(choice) or isinstance(
+            choice, FlyDSLTemplateCaller
+        )
+
     @classmethod
     def benchmark_choice(
         cls, choice: ChoiceCaller, autotune_args: AutotuneArgs
     ) -> float:
-        benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
+        benchmark_tensors = autotune_args.get_benchmark_tensors(
+            cls._uses_layout_preserving_inputs(choice)
+        )
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
         try:
@@ -5206,7 +5255,7 @@ class AlgorithmSelectorCache(PersistentCache):
         rank = dist.get_rank(process_group)
 
         benchmark_tensors: BenchmarkTensors = autotune_args.get_benchmark_tensors(
-            cls._is_extern(choice)
+            cls._uses_layout_preserving_inputs(choice)
         )
         inputs, output = benchmark_tensors.unpack()
         output.zero_()

@@ -530,6 +530,63 @@ class TestNVUniversalGemm(TestCase):
         )
         self.assertIsNone(result[0])
 
+    def test_efc_epilogue_cache_separates_reduction_specializations(self):
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+
+        class FakeOperator:
+            def __init__(self, metadata):
+                self.metadata = metadata
+
+        base_metadata = mock.Mock(
+            operands=object(),
+            design=object(),
+            operator_name="test_efc",
+            operator_class=FakeOperator,
+            supported_targets=object(),
+        )
+        base_kernel = FakeOperator(base_metadata)
+        epilogue_args = mock.Mock(tensors={})
+        sum_specialization = (("reduction_type", "sum"),)
+        max_specialization = (("reduction_type", "max"),)
+
+        kernel_cache.clear_cache()
+        try:
+            with (
+                mock.patch.object(
+                    kernel_cache, "_meta_epilogue_metadata", return_value=object()
+                ),
+                mock.patch(
+                    "cutlass.operators.metadata.OperatorMetadata",
+                    side_effect=lambda **kwargs: mock.Mock(**kwargs),
+                ),
+            ):
+                first = kernel_cache.get_efc_kernel_with_epilogue(
+                    "test_efc",
+                    epilogue_args,
+                    epilogue_source="same_epilogue",
+                    base_kernel=base_kernel,
+                    specialization=sum_specialization,
+                )
+                same = kernel_cache.get_efc_kernel_with_epilogue(
+                    "test_efc",
+                    epilogue_args,
+                    epilogue_source="same_epilogue",
+                    base_kernel=base_kernel,
+                    specialization=sum_specialization,
+                )
+                different = kernel_cache.get_efc_kernel_with_epilogue(
+                    "test_efc",
+                    epilogue_args,
+                    epilogue_source="same_epilogue",
+                    base_kernel=base_kernel,
+                    specialization=max_specialization,
+                )
+        finally:
+            kernel_cache.clear_cache()
+
+        self.assertIs(first, same)
+        self.assertIsNot(first, different)
+
     def test_unaligned_base_pointer_rejected(self):
         """Test that matmul with unaligned base pointer is rejected.
 
@@ -1275,6 +1332,9 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 ("acc", "raw", "secondary"),
             )
 
+    @unittest.skipUnless(
+        ensure_nv_universal_gemm_available(), "Requires cutlass.operators"
+    )
     def test_dense_reduction_uses_generated_callback_contract(self):
         import dataclasses
 
