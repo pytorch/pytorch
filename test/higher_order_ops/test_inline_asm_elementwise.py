@@ -14,6 +14,10 @@ from dataclasses import dataclass
 import torch
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch.testing._internal.common_cuda import evaluate_gfx_arch_within, SM70OrLater
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     MI200_ARCH,
@@ -480,6 +484,142 @@ class TestInlineAsmElementwiseErrors(TestCase):
                 dtype=torch.float32,
             )
 
+    def test_error_multiple_outputs_require_compile(self):
+        x = torch.arange(8, device="cuda", dtype=torch.int32)
+        with self.assertRaisesRegex(
+            RuntimeError, "requires torch.compile.*multiple outputs"
+        ):
+            inline_asm_elementwise(
+                x,
+                asm_str="mov.b32 $0, $2; mov.b32 $1, $2;",
+                constraints="=r,=r,r",
+                dtype=(torch.int32, torch.int32),
+            )
+
+    def test_error_multiple_output_constraint_mismatch(self):
+        x = torch.arange(8, device="cuda", dtype=torch.int32)
+        with self.assertRaisesRegex(ValueError, "Expected 2 output constraint"):
+            inline_asm_elementwise(
+                x,
+                asm_str="mov.b32 $0, $1;",
+                constraints="=r,r",
+                dtype=(torch.int32, torch.int32),
+            )
+
+
+class TestInlineAsmElementwiseMultipleOutputs(TestCase):
+    def _check_stochastic_rounding(self, device, fn, rng_state):
+        halfway = torch.tensor([0x3F808000], device=device, dtype=torch.int32)
+        x = halfway.expand(2).view(torch.float32)
+
+        from torch._inductor.utils import run_and_get_code
+
+        result, sources = run_and_get_code(
+            torch.compile(fn, fullgraph=True), x, rng_state
+        )
+        self.assertEqual(
+            result,
+            torch.tensor([1.0078125, 1.0], device=device, dtype=torch.bfloat16),
+        )
+        code = "\n".join(sources)
+        self.assertEqual(code.count("@triton_heuristics"), 1)
+        self.assertEqual(code.count("tl.inline_asm_elementwise("), 1)
+
+    @onlyCUDA
+    @xfailIfNoAcceleratorTriton
+    @skipIfRocm(msg="PTX test")
+    def test_multiple_outputs_compile(self, device):
+        def asm(x):
+            return inline_asm_elementwise(
+                x,
+                asm_str="mov.b32 $0, $2; cvt.rn.f32.s32 $1, $2;",
+                constraints="=r,=f,r",
+                dtype=(torch.int32, torch.float32),
+            )
+
+        def fn(x):
+            first, second = asm(x)
+            return first.float() * 3 + second
+
+        x = torch.arange(128, device=device, dtype=torch.int32)
+        from torch._inductor.utils import run_and_get_code
+
+        outputs, output_sources = run_and_get_code(
+            torch.compile(asm, fullgraph=True), x
+        )
+        self.assertEqual(outputs, (x, x.float()))
+        output_code = "\n".join(output_sources)
+        self.assertEqual(output_code.count("@triton_heuristics"), 1)
+        self.assertEqual(output_code.count("tl.inline_asm_elementwise("), 1)
+
+        result, sources = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+
+        self.assertEqual(result, x.float() * 4)
+        self.assertEqual("\n".join(sources).count("tl.inline_asm_elementwise("), 1)
+
+    @onlyCUDA
+    @xfailIfNoAcceleratorTriton
+    @skipIfRocm(msg="PTX test")
+    def test_stochastic_rounding_with_rng_input(self, device):
+        def fn(x, rng):
+            lower, remainder = inline_asm_elementwise(
+                x,
+                asm_str=(
+                    "mov.b32 $0, $2; and.b32 $0, $0, 0xffff0000; "
+                    "mov.b32 $1, $2; and.b32 $1, $1, 0xffff;"
+                ),
+                constraints="=r,=r,f",
+                dtype=(torch.int32, torch.int32),
+            )
+            round_up = (rng & 0xFFFF) < remainder
+            rounded = lower + round_up.to(torch.int32) * 0x10000
+            return rounded.view(torch.float32).to(torch.bfloat16)
+
+        rng = torch.tensor([0x7FFF, 0x8000], device=device, dtype=torch.int32)
+        self._check_stochastic_rounding(device, fn, rng)
+
+    @onlyCUDA
+    @xfailIfNoAcceleratorTriton
+    @skipIfRocm(msg="PTX test")
+    def test_stochastic_rounding_with_inline_rng(self, device):
+        def fn(x, counter):
+            lower, remainder, rng = inline_asm_elementwise(
+                x,
+                counter,
+                asm_str=(
+                    "mov.b32 $0, $3; and.b32 $0, $0, 0xffff0000; "
+                    "mov.b32 $1, $3; and.b32 $1, $1, 0xffff; "
+                    "mad.lo.u32 $2, $4, 1664525, 1013904223;"
+                ),
+                constraints="=r,=r,=r,f,r",
+                dtype=(torch.int32, torch.int32, torch.int32),
+            )
+            round_up = (rng & 0xFFFF) < remainder
+            rounded = lower + round_up.to(torch.int32) * 0x10000
+            return rounded.view(torch.float32).to(torch.bfloat16)
+
+        counter = torch.tensor([1, 0], device=device, dtype=torch.int32)
+        self._check_stochastic_rounding(device, fn, counter)
+
+    @onlyCUDA
+    @xfailIfNoAcceleratorTriton
+    @skipIfRocm(msg="PTX test")
+    def test_multiple_outputs_with_pack_compile(self, device):
+        def fn(x):
+            return inline_asm_elementwise(
+                x,
+                asm_str=(
+                    "mov.b32 $0, $4; mov.b32 $1, $5; "
+                    "add.s32 $2, $4, 1; add.s32 $3, $5, 1;"
+                ),
+                constraints="=r,=r,=r,=r,r,r",
+                dtype=(torch.int32, torch.int32),
+                pack=2,
+            )
+
+        x = torch.arange(128, device=device, dtype=torch.int32)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), (x, x + 1))
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
@@ -803,6 +943,11 @@ class TestInlineAsmPackPadding(TestCase):
         FileCheck().check("YBLOCK").check("inline_asm_pack").check(
             "inline_asm_unpack"
         ).run(code)
+
+
+instantiate_device_type_tests(
+    TestInlineAsmElementwiseMultipleOutputs, globals(), only_for=("cuda",)
+)
 
 
 if __name__ == "__main__":
