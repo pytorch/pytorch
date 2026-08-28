@@ -306,21 +306,21 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
   if (grad_input_arg.numel() == 0) {
     return;
   }
-  TORCH_CHECK(grad_input_arg.scalar_type() == input_arg.scalar_type(),
-              "expected scalar type ",
-              input_arg.scalar_type(),
-              " but found ",
-              grad_input_arg.scalar_type());
-  TORCH_CHECK(grad_output_arg.scalar_type() == input_arg.scalar_type(),
-              "expected scalar type ",
-              input_arg.scalar_type(),
-              " but found ",
-              grad_output_arg.scalar_type());
-  TORCH_CHECK(!weight_arg.defined() || weight_arg.scalar_type() == input_arg.scalar_type(),
-              "expected scalar type ",
-              input_arg.scalar_type(),
-              " but found ",
-              weight_arg.scalar_type());
+  TORCH_CHECK_TYPE(grad_input_arg.scalar_type() == input_arg.scalar_type(),
+                   "expected scalar type ",
+                   input_arg.scalar_type(),
+                   " but found ",
+                   grad_input_arg.scalar_type());
+  TORCH_CHECK_TYPE(grad_output_arg.scalar_type() == input_arg.scalar_type(),
+                   "expected scalar type ",
+                   input_arg.scalar_type(),
+                   " but found ",
+                   grad_output_arg.scalar_type());
+  TORCH_CHECK_TYPE(!weight_arg.defined() || weight_arg.scalar_type() == input_arg.scalar_type(),
+                   "expected scalar type ",
+                   input_arg.scalar_type(),
+                   " but found ",
+                   weight_arg.scalar_type());
   grad_input_arg.zero_();
 
   const bool has_weight = weight_arg.defined() && weight_arg.numel() > 0;
@@ -334,7 +334,7 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
 
   const auto class_dim = input_arg.dim() == 1 ? 0 : 1;
   const auto map_size = is2D ? input_arg.size(2) * input_arg.size(3) : 1;
-  const NLLLossBackwardParams params{
+  const NLLLossBackwardParams<> params{
       .n_classes = input_arg.size(class_dim),
       .map_size = map_size,
       .batch_stride = input_arg.dim() == 1 ? 0 : grad_input_arg.stride(0),
@@ -346,8 +346,9 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
       .total_weight_offset = total_weight_cast.storage_offset(),
       .ignore_index = ignore_index,
       .tid_offset = 0,
-      .reduction = static_cast<uint32_t>(reduction),
-      .has_weight = static_cast<uint32_t>(has_weight),
+      .is_reduction = reduction != Reduction::None,
+      .is_mean = reduction == Reduction::Mean,
+      .has_weight = has_weight,
   };
 
   MPSStream* stream = getCurrentMPSStream();

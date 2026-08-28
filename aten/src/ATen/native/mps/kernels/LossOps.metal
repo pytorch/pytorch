@@ -14,7 +14,7 @@ kernel void nllnd_loss_backward(
     constant long* target [[buffer(2)]],
     constant T* weight [[buffer(3)]],
     constant T* total_weight [[buffer(4)]],
-    constant NLLLossBackwardParams& params [[buffer(5)]],
+    constant NLLLossBackwardParams<>& params [[buffer(5)]],
     device ErrorMessages* error_buf [[buffer(6)]],
     uint thread_index [[thread_position_in_grid]]) {
   const long index = static_cast<long>(thread_index) + params.tid_offset;
@@ -29,9 +29,9 @@ kernel void nllnd_loss_backward(
   }
 
   const long grad_output_index =
-      params.grad_output_offset + (params.reduction == 0 ? index : 0);
+      params.grad_output_offset + (params.is_reduction ? 0 : index);
   T grad = -grad_output[grad_output_index];
-  if (params.reduction == 1) {
+  if (params.is_mean) {
     const T total = total_weight[params.total_weight_offset];
     if (total == T(0)) {
       return;
@@ -448,7 +448,7 @@ INSTANTIATE_CTC_LOSS_TARGET_TYPES(half);
       constant long*,                                           \
       constant T*,                                              \
       constant T*,                                              \
-      constant NLLLossBackwardParams&,                          \
+      constant NLLLossBackwardParams<>&,                        \
       device ErrorMessages*,                                    \
       uint);
 
