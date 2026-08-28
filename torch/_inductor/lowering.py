@@ -256,6 +256,7 @@ add_needs_realized_inputs(
     ]
 )
 
+
 # TODO(jansel): ezyang says we won't need this in the future, try removing it
 def decode_dtype(dtype: int | torch.dtype) -> torch.dtype:
     if not isinstance(dtype, int):
