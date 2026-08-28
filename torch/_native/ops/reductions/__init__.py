@@ -6,11 +6,14 @@
 #   kernel_general - K0: TensorIterator-driven general kernel, any geometry (row,
 #                    column, n-D, transposed, reduce-all); the correctness floor +
 #                    the _reduce/_try_fast_row dispatcher that routes to the fast paths.
-#   tile           - the shared load/fold datapath the fast kernels are built from.
-#   kernel_rowtile - the vectorized one-shot row reduction: a contiguous last dim
-#                    whose row fits one CTA tile, dynamic in BOTH M and N.
+#   tile           - the shared reduction KERNEL (one @cute.kernel, parameterized by which
+#                    axis is reduced) and the load/fold datapath it is built from.
+#   kernel_rowtile - launch policy for the ROW axis: a contiguous last dim whose row fits
+#                    one CTA tile, dynamic in BOTH M and N.
 #   kernel_xcta    - fused two-stage cross-CTA row reduction for few-row / huge-N
 #                    and reduce-all.
+#   kernel_coltile - launch policy for the COLUMN (dim-0) axis: one output per thread,
+#                    splitting the reduced axis for parallelism.
 #
 # The remaining fast paths, and the aten op overrides that put torch.sum / mean /
 # var / ... on this package at all, arrive in later stages.

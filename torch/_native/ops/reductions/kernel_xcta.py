@@ -46,6 +46,7 @@ from .._cutedsl.plan_cache import cached_plan
 from . import (  # safe: kernel_general imports us only lazily
     kernel_general as _RB,
     kernel_rowtile as _rt,
+    tile,
 )
 
 
@@ -131,7 +132,7 @@ class FusedTwoStage:
     # framework dispatch + arg marshalling is paid ONCE instead of twice. Keeps the
     # GOOD two-stage kernels (full grid, no cluster cap) AND graph-capturability.
     #
-    # s1 is a kernel_rowtile.RowTile (final=False); s2 a kernel_general.ReduceBlock
+    # s1 is a tile.TileReduce on the row axis (final=False); s2 a kernel_general.ReduceBlock
     # (from_partials). Both expose a bound @cute.kernel `.kernel`; we replicate their
     # __call__ launch bodies here back-to-back.
     def __init__(self, s1, s2):
@@ -153,11 +154,14 @@ class FusedTwoStage:
         stream: cuda.CUstream,
     ):
         s1 = self.s1
-        # --- stage 1 launch (mirrors RowTile.__call__) ---
+        # --- stage 1 launch (mirrors tile.TileReduce.__call__) ---
         # The tile row kernel with final=False: it writes the RAW per-field accumulator of
         # each sub-row. Its fold is ROLLED, so the sub-row length arrives as runtime args
-        # (nchunks/nwaves) and distinct N in a vec class share ONE compiled kernel.
-        s1.kernel(mX, parts, s1_nchunks, s1_nwaves, project_n).launch(
+        # (nchunks/nwaves) and distinct N in a vec class share ONE compiled kernel. tma_atom
+        # is None: a sub-row here is wide enough that the direct load is already coalesced.
+        # q/npar are the col axis's split args: None here, since an unused Int32 param is
+        # not free (see tile.TileReduce.kernel).
+        s1.kernel([mX], parts, s1_nchunks, s1_nwaves, project_n, None, None).launch(
             grid=[cute.ceil_div(mX.shape[0], const_expr(s1.rows_per_block)), 1, 1],
             block=[const_expr(s1.nt), 1, 1],
             stream=stream,
@@ -340,8 +344,16 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
     s1_counts = (Int32(s // svec), Int32(-(-(s // svec) // tpr)))
 
     def _make_s1():
-        return _rt.RowTile(
-            trait, _L.torch2cute[x.dtype], s, tpr, nt, nouts, False, unroll
+        return tile.TileReduce(
+            trait,
+            _L.torch2cute[x.dtype],
+            "row",
+            s,
+            tpr=tpr,
+            nt=nt,
+            nouts=nouts,
+            final=False,
+            unroll=unroll,
         )
 
     def wrap_in(t):
