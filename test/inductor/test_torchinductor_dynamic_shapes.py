@@ -39,10 +39,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
 )
 from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
     HAS_CPU,
-    HAS_GPU,
-    HAS_MPS,
     patch_inductor_backend,
 )
 from torch.utils._triton import has_triton
@@ -206,36 +203,50 @@ if HAS_CPU:
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
-if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
+class DynamicShapesGPUTests(
+    DynamicShapesOpTests, DynamicShapesCommonTemplate, DynamicShapesTestCase
+):
+    hw_classification = HardwareClassification.ACCELERATOR
+    common = check_model_gpu
 
-    class DynamicShapesGPUTests(DynamicShapesOpTests, DynamicShapesTestCase):
-        hw_classification = HardwareClassification.ACCELERATOR
-        common = check_model_gpu
-        device = GPU_TYPE
+    def setUp(self):
+        super().setUp()
+        self.device = self.device_type
 
-    copy_tests(
-        DynamicShapesCommonTemplate, DynamicShapesGPUTests, GPU_TYPE, test_failures
+
+if hasattr(DynamicShapesGPUTests, "test_conv_with_as_strided_dynamic_shapes"):
+    # gfx950 shows a deterministic numerical mismatch for this generated test.
+    DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes = (
+        skipIfRocmArch(MI350_ARCH)(
+            DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes
+        )
     )
 
-    if HAS_GPU and hasattr(
-        DynamicShapesGPUTests, "test_conv_with_as_strided_dynamic_shapes_cuda"
-    ):
-        # gfx950 shows a deterministic numerical mismatch for this generated test.
-        DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes_cuda = (
-            skipIfRocmArch(MI350_ARCH)(
-                DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes_cuda
-            )
+if hasattr(
+    DynamicShapesGPUTests, "test_randint_distribution_dynamic_shapes"
+):
+    # gfx950 shows a deterministic randint64 distribution mismatch for high bounds.
+    DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes = (
+        skipIfRocmArch(MI350_ARCH)(
+            DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes
         )
+    )
 
-    if HAS_GPU and hasattr(
-        DynamicShapesGPUTests, "test_randint_distribution_dynamic_shapes_cuda"
-    ):
-        # gfx950 shows a deterministic randint64 distribution mismatch for high bounds.
-        DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes_cuda = (
-            skipIfRocmArch(MI350_ARCH)(
-                DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes_cuda
-            )
-        )
+if hasattr(
+    DynamicShapesGPUTests, "test_AllenaiLongformerBase_repro_dynamic_shapes"
+):
+    # With tensorify enabled, SymInt div no longer graph-breaks; the full
+    # model compiles but Inductor hangs on the complex dynamic-shape graph.
+    DynamicShapesGPUTests.test_AllenaiLongformerBase_repro_dynamic_shapes = (
+        unittest.skip(
+            "Skipped! SymInt div no longer graph-breaks"
+        )(DynamicShapesGPUTests.test_AllenaiLongformerBase_repro_dynamic_shapes)
+    )
+
+if not TEST_WITH_ASAN:
+    instantiate_device_type_tests(
+        DynamicShapesGPUTests, globals(), allow_xpu=True, allow_mps=True, except_for="cpu"
+    )
 
 
 class TestInductorDynamic(DynamicShapesTestCase):
@@ -243,10 +254,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
     compile_fn = partial(torch.compile, dynamic=True)
 
     def setUp(self):
-        # HAS_CUDA_AND_TRITON also checks compute capability to skip tests
-        # on older devices
-        if not HAS_GPU:
-            self.skipTest("Triton not available")
         torch._dynamo.reset()
         super().setUp()
         # this should be in setUpClass, but device-generic tests
@@ -1535,5 +1542,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
+    if not TEST_WITH_ASAN:
         run_tests(needs="filelock")
