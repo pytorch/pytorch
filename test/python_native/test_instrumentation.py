@@ -706,6 +706,9 @@ def _scan_for_missing_instrumentation(source, label):
 
 _CACHED_COMPILE_CALL = "cute.compile"
 _CACHE_DECORATORS = ("jit_cache", "instrumented_cutedsl_cache")
+# Paths here are POSIX-separated: the labels come from os.path.relpath normalized with
+# `.replace(os.sep, "/")`, because on Windows a backslash label would miss this suffix match and
+# silently drop the allowance (the Windows CPU shards run this file).
 # The ONE shared helper allowed to call cute.compile without carrying a cache decorator itself.
 # It exists so every family reaches cute.compile through the same tvm-ffi convention, and it is
 # only ever called from inside cached_plan(op=...) -- which a static scan cannot see, so
@@ -812,7 +815,7 @@ class TestInstrumentationCoverage(TestCase):
         for path in self._ops_files():
             with open(path) as f:
                 violations, n = _scan_for_missing_instrumentation(
-                    f.read(), os.path.relpath(path)
+                    f.read(), os.path.relpath(path).replace(os.sep, "/")
                 )
             missing += violations
             checked += n
@@ -887,7 +890,7 @@ class TestInstrumentationCoverage(TestCase):
         for path in self._ops_files():
             with open(path) as f:
                 violations, n = _scan_for_raw_cute_compile(
-                    f.read(), os.path.relpath(path)
+                    f.read(), os.path.relpath(path).replace(os.sep, "/")
                 )
             bad += violations
             seen += n
@@ -926,6 +929,12 @@ class TestInstrumentationCoverage(TestCase):
         self.assertEqual(
             len(v), 1, "the allowance ignored the file and exempted the name anywhere"
         )
+        # The callers normalize os.sep away; a backslash label must therefore never reach the
+        # matcher. Assert the normalization the callers do, so a future caller that forgets it
+        # fails here rather than only on the Windows shards.
+        win = f"torch\\_native\\ops\\{helper_file}".replace("/", "\\")
+        v, _ = _scan_for_raw_cute_compile(src, win.replace("\\", "/"))
+        self.assertEqual(v, [], "a normalized Windows path was wrongly flagged")
 
     @unittest.skipUnless(_HAS_CUDA, "cutedsl compile coverage needs CUDA")
     @skipIfNoCuteDSL
