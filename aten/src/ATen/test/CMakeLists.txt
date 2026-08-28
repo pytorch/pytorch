@@ -6,9 +6,7 @@ endif(MSVC)
 
 list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/Dict_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/Dimname_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/MaybeOwned_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/NamedTensor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/accelerator_graph_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/apply_utils_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/atest.cpp
@@ -20,7 +18,9 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_rng_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/dlconvertor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/extension_backend_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/functional_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/half_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/index_kernel_utils_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/ivalue_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/lazy_tensor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/math_kernel_test.cpp

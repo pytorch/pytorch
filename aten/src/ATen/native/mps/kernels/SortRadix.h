@@ -48,6 +48,11 @@ template <>
 struct radix_bits<bool> {
   using type = uchar;
 };
+// 64-bit keys: used by median radix selection only
+template <>
+struct radix_bits<long> {
+  using type = ulong;
+};
 
 // Map key to uint where uint-order matches sort-order, handles floats,
 // signed/unsigned ints and descending.
@@ -96,8 +101,17 @@ to_radix_key(T val, bool desc) {
   return uint(result);
 }
 
-// Inverse of to_radix_key for floats (same `desc`): recovers the value at the
-// keyed merge's final store. Exact for non-NaN; NaN maps to a canonical NaN.
+// Non-template overload wins over the signed template for exact long args.
+inline ulong to_radix_key(long val, bool desc) {
+  ulong result = as_type<ulong>(val) ^ (ulong(1) << 63);
+  if (desc)
+    result = ~result;
+  return result;
+}
+
+// Inverse of to_radix_key (same `desc`): recovers the value at the keyed
+// merge's final store and the median selection's final pick. Exact for
+// non-NaN; NaN maps to a canonical NaN.
 template <typename T>
 inline ::metal::enable_if_t<::metal::is_floating_point_v<T>, T> from_radix_key(
     typename radix_bits<T>::type key,
@@ -110,6 +124,24 @@ inline ::metal::enable_if_t<::metal::is_floating_point_v<T>, T> from_radix_key(
   // flipped.
   U mask = (r & sign_bit) ? sign_bit : U(~U(0));
   return as_type<T>(U(r ^ mask));
+}
+
+template <typename T>
+inline ::metal::
+    enable_if_t<!::metal::is_floating_point_v<T> && ::metal::is_signed_v<T>, T>
+    from_radix_key(typename radix_bits<T>::type key, bool desc) {
+  using U = typename radix_bits<T>::type;
+  constexpr U sign_bit = U(1) << (sizeof(T) * 8 - 1);
+  U r = desc ? U(~key) : key;
+  return as_type<T>(U(r ^ sign_bit));
+}
+
+template <typename T>
+inline ::metal::
+    enable_if_t<!::metal::is_floating_point_v<T> && !::metal::is_signed_v<T>, T>
+    from_radix_key(typename radix_bits<T>::type key, bool desc) {
+  using U = typename radix_bits<T>::type;
+  return T(desc ? U(~key) : key);
 }
 
 template <typename T, short RTPTG, short EPT, short RBITS>

@@ -6,17 +6,17 @@ import torch.distributed as dist
 from torch._C._distributed_c10d import FakeWork, ProcessGroup
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._functional_collectives import (
-    all_gather_into_tensor_coalesced,
-    all_gather_tensor,
-    all_gather_tensor_autograd,
+    all_gather_single,
+    all_gather_single_autograd,
+    all_gather_single_coalesced,
     all_reduce,
     all_reduce_coalesced,
     all_to_all_single,
     all_to_all_single_autograd,
     broadcast,
-    reduce_scatter_tensor,
-    reduce_scatter_tensor_autograd,
-    reduce_scatter_tensor_coalesced,
+    reduce_scatter_single,
+    reduce_scatter_single_autograd,
+    reduce_scatter_single_coalesced,
     wait_tensor,
 )
 from torch.distributed._tools.fake_collectives import (
@@ -74,14 +74,14 @@ class TestFakeCollectives(TestCase):
                 wait_tensor(test_tensor)
                 broadcast(test_tensor, src=0, group=dist.group.WORLD)
                 all_reduce(test_tensor, reduceOp="avg", group=dist.group.WORLD)
-                all_gather_tensor(test_tensor, gather_dim=0, group=dist.group.WORLD)
-                all_gather_tensor_autograd(
+                all_gather_single(test_tensor, gather_dim=0, group=dist.group.WORLD)
+                all_gather_single_autograd(
                     test_tensor, gather_dim=0, group=dist.group.WORLD
                 )
-                reduce_scatter_tensor(
+                reduce_scatter_single(
                     test_tensor2, scatter_dim=0, reduceOp="sum", group=dist.group.WORLD
                 )
-                reduce_scatter_tensor_autograd(
+                reduce_scatter_single_autograd(
                     test_tensor2, scatter_dim=0, reduceOp="sum", group=dist.group.WORLD
                 )
                 all_to_all_single(
@@ -93,10 +93,8 @@ class TestFakeCollectives(TestCase):
                 all_reduce_coalesced(
                     test_tensor_list, reduceOp="avg", group=dist.group.WORLD
                 )
-                all_gather_into_tensor_coalesced(
-                    test_tensor_list, group=dist.group.WORLD
-                )
-                reduce_scatter_tensor_coalesced(
+                all_gather_single_coalesced(test_tensor_list, group=dist.group.WORLD)
+                reduce_scatter_single_coalesced(
                     test_tensor_list_2,
                     scatter_dim=[0] * 4,
                     reduceOp="sum",
@@ -118,6 +116,7 @@ class CollectiveTest(TorchDispatchMode):
         c10d.barrier.default,
         c10d.monitored_barrier_.default,
         _c10d_functional.wait_tensor.default,
+        _c10d_functional.wait_tensors.default,
     }
 
     def __init__(self, test: TestFakeCollectives, _dispatch_key=None):
@@ -128,7 +127,10 @@ class CollectiveTest(TorchDispatchMode):
         res = func(*args, **(kwargs or {}))
 
         if func in collective_ops:
-            if func != _c10d_functional.wait_tensor.default:
+            if func not in (
+                _c10d_functional.wait_tensor.default,
+                _c10d_functional.wait_tensors.default,
+            ):
                 pg = CollectiveOp.get_process_group(func, args)
                 self.test.assertIsInstance(
                     pg, ProcessGroup, "Error: pg is not an instance of ProcessGroup"
@@ -139,7 +141,7 @@ class CollectiveTest(TorchDispatchMode):
                 self.test.assertEqual(
                     pg.size(),
                     4,
-                    f"Error: Expected pg.size() to be 4, but got {pg.size()}",
+                    lambda msg: f"{msg}\nError: Expected pg.size() to be 4, but got {pg.size()}",
                 )
                 self.test.assertNotEqual(
                     pg.name(), "", "Error: pg.name() should not be an empty string"
@@ -155,7 +157,7 @@ class CollectiveTest(TorchDispatchMode):
                 self.test.assertEqual(
                     computed_size,
                     expected_size,
-                    msg=f"Size mismatch for {func.__name__}: expected {expected_size}, got {computed_size}",
+                    msg=lambda msg: f"{msg}\nSize mismatch for {func.__name__}: expected {expected_size}, got {computed_size}",
                 )
 
         if (

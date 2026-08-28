@@ -9,7 +9,7 @@ namespace torch::distributed::autograd {
 
 // Singleton class per worker which is responsible for storing the distributed
 // autograd context for each autograd pass and also cleans up data for an
-// autograd pass once its done.
+// autograd pass once it's done.
 //
 // Each autograd pass is assigned a unique autograd_context_id and all data for
 // that pass (DistAutogradContext) is stored in this container indexed by the

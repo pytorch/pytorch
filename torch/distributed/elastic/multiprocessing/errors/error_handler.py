@@ -41,6 +41,23 @@ class ErrorHandler:
         """
         return os.environ.get("TORCHELASTIC_ERROR_FILE", None)
 
+    # Qualified name of the ``@record``-decorated entrypoint function, set via
+    # ``set_entrypoint_fn_name`` before ``initialize``/``record_exception`` run.
+    # Kept as handler state (rather than a method argument) so overriding
+    # ``initialize``/``record_exception`` does not require a signature change,
+    # preserving backward compatibility for this public extension point.
+    _fn_name: str | None = None
+
+    def set_entrypoint_fn_name(self, fn_name: str | None) -> None:
+        """
+        Record the qualified name of the ``@record``-decorated entrypoint fn.
+
+        Called by ``@record`` before ``initialize()`` so subclasses can attribute
+        errors to the originating function via ``self._fn_name`` without changing
+        the ``initialize``/``record_exception`` signatures.
+        """
+        self._fn_name = fn_name
+
     def initialize(self) -> None:
         """
         Call prior to running code that we wish to capture errors/exceptions.
@@ -68,11 +85,18 @@ class ErrorHandler:
 
     def record_exception(self, e: BaseException) -> None:
         """
-        Write a structured information about the exception into an error file in JSON format.
+        Write structured information about the exception into an error file in JSON format.
 
         If the error file cannot be determined, then logs the content
         that would have been written to the error file.
+
+        ``self._fn_name`` (the qualified name of the ``@record``-decorated
+        entrypoint function, if set via ``set_entrypoint_fn_name``) is logged but
+        not written to the error file; subclasses may override this method to
+        record it in their own format.
         """
+        if self._fn_name:
+            logger.debug("recording exception from entrypoint fn: %s", self._fn_name)
         file = self._get_error_file_path()
         if file:
             data = {
@@ -86,6 +110,31 @@ class ErrorHandler:
             }
             with open(file, "w") as fp:
                 json.dump(data, fp)
+
+    def record_success(self) -> None:
+        """
+        Record that the ``@record``-decorated entrypoint fn completed successfully.
+
+        Called by ``@record`` after the entrypoint returns without raising. The
+        base implementation only logs; subclasses may override to emit structured
+        success telemetry, mirroring ``record_exception`` as a public extension
+        point. ``self._fn_name`` carries the entrypoint fn's qualified name when
+        set.
+        """
+        if self._fn_name:
+            logger.debug("entrypoint fn completed successfully: %s", self._fn_name)
+
+    def maybe_enrich_signal_failure_message(self, message: str, error_file: str) -> str:
+        """Hook to enrich a signal (no-traceback) failure message.
+
+        Called from ``ProcessFailure`` when a worker fails by signal (negative
+        exitcode). Subclasses may override this to append device-specific fault
+        context (e.g. GPU memory faults) scanned from the worker logs near
+        ``error_file``, so it surfaces in the propagated failure regardless of
+        how the failure is later handled. The base implementation is a no-op
+        that returns ``message`` unchanged.
+        """
+        return message
 
     def override_error_code_in_rootcause_data(
         self,

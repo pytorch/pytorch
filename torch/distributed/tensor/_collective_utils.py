@@ -79,6 +79,31 @@ def _shard_dim_alltoall_meta(
     return chunk.contiguous()
 
 
+def _shard_dim_alltoall_backward(ctx, grad_output):
+    return (
+        torch.ops._dtensor.shard_dim_alltoall.default(
+            grad_output.contiguous(), ctx.shard_dim, ctx.gather_dim, ctx.group_name
+        ),
+        None,
+        None,
+        None,
+    )
+
+
+def _shard_dim_alltoall_setup_context(ctx, inputs, output):
+    input, gather_dim, shard_dim, group_name = inputs
+    ctx.gather_dim = gather_dim
+    ctx.shard_dim = shard_dim
+    ctx.group_name = group_name
+
+
+torch.library.register_autograd(
+    "_dtensor::shard_dim_alltoall",
+    _shard_dim_alltoall_backward,
+    setup_context=_shard_dim_alltoall_setup_context,
+)
+
+
 def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
     if mesh.device_type == "cpu" and local_tensor_mode() is None:
         # Gloo does not support alltoall, so falling back to allgather + chunk
@@ -86,7 +111,7 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
             logger,
             "CPU process group does not support alltoall yet, falling back with allgather + chunk!",
         )
-        out = funcol.all_gather_tensor(input, gather_dim, (mesh, mesh_dim))
+        out = funcol.all_gather_single(input, gather_dim, (mesh, mesh_dim))
         if isinstance(out, funcol.AsyncCollectiveTensor):
             # stick to the same behavior for the alltoall case, remove this once we enable alltoall async
             out = out.wait()
@@ -228,6 +253,14 @@ def pad_tensor(
             return tensor
     elif not _are_we_tracing() and guard_or_false(pad_size == 0):
         return tensor
+    if _are_we_tracing():
+        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+        if has_free_unbacked_symbols(tensor):
+            pad_shape: list[IntLikeType] = list(tensor.shape)
+            pad_shape[pad_dim] = pad_size
+            return torch.cat([tensor, tensor.new_zeros(pad_shape)], dim=pad_dim)
+
     pad = [0, 0] * (tensor.ndim - pad_dim)
     pad[-1] = pad_size  # pyrefly: ignore[unsupported-operation]
     return torch.nn.functional.pad(tensor, pad)
@@ -399,7 +432,9 @@ def _compute_placement_transition_cost(
 
     Returns:
         A tuple of (cost, updated_comm_bytes_gb):
-            - cost: The communication cost for this transition (float("inf") if invalid).
+            - cost: The communication cost for this transition. ``float("inf")``
+              means that the strategy planner must not select the transition
+              implicitly; the explicit redistribution API may still support it.
             - updated_comm_bytes_gb: The updated communication bytes after this step.
     """
     if current_placement == target_placement:
@@ -426,8 +461,11 @@ def _compute_placement_transition_cost(
         comm_bytes_gb /= num_devices_on_mesh_dim
         return cost, comm_bytes_gb
     elif current_placement.is_shard() and target_placement.is_partial():
-        # ban shard -> partial as it does not make sense to perform
-        # this redistribute
+        # Shard -> Partial("sum") is a valid explicit redistribution, but it
+        # materializes a logical-shape tensor and copies the local shard into it.
+        # The cost model accounts only for communication, so assigning zero cost
+        # would make the strategy planner over-prefer this memory- and copy-heavy
+        # transition. Exclude it from implicit strategy selection instead.
         return float("inf"), comm_bytes_gb
     elif current_placement.is_partial() and target_placement.is_partial():
         # we already handled the == case at the top, and we ban converting between partial types.

@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <c10/util/irange.h>
 
@@ -41,7 +40,12 @@ Tensor make_feature_noise(const Tensor& input) {
 }
 
 bool is_fused_kernel_acceptable(const Tensor& input, double p) {
-  return (input.is_cuda() || input.is_xpu() || input.is_lazy() || input.is_privateuseone()) && p > 0 && p < 1 && input.sym_numel() > 0;
+  const bool mps_fused_kernel_acceptable =
+      input.is_mps() && input.is_floating_point() &&
+      input.is_non_overlapping_and_dense();
+  return (input.is_cuda() || mps_fused_kernel_acceptable || input.is_xpu() ||
+          input.is_lazy() || input.is_privateuseone()) &&
+      p > 0 && p < 1 && input.sym_numel() > 0;
 }
 
 // NB: sure, we could have used different overloads here, but I would feel insecure
@@ -131,7 +135,6 @@ Tensor native_dropout_backward(const Tensor& grad, const Tensor& mask, double sc
 
 Tensor dropout(const Tensor& input, double p, bool train) {
   auto result = [&]() {
-    NoNamesGuard guard;
     // TODO: we can remove this is_nested() code smell in the future
     //       if we find a way to support _dropout for nested tensor
     //       e.g. make it an op (at::_dropout) to use dispatcher?
@@ -140,7 +143,6 @@ Tensor dropout(const Tensor& input, double p, bool train) {
     }
     return _dropout<false>(input, p, train);
   }();
-  namedinference::propagate_names(result, input);
   return result;
 }
 

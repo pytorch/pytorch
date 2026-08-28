@@ -85,7 +85,7 @@ void TracingState::delValue(const IValue& var) {
   }
 }
 
-// Given a IValue 'var', return the 'node' which represents the instruction
+// Given an IValue 'var', return the 'node' which represents the instruction
 // which computes the value of this variable in the IR.
 // Here, we interpret untraced variables as constants that are just embedded
 // in the graph.  This is useful to handle code which does things like this
@@ -231,7 +231,7 @@ Value* TracingState::getValue(const IValue& var) {
 }
 bool TracingState::hasValue(const IValue& var) const {
   for (const auto& frame : env_stack) {
-    if (frame.count(var)) {
+    if (frame.contains(var)) {
       return true;
     }
   }
@@ -529,7 +529,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     }
     FixupTraceScopeBlocks(graph, self);
     NormalizeOps(graph);
-    return {state, out_stack};
+    return {std::move(state), std::move(out_stack)};
   } catch (...) {
     tracer::abandon();
     throw;
@@ -718,12 +718,6 @@ void addInputs(
     const char* name,
     const std::optional<at::Device>& value) {
   detail::genericAddOptionalInput(n, name, value);
-}
-void addInputs(
-    Node* n,
-    const char* name,
-    std::optional<at::DimnameList> value) {
-  TORCH_CHECK(false, "NYI: Named tensors are not supported with the tracer");
 }
 void addInputs(
     Node* n,
@@ -987,7 +981,7 @@ void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {
        << "that also reference this data will not reflect this change in the trace! "
        << "On the other hand, if all other views use the same memory chunk, but are disjoint (e.g. "
        << "are outputs of torch.split), this might still be safe.";
-    warn(ss.str().c_str());
+    warn(std::move(ss).str().c_str());
   }
 }
 void ensureUniqueIfOutOfPlaced(
@@ -1102,7 +1096,7 @@ void _do_warn(const char* _reason, const char* _kind) {
   std::string kind{_kind ? _kind : ""};
   std::ostringstream s;
   s << reason << kind;
-  warn_callback.load()(s.str());
+  warn_callback.load()(std::move(s).str());
 }
 
 void setWarn(warn_fn_type fn) {
