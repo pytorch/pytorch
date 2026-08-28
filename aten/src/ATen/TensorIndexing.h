@@ -407,7 +407,7 @@ inline Tensor asTensor(const Scalar& value, const Tensor& target) {
   if (isQIntType(target.scalar_type())) {
     return scalarToTensor(
         value, at::device(kCPU).dtype(kFloat), at::Device(kCPU));
-  } else if (target_device.is_cuda()) {
+  } else if (target_device.is_cuda() || target_device.is_mps()) {
     return scalarToTensor(value, target.options(), at::Device(kCPU));
   } else {
     return scalarToTensor(value, target.options(), target_device);

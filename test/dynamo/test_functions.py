@@ -975,6 +975,18 @@ partial_fn = functools.partial(fn, scale=2)
         self.assertEqual(actual[0], torch.Size([-1, 3]))
         self.assertEqual(actual, expected)
 
+    @torch._dynamo.config.patch(specialize_int=True)
+    def test_infer_size_with_direct_size_inputs(self):
+        def fn(a, b):
+            shape = torch._C._infer_size(a, b)
+            return shape, torch.ones(shape)
+
+        args = (torch.Size([2, 1]), torch.Size([1, 3]))
+        expected = fn(*args)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        self.assertIsInstance(actual[0], torch.Size)
+        self.assertEqual(actual, expected)
+
     @parametrize(
         "case,exception_type,expected_message",
         (
