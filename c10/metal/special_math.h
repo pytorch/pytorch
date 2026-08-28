@@ -2188,6 +2188,49 @@ inline float laguerre_polynomial_l_forward(T x, int64_t n) {
   return r;
 } // laguerre_polynomial_l_forward(T x, int64_t n)
 
+template <typename T>
+inline float legendre_polynomial_p_forward(T x, int64_t n) {
+  // Converted once because the recurrence below multiplies x by the int64_t
+  // coefficient (2k + 1) directly. For T = half or bfloat that product is
+  // evaluated in T before it ever meets a float operand, and it loses the low
+  // bits long before the recurrence itself would. The sibling helpers avoid
+  // this by accident rather than by design: laguerre's (1.0 - x) promotes to
+  // float before meeting k, and hermite's (x + x) is exact in half.
+  const float xf = static_cast<float>(x);
+
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (::metal::fabs(xf) == 1.0) {
+    if (xf > 0.0 || n % 2 == 0) {
+      return 1.0;
+    }
+
+    return -1.0;
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  if (n == 1) {
+    return xf;
+  }
+
+  float p = 1.0;
+  float q = xf;
+  float r = q;
+
+  for (int64_t k = 1; (k < n) && !::metal::isnan(q); k++) {
+    r = ((k + k + 1) * xf * q - k * p) / (k + 1);
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // legendre_polynomial_p_forward(T x, int64_t n)
+
 /* The next function is taken from http://ab-initio.mit.edu/faddeeva */
 
 /* Copyright (c) 2012 Massachusetts Institute of Technology
