@@ -324,6 +324,7 @@ class TestNNModuleToStringBufferDevice(TestCase):
         else:
             expected_device = str(torch.empty(1, device=device).device)
             self.assertIn(f'.to("{expected_device}")', result)
+            self.assertNotIn(f".{torch.device(device).type}()", result)
 
     def test_nn_module_to_string_param_device(self, device):
         gm = torch.fx.symbolic_trace(torch.nn.Identity())
@@ -338,6 +339,7 @@ class TestNNModuleToStringBufferDevice(TestCase):
         else:
             expected_device = str(torch.empty(1, device=device).device)
             self.assertIn(f'device="{expected_device}"', result)
+            self.assertNotIn(f', device="{torch.device(device).type}")', result)
 
 
 instantiate_device_type_tests(
