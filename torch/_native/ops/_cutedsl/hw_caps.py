@@ -48,27 +48,29 @@ class HWCaps:
         self.smem_per_block_optin = p.shared_memory_per_block_optin  # 228KB H, 232KB B
         self.smem_per_sm = p.shared_memory_per_multiprocessor
         self.l2_bytes = p.L2_cache_size
-        # peak DRAM bandwidth (bytes/s): bus_width(bits)/8 * memclock(kHz)*1e3 * 2 (DDR)
-        self.peak_bw_bytes = p.memory_bus_width // 8 * p.memory_clock_rate * 1000 * 2
+        # peak DRAM bandwidth (bytes/s): bus_width(bits)/8 * memclock(kHz)*1e3 * 2 (DDR).
+        # Divide LAST: `// 8` first truncates any bus width that is not a multiple of 8.
+        self.peak_bw_bytes = p.memory_bus_width * p.memory_clock_rate * 1000 * 2 // 8
 
     # --- derived quantities the launch heuristics reason in ---
     @property
     def max_warps_per_sm(self):
         return self.max_threads_per_sm // self.warp
 
+    def blocks_per_sm(self, threads_per_block):
+        # Concurrent blocks an SM holds, occupancy-bound: reg/smem limits are ignored here
+        # and checked separately by the callers that build big kernels.
+        return max(1, self.max_threads_per_sm // max(threads_per_block, 1))
+
     def waves(self, total_blocks, threads_per_block):
         # How many occupancy "waves" a grid of `total_blocks` spans. A wave = the
-        # device running its max concurrent blocks once. Concurrency is occupancy-
-        # bound: blocks_per_sm = max_threads_per_sm // threads_per_block (ignoring
-        # reg/smem limits, which the caller checks separately for big kernels).
-        blocks_per_sm = max(1, self.max_threads_per_sm // max(threads_per_block, 1))
-        concurrent = self.sm_count * blocks_per_sm
+        # device running its max concurrent blocks once.
+        concurrent = self.sm_count * self.blocks_per_sm(threads_per_block)
         return total_blocks / max(concurrent, 1)
 
     def fill_blocks(self, threads_per_block, waves=1.0):
         # Number of blocks needed to fill the device to `waves` occupancy waves.
-        blocks_per_sm = max(1, self.max_threads_per_sm // max(threads_per_block, 1))
-        return int(self.sm_count * blocks_per_sm * waves)
+        return int(self.sm_count * self.blocks_per_sm(threads_per_block) * waves)
 
     @property
     def device_lanes(self):
