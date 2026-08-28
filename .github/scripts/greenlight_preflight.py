@@ -20,7 +20,7 @@ from datetime import timedelta
 from typing import NamedTuple, TYPE_CHECKING
 
 from greenlight_identity import is_greenlight, is_known_bot, normalize_login
-from greenlight_ledger import parse_utc_timestamp, TERMINAL_STATUSES
+from greenlight_ledger import parse_utc_timestamp, STATUS_REVERTED, TERMINAL_STATUSES
 
 
 if TYPE_CHECKING:
@@ -49,6 +49,10 @@ def _label_phrase(labels: Sequence[str]) -> str:
 
 EXCLUDED_LABELS_PHRASE = _label_phrase(sorted(EXCLUDED_LABELS))
 
+FIX_REVERTED = (
+    "Get an approval from a human reviewer with merge rights. Greenlight does not "
+    "review a PR again after it has been reverted, so pushing a commit cannot help."
+)
 FIX_CHANGES_REQUESTED = (
     "Resolve or dismiss that review, or get an approval from a human reviewer with "
     "merge rights."
@@ -186,6 +190,10 @@ def cannot_review(
     pr: PRUnderMerge, ledger_status: str | None, now: datetime
 ) -> CannotReview | None:
     """Why greenlight will never dispatch a review for this PR, and how to fix it."""
+    if ledger_status == STATUS_REVERTED:
+        return CannotReview(
+            "the PR was reverted and greenlight never reviews it again", FIX_REVERTED
+        )
     apps = _AppReviewers(pr)
     blocking = blocking_reviewers(pr, apps)
     if blocking.humans:
