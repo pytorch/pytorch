@@ -159,12 +159,12 @@ set_target_properties(torch PROPERTIES
 
 # CMake only reports compile features after CXX has been enabled.
 if(CMAKE_CXX_COMPILER_LOADED)
-  # Checking the configured standard also guards target_compile_features for CMake versions that predate its feature name.
+  # The feature can be absent because CMake does not recognize it or the compiler does not support the standard.
   if("cxx_std_@CMAKE_CXX_STANDARD@" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     # Compile features specify a minimum and preserve a newer standard selected by the consumer.
     target_compile_features(torch INTERFACE cxx_std_@CMAKE_CXX_STANDARD@)
   else()
-    message(STATUS "TorchConfig: CMake does not report cxx_std_@CMAKE_CXX_STANDARD@ support; pinning the CXX compiler standard to C++@CMAKE_CXX_STANDARD@.")
+    message(STATUS "TorchConfig: The CXX compiler does not report cxx_std_@CMAKE_CXX_STANDARD@ support; forcing C++@CMAKE_CXX_STANDARD@. If the compiler does not support C++@CMAKE_CXX_STANDARD@, compilation will fail.")
     if(MSVC)
       set_property(TARGET torch APPEND PROPERTY INTERFACE_COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:/std:c++@CMAKE_CXX_STANDARD@>")
     else()
