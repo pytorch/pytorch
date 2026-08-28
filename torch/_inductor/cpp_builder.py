@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
@@ -1357,7 +1358,7 @@ def _setup_standard_sys_libs(
         include_dirs.append(build_paths.linux_kernel_include)
         include_dirs.append("include")
 
-        if aot_mode and not use_relative_path:
+        if not use_relative_path:
             linker_script = _LINKER_SCRIPT
         else:
             linker_script = os.path.basename(_LINKER_SCRIPT)
@@ -2168,6 +2169,15 @@ def get_cpp_torch_device_options(
     # CppTorchDeviceOptions validates too, but this is a public entry point in
     # its own right.
     _validate_cpp_stdlib(cpp_stdlib, device_type, aot_mode)
+
+    try:
+        device_options = get_interface_for_device(device_type).get_cpp_device_options(
+            aot_mode, compile_only
+        )
+    except NotImplementedError:
+        device_options = None
+    if device_options is not None:
+        return device_options
 
     definitions: list[str] = []
     include_dirs: list[str] = []
