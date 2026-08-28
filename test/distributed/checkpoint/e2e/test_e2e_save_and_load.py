@@ -266,7 +266,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         dist_model, dist_optim = self._create_model(device, compile, model_type)
         _, original_train_state = _train(dist_model, dist_optim, train_steps=2)
 
-        original_stateful_obj = TestStatefulObj(torch.rand(10, 10, device=device))  # tests arbitrary saving/loading
+        original_stateful_obj = TestStatefulObj(torch.rand(10, 10, device=self.device_type))  # tests arbitrary saving/loading
         sd = {
             "model": dist_model,
             "optimizer": dist_optim,
@@ -318,7 +318,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         else:
             DCP.save(sd, checkpoint_id=self.temp_dir)
 
-        loaded_stateful_obj = TestStatefulObj(torch.rand(10, 10, device=device))
+        loaded_stateful_obj = TestStatefulObj(torch.rand(10, 10, device=self.device_type))
         loaded_train_state = TestTrainState()
         dist_model, dist_optim = self._create_model(device, compile, model_type)
 
