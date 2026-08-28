@@ -571,7 +571,12 @@ def _init_efc_jit(kernel, epilogue_args):
     object. We replicate just those two steps so that disk-cached artifacts can
     be rewrapped without recompiling the CuTe DSL kernel.
     """
-    from cutlass.operators.providers.cutedsl.evt.common_efc import EFC
+    try:
+        # `nvidia-cutlass-operators>=0.2.0` have `efc` not `common_efc`
+        from cutlass.operators.providers.cutedsl.evt.efc import EFC
+    except ModuleNotFoundError:
+        from cutlass.operators.providers.cutedsl.evt.common_efc import EFC
+
     from cutlass.operators.utils.tensor import TensorWrapper
 
     efc = kernel.impl.efc
@@ -654,7 +659,8 @@ def _update_reuse_args_tensors(
             wrapper._runtime_tensor = getattr(val, "runtime_tensor", val)
     local_reduce = getattr(args, "local_reduce_out", None)
     if local_reduce is not None:
-        assert args_kwargs is not None  # noqa: S101
+        if args_kwargs is None:
+            raise AssertionError("expected args_kwargs to be not None")
         local_reduce._runtime_tensor = args_kwargs["local_reduce_out"]
     return True
 
