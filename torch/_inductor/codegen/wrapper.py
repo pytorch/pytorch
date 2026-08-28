@@ -10,10 +10,12 @@ import inspect
 import logging
 import operator
 import os
-import random
 import re
+import secrets
+import sys
 import tempfile
 from collections.abc import Callable
+from enum import Enum
 from itertools import chain, count
 from typing import Any, Literal, Protocol, TYPE_CHECKING
 
@@ -30,6 +32,11 @@ from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_constant_type
 from torch._logging import trace_structured
+from torch.fx.experimental.proxy_tensor import (
+    _coor_check_current_accelerator,
+    _coor_current_accelerator,
+    _coor_enabled,
+)
 from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
     ConvertIntKey,
@@ -50,13 +57,20 @@ from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties, TritonMeta
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
-from ..stream_utils import get_raw_stream_name, get_stream_name
+from ..stream_utils import (
+    COOR_DEVICE_IDX_VAR,
+    coor_device_str,
+    get_raw_stream_name,
+    get_stream_name,
+)
 from ..utils import (
     cache_on_self,
     DeferredLineBase,
     DelayReplaceLine,
     get_benchmark_name,
+    get_constexpr_repr_children,
     get_dtype_size,
+    get_importable_constexpr_types,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
     is_using_cudagraph_partition,
@@ -103,6 +117,23 @@ def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
     if denominator == 1:
         return numerator
     return CleanDiv(numerator, denominator)
+
+
+def _sanitize_for_repr(obj: Any) -> Any:
+    """Convert Enum values to their underlying value for valid Python repr in code generation."""
+    if isinstance(obj, Enum):
+        return _sanitize_for_repr(obj.value)
+    repr_children = get_constexpr_repr_children(obj)
+    if repr_children is not None:
+        children = tuple(_sanitize_for_repr(child) for child in repr_children.values)
+        # Rebuilding arbitrary attrs, pydantic, and container subclasses can
+        # invoke user code, so preserve the original when sanitization is a no-op.
+        if all(
+            child is original for child, original in zip(children, repr_children.values)
+        ):
+            return obj
+        return repr_children.rebuild(children)
+    return obj
 
 
 ReuseKey = tuple[torch.device, torch.dtype, str, bool, int, tuple[int, int] | None]
@@ -605,6 +636,24 @@ class ExitSubgraphLine(WrapperLine):
         return converter._generate_exit_subgraph
 
 
+# [device-as-parameter] Name of the call()-local variable holding the runtime current
+# device index under compile-on-one-rank, so the wrapper is byte-identical across ranks.
+_COOR_DEVICE_IDX_VAR = COOR_DEVICE_IDX_VAR
+
+
+def _coor_device_idx_ref(device_idx: int) -> int | str:
+    """Device index to emit in the wrapper. Under compile-on-one-rank, the call()-local
+    runtime current-device variable (so the wrapper is byte-identical across ranks);
+    otherwise the literal compile-time index.
+
+    Safe to ignore ``device_idx`` under CooR: make_fx rejects any operand that is not the
+    current accelerator (_coor_check_current_accelerator), so every ``device_idx`` reaching
+    codegen is already the current device's index; redirecting it to the runtime variable
+    just follows each rank's own device.
+    """
+    return _COOR_DEVICE_IDX_VAR if _coor_enabled() else device_idx
+
+
 @dataclasses.dataclass
 class EnterDeviceContextManagerLine(WrapperLine):
     device_idx: int
@@ -636,9 +685,19 @@ class EnterDeviceContextManagerLine(WrapperLine):
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
-            code.writeline(f"with {V.graph.device_ops.device_guard(self.device_idx)}:")
+            if _coor_enabled():
+                # compile-on-one-rank: resolve the device at runtime so the wrapper is
+                # byte-identical across ranks -- a shared artifact follows each rank's
+                # current device instead of the compile-time index.
+                idx = _COOR_DEVICE_IDX_VAR
+                code.writeline(
+                    f"{idx} = {V.graph.device_ops.current_device_idx_expr()}"
+                )
+            else:
+                idx = self.device_idx
+            code.writeline(f"with {V.graph.device_ops.device_guard(idx)}:")
             code.do_indent()
-            code.writeline(V.graph.device_ops.set_device(self.device_idx))
+            code.writeline(V.graph.device_ops.set_device(idx))
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_enter_device_context_manager
@@ -667,6 +726,100 @@ class ExternKernelAllocLine(WrapperLine):
         return converter._generate_extern_kernel_alloc
 
 
+def kernel_profile_enabled() -> bool:
+    """Whether the C shim emits kernel-profiling instrumentation.
+
+    The RAIIAtenRecordFunctionHandle declaration reaches the generated code
+    through an include that only these platforms emit. Callers that build
+    profiling metadata must use this rather than the config flag alone:
+    `_get_profiling_args` emits codegen for ReinterpretView arguments, so
+    building metadata the shim then declines to emit would leak a handle."""
+    return config.cpp.enable_kernel_profile and sys.platform in ("linux", "win32")
+
+
+def _profiling_arg_entry(value: Any) -> str | None:
+    """Profiling metadata for one argument value: an expression yielding a
+    tensor handle, or None for a value the C shim records as a placeholder.
+
+    A ReinterpretView re-derives its codegen expression so the recorded shape
+    is the logical view shape; get_name() would name the base buffer, which a
+    trace consumer would read as a real but wrong shape.
+
+    Generators, torchbind objects and the stand-ins for a None or SymInt
+    argument are IRNodes that no tensor handle can be made from, so they take
+    a placeholder like any other non-tensor."""
+    if isinstance(value, ReinterpretView):
+        return value.codegen_reference()
+    if isinstance(
+        value, (ir.NonTensorObj, ir.NoneAsConstantBuffer, ir.ShapeAsConstantBuffer)
+    ):
+        return None
+    if isinstance(value, IRNode):
+        return value.get_name()
+    return None
+
+
+def _profiling_arg_entries(values: Sequence[Any]) -> list[str | None]:
+    """One entry per value, except that a tensor list expands to one entry per
+    element so the element shapes survive. Eager records a list as a single
+    IValue; expanding it is the one deliberate deviation, and it keeps the
+    shape data for ops like cat, whose list is its only tensor argument. A
+    list holding no tensor, such as a SymInt[] stride, stays a single
+    placeholder."""
+    entries: list[str | None] = []
+    for value in values:
+        if isinstance(value, (list, tuple)) and any(
+            isinstance(element, IRNode) for element in value
+        ):
+            entries.extend(_profiling_arg_entry(element) for element in value)
+        else:
+            entries.append(_profiling_arg_entry(value))
+    return entries
+
+
+def _get_profiling_args(node: ir.ExternKernel) -> list[str | None]:
+    """Profiling metadata for an extern kernel: one entry per operator schema
+    argument, in schema order, except for a tensor list, which expands per
+    element. `out` is left out, so a caller holding an output buffer can append
+    it last, where eager records it.
+
+    The argument list is rebuilt the same way the kernel's own call arguments
+    are, which is what keeps the two in step. A FallbackKernel restores the
+    original interleaving of tensor and non-tensor arguments through
+    unflatten_args, since partitioning into inputs and constant_args discards
+    it; every other ExternKernel follows the tensors-before-constants
+    convention that ExternKernel.codegen_args relies on. Filling in unprovided
+    positional arguments matches the call the shim actually makes; those
+    arguments are then skipped in the keyword pass, because
+    ordered_kwargs_for_cpp_kernel can name a positional argument that was
+    supplied as a keyword (convolution passes its whole stride/padding/groups
+    tail that way) and it must still be recorded once."""
+    if isinstance(node, ir.FallbackKernel):
+        args, kwargs = node.unflatten_args(node.inputs, node.constant_args)
+    else:
+        args, kwargs = [*node.inputs, *node.constant_args], node.kwargs
+    arg_properties = node.arg_properties or []
+    schema_args: Sequence[Any] = (
+        node.fill_non_provided_args(args, kwargs)
+        if arg_properties and isinstance(node.op_overload, torch._ops.OpOverload)
+        else args
+    )
+    profiling_args = _profiling_arg_entries(schema_args)
+    positional_names = OrderedSet(
+        [
+            arg_property.get("name")
+            for arg_property in arg_properties[: len(schema_args)]
+        ]
+    )
+    for arg_name in node.ordered_kwargs_for_cpp_kernel:
+        if arg_name == "out" or arg_name in positional_names:
+            continue
+        profiling_args.append(
+            _profiling_arg_entry(node.get_kwargs_value(arg_name, **kwargs))
+        )
+    return profiling_args
+
+
 @dataclasses.dataclass
 class ExternKernelOutLine(WrapperLine):
     wrapper: PythonWrapperCodegen
@@ -685,6 +838,12 @@ class ExternKernelOutLine(WrapperLine):
         else:
             kernel_name = node.get_kernel_name()
         device = d.type if (d := node.get_device()) else V.graph.device_type
+        # profiling_args is consumed only inside the C shim's
+        # enable_kernel_profile branch, so build it only when the C++ wrapper
+        # is generating code and profiling is on.
+        profiling_args = None
+        if V.graph.cpp_wrapper and kernel_profile_enabled():
+            profiling_args = _get_profiling_args(node)
         self.wrapper._generate_extern_kernel_out_helper(
             kernel_name,
             node.codegen_reference(),
@@ -692,6 +851,7 @@ class ExternKernelOutLine(WrapperLine):
             args,
             device,
             self.node.get_stack_traces(),
+            profiling_args=profiling_args,
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1062,14 +1222,26 @@ class AllocateLine(MemoryPlanningLine):
         group_name = layout.group_name
 
         if comm_buffer_type == ir.CommBufferType.SYMM_MEM:
+            # [device-as-parameter] under compile-on-one-rank the comm buffer must follow
+            # the running rank's device, not the compile-time index.
+            if _coor_enabled():
+                device_arg = f'torch.device("cuda", {V.graph.device_ops.current_device_idx_expr()})'
+            else:
+                device_arg = f'torch.device("cuda:{device.index}")'
             line = (
                 f"{name} = empty_strided_p2p("
                 f"{self.wrapper.codegen_shape_tuple(shape)}, "
                 f"{self.wrapper.codegen_shape_tuple(stride)}, "
                 f"{dtype}, "
-                f'torch.device("cuda:{device.index}"), '
+                f"{device_arg}, "
                 f'group_name="{group_name}", '
-                f"alloc_id={random.randint(0, 2**64 - 1)})"
+                # alloc_id keys a process-global persistent-allocation map
+                # (SymmetricMemory.cpp) that outlives the graph and rejects
+                # same-id allocations of differing size. Draw from secrets, not
+                # the global random module, which is frequently reseeded (e.g.
+                # TestCase.setUp calls random.seed()) and would yield colliding
+                # ids across graphs.
+                f"alloc_id={secrets.randbits(64)})"
             )
         else:
             raise NotImplementedError(
@@ -1105,6 +1277,11 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
             raise AssertionError("expected line to not be reused")
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
+        if self.node.get_name() in V.graph.never_reuse_but_free_buffers:
+            # Emit the free but keep the storage out of the reuse pool: freeing
+            # only drops inductor's own reference, so a tensor retained behind
+            # inductor's back (stashed away by an effectful op) survives.
+            return self
         if config.allow_buffer_reuse:
             if self.comm_buffer:
                 # Comm buffers use separate pool (comm-comm reuse only)
@@ -1382,6 +1559,50 @@ BufferName = str
 Line = MemoryPlanningLine | LineContext
 
 
+def _resolve_nested_output(
+    outputs: Any, keypath: pytree.KeyPath
+) -> tuple[ir.IRNode, pytree.KeyPath]:
+    """Follow ``SequenceKey`` entries into (possibly nested) custom-op outputs
+    until reaching the IR node an unbacked symbol is bound to, returning that
+    node together with the keypath entries that still apply to it.
+    """
+    # Fast path for a single output. When a fallback kernel returns a list
+    # consisting of a single tensor, the output is a MultiOutput with non-empty
+    # indices, and we strip the leading keypath entry.
+    if len(outputs) == 1 and isinstance(outputs[0], ir.IRNode):
+        single_output = outputs[0]
+        remaining = (
+            keypath[1:]
+            if isinstance(single_output, ir.MultiOutput) and single_output.indices
+            else keypath
+        )
+        return single_output, remaining
+
+    # Otherwise descend through nested list/tuple containers via SequenceKeys.
+    current_output = outputs
+    remaining_keypath = keypath
+    while isinstance(current_output, (list, tuple)):
+        if not remaining_keypath or not isinstance(
+            remaining_keypath[0], pytree.SequenceKey
+        ):
+            raise AssertionError(
+                "expected SequenceKey while traversing nested "
+                f"outputs, got {remaining_keypath}"
+            )
+        key = remaining_keypath[0]
+        if not 0 <= key.idx < len(current_output):
+            raise AssertionError(
+                f"output index {key.idx} is out of range for "
+                f"{type(current_output).__name__} with "
+                f"{len(current_output)} elements"
+            )
+        current_output = current_output[key.idx]
+        remaining_keypath = remaining_keypath[1:]
+    if not isinstance(current_output, ir.IRNode):
+        raise AssertionError(f"expected IRNode output, got {type(current_output)}")
+    return current_output, remaining_keypath
+
+
 class PythonWrapperCodegen(CodeGen):
     """
     Generate outer wrapper in Python that calls the kernels.
@@ -1435,6 +1656,9 @@ class PythonWrapperCodegen(CodeGen):
         self.move_begin = "std::move(" if V.graph.cpp_wrapper else ""
         self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: int | None = None
+        # [device-as-parameter] CooR harness render mode, resolved once and cached:
+        # None = unresolved, False = compile-on-one-rank off, else the current accelerator.
+        self._coor_current_accelerator: torch.device | Literal[False] | None = None
         self.supports_intermediate_hooks = True
         self.user_defined_kernel_cache: dict[
             tuple[Any, ...], tuple[str, Any, dict[str, Any]]
@@ -2015,13 +2239,20 @@ class PythonWrapperCodegen(CodeGen):
         self.write_get_raw_stream_header()
         name = get_raw_stream_name(device_idx)
         if config.triton.autotune_at_compile_time:
+            # compile-on-one-rank: resolve at runtime so the autotune block matches the
+            # rank-agnostic call() body (see codegen_device_guard_enter).
+            autotune_idx = (
+                V.graph.device_ops.current_device_idx_expr()
+                if _coor_enabled()
+                else device_idx
+            )
             self.kernel_autotune_calls.writeline(
-                f"{name} = get_raw_stream({device_idx})"
+                f"{name} = get_raw_stream({autotune_idx})"
             )
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return name
-        self.writeline(f"{name} = get_raw_stream({device_idx})")
+        self.writeline(f"{name} = get_raw_stream({_coor_device_idx_ref(device_idx)})")
         return name
 
     def get_codegened_graph(self):
@@ -2079,15 +2310,22 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.autotune_at_compile_time:
             # mimic logic of EnterDeviceContextManagerLine.codegen for the autotune code block
             self.write_triton_header_once()
+            # compile-on-one-rank: resolve the device at runtime (like the call() body) so
+            # the autotune block is byte-identical across ranks, not baked to this rank's idx.
+            autotune_idx = (
+                V.graph.device_ops.current_device_idx_expr()
+                if _coor_enabled()
+                else device_idx
+            )
             self.kernel_autotune_calls.writeline(
-                f"with {V.graph.device_ops.device_guard(device_idx)}:"
+                f"with {V.graph.device_ops.device_guard(autotune_idx)}:"
             )
             self.kernel_autotune_calls.do_indent()
             if is_codegen_graph_partition_subgraph(self):
                 # Need get_raw_stream for subgraph
                 self.write_get_raw_stream_header()
             self.kernel_autotune_calls.writeline(
-                f"{get_raw_stream_name(device_idx)} = get_raw_stream({device_idx})"
+                f"{get_raw_stream_name(device_idx)} = get_raw_stream({autotune_idx})"
             )
         self.last_seen_device_guard_index = device_idx
         self._num_streams: int = num_streams
@@ -2278,7 +2516,10 @@ class PythonWrapperCodegen(CodeGen):
         args: list[str],
         device: str,
         stack_traces: OrderedSet[str] | None = None,
+        profiling_args: Sequence[str | None] | None = None,
     ) -> None:
+        # profiling_args is consumed only by the CppWrapperCpu override (to
+        # record profiling metadata); the Python wrapper ignores it.
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
@@ -3114,6 +3355,23 @@ class PythonWrapperCodegen(CodeGen):
         # define the variable and assign it None
         self.writeline(f"{node.get_name()} = None")
 
+    def _coor_device_type_str(self, device: torch.device) -> str:
+        """Render a device for the benchmark harness rank-agnostically: the bare device type
+        (no rank-specific index), so it is byte-identical across ranks. cpu/meta have no index
+        and pass through unchanged; a non-current accelerator violates the single-device
+        invariant and is refused. Under compile-on-one-rank the current accelerator is read
+        once per compilation and cached on the wrapper; once cached, the per-input/buffer
+        harness loops repeat neither the enabled check nor the cudaGetDevice.
+        """
+        cur = self._coor_current_accelerator
+        if cur is None:
+            cur = _coor_current_accelerator() if _coor_enabled() else False
+            self._coor_current_accelerator = cur
+        if cur is False:
+            return str(device)
+        _coor_check_current_accelerator(device, cur)
+        return device.type
+
     def benchmark_compiled_module(self, output):
         """Write out codegen for benchmarking the output code"""
 
@@ -3122,7 +3380,7 @@ class PythonWrapperCodegen(CodeGen):
                 f"{name} = rand_strided("
                 f"{self.codegen_python_shape_tuple(shape)}, "
                 f"{self.codegen_python_shape_tuple(stride)}, "
-                f"device='{device}', dtype={dtype})"
+                f"device='{self._coor_device_type_str(device)}', dtype={dtype})"
             )
 
         def add_expr_input(name, val):
@@ -3200,7 +3458,7 @@ class PythonWrapperCodegen(CodeGen):
                     continue
                 numel = group.nbytes // torch._utils._element_size(group.dtype)
                 output.writeline(
-                    f"{group.buffer_name} = rand_strided(({numel},), (1,), device='{group.device}', dtype={group.dtype})"
+                    f"{group.buffer_name} = rand_strided(({numel},), (1,), device='{self._coor_device_type_str(group.device)}', dtype={group.dtype})"
                 )
                 for name, (shape, stride) in group.inputs.items():
                     aliased_input_specs[name] = (group.buffer_name, shape, stride)
@@ -3229,9 +3487,16 @@ class PythonWrapperCodegen(CodeGen):
                     # Use False as a fallback for benchmark harness purposes.
                     add_expr_input(name, False)
                 elif isinstance(value, ir.GeneratorState):
+                    # Harness runs outside the runtime device guard, so resolve the index
+                    # with current_device() (the _coor_device_idx var is not in scope here).
+                    gen_idx = (
+                        V.graph.device_ops.current_device_idx_expr()
+                        if _coor_enabled()
+                        else value.device.index
+                    )
                     add_expr_input(
                         name,
-                        f"torch.cuda.default_generators[{value.device.index}].graphsafe_get_state()",
+                        f"torch.cuda.default_generators[{gen_idx}].graphsafe_get_state()",
                     )
                 elif isinstance(value, ir.OpaqueObjectState):
                     output.writeline(f"{name} = None")
@@ -3512,6 +3777,7 @@ class PythonWrapperCodegen(CodeGen):
             size_dtype=None,  # try to infer based on symints
             indices=arg_indices,
             argdefs=[ArgName(x) for x in kernel.arg_names],
+            use_fp64_for_python_float=False,
         )
         device = V.graph.get_current_device_or_throw()
         device_props = DeviceProperties.create(device)
@@ -3549,7 +3815,8 @@ class PythonWrapperCodegen(CodeGen):
         }
         if backend_option_candidates:
             get_interface_for_device(device).raise_if_triton_unavailable(device)
-            assert GPUTarget is not None  # noqa: S101
+            if GPUTarget is None:
+                raise AssertionError("expected GPUTarget to be not None")
             target = GPUTarget(
                 device_props.type,
                 device_props.cc,
@@ -3664,15 +3931,24 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
+        for type_spec in get_importable_constexpr_types(
+            triton_meta.get("constants", {}).values()
+        ):
+            compile_wrapper.writeline(
+                f"from {type_spec.module} import "
+                f"{type_spec.root_name} as {type_spec.root_name}"
+            )
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
+        # Sanitize triton_meta to convert Enum values for valid Python repr
+        sanitized_triton_meta = _sanitize_for_repr(triton_meta)
         compile_wrapper.splice(
             f"""
             @triton_heuristics.user_autotune(
                 configs={[*map(config_to_dict, configs)]!r},
                 inductor_meta={inductor_meta!r},
-                triton_meta={triton_meta!r},
+                triton_meta={sanitized_triton_meta!r},
                 filename=__file__,
                 custom_kernel=True,
             )
@@ -3884,7 +4160,7 @@ class PythonWrapperCodegen(CodeGen):
             device = buf.get_device()
             dtype = buf.get_dtype()
             offset = V.graph.sizevars.optimization_hint(buf.get_layout().offset)
-            value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset}, {allocation_size})"
+            value = f"generate_example_value({size}, {stride}, '{coor_device_str(device)}', {dtype}, {offset}, {allocation_size})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
             if isinstance(raw_arg, ir.TMADescriptor):
@@ -4019,7 +4295,9 @@ class PythonWrapperCodegen(CodeGen):
             # LRU-cached stream0 variable which captured the default stream.
             self.write_get_raw_stream_header()
             stream_name = "raw_stream"
-            self.writeline(f"{stream_name} = get_raw_stream({device.index})")
+            self.writeline(
+                f"{stream_name} = get_raw_stream({_coor_device_idx_ref(device.index)})"
+            )
         else:
             stream_name = PythonWrapperCodegen.write_get_raw_stream(
                 self, device.index, graph_name
@@ -4160,8 +4438,15 @@ class PythonWrapperCodegen(CodeGen):
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
             # Make sure kernel launch under a device guard because models don't always run on device 0
+            # The autotune block inlines the current-device expression rather than using the
+            # call()-local _coor_device_idx variable, which is not in scope here.
+            guard_idx = (
+                V.graph.device_ops.current_device_idx_expr()
+                if _coor_enabled()
+                else device.index
+            )
             self.kernel_autotune_calls.writeline(
-                f"with {V.graph.device_ops.device_guard(device.index)}:"
+                f"with {V.graph.device_ops.device_guard(guard_idx)}:"
             )
             self.kernel_autotune_calls.do_indent()
             self.kernel_autotune_calls.writeline(
@@ -4239,6 +4524,12 @@ class PythonWrapperCodegen(CodeGen):
             for n, t in opaque_types.items():
                 V.graph.opaque_value_type_classes[n] = t
             return obj_repr
+        elif isinstance(s, torch.device) and _coor_enabled() and s.index is not None:
+            # compile-on-one-rank: repr() of an indexed device would bake this rank's
+            # index into the wrapper (e.g. an aten fallback's device= arg renders as
+            # device(type='cuda', index=0)), which the "cuda:N" checks do not catch.
+            # Emit the bare type so the value follows the enclosing runtime device guard.
+            return repr(torch.device(s.type))
         else:
             return repr(s)
 
@@ -4438,13 +4729,13 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(FreeIfNotReusedLine(self, buffer, comm_buffer=True))
             return
 
-        if not self.can_reuse(buffer):
+        if not self.can_free(buffer):
             return
         self.freed.add(name)
 
         self.writeline(FreeIfNotReusedLine(self, buffer))
 
-    def can_reuse(self, input_buffer, output_buffer=None):
+    def can_free(self, input_buffer):
         name = input_buffer.get_name()
         return not (
             name in V.graph.removed_buffers
@@ -4458,6 +4749,11 @@ class PythonWrapperCodegen(CodeGen):
             or name in V.graph.torchbind_constants
             or name in V.graph.never_reuse_buffers
             or name in self.freed
+        )
+
+    def can_reuse(self, input_buffer, output_buffer=None):
+        return self.can_free(input_buffer) and (
+            input_buffer.get_name() not in V.graph.never_reuse_but_free_buffers
         )
 
     def did_reuse(self, buffer, reused_buffer):
@@ -4557,23 +4853,8 @@ class PythonWrapperCodegen(CodeGen):
                     # because self.get_name() is actually never bound; the
                     # individual output arguments are bound by
                     # generate_c_shim_fallback_kernel
-                    if len(outputs) == 1:
-                        out = outputs[0]
-                        # When fallback kernel returns a list consisting of a single tensor,
-                        # the output is represented as a MultiOutput with non empty indices.
-                        # In this case, we strip the first key path away.
-                        return go(
-                            outputs[0].get_name(),
-                            keypath[1:]
-                            if isinstance(out, ir.MultiOutput) and len(out.indices) != 0
-                            else keypath,
-                        )
-                    else:
-                        if not isinstance(keypath[0], pytree.SequenceKey):
-                            raise AssertionError(
-                                f"expected SequenceKey, got {type(keypath[0])}"
-                            )
-                        return go(outputs[keypath[0].idx].get_name(), keypath[1:])
+                    node, remaining_keypath = _resolve_nested_output(outputs, keypath)
+                    return go(node.get_name(), remaining_keypath)
                 else:
                     return go(output_name, keypath)
 
@@ -5098,7 +5379,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
             )
         else:
             name = get_raw_stream_name(device_idx)
-            self.writeline(f"{name} = get_raw_stream({device_idx})")
+            self.writeline(
+                f"{name} = get_raw_stream({_coor_device_idx_ref(device_idx)})"
+            )
         return name
 
     def codegen_graph_nvtx_range_push(self, post_grad_graph_id: int) -> None:

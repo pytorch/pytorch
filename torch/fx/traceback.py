@@ -126,11 +126,9 @@ class NodeSource:
             self.node_info = self.NodeInfo(
                 name=node.name, target=str(node.target), graph_id=id(node.graph)
             )
-            self.from_node = (
-                copy.deepcopy(node.meta["from_node"])
-                if "from_node" in node.meta
-                else []
-            )
+            # NodeSource records are immutable after construction, so share them
+            # while copying the outer list to preserve its snapshot semantics.
+            self.from_node = list(node.meta.get("from_node", ()))
         else:
             self.node_info = None
             self.from_node = []

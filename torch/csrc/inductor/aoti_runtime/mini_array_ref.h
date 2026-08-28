@@ -35,14 +35,14 @@ class MiniArrayRef final {
   /// Construct an empty MiniArrayRef.
   /* implicit */ constexpr MiniArrayRef() : Data(nullptr), Length(0) {}
 
-  /// Construct an MiniArrayRef from a single element.
+  /// Construct a MiniArrayRef from a single element.
   // TODO Make this explicit
   constexpr MiniArrayRef(const T& OneElt) : Data(&OneElt), Length(1) {}
 
-  /// Construct an MiniArrayRef from a pointer and length.
+  /// Construct a MiniArrayRef from a pointer and length.
   constexpr MiniArrayRef(T* data, size_t length) : Data(data), Length(length) {}
 
-  /// Construct an MiniArrayRef from a range.
+  /// Construct a MiniArrayRef from a range.
   constexpr MiniArrayRef(T* begin, T* end) : Data(begin), Length(end - begin) {}
 
   template <
@@ -53,7 +53,7 @@ class MiniArrayRef final {
   /* implicit */ MiniArrayRef(Container& container)
       : Data(container.data()), Length(container.size()) {}
 
-  /// Construct an MiniArrayRef from a std::vector.
+  /// Construct a MiniArrayRef from a std::vector.
   // The enable_if stuff here makes sure that this isn't used for
   // std::vector<bool>, because MiniArrayRef can't work on a std::vector<bool>
   // bitfield.
@@ -65,21 +65,21 @@ class MiniArrayRef final {
         "MiniArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.");
   }
 
-  /// Construct an MiniArrayRef from a std::array
+  /// Construct a MiniArrayRef from a std::array
   template <size_t N>
   /* implicit */ constexpr MiniArrayRef(std::array<T, N>& Arr)
       : Data(Arr.data()), Length(N) {}
 
-  /// Construct an MiniArrayRef from a C array.
+  /// Construct a MiniArrayRef from a C array.
   template <size_t N>
   // NOLINTNEXTLINE(*c-array*)
   /* implicit */ constexpr MiniArrayRef(T (&Arr)[N]) : Data(Arr), Length(N) {}
 
-  // /// Construct an MiniArrayRef from an empty C array.
+  // /// Construct a MiniArrayRef from an empty C array.
   /* implicit */ constexpr MiniArrayRef(const volatile void* Arr)
       : Data(nullptr), Length(0) {}
 
-  /// Construct an MiniArrayRef from a std::initializer_list.
+  /// Construct a MiniArrayRef from a std::initializer_list.
   /* implicit */ constexpr MiniArrayRef(const std::initializer_list<T>& Vec)
       : Data(
             std::begin(Vec) == std::end(Vec) ? static_cast<T*>(nullptr)
