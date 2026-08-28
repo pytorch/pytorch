@@ -1012,7 +1012,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // Get the result of the current future.
   IValue value() {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     if (eptr_) {
       std::rethrow_exception(eptr_);
@@ -1023,7 +1023,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // This accessor should only be used if we know that the future is
   // completed() with no error.
   const IValue& constValue() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     TORCH_INTERNAL_ASSERT(
       !eptr_,
@@ -1037,7 +1037,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // This accessor should only be used if we know that the future is
   // completed() with no error.
   const std::vector<WeakStorage>& storages() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     AT_ASSERT(!eptr_);
     return storages_;
@@ -1128,7 +1128,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // Tries to retrieve the error message from std::exception_ptr.
   std::string tryRetrieveErrorMessage() const {
     TORCH_CHECK(hasError(), "No error present on the future.");
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     return tryRetrieveErrorMessageInternal(eptr_);
   }
 
@@ -1138,17 +1138,17 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   bool hasValue() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     return completed_ && !eptr_;
   }
 
   bool hasError() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     return eptr_ ? true : false;
   }
 
   std::exception_ptr exception_ptr() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     return eptr_;
   }
 
