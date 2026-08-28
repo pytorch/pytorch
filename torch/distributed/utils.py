@@ -29,8 +29,8 @@ def _pack_kwargs(*args: Any, **kwargs: Any) -> tuple[tuple[Any, ...], tuple[str,
         assert kwargs == {"a": 3, "b": 4}
     Returns:
         Tuple[Tuple[Any, ...], Tuple[str, ...]]: The first tuple element gives
-        gives both positional args and kwarg values, where the positional args
-        proceed kwarg values and kwarg values are ordered consistently with the
+        both positional args and kwarg values, where the positional args
+        precede kwarg values and kwarg values are ordered consistently with the
         kwarg keys. The second tuple element gives the kwarg keys.
         The second tuple element's length is at most the first tuple element's length.
     """
@@ -133,18 +133,31 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
 
         from torch.nn.parallel.scatter_gather import _is_namedtuple
 
+        def _handle_container(obj, elements, make_container):
+            """Handle container types with object identity preservation."""
+            # pyrefly: ignore [bad-argument-type]
+            mapped = list(map(to_map, elements))
+            # Preserve object identity when all elements are unchanged (single-device case)
+            if all(len(m) == 1 for m in mapped):
+                transformed = [m[0] for m in mapped]
+                if all(t is o for t, o in zip(transformed, elements)):
+                    return [obj]
+                # pyrefly: ignore [no-matching-overload]
+                return [make_container(transformed)]
+            # pyrefly: ignore [no-matching-overload]
+            return [make_container(args) for args in zip(*mapped)]
+
         if _is_namedtuple(obj):
-            # pyrefly: ignore [bad-argument-type, no-matching-overload]
-            return [type(obj)(*args) for args in zip(*map(to_map, obj))]
+            return _handle_container(obj, obj, lambda x: type(obj)(*x))
         if isinstance(obj, tuple) and len(obj) > 0:
-            # pyrefly: ignore [bad-argument-type, no-matching-overload]
-            return list(zip(*map(to_map, obj)))
+            return _handle_container(obj, obj, tuple)
         if isinstance(obj, list) and len(obj) > 0:
-            # pyrefly: ignore [bad-argument-type, no-matching-overload]
-            return [list(i) for i in zip(*map(to_map, obj))]
+            return _handle_container(obj, obj, list)
         if isinstance(obj, dict) and len(obj) > 0:
-            # pyrefly: ignore [bad-argument-type, no-matching-overload]
-            return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
+            keys = list(obj.keys())
+            return _handle_container(
+                obj, obj.values(), lambda v: type(obj)(zip(keys, v))
+            )
         return [obj]
 
     # Avoid reference cycle

@@ -161,6 +161,34 @@ class WorkerServerTest(TestCase):
             )
             self.assertEqual(resp.status, 200)
 
+    def test_fr_dump_file_without_rank(self) -> None:
+        with local_worker_server() as pool:
+            # No process group has registered with the generic flight recorder
+            # in this process, so it has no rank to name the dump file with and
+            # must refuse rather than write a bogus file.
+            resp = pool.request("POST", "/handler/fr_dump_file")
+            self.assertEqual(resp.status, 503)
+            self.assertIn(b"Flight Recorder rank is unset", resp.data)
+            # Every backend has a recorder instance of its own, so the check is
+            # per instance too.
+            resp = pool.request("POST", "/handler/fr_dump_file?backend=nccl2")
+            self.assertEqual(resp.status, 503)
+            self.assertIn(b"Flight Recorder rank is unset", resp.data)
+
+    def test_fr_trace_json_selects_a_backend(self) -> None:
+        with local_worker_server() as pool:
+            # No argument reads the default instance, the one ProcessGroupGloo
+            # records into; naming a backend reads that backend's instance.
+            # Both are empty here, so this covers the routing, not the content.
+            for path in (
+                "/handler/fr_trace_json",
+                "/handler/fr_trace_json?backend=gloo",
+                "/handler/fr_trace_json?backend=nccl2",
+            ):
+                resp = pool.request("POST", path)
+                self.assertEqual(resp.status, 200, msg=path)
+                self.assertIn("pg_status", json.loads(resp.data))
+
     @skipIfRocmArch(MI200_ARCH)
     def test_tcp(self) -> None:
         import requests
@@ -259,7 +287,7 @@ class WorkerServerTest(TestCase):
             self.assertIn(
                 counter_name,
                 data,
-                f"Counter '{counter_name}' not found in response. Available counters: {list(data.keys())}",
+                lambda msg: f"{msg}\nCounter '{counter_name}' not found in response. Available counters: {list(data.keys())}",
             )
 
             # Verify the counter has expected metrics
@@ -273,14 +301,14 @@ class WorkerServerTest(TestCase):
             self.assertEqual(
                 counter_data["total_calls"],
                 3,
-                f"Expected 3 calls, got {counter_data['total_calls']}",
+                lambda msg: f"{msg}\nExpected 3 calls, got {counter_data['total_calls']}",
             )
 
             # Verify active_count is 0 (no active waiters)
             self.assertEqual(
                 counter_data["active_count"],
                 0,
-                f"Expected 0 active, got {counter_data['active_count']}",
+                lambda msg: f"{msg}\nExpected 0 active, got {counter_data['active_count']}",
             )
 
             # total_time_us and max_time_us may be 0 or very small for fast operations

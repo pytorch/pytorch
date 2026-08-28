@@ -421,8 +421,9 @@ class Tanh(Module):
     Examples::
 
         >>> m = nn.Tanh()
-        >>> input = torch.randn(2)
-        >>> output = m(input)
+        >>> input = torch.tensor([-2.0, -0.5, 0.0, 0.5, 2.0])
+        >>> m(input)
+        tensor([-0.9640, -0.4621,  0.0000,  0.4621,  0.9640])
     """
 
     def forward(self, input: Tensor) -> Tensor:

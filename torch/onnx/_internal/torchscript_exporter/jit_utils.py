@@ -275,7 +275,7 @@ def _create_node(
     n_outputs: int,
     shape_inference: bool = True,
 ) -> _C.Node:
-    """Creates an node 'domain_op', taking inputs and attributes."""
+    """Creates a node 'domain_op', taking inputs and attributes."""
     if isinstance(graph_or_block, _C.Graph):
         graph = graph_or_block
         node = graph.create(domain_op, inputs, n_outputs)

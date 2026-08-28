@@ -22,11 +22,11 @@ PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>)
 
 namespace torch::dynamo {
 
-std::vector<uint8_t> _PyOpcode_Caches_vec;
-
 using torch::dynamo::autograd::torch_c_dynamo_compiled_autograd_init;
 
 namespace {
+
+std::vector<uint8_t> _PyOpcode_Caches_vec;
 
 struct StripFunctionCall {
   template <typename T>
@@ -229,6 +229,7 @@ enum class PyTypeSlotBit : int64_t {
   TP_DESCR_GET = 8,
   TP_DESCR_SET = 9,
   TP_STR = 10,
+  TP_INIT = 11,
 };
 
 int64_t get_pysequence_slots(PyTypeObject* type) {
@@ -379,6 +380,8 @@ int64_t get_pytype_slots(PyTypeObject* type) {
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_DESCR_SET));
   if (PyType_GetSlot(type, Py_tp_str) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_STR));
+  if (PyType_GetSlot(type, Py_tp_init) != nullptr)
+    slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_INIT));
   return slots;
 }
 
@@ -434,34 +437,29 @@ void _register_functions(PyObject* mod) {
 
 void initDynamoBindings(PyObject* torch) {
   PyObject* dynamo = PyModule_Create(&_module);
-  if (dynamo == nullptr || PyModule_AddObject(torch, "_dynamo", dynamo) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      dynamo != nullptr && PyModule_AddObject(torch, "_dynamo", dynamo) == 0);
 #ifdef Py_GIL_DISABLED
   PyUnstable_Module_SetGIL(dynamo, Py_MOD_GIL_NOT_USED);
 #endif
 
   PyObject* eval_frame = torch_c_dynamo_eval_frame_init();
-  if (eval_frame == nullptr ||
-      PyModule_AddObject(dynamo, "eval_frame", eval_frame) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      eval_frame != nullptr &&
+      PyModule_AddObject(dynamo, "eval_frame", eval_frame) == 0);
 
   PyObject* utils = torch_c_dynamo_utils_init();
-  if (utils == nullptr || PyModule_AddObject(dynamo, "utils", utils) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      utils != nullptr && PyModule_AddObject(dynamo, "utils", utils) == 0);
 
   PyObject* guards = torch_c_dynamo_guards_init();
-  if (guards == nullptr || PyModule_AddObject(dynamo, "guards", guards) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      guards != nullptr && PyModule_AddObject(dynamo, "guards", guards) == 0);
 
   PyObject* compiled_autograd = torch_c_dynamo_compiled_autograd_init();
-  if (compiled_autograd == nullptr ||
-      PyModule_AddObject(dynamo, "compiled_autograd", compiled_autograd) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      compiled_autograd != nullptr &&
+      PyModule_AddObject(dynamo, "compiled_autograd", compiled_autograd) == 0);
 
   auto m = py::handle(eval_frame).cast<py::module>();
 
@@ -501,6 +499,28 @@ void initDynamoBindings(PyObject* torch) {
   m.def("set_c_recursion_limit", &dynamo_set_c_recursion_limit);
   m.def("get_c_recursion_limit", &dynamo_get_c_recursion_limit);
 
+  // Read a builtin callable's PyMethodDef.ml_flags (CPython's METH_* bits) so
+  // the tp_methods arity check can derive its calling convention from CPython
+  // instead of a hand-maintained flag. Returns None for callables that carry
+  // no ml_flags (slot wrappers, Python functions). method_descriptor and
+  // classmethod_descriptor share the d_method layout prefix, so one cast serves
+  // both.
+  m.def("get_method_ml_flags", [](py::handle fn) -> py::object {
+    PyObject* o = fn.ptr();
+    int flags = -1;
+    if (PyCFunction_Check(o)) {
+      flags = PyCFunction_GetFlags(o);
+    } else if (
+        Py_IS_TYPE(o, &PyMethodDescr_Type) ||
+        Py_IS_TYPE(o, &PyClassMethodDescr_Type)) {
+      flags = reinterpret_cast<PyMethodDescrObject*>(o)->d_method->ml_flags;
+    }
+    if (flags < 0) {
+      return py::none();
+    }
+    return py::int_(flags);
+  });
+
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
   m.def("_get_cache_entries_for_region", &_get_cache_entries_for_region);
   m.def("_get_total_cache_entry_count", &_get_total_cache_entry_count);
@@ -532,11 +552,12 @@ void initDynamoBindings(PyObject* torch) {
   _register_functions(dynamo);
 
   auto dynamo_module = py::handle(dynamo).cast<py::module>();
-  dynamo_module.def("has_slot", [](int64_t slots, py::object slot_bit_obj) {
-    // Convert slot_bit to int - handle both int and pybind11 enums
-    int64_t slot_bit = py::cast<int64_t>(slot_bit_obj.attr("__index__")());
-    return (slots & (1LL << slot_bit)) != 0;
-  });
+  dynamo_module.def(
+      "has_slot", [](int64_t slots, const py::object& slot_bit_obj) {
+        // Convert slot_bit to int - handle both int and pybind11 enums
+        int64_t slot_bit = py::cast<int64_t>(slot_bit_obj.attr("__index__")());
+        return (slots & (1LL << slot_bit)) != 0;
+      });
   py::enum_<PySequenceSlotBit>(dynamo_module, "PySequenceSlots")
       .value("SQ_LENGTH", PySequenceSlotBit::SQ_LENGTH)
       .value("SQ_CONCAT", PySequenceSlotBit::SQ_CONCAT)
@@ -603,7 +624,8 @@ void initDynamoBindings(PyObject* torch) {
       .value("TP_SETATTRO", PyTypeSlotBit::TP_SETATTRO)
       .value("TP_DESCR_GET", PyTypeSlotBit::TP_DESCR_GET)
       .value("TP_DESCR_SET", PyTypeSlotBit::TP_DESCR_SET)
-      .value("TP_STR", PyTypeSlotBit::TP_STR);
+      .value("TP_STR", PyTypeSlotBit::TP_STR)
+      .value("TP_INIT", PyTypeSlotBit::TP_INIT);
 }
 
 } // namespace torch::dynamo

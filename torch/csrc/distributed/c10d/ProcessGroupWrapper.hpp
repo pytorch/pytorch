@@ -108,12 +108,6 @@ class TORCH_API ProcessGroupWrapper : public Backend {
   void monitoredBarrier(const BarrierOptions& opts, bool waitAllRanks = false)
       override;
 
-  // Agrees on an initial sequence number for the whole group by having rank 0
-  // create it and broadcast it to other ranks using the store. Only implemented
-  // for GLOO and NCCL backends currently.
-  // don't implement this
-  void setSequenceNumberForGroup() override;
-
   // Retrieves the current sequence number for the whole group, which should be
   // in sync. If the returned number is not consistent across the group, it
   // may indicate that there is some sort of collective desynchronization.
@@ -156,6 +150,8 @@ class TORCH_API ProcessGroupWrapper : public Backend {
   bool supportsSplitting() const override;
   bool supportsCoalescing() const override;
   bool supportsTimeEstimation() const override;
+  void startTimeEstimate() override;
+  float endTimeEstimate() override;
   bool supportsShrinking() const override;
   c10::intrusive_ptr<Backend> shrink(
       const std::vector<int64_t>& ranks_to_exclude,
@@ -176,6 +172,8 @@ class TORCH_API ProcessGroupWrapper : public Backend {
   std::unordered_map<std::string, uint64_t> getMemoryStats() override;
 
   ErrorType getError() override;
+  std::optional<at::Device> getBoundDeviceId() const override;
+  void setBoundDeviceId(std::optional<at::Device> device) override;
   void eagerConnectSingleDevice(at::Device device) override;
 
   c10::intrusive_ptr<Backend> getWrappedPg() const;
