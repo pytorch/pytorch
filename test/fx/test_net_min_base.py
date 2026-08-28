@@ -9,10 +9,12 @@ from torch.fx.passes.net_min_base import (
     FxNetMinimizerResultMismatchError,
 )
 from torch.fx.passes.tools_common import Names
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 class TestNetMinBaseBlock(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         # Setup test fixtures for each test method
