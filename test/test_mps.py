@@ -15992,6 +15992,10 @@ class TestConsistency(TestCaseMPS):
         'addr', 'var_mean',
         'acosh', 'asinh', 'asin',
         'masked.std',
+        # Segment sums are accumulated in fp32 on MPS and in the input dtype
+        # on CPU, so MPS is the more accurate of the two (measured against an
+        # fp64 reference) but the two disagree past the default half tolerance.
+        '_segment_reduce',
         'nn.functional.avg_pool2d',  # NS: Only for backward pass
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
