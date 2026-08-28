@@ -134,4 +134,8 @@ autograd_function_apply_13_in_2_out_no_save,instruction_count,31627,0.1
 
 
 
-runtime_overhead_eager_cpu,instruction_count,193900,0.1
+runtime_overhead_eager_cpu,instruction_count,155600,0.1
+
+
+
+runtime_overhead_eager,instruction_count,170100,0.1
