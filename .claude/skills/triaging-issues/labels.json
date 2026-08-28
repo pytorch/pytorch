@@ -1096,6 +1096,10 @@
       "description": "This tag is to mark Feature Tracked for PyTorch OSS Releases"
     },
     {
+      "name": "release-review",
+      "description": "Flagged as a possible release-branch candidate under the RELEASE.md cherry-pick criteria. For release-manager review; does not itself request a cherry-pick."
+    },
+    {
       "name": "security",
       "description": ""
     },

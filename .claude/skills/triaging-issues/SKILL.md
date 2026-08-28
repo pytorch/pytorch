@@ -34,6 +34,7 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
   - Step 3: Redirect to Secondary Oncall
   - Step 4: Label the Issue
   - Step 5: High Priority — REQUIRES HUMAN REVIEW
+  - Step 5.5: release-review — Possible Release-Branch Candidate
   - Step 6: bot-triaged (automatic)
   - Step 7: Mark Triaged
 - [V1 Constraints](#v1-constraints)
@@ -234,6 +235,39 @@ High priority criteria:
 - Many users affected
 - Core component or popular model impact
 
+### 5.5) release-review — Possible Release-Branch Candidate
+
+Add `release-review` when an issue plausibly meets the cherry-pick bar in
+[RELEASE.md](../../../RELEASE.md). The point is to surface candidates early so the release
+manager can find them with a search, not to decide anything — a fix may not exist yet, and
+the decision to cherry-pick is never the bot's.
+
+Add it when **any** of these hold:
+
+- **Regression against the most recent released minor version.** Pair it with
+  `module: regression`. Only against the last released minor (e.g. while 2.14 is in
+  progress, a regression versus 2.13.x) — a regression against a much older version is
+  not a release candidate.
+- **Critical correctness or stability:** silent correctness (wrong results, no error),
+  backwards-compatibility break, crash / segfault, deadlock or hang, or a large memory
+  leak.
+- **Critical fix to a feature introduced in the most recent minor release** — new
+  surface that shipped broken.
+- **Binary / packaging:** anything affecting wheels, conda packages, Docker images,
+  install, or the release build itself. Pair it with `module: binaries`.
+- **Affects the release currently being prepared.** A bug reported against a nightly, an
+  RC, or the release branch that would ship if it is not fixed — including anything found
+  by release validation or downstream canaries. This holds even when it is not a
+  regression against the previous minor, e.g. a defect in code that has never shipped.
+
+Apply it generously. A false positive costs the release manager one glance; a miss costs
+a broken release. When unsure, add it.
+
+`release-review` is a flag, not a verdict, and it is independent of `triage review` — an
+issue can carry both. Do not add it to feature requests, enhancements, or documentation-only
+issues, and do not add it for a regression against a version older than the last released
+minor.
+
 ### 6) bot-triaged (automatic)
 
 The `bot-triaged` label is automatically applied by a post-hook after any issue mutation. You do not need to add it manually.
@@ -257,6 +291,7 @@ If not transferred/redirected and not flagged for review, add `triaged`.
 **DO:**
 - Close clear usage questions and point to discuss.pytorch.org (per step 1)
 - Be conservative - when in doubt, add `triage review` for human attention
+- Add `release-review` whenever an issue plausibly meets the RELEASE.md cherry-pick bar (step 5.5); err toward adding it
 - Apply type labels (`feature`, `enhancement`, `function request`) when confident
 - Add `triaged` label when classification is complete
 
