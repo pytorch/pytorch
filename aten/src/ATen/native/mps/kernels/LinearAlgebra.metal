@@ -1347,7 +1347,7 @@ inline float luPivotMag(T v) {
 }
 template <typename T>
 inline T luRecip(T v) {
-  if constexpr (::metal::is_same_v<T, float2>) {
+  if IF_CONSTEXPR (::metal::is_same_v<T, float2>) {
     return c10::metal::div(float2(1.0f, 0.0f), v);
   } else {
     return 1.0f / v;
