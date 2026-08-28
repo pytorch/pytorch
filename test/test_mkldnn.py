@@ -1753,6 +1753,18 @@ class TestMkldnn(TestCase):
             with torch.backends.flags(fp32_precision="tf32"):
                 self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "tf32")
 
+    def test_unsupported(self):
+        # unsupported types and unsupported types with gpu
+        for dtype in [torch.double, torch.uint8, torch.int8,
+                      torch.short, torch.int, torch.long]:
+            with self.assertRaises(RuntimeError):
+                torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cpu')).to_mkldnn()
+
+        # some factory functions
+        for creator in [torch.ones, torch.randn, torch.rand]:
+            with self.assertRaises(RuntimeError):
+                creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
+
 
 @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
 class TestMkldnnDevice(TestCase):
@@ -1764,19 +1776,11 @@ class TestMkldnnDevice(TestCase):
         for dtype in [torch.double, torch.uint8, torch.int8,
                       torch.short, torch.int, torch.long]:
             with self.assertRaises(RuntimeError):
-                torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cpu')).to_mkldnn()
-
-            with self.assertRaises(RuntimeError):
                 torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device(device)).to_mkldnn()
 
         # supported type with gpu
         with self.assertRaises(RuntimeError):
             torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device(device)).to_mkldnn()
-
-        # some factory functions
-        for creator in [torch.ones, torch.randn, torch.rand]:
-            with self.assertRaises(RuntimeError):
-                creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
 
 
 instantiate_parametrized_tests(TestMkldnn)
