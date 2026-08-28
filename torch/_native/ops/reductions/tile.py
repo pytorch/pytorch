@@ -13,10 +13,17 @@
 # is the degenerate multirow shape -- one thread owns a whole row and there is no lane merge
 # at all -- and any tpr > 1 shape finishes by folding across its lanes (merge_lanes).
 #
-# The folds here are ROLLED: the trip count is a RUNTIME value, so ONE compiled kernel serves
-# every row length in a vec class. That is a requirement, not a preference -- a static
+# Most folds here are ROLLED: the trip count is a RUNTIME value, so ONE compiled kernel
+# serves every row length in a vec class. That is the default for a good reason -- a static
 # per-thread loop makes compile time scale with the shape (see MAX_UNROLL) and the kernel
 # count scale with the number of distinct shapes seen.
+#
+# The exception is an ORDER that fixes its add DAG at compile time (the inner-tree order): it
+# binds every value to a slot in a tree, so it cannot ride a runtime trip count. That form
+# needs the STATIC fragment -- `load` fills a per-thread tile once and the fold walks it with
+# `range_constexpr` -- and pays the compile/kernel-count cost in exchange for a reproducible
+# bit pattern. `TileMap.strides` is where the two chunk-to-warp assignments differ, and it is
+# the only place they differ: the emitted loads are identical either way.
 
 import math
 
@@ -117,16 +124,30 @@ def _decode_offset(linear, vals, npairs):
     return off + rem * vals[4 * (npairs - 1) + 3]
 
 
+def _off(base, i: int):
+    # Keep a static base static (see TileMap.col_base): int + int stays foldable.
+    return base + i if isinstance(base, int) else base + Int32(i)
+
+
 class TileMap:
     """How one row is spread over threads and loads.
 
     tpr == 1 -> one thread owns a whole row, and there is no lane merge.
     """
 
-    def __init__(self, N: int, itemsize: int, tpr: int, loads: int):
+    def __init__(
+        self,
+        N: int,
+        itemsize: int,
+        tpr: int,
+        loads: int,
+        warp_major: bool = False,
+        vec: int | None = None,
+        exact: bool | None = None,
+    ):
         if tpr != 1 and tpr % WARP != 0:
             raise ValueError(f"tpr must be 1 or a multiple of {WARP}, got {tpr}")
-        unroll = vec_size(N, itemsize) * loads
+        unroll = (vec_size(N, itemsize) if vec is None else vec) * loads
         if unroll > MAX_UNROLL:
             raise ValueError(
                 f"per-thread unroll {unroll} (vec*loads) exceeds MAX_UNROLL={MAX_UNROLL}; "
@@ -134,9 +155,18 @@ class TileMap:
                 f"Got N={N} tpr={tpr} loads={loads}."
             )
         self.N = N
-        self.vec = vec_size(N, itemsize)
+        # `vec` is normally derived, but an order can DEFINE itself in terms of 16 // itemsize
+        # regardless of N (the inner-tree order does, and identity-pads a ragged row), so that
+        # caller passes its own -- the derived gcd form would change the add DAG and the bits.
+        self.vec = vec_size(N, itemsize) if vec is None else vec
         self.tpr = tpr
         self.loads = loads
+        self.warp_major = warp_major
+        self.nw = 1 if tpr == 1 else tpr // WARP
+        # Exact when the tile covers the row with nothing left over: every load is then
+        # unconditionally in range and no predication is emitted at all. A BATCHED tile covers
+        # only its batch, so that caller passes exact=False.
+        self.exact = (self.vec * self.loads * self.tpr == N) if exact is None else exact
         # A wide load needs vec to divide N, which is what makes every row start (row stride
         # N*itemsize) and every chunk base carry the base pointer's alignment. When it does
         # not, the load falls back to per-element reads.
@@ -144,11 +174,52 @@ class TileMap:
 
     @property
     def sig(self):
-        return (self.N, self.vec, self.tpr, self.loads, self.wide_ok)
+        return (
+            self.N,
+            self.vec,
+            self.tpr,
+            self.loads,
+            self.warp_major,
+            self.exact,
+            self.wide_ok,
+        )
 
     def align_bytes(self, itemsize: int) -> int:
         """Alignment to declare for THIS tile (element width when the wide load is off)."""
         return self.vec * itemsize if self.wide_ok else itemsize
+
+    def strides(self):
+        """(lane, w, l) column strides -- the ORDER lives here and nowhere else.
+
+        The regular and inner-tree orders read the SAME elements into the SAME registers and
+        differ only in which chunk goes to which warp, i.e. in the `l` and `w` strides being
+        swapped. Both keep stride-1 innermost and both are compact, so the emitted instruction
+        stream is byte-identical either way.
+        """
+        if self.tpr == 1:
+            return (0, 0, self.vec)
+        wle = WARP * self.vec  # columns one warp covers in one load
+        if self.warp_major:
+            return (self.vec, wle * self.loads, wle)
+        return (self.vec, wle, wle * self.nw)
+
+    def col_base(self, lane, w, l: int, warp_stride=None):
+        """Column of element 0 of this thread's load `l`.
+
+        Returns a PYTHON INT when the whole offset is compile-time (tpr == 1), and only builds
+        a dynamic value when lane/w actually participate. That distinction is load-bearing,
+        not cosmetic: a static offset folds into the address so the compiler can prove the
+        16-byte alignment and emit the wide load, while wrapping the same number in Int32
+        hides it and silently costs 3x.
+        """
+        s_lane, s_w, s_l = self.strides()
+        if warp_stride is not None:
+            # Caller supplies the per-warp stride; 0 means the warp offset is already folded
+            # into base_col.
+            s_w = warp_stride
+        if self.tpr == 1:
+            return l * s_l
+        return lane * Int32(s_lane) + w * s_w + Int32(const_expr(l * s_l))
 
 
 @cute.jit
@@ -268,6 +339,99 @@ def merge_lanes(trait, acc, tpr: cutlass.Constexpr, asc: cutlass.Constexpr = Fal
     return warp_reduce(trait, acc, tpr, ascending=asc)
 
 
+def leaf_op(trait):
+    # The scalar combiner, taken FROM THE TRAIT so any associative 1-field trait shares these
+    # orders. Traits carry nfields-tuples, so unwrap for the scalar tree helpers.
+    def op(x, y):
+        return trait.combine((x,), (y,))[0]
+
+    return op
+
+
+def identity(trait):
+    return trait.init()[0]
+
+
+def _linear_reduce(vals, op):
+    acc = vals[0]
+    for i in range(1, len(vals)):
+        acc = op(acc, vals[i])
+    return acc
+
+
+def _inner_tree_reduce(vals, op):
+    # Stride-doubling pairwise tree: stride 1, 2, 4, ... folding v[i] += v[i + stride].
+    v = list(vals)
+    n = len(v)
+    stride = 1
+    while stride < n:
+        i = 0
+        while i + stride < n:
+            v[i] = op(v[i], v[i + stride])
+            i += stride * 2
+        stride *= 2
+    return v[0]
+
+
+def _reduce_vec(vals, vec, op):
+    return _inner_tree_reduce(vals, op) if vec >= 4 else _linear_reduce(vals, op)
+
+
+def _streaming_push(tree, val, load: int, max_depth: int, op) -> None:
+    # ATen's streaming_inner_tree_step. The merge count is the number of trailing zero bits of
+    # (load + 1) -- __ffs(load + 1) - 1 -- capped at max_depth. The existing accumulator stays
+    # on the LEFT: carry = op(tree.pop(), carry). Both details are load-bearing for bitwise
+    # equality.
+    trailing_zeros = ((load + 1) & -(load + 1)).bit_length() - 1
+    carry = val
+    for _ in range(min(trailing_zeros, max_depth)):
+        carry = op(tree.pop(), carry)
+    tree.append(carry)
+
+
+@cute.jit
+def fold_itree_warp(
+    trait,
+    frag,
+    tm: cutlass.Constexpr,
+    max_depth: cutlass.Constexpr,
+    lane,
+    w,
+    base_col=0,
+    bound=None,
+    warp_stride=None,
+):
+    """Inner-tree fold for the WARP-COOPERATIVE shape. Returns a 1-field acc tuple.
+
+    Differs from `fold_itree` (tpr == 1) in two ways, both forced by the order:
+      * the lane merge happens INSIDE the load loop -- one ascending butterfly per load,
+        before the streaming carry -- rather than once at the end;
+      * the column is dynamic (it depends on lane and warp), so out-of-row slots are masked
+        to the identity here instead of by a compile-time comparison.
+
+    `merge_lanes` is the warp butterfly at any tpr: `_offsets` clamps to WARP, so tpr=512
+    yields the same [1,2,4,8,16] as a single warp.
+    """
+    op, ident = leaf_op(trait), identity(trait)
+    hi = Int32(const_expr(tm.N)) if bound is None else bound
+    tree: list = []
+    for l in cutlass.range_constexpr(tm.loads):
+        base = tm.col_base(lane, w, l, warp_stride) + base_col
+        vals = []
+        for i in cutlass.range_constexpr(tm.vec):
+            # The trait call is hoisted OUT of the predicate and the mask is a select: a trait
+            # reference inside a dynamic `if` leaks the python object into the IR flattener
+            # ("encountered a user-defined Python object"). Reading an unwritten frag slot is
+            # harmless -- the select discards it.
+            x = trait.acc(frag[i, l])
+            vals.append(x if _off(base, i) < hi else ident)
+        merged = merge_lanes(
+            trait, (_reduce_vec(vals, tm.vec, op),), const_expr(tm.tpr), asc=True
+        )
+        _streaming_push(tree, merged[0], l, max_depth, op)
+    return (tree[0],)
+
+
 _ROLL_UNROLL = 4
 
 
@@ -324,6 +488,62 @@ def fold_linear_rolled(
         for i in cutlass.range_constexpr(vec):
             acc = reduce_fn(acc, acc_dt(frag[i]), c * Int32(vec) + Int32(i), True)
     return acc
+
+
+@cute.jit
+def _wide(rowv, base, vec: cutlass.Constexpr, frag_l):
+    # `vec` elements (up to 128 bits) in ONE instruction. The (vec,) view is built by
+    # pointer offset so `base` may be dynamic; frag_l is this load's slice of the fragment.
+    src = cute.make_tensor(rowv.iterator + base, cute.make_layout(vec))
+    cute.autovec_copy(src, frag_l)
+
+
+@cute.jit
+def load(
+    mX,
+    r,
+    tm: cutlass.Constexpr,
+    lane,
+    w,
+    frag,
+    base_col=0,
+    bound=None,
+    warp_stride=None,
+):
+    """Fill `frag` ((vec, loads) rmem) with this thread's slice of row `r`.
+
+    Emits ONE wide load per (thread, load) when the tile is exact. Otherwise the group is
+    tested once -- a fully in-row group still takes the wide load, and only a ragged group
+    falls back to per-element reads, with out-of-row elements left UNTOUCHED for the caller
+    to treat as identity.
+    """
+    hi = Int32(const_expr(tm.N)) if bound is None else bound
+    rowv = mX[Int64(r), None]
+    for l in cutlass.range_constexpr(tm.loads):
+        # base_col may be a python int (0, or a baked batch offset) or a DYNAMIC value
+        # (the two-kernel stage 1 derives it from the block index); a plain add keeps a
+        # static base static and promotes only when it has to.
+        base = tm.col_base(lane, w, l, warp_stride) + base_col
+        if const_expr(tm.exact and tm.wide_ok):
+            _wide(rowv, base, tm.vec, frag[None, l])
+        elif const_expr(not tm.wide_ok):
+            for i in cutlass.range_constexpr(tm.vec):
+                # `_off(base, i)` is inlined rather than bound to a name: binding a DYNAMIC
+                # value inside a dynamic `if` is rejected ("None prior to this if, and update
+                # to Int32 inside"). The compiler CSEs the repeated expression.
+                if _off(base, i) < hi:
+                    frag[i, l] = rowv[_off(base, i)]
+        else:
+            if _off(base, tm.vec) <= hi:
+                _wide(rowv, base, tm.vec, frag[None, l])
+            else:
+                for i in cutlass.range_constexpr(tm.vec):
+                    if _off(base, i) < hi:
+                        frag[i, l] = rowv[_off(base, i)]
+
+
+def make_fragment(mX, tm) -> cute.Tensor:
+    return cute.make_rmem_tensor(cute.make_layout((tm.vec, tm.loads)), mX.element_type)
 
 
 def smem_box_layout(N: int, threads: int):
