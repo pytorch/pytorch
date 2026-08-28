@@ -503,16 +503,16 @@ jobs:
       runner: windows.4xlarge.nonephemeral
     secrets: inherit
 
-  linux-jammy-rocm-py3_10-build:
-    name: linux-jammy-rocm-py3.10-mi350
+  linux-noble-rocm-py3_12-build:
+    name: linux-noble-rocm-py3.12-mi350
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
     with:
       runner_prefix: "mt-"
-      build-environment: linux-jammy-rocm-py3.10-mi350
-      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+      build-environment: linux-noble-rocm-py3.12-mi350
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       # TODO (huydhn): Add this back once other workflow migrates
       # sync-tag: rocm-build
@@ -533,20 +533,20 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.2" },
           { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.2" },
         ]}
-      python-version: "3.10"
+      python-version: "3.12"
     secrets: inherit
 
-  linux-jammy-rocm-py3_10-test:
-    name: linux-jammy-rocm-py3.10-mi350
+  linux-noble-rocm-py3_12-test:
+    name: linux-noble-rocm-py3.12-mi350
     uses: ./.github/workflows/_rocm-test.yml
     needs:
-      - linux-jammy-rocm-py3_10-build
+      - linux-noble-rocm-py3_12-build
       - target-determination
       - job-filter
     with:
-      build-environment: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-noble-rocm-py3_12-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-noble-rocm-py3_12-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-rocm-py3_12-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
     secrets: inherit
 
