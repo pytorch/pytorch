@@ -203,6 +203,14 @@ static void init(void) {
       .gemm = pytorch_q8gemm_ukernel_8x8__aarch64_neon,
       .conv = pytorch_q8conv_ukernel_8x8__aarch64_neon,
       .gemm_dq = pytorch_q8gemm_dq_ukernel_8x8__aarch64_neon,
+      // Batch 1 to 4 gets a kernel of exactly that height; 5 and up keep 8x8.
+      .gemm_dq_exact =
+          {
+              pytorch_q8gemm_dq_ukernel_1x8__aarch64_neon,
+              pytorch_q8gemm_dq_ukernel_2x8__aarch64_neon,
+              pytorch_q8gemm_dq_ukernel_3x8__aarch64_neon,
+              pytorch_q8gemm_dq_ukernel_4x8__aarch64_neon,
+          },
       .mr = 8,
       .nr = 8,
       .kr = 1,

@@ -432,6 +432,20 @@ class TestCalculateShards(unittest.TestCase):
             ),
         )
 
+    def test_disable_pytest_sharding_preserves_file_times(self) -> None:
+        test_times = {"test1": THRESHOLD * 4, "test2": THRESHOLD * 2.5}
+        shards = calculate_shards(
+            2,
+            [TestRun(t) for t in test_times],
+            test_times,
+            gen_class_times(test_times),
+            allow_pytest_sharding=False,
+        )
+
+        tests = [test for _, shard in shards for test in shard]
+        self.assertEqual([test.num_shards for test in tests], [1, 1])
+        self.assertEqual([test.get_time() for test in tests], list(test_times.values()))
+
     def test_zero_tests(self) -> None:
         self.assertListEqual([(0.0, []), (0.0, [])], calculate_shards(2, [], {}, None))
 
