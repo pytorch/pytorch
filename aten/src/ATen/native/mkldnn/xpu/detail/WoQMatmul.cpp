@@ -120,18 +120,12 @@ void woq_matmul_int4_impl(
       /* mask */ (1 << 0) + (1 << 1),
       {group_size, 1},
       scale_dt);
-  // Set zero point: scalar for symmetric, per-group for asymmetric
+  // Set a single zero point with s8 data type for asymmetric.
   if (zp.has_value()) {
     pattr.set_zero_points(
         DNNL_ARG_WEIGHTS,
         (1 << 0) + (1 << 1),
         {group_size, 1},
-        dnnl::memory::data_type::s8);
-  } else {
-    pattr.set_zero_points(
-        DNNL_ARG_WEIGHTS,
-        /* mask */ 0,
-        {},
         dnnl::memory::data_type::s8);
   }
 
@@ -175,24 +169,18 @@ static inline void set_quant_primitive_attr(
     const Tensor& scale,
     const std::optional<Tensor>& zp,
     const int64_t group_size) {
-  // set scale for matmul args
+  // set scale and zero point for matmul args
   pattr.set_scales(
       DNNL_ARG_WEIGHTS,
       /* mask */ (1 << 0) + (1 << 1),
       {group_size, 1},
       get_onednn_dtype(scale));
-  // set zero point: scalar for symmetric, per-group for asymmetric
+  // set zero points only for asymmetric quantization
   if (zp.has_value()) {
     pattr.set_zero_points(
         DNNL_ARG_WEIGHTS,
         /* mask */ (1 << 0) + (1 << 1),
         {group_size, 1},
-        memory::data_type::s8);
-  } else {
-    pattr.set_zero_points(
-        DNNL_ARG_WEIGHTS,
-        /* mask */ 0,
-        {},
         memory::data_type::s8);
   }
 }
@@ -248,7 +236,8 @@ void woq_matmul_int4_impl_cache(
 #endif
   };
 
-  int64_t zp_group_size = zp.has_value() ? group_size : 1;
+  // zp_group_size is 0 when zero points are not used (symmetric quantization)
+  int64_t zp_group_size = zp.has_value() ? group_size : 0;
   auto device_id = c10::xpu::current_device();
   auto& matmul_ext = matmul_primitive_create_and_cache(
       jd,
@@ -275,7 +264,7 @@ void woq_matmul_int4_impl_cache(
             get_onednn_md(scale), engine, scale.data_ptr());
       });
 
-  // set zp: per-group for asymmetric, scalar zero for symmetric
+  // set zp_md for asymmetric quantization
   if (zp.has_value()) {
     matmul_ext.set_attribute(
         DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, zp->data_ptr(), [&]() {
@@ -285,14 +274,6 @@ void woq_matmul_int4_impl_cache(
               engine,
               zp->data_ptr());
           return zp_usr_m;
-        });
-  } else {
-    static int8_t zero_val = 0;
-    matmul_ext.set_attribute(
-        DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, &zero_val, [&]() {
-          memory zp_scalar_m(
-              {{1}, memory::data_type::s8, {1}}, engine, &zero_val);
-          return zp_scalar_m;
         });
   }
 
