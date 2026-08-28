@@ -1,10 +1,11 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
 # Minimal smoke test for the vectorized row kernel on the shared tile datapath. Proves it
-# compiles and reduces a contiguous last dim, and that its ROLLED fold is what the design
-# claims: one compiled kernel serves every N in a vec class, so distinct N must not each
-# add a plan-cache entry. Real numeric coverage comes from the reduction overrides' OpInfo
-# suites in a later commit.
+# compiles and reduces a contiguous last dim, that its ROLLED fold is what the design claims
+# (one compiled kernel serves every N in a vec class, so distinct N must not each add a
+# plan-cache entry), and that its two narrow-row options -- one thread per row, and the
+# TMA-staged load with its rotated smem read -- are wired and correct. Real numeric coverage
+# comes from the reduction overrides' OpInfo suites in a later commit.
 
 import unittest
 
@@ -143,15 +144,21 @@ class TestKernelRowTile(TestCase):
 
     def test_absmax_absmin_propagate_nan(self):
         # These traits' contract is vector_norm(ord=+-inf), which is amax/amin of |x| and
-        # PROPAGATES NaN. A builtin max()/min() that returned the non-NaN operand would diverge
-        # silently on exactly one row, so pin it.
+        # PROPAGATES NaN. They spell that as builtin max()/min(), whose lowering over these
+        # accumulators is not evident from the source, so pin the behaviour instead of arguing
+        # about it -- and pin it from EVERY position, because whether a NaN survives can depend
+        # on which operand of the fold it lands in. Half the rows are left clean so the isnan
+        # comparison cannot pass by everything being NaN, and so the VALUES get checked too.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import kernel_rowtile as rt
 
-        x = torch.randn(8, 512, device="cuda")
-        x[0, 17] = float("nan")
+        M, N = 64, 512
+        half = M // 2
+        x = torch.randn(M, N, device="cuda")
+        rows = torch.arange(half, device="cuda")
+        x[rows, rows * (N // half)] = float("nan")  # a distinct column per row
         for trait, ord_ in ((T.AbsMaxOps, float("inf")), (T.AbsMinOps, -float("inf"))):
             with self.subTest(trait=trait.__name__):
                 (got,) = rt.reduce_row_tile(
@@ -162,7 +169,7 @@ class TestKernelRowTile(TestCase):
                 )
                 want = torch.linalg.vector_norm(x, ord=ord_, dim=-1)
                 self.assertEqual(got.isnan(), want.isnan())
-                self.assertEqual(got[1:], want[1:])
+                self.assertEqual(got[half:], want[half:])
 
     def test_welford_divisor_clamps_at_zero(self):
         # correction >= n must divide by ZERO (-> +inf, which is what aten returns), never by a
@@ -202,6 +209,196 @@ class TestKernelRowTile(TestCase):
                     trait(acc=cutlass.Int32), f"int_{trait.__name__}", x, [torch.int32]
                 )
                 self.assertEqual(got, ref)
+
+    def test_narrow_row_one_thread_per_row(self):
+        # tpr=1: one thread owns a whole row, no lane merge at all.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_rowtile
+
+        x = torch.randn(8192, 16, device="cuda")
+        (out,) = kernel_rowtile.reduce_row_tile(
+            T.SumOps(acc=cutlass.Float32),
+            "narrow",
+            x,
+            [torch.float32],
+            tpr=1,
+            use_tma=False,
+        )
+        self.assertEqual(out, x.sum(dim=1), atol=1e-3, rtol=1e-3)
+
+    def test_tma_staged_narrow_row_argmax(self):
+        # The TMA path rotates each thread's smem read order to de-conflict the banks, so the
+        # column a value came from is no longer the loop counter. An index trait is what
+        # catches a wrong rotation: the values would still look right.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_rowtile
+
+        if not kernel_rowtile.tma_ok(32, 4, 65536, torch.device("cuda")):
+            self.skipTest("TMA path not applicable on this device")
+        x = torch.randn(65536, 32, device="cuda")
+        (idx,) = kernel_rowtile.reduce_row_tile(
+            T.ArgMaxOps(acc=cutlass.Float32),
+            "narrow_tma",
+            x,
+            [torch.int32],
+            tpr=1,
+            use_tma=True,
+        )
+        self.assertEqual(idx, x.argmax(dim=1).to(torch.int32))
+
+    def _sum_trait(self):
+        # The narrow-row tests all drive a plain sum; keep the import local so the module still
+        # imports without the DSL.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+
+        return T.SumOps(acc=cutlass.Float32)
+
+    def test_narrow_row_and_tma_gates(self):
+        # Both gates are pure Python needing no GPU, and the TIERING is the whole point of the
+        # ladder -- a rung silently widening admits a shape measured to regress. Assert the
+        # documented tiers, the ceiling, and that TMA only fires where the direct load falls off
+        # its 128-byte-stride cliff.
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        # Row too wide for one thread, at any M.
+        self.assertFalse(rt.narrow_row(rt._MAX_NARROW_N + 1, 4, 1 << 20))
+        # The ladder is monotone in M: a chunk budget that fails at few rows passes at many.
+        self.assertFalse(
+            rt.narrow_row(128, 4, 1024)
+        )  # below the smallest rung's row count
+        self.assertTrue(rt.narrow_row(16, 4, 1 << 20))  # 4 chunks, plenty of rows
+        for min_rows, budget in rt._CHUNK_LADDER:
+            n = budget * 4  # fp32: vec=4, so chunks == n // 4 == budget exactly
+            with self.subTest(min_rows=min_rows, budget=budget):
+                self.assertTrue(rt.narrow_row(n, 4, min_rows))
+                self.assertFalse(
+                    rt.narrow_row(n + 4, 4, min_rows), "budget did not bite"
+                )
+        # TMA is for the over-the-cliff stride only, is fp32-only and power-of-two-only.
+        self.assertFalse(
+            rt.tma_ok(16, 4, 1 << 20)
+        )  # 64B lane stride: direct load is at SOL
+        self.assertTrue(rt.tma_ok(32, 4, 1 << 20))  # 128B: the cliff
+        self.assertFalse(rt.tma_ok(48, 4, 1 << 20))  # not a power of two
+        self.assertFalse(
+            rt.tma_ok(32, 2, 1 << 20)
+        )  # bf16: the rotation is 4-byte arithmetic
+
+    def test_narrow_row_scalar_vec(self):
+        # narrow_row admits N whose vec collapses to 1 (any N coprime with 4), which is a scalar
+        # fold at element alignment -- a different load path from the vec=4 case the other tests
+        # cover, and reachable through the dispatcher.
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        for n in (1, 2, 3, 5, 7):
+            x = torch.randn(1 << 16, n, device="cuda")
+            with self.subTest(n=n):
+                # vec is gcd(N, 4) for fp32, so these N give a 1- or 2-wide load rather than
+                # the 4-wide one every other narrow test exercises.
+                self.assertLess(rt.tile.vec_size(n, 4), 4)
+                (out,) = rt.reduce_row_tile(
+                    self._sum_trait(), f"narrow_vec{n}", x, [torch.float32], tpr=1
+                )
+                self.assertEqual(
+                    out, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
+                )
+
+    def test_narrow_row_ragged_m(self):
+        # M a multiple of nt leaves the partial last tile -- and the TMA descriptor's zero-fill,
+        # which correctness depends on -- untouched. Use M values that are NOT multiples.
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        for m in (1, 3, 8191, 65537):
+            for n in (16, 32):
+                x = torch.randn(m, n, device="cuda")
+                with self.subTest(m=m, n=n):
+                    (out,) = rt.reduce_row_tile(
+                        self._sum_trait(), f"ragged_m{n}", x, [torch.float32], tpr=1
+                    )
+                    self.assertEqual(
+                        out, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
+                    )
+
+    def test_tma_second_call_rebinds_the_descriptor(self):
+        # The TMA atom is built in __call__ while the plan is cached on a signature that excludes
+        # M, so a cache HIT must still pick up a new base pointer and a new row count. Call twice
+        # with different tensors and different M: a stale descriptor reads the first tensor.
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        n = 32
+        self.assertTrue(rt.tma_ok(n, 4, 1 << 20), "shape no longer takes the TMA path")
+        first = torch.randn(4096, n, device="cuda")
+        (a,) = rt.reduce_row_tile(
+            self._sum_trait(), "tma_rebind", first, [torch.float32], tpr=1, use_tma=True
+        )
+        self.assertEqual(a, first.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
+        second = torch.randn(4097, n, device="cuda")  # new pointer AND a new M
+        (b,) = rt.reduce_row_tile(
+            self._sum_trait(),
+            "tma_rebind",
+            second,
+            [torch.float32],
+            tpr=1,
+            use_tma=True,
+        )
+        self.assertEqual(b, second.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
+
+    def test_one_thread_per_row_is_trait_agnostic(self):
+        # The claim at kernel_rowtile's head is that tpr == 1 needs no lane merge, so it serves any
+        # trait -- including a 3-field accumulator and a 2-output projection. Asserted by comment
+        # only until now.
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        x = torch.randn(1 << 16, 16, device="cuda")
+        (var,) = rt.reduce_row_tile(
+            T.WelfordOps(correction=1, acc=cutlass.Float32),
+            "tpr1_welford",
+            x,
+            [torch.float32],
+            tpr=1,
+        )
+        self.assertEqual(var, x.var(dim=1), atol=1e-4, rtol=1e-4)
+        lo, hi = rt.reduce_row_tile(
+            T.AMinMaxOps(acc=cutlass.Float32),
+            "tpr1_aminmax",
+            x,
+            [torch.float32, torch.float32],
+            nouts=2,
+            tpr=1,
+        )
+        want = torch.aminmax(x, dim=1)
+        self.assertEqual(lo, want.min)
+        self.assertEqual(hi, want.max)
+
+    def test_dispatcher_takes_the_narrow_arm(self):
+        # The routing change touches EVERY reduction at narrow N, but _try_fast_row had one caller
+        # and no test. Drive it through the dispatcher at a shape the gate admits, and assert the
+        # narrow shape is what served it (a packed launch would still be correct, so check the
+        # gate agrees rather than only the numbers).
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import (
+            kernel_general as kg,
+            kernel_rowtile as rt,
+        )
+
+        m, n = 1 << 20, 32
+        self.assertTrue(rt.narrow_row(n, 4, m))
+        x = torch.randn(m, n, device="cuda")
+        got = kg.reduce_dim(
+            T.SumOps(acc=cutlass.Float32), "disp_narrow", x, -1, torch.float32
+        )
+        self.assertEqual(got, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5)
 
 
 if __name__ == "__main__":
