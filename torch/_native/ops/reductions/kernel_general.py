@@ -625,9 +625,11 @@ def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
     #   narrow N                  -> one thread per row (kernel_rowtile at tpr=1)
     #   smem-safe, load-bounded N -> one-shot (kernel_rowtile, 1 or 2 outputs)
     #   larger N                  -> fused cross-CTA two-stage (reduce_xcta, 1 or 2)
-    # The one-shot needs no index remap (the projected index IS the per-row column); the
-    # split rebases each chunk's local column to the global one, so index traits are
-    # served at any N. A geometry neither accepts returns None -> K0.
+    # The one-shot needs no index remap (the projected index IS the per-row column), so it
+    # serves index traits directly. The cross-CTA split DECLINES them: its reshape makes a
+    # sub-row's chunk index row % C, and rebasing that to a global column is awkward, so an
+    # index trait at larger N falls to the ragged split / K0 instead (see kernel_xcta's
+    # has_index gate). A geometry neither accepts returns None -> K0.
     if x.dim() != 2 or x.stride(-1) != 1:
         return None
     N = x.shape[-1]
