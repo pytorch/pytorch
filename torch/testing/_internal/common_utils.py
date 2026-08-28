@@ -2998,6 +2998,31 @@ def set_rng_seed(seed=None):
         np.random.seed(seed)
 
 
+def device_rng_seed(default=0, **per_device):
+    """Decorator that calls set_rng_seed with a device-type-specific seed.
+
+    Different backends may have different RNG implementations, so the same seed
+    can produce different random values on different devices.
+
+    See Note [Randomized statistical tests] in test/distributions/test_distributions.py.
+
+    Usage::
+
+        @device_rng_seed(default=0, xpu=4, cuda=2)
+        def test_foo(self):
+            ...
+    """
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            device_type = getattr(self, "device_type", None)
+            seed = per_device.get(device_type, default)
+            set_rng_seed(seed)
+            return fn(self, *args, **kwargs)
+        return wrapper
+    return decorator
+
+
 @contextlib.contextmanager
 def set_default_dtype(dtype):
     saved_dtype = torch.get_default_dtype()
