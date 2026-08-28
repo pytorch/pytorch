@@ -62,8 +62,10 @@ torch::jit::Stack boxedBufferToStack(IValue* begin, IValue* end) {
       std::make_move_iterator(begin), std::make_move_iterator(end));
 }
 
-// Intentionally out of line; see the declaration in boxing.h.
-void destroyBoxedBuffer(IValue* begin, IValue* end) noexcept {
+// Intentionally out of line; see the declaration in boxing.h. C10_NOINLINE
+// keeps it that way under LTO, where the definition would otherwise be
+// visible to callers in other translation units.
+C10_NOINLINE void destroyBoxedBuffer(IValue* begin, IValue* end) noexcept {
   std::destroy(begin, end);
 }
 
