@@ -20,9 +20,9 @@ _ATOMIC_ORDERINGS = {
     "acq_rel": llvm.AtomicOrdering.acq_rel,
 }
 _ATOMIC_SCOPES = {
-    "gpu": "agent",
-    "cta": "workgroup",
-    "sys": "system",
+    "gpu": fx.rocdl.SyncScope.Agent,
+    "cta": fx.rocdl.SyncScope.Workgroup,
+    "sys": fx.SyncScope.System,
 }
 
 
