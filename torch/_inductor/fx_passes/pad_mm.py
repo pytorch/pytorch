@@ -22,7 +22,8 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     pad_mm_precondition,
 )
 from torch._inductor.runtime.caching import encoders, memoizers
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.utils._mode_utils import no_dispatch
 
 from ...utils._triton import has_triton
@@ -199,8 +200,26 @@ def addmm_pattern(
     return aten.addmm(input, mat1, mat2, beta=beta, alpha=alpha)
 
 
+def _is_statically_expandable_to(shape: torch.Size, desired: Sequence[Any]) -> bool:
+    if len(shape) > len(desired):
+        return False
+    return all(
+        statically_known_true(dim == desired_dim) or statically_known_true(dim == 1)
+        for dim, desired_dim in zip(reversed(shape), reversed(desired))
+    )
+
+
 def should_pad_addmm(match: Match) -> bool:
     mat1, mat2, input = fetch_fake_tensors(match, ("mat1", "mat2", "input"))
+    beta = match.kwargs["beta"]
+    if (
+        beta == 0
+        and input.is_cuda
+        and not _is_statically_expandable_to(
+            input.shape, (mat1.shape[0], mat2.shape[1])
+        )
+    ):
+        return False
     return should_pad(match, mat1, mat2, torch.ops.aten.addmm, input=input)
 
 
@@ -459,10 +478,27 @@ def should_pad(
     op: torch._ops.OpOverloadPacket,
     input: Tensor | None = None,
 ) -> bool:
-    _can_pad = can_pad(mat1, mat2, op, input)
+    if not can_pad(mat1, mat2, op, input):
+        return False
+
+    # Force padding when explicitly requested - performance override
+    if torch._inductor.config.force_shape_pad:
+        return True
+
+    # Small-K/N mm is lowered to a fused pointwise kernel in tuned_mm.
+    # Leave those shapes unpadded and let the pointwise lowering handle them.
+    if op is torch.ops.aten.mm:
+        from ..kernel.mm_common import _use_small_mm_pointwise
+
+        m, k, n = mat1.shape[0], mat1.shape[1], mat2.shape[1]
+        if _use_small_mm_pointwise(
+            m, k, n, mat1.device.type, statically_known_true=statically_known_true
+        ):
+            return False
+
     # Note that if you're tempted to insert a dynamo_timed call here, this function can
     # be called enough that the dynamo_timed overhead is not negligible.
-    return _can_pad and _should_pad(match, mat1, mat2, op, input)
+    return _should_pad(match, mat1, mat2, op, input)
 
 
 def get_do_bench() -> Callable[[Callable[[], Any]], float]:
@@ -507,10 +543,6 @@ def _should_pad(
         else:
             return False
 
-        # Force padding when explicitly requested - performance override
-        if torch._inductor.config.force_shape_pad:
-            return True
-
         # Resolve symbolic dims to concrete hints for heuristic checks below.
         # These are performance decisions, not correctness — optimization_hint is safe.
         m_concrete, k_concrete, n_concrete = hint_symbols((m, k, n))
@@ -535,7 +567,7 @@ def _should_pad(
             return cached_pad
 
         def realize_tensor(t):
-            if isinstance(t, FakeTensor):
+            if is_fake_tensor(t):
                 size_hints = hint_symbols(t.size())
                 # pyrefly: ignore [bad-argument-type]
                 stride_hint = hint_symbols(t.stride())
@@ -931,7 +963,7 @@ def _pad_mm_init(input_device: torch.device | None = None) -> None:
         else:
             device = "cpu"
 
-    # sizes/values dont actually matter for initial trace
+    # sizes/values don't actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds
 
     dim2a = functools.partial(torch.empty, (4, 4), device=device, requires_grad=True)
@@ -969,7 +1001,12 @@ def _pad_mm_init(input_device: torch.device | None = None) -> None:
             should_pad_addmm,
         ),
     ]:
-        assert isinstance(workaround, dict)  # mypy is unable to infer the type properly
+        if not isinstance(
+            workaround, dict
+        ):  # mypy is unable to infer the type properly
+            raise AssertionError(
+                f"expected workaround to be a dict, got {type(workaround)}"
+            )
         name = pattern.__name__
 
         gen_register_replacement(

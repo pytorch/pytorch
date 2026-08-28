@@ -45,6 +45,7 @@ import time
 import traceback
 import types
 import typing
+import unittest
 import unittest.mock as mock
 import weakref
 from dataclasses import dataclass
@@ -61,6 +62,7 @@ from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._guards import compile_context, CompileContext, CompileId, tracing
+from torch._higher_order_ops.utils import _in_hop_compile
 from torch._logging import structured
 from torch._utils_internal import (
     compile_time_strobelight_meta,
@@ -227,7 +229,7 @@ def clear_compile_context_weakrefs(
     tracer_output: DynamoTracerOutput | None,
     compiler_fn: CompilerFn,
 ) -> None:
-    """Clear WeakIdRef entries that can block swap_tensors after compile."""
+    """Clear compile-context references that can retain tensors after compile."""
     should_clear = config.invalidate_compile_context_weakrefs
     if should_clear is None:
         should_clear = _is_registered_backend(innermost_backend(compiler_fn))
@@ -243,6 +245,7 @@ def clear_compile_context_weakrefs(
     _clear_fake_mode_weakrefs(tc.fake_mode)
     if hasattr(output_graph, "_old_fake_mode"):
         _clear_fake_mode_weakrefs(output_graph._old_fake_mode)
+    output_graph.tracked_fakes.clear()
 
 
 class Tracker:
@@ -906,6 +909,19 @@ def trace_frame(
 ) -> DynamoTracerOutput:
     from torch.fx.experimental.validator import bisect, translation_validation_enabled
 
+    if (
+        torch.cuda.is_available()
+        and hasattr(torch._C, "_cuda_isCurrentStreamCapturing")
+        and not isinstance(torch._C._cuda_isCurrentStreamCapturing, type)
+        and torch.cuda.is_current_stream_capturing()
+        and not _in_hop_compile()
+    ):
+        raise exc.TorchRuntimeError(
+            "torch.compile cannot JIT compile during CUDA graph capture. "
+            "Execute warmup iterations outside of CUDA graph capture to trigger "
+            "compilation, then capture the graph after compilation has completed."
+        )
+
     speculation_log.restart()  # type: ignore[has-type]
     exn_vt_stack = ExceptionStack()
     tracer = InstructionTranslator(
@@ -996,6 +1012,44 @@ class DynamoOutput:
         output_graph = self.tracer_output.output_graph
         if output_graph is None:
             raise AssertionError("output_graph must not be None when building guards")
+        # Translation validation runs when guards are produced, which is after
+        # tracing, so a contradiction found here would otherwise be reported
+        # without the bisection that says which node introduced it. Same
+        # treatment as the tracing side.
+        #
+        # Only for a validation failure, and only when validation is on. The
+        # tracing side can afford to bisect on any exception; here it cannot.
+        # bisect replays the recorded events and produces guards again, which
+        # overwrites shape env state the original error still needs - an
+        # unrelated exception escaping this call, such as export's constraint
+        # violation, would come out having lost its suggested fixes. The config
+        # is read directly to keep validator, and so z3, off the common path.
+        from torch.fx.experimental import _config as fx_experimental_config
+
+        if not fx_experimental_config.translation_validation:
+            return self._build_guards(
+                code, output_graph, cache_entries, hooks, save, strict_error
+            )
+
+        from torch.fx.experimental.validator import bisect, ValidationException
+
+        try:
+            return self._build_guards(
+                code, output_graph, cache_entries, hooks, save, strict_error
+            )
+        except ValidationException:
+            bisect(output_graph.shape_env)
+            raise
+
+    def _build_guards(
+        self,
+        code: types.CodeType,
+        output_graph: Any,
+        cache_entries: list[CacheEntry] | None,
+        hooks: Hooks | None,
+        save: bool,
+        strict_error: bool,
+    ) -> CheckFunctionManager:
         return CheckFunctionManager(
             code,
             output_graph,
@@ -1008,8 +1062,8 @@ class DynamoOutput:
 
     def graph_capture_output(
         self,
-        argdefs: tuple[Any, ...] | None = None,
-        kwdefaults: dict[str, Any] | None = None,
+        argdefs: tuple[object, ...] | None = None,
+        kwdefaults: dict[str, object] | None = None,
     ) -> GraphCaptureOutput:
         output_graph = self.tracer_output.output_graph
         if output_graph is None:
@@ -1058,10 +1112,10 @@ class GraphRuntimeEnv:
     bytecode: types.CodeType
     pycode: list[list[str] | None]
     import_sources: dict[str, str]
-    used_globals: dict[str, Any]
+    used_globals: dict[str, object]
     closure: tuple[Any, ...] | None
-    argdefs: tuple[Any, ...] | None
-    kwdefaults: dict[str, Any] | None = None
+    argdefs: tuple[object, ...] | None
+    kwdefaults: dict[str, object] | None = None
     external_refs: set[str] = dataclasses.field(default_factory=set)
 
     def forward_callable(
@@ -1069,7 +1123,7 @@ class GraphRuntimeEnv:
         backend_id: str,
         compiled_fn: Callable[..., Any],
         *,
-        extra_globals: dict[str, Any] | None = None,
+        extra_globals: dict[str, object] | None = None,
         use_python_codegen: bool = False,
     ) -> Callable[..., Any]:
         import_sources = {
@@ -1175,8 +1229,8 @@ class GraphCaptureOutput:
     bytecode: CodeType
     pycode: list[list[str] | None]
     closure: tuple[Any, ...] | None
-    argdefs: tuple[Any, ...] | None
-    kwdefaults: dict[str, Any] | None
+    argdefs: tuple[object, ...] | None
+    kwdefaults: dict[str, object] | None
     f_globals: dict[str, Any]
 
     def build_guards(
@@ -1275,7 +1329,7 @@ class CaptureOutput:
         self,
         *,
         compiled_fn: Callable[..., Any] | None = None,
-        extra_globals: dict[str, Any] | None = None,
+        extra_globals: dict[str, object] | None = None,
         use_python_codegen: bool = False,
     ) -> Callable[..., Any]:
         runtime_env = self.graph_capture_output.get_runtime_env()
@@ -1433,8 +1487,8 @@ class FrameInfo:
     locals: dict[str, object]
     builtins: dict[str, object]
     closure: tuple[CellType]
-    argdefs: tuple[Any, ...] | None
-    kwdefaults: dict[str, Any] | None
+    argdefs: tuple[object, ...] | None
+    kwdefaults: dict[str, object] | None
 
 
 def _fullgraph_capture_frame(
@@ -1669,6 +1723,14 @@ def _compile(
         code: CodeType, one_graph: bool, hooks: Hooks
     ) -> tuple[ConvertFrameReturn, DynamoTracerOutput | None]:
         with contextlib.ExitStack() as stack:
+            # Hold _is_compiling_flag True for the duration of compilation so
+            # torch.compiler.is_compiling() is observable in code that runs
+            # during the compile session but is not directly Dynamo-traced
+            # (wrapper-subclass __torch_dispatch__ invoked by AOTAutograd,
+            # make_fx invoked from a custom backend, etc.). Export sets the
+            # flag itself via _compiling_state_context, so skip there.
+            if not export:
+                stack.enter_context(torch.compiler._compile_session_context())
             stack.enter_context(
                 torch._dynamo.callback_handler.install_callbacks(
                     CallbackTrigger.DYNAMO, str(CompileContext.current_compile_id())
@@ -2152,6 +2214,7 @@ def _compile(
                     ShortenTraceback,
                     PackageError,
                     ResumePrologueTracingError,
+                    unittest.SkipTest,
                 ),
             ):
                 raise
@@ -2548,6 +2611,7 @@ class CatchErrorsWrapper:
                 and not getattr(self._torchdynamo_orig_backend, "_export", False)
             )
         ):
+            apply_to_code = True
             if has_started_execution:
                 skip_reason = "frame has already started executing"
             elif is_skipfile:
@@ -2559,7 +2623,13 @@ class CatchErrorsWrapper:
                     "non-infra torch dispatch mode present, this is not"
                     " supported today in torch.compile"
                 )
-            return self._handle_skip(ConvertFrameReturn(skip_reason=skip_reason), frame)
+                apply_to_code = False
+            return self._handle_skip(
+                ConvertFrameReturn(
+                    apply_to_code=apply_to_code, skip_reason=skip_reason
+                ),
+                frame,
+            )
 
         if (
             frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__"

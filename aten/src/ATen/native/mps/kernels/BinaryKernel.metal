@@ -263,12 +263,45 @@ struct nextafter_functor {
   inline T operator()(const T a, const T b) {
     return static_cast<T>(::metal::nextafter(a, b));
   }
+
+  static inline ushort nextafter_bfloat_bits(
+      const bfloat from,
+      const bfloat to) {
+    ushort uf = as_type<ushort>(from);
+    const ushort ut = as_type<ushort>(to);
+    const ushort af = uf & 0x7fff;
+    const ushort at = ut & 0x7fff;
+
+    if (uf == ut || (af == 0 && at == 0)) {
+      return ut;
+    }
+    if (af == 0) {
+      return ushort((ut & 0x8000) | 1);
+    }
+
+    const bool neg = (uf & 0x8000) != 0;
+    const int from_value = neg ? -int(af) : int(af);
+    const int to_value = (ut & 0x8000) ? -int(at) : int(at);
+    uf += ((from_value < to_value) != neg) ? 1 : -1;
+    return uf;
+  }
+
+  inline bfloat operator()(const bfloat from, const bfloat to) {
+    ushort result;
+    if (from != from || to != to) {
+      result = as_type<ushort>(bfloat(from + to));
+    } else {
+      result = nextafter_bfloat_bits(from, to);
+    }
+    return as_type<bfloat>(result);
+  }
 };
 
 struct hypot_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return static_cast<T>(precise::sqrt(float(a) * a + float(b) * b));
+    return static_cast<T>(
+        c10::metal::hypot(::metal::fabs(a), ::metal::fabs(b)));
   }
 };
 
@@ -365,7 +398,7 @@ struct div_floor_functor {
       typename T,
       ::metal::enable_if_t<!::metal::is_integral_v<T>, bool> = true>
   inline T operator()(const T a, const T b) {
-    return metal::floor(c10::metal::div(a, b));
+    return c10::metal::div_floor(a, b);
   }
   template <
       typename T,
@@ -447,6 +480,21 @@ struct gcd_functor {
   }
 };
 
+struct lcm_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    T g = gcd_functor{}(a, b);
+    if (g == 0) {
+      return 0;
+    }
+    // `auto` keeps the C++ integer-promoted type (sub-int types widen to int),
+    // so the abs matches the CPU/CUDA kernels: abs is taken before narrowing
+    // back to T on return. Divide before multiplying to limit overflow.
+    auto r = a / g * b;
+    return ::metal::abs(r);
+  }
+};
+
 // eq/ne are defined manually (rather than via DEFINE_BINARY_COMPARISON_FUNCTOR)
 // so they can carry complex overloads: `float2 == float2` returns `bool2` in
 // Metal, which doesn't implicitly convert to bool. The reduction `all(...)` /
@@ -480,12 +528,15 @@ DEFINE_BINARY_COMPARISON_FUNCTOR(le, <=);
 DEFINE_BINARY_COMPARISON_FUNCTOR(gt, >);
 DEFINE_BINARY_COMPARISON_FUNCTOR(ge, >=);
 
-#define REGISTER_INTEGER_BINARY_OP(NAME)  \
-  REGISTER_BINARY_OP(NAME, long, long);   \
-  REGISTER_BINARY_OP(NAME, int, int);     \
-  REGISTER_BINARY_OP(NAME, short, short); \
-  REGISTER_BINARY_OP(NAME, uchar, uchar); \
-  REGISTER_BINARY_OP(NAME, char, char);   \
+#define REGISTER_INTEGER_BINARY_OP_NO_BOOL(NAME) \
+  REGISTER_BINARY_OP(NAME, long, long);          \
+  REGISTER_BINARY_OP(NAME, int, int);            \
+  REGISTER_BINARY_OP(NAME, short, short);        \
+  REGISTER_BINARY_OP(NAME, uchar, uchar);        \
+  REGISTER_BINARY_OP(NAME, char, char)
+
+#define REGISTER_INTEGER_BINARY_OP(NAME)    \
+  REGISTER_INTEGER_BINARY_OP_NO_BOOL(NAME); \
   REGISTER_BINARY_OP(NAME, bool, bool)
 
 #define REGISTER_INT2FLOAT_BINARY_OP(NAME) \
@@ -599,11 +650,12 @@ REGISTER_INTEGER_BINARY_OP(fmod);
 REGISTER_OPMATH_FLOAT_BINARY_OP(igamma);
 REGISTER_OPMATH_FLOAT_BINARY_OP(igammac);
 REGISTER_INTEGER_BINARY_OP(gcd);
+REGISTER_INTEGER_BINARY_OP(lcm);
 REGISTER_INTEGER_BINARY_OP(bitwise_and);
 REGISTER_INTEGER_BINARY_OP(bitwise_or);
 REGISTER_INTEGER_BINARY_OP(bitwise_xor);
-REGISTER_INTEGER_BINARY_OP(bitwise_left_shift);
-REGISTER_INTEGER_BINARY_OP(bitwise_right_shift);
+REGISTER_INTEGER_BINARY_OP_NO_BOOL(bitwise_left_shift);
+REGISTER_INTEGER_BINARY_OP_NO_BOOL(bitwise_right_shift);
 REGISTER_COMPARISON_OP(eq);
 REGISTER_COMPLEX_EQ_OP(eq);
 REGISTER_COMPARISON_OP(ne);

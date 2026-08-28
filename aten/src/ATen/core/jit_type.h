@@ -212,7 +212,7 @@ struct TORCH_API OptionalType : public UnionType {
   std::string str() const override {
     std::stringstream ss;
     ss << getElementType()->str() << '?';
-    return ss.str();
+    return std::move(ss).str();
   }
 
   TypePtr createWithContained(
@@ -241,7 +241,7 @@ struct TORCH_API OptionalType : public UnionType {
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
     ss << "Optional[" << getElementType()->annotation_str(printer) << ']';
-    return ss.str();
+    return std::move(ss).str();
   }
 };
 
@@ -278,10 +278,7 @@ struct TORCH_API Stride {
       const std::optional<size_t>& stride)
       : stride_index_(stride_index), contiguous_(contiguous), stride_(stride) {}
 
-  bool operator==(const Stride& b) const {
-    return stride_index_ == b.stride_index_ && contiguous_ == b.contiguous_ &&
-        stride_ == b.stride_;
-  }
+  bool operator==(const Stride& b) const = default;
 
   bool isComplete() const {
     return stride_index_ && contiguous_ && stride_;
@@ -690,7 +687,7 @@ struct TORCH_API TensorType : public SharedType {
       at::IntArrayRef strides) const {
     auto cloned = clone();
     auto ssizes = SymbolicShape(sizes);
-    cloned->sizes_ = ssizes;
+    cloned->sizes_ = std::move(ssizes);
     cloned->strides_ = computeStrideProps(sizes, strides);
     return cloned;
   }
@@ -726,7 +723,7 @@ struct TORCH_API TensorType : public SharedType {
     auto strides = computeStrideProps(
         *concrete_sizes,
         contiguousStridesOf(*concrete_sizes));
-    cloned->strides_ = strides;
+    cloned->strides_ = std::move(strides);
     return cloned;
   }
 
@@ -873,7 +870,7 @@ struct TORCH_API ListType
   std::string str() const override {
     std::stringstream ss;
     ss << getElementType()->str() << "[]";
-    return ss.str();
+    return std::move(ss).str();
   }
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
@@ -907,7 +904,7 @@ struct TORCH_API ListType
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
     ss << "List[" << getElementType()->annotation_str(printer) << ']';
-    return ss.str();
+    return std::move(ss).str();
   }
 };
 
@@ -947,7 +944,7 @@ struct TORCH_API DictType : public SharedType {
     std::stringstream ss;
     ss << "Dict(" << getKeyType()->str() << ", " << getValueType()->str()
        << ')';
-    return ss.str();
+    return std::move(ss).str();
   }
 
   TypePtr createWithContained(
@@ -1019,7 +1016,7 @@ struct TORCH_API FutureType
   std::string str() const override {
     std::stringstream ss;
     ss << "Future(" << getElementType()->str() << ')';
-    return ss.str();
+    return std::move(ss).str();
   }
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
@@ -1042,7 +1039,7 @@ struct TORCH_API FutureType
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
     ss << "Future[" << getElementType()->annotation_str(printer) << ']';
-    return ss.str();
+    return std::move(ss).str();
   }
 };
 
@@ -1061,7 +1058,7 @@ struct TORCH_API AwaitType
   std::string str() const override {
     std::stringstream ss;
     ss << "Await(" << getElementType()->str() << ')';
-    return ss.str();
+    return std::move(ss).str();
   }
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
@@ -1084,7 +1081,7 @@ struct TORCH_API AwaitType
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
     ss << "Await[" << getElementType()->annotation_str(printer) << ']';
-    return ss.str();
+    return std::move(ss).str();
   }
 };
 
@@ -1103,7 +1100,7 @@ struct TORCH_API RRefType
   std::string str() const override {
     std::stringstream ss;
     ss << "RRef(" << getElementType()->str() << ')';
-    return ss.str();
+    return std::move(ss).str();
   }
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
@@ -1116,7 +1113,7 @@ struct TORCH_API RRefType
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
     ss << "RRef[" << getElementType()->annotation_str(printer) << ']';
-    return ss.str();
+    return std::move(ss).str();
   }
 };
 
@@ -1951,12 +1948,6 @@ struct getTypePtr_<std::string> final {
 };
 template <>
 struct getTypePtr_<std::string_view> final {
-  static decltype(auto) call() {
-    return StringType::get();
-  }
-};
-template <>
-struct getTypePtr_<at::Dimname> final {
   static decltype(auto) call() {
     return StringType::get();
   }

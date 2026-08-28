@@ -192,19 +192,20 @@ TryGeneralizeInputDimensionsToSymbolicShapes(
     }
     input_striding.push_back(summarizeInputStrides(tt));
     std::vector<at::ShapeSymbol> shape_vec = *tt.symbolic_sizes().sizes();
-    auto new_sizes = c10::fmap(shape_vec, [&](const at::ShapeSymbol& shape) {
-      auto value = shape.value();
-      TORCH_INTERNAL_ASSERT(value >= 0, "Expected complete tensor");
-      if (value == 1) {
-        return value;
-      } else if (shape_to_sym_shape.count(static_cast<size_t>(value))) {
-        return shape_to_sym_shape[value];
-      } else {
-        auto new_shape_symbol = at::ShapeSymbol::newSymbol().value();
-        shape_to_sym_shape[static_cast<size_t>(value)] = new_shape_symbol;
-        return new_shape_symbol;
-      }
-    });
+    auto new_sizes =
+        c10::fmap(std::move(shape_vec), [&](const at::ShapeSymbol& shape) {
+          auto value = shape.value();
+          TORCH_INTERNAL_ASSERT(value >= 0, "Expected complete tensor");
+          if (value == 1) {
+            return value;
+          } else if (shape_to_sym_shape.count(static_cast<size_t>(value))) {
+            return shape_to_sym_shape[value];
+          } else {
+            auto new_shape_symbol = at::ShapeSymbol::newSymbol().value();
+            shape_to_sym_shape[static_cast<size_t>(value)] = new_shape_symbol;
+            return new_shape_symbol;
+          }
+        });
     v->setType(tt.withSymbolicShapes(c10::SymbolicShape(new_sizes)));
   }
   return input_striding;
@@ -425,7 +426,7 @@ void insertDynamicShapesGuard(
     guarded_node->addInput(pair.second);
     std::stringstream ss;
     ss << "SS_" << -pair.first;
-    subgraph->addInput(ss.str())->setType(IntType::get());
+    subgraph->addInput(std::move(ss).str())->setType(IntType::get());
   }
   guarded_node->is_(
       attr::symbolic_shape_inputs, std::move(symbolic_shape_inputs));
@@ -524,7 +525,7 @@ static RegisterOperators SRCopyOuts({
 
 // On each invocation of this guard, we need to check all of the static
 // information (dtype/device/requires grad/contiguity/static dims),
-// and also the that the symbolic shape dimensions are observed.
+// and also that the symbolic shape dimensions are observed.
 // For any symbolic dimension we need to set its value on its first
 // use and for all subsequent uses check that the values are equal
 static RegisterOperators reg_guard({
@@ -592,7 +593,7 @@ static RegisterOperators reg_guard({
                   sym_dim_index = sym_dim_flat_index[value];
                 }
                 // TODO: potential optimization - if there is a Symbolic
-                // Sym with only one use we dont need to test anything
+                // Sym with only one use we don't need to test anything
                 flattened_input_dims.push_back(
                     static_cast<int64_t>(sym_dim_index));
               }

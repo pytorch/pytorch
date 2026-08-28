@@ -8,12 +8,16 @@ from torch.distributed._shard import sharded_tensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 
 
-PLACEMENTS = [
-    "rank:0/cuda:0",
-    "rank:1/cuda:1",
-    "rank:2/cuda:2",
-    "rank:3/cuda:3",
-]
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
+def _placement(rank):
+    if device_type == "cpu":
+        return f"rank:{rank}/cpu"
+    return f"rank:{rank}/{device_type}:{rank}"
+
+
+PLACEMENTS = [_placement(i) for i in range(4)]
 
 DEFAULT_GPU_NUM = 4
 

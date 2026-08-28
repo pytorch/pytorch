@@ -83,7 +83,7 @@ class TORCH_API Store : public torch::CustomClassHolder {
       WatchKeyCallback /* unused */) {
     C10_THROW_ERROR(
         NotImplementedError,
-        "watchKey is deprecated, no implementation support it.");
+        "watchKey is deprecated, no implementation supports it.");
   }
 
   virtual void append(
@@ -97,7 +97,7 @@ class TORCH_API Store : public torch::CustomClassHolder {
       const std::vector<std::string>& keys,
       const std::vector<std::vector<uint8_t>>& values);
 
-  // Returns true if this store support append, multiGet and multiSet
+  // Returns true if this store supports append, multiGet and multiSet
   virtual bool hasExtendedApi() const;
 
   virtual void queuePush(

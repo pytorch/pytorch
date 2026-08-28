@@ -113,7 +113,7 @@ class Upsample(Module):
 
         >>> # xdoctest: +IGNORE_WANT("seems to fail when other tests are run in the same session")
         >>> m = nn.Upsample(scale_factor=2, mode='bilinear')  # align_corners=False
-        >>> # Notice that values in top left corner are the same with the small input (except at boundary)
+        >>> # Notice that values in top left corner are the same as the small input (except at boundary)
         >>> m(input_3x3)
         tensor([[[[1.0000, 1.2500, 1.7500, 1.5000, 0.5000, 0.0000],
                   [1.5000, 1.7500, 2.2500, 1.8750, 0.6250, 0.0000],
@@ -202,7 +202,7 @@ class UpsamplingNearest2d(Upsample):
     r"""Applies a 2D nearest neighbor upsampling to an input signal composed of several input channels.
 
     To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor`
-    as it's constructor argument.
+    as its constructor argument.
 
     When :attr:`size` is given, it is the output size of the image `(h, w)`.
 
@@ -251,7 +251,7 @@ class UpsamplingBilinear2d(Upsample):
     r"""Applies a 2D bilinear upsampling to an input signal composed of several input channels.
 
     To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor`
-    as it's constructor argument.
+    as its constructor argument.
 
     When :attr:`size` is given, it is the output size of the image `(h, w)`.
 
