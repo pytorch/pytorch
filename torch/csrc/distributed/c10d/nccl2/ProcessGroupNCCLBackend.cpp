@@ -10,7 +10,6 @@
 
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
@@ -245,7 +244,7 @@ bool ProcessGroupNCCL::hasCompletionHooks() {
 }
 
 void ProcessGroupNCCL::runCompletionHooks(
-    const ::c10d::Work* work,
+    uint64_t completion_key,
     std::optional<float> duration_ms) {
   // Snapshot rather than hold the lock across the hooks, and for a harder
   // reason than runAbortHooks has: a hook's owner unregisters with its own lock
@@ -260,7 +259,7 @@ void ProcessGroupNCCL::runCompletionHooks(
     }
   }
   ::c10d::CompletionHookArgs args;
-  args.work = work;
+  args.completionKey = completion_key;
   args.duration_ms = duration_ms;
   for (const auto& hook : hooks) {
     try {
