@@ -87,7 +87,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       stored as opaque inline data because they have no Python-source representation.
       This initial path accepts a Python function with positional tensor/scalar arguments
       and containers of those values; closures and ``nn.Module`` arguments are not
-      supported yet because their identity guards are not serializable.
+      supported yet because their identity guards are not serializable. Tensor-valued
+      globals are rejected because every tensor must be an explicit input, and functions
+      that mutate globals are rejected because the artifact could not reproduce the
+      side effect.
 
       Pass ``training=True`` with ``tracer="dynamo"`` and ``backend="inductor"`` to
       capture differentiable graphs. Each compiled segment contains readable Inductor
@@ -150,9 +153,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        stateful call; see ``artifact_path``.
    :param recompile_limit: Cap on captured variants per Dynamo capture
        (``tracer="dynamo"`` only). The one-shot default is
-       ``torch._dynamo.config.recompile_limit`` or the example count, whichever is
-       larger; the stateful default is ``max(recompile_limit, 256)`` because
-       accumulating captures outgrow the config default.
+       ``torch._dynamo.config.recompile_limit`` or the example count plus one,
+       whichever is larger; the stateful default is
+       ``max(torch._dynamo.config.recompile_limit, 256)`` because accumulating
+       captures outgrow the config default.
    :param dynamic: Forwarded to Dynamo (``tracer="dynamo"`` only): ``None`` keeps the
        automatic dynamic-shape policy, ``True``/``False`` forces or forbids symbolic
        shapes. Like the other capture settings, it must not change across resumed
@@ -164,8 +168,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below).
 
-   Dynamo artifacts are tied to the Python minor version used to create them; loading
-   one under a different minor version raises :class:`PrecompileError`.
+   Dynamo artifacts are tied to the Python minor version and the torch version used
+   to create them; loading one under a different version raises
+   :class:`PrecompileError`.
 
    Example::
 

@@ -329,6 +329,12 @@ class AutotuneCache:
         found_by_coordesc: bool = False,
         triton_cache_hash: str | None = None,
     ) -> None:
+        if not _config_json_cacheable(config):
+            log.debug(
+                "Skipping autotune cache save: a config kwarg does not survive a "
+                "JSON round-trip"
+            )
+            return
         data: dict[str, JsonDataTy] = {
             # pyrefly: ignore [missing-attribute]
             **{key: _json_config_value(val) for key, val in config.kwargs.items()},
@@ -692,6 +698,20 @@ def _json_config_value(value: Any) -> Any:
     return value.value if isinstance(value, enum.Enum) else value
 
 
+def _config_json_cacheable(config: Config) -> bool:
+    # An Enum kwarg whose value is not a JSON-stable scalar (e.g. a tuple, which
+    # JSON round-trips to a list) can neither be matched against a cached entry
+    # nor reconstructed from one; such configs must skip the autotune cache
+    # rather than warm-load a wrong-typed constexpr via
+    # _reconstruct_triton_config.
+    return all(
+        not isinstance(val, enum.Enum)
+        or isinstance(val.value, (bool, int, float, str, type(None)))
+        # pyrefly: ignore [missing-attribute]
+        for val in config.kwargs.values()
+    )
+
+
 def _load_cached_autotuning(
     best_config: dict[str, JsonDataTy],
     configs_hash: str,
@@ -735,6 +755,11 @@ def _load_cached_autotuning(
             # pyrefly: ignore [missing-attribute]
             matched_config.extra_options = extra_options
             return matched_config
+        if not all(_config_json_cacheable(cfg) for cfg in configs):
+            # A no-match here may be a JSON round-trip artifact (see
+            # _config_json_cacheable), and reconstruction below would bake the
+            # degraded JSON value into the kernel; re-autotune instead.
+            return None
 
     # Reconstruct Config from cached data. This handles both coordesc
     # configs and dynamically added configs (e.g. _dynamic_scale_rblock)

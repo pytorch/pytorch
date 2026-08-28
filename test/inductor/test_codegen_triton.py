@@ -1218,6 +1218,29 @@ def helper(x):
         with self.assertRaisesRegex(RuntimeError, "cannot be written into"):
             _render_constexpr_constants({"MODE": Local.VALUE})
 
+        # An enum living in __main__ (an enum defined at the top of a user
+        # script) is not importable from the generated module; decline rather
+        # than emit a dangling import.
+        with patch.object(plistlib.PlistFormat, "__module__", "__main__"):
+            self.assertIsNone(_constexpr_source(plistlib.FMT_XML))
+
+        from torch.utils._ordered_set import OrderedSet
+
+        # A set subclass's type and iteration order are semantic: the source
+        # must reconstruct the exact type in order, not a sorted builtin set.
+        ordered = OrderedSet([2, 1])
+        source, imports = _constexpr_source(ordered)
+        scope = {}
+        exec("\n".join(imports), scope)
+        reconstructed = eval(source, scope)
+        self.assertIs(type(reconstructed), OrderedSet)
+        self.assertEqual(list(reconstructed), [2, 1])
+
+        class LocalSet(set):
+            pass
+
+        self.assertIsNone(_constexpr_source(LocalSet({1})))
+
     @parametrize(
         "value, expected",
         (
@@ -1272,23 +1295,15 @@ def helper(x):
             ),
         )
 
-    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_constexpr_enum_imports_do_not_collide(self):
+        import uuid
+
         from torch._inductor.codegen.wrapper import (
             _constexpr_source,
             _render_constexpr_mappings,
         )
-        from torch.distributed.fsdp._common_utils import (
-            TrainingState as FSDP1TrainingState,
-        )
-        from torch.distributed.fsdp._fully_shard._fsdp_common import (
-            TrainingState as FSDP2TrainingState,
-        )
 
-        values = (
-            FSDP1TrainingState.FORWARD_BACKWARD,
-            FSDP2TrainingState.FORWARD,
-        )
+        values = (plistlib.FMT_XML, uuid.SafeUUID.safe)
         rendered, imports = _render_constexpr_mappings(
             [{"LEFT": values[0]}, {"RIGHT": values[1]}]
         )
@@ -1414,7 +1429,6 @@ def helper(x):
         self.assertNotIn("<Mode.", code[0])
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
-    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_plain_enum_constexpr_in_autotune_config(self):
         # A non-interchangeable Enum in an autotune config reaches the runtime as
         # a real Enum member; autotuning (with >1 config) then saves the winner to
@@ -1422,16 +1436,14 @@ def helper(x):
         import triton
         import triton.language as tl
 
-        from torch.distributed.fsdp._common_utils import TrainingState
-
         @triton.autotune(
             configs=[
                 triton.Config(
-                    {"MODE": TrainingState.FORWARD_BACKWARD, "BLOCK_SIZE": 64},
+                    {"MODE": plistlib.FMT_XML, "BLOCK_SIZE": 64},
                     num_warps=4,
                 ),
                 triton.Config(
-                    {"MODE": TrainingState.IDLE, "BLOCK_SIZE": 128}, num_warps=4
+                    {"MODE": plistlib.FMT_BINARY, "BLOCK_SIZE": 128}, num_warps=4
                 ),
             ],
             key=[],
@@ -1458,10 +1470,9 @@ def helper(x):
         x = torch.randn(128, device=GPU_TYPE)
         actual, code = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(actual, fn(x))
-        self.assertIn("TrainingState['", code[0])
+        self.assertIn("PlistFormat['", code[0])
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
-    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_user_autotune_cache_not_stamped_coordesc(self):
         # Coordinate descent tuning never runs for USER_AUTOTUNE kernels, so their
         # cache entries must not claim found_by_coordesc: a warm load would skip
@@ -1471,16 +1482,15 @@ def helper(x):
         import triton.language as tl
 
         from torch._inductor.runtime.autotune_cache import AutotuneCache
-        from torch.distributed.fsdp._common_utils import TrainingState
 
         @triton.autotune(
             configs=[
                 triton.Config(
-                    {"CD_MODE": TrainingState.FORWARD_BACKWARD, "BLOCK_SIZE": 64},
+                    {"CD_MODE": plistlib.FMT_XML, "BLOCK_SIZE": 64},
                     num_warps=4,
                 ),
                 triton.Config(
-                    {"CD_MODE": TrainingState.IDLE, "BLOCK_SIZE": 128}, num_warps=4
+                    {"CD_MODE": plistlib.FMT_BINARY, "BLOCK_SIZE": 128}, num_warps=4
                 ),
             ],
             key=[],
@@ -1518,27 +1528,55 @@ def helper(x):
             self.assertFalse(call.kwargs.get("found_by_coordesc", False))
 
     @unittest.skipUnless(has_triton_package(), "requires Triton")
-    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_autotune_cache_matches_enum_config_kwargs(self):
         import json
 
         import triton
 
         from torch._inductor.runtime.autotune_cache import (
+            _config_json_cacheable,
             _json_config_value,
             _load_cached_autotuning,
         )
-        from torch.distributed.fsdp._common_utils import TrainingState
 
         cfg = triton.Config(
-            {"MODE": TrainingState.FORWARD_BACKWARD, "BLOCK": 64},
+            {"MODE": plistlib.FMT_XML, "BLOCK": 64},
             num_warps=4,
             num_stages=2,
         )
+        self.assertTrue(_config_json_cacheable(cfg))
         data = {key: _json_config_value(val) for key, val in cfg.kwargs.items()}
         data.update({"num_warps": 4, "num_stages": 2, "configs_hash": "h"})
         best = json.loads(json.dumps(data))  # must be JSON-representable
         self.assertIs(_load_cached_autotuning(best, "h", [cfg], {}), cfg)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_autotune_cache_declines_non_json_enum_config_kwargs(self):
+        import json
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import (
+            _config_json_cacheable,
+            _json_config_value,
+            _load_cached_autotuning,
+        )
+
+        class TupleMode(Enum):
+            PAIR = (1, 2)
+
+        cfg = triton.Config(
+            {"MODE": TupleMode.PAIR, "BLOCK": 64}, num_warps=4, num_stages=2
+        )
+        # save() skips such configs entirely (gated on the same predicate); if a
+        # cache entry exists anyway, the JSON round-trip turned the tuple into a
+        # list, so matching can never succeed and loading must re-autotune (None)
+        # rather than reconstruct a Config carrying the degraded JSON list.
+        self.assertFalse(_config_json_cacheable(cfg))
+        data = {key: _json_config_value(val) for key, val in cfg.kwargs.items()}
+        data.update({"num_warps": 4, "num_stages": 2, "configs_hash": "h"})
+        best = json.loads(json.dumps(data))
+        self.assertIsNone(_load_cached_autotuning(best, "h", [cfg], {}))
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_plain_enum_constexpr_in_user_defined_triton_kernel(self):

@@ -236,38 +236,42 @@ def _constexpr_source_impl(
             cls_ref = _constexpr_type_ref(type(value), module_aliases, imports)
             return None if cls_ref is None else f"{cls_ref}._make(({body}))"
         return f"({body})"
-    if isinstance(value, (set, OrderedSet)):  # noqa: set_linter
+    if isinstance(value, (set, frozenset, OrderedSet)):  # noqa: set_linter
+        # A set subclass's type and iteration order can be semantic (OrderedSet);
+        # reconstruct the exact type in iteration order, or decline, rather than
+        # silently degrade to a builtin set. Builtin sets are unordered, so their
+        # items are sorted for deterministic generated source.
+        exact_builtin = type(value) in (set, frozenset)  # noqa: set_linter
+        elements = (
+            sorted(
+                value,
+                key=lambda item: (
+                    type(item).__module__,
+                    type(item).__qualname__,
+                    repr(item),
+                ),
+            )
+            if exact_builtin
+            else value
+        )
+        cls_ref = None
+        if not exact_builtin:
+            cls_ref = _constexpr_type_ref(type(value), module_aliases, imports)
+            if cls_ref is None:
+                return None
         items = []
-        for item in sorted(
-            value,
-            key=lambda item: (
-                type(item).__module__,
-                type(item).__qualname__,
-                repr(item),
-            ),
-        ):
+        for item in elements:
             source = _constexpr_source_impl(item, module_aliases, imports)
             if source is None:
                 return None
             items.append(source)
+        if cls_ref is not None:
+            return f"{cls_ref}([{', '.join(items)}])"
+        if isinstance(value, frozenset):
+            if not items:
+                return "frozenset()"
+            return "frozenset((" + ", ".join(items) + ",))"
         return "set()" if not items else "{" + ", ".join(items) + "}"
-    if isinstance(value, frozenset):
-        items = []
-        for item in sorted(
-            value,
-            key=lambda item: (
-                type(item).__module__,
-                type(item).__qualname__,
-                repr(item),
-            ),
-        ):
-            source = _constexpr_source_impl(item, module_aliases, imports)
-            if source is None:
-                return None
-            items.append(source)
-        if not items:
-            return "frozenset()"
-        return "frozenset((" + ", ".join(items) + ",))"
     if isinstance(value, slice):
         items = []
         for item in (value.start, value.stop, value.step):
@@ -281,6 +285,8 @@ def _constexpr_source_impl(
     if isinstance(value, bytearray):
         return f"bytearray({bytes(value)!r})"
     if type(value) is float and math.isnan(value):
+        # NaN != NaN would break the ==-based config matching that consumes
+        # these constants (autotune-cache lookup, precomputed-grid selection).
         return None
     if type(value) is float and math.isinf(value):
         return f"float({str(value)!r})"
@@ -354,11 +360,17 @@ def _render_constexpr_mappings(
         for name, value in constants.items():
             expression = _constexpr_source_impl(value, module_aliases, imports)
             if expression is None:
+                detail = (
+                    " NaN constexprs are rejected because autotune config matching "
+                    "compares constants by equality."
+                    if isinstance(value, float) and math.isnan(value)
+                    else ""
+                )
                 raise RuntimeError(
                     f"Triton kernel constexpr argument {name!r} has value {value!r} "
                     f"of type {type(value).__name__}, which cannot be written into "
                     "the generated kernel. Pass an int, an IntEnum, or a value "
-                    "whose type is defined in an importable module."
+                    f"whose type is defined in an importable module.{detail}"
                 )
             rendered[name] = (
                 _SourceLiteral(expression) if expression != repr(value) else value
@@ -4018,13 +4030,23 @@ class PythonWrapperCodegen(CodeGen):
                 *(entry["config"] for entry in precomputed_grids),
             ]
         )
-        constexpr_constants = rendered_mappings[0]
-        config_dicts = rendered_mappings[1 : 1 + len(config_dicts)]
-        for entry, rendered_config in zip(
-            precomputed_grids, rendered_mappings[1 + len(config_dicts) :]
-        ):
-            entry["config"] = rendered_config
-        triton_meta = {**triton_meta, "constants": constexpr_constants}
+        # The rendered mappings hold _SourceLiteral placeholders and exist only to
+        # be repr'd into the generated source below; the returned/cached metas keep
+        # real values so downstream consumers (KernelCallLine, AOTI) never compare
+        # against placeholders.
+        rendered_config_dicts = rendered_mappings[1 : 1 + len(config_dicts)]
+        rendered_grids = [
+            {**entry, "config": rendered_config}
+            for entry, rendered_config in zip(
+                precomputed_grids, rendered_mappings[1 + len(config_dicts) :]
+            )
+        ]
+        source_triton_meta = {**triton_meta, "constants": rendered_mappings[0]}
+        source_inductor_meta = (
+            {**inductor_meta, "precomputed_grids": rendered_grids}
+            if precomputed_grids
+            else inductor_meta
+        )
         for import_line in constexpr_imports:
             compile_wrapper.writeline(import_line)
         if config.triton.proton_profiling:
@@ -4033,9 +4055,9 @@ class PythonWrapperCodegen(CodeGen):
         compile_wrapper.splice(
             f"""
             @triton_heuristics.user_autotune(
-                configs={config_dicts!r},
-                inductor_meta={inductor_meta!r},
-                triton_meta={triton_meta!r},
+                configs={rendered_config_dicts!r},
+                inductor_meta={source_inductor_meta!r},
+                triton_meta={source_triton_meta!r},
                 filename=__file__,
                 custom_kernel=True,
             )

@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     _DYNAMO_BACKEND_IDS: tuple[str, ...] = ()
     _DYNAMO_BACKEND_SOURCES: tuple[str, ...] = ()
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
+    _DYNAMO_TORCH_VERSION: str = ""
     _DYNAMO_STATE: str = ""
     TRAINING: bool = False
 
@@ -402,6 +403,16 @@ def _build_dynamo_forward():
             "precompile artifact was produced on Python "
             f"{_DYNAMO_PYTHON_VERSION[0]}.{_DYNAMO_PYTHON_VERSION[1]}, but is "
             f"being loaded on Python {sys.version_info[0]}.{sys.version_info[1]}."
+        )
+    # _DYNAMO_STATE pickles Dynamo internals (guard trees, code objects), which
+    # have no cross-version compatibility story; check up front so a foreign
+    # build fails with this message instead of an arbitrary unpickling error.
+    if _DYNAMO_TORCH_VERSION != torch.__version__:
+        from torch._precompile import PrecompileError
+
+        raise PrecompileError(
+            f"precompile artifact was produced by torch {_DYNAMO_TORCH_VERSION}, "
+            f"but is being loaded by torch {torch.__version__}."
         )
 
     state = pickle.loads(base64.b64decode(_DYNAMO_STATE))

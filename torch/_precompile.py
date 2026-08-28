@@ -219,6 +219,14 @@ it.
 # specialization/recompilation exercised by example_inputs, minimizes guard records
 # while preserving dispatch for those calls, and dispatches among the variants at
 # runtime. It currently requires one full graph (no graph breaks).
+#
+# The dynamo tracer's artifact format depends on these torch._dynamo internals
+# (changes to them are format/behavior changes here): package.CompilePackage /
+# load_guards_state / load_guard_manager / SerializedCode, guards.
+# CheckFunctionManager rebuilt over a dataclasses.replace'd OutputGraphCommon
+# (guard minimization), CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES,
+# convert_frame.GUARDS_STATE_NONE_MESSAGE, pgo._use_code_state, and the
+# eval_frame.cached_backends / utils.guard_failures registries (teardown).
 
 from __future__ import annotations
 
@@ -227,6 +235,7 @@ import hashlib
 import io
 import logging
 import threading
+import weakref
 from types import MappingProxyType
 from typing import Any, cast, NamedTuple, NewType, TYPE_CHECKING
 
@@ -1129,6 +1138,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     dynamo_metadata = {
         "TRAINING",
         "_DYNAMO_PYTHON_VERSION",
+        "_DYNAMO_TORCH_VERSION",
         "_DYNAMO_BACKEND_IDS",
         "_DROPPED_GUARDS",
         "_DYNAMO_STATE",
@@ -1731,6 +1741,7 @@ def _build_dynamo_python_source(
         f"GRAPH_COUNT = {len(compiled_backends)}",
         f"DYNAMIC_GRAPH_COUNT = {dynamic_count}",
         f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}",
+        f"_DYNAMO_TORCH_VERSION = {torch.__version__!r}",
         f"_DYNAMO_BACKEND_IDS = {tuple(backend_ids)!r}",
         "# (guard type, source) pairs dropped from at least one variant's dispatch:",
         "# they only cover the Python environment, which is a caller-provided",
@@ -1885,6 +1896,26 @@ def _validate_dynamo_capture(
                 names.update(loaded_global_names(constant))
         return names
 
+    def mutates_globals(code: types.CodeType) -> bool:
+        return any(
+            instruction.opname in ("STORE_GLOBAL", "DELETE_GLOBAL")
+            for instruction in dis.get_instructions(code)
+        ) or any(
+            mutates_globals(constant)
+            for constant in code.co_consts
+            if isinstance(constant, types.CodeType)
+        )
+
+    # A capture runs against a copy of fn.__globals__ and the artifact runs
+    # against its own namespace, so a global mutation would never reach the
+    # caller's module -- at capture or at serve. Reject rather than silently
+    # drop the side effect.
+    if mutates_globals(target.__code__):
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot capture a Python function that "
+            "mutates globals; return the value instead."
+        )
+
     input_ids = {
         id(value)
         for example in example_inputs
@@ -1903,6 +1934,24 @@ def _validate_dynamo_capture(
             "precompile tracer='dynamo' cannot capture an explicit input that aliases "
             "the Python environment; pass the value only as an input. Aliased global: "
             f"{aliased_globals[0]!r}."
+        )
+    # A referenced tensor-valued global would be guarded by identity and read
+    # through the fn's globals at serve time, where the artifact namespace has
+    # no such name: capture would succeed and serving would fail with a raw
+    # NameError. Every tensor must be an explicit input.
+    tensor_globals = [
+        name
+        for name in sorted(loaded_global_names(target.__code__))
+        if name in target.__globals__
+        and reaches(
+            target.__globals__[name], lambda v: isinstance(v, torch.Tensor), set()
+        )
+    ]
+    if tensor_globals:
+        raise PrecompileError(
+            "precompile tracer='dynamo' cannot capture tensor-valued Python globals; "
+            "pass every tensor as an explicit input. Referenced global: "
+            f"{tensor_globals[0]!r}."
         )
     return target
 
@@ -2115,7 +2164,6 @@ def _build_dynamo_artifact(
 
     dynamo_state: dict[str, Any] = {
         "code": code.python_code,
-        "python_module": code.python_module,
         "import_sources": dict(code.import_sources),
         "defaults": capture_target.__defaults__,
         "kwdefaults": capture_target.__kwdefaults__,
@@ -2226,6 +2274,15 @@ def _precompile_dynamo(
             _teardown_dynamo_capture(package, capture_target, pgo_state, backend_fn)
 
 
+def _warn_unclosed_dynamo_state(fn_name: str) -> None:
+    log.warning(
+        "A stateful torch.compiler.precompile state for %r was garbage collected "
+        "without close(); its capture session stays pinned by Dynamo's "
+        "process-global registries until torch._dynamo.reset().",
+        fn_name,
+    )
+
+
 class _PrecompileDynamoState:
     """Opaque accumulated capture state for stateful ``torch.compiler.precompile``.
 
@@ -2270,6 +2327,14 @@ class _PrecompileDynamoState:
         self.calls = 0
         self.last_summary: PrecompileStateSummary | None = None
         self.closed = False
+        # Warn-only: the session outlives the state object (Dynamo's registries
+        # pin it by code object, not through this instance), and tearing down
+        # global compiler state from a GC callback is not safe. atexit=False
+        # keeps a state that is simply alive at interpreter exit quiet.
+        self._finalizer = weakref.finalize(
+            self, _warn_unclosed_dynamo_state, getattr(target, "__name__", "<fn>")
+        )
+        self._finalizer.atexit = False
 
     def summary(self) -> PrecompileStateSummary | None:
         """Coverage of the most recently written artifact; None before one exists."""
@@ -2283,12 +2348,13 @@ class _PrecompileDynamoState:
         copy of the fn's globals) stays pinned by Dynamo's process-global
         recompile-logging registry until ``torch._dynamo.reset()``.
         """
-        if self.closed:
-            return
-        self.closed = True
-        self.compiled = None
-        self.examples.clear()
         with _DYNAMO_COMPILE_LOCK:
+            if self.closed:
+                return
+            self.closed = True
+            self._finalizer.detach()
+            self.compiled = None
+            self.examples.clear()
             _teardown_dynamo_capture(
                 self.package, self.capture_target, self.pgo_state, self.backend_fn
             )
@@ -2431,8 +2497,12 @@ def _precompile_dynamo_stateful(
                     )
                 results = []
                 for example in example_inputs:
-                    results.append(state.compiled(*example))
+                    # Record the example before running it: Dynamo installs a new
+                    # guarded variant at frame entry, so a step that raises after
+                    # compiling would otherwise leave a variant matching no
+                    # recorded example and every later rebuild would fail.
                     state.examples.append(example)
+                    results.append(state.compiled(*example))
                 try:
                     python_code, cache, summary = _build_dynamo_artifact(
                         state.package,
@@ -2859,7 +2929,8 @@ class _PrecompileApi:
           compiling at runtime. This initial path requires one full graph (graph breaks
           are rejected), a function without closure cells, and positional tensor/scalar
           arguments or containers of those values (``nn.Module`` arguments are not
-          supported yet).
+          supported yet). Tensor-valued globals are rejected (every tensor must be an
+          explicit input), as are functions that mutate globals.
 
         ``decompositions`` is an optional decomposition table (a dict mapping each
         ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
@@ -3174,13 +3245,29 @@ class _PrecompileApi:
                 # mismatched pairing); see Note [precompile programming model], invariant 7.
                 expected_code_hash = hashlib.sha256(python_code.encode()).hexdigest()
                 if blob.get("code_hash") != expected_code_hash:
-                    raise PrecompileError(
-                        "cache does not match python_code (its code_hash "
-                        f"{blob.get('code_hash')!r} != sha256(python_code) "
-                        f"{expected_code_hash!r}); the cache and python_code came from "
-                        "different precompile() calls. Pair each cache with the "
-                        "python_code from the same precompile() call."
-                    )
+                    if tracer == "dynamo":
+                        # A dynamo python_code is fully self-contained (every graph
+                        # source is inlined), so the cache is pure acceleration.
+                        # Stateful capture rewrites the pair as two back-to-back
+                        # renames; a crash between them leaves exactly this mismatch,
+                        # and degrading keeps the on-disk artifact always loadable.
+                        log.warning(
+                            "torch.compiler.precompile.load got a cache whose "
+                            "code_hash does not match python_code (likely a rewrite "
+                            "interrupted between the artifact and cache renames, or a "
+                            "mismatched pairing). Falling back to JIT from "
+                            "python_code."
+                        )
+                        blob = None
+                    else:
+                        raise PrecompileError(
+                            "cache does not match python_code (its code_hash "
+                            f"{blob.get('code_hash')!r} != sha256(python_code) "
+                            f"{expected_code_hash!r}); the cache and python_code came "
+                            "from different precompile() calls. Pair each cache with "
+                            "the python_code from the same precompile() call."
+                        )
+            if blob is not None:
                 artifact = blob.get("artifact")
         except PrecompileError:
             raise

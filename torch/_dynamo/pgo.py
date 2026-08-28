@@ -215,6 +215,8 @@ def _new_code_state() -> defaultdict[CodeId, CodeState]:
 def _use_code_state(
     code_state: defaultdict[CodeId, CodeState],
 ) -> Iterator[None]:
+    # While the override is set, get_code_state() also skips its cache-fetch and
+    # tlparse bookkeeping, so overridden compiles leave no PGO trace artifacts.
     token = _CODE_STATE_OVERRIDE.set(code_state)
     try:
         yield
