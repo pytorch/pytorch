@@ -556,7 +556,7 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     Currently it only supports modules which return a single Tensor as output.
     You can bind the following kwargs.
     Kwargs:
-        batch_first[bool] : If True, all the Tensors in `args` while be unsqueezed at dim `0` .
+        batch_first[bool] : If True, all the Tensors in `args` will be unsqueezed at dim `0` .
                         and output will be squeezed at dim `0` else dim `1` for both.
         kwargs_to_batchify[dict] : Dictionary specifying the name of the argument and dimension to unsqueeze.
                                Useful if there are few arguments whose batch dimension are different

@@ -19,6 +19,7 @@ import functools
 import operator
 from collections.abc import Iterable, Iterator
 from typing import Any, TYPE_CHECKING
+from typing_extensions import TypeIs
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -51,11 +52,11 @@ if TYPE_CHECKING:
 # see steps outlined for ConstDictVariable
 
 
-def pyanyset_check(obj: VariableTracker) -> bool:
+def pyanyset_check(obj: VariableTracker) -> TypeIs["BaseSetVariable"]:
     return issubclass(obj.python_type(), (set, frozenset))
 
 
-def pyset_check(obj: VariableTracker) -> bool:
+def pyset_check(obj: VariableTracker) -> TypeIs["SetVariable"]:
     # ref: https://github.com/python/cpython/blob/v3.13.0/Include/setobject.h#L36-L38
     return issubclass(obj.python_type(), set)
 
