@@ -34,9 +34,16 @@ class Socket {
   }
 
   struct sockaddr_un prepare_address(const char* path) {
-    struct sockaddr_un address;
+    struct sockaddr_un address{};
     address.sun_family = AF_UNIX;
-    strcpy(address.sun_path, path);
+    const size_t path_len = strlen(path);
+    TORCH_CHECK(
+        path_len < sizeof(address.sun_path),
+        "Unix socket path too long (max ",
+        sizeof(address.sun_path) - 1,
+        " chars)");
+    strncpy(address.sun_path, path, sizeof(address.sun_path) - 1);
+    address.sun_path[sizeof(address.sun_path) - 1] = '\0';
     return address;
   }
 
