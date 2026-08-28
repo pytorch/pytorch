@@ -25,12 +25,10 @@
 #include <ATen/dlpack.h>
 #include <c10/core/Backend.h>
 #include <c10/core/DispatchKeySet.h>
-#include <c10/core/Layout.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <optional>
 
-#include <stdexcept>
 #include <vector>
 
 using at::Device;

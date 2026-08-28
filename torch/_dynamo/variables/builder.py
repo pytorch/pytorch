@@ -115,7 +115,6 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
 )
-from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
 
 from .. import config, graph_break_hints, mutation_guard, replay_record, trace_rules
@@ -4656,6 +4655,8 @@ def _automatic_dynamic(
     outer_only: bool = False,
     tensor_spec: TensorSpec | None = None,
 ) -> SymbolicContext:
+    from ..decorators import _dim_range_to_value_ranges, _get_dim_range
+
     # strided NT not supported
     if e.is_nested and not isinstance(
         e, torch.nested._internal.nested_tensor.NestedTensor
@@ -4894,6 +4895,50 @@ def _automatic_dynamic(
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
 
+        # Constraint policy has two independent axes, do not conflate them:
+        #
+        #   kind                        what it requires
+        #   --------------------------  ------------------------------------------------
+        #   None                        nothing, the dim may be narrowed or even fully
+        #                               specialized, silently
+        #   RelaxedUnspecConstraint     weak, the dim must not collapse to a single
+        #                               value, any further narrowing by guards is fine
+        #   StrictMinMaxConstraint(vr)  strong, no guard is allowed unless vr already
+        #                               implies it, so narrowing below vr violates it
+        #
+        #   warn_only                   reaction when the requirement is violated
+        #   --------------------------  ------------------------------------------------
+        #   False                       raise ConstraintViolationError
+        #   True                        log a warning and keep compiling
+        #
+        # The two axes are orthogonal: RelaxedUnspecConstraint(warn_only=False), what
+        # mark_dynamic uses without min/max, is a loose requirement that is strictly
+        # enforced, while StrictMinMaxConstraint(vr, warn_only=True) is a tight
+        # requirement that is only advisory.
+        #
+        # A constraint only controls enforcement. Whether the dim is symbolic at all is
+        # decided further down from marked_dynamic / marked_weak_dynamic, and
+        # constraint_stride is what picks DimDynamic.DYNAMIC for a stride (its own
+        # symbol) over DimDynamic.INFER_STRIDE (stride derived from the sizes).
+        #
+        # TODO: the chain below leans on the automatic dynamic fall-through for dims that
+        # do not match any branch, which is fragile: that branch also decides
+        # constraint_stride and records automatic_dynamic_shapes feature usage for dims
+        # that are dynamic because the user marked them. Refactor to handle every case
+        # explicitly, each with its own constraint_size/constraint_stride, and document
+        # the resulting DimDynamic per case in a table here:
+        #   mark_dynamic, with and without a range
+        #   mark_dynamic under config.allow_ignore_mark_dynamic, which today drops a
+        #     declared range entirely instead of degrading it to warn_only
+        #   maybe_mark_dynamic, with and without a range
+        #   dims that are only _dynamo_propagated_dynamic_indices, which should keep
+        #     plain automatic dynamic behavior and no user constraint
+        #   pure automatic dynamic, and no marking at all
+        # Until then the automatic_dynamic_shapes feature usage recorded below is skewed:
+        # a weakly marked dim with a declared range takes its own branch and records
+        # nothing, while the same dim without a range falls through and records usage,
+        # even though neither is dynamic because of automatic dynamic shapes.
+        #
         # We will process constraints first, as they will imply that we
         # have a dynamic dimension
         # Precedence: export constraints > eager constraints
@@ -4904,27 +4949,47 @@ def _automatic_dynamic(
             if marked_dynamic and not config.allow_ignore_mark_dynamic:
                 # constraint_stride is deliberaly kept None because no easy way to provide value ranges for mark dynamic
                 constraint_stride = None
-                if hasattr(e, "_dynamo_dynamic_range"):
-                    dim_range = [
-                        dr for dr in e._dynamo_dynamic_range if dr.dim == i
-                    ].pop()
-                    if dim_range.min is None and dim_range.max is None:
-                        constraint_size = RelaxedUnspecConstraint(warn_only=False)
-                    else:
-                        from torch.fx.experimental.symbolic_shapes import (
-                            StrictMinMaxConstraint,
-                        )
-
-                        constraint_size = StrictMinMaxConstraint(
-                            vr=ValueRanges(lower=dim_range.min, upper=dim_range.max),
-                            warn_only=False,
-                        )
-                else:
+                dim_range = _get_dim_range(e, i)
+                if dim_range is None:
                     constraint_size = RelaxedUnspecConstraint(warn_only=False)
+                else:
+                    from torch.fx.experimental.symbolic_shapes import (
+                        StrictMinMaxConstraint,
+                    )
+
+                    constraint_size = StrictMinMaxConstraint(
+                        vr=_dim_range_to_value_ranges(dim_range),
+                        warn_only=False,
+                    )
+            elif (
+                marked_weak_dynamic and (dim_range := _get_dim_range(e, i)) is not None
+            ):
+                # Only dims with a declared range are handled here. A weakly dynamic dim
+                # without one, which includes every dim that is weakly dynamic only
+                # because of _dynamo_propagated_dynamic_indices, keeps taking the
+                # automatic dynamic branch below as it did before ranges existed.
+                from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+
+                constraint_size = StrictMinMaxConstraint(
+                    vr=_dim_range_to_value_ranges(dim_range),
+                    warn_only=True,
+                )
+                # Strides are unrelated to the declared range, so decide them exactly as
+                # they would be for this dim if no range had been declared.
+                # TODO this is hazy, marked_static loses to a weak marking for the size
+                # yet still suppresses the stride constraint here. Maintaining existing
+                # behavior for now, the refactor above should settle it.
+                if not marked_static and automatic_dynamic_stride:
+                    constraint_stride = RelaxedUnspecConstraint(warn_only=True)
             elif marked_strict_unbacked:
                 constraint_size = RelaxedUnspecConstraint(warn_only=False)
             elif not marked_static and automatic_dynamic:
-                set_feature_use("dynamo.automatic_dynamic_shapes", True)
+                if not marked_weak_dynamic:
+                    # A weakly marked dim is dynamic because it was marked, automatic
+                    # dynamic shapes only supplies its constraints, so its usage is not
+                    # recorded. Keeps the reporting independent of whether the marking
+                    # declared a range.
+                    set_feature_use("dynamo.automatic_dynamic_shapes", True)
                 if automatic_dynamic_size:
                     constraint_size = RelaxedUnspecConstraint(warn_only=True)
                 if automatic_dynamic_stride:

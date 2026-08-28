@@ -1027,9 +1027,19 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
-def pointless_cumsum_non_scalar_check(match: Match) -> bool:
+def pointless_cumsum_check(match: Match) -> bool:
     # Scalar cumsum is already handled directly by lowering.cumsum.
-    return len(match.kwargs["shape"]) > 0
+    if len(match.kwargs["shape"]) == 0:
+        return False
+    # A symbolic fill_value arrives as an fx Node, which the replacement's int() and
+    # * both reject. A boolean full stays folded: bool(Node) is True, the right
+    # saturation for every nonzero fill and the wrong one for a zero fill, but
+    # declining is worse today - inductor's own full(..., dtype=bool) lowering drops
+    # the bool cast for a symbolic int fill (#194062). Drop the exemption when that
+    # lands.
+    return is_boolean_dtype(match.kwargs["dtype"]) or not isinstance(
+        match.kwargs["fill_value"], torch.fx.Node
+    )
 
 
 @register_graph_pattern(
@@ -1048,7 +1058,7 @@ def pointless_cumsum_non_scalar_check(match: Match) -> bool:
         KeywordArg("dim"),
         _users=MULTIPLE,
     ),
-    extra_check=pointless_cumsum_non_scalar_check,
+    extra_check=pointless_cumsum_check,
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
 )
