@@ -70,7 +70,7 @@ class cuFFTPlanCache:
     r"""
     Represent a specific plan cache for a specific `device_index`.
 
-    The attributes `size` and `max_size`, and method `clear`, can fetch and/ or
+    The attributes `size` and `max_size`, and method `clear`, can fetch and/or
     change properties of the C++ cuFFT plan cache.
     """
 

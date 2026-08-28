@@ -15,7 +15,12 @@ import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch.utils._pytree as python_pytree
-from torch._dynamo.exc import ResumePrologueTracingError, TorchRuntimeError, Unsupported
+from torch._dynamo.exc import (
+    BackendCompilerFailed,
+    ResumePrologueTracingError,
+    TorchRuntimeError,
+    Unsupported,
+)
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import IS_FBCODE, munge_exc
@@ -265,7 +270,7 @@ from user code:
             """\
 Backend compiler exception
   Explanation: Backend compiler `bad_backend` failed with test. Adding a graph break.
-  Hint: Report an issue to the backend compiler repo.
+  Hint: Set `fullgraph=False` to allow this backend fallback to run eagerly.
 
   Developer debug context: Backend: bad_backend
     Exception:test
@@ -276,6 +281,53 @@ Backend compiler exception
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0219.html""",
         )
+
+    @make_logging_test()
+    def test_backend_fake_tensor_exc_no_warning(self, records):
+        def bad_backend(gm, ex):
+            raise torch._subclasses.fake_tensor.UnsupportedFakeTensorException("test")
+
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend=bad_backend)
+        self.assertEqual(opt_fn(torch.ones(3)), torch.ones(3) + 1)
+
+        self.assertFalse(self.hasRecord(records, "Backend compiler exception"))
+        self.assertFalse(
+            self.hasRecord(records, "Report an issue to the backend compiler repo.")
+        )
+
+    @make_logging_test()
+    def test_backend_scalar_extraction_fallback_no_warning(self, records):
+        def bad_backend(gm, ex):
+            raise torch._subclasses.fake_tensor.DataDependentOutputException(
+                torch.ops.aten._local_scalar_dense.default
+            )
+
+        def fn(x):
+            values = x.to(torch.int64).tolist()
+            return x + values[0]
+
+        with torch._dynamo.config.patch(capture_scalar_outputs=True):
+            opt_fn = torch.compile(fn, backend=bad_backend)
+            self.assertEqual(opt_fn(torch.tensor([1, 2, 3])), torch.tensor([2, 3, 4]))
+
+        self.assertFalse(self.hasRecord(records, "Backend compiler exception"))
+        self.assertFalse(
+            self.hasRecord(records, "Report an issue to the backend compiler repo.")
+        )
+
+    def test_backend_hard_failure_still_raises(self):
+        def bad_backend(gm, ex):
+            raise RuntimeError("test")
+
+        def fn(x):
+            return x + 1
+
+        with torch._dynamo.config.patch(suppress_errors=False):
+            with self.assertRaises(BackendCompilerFailed):
+                torch.compile(fn, backend=bad_backend)(torch.ones(3))
 
     def test_unsupported_builtin(self):
         def fn():
@@ -1303,6 +1355,43 @@ from user code:
 
 """,
         )
+
+    def _backend_compiler_failed_traceback(self):
+        def bad_backend(gm, example_inputs):
+            raise TypeError("'NoneType' object is not iterable")
+
+        def fn(x):
+            return x + 1
+
+        # assertRaises suppresses the traceback, so manually catch
+        try:
+            torch.compile(fn, backend=bad_backend, fullgraph=True)(torch.ones(1))
+        except BackendCompilerFailed as exc:
+            return "".join(
+                traceback.format_exception(type(exc), exc, exc.__traceback__)
+            )
+
+        self.fail("expected BackendCompilerFailed")
+
+    def test_backend_compiler_failed_traceback(self):
+        msg = self._backend_compiler_failed_traceback()
+
+        self.assertIn("BackendCompilerFailed: backend='bad_backend' raised:", msg)
+        self.assertIn("TypeError: 'NoneType' object is not iterable", msg)
+        self.assertIn("in bad_backend", msg)
+        self.assertIn("output_graph.py", msg)
+        self.assertNotIn("convert_frame.py", msg)
+        self.assertNotIn("symbolic_convert.py", msg)
+        self.assertIn("Set TORCHDYNAMO_VERBOSE=1 for the full Dynamo stack trace", msg)
+
+    @torch._dynamo.config.patch(verbose=True)
+    def test_backend_compiler_failed_traceback_verbose(self):
+        msg = self._backend_compiler_failed_traceback()
+
+        self.assertIn("in bad_backend", msg)
+        self.assertIn("convert_frame.py", msg)
+        self.assertIn("symbolic_convert.py", msg)
+        self.assertNotIn("TORCHDYNAMO_VERBOSE=1", msg)
 
     @make_logging_test(graph_breaks=True)
     def test_graph_break_in_loop(self, records):
