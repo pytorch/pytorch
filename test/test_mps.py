@@ -879,6 +879,43 @@ class TestAvgPool(TestCaseMPS):
         self.assertEqual(bn_mps.cpu(), bn_cpu)
 
 
+class TestFractionalMaxPool(TestCaseMPS):
+    # `fractional_max_pool2d` draws its pooling regions from the device RNG when
+    # `_random_samples` is not given, so the OpInfo consistency test can only
+    # check metadata. Pass the samples explicitly to get a deterministic
+    # comparison against CPU.
+    @parametrize("shape,kernel,output_size", [
+        ((1, 3, 9, 9), (4, 4), (2, 3)),
+        ((1, 3, 9, 9), (3, 3), (3, 3)),
+        ((2, 4, 10, 7), (2, 3), (5, 4)),
+        ((3, 8, 8), (2, 2), (4, 4)),
+        ((1, 1, 4, 4), (2, 2), (1, 1)),
+    ])
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_fractional_max_pool2d(self, shape, kernel, output_size, dtype):
+        torch.manual_seed(0)
+        x = torch.randn(shape, dtype=dtype)
+        sample_shape = (shape[0], shape[1], 2) if len(shape) == 4 else (1, shape[0], 2)
+        samples = torch.rand(sample_shape, dtype=dtype)
+
+        cpu_x = x.clone().requires_grad_(True)
+        mps_x = x.to("mps").clone().requires_grad_(True)
+
+        cpu_out, cpu_idx = F.fractional_max_pool2d(
+            cpu_x, kernel, output_size=output_size, return_indices=True, _random_samples=samples)
+        mps_out, mps_idx = F.fractional_max_pool2d(
+            mps_x, kernel, output_size=output_size, return_indices=True,
+            _random_samples=samples.to("mps"))
+
+        self.assertEqual(mps_out.cpu(), cpu_out)
+        self.assertEqual(mps_idx.cpu(), cpu_idx)
+
+        grad = torch.randn_like(cpu_out)
+        cpu_out.backward(grad)
+        mps_out.backward(grad.to("mps"))
+        self.assertEqual(mps_x.grad.cpu(), cpu_x.grad)
+
+
 class TestMPS(TestCaseMPS):
     def ulpAssertAllClose(self, output, reference, n_ulps):
         """
@@ -16076,9 +16113,17 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.dropout2d',
         'nn.functional.dropout3d',
         'nn.functional.feature_alpha_dropout',
+        # Pooling regions are drawn from the device RNG unless
+        # `_random_samples` is passed, which the OpInfo samples do not do.
+        # Deterministic coverage lives in TestFractionalMaxPool.
+        'nn.functional.fractional_max_pool2d',
     }
 
     def _assert_random_op_match(self, mps_out, cpu_out):
+        if not isinstance(mps_out, torch.Tensor):
+            for mps_t, cpu_t in zip(mps_out, cpu_out):
+                self._assert_random_op_match(mps_t, cpu_t)
+            return
         # MPS and CPU consume independent RNG streams, so element-wise
         # comparison is meaningless. Summary stats (min/max/mean) are also
         # unreliable: dropout/multinomial outputs depend on which input
@@ -17314,6 +17359,7 @@ instantiate_parametrized_tests(TestAdvancedIndexing)
 instantiate_parametrized_tests(TestAutocastMPS)
 instantiate_parametrized_tests(MatmulTest)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
+instantiate_parametrized_tests(TestFractionalMaxPool)
 instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
