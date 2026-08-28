@@ -103,6 +103,25 @@ class GraphModule(torch.nn.Module):
         # No recompile
         self.assertEqual(counter.frame_count, 1)
 
+    def test_functorch_interpreter_vmap_attrs(self):
+        counter = CompileCounter()
+
+        def inner(y):
+            interpreter = (
+                torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter()
+            )
+            if interpreter.randomness() != "error":
+                return y * 0
+            return y + interpreter.batch_size() + interpreter.level()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            return torch.vmap(inner)(x)
+
+        x = torch.tensor([1, 2, 3, 4])
+        self.assertEqual(fn(x), torch.tensor([6, 7, 8, 9]))
+        self.assertEqual(counter.frame_count, 1)
+
     def test_graph_break_recovers_missing_python_tls_snapshot(self):
         @torch.compile(backend="eager_noexcept")
         def fn(x):
