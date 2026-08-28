@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyNativeDeviceTypes,
+    onlyOn,
     OpDTypes,
     ops,
     precisionOverride,
@@ -4958,7 +4959,7 @@ class TestBinaryUfuncsDevice(TestCase):
             x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
             test_helper(x, q)
 
-    @onlyAccelerator
+    @onlyOn(["cuda", "xpu"])
     @dtypes(torch.chalf)
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
         # Tests that Tensor and CPU Scalar work for `mul` for chalf.
@@ -5134,12 +5135,7 @@ instantiate_device_type_tests(
     only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
-instantiate_device_type_tests(
-    TestBinaryUfuncsDevice,
-    globals(),
-    only_for=("cpu", "cuda", "xpu"),
-    allow_xpu=True,
-)
+instantiate_device_type_tests(TestBinaryUfuncsDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestBinaryUfuncsCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
