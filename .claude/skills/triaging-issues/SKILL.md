@@ -241,17 +241,31 @@ Add `release triage` when an issue would affect a release if it went unfixed. Th
 only surfaces the issue for whoever owns the release; it is not a cherry-pick request and
 does not decide anything.
 
+**You are told which version is current — never guess it.** Your prompt carries a
+`RELEASE CONTEXT` block giving the most recent released minor version, resolved from the
+newest non-prerelease [GitHub release](https://github.com/pytorch/pytorch/releases) at run
+time. Use that value only. Do not use a version written in this file, and do not rely on
+what you remember about PyTorch releases — that is stale by construction. If the block
+says `unknown`, skip the two version-dependent criteria below and judge the rest on their
+own merits.
+
+The other side of the comparison usually comes from the issue itself: the environment dump
+reports the `torch` version the reporter is on, and regressions normally name the version
+that last worked.
+
 Add it when **any** of these hold:
 
-- **Regression against the most recent released minor version.** Pair it with
-  `module: regression`. Only against the last released minor (e.g. while 2.14 is in
-  progress, a regression versus 2.13.x) — a regression against a much older version is
-  not release-relevant.
+- **Regression against the most recent released minor version.** The issue reports
+  something that worked on that minor (or later) and is broken now. Pair it with
+  `module: regression`. If the last-working version is older than that minor, it is not
+  release-relevant.
 - **Critical correctness or stability:** silent correctness (wrong results, no error),
   backwards-compatibility break, crash / segfault, deadlock or hang, or a large memory
   leak.
-- **Critical fix to a feature introduced in the most recent minor release** — new
-  surface that shipped broken.
+- **Critical fix to a feature introduced in the most recent minor release** — new surface
+  that shipped broken. Go by what the issue says ("new in 2.x", "added in 2.x", "since
+  upgrading to 2.x") checked against the version in `RELEASE CONTEXT`; do not try to recall
+  which features shipped in which release.
 - **Binary / packaging:** anything affecting wheels, conda packages, Docker images,
   install, or the release build itself. Pair it with `module: binaries`.
 - **Would ship broken in the next release.** A defect on main, a nightly, an RC, or the
