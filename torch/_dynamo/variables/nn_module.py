@@ -1234,24 +1234,19 @@ class NNModuleVariable(VariableTracker):
         module = tx.output.get_submodule(self.module_key)
 
         # `constant=` is a Dynamo-internal extra arg from UserMethodVariable,
-        # not a Python method. `_check_input_dim` currently runs before that
-        # folding; other tp_methods must not, or constant nn.Module methods
-        # would stop using invoke_and_store_as_constant.
-        method = self.lookup_tp_method(name)
-        if method is not None and (name == "_check_input_dim" or not constant):
-            result = method(self, tx, name, args, kwargs)
-            if result is not None:
-                return result
-
+        # not a Python method. Base call_method cannot take it.
         if constant:
             fn = getattr(module, name)
             const_name = f"{module.__class__.__name__}_{name}_result"
             return invoke_and_store_as_constant(tx, fn, const_name, args, kwargs)
 
         # Loose heuristic for remaining class methods with all-tensor args.
-        # Runs after tp_methods so a declining handler can still match.
+        # Skip tp_methods names so they reach the declarative dispatch in the
+        # base call_method. Empty-args calls (e.g. __iter__) would otherwise
+        # match `all(x.is_tensor() for x in ())`.
         if (
-            name in module.__class__.__dict__
+            name not in self.tp_methods
+            and name in module.__class__.__dict__
             and callable(module.__class__.__dict__[name])
             and all(x.is_tensor() for x in itertools.chain(args, kwargs.values()))
         ):
