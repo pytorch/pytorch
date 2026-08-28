@@ -2,7 +2,6 @@
 
 #ifdef USE_C10D_NCCL
 
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <fmt/core.h>
 #include <nccl.h>
@@ -11,7 +10,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 #include <cstring>
 #include <exception>
 #include <set>
