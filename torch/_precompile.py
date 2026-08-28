@@ -1833,8 +1833,18 @@ def _validate_dynamo_capture(
         return root == "torch" or root in sys.stdlib_module_names
 
     def reaches(
-        value: object, predicate: Callable[[object], bool], seen: set[int]
+        value: object,
+        predicate: Callable[[object], bool],
+        seen: set[int],
+        *,
+        follow_types: bool = False,
     ) -> bool:
+        # follow_types widens the walk to non-library modules, classes (through
+        # the MRO), slot values, and each instance's type. The tensor-global
+        # scan needs that breadth (a tensor on a class or module attribute
+        # serves a raw NameError); the per-argument checks must NOT use it -- an
+        # argument is rejected only for what it carries, not for unrelated
+        # attributes of its type.
         if predicate(value):
             return True
         value_id = id(value)
@@ -1843,47 +1853,75 @@ def _validate_dynamo_capture(
         seen.add(value_id)
         if isinstance(value, dict):
             return any(
-                reaches(item, predicate, seen)
+                reaches(item, predicate, seen, follow_types=follow_types)
                 for pair in value.items()
                 for item in pair
             )
         if isinstance(value, (tuple, list, set, frozenset)):
-            return any(reaches(item, predicate, seen) for item in value)
+            return any(
+                reaches(item, predicate, seen, follow_types=follow_types)
+                for item in value
+            )
         if isinstance(value, types.ModuleType):
             # User modules can carry tensors as attributes; library modules are
             # part of the environment and are not traversed.
-            if is_library_module(value.__name__):
-                return False
-            return any(reaches(item, predicate, seen) for item in vars(value).values())
-        if isinstance(value, type):
-            if is_library_module(value.__module__):
+            if not follow_types or is_library_module(value.__name__):
                 return False
             return any(
-                reaches(item, predicate, seen)
+                reaches(item, predicate, seen, follow_types=True)
+                for item in vars(value).values()
+            )
+        if isinstance(value, type):
+            if not follow_types or is_library_module(value.__module__):
+                return False
+            return any(
+                reaches(item, predicate, seen, follow_types=True)
                 for cls in value.__mro__
                 if not is_library_module(cls.__module__)
                 for item in vars(cls).values()
             )
         if isinstance(value, (types.FunctionType, torch.Tensor)):
             return False
-        if not hasattr(value, "__dict__"):
+        # Instance state: __dict__ if present, plus slot values, plus (when
+        # following types) the class itself -- __dict__-less (slotted or
+        # C-extension) instances still reach their type this way.
+        if hasattr(value, "__dict__") and any(
+            reaches(item, predicate, seen, follow_types=follow_types)
+            for item in vars(value).values()
+        ):
+            return True
+        if not follow_types:
             return False
-        # Instance state, plus class attributes reachable through the instance.
-        return any(
-            reaches(item, predicate, seen) for item in vars(value).values()
-        ) or reaches(type(value), predicate, seen)
+        for cls in type(value).__mro__:
+            for descriptor in vars(cls).values():
+                if isinstance(descriptor, types.MemberDescriptorType):
+                    try:
+                        slot_value = descriptor.__get__(value, type(value))
+                    except AttributeError:
+                        continue
+                    if reaches(slot_value, predicate, seen, follow_types=True):
+                        return True
+        return reaches(type(value), predicate, seen, follow_types=True)
 
     def has_storage_overlap(values: object) -> bool:
         # The same tensor object passed twice is a supported identity relation
         # (Dynamo's serialized aliasing guards cover it); DISTINCT tensors that
         # share or overlap storage are not: their AOT StorageOverlap relation
         # does not survive serialization, so a mutating variant could silently
-        # serve wrong results.
+        # serve wrong results. The check is deliberately STORAGE-granular
+        # (non-overlapping views of one buffer are also rejected) because
+        # AOTAutograd's synthetic-base mutation handling keys on shared
+        # storage, not on element overlap, so storage identity is the
+        # boundary the missing guards would have enforced. Non-strided
+        # layouts are skipped here so Dynamo can reject them with its own
+        # clearer diagnostics.
         tensors = [
             value
             for value in pytree.tree_leaves(values)
-            if isinstance(value, torch.Tensor)
+            if isinstance(value, torch.Tensor) and value.layout is torch.strided
         ]
+        if len(tensors) < 2:
+            return False
         storage_ranges: dict[tuple[str, int | None], list[tuple[int, int]]] = {}
         storage_ids: set[tuple[str, int | None, int]] = set()
         seen_objects: set[int] = set()
@@ -1904,6 +1942,8 @@ def _validate_dynamo_capture(
             if storage_key in storage_ids:
                 return True
             storage_ids.add(storage_key)
+            # data_ptr() == 0 (meta/fake or unallocated storages) is excluded
+            # from the range check; identity via _cdata above still applies.
             if start != 0 and size > 0:
                 storage_ranges.setdefault(
                     (tensor.device.type, tensor.device.index), []
@@ -2031,7 +2071,10 @@ def _validate_dynamo_capture(
             for name in sorted(loaded_global_names(target.__code__))
             if name in target.__globals__
             and reaches(
-                target.__globals__[name], lambda v: isinstance(v, torch.Tensor), set()
+                target.__globals__[name],
+                lambda v: isinstance(v, torch.Tensor),
+                set(),
+                follow_types=True,
             )
         ]
         if tensor_globals:
@@ -2587,25 +2630,27 @@ def _precompile_dynamo_stateful(
                     )
                 import inspect
 
+                # An unbindable example (a caller arity mistake) must never be
+                # recorded: guard minimization signature.bind()s every recorded
+                # example on every rebuild, so it would poison the state. Probe
+                # every example of the call up front, so a bad one raises
+                # before any example of the batch is recorded or run.
                 signature = inspect.signature(state.capture_target)
-                results = []
                 for example in example_inputs:
-                    # An unbindable example (a caller arity mistake) must never
-                    # be recorded: guard minimization signature.bind()s every
-                    # recorded example on every rebuild, so it would poison the
-                    # state. Probe the bind first, then record BEFORE running:
-                    # Dynamo installs a new guarded variant at frame entry, so a
-                    # step that raises after compiling would otherwise leave a
-                    # variant matching no recorded example and every later
-                    # rebuild would fail.
                     try:
                         signature.bind(*example)
                     except TypeError as e:
                         raise TypeError(
                             f"precompile example does not match the positional "
-                            f"signature of {state.target.__name__!r}: {e}. The "
-                            "state is unchanged."
+                            f"signature of {state.target.__name__!r}: {e}. No "
+                            "example from this call was recorded."
                         ) from e
+                results = []
+                for example in example_inputs:
+                    # Record BEFORE running: Dynamo installs a new guarded
+                    # variant at frame entry, so a step that raises after
+                    # compiling would otherwise leave a variant matching no
+                    # recorded example and every later rebuild would fail.
                     state.examples.append(example)
                     results.append(state.compiled(*example))
                 try:

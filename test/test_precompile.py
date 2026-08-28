@@ -145,6 +145,43 @@ def _precompile_dynamo_module_attr_tensor(x):
     return x + _DYNAMO_TENSOR_MODULE.weight
 
 
+class _PrecompileDynamoSlottedClassAttr:
+    __slots__ = ()
+    tensor = torch.randn(3)
+
+
+_DYNAMO_SLOTTED_CLASS_ATTR = _PrecompileDynamoSlottedClassAttr()
+
+
+def _precompile_dynamo_slotted_class_attr_tensor(x):
+    return x + _DYNAMO_SLOTTED_CLASS_ATTR.tensor
+
+
+class _PrecompileDynamoSlottedValue:
+    __slots__ = ("t",)
+
+    def __init__(self):
+        self.t = torch.randn(3)
+
+
+_DYNAMO_SLOTTED_VALUE = _PrecompileDynamoSlottedValue()
+
+
+def _precompile_dynamo_slot_value_tensor(x):
+    return x + _DYNAMO_SLOTTED_VALUE.t
+
+
+class _PrecompileDynamoBoxWithModuleClassAttr:
+    helper = torch.nn.Linear(2, 2)
+
+    def __init__(self, scale):
+        self.scale = scale
+
+
+def _precompile_dynamo_box_scale(x, box):
+    return x * box.scale
+
+
 def _precompile_dynamo_stateful_flaky(x, mode):
     if mode == 3:
         torch._dynamo.graph_break()
@@ -1294,20 +1331,40 @@ class TestPrecompile(TestCase):
     def test_tracer_dynamo_rejects_tensor_global(self):
         # A referenced global tensor would only exist in the caller's module, so
         # the artifact would capture fine and then serve a raw NameError. The
-        # rejection must also see tensors held as class attributes and as
-        # attributes of user (non-library) modules.
+        # rejection must also see tensors held as class attributes, as
+        # attributes of user (non-library) modules, and on slotted instances
+        # (both slot values and their class attributes).
         for fn in (
             _precompile_dynamo_global_tensor,
             _precompile_dynamo_class_attr_tensor,
             _precompile_dynamo_module_attr_tensor,
+            _precompile_dynamo_slotted_class_attr_tensor,
+            _precompile_dynamo_slot_value_tensor,
         ):
-            with self.assertRaisesRegex(PrecompileError, "contains a tensor"):
-                torch.compiler.precompile(
-                    fn,
-                    example_inputs=[(torch.randn(3),)],
-                    tracer="dynamo",
-                    backend="eager",
-                )
+            with self.subTest(fn=fn.__name__):
+                with self.assertRaisesRegex(PrecompileError, "contains a tensor"):
+                    torch.compiler.precompile(
+                        fn,
+                        example_inputs=[(torch.randn(3),)],
+                        tracer="dynamo",
+                        backend="eager",
+                    )
+
+    def test_tracer_dynamo_accepts_argument_with_module_class_attribute(self):
+        # The widened tensor-global walk must not leak into the per-argument
+        # nn.Module check: an argument is rejected only for what it carries,
+        # not for unrelated attributes of its type.
+        x = torch.randn(4)
+        box = _PrecompileDynamoBoxWithModuleClassAttr(3.0)
+        code, cache = torch.compiler.precompile(
+            _precompile_dynamo_box_scale,
+            example_inputs=[(x, box)],
+            tracer="dynamo",
+            backend="eager",
+        )
+        loaded = torch.compiler.precompile.load(code, cache)
+        served = loaded(x, _PrecompileDynamoBoxWithModuleClassAttr(3.0))
+        self.assertEqual(served, x * 3.0)
 
     def test_tracer_dynamo_rejects_global_mutation(self):
         # Capture runs against a copy of the fn's globals and the artifact against
@@ -1786,6 +1843,15 @@ class TestPrecompile(TestCase):
                     state=state,
                     **kwargs,
                 )
+            # A batch with a bad example records NOTHING, including the good
+            # examples before it -- the message says so.
+            with self.assertRaisesRegex(TypeError, "No example from this call"):
+                torch.compiler.precompile(
+                    _precompile_dynamo_scalar,
+                    example_inputs=[(x, 2), (x, 1, 2)],
+                    state=state,
+                    **kwargs,
+                )
             result, state = torch.compiler.precompile(
                 _precompile_dynamo_scalar,
                 example_inputs=[(x, 3)],
@@ -1793,6 +1859,9 @@ class TestPrecompile(TestCase):
                 **kwargs,
             )
             self.assertEqual(result, x + 3)
+            # 1 from the fresh call + 1 from the good call: the two failed
+            # calls contributed no examples.
+            self.assertEqual(state.summary().examples, 2)
             loaded = torch.compiler.precompile.load(**paths)
             self.assertEqual(loaded(x, 3), x + 3)
 
@@ -2263,6 +2332,10 @@ class TestPrecompile(TestCase):
                         t.testing.assert_close(loaded(x), t.sin(x))
                         # Serving must never compile: dynamo is enabled in this
                         # child, so any compile would show up here.
+                        import os as o
+
+                        if o.environ.get("TORCHDYNAMO_DISABLE"):
+                            raise AssertionError("dynamo must be enabled here")
                         from torch._dynamo.utils import counters
 
                         if counters["frames"]:
@@ -2272,6 +2345,13 @@ class TestPrecompile(TestCase):
                     artifact_path,
                     cache_path,
                 ],
+                # An ambient TORCHDYNAMO_DISABLE would silently void the
+                # frame-counter assertion; strip it (the child double-checks).
+                env={
+                    key: value
+                    for key, value in os.environ.items()
+                    if key != "TORCHDYNAMO_DISABLE"
+                },
             )
 
     def test_tracer_dynamo_varargs_dispatch(self):

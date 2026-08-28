@@ -27,6 +27,7 @@ from __future__ import annotations
 import dataclasses
 import enum
 import logging
+import math
 import os
 import os.path
 import re
@@ -701,7 +702,11 @@ def _json_config_value(value: Any) -> Any:
 def _json_stable_value(value: Any) -> bool:
     if isinstance(value, enum.Enum):
         value = value.value
-    if value is None or isinstance(value, (bool, int, float, str)):
+    if isinstance(value, float):
+        # NaN never ==-matches a cached entry and json.dumps emits non-strict
+        # NaN/Infinity tokens that strict-JSON readers (remote caches) reject.
+        return math.isfinite(value)
+    if value is None or isinstance(value, (bool, int, str)):
         return True
     if isinstance(value, list):
         return all(_json_stable_value(item) for item in value)

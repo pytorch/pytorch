@@ -1241,13 +1241,22 @@ def helper(x):
 
         self.assertIsNone(_constexpr_source(LocalSet({1})))
 
-        # Only OrderedSet exactly reconstructs: other subclasses (even of
-        # OrderedSet, even importable ones) decline rather than emit
-        # hash-order-nondeterministic or constructor-crashing source.
+        # Only OrderedSet exactly reconstructs: other subclasses -- even fully
+        # importable ones, which the reference-resolution path alone would
+        # accept -- decline rather than emit hash-order-nondeterministic or
+        # constructor-assuming source.
+        import torch.utils._ordered_set as ordered_set_module
+
         class OrderedSubSet(OrderedSet):
             pass
 
-        self.assertIsNone(_constexpr_source(OrderedSubSet([1])))
+        OrderedSubSet.__module__ = "torch.utils._ordered_set"
+        OrderedSubSet.__qualname__ = "OrderedSubSet"
+        ordered_set_module.OrderedSubSet = OrderedSubSet
+        try:
+            self.assertIsNone(_constexpr_source(OrderedSubSet([1])))
+        finally:
+            del ordered_set_module.OrderedSubSet
 
     @parametrize(
         "value, expected",

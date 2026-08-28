@@ -465,18 +465,23 @@ def _build_dynamo_forward():
         target_function.__kwdefaults__ = dict(kwdefaults)
     signature = inspect.signature(target_function)
 
+    import torch.utils._pytree as pytree
+
     def has_storage_overlap(values):
         # The same tensor object passed twice is covered by the serialized
         # aliasing guards; DISTINCT tensors sharing or overlapping storage are
         # not (their AOT StorageOverlap relation has no serialized form), and a
-        # mutating variant could silently compute the wrong thing.
-        import torch.utils._pytree as pytree
-
+        # mutating variant could silently compute the wrong thing. Deliberately
+        # STORAGE-granular: AOTAutograd's synthetic-base mutation handling keys
+        # on shared storage, not element overlap. Non-strided layouts are left
+        # for the guard checks to reject with their own diagnostics.
         tensors = [
             value
             for value in pytree.tree_leaves(values)
-            if isinstance(value, torch.Tensor)
+            if isinstance(value, torch.Tensor) and value.layout is torch.strided
         ]
+        if len(tensors) < 2:
+            return False
         storage_ranges: dict = {}
         storage_ids: set = set()
         seen_objects: set = set()
@@ -499,6 +504,8 @@ def _build_dynamo_forward():
             if storage_key in storage_ids:
                 return True
             storage_ids.add(storage_key)
+            # data_ptr() == 0 (meta/fake or unallocated storages) is excluded
+            # from the range check; identity via _cdata above still applies.
             if start != 0 and size > 0:
                 storage_ranges.setdefault(
                     (tensor.device.type, tensor.device.index), []
