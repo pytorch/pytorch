@@ -497,6 +497,7 @@ test_python_smoke_b200() {
       python_native/test_kernel_general \
       python_native/test_hw_caps \
       python_native/test_traits \
+      python_native/test_instrumentation \
       python_native/test_tile_datapath \
       inductor/test_torchinductor \
       inductor/test_async_compile \

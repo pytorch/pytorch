@@ -50,7 +50,14 @@ class HWCaps:
         self.l2_bytes = p.L2_cache_size
         # peak DRAM bandwidth (bytes/s): bus_width(bits)/8 * memclock(kHz)*1e3 * 2 (DDR).
         # Divide LAST: `// 8` first truncates any bus width that is not a multiple of 8.
-        self.peak_bw_bytes = p.memory_bus_width * p.memory_clock_rate * 1000 * 2 // 8
+        #
+        # `memory_clock_rate` is NOT read off `p`: torch/csrc/cuda/Module.cpp registers it as a
+        # property whose lambda ignores the cudaDeviceProp and queries the CURRENT device, so on
+        # a heterogeneous box this would pair `device`'s bus width with another device's clock --
+        # and caps() memoizes the result per index. Scope the read.
+        with torch.cuda.device(device):
+            mem_clock_khz = p.memory_clock_rate
+        self.peak_bw_bytes = p.memory_bus_width * mem_clock_khz * 1000 * 2 // 8
 
     # --- derived quantities the launch heuristics reason in ---
     @property
