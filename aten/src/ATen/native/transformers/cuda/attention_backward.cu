@@ -249,6 +249,9 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
 
     const bool is_nested = cum_seq_q.defined();
     TORCH_CHECK(
+        is_nested || query.size(2) != 1 || !sdp::is_cudnn_attention_decode_disabled(),
+        "cuDNN SDPA decode is disabled for cuDNN versions 9.19-9.25.0 (except 9.24.1) on SM 10.x and 11.x.");
+    TORCH_CHECK(
         !is_nested || max_q > 128,
         "cuDNN varlen attention does not support query sequence length <= 128.");
 

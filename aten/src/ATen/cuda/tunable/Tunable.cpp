@@ -19,7 +19,6 @@
 
 #ifndef USE_ROCM
 #include <cuda.h>
-#include <cuda_runtime_api.h>
 #include <cublasLt.h>
 #include <cublas_v2.h>
 #endif
@@ -511,6 +510,7 @@ static bool CheckKeysMatching(
   std::sort(provided_keys.begin(), provided_keys.end());
 
   std::unordered_set<std::string> intersection;
+  intersection.reserve(std::min(required_keys.size(), provided_keys.size()));
   std::set_intersection(required_keys.cbegin(), required_keys.cend(),
                         provided_keys.cbegin(), provided_keys.cend(),
                         std::inserter(intersection, intersection.end()));
