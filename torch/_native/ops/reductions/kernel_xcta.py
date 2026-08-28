@@ -19,9 +19,11 @@
 #            output or two off the same combined accumulator, so max.dim / aminmax /
 #            var_mean get the split at no extra cost (reduce_row_xcta_2out).
 #
-# C is chosen so each stage-1 sub-row fits the row kernel's tile AND the M*C blocks
-# fill the device. Stage 1's fold is ROLLED, so the sub-row length rides in as a runtime
-# arg: ONE compiled stage-1 shape per vec class serves every N, not one per N.
+# C is chosen from N alone: the nearest divisor to a measured sub-row-length target that
+# still fits the row kernel's tile (see _split_C). It is deliberately NOT a function of M
+# or of the device's SM count -- C is baked into the plan, so one value has to serve every
+# M. Stage 1's fold is ROLLED, so the sub-row length rides in as a runtime arg: ONE
+# compiled stage-1 shape per vec class serves every N, not one per N.
 #
 # INDEX traits (argmax/argmin) are DECLINED here: the reshape makes a sub-row's chunk
 # index row % C, so rebasing its column to the global one is awkward. They are served by
@@ -86,7 +88,7 @@ def _choose_config(hw=None, nfields: int = 1) -> "_XctaConfig":
     return _XctaConfig(subrow_target=int(round(_SUBROW_TARGET * smem)))
 
 
-def _split_C(M, N, vec, sm, smem_budget_elems, subrow_target=None):
+def _split_C(N, vec, smem_budget_elems, subrow_target=None):
     # Choose C = chunks per output row for the two-stage split. The reshape
     # (M*C, N/C) requires C | N exactly, i.e. the sub-row length s = N/C must be a
     # DIVISOR of N that (1) is a multiple of vec (the row kernel vectorizes the load) and
@@ -181,21 +183,12 @@ class FusedTwoStage:
         ).launch(grid=[mOuts[0].shape[0], 1, 1], block=[s2.block, 1, 1], stream=stream)
 
 
-_DEV_SM = {}  # device -> multi_processor_count (get_device_properties is ~1.3us)
 # Two-level cache (mirrors kernel_general): _PLAN holds COMPILED fused kernels, keyed
 # on the sub-row's vec class + stage-1 launch config, so every N sharing those shares one
 # kernel. _GEOM memoizes per-(N, knobs) derivations: C, the wrap params, and the
 # PRE-BOXED runtime args (quads + Int boxing is ~6us), including None declines (prime N).
 _PLAN = {}
 _GEOM = {}
-
-
-def _device_sm(device):
-    sm = _DEV_SM.get(device)
-    if sm is None:
-        sm = torch.cuda.get_device_properties(device).multi_processor_count
-        _DEV_SM[device] = sm
-    return sm
 
 
 def reduce_row_xcta(
@@ -304,12 +297,10 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
     # the caller so the K0 fallback is also remembered.
     device = x.device
     elsize = x.element_size()
-    sm = _device_sm(device)
     vec = math.gcd(N, 128 // (elsize * 8))
-    # M only sizes the device-fill heuristic in _split_C; C is fixed in the plan
-    # (it sets stage-1's sub-row length N//C and stage-2's partial count), so the
-    # same C must be used for every M -> derive it once here.
-    C = _split_C(M, N, vec, sm, _RB._SMEM_BUDGET // elsize, subrow_target)
+    # C is fixed in the plan (it sets stage-1's sub-row length N//C and stage-2's partial
+    # count), so the same C must serve every M -> derive it once here, from N alone.
+    C = _split_C(N, vec, _RB._SMEM_BUDGET // elsize, subrow_target)
     if C is None:
         # Prime / poorly-factored N: no clean reshape split. The caller memoizes the
         # None -> the K0 general kernel serves it (any N, no reshape, O(1) compile).
