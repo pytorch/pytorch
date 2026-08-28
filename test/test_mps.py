@@ -15314,6 +15314,30 @@ class TestAdvancedIndexing(TestCaseMPS):
         finally:
             torch.use_deterministic_algorithms(False)
 
+    @parametrize("op", ["scatter_add_", "index_add_", "index_put_"])
+    @parametrize("dtype", [torch.bool, torch.uint8])
+    @parametrize("offset", [0, 1, 2, 3])
+    def test_accumulate_misaligned_storage_offset(self, op, dtype, offset, device="mps"):
+        # 1-byte dtypes accumulate through a 4-byte atomic<uint> compare-exchange and
+        # the buffer is bound at storage_offset() * element_size(), so a view whose
+        # storage offset is not a multiple of 4 needs the kernel to realign the base
+        # pointer. A miss lands in front of the view, hence comparing the whole base
+        # tensor rather than just the view.
+        idx = torch.tensor([1, 3, 3, 6])
+        src = torch.ones(idx.numel(), dtype=dtype)
+
+        def run(dev):
+            base = torch.zeros(8 + offset, dtype=dtype, device=dev)
+            view = base.narrow(0, offset, 8)
+            index, values = idx.to(dev), src.to(dev)
+            if op == "index_put_":
+                view.index_put_((index,), values, accumulate=True)
+            else:
+                getattr(view, op)(0, index, values)
+            return base
+
+        self.assertEqual(run(device).cpu(), run("cpu"))
+
     def test_multiple_byte_mask(self, device="mps"):
         v = torch.randn(5, 7, 3, device=device)
         # note: these broadcast together and are transposed to the first dim
