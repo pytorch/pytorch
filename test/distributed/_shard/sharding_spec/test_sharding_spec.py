@@ -205,7 +205,7 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[4, 0],
                 shard_sizes=[5, 5],
-                placement="cpu:0",
+                placement="cpu:1",
             ),
         ]
         with self.assertRaisesRegex(ValueError, "overlap"):
@@ -279,12 +279,12 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[0, 5],
                 shard_sizes=[5, 5],
-                placement="cpu:2",
+                placement="cpu:1",
             ),
             ShardMetadata(
                 shard_offsets=[5, 0],
                 shard_sizes=[5, 5],
-                placement="cpu:2",
+                placement="cpu:1",
             ),
             ShardMetadata(
                 shard_offsets=[5, 5],
