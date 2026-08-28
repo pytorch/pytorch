@@ -60,6 +60,9 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         """
         return source_codes
 
+    def cpp_kernel_launch_supports_pdl(self) -> bool:
+        return torch.version.hip is None
+
     def kernel_driver(self) -> str:
         """Return C++ host-side helpers (loadKernel, launchKernel, CUDA_DRIVER_CHECK)
         embedded in AOTI-generated wrapper code."""
@@ -134,6 +137,49 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 return func;
             }
 
+            __LAUNCH_KERNEL__
+        """
+        if self.cpp_kernel_launch_supports_pdl():
+            launch_kernel = """
+            static inline void launchKernel(
+                    CUfunction func,
+                    uint32_t gridX,
+                    uint32_t gridY,
+                    uint32_t gridZ,
+                    uint32_t numWarps,
+                    uint32_t sharedMemBytes,
+                    void* args[],
+                    cudaStream_t stream,
+                    bool launchPdl) {
+                if (!launchPdl) {
+                    CUDA_DRIVER_CHECK(cuLaunchKernel(
+                        func, gridX, gridY, gridZ, __WARP_SIZE__*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
+                    ));
+                    return;
+                }
+
+                CUlaunchAttribute launchAttr{};
+                launchAttr.id =
+                    CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION;
+                launchAttr.value.programmaticStreamSerializationAllowed = 1;
+
+                CUlaunchConfig launchConfig{};
+                launchConfig.gridDimX = gridX;
+                launchConfig.gridDimY = gridY;
+                launchConfig.gridDimZ = gridZ;
+                launchConfig.blockDimX = __WARP_SIZE__ * numWarps;
+                launchConfig.blockDimY = 1;
+                launchConfig.blockDimZ = 1;
+                launchConfig.sharedMemBytes = sharedMemBytes;
+                launchConfig.hStream = stream;
+                launchConfig.attrs = &launchAttr;
+                launchConfig.numAttrs = 1;
+                CUDA_DRIVER_CHECK(
+                    cuLaunchKernelEx(&launchConfig, func, args, nullptr));
+            }
+            """
+        else:
+            launch_kernel = """
             static inline void launchKernel(
                     CUfunction func,
                     uint32_t gridX,
@@ -147,13 +193,16 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     func, gridX, gridY, gridZ, __WARP_SIZE__*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
                 ));
             }
-        """
+            """
+
         if torch.version.hip is not None and torch.cuda.is_available():
             device = torch.device("cuda", torch.cuda.current_device())
             warp_size = get_warp_size(device)
         else:
             warp_size = 32
-        return source_codes.replace("__WARP_SIZE__", str(warp_size))
+        return source_codes.replace("__LAUNCH_KERNEL__", launch_kernel.strip()).replace(
+            "__WARP_SIZE__", str(warp_size)
+        )
 
     def tma_descriptor_helpers(self) -> str:
         """
