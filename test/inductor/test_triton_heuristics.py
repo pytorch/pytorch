@@ -6,15 +6,20 @@ import sys
 import tempfile
 import types
 import unittest
-from unittest import skipUnless
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import rand_strided
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.utils import clone_preserve_strides
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     IS_LINUX,
     parametrize,
     runOnRocm,
@@ -22,8 +27,9 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_GPU_AND_TRITON,
+    HAS_TRITON,
     requires_gpu_with_enough_memory,
+    requires_triton,
 )
 
 
@@ -98,9 +104,45 @@ def get_autotuned_amd_sqr_kernel():
     )(amd_sqr_kernel)
 
 
-@instantiate_parametrized_tests
+def _get_cos_kernel_caching_autotuner_args(device):
+    @triton.jit
+    def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
+        xnumel = 16
+        xoffset = tl.program_id(0) * XBLOCK
+        xindex = xoffset + tl.arange(0, XBLOCK)[:]
+        xmask = xindex < xnumel
+        x0 = xindex
+        tmp0 = tl.load(in_ptr0 + (x0), xmask)
+        tmp1 = tl_math.cos(tmp0)
+        tl.store(out_ptr0 + (x0), tmp1, xmask)
+
+    triton_meta = {
+        "signature": {"in_ptr0": "*fp32", "out_ptr0": "*fp32", "xnumel": "i32"},
+        "device": DeviceProperties.create(torch.device(device)),
+        "constants": {},
+        "configs": [AttrsDescriptorWrapper(divisible_by_16=(0, 1, 2), equal_to_1=())],
+    }
+
+    configs = [
+        triton_config({"x": 16}, 64),
+        triton_config({"x": 256}, 64),
+    ]
+
+    return {
+        "fn": triton_,
+        "triton_meta": triton_meta,
+        "configs": configs,
+        "save_cache_hook": False,
+        "mutated_arg_names": [],
+        "reset_to_zero_arg_names": [],
+        "optimize_mem": True,
+        "heuristic_type": HeuristicType.POINTWISE,
+        "inductor_meta": {},
+    }
+
+
 class TestTritonHeuristics(TestCase):
-    device_type = GPU_TYPE
+    hw_classification = HardwareClassification.GENERIC
 
     def test_find_names_ignores_frame_locals(self):
         """
@@ -346,7 +388,54 @@ class TestTritonHeuristics(TestCase):
         self.assertIsNone(autotune_cache)
         self.assertEqual(autotune_cache_info["autotune_cache_state"], "only 1 config")
 
-    def _test_artificial_zgrid(self):
+    @unittest.skipIf(not HAS_WARP_SPEC, "FBCODE Triton is required for this test")
+    def test_template_function_ws(self):
+        triton_meta = {"device": MagicMock()}
+        num_stages = 2
+        num_warps = 4
+        num_consumer_groups = 3
+        num_buffers_warp_spec = 5
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.cached_autotune"
+        ) as mock_cached_autotune:
+            template(
+                num_stages=num_stages,
+                num_warps=num_warps,
+                triton_meta=triton_meta,
+                num_consumer_groups=num_consumer_groups,
+                num_buffers_warp_spec=num_buffers_warp_spec,
+            )
+            mock_cached_autotune.assert_called_once()
+            configs = mock_cached_autotune.call_args[0][1]
+            self.assertEqual(configs[0].num_consumer_groups, num_consumer_groups)
+            self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
+
+
+class _TritonDeviceTestCase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        device = cls.get_primary_device()
+        if not HAS_TRITON:
+            raise unittest.SkipTest(f"triton is required for {device}")
+        try:
+            device_interface = get_interface_for_device(torch.device(device).type)
+        except NotImplementedError as exc:
+            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
+        if not device_interface.is_triton_capable(device):
+            raise unittest.SkipTest(f"requires Triton support for {device}")
+        try:
+            device_interface.raise_if_triton_unavailable(device)
+        except TritonUnavailableError as exc:
+            raise unittest.SkipTest(str(exc)) from exc
+
+
+@requires_triton()
+class TestTritonHeuristicsRuntime(_TritonDeviceTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _test_artificial_zgrid(self, device):
         def forward(primals_1, primals_2, primals_5):
             view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])
             primals_5 = None
@@ -367,9 +456,9 @@ class TestTritonHeuristics(TestCase):
         s1 = 8
 
         args = [
-            torch.rand([2, 4], device=GPU_TYPE),
-            torch.rand([2], device=GPU_TYPE),
-            torch.rand([s0, s1], device=GPU_TYPE),
+            torch.rand([2, 4], device=device),
+            torch.rand([2], device=device),
+            torch.rand([s0, s1], device=device),
         ]
         torch._dynamo.mark_dynamic(args[-1], 0)
         foo_c = torch.compile(forward)
@@ -377,66 +466,25 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(forward(*args), foo_c(*args))
 
         args = [
-            torch.rand([2, 4], device=GPU_TYPE),
-            torch.rand([2], device=GPU_TYPE),
-            torch.rand([s0, s1], device=GPU_TYPE),
+            torch.rand([2, 4], device=device),
+            torch.rand([2], device=device),
+            torch.rand([s0, s1], device=device),
         ]
         self.assertEqual(forward(*args), foo_c(*args))
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_artificial_zgrid(self):
-        self._test_artificial_zgrid()
+    @onlyAccelerator
+    def test_artificial_zgrid(self, device):
+        self._test_artificial_zgrid(device)
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    @onlyAccelerator
     @config.patch("cpp_wrapper", True)
-    def test_artificial_grid_cpp_wrapper(self):
-        self._test_artificial_zgrid()
+    def test_artificial_grid_cpp_wrapper(self, device):
+        self._test_artificial_zgrid(device)
 
-    @staticmethod
-    def _get_cos_kernel_caching_autotuner_args():
-        @triton.jit
-        def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
-            xnumel = 16
-            xoffset = tl.program_id(0) * XBLOCK
-            xindex = xoffset + tl.arange(0, XBLOCK)[:]
-            xmask = xindex < xnumel
-            x0 = xindex
-            tmp0 = tl.load(in_ptr0 + (x0), xmask)
-            tmp1 = tl_math.cos(tmp0)
-            tl.store(out_ptr0 + (x0), tmp1, xmask)
-
-        triton_meta = {
-            "signature": {"in_ptr0": "*fp32", "out_ptr0": "*fp32", "xnumel": "i32"},
-            "device": DeviceProperties.create(torch.device(GPU_TYPE)),
-            "constants": {},
-            "configs": [
-                AttrsDescriptorWrapper(divisible_by_16=(0, 1, 2), equal_to_1=())
-            ],
-        }
-
-        configs = [
-            triton_config({"x": 16}, 64),
-            triton_config({"x": 256}, 64),
-        ]
-
-        inductor_meta = {}
-
-        return {
-            "fn": triton_,
-            "triton_meta": triton_meta,
-            "configs": configs,
-            "save_cache_hook": False,
-            "mutated_arg_names": [],
-            "reset_to_zero_arg_names": [],
-            "optimize_mem": True,
-            "heuristic_type": HeuristicType.POINTWISE,
-            "inductor_meta": inductor_meta,
-        }
-
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_pre_hook_assert(self):
+    @onlyAccelerator
+    def test_pre_hook_assert(self, device):
         # assert if any of the configs passed to the CachingAutotuner have pre-hooks
-        args = self._get_cos_kernel_caching_autotuner_args()
+        args = _get_cos_kernel_caching_autotuner_args(device)
 
         def pre_hook(kwargs):
             if "in_ptr0" in kwargs:
@@ -448,9 +496,9 @@ class TestTritonHeuristics(TestCase):
         with self.assertRaisesRegex(AssertionError, "pre_hook"):
             CachingAutotuner(**args)
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_autotune_hints_to_configs(self):
-        device_props = DeviceProperties.create(torch.device(GPU_TYPE))
+    @onlyAccelerator
+    def test_autotune_hints_to_configs(self, device):
+        device_props = DeviceProperties.create(torch.device(device))
         device_props = device_props._replace(warp_size=8)
 
         hints = {AutotuneHint.ONE_ELEMENT_PER_THREAD}
@@ -481,94 +529,12 @@ class TestTritonHeuristics(TestCase):
 
         self.assertTrue(8 in seen_num_elements_per_warp)
 
-    @unittest.skipIf(not HAS_WARP_SPEC, "FBCODE Triton is required for this test")
-    def test_template_function_ws(self):
-        triton_meta = {"device": MagicMock()}
-        num_stages = 2
-        num_warps = 4
-        num_consumer_groups = 3
-        num_buffers_warp_spec = 5
-
-        with patch(
-            "torch._inductor.runtime.triton_heuristics.cached_autotune"
-        ) as mock_cached_autotune:
-            template(
-                num_stages=num_stages,
-                num_warps=num_warps,
-                triton_meta=triton_meta,
-                num_consumer_groups=num_consumer_groups,
-                num_buffers_warp_spec=num_buffers_warp_spec,
-            )
-            mock_cached_autotune.assert_called_once()
-            configs = mock_cached_autotune.call_args[0][1]
-            self.assertEqual(configs[0].num_consumer_groups, num_consumer_groups)
-            self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
-
-    @runOnRocm
-    def test_amd_special_config_args(self):
-        """
-        waves_per_eu is an example of a special config arg on AMD; if it is explicitly specified
-        in a config, the kwarg will exist in the kwargs but not in the function signature.
-        """
-
-        @torch.library.triton_op("test_triton_heuristics::triton_sqr", mutates_args=())
-        def triton_sqr(x: torch.Tensor) -> torch.Tensor:
-            y = torch.empty_like(x)
-
-            def grid(meta):
-                return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
-
-            torch.library.wrap_triton(get_autotuned_amd_sqr_kernel())[grid](
-                x, y, x.numel()
-            )
-
-        def fn(x):
-            return triton_sqr(x)
-
-        x = torch.randn(32, device=GPU_TYPE)
-        ref = fn(x)
-        res = torch.compile(fn)(x)
-        self.assertEqual(ref, res)
-
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    @parametrize("do_pruning", [False, True])
-    def test_prune_configs_over_shared_memory_limit(self, do_pruning):
-        from torch._inductor.heuristics.template.triton import (
-            CUDAConfigHeuristic,
-            GemmConfig,
-            ROCmConfigHeuristic,
-            XPUConfigHeuristic,
-        )
-
-        expected_count = 1 if do_pruning else 2
-        mm_configs = [
-            GemmConfig(32, 32, 32, 1, 8, group_m=8),
-            GemmConfig(
-                128, 128, 128, 100, 8, group_m=4
-            ),  # intentionally large to exceed shared memory limit
-        ]
-        with config.patch(
-            {"max_autotune_prune_choices_based_on_shared_mem": do_pruning}
-        ):
-            if GPU_TYPE == "xpu":
-                config_heuristic = XPUConfigHeuristic()
-            elif torch.version.hip:
-                config_heuristic = ROCmConfigHeuristic()
-            else:
-                config_heuristic = CUDAConfigHeuristic()
-            config_heuristic.should_scale_configs = False
-            config_heuristic.mm_configs = mm_configs
-            configs = list(
-                config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
-            )
-            self.assertEqual(len(configs), expected_count)
-
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_compile_time_autotune_not_repeated_at_runtime(self):
+    @onlyAccelerator
+    def test_compile_time_autotune_not_repeated_at_runtime(self, device):
         def fn(x):
             return (x + 1).sum(dim=1)
 
-        x = torch.randn(2048, 2048, device=GPU_TYPE)
+        x = torch.randn(2048, 2048, device=device)
         benchmark_calls = []
 
         def fake_benchmark_all_configs(autotuner, *args, **kwargs):
@@ -601,18 +567,90 @@ class TestTritonHeuristics(TestCase):
             self.assertEqual(len(benchmark_calls), 1)
 
 
+@requires_triton()
+class TestTritonHeuristicsBackendConfig(_TritonDeviceTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    @parametrize("do_pruning", [False, True])
+    def test_prune_configs_over_shared_memory_limit(self, device, do_pruning):
+        from torch._inductor.heuristics.template.triton import (
+            CUDAConfigHeuristic,
+            GemmConfig,
+            ROCmConfigHeuristic,
+            XPUConfigHeuristic,
+        )
+
+        expected_count = 1 if do_pruning else 2
+        mm_configs = [
+            GemmConfig(32, 32, 32, 1, 8, group_m=8),
+            GemmConfig(
+                128, 128, 128, 100, 8, group_m=4
+            ),  # intentionally large to exceed shared memory limit
+        ]
+        with config.patch(
+            {"max_autotune_prune_choices_based_on_shared_mem": do_pruning}
+        ):
+            if torch.device(device).type == "xpu":
+                config_heuristic = XPUConfigHeuristic()
+            elif torch.version.hip:
+                config_heuristic = ROCmConfigHeuristic()
+            else:
+                config_heuristic = CUDAConfigHeuristic()
+            config_heuristic.should_scale_configs = False
+            config_heuristic.mm_configs = mm_configs
+            configs = list(
+                config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
+            )
+            self.assertEqual(len(configs), expected_count)
+
+
+@requires_triton()
+class TestTritonHeuristicsROCm(_TritonDeviceTestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @runOnRocm
+    def test_amd_special_config_args(self, device):
+        """
+        waves_per_eu is an example of a special config arg on AMD; if it is explicitly specified
+        in a config, the kwarg will exist in the kwargs but not in the function signature.
+        """
+
+        @torch.library.triton_op("test_triton_heuristics::triton_sqr", mutates_args=())
+        def triton_sqr(x: torch.Tensor) -> torch.Tensor:
+            y = torch.empty_like(x)
+
+            def grid(meta):
+                return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
+
+            torch.library.wrap_triton(get_autotuned_amd_sqr_kernel())[grid](
+                x, y, x.numel()
+            )
+
+        def fn(x):
+            return triton_sqr(x)
+
+        x = torch.randn(32, device=device)
+        ref = fn(x)
+        res = torch.compile(fn)(x)
+        self.assertEqual(ref, res)
+
+
 _PLUGIN_FACTORY_PATH = (
     "torch._inductor.runtime.triton_heuristics.get_caching_autotuner_plugins"
 )
 
 
-class TestCachingAutotunerPrecompileDriverSetup(TestCase):
+@requires_triton()
+class TestCachingAutotunerPrecompileDriverSetup(_TritonDeviceTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipIfRocm
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_warm_cache_only_precompile_skips_driver_setup_in_context(self):
+    @onlyAccelerator
+    def test_warm_cache_only_precompile_skips_driver_setup_in_context(self, device):
         from torch._inductor.runtime import triton_helpers
 
-        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args = _get_cos_kernel_caching_autotuner_args(device)
         num_configs = len(args["configs"])
         self.assertGreaterEqual(num_configs, 2)
         autotuner = CachingAutotuner(**args)
@@ -637,68 +675,71 @@ class TestCachingAutotunerPrecompileDriverSetup(TestCase):
 # attribute '_unflatten_ir'") inside ast_to_ttir for the trivial cos kernel
 # used by these tests. CUDA paths are unaffected.
 @skipIfRocm
-@skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-class TestCachingAutotunerPlugin(TestCase):
-    device_type = GPU_TYPE
+@requires_triton()
+class TestCachingAutotunerPlugin(_TritonDeviceTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @staticmethod
-    def _get_stream():
+    def _get_stream(device):
         from torch._dynamo.device_interface import get_interface_for_device
 
-        device_interface = get_interface_for_device(GPU_TYPE)
+        device_interface = get_interface_for_device(torch.device(device).type)
         return device_interface.get_raw_stream(device_interface.current_device())
 
     @staticmethod
-    def _make_kernel_inputs():
-        in_ptr = torch.zeros(16, device=GPU_TYPE, dtype=torch.float32)
-        out_ptr = torch.zeros(16, device=GPU_TYPE, dtype=torch.float32)
+    def _make_kernel_inputs(device):
+        in_ptr = torch.zeros(16, device=device, dtype=torch.float32)
+        out_ptr = torch.zeros(16, device=device, dtype=torch.float32)
         return (in_ptr, out_ptr, 16)
 
-    def _make_autotuner(self, plugins, configs=None):
-        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+    def _make_autotuner(self, plugins, device, configs=None):
+        args = _get_cos_kernel_caching_autotuner_args(device)
         args["inductor_meta"] = {**args["inductor_meta"], "grid_type": "Grid1D"}
         if configs is not None:
             args["configs"] = configs
         with patch(_PLUGIN_FACTORY_PATH, return_value=list(plugins)):
             return CachingAutotuner(**args)
 
-    def test_pre_dispatch_runs_before_precompile_and_autotune(self):
+    @onlyAccelerator
+    def test_pre_dispatch_runs_before_precompile_and_autotune(self, device):
         sentinel = object()
 
         class _Plugin(CachingAutotunerPlugin):
             def pre_dispatch(self, autotuner, *args, stream, **kwargs):
                 return sentinel
 
-        autotuner = self._make_autotuner([_Plugin()])
+        autotuner = self._make_autotuner([_Plugin()], device)
         with (
             patch.object(autotuner, "precompile") as mock_precompile,
             patch.object(autotuner, "autotune_to_one_config") as mock_autotune,
         ):
             result = autotuner.run(
-                *self._make_kernel_inputs(), stream=self._get_stream()
+                *self._make_kernel_inputs(device), stream=self._get_stream(device)
             )
 
         self.assertIs(result, sentinel)
         mock_precompile.assert_not_called()
         mock_autotune.assert_not_called()
 
-    def test_pre_autotune_runs_before_default_autotune(self):
+    @onlyAccelerator
+    def test_pre_autotune_runs_before_default_autotune(self, device):
         sentinel = object()
 
         class _Plugin(CachingAutotunerPlugin):
             def pre_autotune(self, autotuner, *args, stream, **kwargs):
                 return sentinel
 
-        autotuner = self._make_autotuner([_Plugin()])
+        autotuner = self._make_autotuner([_Plugin()], device)
         with patch.object(autotuner, "autotune_to_one_config") as mock_autotune:
             result = autotuner.run(
-                *self._make_kernel_inputs(), stream=self._get_stream()
+                *self._make_kernel_inputs(device), stream=self._get_stream(device)
             )
 
         self.assertIs(result, sentinel)
         mock_autotune.assert_not_called()
 
-    def test_hooks_fire_in_registration_order(self):
+    @onlyAccelerator
+    def test_hooks_fire_in_registration_order(self, device):
         sentinel = object()
         seen = []
 
@@ -712,14 +753,18 @@ class TestCachingAutotunerPlugin(TestCase):
                 return self.return_value
 
         autotuner = self._make_autotuner(
-            [_Plugin("a"), _Plugin("b"), _Plugin("c", sentinel), _Plugin("d")]
+            [_Plugin("a"), _Plugin("b"), _Plugin("c", sentinel), _Plugin("d")],
+            device,
         )
-        result = autotuner.run(*self._make_kernel_inputs(), stream=self._get_stream())
+        result = autotuner.run(
+            *self._make_kernel_inputs(device), stream=self._get_stream(device)
+        )
 
         self.assertIs(result, sentinel)
         self.assertEqual(seen, ["a", "b", "c"])
 
-    def test_defer_falls_through_to_default(self):
+    @onlyAccelerator
+    def test_defer_falls_through_to_default(self, device):
         seen = []
 
         class _Plugin(CachingAutotunerPlugin):
@@ -729,15 +774,20 @@ class TestCachingAutotunerPlugin(TestCase):
 
         # Single config so precompile produces one launcher and the kernel
         # runs to completion without the autotune branch firing.
-        full_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
-        autotuner = self._make_autotuner([_Plugin()], configs=full_args["configs"][:1])
+        full_args = _get_cos_kernel_caching_autotuner_args(device)
+        autotuner = self._make_autotuner(
+            [_Plugin()], device, configs=full_args["configs"][:1]
+        )
 
-        autotuner.run(*self._make_kernel_inputs(), stream=self._get_stream())
+        autotuner.run(
+            *self._make_kernel_inputs(device), stream=self._get_stream(device)
+        )
 
         self.assertEqual(seen, ["pre_dispatch"])
         self.assertEqual(len(autotuner.launchers), 1)
 
-    def test_pre_compile_defer_runs_default_precompile_flow(self):
+    @onlyAccelerator
+    def test_pre_compile_defer_runs_default_precompile_flow(self, device):
         """``DEFER`` from pre_compile lets the standard precompile flow
         run (``_precompile_worker`` → ``_make_launchers`` →
         ``_dynamic_scale_rblock``)."""
@@ -746,8 +796,10 @@ class TestCachingAutotunerPlugin(TestCase):
             def pre_compile(self, autotuner):
                 return DEFER
 
-        full_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
-        autotuner = self._make_autotuner([_Plugin()], configs=full_args["configs"][:1])
+        full_args = _get_cos_kernel_caching_autotuner_args(device)
+        autotuner = self._make_autotuner(
+            [_Plugin()], device, configs=full_args["configs"][:1]
+        )
         with (
             patch.object(autotuner, "_precompile_worker") as mock_pcw,
             patch.object(autotuner, "_make_launchers") as mock_mkl,
@@ -758,7 +810,8 @@ class TestCachingAutotunerPlugin(TestCase):
         mock_mkl.assert_called_once()
         mock_dsr.assert_called_once()
 
-    def test_pre_compile_non_defer_short_circuits_precompile(self):
+    @onlyAccelerator
+    def test_pre_compile_non_defer_short_circuits_precompile(self, device):
         """A non-``DEFER`` return from pre_compile means the plugin
         owns the entire compile pipeline; ``precompile`` returns early
         without running ``_precompile_worker`` / ``_make_launchers`` /
@@ -768,8 +821,10 @@ class TestCachingAutotunerPlugin(TestCase):
             def pre_compile(self, autotuner):
                 return object()  # any non-DEFER value
 
-        full_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
-        autotuner = self._make_autotuner([_Plugin()], configs=full_args["configs"][:1])
+        full_args = _get_cos_kernel_caching_autotuner_args(device)
+        autotuner = self._make_autotuner(
+            [_Plugin()], device, configs=full_args["configs"][:1]
+        )
         with (
             patch.object(autotuner, "_precompile_worker") as mock_pcw,
             patch.object(autotuner, "_make_launchers") as mock_mkl,
@@ -780,7 +835,8 @@ class TestCachingAutotunerPlugin(TestCase):
         mock_mkl.assert_not_called()
         mock_dsr.assert_not_called()
 
-    def test_getstate_clears_plugins_setstate_invokes_factory(self):
+    @onlyAccelerator
+    def test_getstate_clears_plugins_setstate_invokes_factory(self, device):
         """``__getstate__`` drops the live plugin instances so they
         don't pickle into workers; ``__setstate__`` re-runs
         ``get_caching_autotuner_plugins`` so the revived autotuner
@@ -793,7 +849,7 @@ class TestCachingAutotunerPlugin(TestCase):
         class _PluginB(CachingAutotunerPlugin):
             pass
 
-        autotuner = self._make_autotuner([_PluginA(), _PluginB()])
+        autotuner = self._make_autotuner([_PluginA(), _PluginB()], device)
         self.assertEqual(len(autotuner._plugins), 2)
 
         # State excludes the live plugin instances.
@@ -807,38 +863,41 @@ class TestCachingAutotunerPlugin(TestCase):
         self.assertEqual(revived._plugins, [])
 
 
-class TestArgumentCloneAndRestore(TestCase):
+class TestArgumentCloneAndRestore(_TritonDeviceTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Our tensor is large enough. If a unexpected copy happens, the
     # peak memory increase should be larger than tolerance and the test
     # will fail.
     MEM_TOLERANCE = int(256 * 1e6)
 
-    def _create_caching_autotuner(self):
-        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+    def _create_caching_autotuner(self, device):
+        args = _get_cos_kernel_caching_autotuner_args(device)
         args["optimize_mem"] = True
         args["mutated_arg_names"] = ["in_ptr0"]
         autotuner = CachingAutotuner(**args)
         return autotuner
 
-    def _create_tensor(self, pad=1, with_offset=False):
+    def _create_tensor(self, device, pad=1, with_offset=False):
         """
         Create a GPU tensor of about 1GB size.
         """
         M = 2
         N = 2**29 // 4
-        out = rand_strided((M, N), (N + pad, 1), device=GPU_TYPE)
+        out = rand_strided((M, N), (N + pad, 1), device=device)
         if with_offset:
             out = out[:, 1:]
         return out
 
-    def _do_test(self, gpu_tensor):
-        torch.get_device_module(GPU_TYPE).reset_peak_memory_stats()
-        autotuner = self._create_caching_autotuner()
+    def _do_test(self, device, gpu_tensor):
+        device_module = torch.get_device_module(device)
+        device_module.reset_peak_memory_stats()
+        autotuner = self._create_caching_autotuner(device)
 
         old_storage_offset = gpu_tensor.storage_offset()
         gpu_tensor_clone = clone_preserve_strides(gpu_tensor)
 
-        peak_mem_before = torch.get_device_module(GPU_TYPE).max_memory_allocated()
+        peak_mem_before = device_module.max_memory_allocated()
         cpu_copies = autotuner.copy_args_to_cpu_if_needed(gpu_tensor)
         self.assertTrue(len(cpu_copies) == 1)
 
@@ -854,7 +913,7 @@ class TestArgumentCloneAndRestore(TestCase):
 
         # Note: torch.allclose somehow allocates large amount of extra memory.
         # Record peak memory before that.
-        peak_mem_after = torch.get_device_module(GPU_TYPE).max_memory_allocated()
+        peak_mem_after = device_module.max_memory_allocated()
 
         self.assertTrue(torch.allclose(gpu_tensor, gpu_tensor_clone))
         self.assertTrue(
@@ -865,31 +924,37 @@ class TestArgumentCloneAndRestore(TestCase):
         # Avoid OOM in CI
         self.assertTrue(peak_mem_after < 1e10)
 
+    @onlyAccelerator
     @requires_gpu_with_enough_memory(1e10)
-    def test_clone_contiguous_args(self):
-        arg = self._create_tensor(pad=0)
+    def test_clone_contiguous_args(self, device):
+        arg = self._create_tensor(device, pad=0)
         self.assertTrue(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() == 0)
-        self._do_test(arg)
+        self._do_test(device, arg)
 
+    @onlyAccelerator
     @requires_gpu_with_enough_memory(1e10)
-    def test_clone_non_contiguous_args(self):
-        arg = self._create_tensor(pad=1)
+    def test_clone_non_contiguous_args(self, device):
+        arg = self._create_tensor(device, pad=1)
         self.assertFalse(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() == 0)
-        self._do_test(arg)
+        self._do_test(device, arg)
 
+    @onlyAccelerator
     @requires_gpu_with_enough_memory(1e10)
-    def test_clone_args_with_non_zero_offset(self):
-        arg = self._create_tensor(pad=1, with_offset=True)
+    def test_clone_args_with_non_zero_offset(self, device):
+        arg = self._create_tensor(device, pad=1, with_offset=True)
         self.assertFalse(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() > 0)
 
-        self._do_test(arg)
+        self._do_test(device, arg)
 
 
-class TestDumpLaunchTensors(TestCase):
+@requires_triton()
+class TestDumpLaunchTensors(_TritonDeviceTestCase):
     """Test the _dump_launch_tensors functionality"""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
         super().setUp()
@@ -904,8 +969,8 @@ class TestDumpLaunchTensors(TestCase):
             shutil.rmtree(self.test_dir)
         super().tearDown()
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
-    def test_dump_launch_tensors(self):
+    @onlyAccelerator
+    def test_dump_launch_tensors(self, device):
         """
         Test that dump_launch_tensors functions correctly:
         1. Creates the dump directory when torch.compile() runs
@@ -935,7 +1000,7 @@ class TestDumpLaunchTensors(TestCase):
             max_runs = inductor_triton_config.max_kernel_dump_occurrences
 
             for i in range(max_runs + 2):
-                test_input = torch.randn(100, 100, device=GPU_TYPE) * (i + 1)
+                test_input = torch.randn(100, 100, device=device) * (i + 1)
                 _ = compiled_fn(test_input)
 
             # After multiple runs, verify rotation and tensor correctness
@@ -970,7 +1035,9 @@ class TestDumpLaunchTensors(TestCase):
 
                             # Verify it's a valid tensor with expected properties
                             self.assertIsInstance(loaded_tensor, torch.Tensor)
-                            self.assertEqual(loaded_tensor.device.type, GPU_TYPE)
+                            self.assertEqual(
+                                loaded_tensor.device.type, torch.device(device).type
+                            )
                             verified_tensor_load = True
 
             # Verify rotation constraints
@@ -998,8 +1065,11 @@ class TestDumpLaunchTensors(TestCase):
                 os.environ["TORCHINDUCTOR_DUMP_LAUNCH_TENSORS"] = old_dump_env
 
 
-class TestRecheckAutotuneCache(TestCase):
+@requires_triton()
+class TestRecheckAutotuneCache(_TritonDeviceTestCase):
     """Tests for CachingAutotuner.recheck_autotune_cache"""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @staticmethod
     def _make_compile_result(cfg):
@@ -1011,19 +1081,19 @@ class TestRecheckAutotuneCache(TestCase):
         return result
 
     @staticmethod
-    def _make_autotuner_with_results(configs, compile_results):
+    def _make_autotuner_with_results(configs, compile_results, device):
         """
         Create a CachingAutotuner and inject compile_results directly,
         bypassing actual Triton compilation.
         """
-        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args = _get_cos_kernel_caching_autotuner_args(device)
         args["configs"] = configs
         autotuner = CachingAutotuner(**args)
         autotuner.compile_results = compile_results
         return autotuner
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_recheck_single_config_enters_cache_hit_block(self):
+    @onlyAccelerator
+    def test_recheck_single_config_enters_cache_hit_block(self, device):
         """
         When there is exactly 1 config and the autotune cache returns a hit,
         recheck_autotune_cache should narrow compile_results to that single
@@ -1033,7 +1103,7 @@ class TestRecheckAutotuneCache(TestCase):
         cfg.found_by_coordesc = False
         compile_result = self._make_compile_result(cfg)
 
-        autotuner = self._make_autotuner_with_results([cfg], [compile_result])
+        autotuner = self._make_autotuner_with_results([cfg], [compile_result], device)
 
         # Cache returns the same config as the best
         cached_cfg = triton_config({"x": 16}, 64)
@@ -1051,8 +1121,8 @@ class TestRecheckAutotuneCache(TestCase):
         # And found_by_coordesc must be propagated
         self.assertTrue(autotuner.compile_results[0].config.found_by_coordesc)
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_recheck_propagates_found_by_coordesc_true(self):
+    @onlyAccelerator
+    def test_recheck_propagates_found_by_coordesc_true(self, device):
         """
         When the cached best config has found_by_coordesc=True,
         it must be propagated to the compile result's config.
@@ -1065,7 +1135,7 @@ class TestRecheckAutotuneCache(TestCase):
         result_b = self._make_compile_result(cfg_b)
 
         autotuner = self._make_autotuner_with_results(
-            [cfg_a, cfg_b], [result_a, result_b]
+            [cfg_a, cfg_b], [result_a, result_b], device
         )
 
         # Cache says cfg_b is the best, found via coordesc
@@ -1083,8 +1153,8 @@ class TestRecheckAutotuneCache(TestCase):
         # The flag must be propagated from the cached config
         self.assertTrue(autotuner.compile_results[0].config.found_by_coordesc)
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_recheck_propagates_found_by_coordesc_false(self):
+    @onlyAccelerator
+    def test_recheck_propagates_found_by_coordesc_false(self, device):
         """
         When the cached best config has found_by_coordesc=False, it must be
         propagated so that coordinate descent can still run if enabled.
@@ -1093,7 +1163,7 @@ class TestRecheckAutotuneCache(TestCase):
         cfg.found_by_coordesc = True
         compile_result = self._make_compile_result(cfg)
 
-        autotuner = self._make_autotuner_with_results([cfg], [compile_result])
+        autotuner = self._make_autotuner_with_results([cfg], [compile_result], device)
 
         cached_cfg = triton_config({"x": 16}, 64)
         cached_cfg.found_by_coordesc = False
@@ -1107,8 +1177,8 @@ class TestRecheckAutotuneCache(TestCase):
         self.assertEqual(len(autotuner.compile_results), 1)
         self.assertFalse(autotuner.compile_results[0].config.found_by_coordesc)
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_recheck_no_cache_hit_leaves_results_unchanged(self):
+    @onlyAccelerator
+    def test_recheck_no_cache_hit_leaves_results_unchanged(self, device):
         """
         When there's no autotune cache hit, compile_results should not change.
         """
@@ -1118,7 +1188,7 @@ class TestRecheckAutotuneCache(TestCase):
         result_b = self._make_compile_result(cfg_b)
 
         autotuner = self._make_autotuner_with_results(
-            [cfg_a, cfg_b], [result_a, result_b]
+            [cfg_a, cfg_b], [result_a, result_b], device
         )
 
         # Cache returns no hit (empty list)
@@ -1158,10 +1228,12 @@ def get_hip_autotune_kernel_with_invalid_config():
     )(hip_autotune_kernel)
 
 
-class TestHIPInvalidConfigHandling(TestCase):
+@requires_triton()
+class TestHIPInvalidConfigHandling(_TritonDeviceTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @runOnRocm
-    @skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
-    def test_benchmark_returns_inf_on_invalid_config(self):
+    def test_benchmark_returns_inf_on_invalid_config(self, device):
         from torch._inductor.runtime.benchmarking import TritonBenchmarker
 
         benchmarker = TritonBenchmarker()
@@ -1173,16 +1245,15 @@ class TestHIPInvalidConfigHandling(TestCase):
 
         result = benchmarker.benchmark(
             fn=failing_callable,
-            device=GPU_TYPE,
+            device=device,
             is_vetted_benchmarking=True,
         )
         self.assertEqual(result, float("inf"))
 
     @runOnRocm
-    @skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
-    def test_autotune_skips_invalid_hip_config_and_succeeds(self):
+    def test_autotune_skips_invalid_hip_config_and_succeeds(self, device):
         numel = 1024 * 1024
-        x = torch.randn(numel, device=GPU_TYPE, dtype=torch.float32)
+        x = torch.randn(numel, device=device, dtype=torch.float32)
         y = torch.empty_like(x)
 
         kernel = get_hip_autotune_kernel_with_invalid_config()
@@ -1197,6 +1268,8 @@ class TestHIPInvalidConfigHandling(TestCase):
 
 
 class TestGridExprMaximum(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_maximum_cpp_mode_casts_int_constants_to_long(self):
         from torch._inductor.runtime.triton_heuristics import Grid1D
 
@@ -1214,6 +1287,8 @@ class TestGridExprMaximum(TestCase):
 
 class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
     """Regression test for https://github.com/pytorch/pytorch/issues/178530"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_grid2d_yz_overflow_zero_ynumel_python(self):
         from torch._inductor.runtime.triton_heuristics import Grid2DWithYZOverflow
@@ -1263,6 +1338,8 @@ class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
 
 
 class TestFastLauncherDeviceSupport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _make_autotuner(device_type):
         def triton_():
@@ -1326,7 +1403,8 @@ class TestFastLauncherDeviceSupport(TestCase):
             fast_launcher.assert_not_called()
 
 
-class TestDynamicScaleRblockCacheInteraction(TestCase):
+@requires_triton()
+class TestDynamicScaleRblockCacheInteraction(_TritonDeviceTestCase):
     """Tests for _dynamic_scale_rblock + autotune cache interaction.
 
     _dynamic_scale_rblock can add configs that aren't in the original
@@ -1334,6 +1412,8 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
     the warm-start path must still be able to load it from the cache
     and skip re-autotuning.
     """
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @staticmethod
     def _make_compile_result(cfg):
@@ -1344,22 +1424,22 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         return result
 
     @staticmethod
-    def _make_autotuner_with_results(configs, compile_results):
-        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+    def _make_autotuner_with_results(configs, compile_results, device):
+        args = _get_cos_kernel_caching_autotuner_args(device)
         args["configs"] = configs
         autotuner = CachingAutotuner(**args)
         autotuner.compile_results = compile_results
         return autotuner
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_dynamic_scale_rblock_skipped_on_cache_hit(self):
+    @onlyAccelerator
+    def test_dynamic_scale_rblock_skipped_on_cache_hit(self, device):
         """
         _dynamic_scale_rblock must be a no-op when the autotune cache
         already determined the best config (cache_state == 'hit').
         """
         cfg = triton_config({"x": 16}, 64)
         result = self._make_compile_result(cfg)
-        autotuner = self._make_autotuner_with_results([cfg], [result])
+        autotuner = self._make_autotuner_with_results([cfg], [result], device)
         autotuner.autotune_cache_info = {"autotune_cache_state": "hit"}
 
         n_before = len(autotuner.compile_results)
@@ -1368,33 +1448,73 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 
         self.assertEqual(n_before, n_after)
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_dynamic_scale_rblock_runs_on_cache_miss(self):
+    @onlyAccelerator
+    def test_dynamic_scale_rblock_runs_on_cache_miss(self, device):
         """
         _dynamic_scale_rblock should not be skipped when the autotune
         cache missed — this is a cold-start scenario.
         """
         cfg = triton_config({"x": 16}, 64)
         result = self._make_compile_result(cfg)
-        autotuner = self._make_autotuner_with_results([cfg], [result])
+        autotuner = self._make_autotuner_with_results([cfg], [result], device)
         autotuner.autotune_cache_info = {"autotune_cache_state": "miss"}
 
         autotuner._dynamic_scale_rblock()
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_dynamic_scale_rblock_runs_when_cache_info_none(self):
+    @onlyAccelerator
+    def test_dynamic_scale_rblock_runs_when_cache_info_none(self, device):
         """
         _dynamic_scale_rblock should not be skipped when
         autotune_cache_info is None (e.g. loaded from old pickle).
         """
         cfg = triton_config({"x": 16}, 64)
         result = self._make_compile_result(cfg)
-        autotuner = self._make_autotuner_with_results([cfg], [result])
+        autotuner = self._make_autotuner_with_results([cfg], [result], device)
         autotuner.autotune_cache_info = None
 
         autotuner._dynamic_scale_rblock()
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    @onlyAccelerator
+    def test_recheck_autotune_cache_compiles_dynamic_config(self, device):
+        """
+        When the cached best config was added by _dynamic_scale_rblock
+        and isn't in compile_results, recheck_autotune_cache must compile
+        it (not silently drop it, leaving all original configs active).
+        """
+        from triton import Config
+
+        cfg_a = Config({"XBLOCK": 1, "R0_BLOCK": 2048}, num_warps=16, num_stages=1)
+        cfg_b = Config({"XBLOCK": 8, "R0_BLOCK": 512}, num_warps=4, num_stages=1)
+        result_a = self._make_compile_result(cfg_a)
+        result_b = self._make_compile_result(cfg_b)
+
+        autotuner = self._make_autotuner_with_results(
+            [cfg_a, cfg_b], [result_a, result_b], device
+        )
+
+        dynamic_cfg = Config(
+            {"XBLOCK": 1, "R0_BLOCK": 1024}, num_warps=16, num_stages=1
+        )
+
+        mock_precompile = MagicMock(return_value=self._make_compile_result(dynamic_cfg))
+        autotuner._precompile_config = mock_precompile
+
+        reload_fn = MagicMock()
+        reload_fn.return_value.fn = MagicMock()
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
+            return_value=([dynamic_cfg], None, {"autotune_cache_state": "hit"}),
+        ):
+            autotuner.recheck_autotune_cache(reload_kernel_from_src=reload_fn)
+
+        self.assertEqual(len(autotuner.compile_results), 1)
+        mock_precompile.assert_called_once_with(dynamic_cfg)
+
+
+class TestDynamicScaleRblockCacheLoading(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_load_cached_autotuning_reconstructs_unknown_config(self):
         """
         When the cached best config is not in the original configs list
@@ -1430,7 +1550,6 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         self.assertEqual(result.num_warps, 8)
         self.assertEqual(result.num_stages, 1)
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_still_matches_known_config(self):
         """
         When the cached best config IS in the original configs list,
@@ -1460,7 +1579,6 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         self.assertIsNotNone(result)
         self.assertIs(result, cfg_b)
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_rejects_hash_mismatch(self):
         """
         When configs_hash doesn't match, _load_cached_autotuning must
@@ -1484,56 +1602,22 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 
         self.assertIsNone(result)
 
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_recheck_autotune_cache_compiles_dynamic_config(self):
-        """
-        When the cached best config was added by _dynamic_scale_rblock
-        and isn't in compile_results, recheck_autotune_cache must compile
-        it (not silently drop it, leaving all original configs active).
-        """
-        from triton import Config
 
-        cfg_a = Config({"XBLOCK": 1, "R0_BLOCK": 2048}, num_warps=16, num_stages=1)
-        cfg_b = Config({"XBLOCK": 8, "R0_BLOCK": 512}, num_warps=4, num_stages=1)
-        result_a = self._make_compile_result(cfg_a)
-        result_b = self._make_compile_result(cfg_b)
-
-        autotuner = self._make_autotuner_with_results(
-            [cfg_a, cfg_b], [result_a, result_b]
-        )
-
-        dynamic_cfg = Config(
-            {"XBLOCK": 1, "R0_BLOCK": 1024}, num_warps=16, num_stages=1
-        )
-
-        mock_precompile = MagicMock(return_value=self._make_compile_result(dynamic_cfg))
-        autotuner._precompile_config = mock_precompile
-
-        reload_fn = MagicMock()
-        reload_fn.return_value.fn = MagicMock()
-
-        with patch(
-            "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
-            return_value=([dynamic_cfg], None, {"autotune_cache_state": "hit"}),
-        ):
-            autotuner.recheck_autotune_cache(reload_kernel_from_src=reload_fn)
-
-        self.assertEqual(len(autotuner.compile_results), 1)
-        mock_precompile.assert_called_once_with(dynamic_cfg)
-
-
-@skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-class TestCheckLauncherCallArgs(TestCase):
+@requires_triton()
+class TestCheckLauncherCallArgs(_TritonDeviceTestCase):
     """Unit tests for CachingAutotuner._check_launcher_call_args.
 
     These exercise the arg-mismatch error path without Triton compilation,
     but the shared cos-kernel fixture still builds a CachingAutotuner (which
-    resolves DeviceProperties for GPU_TYPE), so they require a GPU.
+    resolves DeviceProperties for the injected device), so they require an
+    accelerator with a Triton backend.
     """
 
-    def _make_autotuner(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _make_autotuner(self, device):
         """Return a CachingAutotuner configured with the cos kernel fixture."""
-        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args = _get_cos_kernel_caching_autotuner_args(device)
         return CachingAutotuner(**args)
 
     def _make_launcher(self, n_positional: int):
@@ -1549,16 +1633,18 @@ class TestCheckLauncherCallArgs(TestCase):
         launcher._expected_positional_count = n_positional
         return launcher
 
-    def test_correct_arg_count_passes_silently(self):
+    @onlyAccelerator
+    def test_correct_arg_count_passes_silently(self, device):
         """No exception when args exactly matches _expected_positional_count."""
-        autotuner = self._make_autotuner()
+        autotuner = self._make_autotuner(device)
         launcher = self._make_launcher(n_positional=3)
         # Pass exactly 3 positional args - should be a no-op.
         autotuner._check_launcher_call_args(launcher, (1, 2, 3))
 
-    def test_too_many_args_raises_type_error(self):
+    @onlyAccelerator
+    def test_too_many_args_raises_type_error(self, device):
         """TypeError with a helpful message when too many positional args are passed."""
-        autotuner = self._make_autotuner()
+        autotuner = self._make_autotuner(device)
         launcher = self._make_launcher(n_positional=3)
         # Simulate the 'stream' being passed positionally (4 args, expected 3).
         with self.assertRaises(TypeError) as cm:
@@ -1566,9 +1652,10 @@ class TestCheckLauncherCallArgs(TestCase):
         self.assertIn("stream", str(cm.exception).lower())
         self.assertIn("keyword", str(cm.exception).lower())
 
-    def test_error_message_includes_kernel_name(self):
+    @onlyAccelerator
+    def test_error_message_includes_kernel_name(self, device):
         """The TypeError message should include the kernel name from inductor_meta."""
-        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args = _get_cos_kernel_caching_autotuner_args(device)
         args["inductor_meta"] = {
             "kernel_name": "my_custom_kernel",
             "grid_type": "Grid1D",
@@ -1579,20 +1666,23 @@ class TestCheckLauncherCallArgs(TestCase):
             autotuner._check_launcher_call_args(launcher, (1, 2, 3))
         self.assertIn("my_custom_kernel", str(cm.exception))
 
-    def test_launcher_without_expected_count_is_skipped(self):
+    @onlyAccelerator
+    def test_launcher_without_expected_count_is_skipped(self, device):
         """Launchers without the generated metadata are skipped gracefully."""
 
         def raw_launcher(*args, stream=None):
             pass
 
         # No _expected_positional_count attribute set.
-        autotuner = self._make_autotuner()
+        autotuner = self._make_autotuner(device)
         # Should not raise, even with many args.
         autotuner._check_launcher_call_args(raw_launcher, (1, 2, 3, 4, 5))
 
 
 class TestWarpSizeUnification(TestCase):
     """Tests for the unified warp_size threading through config helpers."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_warp_size_or_default(self):
         none_props = DeviceProperties(
@@ -1665,6 +1755,8 @@ class TestWarpSizeUnification(TestCase):
 
 
 class TestMakeLaunchersMemory(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_failed_config_exception_not_retained(self):
         """Regression (D107597017 / PR #184285): CachingAutotuner._make_launchers
         must not retain the failed-config build exception past its return. That
@@ -1731,6 +1823,66 @@ class TestMakeLaunchersMemory(TestCase):
             gc.enable()
 
         self.assertEqual(len(fake_self.launchers), 1)
+
+
+instantiate_device_type_tests(
+    TestTritonHeuristicsRuntime,
+    globals(),
+    except_for=("hpu",),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestTritonHeuristicsBackendConfig,
+    globals(),
+    only_for=(GPU_TYPE,),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestArgumentCloneAndRestore,
+    globals(),
+    only_for=(GPU_TYPE,),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestTritonHeuristicsROCm,
+    globals(),
+    only_for=("cuda",),
+)
+instantiate_device_type_tests(
+    TestCachingAutotunerPrecompileDriverSetup,
+    globals(),
+    except_for=("hpu",),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestCachingAutotunerPlugin,
+    globals(),
+    except_for=("hpu",),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDumpLaunchTensors, globals(), except_for=("hpu",), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestRecheckAutotuneCache, globals(), except_for=("hpu",), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestHIPInvalidConfigHandling,
+    globals(),
+    only_for=("cuda",),
+)
+instantiate_device_type_tests(
+    TestDynamicScaleRblockCacheInteraction,
+    globals(),
+    except_for=("hpu",),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestCheckLauncherCallArgs,
+    globals(),
+    except_for=("hpu",),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
