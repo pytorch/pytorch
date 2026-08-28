@@ -10,8 +10,7 @@
 PyObject* THPQScheme_New(at::QScheme qscheme, const std::string& name) {
   auto type = &THPQSchemeType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
-  if (!self)
-    throw python_error();
+  TORCH_CHECK_PYTHON(self);
   auto self_ = reinterpret_cast<THPQScheme*>(self.get());
   self_->qscheme = qscheme;
   std::strncpy(self_->name, name.c_str(), QSCHEME_NAME_LEN);
@@ -77,7 +76,5 @@ PyTypeObject THPQSchemeType = {
 };
 
 void THPQScheme_init(PyObject* module) {
-  if (PyModule_AddType(module, &THPQSchemeType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPQSchemeType) >= 0);
 }

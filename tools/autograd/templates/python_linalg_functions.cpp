@@ -52,13 +52,9 @@ void initLinalgFunctions(PyObject* module) {
   };
   PyObject* linalg = PyModule_Create(&def);
   THPLinalgVariableFunctionsModule = linalg;
-  if (!linalg) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(linalg);
   // steals a reference to linalg
-  if (PyModule_AddObject(module, "_linalg", linalg) != 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddObject(module, "_linalg", linalg) == 0);
 }
 
 // generated methods start here

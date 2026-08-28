@@ -1,7 +1,5 @@
 #define PY_SSIZE_T_CLEAN
-#include <opcode.h>
 #include <signal.h>
-#include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
@@ -386,7 +384,7 @@ static PyObject* dynamo_eval_custom_code_impl(
   //  variables into frame and initializing cell variables
   //  3. CPython interpreter executes the code object
   //
-  // Dynamo hooks the 3th step: before executing the code object, Dynamo
+  // Dynamo hooks the 3rd step: before executing the code object, Dynamo
   // transforms the code object into a new code object. Then, the old frame is
   // not suitable for executing the new code. Therefore, Dynamo needs to
   // manually create and initialize a new frame to execute the new code. The
@@ -584,6 +582,8 @@ static PyTypeObject THPPyInterpreterFrameType = {
 
 #endif // !(IS_PYTHON_3_15_PLUS)
 
+#if !IS_PYTHON_3_13_PLUS
+
 void clear_old_frame_if_python_312_plus(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame) {
@@ -594,6 +594,8 @@ void clear_old_frame_if_python_312_plus(
 
 #endif
 }
+
+#endif // !IS_PYTHON_3_13_PLUS
 
 static PyObject* increment_working_threads(
     PyThreadState* tstate,
