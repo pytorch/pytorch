@@ -208,6 +208,7 @@ class FSDPParam:
     # All-gather extension attributes
     _extensions_data: ExtensionsData
     _unsharded_inner_tensors: list[torch.Tensor]
+    _release_all_gather_outputs_after_post_all_gather: bool
     _orig_param_uid: int
 
     def __init__(
@@ -684,7 +685,7 @@ class FSDPParam:
                 if isinstance(self.mesh_info, HSDPMeshInfo):
                     spec_placements.append(Replicate())
                 # Reuse the placement already computed for this DP shard dim
-                # so that we don't loss _StridedShard.
+                # so that we don't lose _StridedShard.
                 spec_placements.append(spmd_placements[i])
                 skip = len(dp_dim_names.shard_names) - 1
             elif name in replicate_names_set and isinstance(
@@ -819,13 +820,47 @@ class FSDPParam:
         inner_tensor = self._sharded_local_tensor
         has_fsdp_pre_all_gather = hasattr(inner_tensor, "fsdp_pre_all_gather")
         has_fsdp_post_all_gather = hasattr(inner_tensor, "fsdp_post_all_gather")
+        release_all_gather_outputs_fn = getattr(
+            inner_tensor,
+            "fsdp_should_release_all_gather_outputs_after_post_all_gather",
+            None,
+        )
+        has_release_all_gather_outputs = release_all_gather_outputs_fn is not None
         if has_fsdp_pre_all_gather != has_fsdp_post_all_gather:
             raise AssertionError(
                 "Both fsdp_pre_all_gather and fsdp_post_all_gather should be defined "
                 f"if using all-gather extensions: {inner_tensor}"
             )
+        if has_release_all_gather_outputs and not has_fsdp_post_all_gather:
+            raise AssertionError(
+                "fsdp_should_release_all_gather_outputs_after_post_all_gather "
+                "requires fsdp_pre_all_gather and fsdp_post_all_gather to be "
+                f"defined: {inner_tensor}"
+            )
         if has_fsdp_pre_all_gather:
             self._extensions_data = ExtensionsData()
+        self._release_all_gather_outputs_after_post_all_gather = False
+        if release_all_gather_outputs_fn is not None:
+            # The extension owns whether its post-all-gather representation
+            # aliases the raw all-gather outputs, so it must declare when those
+            # outputs are no longer needed.
+            should_release = release_all_gather_outputs_fn()
+            if not isinstance(should_release, bool):
+                raise AssertionError(
+                    "fsdp_should_release_all_gather_outputs_after_post_all_gather "
+                    f"must return a bool, got {type(should_release)}"
+                )
+            if (
+                should_release
+                and self.post_forward_mesh_info is not None
+                and self.post_forward_mesh_info != self.mesh_info
+            ):
+                raise NotImplementedError(
+                    "Releasing all-gather outputs after post-all-gather is not "
+                    "supported when reshard_after_forward is an int because FSDP "
+                    "uses those outputs to construct the post-forward shard"
+                )
+            self._release_all_gather_outputs_after_post_all_gather = should_release
         self._unsharded_inner_tensors: list[torch.Tensor] = []
 
     def init_all_gather_outputs(
@@ -857,6 +892,7 @@ class FSDPParam:
                 out=self._unsharded_param,
             )
             self._extensions_data.clear()
+            self._release_all_gather_outputs_if_needed()
             return
         inner_tensor = self._sharded_local_tensor
         if hasattr(inner_tensor, "fsdp_post_all_gather"):
@@ -894,6 +930,11 @@ class FSDPParam:
         self._unsharded_param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
         )
+        self._release_all_gather_outputs_if_needed()
+
+    def _release_all_gather_outputs_if_needed(self) -> None:
+        if self._release_all_gather_outputs_after_post_all_gather:
+            self.free_all_gather_outputs()
 
     def _get_unsharded_dtensor_spec(self, unsharded_param: torch.Tensor) -> DTensorSpec:
         if self._unsharded_dtensor_spec is None:
@@ -1018,15 +1059,21 @@ class FSDPParam:
 
     def to_accumulated_grad_if_needed(self) -> None:
         # Access `_unsharded_param` to bypass the sharded state check since we
-        # prefer to reshard before upcasting the gradient to save memory
+        # prefer to reshard before upcasting the gradient to save memory.
+        # It is created by `init_unsharded_param` and dropped by
+        # `free_unsharded_param`, so a parameter that has not been all-gathered
+        # does not have it. Such a parameter has no unsharded gradient to upcast,
+        # which is the case this method already returns early for.
+        unsharded_param = getattr(self, "_unsharded_param", None)
         if (
             self.reduce_dtype is None
-            or self._unsharded_param.grad is None
-            or self._unsharded_param.grad.dtype == self.reduce_dtype
+            or unsharded_param is None
+            or unsharded_param.grad is None
+            or unsharded_param.grad.dtype == self.reduce_dtype
         ):
             return
-        unsharded_grad = self._unsharded_param.grad
-        self._unsharded_param.grad = None
+        unsharded_grad = unsharded_param.grad
+        unsharded_param.grad = None
         self.unsharded_accumulated_grad = unsharded_grad.to(self.reduce_dtype)
 
     def accumulate_unsharded_grad_if_needed(self) -> None:
@@ -1041,10 +1088,13 @@ class FSDPParam:
         for tensor in self.all_gather_outputs:
             alloc_storage(tensor)
 
+    def free_all_gather_outputs(self) -> None:
+        for tensor in self.all_gather_outputs:
+            free_storage(tensor)
+
     def free_unsharded_param(self) -> None:
-        for tensor in itertools.chain(
-            self.all_gather_outputs, self._unsharded_inner_tensors
-        ):
+        self.free_all_gather_outputs()
+        for tensor in self._unsharded_inner_tensors:
             free_storage(tensor)
 
     @property
