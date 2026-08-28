@@ -488,11 +488,12 @@ Tensor reduce_sparse_csr_dim0_cuda_template(const Tensor& sparse, ReductionOp ro
   // of float should be float in current scenario. In CUDA, float is the accumulate type
   // of float, while in CPU, double is the accumulate type of float.
   using acc_t = at::acc_type<scalar_t, true>;
-  auto [new_values, new_values_acc] =
-      at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
-          values.options(), values.scalar_type(), new_nnz);
+  auto acc_buffer = at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
+      values.options(), values.scalar_type(), new_nnz);
+  Tensor new_values = std::get<0>(acc_buffer);
+  Tensor new_values_acc = std::get<1>(acc_buffer);
   scalar_t* values_ptr = values.data_ptr<scalar_t>();
-  acc_t* new_values_acc_ptr = new_values_acc.template data_ptr<acc_t>();
+  acc_t* new_values_acc_ptr = new_values_acc.data_ptr<acc_t>();
   int64_t THREADS = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   int64_t BLOCKS = (new_nnz + THREADS) / THREADS;
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
@@ -578,9 +579,10 @@ Tensor reduce_sparse_csr_dim1_cuda_template(const Tensor& sparse, ReductionOp ro
   // of float should be float in current scenario. In CUDA, float is the accumulate type
   // of float, while in CPU, double is the accumulate type of float.
   using acc_t = at::acc_type<scalar_t, true>;
-  auto [new_values, new_values_acc] =
-      at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
-          values.options(), values.scalar_type());
+  auto acc_buffer = at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
+      values.options(), values.scalar_type());
+  Tensor new_values = std::get<0>(acc_buffer);
+  Tensor new_values_acc = std::get<1>(acc_buffer);
 
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
   int64_t THREADS = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
@@ -603,8 +605,7 @@ Tensor reduce_sparse_csr_dim1_cuda_template(const Tensor& sparse, ReductionOp ro
                             new_values_acc.resize_(new_nnz);
 
                             scalar_t* values_ptr = values.data_ptr<scalar_t>();
-                            acc_t* new_values_acc_ptr =
-                                new_values_acc.template data_ptr<acc_t>();
+                            acc_t* new_values_acc_ptr = new_values_acc.data_ptr<acc_t>();
                             reduce_sparse_csr_dim1_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(new_values_acc_ptr,
                                                                                                values_ptr,
                                                                                                crow_indices_ptr,
