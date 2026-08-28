@@ -6,7 +6,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
 #include <string_view>
-#include <tuple>
 
 namespace c10d::nccl2 {
 
@@ -40,6 +39,17 @@ ncclResult_t DefaultNcclApi::commInitRankConfig(
     ncclConfig_t* config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
   return ncclCommInitRankConfig(comm, nranks, commId, rank, config);
+}
+
+ncclResult_t DefaultNcclApi::commInitRankScalable(
+    ncclComm_t* comm,
+    int nranks,
+    int rank,
+    int nId,
+    ncclUniqueId* commIds,
+    ncclConfig_t* config) {
+  std::lock_guard<std::mutex> lock(api_mutex_);
+  return ncclCommInitRankScalable(comm, nranks, rank, nId, commIds, config);
 }
 
 ncclResult_t DefaultNcclApi::commDestroy(ncclComm_t comm) {
@@ -284,12 +294,19 @@ ncclResult_t DefaultNcclApi::groupEnd() {
   return ncclGroupEnd();
 }
 
-ncclResult_t DefaultNcclApi::commUserRank(const ncclComm_t comm, int* myRank) {
+#ifdef NCCL_SIM_INFO_INITIALIZER
+ncclResult_t DefaultNcclApi::groupSimulateEnd(ncclSimInfo_t* simInfo) {
+  std::lock_guard<std::mutex> lock(api_mutex_);
+  return ncclGroupSimulateEnd(simInfo);
+}
+#endif
+
+ncclResult_t DefaultNcclApi::commUserRank(ncclComm_t comm, int* myRank) {
   std::lock_guard<std::mutex> lock(api_mutex_);
   return ncclCommUserRank(comm, myRank);
 }
 
-ncclResult_t DefaultNcclApi::commCount(const ncclComm_t comm, int* count) {
+ncclResult_t DefaultNcclApi::commCount(ncclComm_t comm, int* count) {
   std::lock_guard<std::mutex> lock(api_mutex_);
   return ncclCommCount(comm, count);
 }
