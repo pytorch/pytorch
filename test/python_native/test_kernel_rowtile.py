@@ -144,15 +144,21 @@ class TestKernelRowTile(TestCase):
 
     def test_absmax_absmin_propagate_nan(self):
         # These traits' contract is vector_norm(ord=+-inf), which is amax/amin of |x| and
-        # PROPAGATES NaN. A builtin max()/min() that returned the non-NaN operand would diverge
-        # silently on exactly one row, so pin it.
+        # PROPAGATES NaN. They spell that as builtin max()/min(), whose lowering over these
+        # accumulators is not evident from the source, so pin the behaviour instead of arguing
+        # about it -- and pin it from EVERY position, because whether a NaN survives can depend
+        # on which operand of the fold it lands in. Half the rows are left clean so the isnan
+        # comparison cannot pass by everything being NaN, and so the VALUES get checked too.
         import cutlass
 
         from torch._native.ops._cutedsl import traits as T
         from torch._native.ops.reductions import kernel_rowtile as rt
 
-        x = torch.randn(8, 512, device="cuda")
-        x[0, 17] = float("nan")
+        M, N = 64, 512
+        half = M // 2
+        x = torch.randn(M, N, device="cuda")
+        rows = torch.arange(half, device="cuda")
+        x[rows, rows * (N // half)] = float("nan")  # a distinct column per row
         for trait, ord_ in ((T.AbsMaxOps, float("inf")), (T.AbsMinOps, -float("inf"))):
             with self.subTest(trait=trait.__name__):
                 (got,) = rt.reduce_row_tile(
@@ -163,7 +169,7 @@ class TestKernelRowTile(TestCase):
                 )
                 want = torch.linalg.vector_norm(x, ord=ord_, dim=-1)
                 self.assertEqual(got.isnan(), want.isnan())
-                self.assertEqual(got[1:], want[1:])
+                self.assertEqual(got[half:], want[half:])
 
     def test_welford_divisor_clamps_at_zero(self):
         # correction >= n must divide by ZERO (-> +inf, which is what aten returns), never by a

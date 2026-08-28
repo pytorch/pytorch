@@ -14,6 +14,7 @@
 #     tracks the CUDA-graph capture stream. Do NOT use _cuda_getCurrentStream(dev)[0]
 #     (a packed stream id, not a pointer -- deadlocks graph capture).
 
+import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
 import cutlass
 import cutlass.cute as cute
 from cutlass import Float32, Float64, Int32
@@ -108,7 +109,7 @@ def cute_tensor_dynM(t, align=None, ndim=None, read_only=False):
 # get_c_pointers marshalling. The `--enable-tvm-ffi` codegen flag is equivalent to
 # the cute.compile[EnableTVMFFI] typed form (measured identical host dispatch on
 # B200, +-0.03us) and matches the convention used by the other native CuteDSL ops.
-def compile(op, *args):
+def compile_kernel(op, *args):
     return cute.compile(op, *args, options="--enable-tvm-ffi")
 
 
@@ -117,7 +118,5 @@ def stream():
     # different stream/device per call, and the kernel must launch on whatever is
     # current, including the CUDA-graph capture stream). _cuda_getCurrentRawStream
     # returns the real cudaStream_t pointer cheaply and capture-correctly.
-    import cuda.bindings.driver as cuda
-
     dev = torch.cuda.current_device()
     return cuda.CUstream(torch._C._cuda_getCurrentRawStream(dev))
