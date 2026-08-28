@@ -1573,7 +1573,7 @@ class TestUnaryUfuncs(TestCase):
     # NaN, so logit_backward returned a different gradient at a NaN element
     # depending only on unrelated tensor length/alignment.
     @onlyCPU
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     def test_logit_backward_nan_length_invariant(self, device, dtype):
         size = 128 + 1  # exceed AVX512 width so a scalar remainder tail runs
         for eps in (None, 1e-6):

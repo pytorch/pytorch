@@ -3633,21 +3633,23 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     # depending only on unrelated tensor length/alignment.
     def test_activation_backward_nan_length_invariant(self):
         size = 128 + 1  # exceed AVX512 width so a scalar remainder tail runs
-        ops = (F.hardtanh, F.elu, F.hardswish, F.hardshrink, F.softshrink)
-        for op in ops:
-            for nan_pos in (0, size // 2, size - 1):
-                x = torch.full((size,), 0.3, dtype=torch.float32)
-                x[nan_pos] = float("nan")
-                x.requires_grad_(True)
-                (long_grad,) = torch.autograd.grad(op(x), x, torch.ones(size))
+        ops = (F.hardtanh, F.elu, F.celu, F.hardswish, F.hardshrink, F.softshrink)
+        dtypes = (torch.float32, torch.bfloat16, torch.float16)
+        for dtype in dtypes:
+            for op in ops:
+                for nan_pos in (0, size // 2, size - 1):
+                    x = torch.full((size,), 0.3, dtype=dtype)
+                    x[nan_pos] = float("nan")
+                    x.requires_grad_(True)
+                    (long_grad,) = torch.autograd.grad(op(x), x, torch.ones(size, dtype=dtype))
 
-                x1 = torch.tensor([float("nan")], dtype=torch.float32, requires_grad=True)
-                (short_grad,) = torch.autograd.grad(op(x1), x1, torch.ones(1))
+                    x1 = torch.tensor([float("nan")], dtype=dtype, requires_grad=True)
+                    (short_grad,) = torch.autograd.grad(op(x1), x1, torch.ones(1, dtype=dtype))
 
-                self.assertEqual(
-                    long_grad[nan_pos], short_grad[0], equal_nan=True,
-                    msg=f"{op.__name__} backward depends on tensor length at NaN (pos {nan_pos}/{size})",
-                )
+                    self.assertEqual(
+                        long_grad[nan_pos], short_grad[0], equal_nan=True,
+                        msg=f"{op.__name__} backward ({dtype}) depends on tensor length at NaN (pos {nan_pos}/{size})",
+                    )
 
     def test_batchnorm_nhwc_cpu(self):
         def helper(self, mod, size, dtype, mixed_dtype=False, format=torch.channels_last, precision=None):
