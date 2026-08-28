@@ -53,7 +53,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 .. py:function:: precompile(fn, *example_args, example_inputs=None, backend="inductor", tracer="make_fx", decompositions=None, training=False, state=None, artifact_path=None, cache_path=None, recompile_limit=None, dynamic=None)
 
    Ahead-of-time precompile ``fn`` against example inputs, returning a self-contained,
-   runnable Python source string plus an acceleration cache as ``(python_code, cache)``.
+   runnable Python source string plus an acceleration cache as ``(python_code, cache)``
+   (stateful capture instead returns ``(results, state)``; see ``artifact_path``).
    ``fn`` is the whole computation, taking the model(s) as
    explicit arguments, e.g. ``lambda model, x: model(x)`` or a training step. The
    ``nn.Module`` arguments have their parameters/buffers lifted to graph inputs, so no
@@ -115,7 +116,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       ``backward()`` executes the captured backward kernels. Training works across
       captured recompilations. Backward variants are specialized to output-tangent
       patterns observed during capture, and an unseen pattern fails instead of compiling
-      at runtime. Only first-order backward is supported; tensor-subclass and
+      at runtime; the ordinary all-tangents-defined pattern is always covered, even
+      when capture runs no backward. Only first-order backward is supported; tensor-subclass and
       ``BackwardState`` training graphs are rejected.
 
    With ``tracer="make_fx"``, if ``fn`` runs a backward, the artifact re-runs the whole
@@ -163,8 +165,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        runs its example tuples for real, adds whatever guarded variants they newly
        exercise, atomically rewrites the artifact files at these paths (they are
        always a loadable artifact for everything captured so far), and returns
-       ``(result, state)`` -- this call's example result(s) plus the accumulated
-       state -- instead of ``(python_code, cache)``.
+       ``(results, state)`` -- a list with this call's per-example results plus the
+       accumulated state -- instead of ``(python_code, cache)``.
    :param cache_path: Where the binary acceleration cache is rewritten on every
        stateful call; see ``artifact_path``.
    :param recompile_limit: Cap on captured variants per Dynamo capture
@@ -181,6 +183,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        single source of truth for the calling convention) and a binary acceleration
        cache (no weights, no calling-convention metadata; it carries a small
        format/version/backend/code_hash integrity tag that ``load`` verifies).
+       Stateful capture (``artifact_path``/``cache_path`` given) instead returns
+       ``(results, state)`` -- a list with this call's per-example results and the
+       opaque accumulated state; the artifact lives on disk at the given paths.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below).
 
@@ -220,23 +225,31 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    batches captured so far)::
 
        state = None
-       for batch in batches:
-           result, state = torch.compiler.precompile(
-               step, example_inputs=[(batch,)], state=state,
-               artifact_path="step.py", cache_path="step.cache",
-               tracer="dynamo", training=True, recompile_limit=256,
-           )
-           # result is this call's real step output; run the training loop on it.
+       try:
+           for batch in batches:
+               [result], state = torch.compiler.precompile(
+                   step, example_inputs=[(batch,)], state=state,
+                   artifact_path="step.py", cache_path="step.cache",
+                   tracer="dynamo", training=True, recompile_limit=256,
+               )
+               # result is this call's real step output; run the training loop on it.
+       finally:
+           if state is not None:
+               state.close()  # release the capture session
 ```
 
 ```{eval-rst}
-.. py:method:: precompile.load(python_code, cache)
+.. py:method:: precompile.load(python_code=None, cache=None, *, artifact_path=None, cache_path=None)
 
    Reconstruct a runnable from the ``(python_code, cache)`` pair returned by
-   ``precompile``. The calling convention is read from ``python_code`` (the single
-   source of truth); ``cache`` only accelerates loading -- it carries only the compiled
-   backend artifact (the Inductor bundle for ``backend="inductor"``; empty for
-   ``backend="eager"``) and no weights. You pass the model(s) again at runtime.
+   ``precompile``, or -- the natural companion of stateful capture's on-disk
+   rewrites -- from the file pair at ``artifact_path``/``cache_path``. Pass one
+   form or the other, not both (mixing raises ``TypeError``; giving only one
+   path raises ``ValueError``). The calling convention is read from
+   ``python_code`` (the single source of truth); ``cache`` only accelerates
+   loading -- it carries only the compiled backend artifact (the Inductor
+   bundle for ``backend="inductor"``; empty for ``backend="eager"``) and no
+   weights. You pass the model(s) again at runtime.
 
    .. warning::
 
@@ -249,13 +262,23 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    :param python_code: The self-contained Python source string returned by ``precompile``.
    :param cache: The binary acceleration cache returned by ``precompile``.
+   :param artifact_path: With ``cache_path``, read the pair from the files a
+       stateful capture wrote (keyword-only).
+   :param cache_path: The cache file path paired with ``artifact_path`` (keyword-only).
    :returns: A runnable callable with the same calling convention as the captured ``fn``.
        Arguments are matched positionally at both capture and load time; keyword-argument
        calling conventions are not supported.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
-       fails to parse or is missing its calling-convention metadata), if ``cache`` is
-       paired with a different ``python_code`` (mismatched ``backend`` tag or
-       ``code_hash``), or if a runtime call violates the precompile contract.
+       fails to parse or is missing its calling-convention metadata), if a ``make_fx``
+       artifact's ``cache`` is paired with a different ``python_code`` (mismatched
+       ``backend`` tag or ``code_hash``), if a Dynamo artifact is loaded under a
+       different Python minor version or torch version than produced it, or if a
+       runtime call violates the precompile contract. A Dynamo artifact's mismatched
+       (or missing, on the path form) cache instead degrades to a cold cache with a
+       warning: the python_code is fully self-contained, and stateful capture's
+       two-rename rewrite can legitimately leave a mismatched pair after a crash. A
+       cache whose ``format``/``version`` tag does not match (a foreign or
+       different-build envelope) also degrades to JIT'ing from ``python_code``.
 
 .. autoexception:: torch.compiler.PrecompileError
 ```

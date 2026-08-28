@@ -1258,6 +1258,32 @@ def helper(x):
         finally:
             del ordered_set_module.OrderedSubSet
 
+    def test_constexpr_container_subclass_declines(self):
+        # Consistent with the set-subclass policy: emitting a container display
+        # for a dict/list/tuple subclass would silently drop its type, so these
+        # decline with the clear error instead of coercing to plain builtins.
+        from torch._inductor.codegen.wrapper import (
+            _constexpr_constant,
+            _constexpr_source,
+            _render_constexpr_constants,
+        )
+
+        class LocalDict(dict):
+            pass
+
+        class LocalList(list):
+            pass
+
+        class LocalTuple(tuple):
+            __slots__ = ()
+
+        for value in (LocalDict({"a": 1}), LocalList([1]), LocalTuple((1,))):
+            with self.subTest(type=type(value).__name__):
+                self.assertIs(_constexpr_constant(value), value)
+                self.assertIsNone(_constexpr_source(value))
+                with self.assertRaisesRegex(RuntimeError, "cannot be written into"):
+                    _render_constexpr_constants({"MODE": value})
+
     @parametrize(
         "value, expected",
         (
@@ -1635,6 +1661,73 @@ def helper(x):
         best = json.loads(json.dumps(data))
         self.assertIsNone(_load_cached_autotuning(best, "h", [cfg], {}))
 
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_autotune_cache_saves_container_enum_config_kwargs(self):
+        # Enum members nested inside list/dict kwargs pass _config_json_cacheable
+        # (which recurses), so _json_config_value must unwrap them recursively
+        # too: otherwise save() hands raw Enum members to json.dumps and the
+        # resulting TypeError aborts the run. A plain Enum (not IntEnum, which
+        # json serializes as its int) exercises this.
+        import json
+        import os
+        import tempfile
+
+        import triton
+
+        from torch._inductor.remote_cache import LocalAutotuneCache
+        from torch._inductor.runtime.autotune_cache import (
+            _config_json_cacheable,
+            _json_config_value,
+            _load_cached_autotuning,
+            AutotuneCache,
+        )
+
+        class Mode(Enum):
+            A = 1
+            B = 2
+
+        kwargs = {"MODES": [Mode.A], "TABLE": {"m": Mode.A}, "BLOCK": 64}
+        cfg = triton.Config(dict(kwargs), num_warps=4, num_stages=2)
+        self.assertTrue(_config_json_cacheable(cfg))
+        data = {key: _json_config_value(val) for key, val in cfg.kwargs.items()}
+        self.assertEqual(data, {"MODES": [1], "TABLE": {"m": 1}, "BLOCK": 64})
+        json.dumps(data)  # anything cacheable must serialize
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            key = os.path.join(tmpdir, "kernel.best_config")
+            local_cache = LocalAutotuneCache("local-autotune")
+            cache = AutotuneCache(configs_hash="h", local_cache=(local_cache, key))
+            cache.save(cfg, time_taken_ns=0)
+            best = local_cache.get(key)
+        self.assertIsNotNone(best)
+        # Warm load must match back to the original config, keeping the real
+        # Enum members rather than the degraded JSON values.
+        loaded = _load_cached_autotuning(best, "h", [cfg], {})
+        self.assertIs(loaded, cfg)
+        self.assertEqual(loaded.kwargs, kwargs)
+        self.assertIs(loaded.kwargs["MODES"][0], Mode.A)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_autotune_cache_ambiguous_match_reautotunes(self):
+        # Enum unwrapping makes MODE=Mode.A and MODE=1 serialize identically, so
+        # a cached winner matches both candidates. Reconstructing would bake the
+        # raw JSON value even when the winner was the Enum member (plain Enum
+        # __eq__ is identity, a silent semantic flip); re-autotune instead.
+        import json
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        class Mode(Enum):
+            A = 1
+
+        cfg_enum = triton.Config({"MODE": Mode.A}, num_warps=4, num_stages=2)
+        cfg_raw = triton.Config({"MODE": 1}, num_warps=4, num_stages=2)
+        data = {"MODE": 1, "num_warps": 4, "num_stages": 2, "configs_hash": "h"}
+        best = json.loads(json.dumps(data))
+        self.assertIsNone(_load_cached_autotuning(best, "h", [cfg_enum, cfg_raw], {}))
+
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_plain_enum_constexpr_in_user_defined_triton_kernel(self):
         import triton
@@ -1662,6 +1755,44 @@ def helper(x):
         actual, code = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(actual, fn(x))
         self.assertIn("PlistFormat['FMT_XML']", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_escape_bearing_constexpr_in_user_defined_triton_kernel(self):
+        # The rendered constants are spliced into the '''...''' literal passed
+        # to async_compile.triton and parsed twice; reprs carrying backslashes
+        # or quotes (a "\n" string, bytes) must be escaped like kernel_src or
+        # the generated module fails with SyntaxError on the second parse.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def esc_kernel(
+            in_ptr,
+            out_ptr,
+            numel,
+            MODE: tl.constexpr,
+            TAG: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE == "a\nb":
+                output = x + 1
+            else:
+                output = x * 2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            esc_kernel[(1,)](x, y, x.numel(), "a\nb", b"\x00\\", 256)
+            return y
+
+        x = torch.randn(128, device=GPU_TYPE)
+        res, code = run_and_get_code(torch.compile(fn), x)
+        # x + 1, not x * 2: the "a\nb" constexpr survived both parses intact.
+        self.assertEqual(fn(x), res)
+        compile(code[0], "<test-generated-wrapper>", "exec")
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_unspellable_enum_constexpr_errors_clearly(self):

@@ -383,6 +383,7 @@ def _build_dynamo_forward():
     retained guard set raises instead of compiling another specialization.
     """
     import base64
+    import enum
     import importlib
     import inspect
     import pickle
@@ -440,32 +441,64 @@ def _build_dynamo_forward():
     defaults = state["defaults"]
     kwdefaults = state["kwdefaults"]
 
-    closure_values = state["closure"]
-    closure = (
-        tuple(types.CellType(value) for value in closure_values)
-        if closure_values is not None
-        else None
-    )
+    # Capture rejects fns with closure cells, so rebuilt functions never carry one.
     variants = []
     for guarded in state["variants"]:
         guards_state = load_guards_state(guarded["guards_state"])
         manager = load_guard_manager(guards_state, target, namespace)
         code = SerializedCode.to_code_object(guarded["dynamo_code"])
-        function = types.FunctionType(
-            code, namespace, target.co_name, defaults, closure
-        )
+        function = types.FunctionType(code, namespace, target.co_name, defaults, None)
         if kwdefaults:
             function.__kwdefaults__ = dict(kwdefaults)
         variants.append((manager, function))
 
     target_function = types.FunctionType(
-        target, namespace, target.co_name, defaults, closure
+        target, namespace, target.co_name, defaults, None
     )
     if kwdefaults:
         target_function.__kwdefaults__ = dict(kwdefaults)
     signature = inspect.signature(target_function)
 
-    import torch.utils._pytree as pytree
+    def instance_values(root):
+        # Deep per-argument walk: containers, __dict__ contents, and slot
+        # values; functions, modules, types, and tensors are yielded but not
+        # descended. Must stay in sync with the capture-side walk in
+        # torch/_precompile.py (test_precompile pins the overlap parity).
+        seen = set()
+        stack = [root]
+        while stack:
+            value = stack.pop()
+            if value is None or type(value) in (bool, int, float, complex, str, bytes):
+                continue
+            if id(value) in seen:
+                continue
+            seen.add(id(value))
+            yield value
+            if isinstance(
+                value, (enum.Enum, torch.dtype, torch.layout, torch.memory_format)
+            ):
+                # Value-guarded singleton leaves, matching the capture-side walk.
+                continue
+            if isinstance(value, dict):
+                stack.extend(value.keys())
+                stack.extend(value.values())
+                continue
+            if isinstance(value, (tuple, list, set, frozenset)):
+                stack.extend(value)
+                continue
+            if isinstance(
+                value, (types.FunctionType, types.ModuleType, type, torch.Tensor)
+            ):
+                continue
+            if hasattr(value, "__dict__"):
+                stack.extend(vars(value).values())
+            for cls in type(value).__mro__:
+                for descriptor in vars(cls).values():
+                    if isinstance(descriptor, types.MemberDescriptorType):
+                        try:
+                            stack.append(descriptor.__get__(value, type(value)))
+                        except AttributeError:
+                            pass
 
     def has_storage_overlap(values):
         # The same tensor object passed twice is covered by the serialized
@@ -476,6 +509,8 @@ def _build_dynamo_forward():
         # on shared storage, not element overlap. Sparse layouts are left for
         # the guard checks to reject; any other non-strided layout (e.g.
         # jagged) is rejected outright since its aliasing cannot be verified.
+        # Enumeration is DEEP via instance_values, matching the capture-side
+        # scan: a tensor inside a custom argument must not bypass the check.
         sparse_layouts = (
             torch.sparse_coo,
             torch.sparse_csr,
@@ -484,7 +519,7 @@ def _build_dynamo_forward():
             torch.sparse_bsc,
         )
         tensors = []
-        for value in pytree.tree_leaves(values):
+        for value in instance_values(values):
             if not isinstance(value, torch.Tensor) or value.layout in sparse_layouts:
                 continue
             if value.layout is not torch.strided:

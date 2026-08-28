@@ -1822,6 +1822,7 @@ def _validate_dynamo_capture(
     """
     import dis
     import enum
+    import functools
     import inspect
     import pickle
     import sys
@@ -1840,48 +1841,53 @@ def _validate_dynamo_capture(
         root = (module_name or "").partition(".")[0]
         return root == "torch" or root in sys.stdlib_module_names
 
-    def reaches(
-        value: object, predicate: Callable[[object], bool], seen: set[int]
-    ) -> bool:
+    def instance_values(root: object) -> Iterator[object]:
         # The narrow, per-argument walker: an argument is judged only by what
         # it carries -- containers, __dict__ contents, and slot values -- not
-        # by attributes of its type or by modules. The wide environment walk
+        # by attributes of its type or by modules. Functions, modules, types,
+        # and tensors are yielded but not descended. The wide environment walk
         # (classes through the MRO, user modules, instance types) lives in
         # environment_reachable below.
-        if predicate(value):
-            return True
-        if value is None or type(value) in (bool, int, float, complex, str, bytes):
-            return False
-        value_id = id(value)
-        if value_id in seen:
-            return False
-        seen.add(value_id)
-        if isinstance(value, dict):
-            return any(
-                reaches(item, predicate, seen)
-                for pair in value.items()
-                for item in pair
-            )
-        if isinstance(value, (tuple, list, set, frozenset)):
-            return any(reaches(item, predicate, seen) for item in value)
-        if isinstance(
-            value, (types.FunctionType, types.ModuleType, type, torch.Tensor)
-        ):
-            return False
-        if hasattr(value, "__dict__") and any(
-            reaches(item, predicate, seen) for item in vars(value).values()
-        ):
-            return True
-        for cls in type(value).__mro__:
-            for descriptor in vars(cls).values():
-                if isinstance(descriptor, types.MemberDescriptorType):
-                    try:
-                        slot_value = descriptor.__get__(value, type(value))
-                    except AttributeError:
-                        continue
-                    if reaches(slot_value, predicate, seen):
-                        return True
-        return False
+        seen: set[int] = set()
+        stack: list[object] = [root]
+        while stack:
+            value = stack.pop()
+            if value is None or type(value) in (bool, int, float, complex, str, bytes):
+                continue
+            if id(value) in seen:
+                continue
+            seen.add(id(value))
+            yield value
+            if isinstance(
+                value, (enum.Enum, torch.dtype, torch.layout, torch.memory_format)
+            ):
+                # Value-guarded singleton leaves: an enum member's __dict__
+                # carries __objclass__ (its class), which would otherwise read
+                # as an environment alias of the enum's global.
+                continue
+            if isinstance(value, dict):
+                stack.extend(value.keys())
+                stack.extend(value.values())
+                continue
+            if isinstance(value, (tuple, list, set, frozenset)):
+                stack.extend(value)
+                continue
+            if isinstance(
+                value, (types.FunctionType, types.ModuleType, type, torch.Tensor)
+            ):
+                continue
+            if hasattr(value, "__dict__"):
+                stack.extend(vars(value).values())
+            for cls in type(value).__mro__:
+                for descriptor in vars(cls).values():
+                    if isinstance(descriptor, types.MemberDescriptorType):
+                        try:
+                            stack.append(descriptor.__get__(value, type(value)))
+                        except AttributeError:
+                            pass
+
+    def reaches(value: object, predicate: Callable[[object], bool]) -> bool:
+        return any(predicate(item) for item in instance_values(value))
 
     def environment_reachable(root: object) -> tuple[frozenset[int], bool]:
         # The wide environment walk: enumerate every object id reachable from a
@@ -1935,6 +1941,34 @@ def _validate_dynamo_capture(
                     )
                 continue
             if isinstance(value, types.FunctionType):
+                # A function carries state too: tensors or input aliases can
+                # hide in its defaults, closure cells, attributes, or -- for a
+                # user function Dynamo may inline -- in globals its own code
+                # loads that the root fn's bytecode never names. Library
+                # functions are opaque leaves, like library modules.
+                if is_library_module(getattr(value, "__module__", None)):
+                    continue
+                stack.extend(value.__defaults__ or ())
+                stack.extend((value.__kwdefaults__ or {}).values())
+                for cell in value.__closure__ or ():
+                    try:
+                        stack.append(cell.cell_contents)
+                    except ValueError:
+                        pass
+                stack.extend(vars(value).values())
+                stack.extend(
+                    value.__globals__[name]
+                    for name in loaded_global_names(value.__code__)
+                    if name in value.__globals__
+                )
+                continue
+            if isinstance(value, types.MethodType):
+                stack.extend((value.__func__, value.__self__))
+                continue
+            if isinstance(value, functools.partial):
+                stack.append(value.func)
+                stack.extend(value.args)
+                stack.extend(value.keywords.values())
                 continue
             if hasattr(value, "__dict__"):
                 stack.extend(vars(value).values())
@@ -1968,8 +2002,13 @@ def _validate_dynamo_capture(
             torch.sparse_bsr,
             torch.sparse_bsc,
         )
+        # Tensor enumeration must be DEEP (containers, __dict__, slot values):
+        # a tensor inside a custom, non-pytree argument is invisible to
+        # tree_leaves and an aliased pair would bypass the check. Keep this
+        # enumeration in sync with the driver copy in
+        # torch/_precompile_driver.py (test_precompile pins the parity).
         tensors = []
-        for value in pytree.tree_leaves(values):
+        for value in instance_values(values):
             if not isinstance(value, torch.Tensor) or value.layout in sparse_layouts:
                 continue
             if value.layout is not torch.strided:
@@ -2020,7 +2059,7 @@ def _validate_dynamo_capture(
                 "precompile example_inputs must be a sequence of positional-argument "
                 f"tuples, got {type(example).__name__}."
             )
-        if reaches(example, lambda v: isinstance(v, torch.nn.Module), set()):
+        if reaches(example, lambda v: isinstance(v, torch.nn.Module)):
             raise NotImplementedError(
                 "precompile tracer='dynamo' does not yet support nn.Module arguments "
                 "(including inside containers) because Dynamo's module identity "
@@ -2048,7 +2087,7 @@ def _validate_dynamo_capture(
         )
 
     defaults = (target.__defaults__, target.__kwdefaults__)
-    if reaches(defaults, lambda v: isinstance(v, torch.Tensor), set()):
+    if reaches(defaults, lambda v: isinstance(v, torch.Tensor)):
         raise PrecompileError(
             "precompile tracer='dynamo' cannot serialize tensor-valued function "
             "defaults; pass every tensor as an explicit example input."
@@ -2114,25 +2153,16 @@ def _validate_dynamo_capture(
     # enum argument always fails capture loudly with the accurate
     # identity-guard error, while an unused pass-through enum (which this
     # exemption newly enables) never influences dispatch.
+    # The id set must be as deep as what an argument carries (instance_values:
+    # containers, __dict__, slot values): a tensor inside a custom object that
+    # aliases the environment has the same dropped-guard hazard as a bare
+    # aliased leaf. instance_values already skips primitive leaves.
     input_ids = {
         id(value)
         for example in example_inputs
-        for value in pytree.tree_leaves(example)
+        for value in instance_values(example)
         if not isinstance(
-            value,
-            (
-                type(None),
-                bool,
-                int,
-                float,
-                complex,
-                str,
-                bytes,
-                enum.Enum,
-                torch.dtype,
-                torch.layout,
-                torch.memory_format,
-            ),
+            value, (enum.Enum, torch.dtype, torch.layout, torch.memory_format)
         )
     }
     # An input aliased through the environment (including a global's class or
@@ -2238,7 +2268,9 @@ def _dynamo_capture_context(
 
 
 @contextlib.contextmanager
-def _translate_dynamo_capture_errors(capture_limit: int) -> Iterator[None]:
+def _translate_dynamo_capture_errors(
+    capture_limit: int, *, stateful: bool = False
+) -> Iterator[None]:
     from torch._dynamo.exc import (
         BackendCompilerFailed,
         FailOnRecompileLimitHit,
@@ -2263,10 +2295,19 @@ def _translate_dynamo_capture_errors(capture_limit: int) -> Iterator[None]:
             f"precompile tracer='dynamo' could not serialize the capture: {e}"
         ) from e
     except (FailOnRecompileLimitHit, RecompileError) as e:
+        # A state's limit is fixed at creation (the optimize wrapper bakes it
+        # in), so "pass a larger recompile_limit" alone would send a stateful
+        # caller into the resume-mismatch error.
+        advice = (
+            "a state's recompile_limit is fixed when it is created, so close() "
+            "this state and precompile again from scratch with a larger "
+            "recompile_limit"
+            if stateful
+            else "pass a larger recompile_limit"
+        )
         raise PrecompileError(
             "precompile tracer='dynamo' could not capture every example before "
-            f"recompile_limit={capture_limit}; pass a larger recompile_limit. "
-            f"Dynamo reported: {e}"
+            f"recompile_limit={capture_limit}; {advice}. Dynamo reported: {e}"
         ) from e
     except AssertionError as e:
         # torch/_dynamo/convert_frame.py raises this assertion when a kept guard
@@ -2381,7 +2422,6 @@ def _build_dynamo_artifact(
         "import_sources": dict(code.import_sources),
         "defaults": capture_target.__defaults__,
         "kwdefaults": capture_target.__kwdefaults__,
-        "closure": None,
         "variants": [
             {
                 "guards_state": guards_state,
@@ -2441,6 +2481,29 @@ def _teardown_dynamo_capture(
                 cached_backends.pop(id(backend_fn), None)
 
 
+def _snapshot_example(example: tuple[object, ...]) -> tuple[object, ...]:
+    # Guard minimization re-checks every recorded example AFTER it has run
+    # (and stateful rebuilds re-check them again on every later call), so a fn
+    # that mutates a container input would otherwise fail the re-check -- or
+    # permanently poison a stateful state -- for a computation plain
+    # torch.compile supports. Record a pre-execution copy instead. Tensors are
+    # kept by reference (guards check metadata, not data, and copying would
+    # double example memory; the shared memo also preserves aliasing
+    # relations); an example deepcopy cannot handle is recorded live, which
+    # only matters if the fn then mutates it.
+    import copy
+
+    memo: dict[int, object] = {
+        id(leaf): leaf
+        for leaf in pytree.tree_leaves(example)
+        if isinstance(leaf, torch.Tensor)
+    }
+    try:
+        return copy.deepcopy(example, memo)
+    except Exception:
+        return example
+
+
 def _precompile_dynamo(
     fn: Callable[..., object],
     example_inputs: Sequence[tuple[object, ...]],
@@ -2476,12 +2539,14 @@ def _precompile_dynamo(
                 compiled, backend_fn = _make_dynamo_capture_optimizer(
                     capture_target, package, backend, training, capture_limit, dynamic
                 )
+                recorded = []
                 for example in example_inputs:
+                    recorded.append(_snapshot_example(example))
                     compiled(*example)
                 python_code, cache, _summary = _build_dynamo_artifact(
                     package,
                     capture_target,
-                    example_inputs,
+                    recorded,
                     backend=backend,
                     training=training,
                 )
@@ -2508,9 +2573,10 @@ class _PrecompileDynamoState:
     CompilePackage new variants accumulate into, the optimize wrapper (whose
     isolate-recompiles bucket keeps earlier variants visible to later calls),
     the isolated PGO state that drives automatic dynamic shapes across calls,
-    and every example tuple seen so far (guard minimization re-checks all of
-    them on every rebuild, so their tensors stay alive for the state's
-    lifetime). Treat it as opaque: it is process-local and not serializable.
+    and a pre-execution snapshot of every example tuple seen so far (guard
+    minimization re-checks all of them on every rebuild, so their tensors stay
+    alive for the state's lifetime; see _snapshot_example). Treat it as
+    opaque: it is process-local and not serializable.
     Call :meth:`close` when done capturing -- Dynamo's recompile-logging
     registry otherwise pins the session until ``torch._dynamo.reset()``. Do
     not call ``torch._dynamo.reset()`` between calls that share a state: later
@@ -2600,28 +2666,29 @@ def _write_dynamo_artifact_files(
 
     renames = []
     try:
-        for path, data, mode in (
-            (artifact_path, python_code, "w"),
-            (cache_path, cache, "wb"),
+        for path, data, mode, encoding in (
+            (artifact_path, python_code, "w", "utf-8"),
+            (cache_path, cache, "wb", None),
         ):
             parent = os.path.dirname(os.fspath(path))
             if parent:
                 os.makedirs(parent, exist_ok=True)
             tmp = f"{path}.{os.getpid()}.tmp"
             renames.append((tmp, path))
-            with open(tmp, mode) as f:
+            with open(tmp, mode, encoding=encoding) as f:
                 f.write(data)
                 f.flush()
                 os.fsync(f.fileno())
+        for tmp, path in renames:
+            os.replace(tmp, path)
     except BaseException:
+        # A tmp already renamed away just fails its unlink with ENOENT.
         for tmp, _ in renames:
             try:
                 os.unlink(tmp)
             except OSError:
                 pass
         raise
-    for tmp, path in renames:
-        os.replace(tmp, path)
 
 
 def _precompile_dynamo_stateful(
@@ -2636,7 +2703,7 @@ def _precompile_dynamo_stateful(
     state: _PrecompileDynamoState | None,
     artifact_path: str,
     cache_path: str,
-) -> tuple[object, _PrecompileDynamoState]:
+) -> tuple[list[object], _PrecompileDynamoState]:
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.pgo import _new_code_state
 
@@ -2711,7 +2778,7 @@ def _precompile_dynamo_stateful(
         try:
             with (
                 _dynamo_capture_context(state.pgo_state, training, state.capture_limit),
-                _translate_dynamo_capture_errors(state.capture_limit),
+                _translate_dynamo_capture_errors(state.capture_limit, stateful=True),
             ):
                 if state.compiled is None:
                     state.compiled, state.backend_fn = _make_dynamo_capture_optimizer(
@@ -2745,7 +2812,9 @@ def _precompile_dynamo_stateful(
                     # variant at frame entry, so a step that raises after
                     # compiling would otherwise leave a variant matching no
                     # recorded example and every later rebuild would fail.
-                    state.examples.append(example)
+                    # Record a pre-execution snapshot (see _snapshot_example);
+                    # the step itself runs on the caller's live objects.
+                    state.examples.append(_snapshot_example(example))
                     results.append(state.compiled(*example))
                 try:
                     python_code, cache, summary = _build_dynamo_artifact(
@@ -2779,7 +2848,10 @@ def _precompile_dynamo_stateful(
             if fresh:
                 state.close()
             raise
-        return (results[0] if len(results) == 1 else results), state
+        # Always a list, one entry per example of THIS call: with a single
+        # conditional shape, a fn that itself returns a list would be
+        # indistinguishable from a multi-example call.
+        return results, state
 
 
 class PrecompiledModule:
@@ -3108,7 +3180,7 @@ class _PrecompileApi:
         cache_path: str | None = None,
         recompile_limit: int | None = None,
         dynamic: bool | None = None,
-    ) -> tuple[str, bytes] | tuple[object, _PrecompileDynamoState]:
+    ) -> tuple[str, bytes] | tuple[list[object], _PrecompileDynamoState]:
         """Ahead-of-time precompile ``fn`` against ``example_inputs``.
 
         .. note::
@@ -3210,23 +3282,29 @@ class _PrecompileApi:
         STATEFUL CAPTURE (``tracer="dynamo"`` only): pass ``artifact_path`` and
         ``cache_path`` to capture incrementally from a loop the caller owns.
         API note: this mode deliberately changes the return type to
-        ``(result, state)`` -- the caller's loop needs the step's real result,
-        and the artifact lives on disk rather than in the return value. A
-        separate entry point (e.g. ``precompile.stateful``) was considered and
-        rejected: the two modes share every capture semantic and differ only
-        in delivery, and one callable keeps the "same call, plus paths"
-        migration story::
+        ``(results, state)`` -- the caller's loop needs the step's real
+        results, and the artifact lives on disk rather than in the return
+        value. ``results`` is always a list with one entry per example tuple
+        of THIS call (never unwrapped, so a fn that itself returns a list is
+        unambiguous). A separate entry point (e.g. ``precompile.stateful``)
+        was considered and rejected: the two modes share every capture
+        semantic and differ only in delivery, and one callable keeps the
+        "same call, plus paths" migration story::
 
             state = None
-            for batch in batches:
-                result, state = torch.compiler.precompile(
-                    step,
-                    example_inputs=[(batch,)],
-                    state=state,
-                    artifact_path="step.py",
-                    cache_path="step.cache",
-                    tracer="dynamo",
-                )
+            try:
+                for batch in batches:
+                    [result], state = torch.compiler.precompile(
+                        step,
+                        example_inputs=[(batch,)],
+                        state=state,
+                        artifact_path="step.py",
+                        cache_path="step.cache",
+                        tracer="dynamo",
+                    )
+            finally:
+                if state is not None:
+                    state.close()
 
         Every call runs its example tuples for real, records whatever guarded
         variants they newly exercise into the returned opaque ``state``
@@ -3234,19 +3312,22 @@ class _PrecompileApi:
         the same fn, ``backend``, ``training``, and ``recompile_limit``, else
         the call raises rather than produce a mixed artifact), REWRITES the
         artifact and cache files atomically, and returns this call's example
-        result(s) instead of ``(python_code, cache)`` -- the single result for
-        one example tuple, a list for several. The files on disk are always a
+        results (a list, one entry per example tuple) instead of
+        ``(python_code, cache)``. The files on disk are always a
         loadable artifact for everything captured so far. A call whose guards
         all hit adds nothing; guard minimization is re-run over every example
-        seen so far on each rebuild, so the state keeps all example tuples
-        alive, and later calls see earlier variants because the state carries
+        seen so far on each rebuild, so the state keeps a pre-execution
+        snapshot of every example tuple alive (tensors by reference; a step
+        may freely mutate its container inputs), and later calls see earlier
+        variants because the state carries
         one isolate-recompiles bucket and one PGO record across calls (a
         dimension that varies between calls recompiles into a symbolic graph
         exactly as it would within one call). ``recompile_limit`` caps the
         variants per capture; the stateful default is
         ``max(torch._dynamo.config.recompile_limit, 256)`` because accumulating
-        captures outgrow the config default (the one-shot default stays the
-        example count). ``dynamic`` is forwarded to Dynamo (``None`` keeps the
+        captures outgrow the config default (the one-shot default is
+        ``max(torch._dynamo.config.recompile_limit, len(example_inputs) + 1)``).
+        ``dynamic`` is forwarded to Dynamo (``None`` keeps the
         automatic policy) and, like the other capture settings, must not change
         across resumed calls. After each rewrite, ``state.summary()`` reports
         what the artifact carries -- calls, examples, variants, graphs, dynamic
@@ -3432,13 +3513,14 @@ class _PrecompileApi:
 
         Raises ``PrecompileError`` if ``python_code`` is malformed or is not a
         ``torch.compiler.precompile`` artifact (it fails to parse, or is missing the
-        calling-convention metadata), if the cache's ``backend`` tag does not match
-        ``python_code``, or -- for ``make_fx`` artifacts -- if the cache's
-        ``code_hash`` does not match ``sha256(python_code)``, i.e. the cache and
-        python_code came from different ``precompile()`` calls. For ``dynamo``
-        artifacts a ``code_hash`` mismatch instead degrades to a cold cache with a
-        warning: the python_code is fully self-contained, and stateful capture's
-        two-rename rewrite can legitimately leave a mismatched pair after a crash.
+        calling-convention metadata), or -- for ``make_fx`` artifacts -- if the
+        cache's ``backend`` tag or ``code_hash`` does not match ``python_code``,
+        i.e. the cache and python_code came from different ``precompile()`` calls.
+        For ``dynamo`` artifacts a ``backend``/``code_hash`` mismatch -- or a
+        missing cache file on the path form -- instead degrades to a cold cache
+        with a warning: the python_code is fully self-contained, and stateful
+        capture's two-rename rewrite can legitimately leave a mismatched pair (or,
+        on its first rewrite, an artifact without its cache) after a crash.
         A cache whose ``format``/``version`` does not match (a
         foreign or different-build envelope) is NOT fatal: the cache is acceleration
         only, so ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
@@ -3455,8 +3537,20 @@ class _PrecompileApi:
                 )
             with open(artifact_path, encoding="utf-8") as f:
                 python_code = f.read()
-            with open(cache_path, "rb") as f:
-                cache = f.read()
+            try:
+                with open(cache_path, "rb") as f:
+                    cache = f.read()
+            except FileNotFoundError:
+                # A crash between the two renames of a stateful capture's
+                # FIRST rewrite leaves an artifact with no cache file; the
+                # cache is acceleration only, so degrade instead of raising.
+                log.warning(
+                    "torch.compiler.precompile.load found no cache file at %r "
+                    "(likely a first rewrite interrupted between the artifact "
+                    "and cache renames). Falling back to JIT from python_code.",
+                    cache_path,
+                )
+                cache = b""
         if python_code is None or cache is None:
             raise TypeError(
                 "precompile.load requires python_code and cache (or artifact_path "
@@ -3484,9 +3578,10 @@ class _PrecompileApi:
         # cache) pairing -- so it hard-fails rather than running under foreign metadata.
         artifact = None
         try:
-            blob = torch.load(io.BytesIO(cache), weights_only=True)
-            if blob.get("format") != _CACHE_FORMAT or blob.get("version") != (
-                _CACHE_VERSION
+            blob = torch.load(io.BytesIO(cache), weights_only=True) if cache else None
+            if blob is not None and (
+                blob.get("format") != _CACHE_FORMAT
+                or blob.get("version") != _CACHE_VERSION
             ):
                 log.warning(
                     "torch.compiler.precompile.load got a cache with format=%r "
@@ -3499,38 +3594,44 @@ class _PrecompileApi:
                 )
                 blob = None
             if blob is not None:
-                if blob.get("backend") != backend:
+                # Reject a cache whose backend or code_hash does not match this
+                # python_code (a mismatched pairing); see Note [precompile
+                # programming model], invariant 7.
+                expected_code_hash = hashlib.sha256(python_code.encode()).hexdigest()
+                mismatched = (
+                    blob.get("backend") != backend
+                    or blob.get("code_hash") != expected_code_hash
+                )
+                if mismatched and tracer == "dynamo":
+                    # A dynamo python_code is fully self-contained (every graph
+                    # source is inlined), so the cache is pure acceleration.
+                    # Stateful capture rewrites the pair as two back-to-back
+                    # renames; a crash between them leaves exactly this mismatch
+                    # (a backend mismatch is the same window, over an older
+                    # artifact at the same paths), and degrading keeps the
+                    # on-disk artifact always loadable.
+                    log.warning(
+                        "torch.compiler.precompile.load got a cache whose "
+                        "backend/code_hash does not match python_code (likely a "
+                        "rewrite interrupted between the artifact and cache "
+                        "renames, or a mismatched pairing). Falling back to JIT "
+                        "from python_code."
+                    )
+                    blob = None
+                elif blob.get("backend") != backend:
                     raise PrecompileError(
                         f"cache backend {blob.get('backend')!r} does not match the "
                         f"python_code backend {backend!r}; the cache and python_code "
                         "came from different precompile() calls."
                     )
-                # Reject a cache whose code_hash does not match this python_code (a
-                # mismatched pairing); see Note [precompile programming model], invariant 7.
-                expected_code_hash = hashlib.sha256(python_code.encode()).hexdigest()
-                if blob.get("code_hash") != expected_code_hash:
-                    if tracer == "dynamo":
-                        # A dynamo python_code is fully self-contained (every graph
-                        # source is inlined), so the cache is pure acceleration.
-                        # Stateful capture rewrites the pair as two back-to-back
-                        # renames; a crash between them leaves exactly this mismatch,
-                        # and degrading keeps the on-disk artifact always loadable.
-                        log.warning(
-                            "torch.compiler.precompile.load got a cache whose "
-                            "code_hash does not match python_code (likely a rewrite "
-                            "interrupted between the artifact and cache renames, or a "
-                            "mismatched pairing). Falling back to JIT from "
-                            "python_code."
-                        )
-                        blob = None
-                    else:
-                        raise PrecompileError(
-                            "cache does not match python_code (its code_hash "
-                            f"{blob.get('code_hash')!r} != sha256(python_code) "
-                            f"{expected_code_hash!r}); the cache and python_code came "
-                            "from different precompile() calls. Pair each cache with "
-                            "the python_code from the same precompile() call."
-                        )
+                elif blob.get("code_hash") != expected_code_hash:
+                    raise PrecompileError(
+                        "cache does not match python_code (its code_hash "
+                        f"{blob.get('code_hash')!r} != sha256(python_code) "
+                        f"{expected_code_hash!r}); the cache and python_code came "
+                        "from different precompile() calls. Pair each cache with "
+                        "the python_code from the same precompile() call."
+                    )
             if blob is not None:
                 artifact = blob.get("artifact")
         except PrecompileError:

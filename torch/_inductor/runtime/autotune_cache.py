@@ -331,9 +331,14 @@ class AutotuneCache:
         triton_cache_hash: str | None = None,
     ) -> None:
         if not _config_json_cacheable(config):
-            log.debug(
-                "Skipping autotune cache save: a config kwarg does not survive a "
-                "JSON round-trip"
+            # Skipped configs are also absent from the bundled/mega caches, so
+            # this kernel re-autotunes on every cold process; name the cache
+            # entry so the recurring cost is attributable.
+            cache_id = (self.local_cache or self.remote_cache or (None, "<unknown>"))[1]
+            log.warning(
+                "Skipping autotune cache save for %s: a config kwarg does not "
+                "survive a JSON round-trip",
+                cache_id,
             )
             return
         data: dict[str, JsonDataTy] = {
@@ -696,7 +701,16 @@ def _json_config_value(value: Any) -> Any:
     # Enum config kwargs stay real Enum members at runtime (the kernel may consume
     # e.g. MODE.value), but the JSON caches store the underlying value -- the same
     # form the generated source used to bake in before Enums round-tripped.
-    return value.value if isinstance(value, enum.Enum) else value
+    # Recurses over the same structure _json_stable_value accepts (lists and
+    # str-keyed dicts; tuples are rejected there) so that anything
+    # _config_json_cacheable admits both serializes and ==-matches on load.
+    if isinstance(value, enum.Enum):
+        value = value.value
+    if isinstance(value, list):
+        return [_json_config_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _json_config_value(item) for key, item in value.items()}
+    return value
 
 
 def _json_stable_value(value: Any) -> bool:
@@ -774,6 +788,12 @@ def _load_cached_autotuning(
             # pyrefly: ignore [missing-attribute]
             matched_config.extra_options = extra_options
             return matched_config
+        if len(matching_configs) > 1:
+            # Enum unwrapping can make distinct candidates (e.g. MODE=Mode.A vs
+            # MODE=1) serialize identically; reconstruction below would
+            # arbitrarily bake the raw JSON value even when the winner was the
+            # Enum member. Re-autotune instead.
+            return None
         if not all(_config_json_cacheable(cfg) for cfg in configs):
             # A no-match here may be a JSON round-trip artifact (see
             # _config_json_cacheable), and reconstruction below would bake the

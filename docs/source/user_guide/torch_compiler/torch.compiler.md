@@ -53,10 +53,12 @@ tensor object may be passed more than once).
 With `training=True` and the Inductor backend, Dynamo graphs
 include readable compiled forward and backward code, so served outputs retain a
 `grad_fn` and can be passed to `backward()`. This training mode works across captured
-recompilations and rejects output-tangent patterns not observed during capture. Passing
+recompilations and rejects output-tangent patterns not observed during capture (the
+ordinary all-tangents-defined pattern is always covered). Passing
 `artifact_path`/`cache_path` switches `precompile` into stateful capture: each call runs
-its example for real inside a loop the caller owns, returns that call's result plus an
-opaque `state` to pass back in, and rewrites an always-loadable artifact on disk. See
+its example tuples for real inside a loop the caller owns, returns a list of that call's
+per-example results plus an opaque `state` to pass back in, and rewrites an
+always-loadable artifact on disk; call `state.close()` when done capturing. See
 the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}

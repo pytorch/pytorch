@@ -217,6 +217,9 @@ def _use_code_state(
 ) -> Iterator[None]:
     # While the override is set, get_code_state() also skips its cache-fetch and
     # tlparse bookkeeping, so overridden compiles leave no PGO trace artifacts.
+    # ContextVars do not propagate to newly spawned threads: every compile that
+    # should see the override must run on the thread that entered this context
+    # (precompile capture is synchronous under its compile lock today).
     token = _CODE_STATE_OVERRIDE.set(code_state)
     try:
         yield

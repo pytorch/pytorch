@@ -122,17 +122,20 @@ def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
 
 
 def _constexpr_constant(value: Any) -> Any:
-    if isinstance(value, dict):
+    # Only exact builtin containers are rebuilt (subclasses would be silently
+    # coerced to plain builtins); subclasses pass through unchanged and
+    # _constexpr_source_impl declines them, matching the set-subclass policy.
+    if type(value) is dict:
         return {
             _constexpr_constant(key): _constexpr_constant(item)
             for key, item in value.items()
         }
-    if isinstance(value, list):
+    if type(value) is list:
         return [_constexpr_constant(item) for item in value]
     if isinstance(value, tuple) and hasattr(value, "_fields"):
         make = getattr(type(value), "_make")  # noqa: B009
         return make(_constexpr_constant(item) for item in value)
-    if isinstance(value, tuple):
+    if type(value) is tuple:
         return tuple(_constexpr_constant(item) for item in value)
     if isinstance(value, enum.Enum) and isinstance(
         value.value, (bytes, float, int, str)
@@ -152,6 +155,10 @@ def _constexpr_module_ref(
     if module not in module_aliases:
         alias = f"__inductor_constexpr_module_{len(module_aliases)}"
         module_aliases[module] = alias
+        # Known limitation: async-compile subprocess workers snapshot
+        # PYTHONPATH when the pool is spawned, so a module importable in the
+        # parent process may fail to import when the worker executes this
+        # generated import.
         imports.append(f"import {module} as {alias}")
     return module_aliases[module]
 
@@ -206,6 +213,10 @@ def _constexpr_source_impl(
             return f"{module_ref}.{name}"
         return None
     if isinstance(value, dict):
+        # Like the set path below: a `{...}` display would silently drop a
+        # subclass's type, so only exact builtin dicts render.
+        if type(value) is not dict:
+            return None
         items = []
         for key, item in value.items():
             key_source = _constexpr_source_impl(key, module_aliases, imports)
@@ -215,6 +226,8 @@ def _constexpr_source_impl(
             items.append(f"{key_source}: {item_source}")
         return "{" + ", ".join(items) + "}"
     if isinstance(value, list):
+        if type(value) is not list:
+            return None
         items = []
         for item in value:
             source = _constexpr_source_impl(item, module_aliases, imports)
@@ -223,6 +236,10 @@ def _constexpr_source_impl(
             items.append(source)
         return "[" + ", ".join(items) + "]"
     if isinstance(value, tuple):
+        # Namedtuples reconstruct exactly via _make; any other tuple subclass
+        # declines rather than degrade to a plain tuple.
+        if not hasattr(value, "_fields") and type(value) is not tuple:
+            return None
         items = []
         for item in value:
             source = _constexpr_source_impl(item, module_aliases, imports)
@@ -4057,7 +4074,11 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
-        compile_wrapper.splice(
+        # Like kernel_src below, this text is spliced into the '''...''' literal
+        # passed to async_compile.triton and therefore parsed twice; escape it so
+        # rendered constants whose reprs carry backslashes or quotes (e.g. "a\nb",
+        # bytes) survive the outer parse intact.
+        decorator_src = _escape_triton_kernel_source_for_wrapper(
             f"""
             @triton_heuristics.user_autotune(
                 configs={rendered_config_dicts!r},
@@ -4069,6 +4090,7 @@ class PythonWrapperCodegen(CodeGen):
             @triton.jit
             """
         )
+        compile_wrapper.splice(decorator_src)
         kernel_src = user_defined_triton_kernel_transitive_closure_source_code(
             kernel, epilogue_fusion
         )
