@@ -4556,14 +4556,27 @@ class TestCuptiMonitorNative(TestCase):
         pyprof._cupti_monitor.return_buffer(ptr_a)
 
         # The next request reuses the freed buffer: same pointer, no new alloc.
+        checked_out = []
         ptr_b, _ = do_request()
-        self.assertEqual(ptr_b, ptr_a)
-        self.assertEqual(pyprof._cupti_monitor.allocated_buffers(), 1)
+        checked_out.append(ptr_b)
+        try:
+            self.assertEqual(ptr_b, ptr_a)
+            self.assertEqual(pyprof._cupti_monitor.allocated_buffers(), 1)
 
-        # A second concurrently-outstanding buffer forces a fresh allocation.
-        ptr_c, _ = do_request()
-        self.assertNotEqual(ptr_c, ptr_b)
-        self.assertEqual(pyprof._cupti_monitor.allocated_buffers(), 2)
+            # A second concurrently-outstanding buffer forces a fresh allocation.
+            ptr_c, _ = do_request()
+            checked_out.append(ptr_c)
+            self.assertNotEqual(ptr_c, ptr_b)
+            self.assertEqual(pyprof._cupti_monitor.allocated_buffers(), 2)
+
+            pyprof._cupti_monitor.reset_buffers()
+            self.assertEqual(pyprof._cupti_monitor.allocated_buffers(), 2)
+        finally:
+            if pyprof._cupti_monitor.allocated_buffers() == len(checked_out):
+                for ptr in checked_out:
+                    do_complete(ptr)
+            pyprof._cupti_monitor.reset_buffers()
+        self.assertEqual(pyprof._cupti_monitor.allocated_buffers(), 0)
 
     def test_cupti_monitor_not_imported_without_active_session(self):
         # The optional CUPTI monitor import chain (observers.profiler -> monitor ->

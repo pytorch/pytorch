@@ -32,6 +32,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -111,6 +112,10 @@ class TORCH_API CuptiMonitorBuffers {
   // LIFO free list: reuse the warmest (most recently returned) buffer first.
   std::vector<uint8_t*> free_;
   std::vector<uint8_t*> all_; // every buffer ever allocated (for reset)
+  // Buffers currently held by libcupti (requested, not yet completed). CUPTI
+  // can write into a held buffer even after disarm+unsubscribe, so reset()
+  // must leak these rather than free them (a freed one corrupts the heap).
+  std::unordered_set<uint8_t*> checked_out_;
   std::deque<CompletedCuptiBuffer> completed_;
   size_t buffer_size_ = 4UL * 1024 * 1024;
   size_t allocated_ = 0;

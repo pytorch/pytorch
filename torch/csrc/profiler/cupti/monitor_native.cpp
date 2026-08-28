@@ -103,6 +103,7 @@ void CuptiMonitorBuffers::on_request(
     if (!free_.empty()) {
       buf = free_.back();
       free_.pop_back();
+      checked_out_.insert(buf);
     }
   }
   if (buf == nullptr) {
@@ -114,6 +115,9 @@ void CuptiMonitorBuffers::on_request(
     std::lock_guard<std::mutex> guard(mutex_);
     all_.push_back(buf);
     ++allocated_;
+    if (buf != nullptr) {
+      checked_out_.insert(buf);
+    }
   }
   *buffer = buf;
   *size = bytes;
@@ -133,6 +137,7 @@ void CuptiMonitorBuffers::on_complete(
       cuptiMonitorParseRecordLayouts(complete_info);
   {
     std::lock_guard<std::mutex> guard(mutex_);
+    checked_out_.erase(buffer);
     completed_.push_back({buffer, valid_size, 0, 0, std::move(layouts)});
   }
   cv_.notify_one();
@@ -189,12 +194,21 @@ void CuptiMonitorBuffers::reset() {
   std::lock_guard<std::mutex> guard(mutex_);
   completed_.clear();
   free_.clear();
+  // Buffers libcupti still holds (requested, never completed) are kept
+  // allocated: CUPTI writes into a held buffer even after unsubscribe, and
+  // freeing it here corrupts the heap. They stay in all_ so a later reset
+  // can free them once completed.
+  std::vector<uint8_t*> still_held;
   for (uint8_t* p : all_) {
+    if (checked_out_.count(p) != 0) {
+      still_held.push_back(p);
+      continue;
+    }
     // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     std::free(p);
   }
-  all_.clear();
-  allocated_ = 0;
+  all_ = std::move(still_held);
+  allocated_ = all_.size();
   shutdown_ = false;
 }
 
