@@ -11,6 +11,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/DeviceGuard.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/bit_cast.h>
 
 #if defined(USE_ROCM)
 #include <ATen/cuda/detail/ROCmMacros.cuh>
@@ -578,14 +579,9 @@ struct BLayout_TC_int4 {
           // type pun, the __nv_bfloat162 value in bf16x2x4 is a struct and
           // can't be used as a 32-bit asm register argument for `mma`
           static_assert(sizeof(bf16x2x4) == sizeof(out[0][0]));
-          // On Windows with ROCm, std::memcpy resolves to a __host__-only
-          // function and cannot be called from __device__ code. Use the raw
-          // memcpy which the HIP compiler provides as a __device__ builtin.
-#if defined(_WIN32) && defined(USE_ROCM)
-          memcpy(&out[i][j], &v, sizeof(bf16x2x4_u32));
-#else
-          std::memcpy(&out[i][j], &v, sizeof(bf16x2x4_u32));
-#endif
+          // bit_cast is a compiler builtin, not a std::memcpy call, so this
+          // also covers the Windows+ROCm case the old raw memcpy was for.
+          out[i][j] = c10::bit_cast<bf16x2x4_u32>(v);
         }
       }
     }
