@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <type_traits>
 
 // GCC has __builtin_mul_overflow from before it supported __has_builtin
@@ -109,6 +110,28 @@ bool safe_multiplies_u64(It first, It last, uint64_t* out) {
 template <typename Container>
 bool safe_multiplies_u64(const Container& c, uint64_t* out) {
   return safe_multiplies_u64(c.begin(), c.end(), out);
+}
+
+// Floating point conversion that never underflows a nonzero value to zero.
+// A narrowing cast (double -> Half, say) rounds anything smaller than the
+// destination's smallest subnormal down to an exact 0, which is a silent
+// correctness bug for callers that go on to divide by the result. Return
+// denorm_min with the sign of the input instead. A value that is already
+// exactly zero stays zero, and NaN stays NaN.
+template <typename To, typename From>
+C10_HOST_DEVICE inline To cast_no_underflow(From value) {
+  static_assert(
+      std::numeric_limits<From>::is_specialized &&
+          !std::numeric_limits<From>::is_integer &&
+          std::numeric_limits<To>::is_specialized &&
+          !std::numeric_limits<To>::is_integer,
+      "cast_no_underflow requires floating point source and destination types");
+  const auto result = static_cast<To>(value);
+  if (result == static_cast<To>(0) && value != static_cast<From>(0)) {
+    constexpr auto smallest = std::numeric_limits<To>::denorm_min();
+    return value > static_cast<From>(0) ? smallest : -smallest;
+  }
+  return result;
 }
 
 } // namespace c10

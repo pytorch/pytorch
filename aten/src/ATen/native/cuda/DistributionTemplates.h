@@ -8,6 +8,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/util/Half.h>
+#include <c10/util/safe_numerics.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -565,7 +566,9 @@ void exponential_kernel(TensorIteratorBase& iter, double lambda_, RNG gen) {
     auto lambda = static_cast<accscalar_t>(lambda_);
     // define lambda for exponential transformation
     auto exponential_func = [lambda] __device__ (accscalar_t rand) {
-      return static_cast<scalar_t>(transformation::exponential<accscalar_t>(rand, lambda));
+      // The eps/2 floor inside the transformation is in accscalar_t; for half
+      // it still narrows to 0 once lambda >= 2. multinomial divides by this.
+      return c10::cast_no_underflow<scalar_t>(transformation::exponential<accscalar_t>(rand, lambda));
     };
     uniform_and_transform<scalar_t, accscalar_t>(iter, gen, exponential_func);
    });

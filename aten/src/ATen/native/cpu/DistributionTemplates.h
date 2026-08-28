@@ -8,6 +8,7 @@
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <c10/util/safe_numerics.h>
 #include <mutex>
 
 #ifdef CPU_CAPABILITY_AVX2
@@ -338,7 +339,9 @@ void exponential_kernel(TensorIteratorBase& iter, double lambda, RNG generator) 
     std::lock_guard<std::mutex> lock(generator->mutex_);
     at::exponential_distribution<double> exponential(lambda);
     cpu_serial_kernel(iter, [&exponential, generator]() -> scalar_t {
-      return static_cast<scalar_t>(exponential(generator));
+      // multinomial divides by this sample, so a float16 underflow to 0 would
+      // turn into 0/0; exponential_(inf) still returns an exact 0.
+      return c10::cast_no_underflow<scalar_t>(exponential(generator));
     });
   });
 }
