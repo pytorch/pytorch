@@ -1212,3 +1212,4 @@ if __name__ == "__main__":
 
     if HAS_GPU or sys.platform == "darwin":
         run_tests(needs="filelock")
+    # End of tests
