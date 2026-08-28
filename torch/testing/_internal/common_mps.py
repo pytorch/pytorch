@@ -557,7 +557,6 @@ if torch.backends.mps.is_available():
             ],
             "nn.functional.padreplicate_negative": [torch.bool],
             "nn.functional.pdist": None,
-            "nn.functional.rrelu": None,
             "nn.functional.silu": [
                 torch.int16,
                 torch.int32,
@@ -882,6 +881,11 @@ if torch.backends.mps.is_available():
             "nn.functional.dropout2d": [torch.float16, torch.float32],
             "nn.functional.dropout3d": [torch.float16, torch.float32],
             "nn.functional.alpha_dropout": [torch.float16, torch.float32],
+            # rrelu in training mode multiplies by a random slope drawn on the
+            # device, so the gradient depends on that draw exactly as the
+            # dropout mask does. Deterministic coverage lives in TestRRelu in
+            # test_mps.py.
+            "nn.functional.rrelu": [torch.float16, torch.float32],
             "nn.functional.feature_alpha_dropoutwith_train": [
                 torch.float16,
                 torch.float32,

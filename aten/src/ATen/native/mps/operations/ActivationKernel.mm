@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
+#include <ATen/mps/MPSGeneratorImpl.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Activation.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -13,11 +14,13 @@
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/glu_backward_native.h>
 #include <ATen/ops/glu_native.h>
+#include <ATen/ops/leaky_relu.h>
 #include <ATen/ops/log_sigmoid_backward_native.h>
 #include <ATen/ops/log_sigmoid_forward_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/mul_native.h>
 #include <ATen/ops/relu_native.h>
+#include <ATen/ops/rrelu_with_noise_native.h>
 #include <ATen/ops/rsub.h>
 #include <ATen/ops/sigmoid.h>
 #include <ATen/ops/sigmoid_backward_native.h>
@@ -350,6 +353,110 @@ REGISTER_DISPATCH(hardswish_stub, hardswish_kernel);
 REGISTER_DISPATCH(hardswish_backward_stub, hardswish_backward_kernel);
 REGISTER_DISPATCH(elu_stub, elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, elu_backward_kernel);
+
+static Tensor& rrelu_with_noise_out_mps_impl(const Tensor& self,
+                                             Tensor& noise,
+                                             const Scalar& lower,
+                                             const Scalar& upper,
+                                             bool training,
+                                             std::optional<Generator> generator,
+                                             Tensor& output) {
+  TORCH_CHECK(self.sizes() == noise.sizes(),
+              "noise tensor shape must match self tensor shape. Got self.shape = ",
+              self.sizes(),
+              " noise.shape = ",
+              noise.sizes());
+
+  if (!training) {
+    // Matches CPU and CUDA: outside training this is leaky_relu with the mean
+    // of the bounds, and the noise tensor is left alone.
+    const Scalar negative_slope = (lower.to<double>() + upper.to<double>()) / 2;
+    return at::leaky_relu_out(output, self, negative_slope);
+  }
+
+  output.resize_as_(self);
+  if (self.numel() == 0) {
+    return output;
+  }
+
+  using namespace mps;
+
+  const auto input_c = self.contiguous();
+  auto output_c = output.is_contiguous() ? output : at::empty_like(input_c);
+  auto noise_c = noise.is_contiguous() ? noise : at::empty_like(input_c);
+
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(generator, at::mps::detail::getDefaultMPSGenerator());
+  auto stream = getCurrentMPSStream();
+  const auto numel = static_cast<uint32_t>(input_c.numel());
+  const uint32_t threads = (numel + 3) / 4;
+
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc("rrelu_with_noise_" + scalarToMetalTypeString(input_c));
+
+    int64_t seed;
+    int64_t base_offset;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      seed = static_cast<int64_t>(mps_gen->current_seed());
+      base_offset = static_cast<int64_t>(mps_gen->get_offset());
+      mps_gen->set_offset(base_offset + threads);
+    }
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        [computeEncoder setComputePipelineState:pso];
+        mtl_setArgs(computeEncoder,
+                    output_c,
+                    noise_c,
+                    input_c,
+                    std::array<float, 2>{lower.to<float>(), upper.to<float>()},
+                    std::array<long, 2>{seed, base_offset},
+                    numel);
+        mtl_dispatch1DJob(computeEncoder, pso, threads);
+      }
+    });
+  }
+
+  if (!output.is_contiguous()) {
+    output.copy_(output_c);
+  }
+  if (!noise.is_contiguous()) {
+    noise.copy_(noise_c);
+  }
+  return output;
+}
+
+Tensor& rrelu_with_noise_out_mps(const Tensor& self,
+                                 Tensor& noise,
+                                 const Scalar& lower,
+                                 const Scalar& upper,
+                                 bool training,
+                                 std::optional<Generator> generator,
+                                 Tensor& output) {
+  return rrelu_with_noise_out_mps_impl(self, noise, lower, upper, training, std::move(generator), output);
+}
+
+Tensor rrelu_with_noise_mps(const Tensor& self,
+                            Tensor& noise,
+                            const Scalar& lower,
+                            const Scalar& upper,
+                            bool training,
+                            std::optional<Generator> generator) {
+  Tensor output = at::empty_like(self);
+  return rrelu_with_noise_out_mps_impl(self, noise, lower, upper, training, std::move(generator), output);
+}
+
+Tensor& rrelu_with_noise_mps_(Tensor& self,
+                              Tensor& noise,
+                              const Scalar& lower,
+                              const Scalar& upper,
+                              bool training,
+                              std::optional<Generator> generator) {
+  return rrelu_with_noise_out_mps_impl(self, noise, lower, upper, training, std::move(generator), self);
+}
+
 REGISTER_DISPATCH(leaky_relu_stub, leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, leaky_relu_backward_kernel);
 REGISTER_DISPATCH(silu_stub, silu_kernel);

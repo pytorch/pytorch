@@ -879,6 +879,65 @@ class TestAvgPool(TestCaseMPS):
         self.assertEqual(bn_mps.cpu(), bn_cpu)
 
 
+class TestRRelu(TestCaseMPS):
+    # In training mode the negative slopes are drawn from the device RNG, so
+    # the OpInfo consistency test can only check metadata. Eval mode is
+    # deterministic and compared against CPU directly; training mode is checked
+    # through the invariants the op guarantees.
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_rrelu_eval_matches_cpu(self, dtype):
+        torch.manual_seed(0)
+        x = torch.randn(5, 7, dtype=dtype)
+        for lower, upper in ((0.125, 1 / 3), (0.0, 1.0), (0.4, 0.4)):
+            cpu_x = x.clone().requires_grad_(True)
+            mps_x = x.to("mps").clone().requires_grad_(True)
+            cpu_noise = torch.zeros_like(cpu_x)
+            mps_noise = torch.zeros_like(mps_x)
+
+            cpu_out = torch._C._nn.rrelu_with_noise(cpu_x, cpu_noise, lower, upper, False)
+            mps_out = torch._C._nn.rrelu_with_noise(mps_x, mps_noise, lower, upper, False)
+            self.assertEqual(mps_out.cpu(), cpu_out)
+
+            grad = torch.randn_like(cpu_out)
+            cpu_out.backward(grad)
+            mps_out.backward(grad.to("mps"))
+            self.assertEqual(mps_x.grad.cpu(), cpu_x.grad)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_rrelu_train_invariants(self, dtype):
+        torch.manual_seed(0)
+        lower, upper = 0.125, 1 / 3
+        x = torch.randn(64, 33, dtype=dtype)
+        mps_x = x.to("mps")
+        noise = torch.zeros_like(mps_x)
+        out = torch._C._nn.rrelu_with_noise(mps_x, noise, lower, upper, True)
+
+        # noise is 1 where the input is positive, and the drawn slope elsewhere
+        positive = mps_x > 0
+        self.assertEqual(noise[positive], torch.ones_like(noise[positive]))
+        negative_noise = noise[~positive]
+        self.assertTrue(bool((negative_noise >= lower).all()))
+        self.assertTrue(bool((negative_noise <= upper).all()))
+        # and the output is exactly the input scaled by that noise
+        self.assertEqual(out, mps_x * noise)
+
+    def test_rrelu_inplace_and_out(self):
+        torch.manual_seed(0)
+        x = torch.randn(9, device="mps")
+        noise = torch.zeros_like(x)
+
+        out = torch.empty_like(x)
+        torch._C._nn.rrelu_with_noise(x, noise, 0.2, 0.5, False, None, out=out)
+        self.assertEqual(out, torch.nn.functional.leaky_relu(x, 0.35))
+
+        inplace = x.clone()
+        noise2 = torch.zeros_like(x)
+        torch._C._nn.rrelu_with_noise_(inplace, noise2, 0.2, 0.5, False)
+        self.assertEqual(inplace, out)
+
+
+
+
 class TestMPS(TestCaseMPS):
     def ulpAssertAllClose(self, output, reference, n_ulps):
         """
@@ -16076,6 +16135,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.dropout2d',
         'nn.functional.dropout3d',
         'nn.functional.feature_alpha_dropout',
+        'nn.functional.rrelu',
     }
 
     def _assert_random_op_match(self, mps_out, cpu_out):
@@ -17314,6 +17374,7 @@ instantiate_parametrized_tests(TestAdvancedIndexing)
 instantiate_parametrized_tests(TestAutocastMPS)
 instantiate_parametrized_tests(MatmulTest)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)
+instantiate_parametrized_tests(TestRRelu)
 instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)

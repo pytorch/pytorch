@@ -1,5 +1,6 @@
 #include <ATen/native/mps/kernels/Activation.h>
 #include <c10/metal/indexing.h>
+#include <c10/metal/random.h>
 #include <c10/metal/special_math.h>
 #include <metal_stdlib>
 using namespace metal;
@@ -522,3 +523,49 @@ struct log_sigmoid_backward_functor {
 REGISTER_BINARY_OP(log_sigmoid_backward, float, float);
 REGISTER_BINARY_OP(log_sigmoid_backward, half, half);
 REGISTER_BINARY_OP(log_sigmoid_backward, bfloat, bfloat);
+
+// Training-mode rrelu: one Philox-4x32-10 round per thread yields 4 uniforms,
+// used only where the input is non-positive. Elsewhere the noise is exactly 1,
+// so the output is the input unchanged. Mirrors the fused dropout kernel.
+template <typename T>
+kernel void rrelu_with_noise(
+    device T* output [[buffer(0)]],
+    device T* noise [[buffer(1)]],
+    device const T* input [[buffer(2)]],
+    constant float2& bounds [[buffer(3)]],
+    constant long2& seed_base_offset [[buffer(4)]],
+    constant uint& numel [[buffer(5)]],
+    uint tid [[thread_position_in_grid]]) {
+  const uint base = tid * 4;
+  const uint4 raw =
+      c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  const float lower = bounds.x;
+  const float upper = bounds.y;
+  const uint count = ::metal::min(4u, numel - base);
+
+  for (uint i = 0; i < count; ++i) {
+    const float x = static_cast<float>(input[base + i]);
+    float r = 1.0;
+    if (x <= 0.0) {
+      r = lower +
+          (upper - lower) * c10::metal::detail::uint32_to_uniform_float(raw[i]);
+    }
+    noise[base + i] = static_cast<T>(r);
+    output[base + i] = static_cast<T>(x * r);
+  }
+}
+
+#define REGISTER_RRELU_WITH_NOISE(DTYPE)                         \
+  template [[host_name("rrelu_with_noise_" #DTYPE)]] kernel void \
+  rrelu_with_noise<DTYPE>(                                       \
+      device DTYPE*,                                             \
+      device DTYPE*,                                             \
+      device const DTYPE*,                                       \
+      constant float2&,                                          \
+      constant long2&,                                           \
+      constant uint&,                                            \
+      uint)
+
+REGISTER_RRELU_WITH_NOISE(float);
+REGISTER_RRELU_WITH_NOISE(half);
+REGISTER_RRELU_WITH_NOISE(bfloat);
