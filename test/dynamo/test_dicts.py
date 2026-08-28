@@ -3340,10 +3340,12 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
 
 class DictSubclassMethodsTests(DictMethodsTests):
+    hw_classification = HardwareClassification.GENERIC
     thetype = SimpleDict
 
 
 class OrderedDictMethodsTests(DictMethodsTests):
+    hw_classification = HardwareClassification.GENERIC
     thetype = OrderedDict
 
     # Methods:
