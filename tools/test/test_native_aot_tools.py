@@ -3828,6 +3828,37 @@ class TestOrphanArtifactSafety(unittest.TestCase):
             f.write("x")
         return op, src
 
+    def test_a_sidecar_without_a_kind_is_refused(self):
+        # The stale check reads the kind first (export.runtimes_current), so a
+        # sidecar naming none was judged by cutedsl's compiler versions instead of
+        # refused. Written by hand because _write_sidecar always names a kind, and
+        # declared like the sibling below because these checks run per matched
+        # declaration.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            art = os.path.join(tmpdir, "sm_100a", "fakeop")
+            os.makedirs(art)
+            _touch_artifacts(art, "k__sm100a")
+            with open(os.path.join(art, "k__sm100a.json"), "w") as f:
+                json.dump(
+                    {
+                        "version": export.SIDECAR_VERSION,
+                        "prefix": "k__sm100a",
+                        "arch": "sm_100a",
+                    },
+                    f,
+                )
+            opsdir = os.path.join(tmpdir, "_ops")
+            os.makedirs(os.path.join(opsdir, "fakeop"))
+            open(os.path.join(opsdir, "fakeop", "aot.py"), "w").close()
+            with (
+                mock.patch.object(gen_aot_lib, "OPS_DIR", opsdir),
+                mock.patch.object(
+                    gen_aot_lib.decl, "load_declarations", return_value=[_FakeDecl]
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "names no kind"):
+                    gen_aot_lib.main(["--artifacts-dir", tmpdir])
+
     def test_same_prefix_from_two_arch_dirs_is_fatal(self):
         # Prefixes carry their arch, so two arch dirs cannot collide by
         # construction -- but a copied or renamed tree (rsynced artifacts, a
@@ -3851,6 +3882,7 @@ class TestOrphanArtifactSafety(unittest.TestCase):
                             "version": export.SIDECAR_VERSION,
                             "prefix": "k__sm100a",
                             "arch": "sm_100a",
+                            "kind": "cutedsl",
                         },
                         f,
                     )
