@@ -275,7 +275,7 @@ struct CodeImpl {
       std::vector<NodeSourceInfo> expandedStack;
       getNodeStack(current_node_, &expandedStack);
       auto insertIdx = expanded_node_stacks_.size();
-      expanded_node_stacks_.emplace_back(expandedStack);
+      expanded_node_stacks_.emplace_back(std::move(expandedStack));
       current_node_->i_(attr::node_stack_idx, insertIdx);
     }
 
