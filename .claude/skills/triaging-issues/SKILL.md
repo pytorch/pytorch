@@ -33,10 +33,9 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
   - Step 2.5: PT2 Issues — Special Handling
   - Step 3: Redirect to Secondary Oncall
   - Step 4: Label the Issue
-  - Step 5: High Priority — REQUIRES HUMAN REVIEW
-  - Step 6: release triage — Affects an Upcoming Release
-  - Step 7: bot-triaged (automatic)
-  - Step 8: Mark Triaged
+  - Step 5: Escalate — High Priority (human review), then release triage
+  - Step 6: bot-triaged (automatic)
+  - Step 7: Mark Triaged
 - [V1 Constraints](#v1-constraints)
 
 **Labels reference:** See [labels.json](labels.json) for the full catalog of labels suitable for triage. **ONLY apply labels that exist in this file.** Do not invent or guess label names. This file excludes CI triggers, test configs, release notes, deprecated labels, and labels requiring human decision.
@@ -160,7 +159,7 @@ If the issue belongs in another repo (vision/text/audio/RL/ExecuTorch/etc.), tra
 
 ### 2.5) PT2 Issues — Special Handling
 
-**PT2 is NOT a redirect.** `oncall: pt2` is not like the other oncall labels in Step 3. PT2 issues continue through Steps 4–8 for full triage — add `oncall: pt2`, then proceed to label with `module:` labels, mark `triaged`, etc.
+**PT2 is NOT a redirect.** `oncall: pt2` is not like the other oncall labels in Step 3. PT2 issues continue through Steps 4–7 for full triage — add `oncall: pt2`, then proceed to label with `module:` labels, mark `triaged`, etc.
 
 **Every `oncall: pt2` issue MUST have at least one `module:` label.** The PT2 oncall queue is too broad without a module label — the team needs to know which component is affected (e.g., `module: dynamo`, `module: inductor`, `module: helion`, `module: dynamic shapes`). If you cannot determine the specific module, use `module: compile ux` as a fallback, but always try to be specific first. See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed guidance.
 
@@ -220,7 +219,13 @@ Only if the issue stays in the general queue:
 
 **Label based on the actual bug, not keywords.** Read the issue to understand what is actually broken. A bug about broadcasting that happens to mention "nan" in a parameter name is a frontend bug, not a NaN/Inf bug.
 
-### 5) High Priority — REQUIRES HUMAN REVIEW
+### 5) Escalate — High Priority (human review), then release triage
+
+Two independent decisions, in this order. Work through 5a first, then 5b for **every**
+issue — 5b is not limited to issues you escalated in 5a, and an issue can end up with
+both labels, one, or neither.
+
+#### 5a) High Priority — REQUIRES HUMAN REVIEW
 
 **CRITICAL:** If you believe an issue is high priority, you MUST:
 1. Add `triage review` label and do not add `triaged`
@@ -235,7 +240,7 @@ High priority criteria:
 - Many users affected
 - Core component or popular model impact
 
-### 6) release triage — Affects an Upcoming Release
+#### 5b) release triage — Affects an Upcoming Release
 
 Add `release triage` when an issue would affect a release if it went unfixed. The label
 only surfaces the issue for whoever owns the release; it is not a cherry-pick request and
@@ -276,15 +281,15 @@ Add it when **any** of these hold:
 Apply it generously. A false positive costs the release manager one glance; a miss costs
 a broken release. When unsure, add it.
 
-`release triage` is independent of `triage review` — an issue can carry both. Do not add it
-to feature requests, enhancements, or documentation-only issues, and do not add it for a
-regression against a version older than the last released minor.
+`release triage` is independent of the `triage review` decision in 5a — an issue can carry
+both. Do not add it to feature requests, enhancements, or documentation-only issues, and do
+not add it for a regression against a version older than the last released minor.
 
-### 7) bot-triaged (automatic)
+### 6) bot-triaged (automatic)
 
 The `bot-triaged` label is automatically applied by a post-hook after any issue mutation. You do not need to add it manually.
 
-### 8) Mark triaged
+### 7) Mark triaged
 
 If not transferred/redirected and not flagged for review, add `triaged`.
 
@@ -303,7 +308,7 @@ If not transferred/redirected and not flagged for review, add `triaged`.
 **DO:**
 - Close clear usage questions and point to discuss.pytorch.org (per step 1)
 - Be conservative - when in doubt, add `triage review` for human attention
-- Add `release triage` whenever an issue would affect an upcoming release (step 6); err toward adding it
+- Add `release triage` whenever an issue would affect an upcoming release (step 5b); err toward adding it
 - Apply type labels (`feature`, `enhancement`, `function request`) when confident
 - Add `triaged` label when classification is complete
 
