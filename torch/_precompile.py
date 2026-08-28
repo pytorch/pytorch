@@ -228,7 +228,7 @@ import io
 import logging
 import threading
 from types import MappingProxyType
-from typing import Any, cast, NewType, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, NewType, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -1130,6 +1130,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "TRAINING",
         "_DYNAMO_PYTHON_VERSION",
         "_DYNAMO_BACKEND_IDS",
+        "_DROPPED_GUARDS",
         "_DYNAMO_STATE",
     }
     wanted = {"BACKEND", "TRACER", *make_fx_metadata, *dynamo_metadata}
@@ -1509,8 +1510,15 @@ def _filter_dynamo_guards(
     target: Callable[..., object],
     guarded_codes: Sequence[Any],
     example_inputs: Sequence[tuple[object, ...]],
-) -> list[bytes]:
-    """Drop environment guards while preserving every input-derived guard."""
+) -> tuple[list[bytes], tuple[tuple[str, str], ...]]:
+    """Drop environment guards while preserving every input-derived guard.
+
+    Returns the re-serialized guard states plus the dropped guards as sorted,
+    deduplicated (guard type, source) pairs aggregated across variants: a
+    listed pair was dropped from at least one variant's dispatch, but may
+    remain checked in a variant where dropping it would have changed how the
+    capture examples dispatch.
+    """
     import dataclasses
     import functools
     import inspect
@@ -1575,6 +1583,7 @@ def _filter_dynamo_guards(
         return [manager.check(scope) for scope in example_scopes]
 
     filtered_states: list[bytes] = []
+    dropped_guards: set[tuple[str, str]] = set()
     for guarded in guarded_codes:
         state = load_guards_state(guarded.guards_state)
         kept_guards = list(state.output_graph.guards)
@@ -1627,6 +1636,8 @@ def _filter_dynamo_guards(
             index = 0
             while index < len(kept_guards):
                 if try_drop(index):
+                    guard = kept_guards[index]
+                    dropped_guards.add((guard.create_fn_name(), guard.name or ""))
                     del kept_guards[index]
                     changed = True
                 else:
@@ -1670,7 +1681,7 @@ def _filter_dynamo_guards(
             )
         filtered_states.append(check_fn.guards_state)
 
-    return filtered_states
+    return filtered_states, tuple(sorted(dropped_guards))
 
 
 def _dynamo_backend_source_literal(source: str) -> str:
@@ -1685,6 +1696,7 @@ def _build_dynamo_python_source(
     state: dict[str, Any],
     backend_ids: list[str],
     compiled_backends: list[_DynamoPythonBackend],
+    dropped_guards: tuple[tuple[str, str], ...],
 ) -> str:
     import base64
     import inspect
@@ -1720,6 +1732,13 @@ def _build_dynamo_python_source(
         f"DYNAMIC_GRAPH_COUNT = {dynamic_count}",
         f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}",
         f"_DYNAMO_BACKEND_IDS = {tuple(backend_ids)!r}",
+        "# (guard type, source) pairs dropped from at least one variant's dispatch:",
+        "# they only cover the Python environment, which is a caller-provided",
+        "# invariant. A listed pair may still be checked by other variants, and every",
+        "# retained input-derived guard still gates dispatch.",
+        "_DROPPED_GUARDS = (",
+        *(f"    {entry!r}," for entry in dropped_guards),
+        ")",
         "# Each block is a standalone backend module. Keep them in separate strings so",
         "# load can execute each in an isolated namespace without graph-global collisions.",
         "_DYNAMO_BACKEND_SOURCES = (",
@@ -2008,6 +2027,7 @@ def _make_dynamo_capture_optimizer(
     backend: str,
     training: bool,
     capture_limit: int,
+    dynamic: bool | None,
 ) -> tuple[Callable[..., object], Callable[..., object]]:
     compile_graph = _dynamo_backend_compiler(backend, training)
     compiled = torch._dynamo.optimize(
@@ -2015,7 +2035,7 @@ def _make_dynamo_capture_optimizer(
         nopython=True,
         guard_filter_fn=_keep_serializable_capture_guards,
         package=package,
-        dynamic=None,
+        dynamic=dynamic,
         recompile_limit=capture_limit,
         isolate_recompiles=True,
     )(capture_target)
@@ -2030,6 +2050,24 @@ def _make_dynamo_capture_optimizer(
     return compiled, compile_graph
 
 
+class PrecompileStateSummary(NamedTuple):
+    """What the most recently rendered artifact carries.
+
+    ``dropped_guards`` lists the (guard type, source) pairs guard minimization
+    removed from at least one variant's dispatch (deduplicated across
+    variants; a pair may remain checked elsewhere). They only covered the
+    Python environment, which the programming model declares invariant
+    between capture and serving.
+    """
+
+    calls: int
+    examples: int
+    variants: int
+    graphs: int
+    dynamic_graphs: int
+    dropped_guards: tuple[tuple[str, str], ...]
+
+
 def _build_dynamo_artifact(
     package: Any,
     capture_target: Callable[..., object],
@@ -2038,7 +2076,7 @@ def _build_dynamo_artifact(
     backend: str,
     training: bool,
     keep_capture: bool = False,
-) -> tuple[str, bytes]:
+) -> tuple[str, bytes, PrecompileStateSummary]:
     """Render the package's accumulated capture as (python_code, cache) bytes.
 
     A pure read of the live package (plus, for training, a snapshot compose of
@@ -2061,7 +2099,7 @@ def _build_dynamo_artifact(
         raise PrecompileError(
             "precompile tracer='dynamo' did not capture a runnable entry frame."
         )
-    filtered_guard_states = _filter_dynamo_guards(
+    filtered_guard_states, dropped_guards = _filter_dynamo_guards(
         capture_target, code.guarded_codes, example_inputs
     )
 
@@ -2097,12 +2135,22 @@ def _build_dynamo_artifact(
         state=dynamo_state,
         backend_ids=backend_ids,
         compiled_backends=compiled_backends,
+        dropped_guards=dropped_guards,
     )
-    return python_code, _dynamo_cache_bytes(
+    cache = _dynamo_cache_bytes(
         python_code,
         backend,
         [compiled.cache for compiled in compiled_backends],
     )
+    summary = PrecompileStateSummary(
+        calls=0,
+        examples=len(example_inputs),
+        variants=len(code.guarded_codes),
+        graphs=len(compiled_backends),
+        dynamic_graphs=sum(c.is_dynamic for c in compiled_backends),
+        dropped_guards=dropped_guards,
+    )
+    return python_code, cache, summary
 
 
 def _teardown_dynamo_capture(
@@ -2139,6 +2187,7 @@ def _precompile_dynamo(
     decompositions: dict | None,
     training: bool,
     recompile_limit: int | None = None,
+    dynamic: bool | None = None,
 ) -> tuple[str, bytes]:
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.pgo import _new_code_state
@@ -2161,17 +2210,18 @@ def _precompile_dynamo(
             ):
                 package = CompilePackage(capture_target)
                 compiled, backend_fn = _make_dynamo_capture_optimizer(
-                    capture_target, package, backend, training, capture_limit
+                    capture_target, package, backend, training, capture_limit, dynamic
                 )
                 for example in example_inputs:
                     compiled(*example)
-                return _build_dynamo_artifact(
+                python_code, cache, _summary = _build_dynamo_artifact(
                     package,
                     capture_target,
                     example_inputs,
                     backend=backend,
                     training=training,
                 )
+                return python_code, cache
         finally:
             _teardown_dynamo_capture(package, capture_target, pgo_state, backend_fn)
 
@@ -2204,6 +2254,7 @@ class _PrecompileDynamoState:
         backend: str,
         training: bool,
         capture_limit: int,
+        dynamic: bool | None,
     ) -> None:
         self.target = target
         self.capture_target = capture_target
@@ -2212,10 +2263,17 @@ class _PrecompileDynamoState:
         self.backend = backend
         self.training = training
         self.capture_limit = capture_limit
+        self.dynamic = dynamic
         self.compiled: Callable[..., object] | None = None
         self.backend_fn: Callable[..., object] | None = None
         self.examples: list[tuple[object, ...]] = []
+        self.calls = 0
+        self.last_summary: PrecompileStateSummary | None = None
         self.closed = False
+
+    def summary(self) -> PrecompileStateSummary | None:
+        """Coverage of the most recently written artifact; None before one exists."""
+        return self.last_summary
 
     def close(self) -> None:
         """Release the capture session (installed code caches and registries).
@@ -2247,20 +2305,34 @@ class _PrecompileDynamoState:
 def _write_dynamo_artifact_files(
     python_code: str, cache: bytes, artifact_path: str, cache_path: str
 ) -> None:
-    # Two-phase: write both temp files first, then rename back to back, so the
-    # window in which a crash leaves a mismatched (code_hash-rejected) pair on
-    # disk is two renames, not a full cache write.
+    # Two-phase: write and fsync both temp files first, then rename back to
+    # back, so the window in which a crash leaves a mismatched
+    # (code_hash-rejected) pair on disk is two renames, not a full cache write.
+    # A failed write cleans its temp files up and leaves the previous pair.
     import os
 
     renames = []
-    for path, data, mode in (
-        (artifact_path, python_code, "w"),
-        (cache_path, cache, "wb"),
-    ):
-        tmp = f"{path}.{os.getpid()}.tmp"
-        with open(tmp, mode) as f:
-            f.write(data)
-        renames.append((tmp, path))
+    try:
+        for path, data, mode in (
+            (artifact_path, python_code, "w"),
+            (cache_path, cache, "wb"),
+        ):
+            parent = os.path.dirname(os.fspath(path))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            tmp = f"{path}.{os.getpid()}.tmp"
+            renames.append((tmp, path))
+            with open(tmp, mode) as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+    except BaseException:
+        for tmp, _ in renames:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        raise
     for tmp, path in renames:
         os.replace(tmp, path)
 
@@ -2273,6 +2345,7 @@ def _precompile_dynamo_stateful(
     decompositions: dict | None,
     training: bool,
     recompile_limit: int | None,
+    dynamic: bool | None,
     state: _PrecompileDynamoState | None,
     artifact_path: str,
     cache_path: str,
@@ -2284,10 +2357,12 @@ def _precompile_dynamo_stateful(
     with _DYNAMO_COMPILE_LOCK:
         fresh = state is None
         if state is None:
+            # Accumulating captures outgrow the config default quickly, so the
+            # stateful default is a real budget rather than the example count.
             capture_limit = (
                 recompile_limit
                 if recompile_limit is not None
-                else max(torch._dynamo.config.recompile_limit, len(example_inputs) + 1)
+                else max(torch._dynamo.config.recompile_limit, 256)
             )
             capture_target = _make_dynamo_capture_target(target)
             state = _PrecompileDynamoState(
@@ -2298,6 +2373,7 @@ def _precompile_dynamo_stateful(
                 backend=backend,
                 training=training,
                 capture_limit=capture_limit,
+                dynamic=dynamic,
             )
         else:
             if not isinstance(state, _PrecompileDynamoState):
@@ -2323,6 +2399,11 @@ def _precompile_dynamo_stateful(
                     f"recompile_limit={recompile_limit!r} (the state was created "
                     f"with {state.capture_limit!r})"
                 )
+            if dynamic is not None and dynamic != state.dynamic:
+                mismatches.append(
+                    f"dynamic={dynamic!r} (the state was created with "
+                    f"{state.dynamic!r})"
+                )
             if target is not state.target:
                 mismatches.append(
                     "fn (a state resumes only the function that created it)"
@@ -2346,13 +2427,14 @@ def _precompile_dynamo_stateful(
                         backend,
                         training,
                         state.capture_limit,
+                        state.dynamic,
                     )
                 results = []
                 for example in example_inputs:
                     results.append(state.compiled(*example))
                     state.examples.append(example)
                 try:
-                    python_code, cache = _build_dynamo_artifact(
+                    python_code, cache, summary = _build_dynamo_artifact(
                         state.package,
                         state.capture_target,
                         state.examples,
@@ -2374,6 +2456,8 @@ def _precompile_dynamo_stateful(
                         "the offending example."
                     ) from e
             _write_dynamo_artifact_files(python_code, cache, artifact_path, cache_path)
+            state.calls += 1
+            state.last_summary = summary._replace(calls=state.calls)
         except BaseException:
             # A fresh call that failed returns no state, so tear its session
             # down; a resumed call leaves the state (and the last successfully
@@ -2709,6 +2793,7 @@ class _PrecompileApi:
         artifact_path: str | None = None,
         cache_path: str | None = None,
         recompile_limit: int | None = None,
+        dynamic: bool | None = None,
     ) -> tuple[str, bytes] | tuple[object, _PrecompileDynamoState]:
         """Ahead-of-time precompile ``fn`` against ``example_inputs``.
 
@@ -2827,12 +2912,23 @@ class _PrecompileApi:
         one isolate-recompiles bucket and one PGO record across calls (a
         dimension that varies between calls recompiles into a symbolic graph
         exactly as it would within one call). ``recompile_limit`` caps the
-        variants per capture (default: ``torch._dynamo.config.recompile_limit``
-        or the example count, whichever is larger; accumulating captures should
-        pass an explicit budget). The state is process-local and not
-        serializable; call ``state.close()`` when done capturing to release the
-        session, and do not call ``torch._dynamo.reset()`` between calls that
-        share a state (later calls may raise or duplicate variants).
+        variants per capture; the stateful default is
+        ``max(torch._dynamo.config.recompile_limit, 256)`` because accumulating
+        captures outgrow the config default (the one-shot default stays the
+        example count). ``dynamic`` is forwarded to Dynamo (``None`` keeps the
+        automatic policy) and, like the other capture settings, must not change
+        across resumed calls. After each rewrite, ``state.summary()`` reports
+        what the artifact carries -- calls, examples, variants, graphs, dynamic
+        graphs, and the environment guards minimization dropped from at least
+        one variant (also embedded in the artifact as ``_DROPPED_GUARDS``). Load the on-disk pair directly
+        with ``precompile.load(artifact_path=..., cache_path=...)``. Rewriting
+        is proportional to everything captured so far, not to the call, so a
+        long loop over a large capture pays it every time; feed precompile the
+        calls that add variants rather than all of them. The state is
+        process-local and not serializable; call ``state.close()`` when done
+        capturing to release the session, and do not call
+        ``torch._dynamo.reset()`` between calls that share a state (later calls
+        may raise or duplicate variants).
 
         With ``tracer="make_fx"``, dynamic shapes are opt-in via
         ``torch._dynamo.decorators.mark_unbacked``
@@ -2933,10 +3029,11 @@ class _PrecompileApi:
         stateful = (
             state is not None or artifact_path is not None or cache_path is not None
         )
-        if (stateful or recompile_limit is not None) and tracer != "dynamo":
+        dynamo_only = stateful or recompile_limit is not None or dynamic is not None
+        if dynamo_only and tracer != "dynamo":
             raise ValueError(
-                "precompile state, artifact_path, cache_path, and recompile_limit "
-                "require tracer='dynamo'."
+                "precompile state, artifact_path, cache_path, recompile_limit, "
+                "and dynamic require tracer='dynamo'."
             )
         if stateful and (artifact_path is None or cache_path is None):
             raise ValueError(
@@ -2951,6 +3048,7 @@ class _PrecompileApi:
                     decompositions=decompositions,
                     training=training,
                     recompile_limit=recompile_limit,
+                    dynamic=dynamic,
                     state=state,
                     artifact_path=cast(str, artifact_path),
                     cache_path=cast(str, cache_path),
@@ -2962,6 +3060,7 @@ class _PrecompileApi:
                 decompositions=decompositions,
                 training=training,
                 recompile_limit=recompile_limit,
+                dynamic=dynamic,
             )
         compiled = PrecompiledModule(
             fn, backend=backend, tracer=tracer, decompositions=decompositions
@@ -2973,8 +3072,19 @@ class _PrecompileApi:
         python_code = compiled.to_python_code()
         return python_code, compiled.to_cache_bytes(python_code)
 
-    def load(self, python_code: str, cache: bytes) -> Callable[..., object]:
+    def load(
+        self,
+        python_code: str | None = None,
+        cache: bytes | None = None,
+        *,
+        artifact_path: str | None = None,
+        cache_path: str | None = None,
+    ) -> Callable[..., object]:
         """Reconstruct a runnable from ``(python_code, cache)`` from precompile.
+
+        Pass either the in-memory pair or -- the natural companion of stateful
+        capture's on-disk rewrites -- ``artifact_path``/``cache_path`` to read
+        the pair from the files a capture wrote.
 
         The driver runs from ``python_code`` -- the single source of truth for the whole
         calling convention. ``load`` reads the cache's ``BACKEND`` (to check the pairing)
@@ -2998,6 +3108,25 @@ class _PrecompileApi:
         foreign or different-build envelope) is NOT fatal: the cache is acceleration
         only, so ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
         """
+        if (artifact_path is None) != (cache_path is None):
+            raise ValueError(
+                "precompile.load requires both artifact_path and cache_path."
+            )
+        if artifact_path is not None and cache_path is not None:
+            if python_code is not None or cache is not None:
+                raise TypeError(
+                    "precompile.load takes either (python_code, cache) or "
+                    "(artifact_path, cache_path), not both."
+                )
+            with open(artifact_path, encoding="utf-8") as f:
+                python_code = f.read()
+            with open(cache_path, "rb") as f:
+                cache = f.read()
+        if python_code is None or cache is None:
+            raise TypeError(
+                "precompile.load requires python_code and cache (or artifact_path "
+                "and cache_path)."
+            )
         # Unpickling the cache references classes in AOTAutograd's runtime; import
         # dynamo first so that import completes in a non-circular order (otherwise
         # a cold load can hit a runtime_wrappers <-> _dynamo circular import).

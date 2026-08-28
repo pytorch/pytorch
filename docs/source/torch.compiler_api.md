@@ -50,7 +50,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *example_args, example_inputs=None, backend="inductor", tracer="make_fx", decompositions=None, training=False, state=None, artifact_path=None, cache_path=None, recompile_limit=None)
+.. py:function:: precompile(fn, *example_args, example_inputs=None, backend="inductor", tracer="make_fx", decompositions=None, training=False, state=None, artifact_path=None, cache_path=None, recompile_limit=None, dynamic=None)
 
    Ahead-of-time precompile ``fn`` against example inputs, returning a self-contained,
    runnable Python source string plus an acceleration cache as ``(python_code, cache)``.
@@ -132,9 +132,14 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param state: Opaque accumulated-capture state for stateful capture
        (``tracer="dynamo"`` only). ``None`` starts fresh; passing the state returned
        by a previous call resumes it. A resumed call must use the same ``fn``,
-       ``backend``, ``training``, and ``recompile_limit`` as the state, else it
-       raises rather than produce a mixed artifact. The state is process-local and
-       not serializable.
+       ``backend``, ``training``, ``recompile_limit``, and ``dynamic`` as the
+       state, else it raises rather than produce a mixed artifact. After each rewrite
+       ``state.summary()`` reports what the artifact carries (calls, examples,
+       variants, graphs, dynamic graphs, and the environment guards minimization
+       dropped from at least one variant -- also embedded in the artifact as
+       ``_DROPPED_GUARDS``). The state is
+       process-local and not serializable; call ``state.close()`` when done. Reload
+       the on-disk pair with ``precompile.load(artifact_path=..., cache_path=...)``.
    :param artifact_path: With ``cache_path``, enables stateful capture: every call
        runs its example tuples for real, adds whatever guarded variants they newly
        exercise, atomically rewrites the artifact files at these paths (they are
@@ -144,9 +149,14 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param cache_path: Where the binary acceleration cache is rewritten on every
        stateful call; see ``artifact_path``.
    :param recompile_limit: Cap on captured variants per Dynamo capture
-       (``tracer="dynamo"`` only). Defaults to ``torch._dynamo.config.recompile_limit``
-       or the example count, whichever is larger; captures that accumulate across
-       many calls should pass an explicit budget.
+       (``tracer="dynamo"`` only). The one-shot default is
+       ``torch._dynamo.config.recompile_limit`` or the example count, whichever is
+       larger; the stateful default is ``max(recompile_limit, 256)`` because
+       accumulating captures outgrow the config default.
+   :param dynamic: Forwarded to Dynamo (``tracer="dynamo"`` only): ``None`` keeps the
+       automatic dynamic-shape policy, ``True``/``False`` forces or forbids symbolic
+       shapes. Like the other capture settings, it must not change across resumed
+       stateful calls.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string (the
        single source of truth for the calling convention) and a binary acceleration
        cache (no weights, no calling-convention metadata; it carries a small
