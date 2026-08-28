@@ -6990,6 +6990,28 @@ class TestFunctors(DistributionsTestCase):
 
 
 class TestValidation(DistributionsTestCase):
+    def test_valid_does_not_format_error(self):
+        class UnformattableConstraint(Constraint):
+            def check(self, value):
+                return torch.ones_like(value, dtype=torch.bool)
+
+            def __repr__(self):
+                raise AssertionError("valid constraints should not be formatted")
+
+        constraint = UnformattableConstraint()
+
+        class UnformattableDistribution(Distribution):
+            arg_constraints = {"value": constraint}
+            support = constraint
+
+            def __init__(self, value, validate_args):
+                self.value = value
+                super().__init__(validate_args=validate_args)
+
+        value = torch.tensor(0.0)
+        UnformattableDistribution(value, validate_args=False)._validate_sample(value)
+        UnformattableDistribution(value, validate_args=True)
+
     def test_valid(self):
         for Dist, params in _get_examples():
             for param in params:
