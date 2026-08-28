@@ -6381,7 +6381,10 @@ for dtype in (torch.int32, torch.int64):
     )
     @parametrize("nhwc", (False, True))
     # ROCm 7.14+ Triton conv2d backward accuracy issue for
-    # channels_groups=[61, 151, 1], stride=1, padding=0, kernel=1, nhwc=True.
+    # channels_groups=[61, 151, 1], stride=1, nhwc=True:
+    # - kernel=1, padding=0 (both dilations): original skip, observed on MI350
+    # - kernel=3, padding in {0, 1} (both dilations): additional fails on MI200
+    #   (these kernel=3 cases passed on MI350)
     @decorateIf(
         unittest.skip("ROCm 7.14+ Triton conv2d backward accuracy issue"),
         lambda p: (
@@ -6389,9 +6392,11 @@ for dtype in (torch.int32, torch.int64):
             and _get_torch_rocm_version() >= (7, 14)
             and p["channels_groups"] == [61, 151, 1]
             and p["stride"] == 1
-            and p["padding"] == 0
-            and p["kernel"] == 1
             and p["nhwc"]
+            and (
+                (p["kernel"] == 1 and p["padding"] == 0)
+                or p["kernel"] == 3
+            )
         ),
     )
     @with_tf32_off
