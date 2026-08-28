@@ -216,9 +216,11 @@ def _materialize_trunc_to_float_expr(
             return node
 
         new_args = tuple(
-            rewrite_float_subexpr(arg)
-            if isinstance(arg, sympy.Expr) and not is_predicate_expr(arg)
-            else arg
+            (
+                rewrite_float_subexpr(arg)
+                if isinstance(arg, sympy.Expr) and not is_predicate_expr(arg)
+                else arg
+            )
             for arg in node.args
         )
         if new_args == node.args:
@@ -5243,6 +5245,85 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         exit_stack.close()
 
+    def _auxiliary_predicate_to_str(self, predicate: sympy.Expr) -> str:
+        if isinstance(predicate, (sympy.And, sympy.Or, sympy.Xor)):
+            operator = {
+                sympy.And: " & ",
+                sympy.Or: " | ",
+                sympy.Xor: " ^ ",
+            }[type(predicate)]
+            return operator.join(
+                f"({self._auxiliary_predicate_to_str(arg)})" for arg in predicate.args
+            )
+        if isinstance(predicate, sympy.Not):
+            return f"~({self._auxiliary_predicate_to_str(predicate.args[0])})"
+        return self.kexpr(predicate)
+
+    def codegen_auxiliary_write(
+        self, output_name: str, write: ir.AuxiliaryWriteRegion
+    ) -> None:
+        if not hasattr(self, "auxiliary_store"):
+            self.auxiliary_store = IndentedBuffer()
+            self._auxiliary_write_index = itertools.count()
+            self._auxiliary_writes: OrderedSet[tuple[str, ir.AuxiliaryWriteRegion]] = (
+                OrderedSet()
+            )
+        key = (output_name, write)
+        if key in self._auxiliary_writes:
+            return
+        self._auxiliary_writes.add(key)
+        output = self.args.output(output_name)
+        suffix = next(self._auxiliary_write_index)
+        loop_var = sympy.Symbol(
+            f"auxiliary_index_{suffix}", integer=True, nonnegative=True
+        )
+        loop_offset = f"auxiliary_offset_{suffix}"
+        block_size = 256
+        replacements = {write.index_var: loop_var}
+        numel_str = self.index_to_str(self.rename_indexing(write.numel))
+        output_index_str = self.index_to_str(
+            self.rename_indexing(sympy_subs(write.output_index, replacements))
+        )
+        predicate = sympy_subs(write.predicate, replacements)
+        predicate = sympy_subs(
+            predicate,
+            {
+                symbol: self.args.size(symbol)
+                for symbol in sorted(predicate.free_symbols, key=lambda s: s.name)
+                if symbol_is_type(
+                    symbol,
+                    (
+                        SymT.UNBACKED_INT,
+                        SymT.SIZE,
+                        SymT.PRECOMPUTED_SIZE,
+                        SymT.UNBACKED_FLOAT,
+                    ),
+                )
+            },
+        )
+        predicate_str = self._auxiliary_predicate_to_str(predicate)
+        code = IndentedBuffer()
+        code.writeline("if tl.program_id(1) == 0 and tl.program_id(2) == 0:")
+        with code.indent():
+            code.writeline(
+                f"for {loop_offset} in tl.range("
+                f"tl.program_id(0) * {block_size}, {numel_str}, "
+                f"tl.num_programs(0) * {block_size}):"
+            )
+            with code.indent():
+                code.writeline(
+                    f"{loop_var} = {loop_offset} + tl.arange(0, {block_size})"
+                )
+                code.writeline(
+                    DeferredLine(
+                        output_name,
+                        f"tl.store({output} + {output_index_str}, "
+                        f"{constant_repr(write.value)}, "
+                        f"({loop_var} < {numel_str}) & ({predicate_str}))",
+                    )
+                )
+        self.auxiliary_store.splice(code)
+
     def device_assert_async(self, cond, msg) -> None:
         self.compute.writeline(f"tl.device_assert({cond}, {repr(msg)})")
 
@@ -5545,9 +5626,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             index = self.reduction_collapse_dims(
                 buffer,
                 index,
-                cast(torch.dtype, index.dtype)
-                if isinstance(index, CSEVariable)
-                else V.kernel.get_index_dtype_as_torch_dtype(),
+                (
+                    cast(torch.dtype, index.dtype)
+                    if isinstance(index, CSEVariable)
+                    else V.kernel.get_index_dtype_as_torch_dtype()
+                ),
             )
             if result_kind == "value_and_index":
                 result_value, result_index = result_var
@@ -6765,6 +6848,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             or self.compute
             or self.post_loop_combine
             or self.post_loop_store
+            or getattr(self, "auxiliary_store", None)
         ):
             return
 
@@ -6936,12 +7020,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.cooperative_reduction_workspace_cache.on_loop_end()
         if not self.mix_order_reduction:
             self.body.splice(self.post_loop_store)
+        if hasattr(self, "auxiliary_store"):
+            self.body.splice(self.auxiliary_store)
         self.indexing_code.clear()
         self.loads.clear()
         self.compute.clear()
         self.stores.clear()
         self.post_loop_combine.clear()
         self.post_loop_store.clear()
+        if hasattr(self, "auxiliary_store"):
+            self.auxiliary_store.clear()
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         args = []
@@ -8297,6 +8385,7 @@ class TritonScheduling(SIMDScheduling):
     kernel_type: type[Any] = TritonKernel
     backend_features = OrderedSet(
         [
+            BackendFeature.AUXILIARY_WRITE_REGIONS,
             BackendFeature.FOREACH,
             BackendFeature.BUCKETIZE,
             BackendFeature.INPLACE_BUFFERS,

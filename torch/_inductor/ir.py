@@ -1102,6 +1102,12 @@ class Loops(IRNode):
     def get_pointwise_size(self) -> Sequence[_IntLike]:
         return self.ranges
 
+    def get_auxiliary_writes(
+        self,
+        indexer: Callable[[Sequence[Expr]], Expr],
+    ) -> tuple[AuxiliaryWriteRegion, ...]:
+        return ()
+
     @classmethod
     def create(cls, *args: Any, **kwargs: Any) -> TensorBox:
         origin_node = kwargs.pop("origin_node", None)
@@ -1209,6 +1215,30 @@ class Loops(IRNode):
         raise NotImplementedError(
             f"constant_to_device() is not implemented by {type(self)}!"
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class AuxiliaryWriteRegion:
+    """A secondary write domain owned by the enclosing computed buffer.
+
+    The selected output indices must be in bounds, injective, and disjoint from
+    the primary store and every other auxiliary write in the same kernel.
+    """
+
+    numel: Expr
+    index_var: Symbol
+    output_index: Expr
+    predicate: Expr
+    value: bool | float | int
+
+    def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
+        result = OrderedSet().union(
+            get_free_symbols(self.numel, unbacked_only),
+            get_free_symbols(self.output_index, unbacked_only),
+            get_free_symbols(self.predicate, unbacked_only),
+        )
+        result.discard(self.index_var)
+        return result
 
 
 def nop_loader_fn(idx: Expr | Sequence[Expr], *, dtype: torch.dtype) -> OpsValue:
@@ -5628,16 +5658,35 @@ class ComputedBuffer(OperationBuffer):
 
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():
-                return extract_read_writes(
+                read_writes = extract_read_writes(
                     self.get_store_function(),
                     self.data.get_pointwise_size(),
                     self.data.get_reduction_size(),
                 )
             else:
-                return extract_read_writes(
+                read_writes = extract_read_writes(
                     self.get_store_function(),
                     self.data.get_size(),
                 )
+
+            if self._get_auxiliary_writes():
+                read_writes.writes.add(dependencies.StarDep(self.get_name()))
+            return read_writes
+
+    def _get_auxiliary_writes(self) -> tuple[AuxiliaryWriteRegion, ...]:
+        if not config.triton.enable_fuse_auxiliary_writes:
+            return ()
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            writes = self.data.get_auxiliary_writes(
+                self.get_layout().as_fixed().make_indexer()
+            )
+        if writes and not V.graph.sizevars.statically_known_gt(
+            sympy_product(self.data.get_pointwise_size()), sympy.S.Zero
+        ):
+            raise AssertionError(
+                "auxiliary writes require a statically nonempty primary domain"
+            )
+        return writes
 
     @cache_on_self_and_args("ComputedBuffer")
     def get_free_symbol_uses(
@@ -5660,6 +5709,9 @@ class ComputedBuffer(OperationBuffer):
         result = self.layout.get_free_symbol_uses(
             unbacked_only
         ) | self.data.get_free_symbol_uses(unbacked_only)
+
+        for write in self._get_auxiliary_writes():
+            result |= write.get_free_symbol_uses(unbacked_only)
 
         if self.has_store_function():
             result |= self.get_read_writes().get_free_symbol_uses(unbacked_only)
@@ -5755,6 +5807,9 @@ class ComputedBuffer(OperationBuffer):
                 (args if self.get_reduction_type() else args[:1]),
                 var_ranges,
                 *args,
+                auxiliary_writes=tuple(
+                    (self.get_name(), write) for write in self._get_auxiliary_writes()
+                ),
             )
         index_vars = []
         reduce_vars: list[Any] = []
@@ -6204,8 +6259,9 @@ class TemplateBuffer(OperationBuffer):
         structured: object,
         *,
         direct_alias_at_leaf: dict[int, IRNode] | None = None,
-        on_tensor_leaf: Callable[[str, MultiOutput, list[tuple[type, int]], int], None]
-        | None = None,
+        on_tensor_leaf: (
+            Callable[[str, MultiOutput, list[tuple[type, int]], int], None] | None
+        ) = None,
         on_non_tensor_leaf: Callable[[int], None] | None = None,
     ) -> tuple[TensorBox, ...]:
         """Walk a structured output tree, creating MultiOutput nodes for tensor leaves."""
@@ -11464,9 +11520,11 @@ class Switch(ExternKernel):
             MultiOutput(
                 FixedLayout(
                     # pyrefly: ignore [bad-argument-type]
-                    device=output.get_device()
-                    if output.get_device() is not None
-                    else device,  # type: ignore[arg-type]
+                    device=(
+                        output.get_device()
+                        if output.get_device() is not None
+                        else device
+                    ),  # type: ignore[arg-type]
                     dtype=output.get_dtype(),
                     size=[_maybe_expr(sz) for sz in merged_output.size()],
                     stride=[_maybe_expr(sz) for sz in merged_output.stride()],

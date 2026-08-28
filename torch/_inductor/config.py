@@ -2325,6 +2325,11 @@ class triton:
     # and lane-resolution pointwise epilogues.
     nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
 
+    # Fuse auxiliary write regions into Triton producer kernels.
+    enable_fuse_auxiliary_writes = (
+        os.environ.get("TORCHINDUCTOR_ENABLE_FUSE_AUXILIARY_WRITES", "0") == "1"
+    )
+
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
     debug_dump_kernel_inputs: dict[str, int] = {}
