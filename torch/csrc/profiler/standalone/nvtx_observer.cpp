@@ -20,11 +20,15 @@ struct NVTXThreadLocalState : ProfilerStateBase {
     return ActiveProfilerType::NVTX;
   }
 
-  void reportMemoryUsage(void*, int64_t, size_t, size_t, c10::Device) override {
-  }
+  void reportMemoryUsage(
+      void* /*ptr*/,
+      int64_t /*alloc_size*/,
+      size_t /*total_allocated*/,
+      size_t /*total_reserved*/,
+      c10::Device /*device*/) override {}
 
   static NVTXThreadLocalState* getTLS() {
-    auto tls = ProfilerStateBase::get(/*global=*/false);
+    ProfilerStateBase* tls = ProfilerStateBase::getTLS();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         tls == nullptr || tls->profilerType() == ActiveProfilerType::NVTX);
     return static_cast<NVTXThreadLocalState*>(tls);
@@ -56,7 +60,7 @@ std::pair<at::RecordFunctionHandle, int> NVTXThreadLocalState::getOpIdFromInput(
   if (tensor.defined()) {
     at::TensorImpl* ten_addr = tensor.unsafeGetTensorImpl();
     // See if Address is in the map already
-    if (producer_tensor_map_.count((void*)ten_addr) > 0) {
+    if (producer_tensor_map_.contains((void*)ten_addr)) {
       producer_op_pair = producer_tensor_map_[(void*)ten_addr];
     }
   }
@@ -124,7 +128,8 @@ static void updateOutputTensorTracker(const at::RecordFunction& fn) {
 }
 
 template <bool report_input_shapes>
-std::unique_ptr<at::ObserverContext> enterNVTX(const at::RecordFunction& fn) {
+static std::unique_ptr<at::ObserverContext> enterNVTX(
+    const at::RecordFunction& fn) {
   if (NVTXThreadLocalState::getTLS() != nullptr) {
     auto input_op_ids = getInputTensorOpIds(fn);
     torch::profiler::impl::cudaStubs()->rangePush(

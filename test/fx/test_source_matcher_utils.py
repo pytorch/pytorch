@@ -16,13 +16,22 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
+    raise_on_run_directly,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
 
+def _get_node_names(nodes: list[torch.fx.Node]) -> list[str]:
+    return [n.name for n in nodes]
+
+
 class TestSourceMatcher(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_module_partitioner_linear_relu_linear(self):
         class M(torch.nn.Module):
@@ -212,16 +221,19 @@ class TestSourceMatcher(JitTestCase):
         self.assertEqual(len(module_partitions[torch.nn.functional.linear]), 4)
         self.assertEqual(len(module_partitions[torch.nn.functional.relu]), 2)
 
+    @skipIfTorchDynamo(
+        "unexplained 3.13 failure: weakref inlining raises dynamic shape error only in 3.13"
+    )
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_legalize_slice(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
                 b = x.item()
-                torch._check_is_size(b)
+                torch._check(b >= 0)
                 torch._check(b + 1 < y.size(0))
                 return y[: b + 1]
 
-        ep = torch.export.export(M(), (torch.tensor(4), torch.randn(10)))
+        ep = torch.export.export(M(), (torch.tensor(4), torch.randn(10)), strict=True)
         fake_inputs = [
             node.meta["val"] for node in ep.graph.nodes if node.op == "placeholder"
         ]
@@ -443,5 +455,148 @@ class TestSourceMatcher(JitTestCase):
         self.assertEqual(len(module_partitions["linear"]), 4)
         self.assertEqual(len(module_partitions["relu"]), 2)
 
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    @parametrize("strict", (True, False))
+    def test_module_partitioner_weight_tied(self, strict: bool):
+        # real-world example: https://github.com/pytorch/pytorch/issues/142035
+        class M(torch.nn.Module):
+            def __init__(self, input_size, output_size):
+                super().__init__()
+                # Define a linear layer
+                self.linear = torch.nn.Linear(input_size, output_size)
+                self.tied_weight = self.linear.weight
+
+            def forward(self, x):
+                # Forward pass through the linear layer
+                b = self.tied_weight + 1
+                return self.linear(x), b
+
+        inputs = (torch.randn(1, 10),)
+        gm = torch.export.export(
+            M(input_size=10, output_size=1), inputs, strict=strict
+        ).module()
+        gm.graph.eliminate_dead_code()
+
+        k = torch.nn.Linear if strict else "linear"
+        module_partitions = get_source_partitions(gm.graph, [k])
+
+        self.assertEqual(len(module_partitions), 1)
+        self.assertEqual(len(module_partitions[k]), 1)
+        self.assertEqual(len(module_partitions[k][0].output_nodes), 1)
+        self.assertEqual(module_partitions[k][0].output_nodes[0].name, "linear")
+        input_node_names = {node.name for node in module_partitions[k][0].input_nodes}
+        self.assertEqual(input_node_names, {"x"})
+
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    def test_module_partitioner_linear_relu_linear_nn_module_stack(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+                self.relu = torch.nn.ReLU()
+                self.linear3 = torch.nn.Linear(3, 5)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                x = self.relu(x)
+                x = self.linear3(x)
+                return x
+
+        inputs = (torch.randn(3, 3),)
+        # strict=False does not populate source_fn_stack, so
+        # get_source_partitions should fall back to nn_module_stack.
+        gm = torch.export.export(M(), inputs, strict=False).module()
+        gm.graph.eliminate_dead_code()
+
+        module_partitions = get_source_partitions(
+            gm.graph, [torch.nn.Linear, torch.nn.ReLU]
+        )
+
+        self.assertEqual(len(module_partitions), 2)
+        self.assertEqual(len(module_partitions[torch.nn.Linear]), 3)
+        self.assertEqual(len(module_partitions[torch.nn.ReLU]), 1)
+
+        self.assertFalse(
+            check_subgraphs_connected(
+                module_partitions[torch.nn.Linear][0],
+                module_partitions[torch.nn.ReLU][0],
+            )
+        )
+        self.assertTrue(
+            check_subgraphs_connected(
+                module_partitions[torch.nn.Linear][1],
+                module_partitions[torch.nn.ReLU][0],
+            )
+        )
+        self.assertFalse(
+            check_subgraphs_connected(
+                module_partitions[torch.nn.Linear][2],
+                module_partitions[torch.nn.ReLU][0],
+            )
+        )
+
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    def test_get_source_partitions_deterministic_ordering(self):
+        """
+        Verifies that get_source_partitions() returns input_nodes, output_nodes,
+        and params in deterministic order (sorted by graph position).
+        """
+
+        # Create a model where a single linear takes input from multiple sources
+        # and produces outputs consumed by multiple downstream nodes.
+        # This ensures multiple input_nodes, output_nodes, and params per partition.
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+                self.linear3 = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                a = self.linear1(x)
+                b = self.linear2(x)
+                # linear3 takes both a and b as inputs, so both are input_nodes
+                c = self.linear3(a + b)
+                return c
+
+        inputs = (torch.randn(3, 3),)
+        gm, _ = torch._dynamo.export(M(), aten_graph=True)(*inputs)
+        gm.graph.eliminate_dead_code()
+
+        partitions = get_source_partitions(gm.graph, [torch.nn.Linear])
+
+        # Build a position map to verify nodes are sorted by graph order
+        node_positions = {n: i for i, n in enumerate(gm.graph.nodes)}
+
+        for partition in partitions[torch.nn.Linear]:
+            # Verify input_nodes are sorted by graph position
+            input_positions = [node_positions[n] for n in partition.input_nodes]
+            self.assertEqual(
+                input_positions,
+                sorted(input_positions),
+                f"input_nodes not in graph order: {_get_node_names(partition.input_nodes)}",
+            )
+
+            # Verify output_nodes are sorted by graph position
+            output_positions = [node_positions[n] for n in partition.output_nodes]
+            self.assertEqual(
+                output_positions,
+                sorted(output_positions),
+                f"output_nodes not in graph order: {_get_node_names(partition.output_nodes)}",
+            )
+
+            # Verify params are sorted by graph position
+            params_positions = [node_positions[n] for n in partition.params]
+            self.assertEqual(
+                params_positions,
+                sorted(params_positions),
+                f"params not in graph order: {_get_node_names(partition.params)}",
+            )
+
 
 instantiate_parametrized_tests(TestSourceMatcher)
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_fx.py")

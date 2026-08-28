@@ -13,74 +13,62 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/util/Exception.h>
 #include <nccl.h>
-#include <torch/csrc/distributed/c10d/TraceUtils.h>
+#include <torch/csrc/cuda/nccl.h>
 #include <optional>
 
 constexpr int64_t kCommInitBusyWaitMillis = 2;
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 14)
-#define NCCL_HAS_COMM_NONBLOCKING
-#endif
-
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 18)
-#define NCCL_HAS_COMM_SPLIT
-#endif
-
-// ncclGetLastError() is enabled only for NCCL versions 2.13+
-// ncclRemoteError only exists in NCCL versions 2.13+
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 13)
-#define ENABLE_NCCL_GET_LAST_ERROR
-#define NCCL_REMOTE_ERROR
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_GET_LAST_ERROR
-#define NCCL_REMOTE_ERROR
-#endif
-
 static_assert(
-    (NCCL_MAJOR == 2 && NCCL_MINOR >= 7) || (NCCL_MAJOR > 2),
-    "NCCL version must be 2.7 or later");
+    NCCL_VERSION_CODE >= NCCL_VERSION(2, 23, 0),
+    "NCCL version must be 2.23 or later");
 
-// Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
-// and ncclCommGetAsyncError() are not supported in earlier versions.
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 4)
-#define ENABLE_NCCL_ERROR_CHECKING
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_ERROR_CHECKING
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 24, 0)
+#define NCCL_SUPPORTS_FP8
 #endif
 
-// P2P is enabled only for NCCL versions 2.7+ since ncclSend()
-// and ncclRecv() are not supported in earlier versions.
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 7)
-#define ENABLE_NCCL_P2P_SUPPORT
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_P2P_SUPPORT
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 26, 0)
+#define NCCL_HAS_QOS
 #endif
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 11)
-#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COMM_WINDOW_REGISTER
 #endif
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 17)
-#define NCCL_HAS_COMM_CTA_CGA
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define NCCL_HAS_COMM_CTA_CGA
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COLLNET
 #endif
 
-#if defined(NCCL_REGISTRATION_SUPPORTED) ||                              \
-    ((defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-      (NCCL_MINOR >= 19)))
-#define NCCL_HAS_COMM_REGISTER
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define NCCL_HAS_COMM_REGISTER
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 3)
+#define NCCL_HAS_COMM_NAME
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_CTA_POLICY
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_NVLS_CTAS
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COMM_SHRINK
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
+#define NCCL_HAS_COMM_OFFLOAD
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 0)
+#define NCCL_HAS_MAX_P2P_PEERS
+#endif
+
+// `ncclConfig_t::hostCftMode` asks NCCL to create the communicator's CFT
+// (Compute Fabric Transport) logical endpoints during the first
+// `ncclCommWindowRegister`, which is what makes the host-side LE queries
+// (`ncclGetPeerDeviceLeInfo` and friends) usable without first building a
+// `ncclDevComm`. See NCCLSymmetricMemory::get_peer_cft_handle.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 2)
+#define NCCL_HAS_HOST_CFT_MODE
 #endif
 
 // Macro to throw on a non-successful NCCL return value.
@@ -122,7 +110,11 @@ static_assert(
   } while (0)
 
 // Macro to throw on a non-successful NCCL return value, non-blocking.
-#define C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, yield_fn)      \
+// Thread-safe: uses NCCLComm wrapper's getAsyncError() which acquires mutex
+// before calling ncclCommGetAsyncError to prevent race conditions between
+// watchdog and main threads.
+#define C10D_NCCL_CHECK_TIMEOUT_BASE(                                         \
+    cmd, commWrapper, failureReason, yield_fn)                                \
   do {                                                                        \
     ncclResult_t result = cmd;                                                \
     auto startTimepoint = std::chrono::steady_clock::now();                   \
@@ -130,7 +122,7 @@ static_assert(
     while (result == ncclInProgress) {                                        \
       C10D_CHECK_TIMEOUT(startTimepoint, timeout);                            \
       yield_fn;                                                               \
-      ncclCommGetAsyncError(comm, &result);                                   \
+      commWrapper->getAsyncError(&result);                                    \
     }                                                                         \
     if (result != ncclSuccess) {                                              \
       std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
@@ -149,15 +141,16 @@ static_assert(
 // This macro uses sched_yield() to yield the CPU.
 // Thus suitable for NCCL calls that would quickly turn ncclSuccess, e.g.
 // collectives.
-#define C10D_NCCL_CHECK_TIMEOUT(cmd, comm, failureReason) \
-  C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, sched_yield())
+#define C10D_NCCL_CHECK_TIMEOUT(cmd, commWrapper, failureReason) \
+  C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, commWrapper, failureReason, sched_yield())
 
 // Macro to throw exception on a non-successful NCCL return value or timeout.
 // This macro uses sleep to yield the CPU.
 // Thus suitable for NCCL calls that would take longer to turn ncclSuccess, e.g.
 // ncclCommInitRankConfig, ncclCommFinalize, etc.
-#define C10D_NCCL_CHECK_TIMEOUT_SLEEP(cmd, comm, failureReason) \
-  C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, C10D_SCHED_SLEEP())
+#define C10D_NCCL_CHECK_TIMEOUT_SLEEP(cmd, commWrapper, failureReason) \
+  C10D_NCCL_CHECK_TIMEOUT_BASE(                                        \
+      cmd, commWrapper, failureReason, C10D_SCHED_SLEEP())
 
 #define C10D_NCCL_CHECK_TIMEOUT_GROUPEND(cmd, comm, failureReason)           \
   do {                                                                       \
@@ -168,7 +161,7 @@ static_assert(
       do {                                                                   \
         C10D_CHECK_TIMEOUT(startTimepoint, timeout);                         \
         sched_yield();                                                       \
-        ncclCommGetAsyncError(comm->getNcclComm(), &state);                  \
+        comm->getAsyncError(&state);                                         \
       } while (state == ncclInProgress);                                     \
     }                                                                        \
     if (state != ncclSuccess) {                                              \
@@ -197,8 +190,36 @@ static_assert(
 
 namespace c10d {
 
+// NCCL type typing
+static std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
+    {at::kChar, ncclInt8},
+    {at::kByte, ncclUint8},
+    {at::kFloat, ncclFloat},
+    {at::kDouble, ncclDouble},
+    {at::kInt, ncclInt32},
+    {at::kLong, ncclInt64},
+    {at::kHalf, ncclHalf},
+    {at::kBool, ncclUint8},
+#ifdef NCCL_SUPPORTS_FP8
+    {at::kFloat8_e5m2, ncclFloat8e5m2},
+    {at::kFloat8_e4m3fn, ncclFloat8e4m3},
+#else
+    {at::kFloat8_e5m2, ncclUint8},
+    {at::kFloat8_e4m3fn, ncclUint8},
+#endif
+    // NVIDIA GPUs does not support the UZ version standing for "no negative
+    // zero".  See https://onnx.ai/onnx/technical/float8.html
+    {at::kFloat8_e4m3fnuz, ncclUint8},
+    {at::kFloat8_e5m2fnuz, ncclUint8},
+#if HAS_NCCL_BF16_DATATYPE
+    {at::kBFloat16, ncclBfloat16},
+#endif // HAS_NCCL_BF16_DATATYPE
+};
+
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
 TORCH_API std::string getNcclVersion();
+TORCH_API std::tuple<int, int, int> getNcclVersionTuple();
+TORCH_API int getNcclVersionNumber();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
 int nccl_nonblocking_timeout();
 
@@ -207,6 +228,9 @@ int nccl_nonblocking_timeout();
 TORCH_API std::string getNcclErrorDetailStr(
     ncclResult_t error,
     std::optional<std::string> processGroupFailureReason = std::nullopt);
+
+// Helper function that gets the data type and issues error if not supported
+TORCH_API ncclDataType_t getNcclDataType(at::ScalarType type);
 
 // RAII wrapper for NCCL communicator
 class NCCLComm {
@@ -220,17 +244,26 @@ class NCCLComm {
 
   ~NCCLComm() noexcept;
 
+  void setUniqueHash(ncclUniqueId ncclId);
+  void setUniqueHash(std::string hash);
+  std::string getUniqueHash();
+
   static std::shared_ptr<NCCLComm> create(
       int numRanks,
       int rank,
       ncclUniqueId commId,
       at::DeviceIndex deviceIndex);
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
   static std::shared_ptr<NCCLComm> create(
       int numRanks,
       int rank,
       ncclUniqueId commId,
+      at::DeviceIndex deviceIndex,
+      ncclConfig_t& config);
+  static std::shared_ptr<NCCLComm> create_scalable(
+      int numRanks,
+      int rank,
+      std::vector<ncclUniqueId>& commIds,
       at::DeviceIndex deviceIndex,
       ncclConfig_t& config);
 
@@ -238,15 +271,21 @@ class NCCLComm {
       NCCLComm* source,
       int color_id,
       int rank,
-      ncclConfig_t& config,
-      std::vector<uint64_t>& ranks_ull);
-#endif
+      ncclConfig_t& config);
 
-#if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
+#ifdef NCCL_HAS_COMM_SHRINK
+  static std::shared_ptr<NCCLComm> shrink(
+      NCCLComm* source,
+      std::vector<int>& ranks_to_exclude,
+      ncclConfig_t* config,
+      int shrinkFlags = 0);
+#endif // NCCL_HAS_COMM_SHRINK
+
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump();
 #endif
 
-  ncclUniqueId getNcclId();
+  at::DeviceIndex getDeviceIndex();
 
   // Must not be copyable
   NCCLComm(const NCCLComm&) = delete;
@@ -292,17 +331,34 @@ class NCCLComm {
 
   ncclResult_t checkForNcclError();
 
-  ncclResult_t registerSegment(void* ptr, size_t size);
+  // Thread-safe wrapper for ncclCommGetAsyncError that acquires the mutex
+  // before calling the NCCL API. This is needed because NCCL does not provide
+  // thread-safety guarantees for ncclCommGetAsyncError, and both the main
+  // thread and watchdog thread may call it concurrently.
+  ncclResult_t getAsyncError(ncclResult_t* asyncError);
 
-  ncclResult_t deregisterSegment(void* ptr);
+  ncclResult_t registerSegment(
+      void* ptr,
+      size_t size,
+      bool errorOnRereg = true,
+      bool window = false);
+
+  ncclResult_t deregisterSegment(void* ptr, bool window = false);
 
   std::string repr() const;
+
+  // APIs related to memory offload (require NCCL 2.29.7+ at runtime)
+  void suspend();
+
+  void resume();
+
+  std::unordered_map<std::string, uint64_t> getMemoryStats();
 
   friend class ProcessGroupNCCL;
 
  protected:
-  // Unique nccl_id for this communicator.
-  ncclUniqueId ncclId_{};
+  // Unique hash for this communicator.
+  std::string uniqueHash_;
   bool aborted_{false};
   uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_{ncclSuccess};
@@ -311,7 +367,7 @@ class NCCLComm {
   int rank_{};
   // Optional reason for communicator failure, provided by ProcessGroupNCCL for
   // better error messaging.
-  std::optional<std::string> commFailureReason_{};
+  std::optional<std::string> commFailureReason_;
   bool initialized_{false};
   // Whether this communicator is using nonblocking mode. Recorded during comm
   // creation or split. For safety, we give a default value of true (more
@@ -319,10 +375,9 @@ class NCCLComm {
   bool nonBlocking_{true};
   // Device index for which the NCCL comm is created
   at::DeviceIndex deviceIndex_{-1};
-#ifdef NCCL_HAS_COMM_REGISTER
-  // Stores handlers for tensors registered by NCCL
-  std::unordered_map<void*, void*> registeredSegmentHandles_;
-#endif
+  // Stores handlers for tensors registered by NCCL.
+  // Maps ptr -> (handle, is_window_registered).
+  std::unordered_map<void*, std::pair<void*, bool>> registeredSegmentHandles_;
 
  private:
   ncclComm_t ncclComm_{nullptr};
@@ -341,13 +396,11 @@ struct ncclRedOpRAII {
     std::swap(tmp.comm_, this->comm_);
     std::swap(tmp.premul_sum_, this->premul_sum_);
   }
-#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
   ~ncclRedOpRAII() {
     if (premul_sum_) {
       ncclRedOpDestroy(op_, comm_);
     }
   }
-#endif
   operator ncclRedOp_t() const {
     return op_;
   }
@@ -356,6 +409,9 @@ struct ncclRedOpRAII {
   bool premul_sum_ = false;
 };
 
+void printNcclCommProxyTrace(
+    const std::string& dumpReason,
+    const std::unordered_map<std::string, std::string>& dumpMap);
 } // namespace c10d
 
 #endif // USE_C10D_NCCL

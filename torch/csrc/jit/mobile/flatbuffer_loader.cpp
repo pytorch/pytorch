@@ -154,34 +154,34 @@ class FlatbufferLoader final {
 };
 
 IValue parseList(
-    FlatbufferLoader&,
+    FlatbufferLoader& /*loader*/,
     const mobile::serialization::IValue& ivalue);
 IValue parseTensor(
-    FlatbufferLoader&,
+    FlatbufferLoader& /*loader*/,
     const mobile::serialization::IValue& ivalue);
 IValue parseTuple(
-    FlatbufferLoader&,
+    FlatbufferLoader& /*loader*/,
     const mobile::serialization::IValue& ivalue);
 IValue parseDict(
-    FlatbufferLoader&,
+    FlatbufferLoader& /*loader*/,
     const mobile::serialization::IValue& ivalue);
 IValue parseObject(
-    FlatbufferLoader&,
+    FlatbufferLoader& /*loader*/,
     const mobile::serialization::IValue& ivalue);
 IValue parseIntList(
-    FlatbufferLoader&,
+    FlatbufferLoader& /*unused*/,
     const mobile::serialization::IValue& ivalue);
 IValue parseDoubleList(
-    FlatbufferLoader&,
+    FlatbufferLoader& /*unused*/,
     const mobile::serialization::IValue& ivalue);
 IValue parseBoolList(
-    FlatbufferLoader&,
+    FlatbufferLoader& /*unused*/,
     const mobile::serialization::IValue& ivalue);
 IValue parseBasic(
-    FlatbufferLoader&,
+    FlatbufferLoader& /*unused*/,
     const mobile::serialization::IValue& ivalue);
 IValue parseEnum(
-    FlatbufferLoader&,
+    FlatbufferLoader& /*loader*/,
     const mobile::serialization::IValue& ivalue);
 
 TypePtr resolveType(
@@ -323,7 +323,14 @@ mobile::Module FlatbufferLoader::parseModule(
   for (const auto& f : all_functions_) {
     uint32_t class_index =
         ivalues->Get(f.first)->val_as_Function()->class_type();
-    ClassTypePtr class_type = all_types_[class_index];
+    // class_index comes from the flatbuffer but is not range-checked by
+    // VerifyModuleBuffer; validate it before indexing so a malformed module
+    // fails with a clear error instead of crashing.
+    ClassTypePtr class_type = getType(class_index);
+    TORCH_CHECK(
+        class_type != nullptr,
+        "Parsing flatbuffer module: function references uninitialized class type at index ",
+        class_index);
     class_type->addMethod(f.second);
   }
 
@@ -379,7 +386,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     function->append_type(getOrCreateTypeAnnotations(i));
   }
 
-  // 3. If upgrader is needed, change change the OP instrunction to CALL
+  // 3. If upgrader is needed, change the OP instruction to CALL
   // instruction (In next PR, use_upgrader will be parsed to parseInstruction
   // function and do the actual change)
   if (use_upgrader) {
@@ -414,7 +421,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
           false /*is_varret*/);
 
       function->setSchema(std::move(schema));
-    } catch (const c10::Error& e) {
+    } catch (const c10::Error&) {
     }
   }
   return function;
@@ -442,7 +449,7 @@ IValue parseEnum(
 }
 
 IValue parseBasic(
-    FlatbufferLoader&,
+    FlatbufferLoader& /*unused*/,
     const mobile::serialization::IValue& ivalue) {
   switch (ivalue.val_type()) {
     case mobile::serialization::IValueUnion::NONE:
@@ -546,21 +553,21 @@ std::vector<T> parseListNative(const U* list) {
 }
 
 IValue parseIntList(
-    FlatbufferLoader&,
+    FlatbufferLoader& /*unused*/,
     const mobile::serialization::IValue& ivalue) {
   const auto& list = ivalue.val_as_IntList();
   return parseListNative<int64_t>(list);
 }
 
 IValue parseDoubleList(
-    FlatbufferLoader&,
+    FlatbufferLoader& /*unused*/,
     const mobile::serialization::IValue& ivalue) {
   const auto& list = ivalue.val_as_DoubleList();
   return parseListNative<double>(list);
 }
 
 IValue parseBoolList(
-    FlatbufferLoader&,
+    FlatbufferLoader& /*unused*/,
     const mobile::serialization::IValue& ivalue) {
   const auto& list = ivalue.val_as_BoolList();
   std::vector<uint8_t> res = parseListNative<uint8_t>(list);
@@ -690,8 +697,8 @@ IValue FlatbufferLoader::parseIValue(
       *this, *ivalue);
 }
 
-void deleteNothing2(void*);
-void deleteNothing2(void*) {}
+void deleteNothing2(void* /*unused*/);
+void deleteNothing2(void* /*unused*/) {}
 
 c10::Storage FlatbufferLoader::getStorage(uint32_t index) {
   TORCH_CHECK(index < storage_loaded_.size());
@@ -744,7 +751,13 @@ void FlatbufferLoader::extractJitSourceAndConstants(
     if (f.first >= mobile_ivalue_size_) {
       uint32_t class_index =
           ivalues->Get(f.first)->val_as_Function()->class_type();
-      ClassTypePtr class_type = all_types_[class_index];
+      // See note in parseModule: class_index is not range-checked by
+      // VerifyModuleBuffer, so validate it before indexing all_types_.
+      ClassTypePtr class_type = getType(class_index);
+      TORCH_CHECK(
+          class_type != nullptr,
+          "Parsing flatbuffer module: function references uninitialized class type at index ",
+          class_index);
       class_type->addMethod(f.second);
     }
   }
@@ -760,7 +773,7 @@ void FlatbufferLoader::extractJitSourceAndConstants(
 mobile::Module parse_and_initialize_mobile_module(
     void* data,
     size_t size,
-    std::optional<at::Device>,
+    std::optional<at::Device> /*unused*/,
     ExtraFilesMap* extra_files,
     bool should_copy_tensor_memory) {
   // TODO(T128189662): If not copying, enforce that data is aligned to
@@ -806,7 +819,7 @@ mobile::Module parse_and_initialize_mobile_module_for_jit(
     size_t size,
     ExtraFilesMap& jit_sources,
     std::vector<IValue>& jit_constants,
-    std::optional<at::Device>,
+    std::optional<at::Device> /*unused*/,
     ExtraFilesMap* extra_files) {
   TORCH_CHECK(
       mobile::serialization::ModuleBufferHasIdentifier(data), "Format error");

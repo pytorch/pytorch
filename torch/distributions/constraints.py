@@ -1,4 +1,9 @@
 # mypy: allow-untyped-defs
+
+from collections.abc import Callable
+from typing import Any
+
+
 r"""
 The following constraints are implemented:
 
@@ -14,6 +19,7 @@ The following constraints are implemented:
 - ``constraints.less_than(upper_bound)``
 - ``constraints.lower_cholesky``
 - ``constraints.lower_triangular``
+- ``constraints.MixtureSameFamilyConstraint(base_constraint)``
 - ``constraints.multinomial``
 - ``constraints.nonnegative``
 - ``constraints.nonnegative_integer``
@@ -52,6 +58,7 @@ __all__ = [
     "less_than",
     "lower_cholesky",
     "lower_triangular",
+    "MixtureSameFamilyConstraint",
     "multinomial",
     "nonnegative",
     "nonnegative_integer",
@@ -119,13 +126,13 @@ class _Dependent(Constraint):
         super().__init__()
 
     @property
-    def is_discrete(self):
+    def is_discrete(self) -> bool:  # type: ignore[override]
         if self._is_discrete is NotImplemented:
             raise NotImplementedError(".is_discrete cannot be determined statically")
         return self._is_discrete
 
     @property
-    def event_dim(self):
+    def event_dim(self) -> int:  # type: ignore[override]
         if self._event_dim is NotImplemented:
             raise NotImplementedError(".event_dim cannot be determined statically")
         return self._event_dim
@@ -161,7 +168,7 @@ def is_dependent(constraint):
         >>> from torch.distributions import Bernoulli
         >>> from torch.distributions.constraints import is_dependent
 
-        >>> dist = Bernoulli(probs = torch.tensor([0.6], requires_grad=True))
+        >>> dist = Bernoulli(probs=torch.tensor([0.6], requires_grad=True))
         >>> constraint1 = dist.arg_constraints["probs"]
         >>> constraint2 = dist.arg_constraints["logits"]
 
@@ -183,6 +190,7 @@ class _DependentProperty(property, _Dependent):
             def __init__(self, low, high):
                 self.low = low
                 self.high = high
+
             @constraints.dependent_property(is_discrete=False, event_dim=0)
             def support(self):
                 return constraints.interval(self.low, self.high)
@@ -198,19 +206,22 @@ class _DependentProperty(property, _Dependent):
     """
 
     def __init__(
-        self, fn=None, *, is_discrete=NotImplemented, event_dim=NotImplemented
-    ):
+        self,
+        fn: Callable[..., Any] | None = None,
+        *,
+        is_discrete: bool | None = NotImplemented,
+        event_dim: int | None = NotImplemented,
+    ) -> None:
         super().__init__(fn)
         self._is_discrete = is_discrete
         self._event_dim = event_dim
 
-    def __call__(self, fn):  # type: ignore[override]
+    def __call__(self, fn: Callable[..., Any]) -> "_DependentProperty":  # type: ignore[override]
         """
         Support for syntax to customize static attributes::
 
             @constraints.dependent_property(is_discrete=True, event_dim=1)
-            def support(self):
-                ...
+            def support(self): ...
         """
         return _DependentProperty(
             fn, is_discrete=self._is_discrete, event_dim=self._event_dim
@@ -225,19 +236,28 @@ class _IndependentConstraint(Constraint):
     """
 
     def __init__(self, base_constraint, reinterpreted_batch_ndims):
-        assert isinstance(base_constraint, Constraint)
-        assert isinstance(reinterpreted_batch_ndims, int)
-        assert reinterpreted_batch_ndims >= 0
+        if not isinstance(base_constraint, Constraint):
+            raise AssertionError(
+                f"base_constraint must be a Constraint, got {type(base_constraint).__name__}"
+            )
+        if not isinstance(reinterpreted_batch_ndims, int):
+            raise AssertionError(
+                f"reinterpreted_batch_ndims must be an int, got {type(reinterpreted_batch_ndims).__name__}"
+            )
+        if reinterpreted_batch_ndims < 0:
+            raise AssertionError(
+                f"reinterpreted_batch_ndims must be >= 0, got {reinterpreted_batch_ndims}"
+            )
         self.base_constraint = base_constraint
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
         super().__init__()
 
     @property
-    def is_discrete(self):
+    def is_discrete(self) -> bool:  # type: ignore[override]
         return self.base_constraint.is_discrete
 
     @property
-    def event_dim(self):
+    def event_dim(self) -> int:  # type: ignore[override]
         return self.base_constraint.event_dim + self.reinterpreted_batch_ndims
 
     def check(self, value):
@@ -255,6 +275,55 @@ class _IndependentConstraint(Constraint):
 
     def __repr__(self):
         return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)}, {self.reinterpreted_batch_ndims})"
+
+
+class MixtureSameFamilyConstraint(Constraint):
+    """
+    Constraint for the :class:`~torch.distributions.MixtureSameFamily`
+    distribution that adds back the rightmost batch dimension before
+    performing the validity check with the component distribution
+    constraint.
+
+    Args:
+        base_constraint: The ``Constraint`` object of
+            the component distribution of
+            the :class:`~torch.distributions.MixtureSameFamily` distribution.
+    """
+
+    def __init__(self, base_constraint):
+        if not isinstance(base_constraint, Constraint):
+            raise AssertionError(
+                f"base_constraint must be a Constraint, got {type(base_constraint).__name__}"
+            )
+        self.base_constraint = base_constraint
+        super().__init__()
+
+    @property
+    def is_discrete(self) -> bool:  # type: ignore[override]
+        return self.base_constraint.is_discrete
+
+    @property
+    def event_dim(self) -> int:  # type: ignore[override]
+        return self.base_constraint.event_dim
+
+    def check(self, value):
+        """
+        Check validity of ``value`` as a possible outcome of sampling
+        the :class:`~torch.distributions.MixtureSameFamily` distribution.
+        """
+        unsqueezed_value = value.unsqueeze(-1 - self.event_dim)
+        result = self.base_constraint.check(unsqueezed_value)
+        if value.dim() < self.event_dim:
+            raise ValueError(
+                f"Expected value.dim() >= {self.event_dim} but got {value.dim()}"
+            )
+        num_dim_to_keep = value.dim() - self.event_dim
+        result = result.reshape(result.shape[:num_dim_to_keep] + (-1,))
+        result = result.all(-1)
+        return result
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({repr(self.base_constraint)})"
 
 
 class _Boolean(Constraint):
@@ -589,25 +658,32 @@ class _Cat(Constraint):
     """
 
     def __init__(self, cseq, dim=0, lengths=None):
-        assert all(isinstance(c, Constraint) for c in cseq)
+        if not all(isinstance(c, Constraint) for c in cseq):
+            raise AssertionError("All elements of cseq must be Constraint instances")
         self.cseq = list(cseq)
         if lengths is None:
             lengths = [1] * len(self.cseq)
         self.lengths = list(lengths)
-        assert len(self.lengths) == len(self.cseq)
+        if len(self.lengths) != len(self.cseq):
+            raise AssertionError(
+                f"lengths ({len(self.lengths)}) must match cseq ({len(self.cseq)})"
+            )
         self.dim = dim
         super().__init__()
 
     @property
-    def is_discrete(self):
+    def is_discrete(self) -> bool:  # type: ignore[override]
         return any(c.is_discrete for c in self.cseq)
 
     @property
-    def event_dim(self):
+    def event_dim(self) -> int:  # type: ignore[override]
         return max(c.event_dim for c in self.cseq)
 
     def check(self, value):
-        assert -value.dim() <= self.dim < value.dim()
+        if not (-value.dim() <= self.dim < value.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for value with {value.dim()} dimensions"
+            )
         checks = []
         start = 0
         for constr, length in zip(self.cseq, self.lengths):
@@ -625,24 +701,28 @@ class _Stack(Constraint):
     """
 
     def __init__(self, cseq, dim=0):
-        assert all(isinstance(c, Constraint) for c in cseq)
+        if not all(isinstance(c, Constraint) for c in cseq):
+            raise AssertionError("All elements of cseq must be Constraint instances")
         self.cseq = list(cseq)
         self.dim = dim
         super().__init__()
 
     @property
-    def is_discrete(self):
+    def is_discrete(self) -> bool:  # type: ignore[override]
         return any(c.is_discrete for c in self.cseq)
 
     @property
-    def event_dim(self):
+    def event_dim(self) -> int:  # type: ignore[override]
         dim = max(c.event_dim for c in self.cseq)
         if self.dim + dim < 0:
             dim += 1
         return dim
 
     def check(self, value):
-        assert -value.dim() <= self.dim < value.dim()
+        if not (-value.dim() <= self.dim < value.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for value with {value.dim()} dimensions"
+            )
         vs = [value.select(self.dim, i) for i in range(value.size(self.dim))]
         return torch.stack(
             [constr.check(v) for v, constr in zip(vs, self.cseq)], self.dim

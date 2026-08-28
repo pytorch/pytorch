@@ -16,10 +16,6 @@
 #include <unordered_set>
 #include <vector>
 
-namespace c10 {
-TypePtr parseType(const std::string& pythonStr);
-} // namespace c10
-
 namespace torch::jit {
 
 using caffe2::serialize::FileAdapter;
@@ -67,8 +63,7 @@ std::vector<IValue> get_bytecode_ivalues(PyTorchStreamReader& reader) {
 /********************** Bytecode **********************/
 
 // Forward declare
-uint64_t _get_model_bytecode_version(
-    const std::vector<IValue>& bytecode_ivalues);
+
 static uint64_t _get_model_bytecode_version_from_bytes(char* data, size_t size);
 
 uint64_t _get_model_bytecode_version(std::istream& in) {
@@ -137,7 +132,7 @@ uint64_t _get_model_bytecode_version(
 
 /********************** Operator Version **********************/
 
-uint64_t _get_model_operator_version(
+static uint64_t _get_model_operator_version(
     PyTorchStreamReader& reader); // Forward Declare
 
 uint64_t _get_model_operator_version(std::istream& in) {
@@ -168,7 +163,7 @@ uint64_t _get_model_operator_version(PyTorchStreamReader& reader) {
 /********************** Operators and Info **********************/
 
 // Forward declare
-std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
+static std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     std::vector<IValue> bytecode_ivalues);
 
 std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
@@ -232,7 +227,7 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
       std::string op_name = op.at(0).toStringRef();
       std::string op_overload_name = op.at(1).toStringRef();
       if (!op_overload_name.empty()) {
-        op_name.append(".");
+        op_name.push_back('.');
         op_name.append(op_overload_name);
       }
 
@@ -250,8 +245,6 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 /********************** Get Type Table **********************/
 
 // Forward declare
-std::unordered_set<std::string> _get_mobile_model_contained_types(
-    const std::vector<IValue>& bytecode_ivalues);
 
 std::unordered_set<std::string> _get_mobile_model_contained_types(
     std::istream& in) {
@@ -277,7 +270,7 @@ std::unordered_set<std::string> _get_mobile_model_contained_types(
   return _get_mobile_model_contained_types(bytecode_values);
 }
 
-// Get deduplicate type table given bytecode, and each string is a atomic type,
+// Get deduplicate type table given bytecode, and each string is an atomic type,
 // like str, Tensor and etc. For example,
 // input: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
 // output: {Dict, int, Tuple, Tensor}
@@ -350,7 +343,7 @@ ModelCompatCheckResult is_compatible(
     s << "model bytecode version " << model_info.bytecode_version
       << "is greater than the max supported bytecode version in runtimes "
       << runtime_info.min_max_supported_bytecode_version.second;
-    result.errors.emplace_back(s.str());
+    result.errors.emplace_back(std::move(s).str());
   } else if (
       model_info.bytecode_version <
       runtime_info.min_max_supported_bytecode_version.first) {
@@ -359,19 +352,19 @@ ModelCompatCheckResult is_compatible(
     s << "model bytecode version " << model_info.bytecode_version
       << "is less than the minimum supported bytecode version in runtime "
       << runtime_info.min_max_supported_bytecode_version.first;
-    result.errors.emplace_back(s.str());
+    result.errors.emplace_back(std::move(s).str());
   }
 
   std::unordered_set<std::string> supported_type = runtime_info.supported_types;
 
   // Check type table
   for (const auto& type_name : model_info.type_table) {
-    if (supported_type.find(type_name) == supported_type.end()) {
+    if (!supported_type.contains(type_name)) {
       result.status = ModelCompatibilityStatus::ERROR;
       std::ostringstream s;
       s << "Primitive type: '" << type_name
         << "' is not supported in current runtime";
-      result.errors.push_back(s.str());
+      result.errors.push_back(std::move(s).str());
     }
   }
 
@@ -383,23 +376,22 @@ ModelCompatCheckResult is_compatible(
     OperatorInfo model_op_info = op.second;
 
     // Check if operator not present in runtime
-    if (runtime_info.operator_info.find(op_name) ==
-        runtime_info.operator_info.end()) {
+    if (!runtime_info.operator_info.contains(op_name)) {
       result.status = ModelCompatibilityStatus::ERROR;
       std::ostringstream s;
       s << "Operator '" << op_name << "' missing from runtime (not found)";
-      result.errors.push_back(s.str());
+      result.errors.push_back(std::move(s).str());
     } else {
       OperatorInfo runtime_op_info = runtime_info.operator_info.at(op_name);
 
-      // If the runtime op has no schema information its a false alarm and isn't
-      // actually useable
+      // If the runtime op has no schema information it's a false alarm and
+      // isn't actually usable
       if (!runtime_op_info.num_schema_args.has_value()) {
         result.status = ModelCompatibilityStatus::ERROR;
         std::ostringstream s;
         s << "Operator '" << op_name
           << "' missing from runtime (missing schema)";
-        result.errors.push_back(s.str());
+        result.errors.push_back(std::move(s).str());
       } else {
         // Check if the model operator has schema information. If it doesn't
         // then the model is from a bytecode version < 6 and we are done. If the
@@ -415,7 +407,7 @@ ModelCompatCheckResult is_compatible(
             << model_op_info.num_schema_args.value()
             << " args in model but only "
             << runtime_op_info.num_schema_args.value() << " in the runtime";
-          result.errors.push_back(s.str());
+          result.errors.push_back(std::move(s).str());
         }
       }
     }
@@ -423,16 +415,16 @@ ModelCompatCheckResult is_compatible(
 
   // Check Operator Versions
   if (model_info.operator_version <
-          runtime_info.min_max_supported_opperator_versions.first ||
+          runtime_info.min_max_supported_operator_versions.first ||
       model_info.operator_version >
-          runtime_info.min_max_supported_opperator_versions.second) {
+          runtime_info.min_max_supported_operator_versions.second) {
     result.status = ModelCompatibilityStatus::ERROR;
     std::ostringstream s;
     s << "Model Operator Version " << model_info.operator_version
       << "is not within supported version range of the runtime "
-      << runtime_info.min_max_supported_opperator_versions.first << " to "
-      << runtime_info.min_max_supported_opperator_versions.second;
-    result.errors.push_back(s.str());
+      << runtime_info.min_max_supported_operator_versions.first << " to "
+      << runtime_info.min_max_supported_operator_versions.second;
+    result.errors.push_back(std::move(s).str());
   }
 
   return result;

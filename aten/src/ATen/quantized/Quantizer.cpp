@@ -82,8 +82,7 @@ QTensorImpl* get_qtensorimpl(const TensorBase& self) {
 }
 
 static int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::ScalarType t) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t element_per_byte;
+  int64_t element_per_byte = 1;
   switch(t) {
     case at::ScalarType::QUInt4x2:
       element_per_byte = 2;
@@ -109,18 +108,25 @@ inline Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
     QuantizerPtr quantizer) {
+  TORCH_WARN_ONCE(
+      "torch.quantize_per_tensor, torch.quantize_per_channel and other quantized "
+      "tensor creation functions that produce tensors with dtype torch.quint8, "
+      "torch.qint8, and torch.qint32 are deprecated and will be removed in a "
+      "future PyTorch release. Please see "
+      "https://github.com/pytorch/pytorch/issues/184982 for more information.");
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   auto device = options.device();
   at::Allocator* allocator = nullptr;
   // TODO: why isn't this just using GetAllocator
   if (device.is_cuda()) {
     allocator = at::detail::getCUDAHooks().getCUDADeviceAllocator();
+  } else if (at::accelerator::isAccelerator(device.type())) {
+    TORCH_INTERNAL_ASSERT(!device.is_cuda(), "CUDA should already get the allocator.");
+    allocator = at::GetAllocator(device.type());
   } else if (device.is_cpu()) {
     allocator = at::getCPUAllocator();
   } else if (device.is_meta()) {
     allocator = GetAllocator(kMeta);
-  } else if (device.is_privateuseone()) {
-    allocator = GetAllocator(kPrivateUse1);
   } else {
     TORCH_INTERNAL_ASSERT(0, "unrecognized device for new_qtensor: ", device);
   }

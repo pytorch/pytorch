@@ -1,6 +1,5 @@
 #include <ATen/TracerMode.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -245,13 +244,12 @@ static void general_trace_function(
           tracer::addInputs(
               node, args[i].name().c_str(), iter->toBoolList().vec());
         } else {
-          throw std::runtime_error(
-              "unsupported input list type: " + elem_type->str());
+          TORCH_CHECK(false, "unsupported input list type: ", elem_type->str());
         }
       } else if (iter->isObject()) {
         tracer::addInputs(node, args[i].name().c_str(), iter->toObject());
       } else {
-        throw std::runtime_error("unsupported input type: " + type->str());
+        TORCH_CHECK(false, "unsupported input type: ", type->str());
       }
     }
     graph->insertNode(node);
@@ -277,16 +275,19 @@ static void general_trace_function(
           AT_ASSERT(iter->isTensorList());
           tracer::addOutput(node, iter->toTensorList());
         } else {
-          throw std::runtime_error(
-              "unsupported ouptut list type: " + elem_type->str());
+          TORCH_CHECK(
+              false, "unsupported output list type: ", elem_type->str());
         }
       } else if (type->kind() == TypeKind::ClassType) {
         AT_ASSERT(iter->isObject());
         tracer::addOutput(node, iter->toObject());
       } else {
-        throw std::runtime_error(
-            "unsupported output type: " + type->str() +
-            ", from operator: " + toString(op.operator_name()));
+        TORCH_CHECK(
+            false,
+            "unsupported output type: ",
+            type->str(),
+            ", from operator: ",
+            toString(op.operator_name()));
       }
     }
   }

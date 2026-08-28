@@ -13,7 +13,7 @@
 
 
 namespace {
-// Thin wrapper around https://docs.nvidia.com/cuda/cuda-math-api/group__CUDA__MATH__SINGLE.html#group__CUDA__MATH__SINGLE_1g57a3c8313f570282a1a7bcc78743b08e,
+// Thin wrapper around https://docs.nvidia.com/cuda/cuda-math-api/cuda_math_api/group__CUDA__MATH__SINGLE.html,
 // to ensure the Cuda math library's isfinite is actually what gets called in
 // _amp_non_finite_check_and_unscale_cuda_'s gpu_kernel lambda.
 //
@@ -89,7 +89,7 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
                                                      Tensor& found_inf,
                                                      const Tensor& inv_scale)
 {
-  if (scaled_grads.size() == 0) {
+  if (scaled_grads.empty()) {
     return;
   }
 

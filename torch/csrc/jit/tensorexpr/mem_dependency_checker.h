@@ -164,7 +164,7 @@ class TORCH_API AccessInfo {
 
 using VarBoundMap = std::unordered_map<VarPtr, Bound>;
 
-/* MemDependencyChecker analyses a IR fragment and builds a dependency graph of
+/* MemDependencyChecker analyses an IR fragment and builds a dependency graph of
  * accesses contained within.
  *
  * It's possible to retrieve the entire graph in node-object form, or can be
@@ -240,7 +240,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   std::unordered_set<std::shared_ptr<AccessInfo>> accessesWithin(
       const StmtPtr& A) const;
   // TODO: this will return only the AccessInfo for A. It's included for
-  // completeness but be aware it wont return accesses used in the computation
+  // completeness but be aware it won't return accesses used in the computation
   // of A.
   std::unordered_set<std::shared_ptr<AccessInfo>> accessesWithin(
       const ExprPtr& A) const;

@@ -1,7 +1,9 @@
 import time
 from argparse import ArgumentParser
 from collections import defaultdict
-from typing import Any, Callable, List, NamedTuple
+from collections.abc import Callable
+from functools import partial
+from typing import Any, NamedTuple
 
 import torch
 from torch.autograd import functional
@@ -58,25 +60,29 @@ def get_task_func(task: str) -> Callable:
 def get_task_functorch(task: str) -> Callable:
     @torch.no_grad()
     def vjp(model, inp, v=None, strict=None):
-        assert v is not None
+        if v is None:
+            raise AssertionError("v must not be None for vjp")
         out, vjpfunc = ft.vjp(model, *inp)
         return out, vjpfunc(v)
 
     @torch.no_grad()
     def jvp(model, inp, v=None, strict=None):
-        assert v is not None
+        if v is None:
+            raise AssertionError("v must not be None for jvp")
         return ft.jvp(model, inp, v)
 
     @torch.no_grad()
     def vhp(model, inp, v=None, strict=None):
-        assert v is not None
+        if v is None:
+            raise AssertionError("v must not be None for vhp")
         argnums = tuple(range(len(inp)))
         _, vjpfunc, aux = ft.vjp(ft.grad_and_value(model, argnums), *inp, has_aux=True)
         return aux, vjpfunc(v)
 
     @torch.no_grad()
     def hvp(model, inp, v=None, strict=None):
-        assert v is not None
+        if v is None:
+            raise AssertionError("v must not be None for hvp")
         argnums = tuple(range(len(inp)))
         _, hvp_out, aux = ft.jvp(
             ft.grad_and_value(model, argnums), inp, v, has_aux=True
@@ -147,8 +153,8 @@ ALL_TASKS = ALL_TASKS_NON_VECTORIZED + VECTORIZED_TASKS
 class ModelDef(NamedTuple):
     name: str
     getter: GetterType
-    tasks: List[str]
-    unsupported: List[str]
+    tasks: list[str]
+    unsupported: list[str]
 
 
 MODELS = [
@@ -223,7 +229,7 @@ def run_once_functorch(
 
 def run_model(
     model_getter: GetterType, args: Any, task: str, run_once_fn: Callable = run_once
-) -> List[float]:
+) -> list[float]:
     if args.gpu == -1:
         device = torch.device("cpu")
 
@@ -232,8 +238,8 @@ def run_model(
 
         do_sync = noop
     else:
-        device = torch.device(f"cuda:{args.gpu}")
-        do_sync = torch.cuda.synchronize
+        device = torch.device(torch.accelerator.current_accelerator().type, args.gpu)
+        do_sync = partial(torch.accelerator.synchronize, device)
 
     model, inp = model_getter(device)
 
@@ -296,7 +302,7 @@ def main():
     torch.manual_seed(args.seed)
 
     if args.gpu == -2:
-        args.gpu = 0 if torch.cuda.is_available() else -1
+        args.gpu = 0 if torch.accelerator.is_available() else -1
 
     for name, model_getter, recommended_tasks, unsupported_tasks in MODELS:
         if args.model_filter and name not in args.model_filter:

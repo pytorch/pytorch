@@ -13,9 +13,19 @@ std::shared_ptr<CapturedTraceback> CapturedTraceback::gather(
   if (python) {
     auto p = python_support_.load();
     while (p && r->frames_.empty()) {
-      r->frames_ = p->gather();
-      r->python_ = p;
+      // Check if it's safe to gather Python frames from current thread
+      if (p->canGather()) {
+        r->frames_ = p->gather();
+        r->python_ = p;
+      }
       p = p->next_;
+    }
+    // Try to gather forward traceback from current autograd node
+    if (r->python_) {
+      auto forward_tb = r->python_->gatherForwardTraceback();
+      if (!forward_tb.empty()) {
+        r->forward_traceback_ = std::move(forward_tb);
+      }
     }
   }
   if (script) {
@@ -70,7 +80,7 @@ SymbolizedTracebacks symbolize(
   // dedup and collect any C++ frames that need symbols for
   for (const auto& e : to_symbolize) {
     for (void* f : e->cpp_frames_) {
-      if (!ip_to_frame_offset.count(f)) {
+      if (!ip_to_frame_offset.contains(f)) {
         ip_to_frame_offset[f] = all_cpp_ips.size();
         all_cpp_ips.push_back(f);
       }
@@ -92,14 +102,13 @@ SymbolizedTracebacks symbolize(
     if (e->python_) {
       if (cur_python != e->python_ && !cur_py_frames.empty()) {
         if (cur_python) {
-          // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
           cur_python->appendSymbolized(cur_py_frames, r);
         }
         cur_py_frames.clear();
       }
       cur_python = e->python_;
       for (const auto& f : e->frames_) {
-        if (!py_to_frame_offset.count(f)) {
+        if (!py_to_frame_offset.contains(f)) {
           py_to_frame_offset[f] = py_frames_size_++;
           cur_py_frames.push_back(f);
         }
@@ -108,7 +117,6 @@ SymbolizedTracebacks symbolize(
   }
   if (!cur_py_frames.empty()) {
     if (cur_python) {
-      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
       cur_python->appendSymbolized(cur_py_frames, r);
     }
     cur_py_frames.clear();

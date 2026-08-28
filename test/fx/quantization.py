@@ -2,12 +2,12 @@ r"""
 **This file is EXPERIMENTAL and is mostly used for testing purposes! Do not
 rely on it for anything!**
 """
+
 import operator
 import sys
-from typing import Optional
 
 import torch
-from torch.fx import Graph, GraphModule, Node
+from torch.fx import Graph, GraphModule
 from torch.fx.graph import map_arg
 from torch.fx.proxy import Proxy
 from torch.nn.utils import fuse_conv_bn_weights
@@ -129,7 +129,10 @@ class ConvNormRelu(MinMaxObserver):
             self.bn_node = node
             self.bn = quantizer.modules[self.bn_node.target]
             node = node.args[0]
-        assert isinstance(quantizer.modules[node.target], torch.nn.modules.Conv2d)
+        if not isinstance(quantizer.modules[node.target], torch.nn.modules.Conv2d):
+            raise AssertionError(
+                f"Expected Conv2d, got {type(quantizer.modules[node.target])}"
+            )
         self.conv_node = node
         self.conv = quantizer.modules[self.conv_node.target]
 
@@ -181,7 +184,7 @@ class ConvNormRelu(MinMaxObserver):
         parent_name, name = _parent_name(self.conv_node.target)
         setattr(quantizer.modules[parent_name], name, qconv)
         if self.bn_node is not None:
-            parent_bn, bn_name = _parent_name(self.bn_node.target)
+            _, bn_name = _parent_name(self.bn_node.target)
             # we can't just delete this because submodules's forwards (which are not longer use)
             # try to call it, so replace with something that does nothing.
             setattr(quantizer.modules[parent_name], bn_name, IdentityModule())
@@ -205,7 +208,8 @@ def _parent_name(target):
 
 class DefaultQuant(MinMaxObserver):
     def quantize(self, input):
-        assert self.all_tensors
+        if not self.all_tensors:
+            raise AssertionError("Expected self.all_tensors to be non-empty")
         scale, zeropoint = self.scale_zeropoint()
         return torch.quantize_per_tensor(
             Proxy(input), scale, zeropoint, torch.quint8
@@ -277,7 +281,6 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
-        output_node: Optional[Node] = None
         for node in self.graph.nodes:
             if node.op == "placeholder":
                 result = next(args_iter)
@@ -322,12 +325,6 @@ class Quantizer:
                 return quant_env[n.name]
 
         def copy_recursive(node):
-            def load_or_emit(n):
-                if n.name in env or e.name in quant_env:  # noqa: F821
-                    return load_arg(n, quantized=False)
-                else:
-                    return copy_recursive(n)
-
             r = env[node.name] = self.quantized_graph.node_copy(
                 node, lambda n: load_arg(n, quantized=False)
             )
@@ -348,7 +345,7 @@ class Quantizer:
                     lambda a: map_arg(a, lambda n: load_arg(n, quantized=True)),
                 )
                 if r is NotImplemented:
-                    # quantizer choose to to quantize the node take the entire match, and just copy it over
+                    # quantizer choose to quantize the node take the entire match, and just copy it over
                     env[node.name] = copy_recursive(node)
                 else:
                     quant_env[node.name] = r

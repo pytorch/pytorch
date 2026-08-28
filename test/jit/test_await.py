@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 import torch
 from torch import Tensor
 from torch._awaits import _Await as Await
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 
@@ -200,7 +201,7 @@ class TestAwait(JitTestCase):
             aw: Await[C] = torch.jit._awaitable(C_wait_impl, C(x, x))
             _a = torch.eye(2)
             ai = aw._a
-            awb = aw.b()
+            awb = aw.b()  # noqa: F841
             c = C(2 * x, 2 * x)
             return _a + ai + x + c._a + c.b()
 
@@ -268,7 +269,7 @@ class TestAwait(JitTestCase):
         def main(x: Tensor) -> Tensor:
             aw = torch.jit._awaitable(delayed, x)
             if torch.jit.is_scripting():
-                assert isinstance(aw, torch.jit._Await)
+                assert isinstance(aw, torch.jit._Await)  # noqa: S101
             return torch.jit._awaitable_wait(aw)
 
         inp = torch.eye(2)
@@ -320,7 +321,7 @@ class TestAwait(JitTestCase):
 
         def main(x: Tensor, y: Tensor) -> Tensor:
             aw = torch.jit._awaitable(delayed, x)
-            z = gap(y)
+            z = gap(y)  # noqa: F841
             k = torch.jit._awaitable_wait(aw)
             return y + k
 
@@ -371,7 +372,7 @@ class TestAwait(JitTestCase):
 
         def main(x: Tensor) -> Tensor:
             aw = torch.jit._awaitable(delayed, x)
-            z = gap(x)
+            z = gap(x)  # noqa: F841
             y = fn(aw)
             return y + x
 
@@ -390,3 +391,7 @@ class TestAwait(JitTestCase):
         sm = torch.jit.load(iofile)
         script_out_load = sm(inp)
         self.assertTrue(torch.allclose(expected, script_out_load))
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

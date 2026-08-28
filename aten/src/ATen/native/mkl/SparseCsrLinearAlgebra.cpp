@@ -9,8 +9,8 @@
 #if !AT_MKL_ENABLED() || defined(__APPLE__) || \
     defined(__MACH__)
 
-namespace at {
-namespace sparse_csr {
+
+namespace at::sparse_csr {
 Tensor& _sparse_mm_mkl_(
     Tensor& self,
     const SparseCsrTensor& sparse_,
@@ -23,10 +23,9 @@ Tensor& _sparse_mm_mkl_(
 #else
   TORCH_CHECK(false, "sparse_mm_mkl: ATen not compiled with MKL support");
 #endif
-  return self; // for stopping compiler warnings.
 }
 } // namespace native
-} // namespace at
+
 
 #else // AT_MKL_ENABLED
 

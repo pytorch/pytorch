@@ -10,6 +10,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TransposeType.h>
 #include <limits>
+#include <string_view>
 #include <type_traits>
 #include <sstream>
 #include <cstring>
@@ -26,6 +27,36 @@
 #endif
 
 namespace at::native {
+
+inline void check_mm_shapes(
+    const Tensor& self,
+    const Tensor& mat2,
+    std::string_view func_name) {
+  TORCH_CHECK(
+      self.dim() == 2,
+      func_name,
+      ": self must be a matrix, got ",
+      self.dim(),
+      "-D tensor");
+  TORCH_CHECK(
+      mat2.dim() == 2,
+      func_name,
+      ": mat2 must be a matrix, got ",
+      mat2.dim(),
+      "-D tensor");
+  TORCH_CHECK(
+      self.sym_size(1) == mat2.sym_size(0),
+      func_name,
+      ": mat1 and mat2 shapes cannot be multiplied (",
+      self.sym_size(0),
+      "x",
+      self.sym_size(1),
+      " and ",
+      mat2.sym_size(0),
+      "x",
+      mat2.sym_size(1),
+      ")");
+}
 
 inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
   if (tensor.is_conj()) {
@@ -148,7 +179,7 @@ inline void checkInputsSolver(const Tensor& A,
 
 inline bool is_row_or_column_contiguous(const Tensor& t) {
   // This could be made more general, similar to how it's checked in matmul, which would allow to
-  // ellide the copy with strides such as (6, 12, 1, 3) or (3, 1, 9), but this is quite tricky.
+  // elide the copy with strides such as (6, 12, 1, 3) or (3, 1, 9), but this is quite tricky.
   // We choose to be conservative for simplicity
   return t.is_contiguous() || t.transpose(-2, -1).is_contiguous();
 }
@@ -336,7 +367,7 @@ inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tensor& arg1
 
   auto arg1_broadcasted  = arg1_expand_size == arg1.sizes() ? arg1 : arg1.expand(arg1_expand_size);
   auto arg2_broadcasted  = arg2_expand_size == arg2.sizes() ? arg2 : arg2.expand(arg2_expand_size);
-  return std::make_tuple(arg1_broadcasted, arg2_broadcasted);
+  return std::make_tuple(std::move(arg1_broadcasted), std::move(arg2_broadcasted));
 }
 
 inline std::vector<int64_t> broadcast_batch_size(const Tensor& t1, const Tensor& t2, int64_t n_batch_dims) {
@@ -351,6 +382,7 @@ inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
   const std::vector<int64_t> a = axes.vec();
   const int64_t ndim = self.ndimension();
   std::vector<int64_t> perm;
+  perm.reserve(static_cast<size_t>(std::max<int64_t>(0, ndim)));
 
   for (const auto i : c10::irange(ndim)) {
     auto it = std::find(a.begin(), a.end(), i);
@@ -405,7 +437,7 @@ inline std::tuple<DimVector, DimVector, int64_t> _compute_geometry_for_Q(
     n_columns_q = std::min(m, n);
   }
   auto q_strides = batched_matrix_contiguous_strides(q_sizes, /*f-contig*/true);
-  return std::make_tuple(q_sizes, q_strides, n_columns_q);
+  return std::make_tuple(std::move(q_sizes), std::move(q_strides), n_columns_q);
 }
 
 inline bool svd_uses_cusolver(const Tensor& A) {

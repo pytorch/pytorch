@@ -1,8 +1,6 @@
-# mypy: allow-untyped-defs
 import functools
 import importlib.util
-
-import torch
+from types import ModuleType
 
 
 def _check_module_exists(name: str) -> bool:
@@ -20,16 +18,12 @@ def _check_module_exists(name: str) -> bool:
 
 
 @functools.lru_cache
-def dill_available():
-    return (
-        _check_module_exists("dill")
-        # dill fails to import under torchdeploy
-        and not torch._running_with_deploy()
-    )
+def dill_available() -> bool:
+    return _check_module_exists("dill")
 
 
 @functools.lru_cache
-def import_dill():
+def import_dill() -> ModuleType | None:
     if not dill_available():
         return None
 

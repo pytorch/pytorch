@@ -1,5 +1,4 @@
 #include <ATen/core/dynamic_type.h>
-#include <ATen/core/type_factory.h>
 #include <torch/csrc/jit/mobile/register_ops_common_utils.h>
 
 namespace torch::jit {

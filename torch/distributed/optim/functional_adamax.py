@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.optim._functional as F
@@ -9,10 +8,10 @@ from torch.distributed.optim._deprecation_warning import (
 )
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 
-# Define a TorchScript compatible Functional Adamax Optimizer
+# Define a Functional Adamax Optimizer
 # where we use these optimizer in a functional way.
 # Instead of using the `param.grad` when updating parameters,
 # we explicitly allow the distributed optimizer pass gradients to
@@ -21,13 +20,12 @@ __all__: List[str] = []
 # parameters without data traces on accumulating to the same .grad.
 # NOTE: This should be only used by distributed optimizer internals
 # and not meant to expose to the user.
-@torch.jit.script
 class _FunctionalAdamax:
     def __init__(
         self,
-        params: List[Tensor],
+        params: list[Tensor],
         lr: float = 1e-3,
-        betas: Tuple[float, float] = (0.9, 0.999),
+        betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0.0,
         foreach: bool = False,
@@ -55,7 +53,7 @@ class _FunctionalAdamax:
         }
         self.foreach = foreach
         self.maximize = maximize
-        self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
+        self.state = torch.jit.annotate(dict[torch.Tensor, dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
@@ -64,13 +62,13 @@ class _FunctionalAdamax:
         # param group as it's not a common use case.
         self.param_group = {"params": params}
 
-    def step(self, gradients: List[Optional[Tensor]]):
+    def step(self, gradients: list[Tensor | None]):
         params = self.param_group["params"]
         params_with_grad = []
         grads = []
         exp_avgs = []
         exp_infs = []
-        state_steps: List[Tensor] = []
+        state_steps: list[Tensor] = []
 
         if len(params) != len(gradients):
             raise ValueError(

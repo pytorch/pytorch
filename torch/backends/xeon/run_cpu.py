@@ -119,7 +119,7 @@ Multi-instance inference
 Memory allocator
 ----------------
 
-"--enable-tcmalloc" and "--enable-jemalloc" can be used to enable different memory allcator.
+"--enable-tcmalloc" and "--enable-jemalloc" can be used to enable different memory allocator.
 
 """
 
@@ -132,7 +132,6 @@ import subprocess
 import sys
 from argparse import ArgumentParser, RawTextHelpFormatter, REMAINDER
 from os.path import expanduser
-from typing import Dict, List
 
 from torch.distributed.elastic.multiprocessing import (
     DefaultLogsSpecs as _DefaultLogsSpecs,
@@ -157,7 +156,7 @@ class _CPUinfo:
             # Sample output of: `lscpu --parse=CPU,Core,Socket,Node`
             #
             # # The following is the parsable format, which can be fed to other
-            # # programs. Each different item in every column has an unique ID
+            # # programs. Each different item in every column has a unique ID
             # # starting from zero.
             # # CPU,Core,Socket,Node
             # 0,0,0,0
@@ -181,8 +180,8 @@ class _CPUinfo:
             # physical cores := core column in lscpu output
             #  logical cores :=  cPU column in lscpu output
             self.node_nums = int(max(line[3] for line in self.cpuinfo)) + 1
-            self.node_physical_cores: List[List[int]] = []  # node_id is index
-            self.node_logical_cores: List[List[int]] = []  # node_id is index
+            self.node_physical_cores: list[list[int]] = []  # node_id is index
+            self.node_logical_cores: list[list[int]] = []  # node_id is index
             self.physical_core_node_map = {}  # physical core to numa node id
             self.logical_core_node_map = {}  # logical core to numa node id
 
@@ -201,10 +200,16 @@ class _CPUinfo:
                 self.node_logical_cores.append(cur_node_logical_core)
 
     def _physical_core_nums(self):
-        return len(self.node_physical_cores) * len(self.node_physical_cores[0])
+        overall_core_num = 0
+        for phycisal_core_list in self.node_physical_cores:
+            overall_core_num += len(phycisal_core_list)
+        return overall_core_num
 
     def _logical_core_nums(self):
-        return len(self.node_logical_cores) * len(self.node_logical_cores[0])
+        overall_core_num = 0
+        for logical_core_list in self.node_logical_cores:
+            overall_core_num += len(logical_core_list)
+        return overall_core_num
 
     def get_node_physical_cores(self, node_id):
         if node_id < 0 or node_id > self.node_nums - 1:
@@ -237,7 +242,7 @@ class _CPUinfo:
         Check whether all cores in core_list are in the same NUMA node.
 
         Cross NUMA will reduce performance.
-        We strongly advice to not use cores on different nodes.
+        We strongly advise to not use cores on different nodes.
         """
         cores_numa_map = self.logical_core_node_map
         numa_ids = []
@@ -250,8 +255,8 @@ class _CPUinfo:
                 "Numa Aware: cores:%s on different NUMA nodes:%s. To avoid \
 this behavior, please use --ncores-per-instance knob to make sure number of cores is divisible by --ncores-per-\
 instance. Alternatively, please use --skip-cross-node-cores knob.",
-                str(core_list),
-                str(numa_ids),
+                core_list,
+                numa_ids,
             )
         if len(numa_ids) == 0:
             raise RuntimeError(
@@ -263,9 +268,11 @@ instance. Alternatively, please use --skip-cross-node-cores knob.",
 class _Launcher:
     r"""Class for launcher."""
 
-    msg_lib_notfound = f"Unable to find the {{0}} library file lib{{1}}.so in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib \
+    msg_lib_notfound = (
+        f"Unable to find the {{0}} library file lib{{1}}.so in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib \
 or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib64 or \
 {expanduser('~')}/.local/lib/ so the LD_PRELOAD environment variable will not be set."
+    )
 
     def __init__(self) -> None:
         self.cpuinfo = _CPUinfo()
@@ -294,11 +301,15 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
                 break
         if not lib_set:
             for lib_path in library_paths:
+                # pyrefly: ignore [unbound-name]
                 library_file = os.path.join(lib_path, f"lib{lib_type}.so")
                 matches = glob.glob(library_file)
                 if len(matches) > 0:
+                    # pyrefly: ignore [unbound-name]
                     ld_preloads = [f"{matches[0]}", os.getenv("LD_PRELOAD", "")]
+                    # pyrefly: ignore [unbound-name]
                     os.environ["LD_PRELOAD"] = os.pathsep.join(
+                        # pyrefly: ignore [unbound-name]
                         [p.strip(os.pathsep) for p in ld_preloads if p]
                     )
                     lib_find = True
@@ -340,7 +351,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             find_tc = self.add_lib_preload(lib_type="tcmalloc")
             if not find_tc:
                 msg = f'{self.msg_lib_notfound} you can use "conda install -c conda-forge gperftools" to install {{0}}'
-                logger.warning(msg.format("TCmalloc", "tcmalloc"))  # noqa: G001
+                logger.warning(msg.format("TCmalloc", "tcmalloc"))
             else:
                 logger.info("Use TCMalloc memory allocator")
 
@@ -348,7 +359,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             find_je = self.add_lib_preload(lib_type="jemalloc")
             if not find_je:
                 msg = f'{self.msg_lib_notfound} you can use "conda install -c conda-forge jemalloc" to install {{0}}'
-                logger.warning(msg.format("Jemalloc", "jemalloc"))  # noqa: G001
+                logger.warning(msg.format("Jemalloc", "jemalloc"))
             else:
                 logger.info("Use JeMalloc memory allocator")
                 self.set_env(
@@ -400,7 +411,6 @@ Value applied: %s. Value ignored: %s",
     # In this case, KMP_AFFINITY should not be set.
     def set_multi_thread_and_allocator(
         self,
-        ncores_per_instance,
         disable_iomp=False,
         set_kmp_affinity=True,
         enable_tcmalloc=True,
@@ -416,12 +426,11 @@ Value applied: %s. Value ignored: %s",
         self.set_memory_allocator(
             enable_tcmalloc, enable_jemalloc, use_default_allocator
         )
-        self.set_env("OMP_NUM_THREADS", str(ncores_per_instance))
         if not disable_iomp:
             find_iomp = self.add_lib_preload(lib_type="iomp5")
             if not find_iomp:
                 msg = f'{self.msg_lib_notfound} you can use "conda install mkl" to install {{0}}'
-                logger.warning(msg.format("iomp", "iomp5"))  # noqa: G001
+                logger.warning(msg.format("iomp", "iomp5"))
             else:
                 logger.info("Using Intel OpenMP")
                 if set_kmp_affinity:
@@ -437,25 +446,35 @@ Value applied: %s. Value ignored: %s",
         cores = []
         set_kmp_affinity = True
         enable_taskset = False
+        # ncores_per_instance param check and expand for multi-instance
+        if not isinstance(args.ncores_per_instance, list):
+            args.ncores_per_instance = [args.ncores_per_instance]
+        args.ncores_per_instance = [int(x) for x in args.ncores_per_instance]
+        if args.ncores_per_instance != [-1]:
+            if args.ninstances > 0:
+                if len(args.ncores_per_instance) == 1:
+                    args.ncores_per_instance = (
+                        args.ncores_per_instance * args.ninstances
+                    )
+                if len(args.ncores_per_instance) != args.ninstances:
+                    raise ValueError(
+                        'Mismatch for "--ninstances" and "--ncores-per-instance" settings.'
+                    )
+            elif len(args.ncores_per_instance) > 1:
+                args.ninstances = len(args.ncores_per_instance)
         if args.core_list:  # user specify what cores will be used by params
             cores = [int(x) for x in args.core_list.split(",")]
-            if args.ncores_per_instance == -1:
+            if args.ncores_per_instance == [-1]:
                 raise RuntimeError(
                     'please specify the "--ncores-per-instance" if you have pass the --core-list params'
                 )
-            elif (
-                args.ninstances > 1
-                and args.ncores_per_instance * args.ninstances < len(cores)
-            ):
+            if args.ninstances > 0 and sum(args.ncores_per_instance) < len(cores):
                 logger.warning(
                     "only first %s cores will be used, \
 but you specify %s cores in core_list",
-                    args.ncores_per_instance * args.ninstances,
+                    sum(args.ncores_per_instance),
                     len(cores),
                 )
-            else:
-                args.ninstances = len(cores) // args.ncores_per_instance
-
         else:
             if args.use_logical_core:
                 if args.node_id != -1:
@@ -473,81 +492,128 @@ but you specify %s cores in core_list",
             if (
                 not args.multi_instance
                 and args.ninstances == -1
-                and args.ncores_per_instance == -1
+                and args.ncores_per_instance == [-1]
             ):
                 args.ninstances = 1
-                args.ncores_per_instance = len(cores)
+                args.ncores_per_instance = [len(cores)]
             elif (
                 args.multi_instance
                 and args.ninstances == -1
-                and args.ncores_per_instance == -1
+                and args.ncores_per_instance == [-1]
             ):
                 args.throughput_mode = True
-            elif args.ncores_per_instance == -1 and args.ninstances != -1:
+            elif args.ncores_per_instance == [-1] and args.ninstances != -1:
                 if args.ninstances > len(cores):
                     raise RuntimeError(
                         f"there are {len(cores)} total cores but you specify {args.ninstances} ninstances; \
 please make sure ninstances <= total_cores)"
                     )
+                if args.skip_cross_node_cores:
+                    logger.warning(
+                        "with --skip-cross-node-cores set, the first %d sub-numa node(s) will be used \
+to launch the instance(s), each node for 1 instance.",
+                        args.ninstances,
+                    )
+                    if args.ninstances > self.cpuinfo.node_nums:
+                        raise ValueError(
+                            "--ninstances should not be larger than numa node number \
+when --skip-cross-node-cores is set"
+                        )
+                    cores.clear()
+                    args.ncores_per_instance.clear()
+                    for i in range(args.ninstances):
+                        per_node_cores = self.cpuinfo.get_node_physical_cores(i)
+                        cores.extend(per_node_cores)
+                        args.ncores_per_instance.append(len(per_node_cores))
                 else:
-                    args.ncores_per_instance = len(cores) // args.ninstances
-            elif args.ncores_per_instance != -1 and args.ninstances == -1:
-                if not args.skip_cross_node_cores:
-                    args.ninstances = len(cores) // args.ncores_per_instance
-                else:
-                    ncore_per_node = len(self.cpuinfo.node_physical_cores[0])
-                    num_leftover_cores = ncore_per_node % args.ncores_per_instance
-                    if args.ncores_per_instance > ncore_per_node:
+                    logger.warning(
+                        "all the CPU cores on the machine will be distributed \
+as evenly as possible to each instance. It is possible that some cores in an instance may cross the numa node."
+                    )
+                    args.ncores_per_instance = [
+                        len(cores) // args.ninstances
+                    ] * args.ninstances
+            elif args.ncores_per_instance != [-1]:
+                if args.skip_cross_node_cores:
+                    utilized_node_cores = (
+                        self.cpuinfo.node_logical_cores
+                        if args.use_logical_core
+                        else self.cpuinfo.node_physical_cores
+                    )
+                    ncore_per_node = [len(c) for c in utilized_node_cores]
+                    if len(args.ncores_per_instance) > len(ncore_per_node):
                         # too many ncores_per_instance to skip cross-node cores
-                        logger.warning(
-                            "there are %s core(s) per socket, but you specify %s ncores_per_instance and \
-skip_cross_node_cores. Please make sure --ncores-per-instance < core(s) per \
-socket",
-                            ncore_per_node,
-                            args.ncores_per_instance,
+                        raise ValueError(
+                            "there are %s nodes, but %s ncores-per-instance elements and \
+--skip-cross-node-cores is specified.",
+                            len(ncore_per_node),
+                            len(args.ncores_per_instance),
                         )
-                        sys.exit(-1)
-                    elif num_leftover_cores == 0:
-                        # aren't any cross-node cores
-                        logger.info(
-                            "--skip-cross-node-cores is set, but there are no cross-node cores."
-                        )
-                        args.ninstances = len(cores) // args.ncores_per_instance
-                    else:
-                        # skip cross-node cores
-                        if args.ninstances != -1:
-                            logger.warning(
-                                "--skip-cross-node-cores is exclusive to --ninstances. --ninstances \
-won't take effect even if it is set explicitly."
+                    leftover_cores = list()
+                    for i, core_num in enumerate(args.ncores_per_instance):
+                        leftover_num = core_num - ncore_per_node[i]
+                        if leftover_num > 0:
+                            # too many ncores_per_instance for a node
+                            raise ValueError(
+                                "there are %s core(s) in node %s, but specified %s cores for \
+this node and --skip-cross-node-cores is specified.",
+                                ncore_per_node[i],
+                                i,
+                                core_num,
                             )
-
-                        i = 1
-                        leftover_cores = set()
-                        while ncore_per_node * i <= len(cores):
-                            leftover_cores.update(
-                                cores[
-                                    ncore_per_node * i
-                                    - num_leftover_cores : ncore_per_node * i
-                                ]
-                            )
-                            i += 1
-                        cores = list(set(cores) - leftover_cores)
-                        assert len(cores) % args.ncores_per_instance == 0
-                        args.ninstances = len(cores) // args.ncores_per_instance
+                        elif leftover_num < 0:
+                            # Exclude excessive cores from largest core IDs
+                            leftover_cores.extend(utilized_node_cores[i][leftover_num:])
+                    # used node num < total node num, mark the rest node cores as unused
+                    for j in range(i + 1, len(ncore_per_node)):
+                        leftover_cores.extend(utilized_node_cores[j][:])
+                    for core_rm in leftover_cores:
+                        if core_rm in cores:
+                            cores.remove(core_rm)
+                args.ninstances = len(args.ncores_per_instance)
             else:
-                if args.ninstances * args.ncores_per_instance > len(cores):
+                if sum(args.ncores_per_instance) > len(cores):
                     raise RuntimeError(
-                        "Please make sure ninstances * ncores_per_instance <= total_cores"
+                        "Please make sure the sum up of ncores_per_instance <= total_cores"
                     )
             if args.latency_mode:
                 logger.warning(
                     "--latency-mode is exclusive to --ninstances, --ncores-per-instance, --node-id and \
 --use-logical-core. They won't take effect even they are set explicitly."
                 )
-                args.ncores_per_instance = 4
-                cores = self.cpuinfo.get_all_physical_cores()
-                args.ninstances = len(cores) // args.ncores_per_instance
-
+                core_num_per_instance = 4
+                cores = list()
+                args.ninstances = 0
+                if args.skip_cross_node_cores:
+                    # Per-numa core allocation, the remainder cores are not used
+                    for node_id, node_core_list in enumerate(
+                        self.cpuinfo.node_physical_cores
+                    ):
+                        node_core_num = len(node_core_list)
+                        for i in range(
+                            core_num_per_instance,
+                            node_core_num + 1,
+                            core_num_per_instance,
+                        ):
+                            args.ninstances += 1
+                            cores.extend(node_core_list[i - core_num_per_instance : i])
+                        if i < node_core_num:
+                            logger.warning(
+                                "With --skip-cross-node-cores set, not all the cores on node %d is used \
+because the core number on this node is not dividable by %d.",
+                                node_id,
+                                core_num_per_instance,
+                            )
+                    args.ncores_per_instance = [core_num_per_instance] * args.ninstances
+                else:
+                    # Compact allocation of all physical cores, regardless of numa
+                    cores = self.cpuinfo.get_all_physical_cores()
+                    args.ninstances = len(cores) // core_num_per_instance
+                    args.ncores_per_instance = [core_num_per_instance] * args.ninstances
+                    remainder = len(cores) % core_num_per_instance
+                    if remainder > 0:
+                        args.ninstances += 1
+                        args.ncores_per_instance.append(remainder)
             if args.throughput_mode:
                 logger.warning(
                     "--throughput-mode is exclusive to --ninstances, --ncores-per-instance, --node-id and \
@@ -555,12 +621,14 @@ won't take effect even if it is set explicitly."
                 )
                 args.ninstances = self.cpuinfo.node_nums
                 cores = self.cpuinfo.get_all_physical_cores()
-                args.ncores_per_instance = len(cores) // args.ninstances
+                args.ncores_per_instance.clear()
+                for node_core_list in self.cpuinfo.node_physical_cores:
+                    args.ncores_per_instance.append(len(node_core_list))
 
         if args.ninstances > 1 and args.rank != -1:
             logger.info(
                 "assigning %s cores for instance %s",
-                args.ncores_per_instance,
+                args.ncores_per_instance[args.rank],
                 args.rank,
             )
 
@@ -585,7 +653,6 @@ won't take effect even if it is set explicitly."
             enable_taskset = True
 
         self.set_multi_thread_and_allocator(
-            args.ncores_per_instance,
             args.disable_iomp,
             set_kmp_affinity,
             args.enable_tcmalloc,
@@ -594,11 +661,12 @@ won't take effect even if it is set explicitly."
         )
         entrypoint = ""
         launch_args = {}
-        launch_envs: Dict[int, Dict] = {}
+        launch_envs: dict[int, dict] = {}
         launch_tee = {}
         # check whether is launched from torchrun with --nproc-per-node <num workers>
         local_size = int(os.environ.get("LOCAL_WORLD_SIZE", 1))
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        cores = sorted(cores)
         for i in range(args.ninstances):
             cmd = []
             cur_process_cores = ""
@@ -607,29 +675,33 @@ won't take effect even if it is set explicitly."
                     cmd = ["numactl"]
                 elif enable_taskset:
                     cmd = ["taskset"]
-                cores = sorted(cores)
+                core_index_start = 0
                 if (
                     args.rank == -1
                 ):  # sequentially assign ncores_per_instance to ninstances
+                    for j in range(i):
+                        core_index_start += args.ncores_per_instance[j]
                     core_list = cores[
-                        i
-                        * args.ncores_per_instance : (i + 1)
-                        * args.ncores_per_instance
+                        core_index_start : core_index_start
+                        + args.ncores_per_instance[i]
                     ]
                 else:  # assign ncores_per_instance from rank
+                    for j in range(args.rank):
+                        core_index_start += args.ncores_per_instance[j]
                     core_list = cores[
-                        args.rank
-                        * args.ncores_per_instance : (args.rank + 1)
-                        * args.ncores_per_instance
+                        core_index_start : core_index_start
+                        + args.ncores_per_instance[args.rank]
                     ]
 
-                core_ranges: List[Dict] = []
+                core_ranges: list[dict] = []
                 if local_size > 1:
                     total_num_cores = len(core_list)
                     cores_per_rank = total_num_cores // local_size
-                    assert (
-                        cores_per_rank >= 1
-                    ), "At least one core needs to be assigned to each rank"
+                    if cores_per_rank < 1:
+                        raise AssertionError(
+                            f"At least one core needs to be assigned to each rank, "
+                            f"got {total_num_cores} cores for {local_size} ranks"
+                        )
                     core_list = core_list[
                         cores_per_rank * local_rank : cores_per_rank * (local_rank + 1)
                     ]
@@ -673,7 +745,14 @@ won't take effect even if it is set explicitly."
                 entrypoint = cmd[0]
             del cmd[0]
             launch_args[i] = tuple(cmd)
-            launch_envs[i] = {}
+            # Use user defined OMP_NUM_THREADS if set explicitly in prior
+            # Else set it as ncores-per-instance of the current instance
+            predef_omp_thr_num = os.environ.get("OMP_NUM_THREADS")
+            launch_envs[i] = (
+                {"OMP_NUM_THREADS": str(args.ncores_per_instance[i])}
+                if predef_omp_thr_num is None
+                else {}
+            )
             launch_tee[i] = Std.ALL
 
             if args.rank != -1:  # launches single instance, rank, only
@@ -724,6 +803,7 @@ def _add_multi_instance_params(parser):
         metavar="\b",
         default=-1,
         type=int,
+        nargs="+",
         help="Cores per instance",
     )
     group.add_argument(
@@ -836,6 +916,7 @@ def create_args(parser=None):
 
     @retval ArgumentParser
     """
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "--multi-instance",
         "--multi_instance",
@@ -844,6 +925,7 @@ def create_args(parser=None):
         help="Enable multi-instance, by default one instance per node",
     )
 
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "-m",
         "--module",
@@ -854,6 +936,7 @@ def create_args(parser=None):
         '"python -m".',
     )
 
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "--no-python",
         "--no_python",
@@ -868,6 +951,7 @@ def create_args(parser=None):
 
     _add_multi_instance_params(parser)
     # positional
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "program",
         type=str,
@@ -876,6 +960,7 @@ def create_args(parser=None):
     )
 
     # rest from the training program
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument("program_args", nargs=REMAINDER)
 
 

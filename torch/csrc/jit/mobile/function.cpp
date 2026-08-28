@@ -2,15 +2,12 @@
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
-#include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
-#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch::jit {
 
-char const* toString(OpCode op);
 namespace mobile {
 Function::Function(c10::QualifiedName name) : name_(std::move(name)) {}
 
@@ -150,7 +147,9 @@ size_t Function::num_inputs() const {
   return schema_->arguments().size();
 }
 
-bool Function::call(Stack&, c10::function_ref<void(const mobile::Code&)> f) {
+bool Function::call(
+    Stack& /*unused*/,
+    c10::function_ref<void(const mobile::Code&)> f) {
   initialize_operators(true);
   f(code_);
   return true;
@@ -218,7 +217,7 @@ std::optional<std::function<void(Stack&)>> makeOperatorFunction(
             static_cast<size_t>(num_specified_args.value()) >= out_args.size(),
             "The number of output arguments is: ",
             out_args.size(),
-            ", which is more then the number of specified arguments: ",
+            ", which is more than the number of specified arguments: ",
             num_specified_args.value());
         size_t start_index = num_specified_args.value() - out_args.size();
         for (size_t i = start_index; i < (args.size() - out_args.size()); ++i) {

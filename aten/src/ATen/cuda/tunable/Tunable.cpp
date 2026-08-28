@@ -1,14 +1,14 @@
 // Original TunableOp is from onnxruntime.
 // https://github.com/microsoft/onnxruntime/blob/main/onnxruntime/core/framework/tunable.h
-// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/rocm/tunable
+// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/cuda/tunable
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 //
 // Adapting TunableOp into PyTorch
 // Copyright (c) Advanced Micro Devices, Inc.
 //
-#include <cuda_runtime.h>
 
+#include <ATen/core/functional.h>
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/util/Exception.h>
@@ -16,14 +16,18 @@
 #include <c10/util/env.h>
 #include <torch/version.h>
 
-#ifndef _WIN32
-#include <cxxabi.h>
+
+#ifndef USE_ROCM
+#include <cuda.h>
+#include <cublasLt.h>
+#include <cublas_v2.h>
 #endif
 
+#include <algorithm>
 #include <fstream>
-#include <mutex>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -31,7 +35,11 @@
 
 // for validators
 #ifdef USE_ROCM
+#ifdef _WIN32
+#include <hip/hip_version.h>
+#else
 #include <rocm-core/rocm_version.h>
+#endif
 #define ROCBLAS_BETA_FEATURES_API
 #include <rocblas/rocblas.h>
 #include <hipblaslt/hipblaslt.h>
@@ -40,13 +48,57 @@
 
 namespace at::cuda::tunable {
 
+namespace {
+
+// Matches a tunableop params signature against a wildcard pattern. Both
+// strings are split on '_' and compared token-by-token; '*' in the pattern
+// matches any single token. Returns true iff every pattern token equals
+// the corresponding concrete token (or is '*').
+bool matches_wildcard_pattern(
+    const std::string& pattern,
+    const std::string& concrete) {
+  if (pattern.find('*') == std::string::npos) {
+    // Pattern has no wildcard token -> only exact match counts.
+    return pattern == concrete;
+  }
+  size_t p_i = 0, c_i = 0;
+  while (p_i < pattern.size() && c_i < concrete.size()) {
+    // Find next token boundary in each string.
+    size_t p_end = pattern.find('_', p_i);
+    if (p_end == std::string::npos) {
+      p_end = pattern.size();
+    }
+    size_t c_end = concrete.find('_', c_i);
+    if (c_end == std::string::npos) {
+      c_end = concrete.size();
+    }
+    const auto p_tok = std::string_view(pattern).substr(p_i, p_end - p_i);
+    const auto c_tok = std::string_view(concrete).substr(c_i, c_end - c_i);
+    if (p_tok != "*" && p_tok != c_tok) {
+      return false;
+    }
+    p_i = (p_end == pattern.size()) ? pattern.size() : p_end + 1;
+    c_i = (c_end == concrete.size()) ? concrete.size() : c_end + 1;
+  }
+  // Both must be fully consumed (same token count).
+  return p_i >= pattern.size() && c_i >= concrete.size();
+}
+
+} // namespace
+
 TuningContext* getTuningContext() {
   static TuningContext tuning_context;
   return &tuning_context;
 }
 
 std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry) {
-  return stream << entry.key_ << "," << entry.time_;
+  static const bool blaslog = c10::utils::get_env("PYTORCH_TUNABLEOP_BLAS_LOG") == "1";
+  if (!blaslog) {
+    return stream << entry.key_ << ',' << entry.time_;
+  }
+  else {
+    return stream << entry.key_ << ',' << entry.time_ << ",BLAS_PARAMS: " << entry.blas_sig_;
+  }
 }
 
 // TuningResultsManager
@@ -70,14 +122,54 @@ ResultEntry TuningResultsManager::Lookup(const std::string& op_signature, const 
 
   const auto& km = kernel_map_it->second;
   auto it = km.find(params_signature);
-  if (it == km.cend()) {
-    TUNABLE_LOG3("missing params_signature, returning null ResultEntry for ", op_signature, ",", params_signature);
-    return ResultEntry::Null();
+  if (it != km.cend()) {
+    TUNABLE_LOG3(
+        "ResultEntry found for ",
+        op_signature,
+        ",",
+        params_signature);
+    return it->second;
   }
-  TUNABLE_LOG3("ResultEntry found for ", op_signature, ",", params_signature);
-  return it->second;
+  // Exact match only: a caller that wants a wildcard key must pass the
+  // already-formed wildcard signature. This neither expands wildcards in the
+  // request nor matches a wildcard request against concrete candidates;
+  // wildcard fallback lives in LookupWildcardFallback below.
+  TUNABLE_LOG3(
+      "missing params_signature, returning null ResultEntry for ",
+      op_signature,
+      ",",
+      params_signature);
+  return ResultEntry::Null();
 }
 
+ResultEntry TuningResultsManager::LookupWildcardFallback(
+    const std::string& op_signature,
+    const std::string& concrete_params_signature) {
+  std::scoped_lock l{lock_};
+  auto kernel_map_it = results_.find(op_signature);
+  if (kernel_map_it == results_.cend()) {
+    return ResultEntry::Null();
+  }
+  const auto& km = kernel_map_it->second;
+  // First match wins in unspecified order; a rejected candidate falls back to
+  // default ATen, not to the next pattern. See the decl in Tunable.h.
+  for (const auto& [key, entry] : km) {
+    if (key.find('*') == std::string::npos) {
+      continue;
+    }
+    if (matches_wildcard_pattern(key, concrete_params_signature)) {
+      TUNABLE_LOG3(
+          "wildcard fallback hit for ",
+          op_signature,
+          ",",
+          concrete_params_signature,
+          " via wildcard ",
+          key);
+      return entry;
+    }
+  }
+  return ResultEntry::Null();
+}
 void TuningResultsManager::AddImpl(const std::string& op_signature,
     const std::string& params_signature,
     ResultEntry best,
@@ -97,17 +189,34 @@ void TuningResultsManager::AddImpl(const std::string& op_signature,
 }
 
 void TuningResultsManager::Add(const std::string& op_signature, const std::string& params_signature, ResultEntry best) {
-  std::scoped_lock l{lock_};
+  bool is_new = false;
+  ResultEntry inserted = ResultEntry::Null();
 
-  auto it = results_.find(op_signature);
-  if (it == results_.end()) {
-    it = results_.insert({op_signature, {}}).first;
+  // ---- mutate maps under results lock ----
+  {
+    std::scoped_lock l{lock_};
+    auto& km = results_[op_signature];  // creates if missing
+    is_new = (!km.contains(params_signature));
+    AddImpl(op_signature, params_signature, std::move(best), km);
+    if (is_new) {
+      inserted = km.at(params_signature);  // snapshot for I/O after unlocking
+    }
+  }
+   if (!is_new) return;  // only write once per unique (op, params)
+
+   TuningContext* ctx = getTuningContext();
+  if (ctx->IsTuningEnabled() && !ctx->IsRecordUntunedEnabled()) {
+    InitRealtimeAppend(ctx->GetFilename(), ctx->GetTuningResultsValidator().GetAllValidators());
+
+    if (is_new && realtime_out_ && realtime_out_->good()) {
+      AppendResultLine(op_signature, params_signature, inserted);
+    }
   }
 
-  AddImpl(op_signature, params_signature, std::move(best), it->second);
 }
 
-void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature, const std::string& params_signature) {
+void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature,
+    const std::string& params_signature, const std::string& blas_signature) {
   std::scoped_lock l{lock_};
   if (!untuned_file.good()) {
     TORCH_WARN_ONCE("failed to open file for writing; untuned gemm will not be saved");
@@ -127,9 +236,97 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
     }
 
     if (isNew) {
-      untuned_file << op_signature << "," << params_signature << std::endl;
+      static const bool blaslog = c10::utils::get_env("PYTORCH_TUNABLEOP_BLAS_LOG") == "1";
+      if (!blaslog) {
+        untuned_file << op_signature << ',' << params_signature << std::endl;
+      }
+      else {
+        untuned_file << op_signature << ',' << params_signature << ",BLAS_PARAMS: " << blas_signature << std::endl;
+      }
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
     }
+  }
+}
+
+void TuningResultsManager::ClearUntuned() {
+  std::scoped_lock l{lock_};
+  untuned_results_.clear();
+}
+
+void TuningResultsManager::ClearAll() {
+  std::scoped_lock l{lock_};
+  results_.clear();
+  untuned_results_.clear();
+}
+
+void TuningResultsManager::InitRealtimeAppend(const std::string& filename, const std::unordered_map<std::string, std::string>& validators) {
+  std::scoped_lock fl{realtime_file_mutex_};
+
+  if (realtime_out_ && realtime_out_->good() && realtime_filename_ == filename) {
+    return;
+  }
+
+  if (realtime_out_ && realtime_filename_ != filename) {
+    realtime_out_->flush();
+    realtime_out_->close();
+    realtime_out_.reset();
+    validators_written_ = false;
+  }
+
+  bool file_exists = false;
+  bool file_empty = true;
+
+  {
+    std::ifstream check_file(filename);
+    if (check_file.good()) {
+      file_exists = true;
+      file_empty = (check_file.peek() == std::ifstream::traits_type::eof());
+    }
+  }
+
+  realtime_out_ = std::make_unique<std::ofstream>(filename, std::ios::out | std::ios::app);
+
+  if (!realtime_out_->good()) {
+    TORCH_WARN("TunableOp realtime append: failed to open '", filename,"'");
+    realtime_out_.reset();
+    return;
+  }
+
+  if(!file_exists || file_empty) {
+    for(const auto& [key, val] : validators) {
+      (*realtime_out_) << "Validator," << key << ',' << val << std::endl;
+      realtime_out_->flush();
+    }
+    validators_written_ = true;
+
+    TUNABLE_LOG2("Wrote validators to realtime output file");
+  }
+
+  realtime_filename_ = filename;
+}
+
+void TuningResultsManager::AppendResultLine(const std::string& op_sig, const std::string& param_sig, const ResultEntry& result) {
+  std::scoped_lock fl{realtime_file_mutex_};
+
+  if(!realtime_out_ || !realtime_out_->good()) {
+    return;
+  }
+
+  (*realtime_out_) << op_sig << ',' << param_sig << ',' << result << std::endl;
+  realtime_out_->flush(); //ensure immediate write to disk
+
+  TUNABLE_LOG3("Realtime append: ", op_sig, "(", param_sig, ") -> ", result);
+}
+
+void TuningResultsManager::CloseRealtimeAppend() {
+  std::scoped_lock fl{realtime_file_mutex_};
+
+
+  if(realtime_out_) {
+    realtime_out_->flush();
+    realtime_out_->close();
+    realtime_out_.reset();
+    TUNABLE_LOG2("Closed realtime output file");
   }
 }
 
@@ -202,16 +399,33 @@ TuningResultsValidator::TuningResultsValidator() {
       "PT_VERSION",
       []() { return GetPyTorchVersion(); },
       [this](auto&& k) { return ValidatePyTorchVersion(std::forward<decltype(k)>(k)); });
-#ifdef USE_ROCM
-  // rocm
+#ifndef USE_ROCM
+  auto register_exact_validator = [this](const char* name, auto getter) {
+    RegisterValidator(name, getter, [name, getter](auto&& k) {
+      std::string value = getter();
+      TUNABLE_LOG1(name, " validation: expect ", k, " to match ", value);
+      return value == k ? OK : FAIL;
+    });
+  };
+
+  register_exact_validator(
+      "CUBLASLT_VERSION", []() { return c10::str(cublasLtGetVersion()); });
+  register_exact_validator("CUDA_DEVICE", []() {
+    const auto* prop = at::cuda::getCurrentDeviceProperties();
+    return c10::str(prop->major, ".", prop->minor, ":", prop->name);
+  });
+#else
+  // hip
   {
-    std::string rocm_version = ROCM_BUILD_INFO;
+    // HIP version is more accurate than ROCm version.  User's environment could be a stock
+    // ROCm install but with a mix of newer components, making ROCm version meaningless.
+    std::string hip_version = c10::str(TORCH_HIP_VERSION);
     RegisterValidator(
-       "ROCM_VERSION",
-       [rocm_version]() { return rocm_version; },
-       [rocm_version](auto&& k) {
-        TUNABLE_LOG1("ROCM_VERSION validation: expect ", k, " to match ", rocm_version);
-        return rocm_version == k ? OK : FAIL;
+       "HIP_VERSION",
+       [hip_version]() { return hip_version; },
+       [hip_version](auto&& k) {
+        TUNABLE_LOG1("HIP_VERSION validation: expect ", k, " to match ", hip_version);
+        return hip_version == k ? OK : FAIL;
       });
   }
   // gfx arch
@@ -227,15 +441,10 @@ TuningResultsValidator::TuningResultsValidator() {
   }
   // rocblas
   {
-#define STRINGIFY(s) #s
-#define XSTRINGIFY(s) STRINGIFY(s)
-    std::string rocblas_version = c10::str(
-        XSTRINGIFY(ROCBLAS_VERSION_MAJOR), ".",
-        XSTRINGIFY(ROCBLAS_VERSION_MINOR), ".",
-        XSTRINGIFY(ROCBLAS_VERSION_PATCH), "-",
-        XSTRINGIFY(ROCBLAS_VERSION_TWEAK));
-#undef XSTRINGIFY
-#undef STRINGIFY
+    size_t rocblas_version_size;
+    rocblas_get_version_string_size(&rocblas_version_size);
+    std::string rocblas_version(rocblas_version_size - 1, '\0');
+    rocblas_get_version_string(rocblas_version.data(), rocblas_version_size);
     RegisterValidator(
         "ROCBLAS_VERSION",
         [rocblas_version]() { return rocblas_version; },
@@ -278,12 +487,12 @@ static bool CheckMandatoryKeys(
     const std::unordered_map<std::string, std::string>& to_check) {
   bool passed = true;
   for (const auto& k : TuningResultsValidator::mandatory_keys) {
-    if (gv_funcs.find(k) == gv_funcs.end()) {
+    if (!gv_funcs.contains(k)) {
       passed = false;
       TUNABLE_LOG1("key=\"", k, "\" is not registered for Get and Validate. ");
     }
 
-    if (to_check.find(k) == to_check.end()) {
+    if (!to_check.contains(k)) {
       passed = false;
       TUNABLE_LOG1("key=\"", k, "\" is not provided for validation. ");
     }
@@ -295,14 +504,13 @@ static bool CheckKeysMatching(
     const TuningResultsValidator::GetValidateFuncs& gv_funcs,
     const std::unordered_map<std::string, std::string>& to_check) {
   auto get_keys = [](const auto& it) -> std::string { return it.first; };
-  std::vector<std::string> required_keys;
-  std::vector<std::string> provided_keys;
-  std::transform(gv_funcs.cbegin(), gv_funcs.cend(), std::back_inserter(required_keys), get_keys);
-  std::transform(to_check.cbegin(), to_check.cend(), std::back_inserter(provided_keys), get_keys);
+  std::vector<std::string> required_keys = c10::fmap(gv_funcs, get_keys);
+  std::vector<std::string> provided_keys = c10::fmap(to_check, get_keys);
   std::sort(required_keys.begin(), required_keys.end());
   std::sort(provided_keys.begin(), provided_keys.end());
 
   std::unordered_set<std::string> intersection;
+  intersection.reserve(std::min(required_keys.size(), provided_keys.size()));
   std::set_intersection(required_keys.cbegin(), required_keys.cend(),
                         provided_keys.cbegin(), provided_keys.cend(),
                         std::inserter(intersection, intersection.end()));
@@ -310,7 +518,7 @@ static bool CheckKeysMatching(
   if (intersection.size() != required_keys.size()) {
     matched = false;
     for (const auto& k : required_keys) {
-      if (intersection.find(k) == intersection.end()) {
+      if (!intersection.contains(k)) {
         TORCH_WARN("Unmatched validator: \"", k, "\" is required, but the tuning results does not provide it. ");
       }
     }
@@ -318,7 +526,7 @@ static bool CheckKeysMatching(
   if (intersection.size() != provided_keys.size()) {
     matched = false;
     for (const auto& k : provided_keys) {
-      if (intersection.find(k) == intersection.end()) {
+      if (!intersection.contains(k)) {
         TORCH_WARN("Unmatched validator: \"", k, "\" is provided, but pytorch is unable to consume it. ");
       }
     }
@@ -355,7 +563,7 @@ TuningStatus TuningResultsValidator::ValidateAll(
 }
 
 void TuningResultsValidator::RegisterValidator(const std::string& key, const GetFunc& gf, const ValidateFunc& vf) {
-  if (validators_.find(key) != validators_.end()) {
+  if (validators_.contains(key)) {
     TORCH_WARN("Attempting to re-register validator with key ", key);
   }
   else {
@@ -382,18 +590,17 @@ TuningContext::TuningContext() :
     tuning_enable_{true},
     record_untuned_enable_{false},
     manager_initialized_{false},
-    write_file_on_exit_{true},
     numerics_check_enable_{false},
     max_tuning_duration_ms_{30},
     max_tuning_iterations_{100},
+    cublaslt_requested_algo_count_{8},
     max_warmup_duration_ms_{0},
     max_warmup_iterations_{0},
     icache_flush_{true},
     rotating_buffer_size_{-1},
-    filename_{},
-    untuned_file_{},
     results_count_from_input_file_{0},
-    is_shutting_down_{false}
+    is_shutting_down_{false},
+    wildcard_fallback_enabled_{false}
 {
 }
 
@@ -405,20 +612,8 @@ TuningContext::~TuningContext() {
     // but doesn't do any computation itself.
     return;
   }
-  auto filename = GetFilename();
-  if (IsTunableOpEnabled() && IsTuningEnabled() && !filename.empty() && write_file_on_exit_) {
-    if (results_count_from_input_file_ < GetTuningResultsManager().GetSize()) {
-      if (results_count_from_input_file_ > 0) {
-        TUNABLE_LOG1("additional tuning results available, rewriting file ", filename);
-      }
-      else {
-        TUNABLE_LOG1("writing file ", filename);
-      }
-      if (!WriteFile(filename)) {
-        TUNABLE_LOG1("failed to write file ", filename);
-      }
-    }
-  }
+  TUNABLE_LOG1("Closing File");
+  GetTuningResultsManager().CloseRealtimeAppend(); // Since, we do instant logging by default now.
 
   if (untuned_file_.good()) {
     untuned_file_.close();
@@ -459,7 +654,22 @@ void TuningContext::EnableRecordUntuned(bool value) {
     TUNABLE_LOG1("Enable Record Untuned for TunableOp");
   } else {
     TUNABLE_LOG1("Disable Record Untuned for TunableOp");
+    TUNABLE_LOG1("Closing Untuned GEMM Results File");
+    untuned_file_.close();
+    manager_.ClearUntuned();
   }
+}
+
+void TuningContext::EnableWildcardFallback(bool value) {
+  wildcard_fallback_enabled_ = value;
+}
+
+bool TuningContext::IsWildcardFallbackEnabled() const {
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_WILDCARD_FALLBACK") == "1";
+  if (eval) {
+    return true;
+  }
+  return wildcard_fallback_enabled_;
 }
 
 bool TuningContext::IsTuningEnabled() const {
@@ -492,25 +702,59 @@ std::ofstream& TuningContext::GetUntunedFile(){
       filename.append(device);
     }
 
-    untuned_file_ = std::ofstream(filename, std::ios::out | std::ios::trunc);
+    untuned_file_ = std::ofstream(filename, std::ios::out | std::ios::app);
   }
   return untuned_file_;
 }
 
-void TuningContext::WriteFileOnExit(bool value) {
-  write_file_on_exit_ = value;
-}
 
 void TuningContext::EnableNumericsCheck(bool value) {
   numerics_check_enable_ = value;
 }
 
-bool TuningContext::IsNumericsCheckEnabled() const {
-  const char *env = getenv("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
-  if (env != nullptr && strcmp(env, "1") == 0) {
-    return true;
+NumericalCheckConfig TuningContext::GetNumericalCheckConfig() const {
+  const auto env_opt = c10::utils::get_env("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
+
+  if (!env_opt.has_value()) {
+    return numerics_cfg_;
   }
-  return numerics_check_enable_;
+
+  const std::string& env = env_opt.value();
+
+  if (env == "0") {
+    return NumericalCheckConfig(false, 1e-5, 1e-5);
+  }
+
+  const size_t underscore = env.find('_');
+
+  TORCH_CHECK(
+      underscore != std::string::npos,
+      "Invalid PYTORCH_TUNABLEOP_NUMERICAL_CHECK format. "
+      "Expected 'atol_rtol', got: ",
+      env);
+
+  double atol = 0.0;
+  double rtol = 0.0;
+
+  try {
+    atol = std::stod(env.substr(0, underscore));
+    rtol = std::stod(env.substr(underscore + 1));
+  } catch (const std::exception& e) {
+    TORCH_CHECK(false, "Failed to parse PYTORCH_TUNABLEOP_NUMERICAL_CHECK: ", e.what());
+  }
+
+  TORCH_CHECK( atol > 0.0 && rtol > 0.0, "Tolerance values must be positive. atol=", atol, ", rtol=", rtol);
+  return NumericalCheckConfig(true, atol, rtol);
+}
+
+void TuningContext::SetNumericalCheckConfig(bool enabled, double atol, double rtol) {
+  TORCH_CHECK(atol > 0.0 && rtol > 0.0, "Numerical check tolerances must be positive");
+  numerics_cfg_ = {enabled, atol, rtol};
+}
+
+bool TuningContext::IsNumericsCheckEnabled() const {
+  const auto cfg = GetNumericalCheckConfig();
+  return cfg.enabled || numerics_check_enable_;
 }
 
 void TuningContext::SetMaxTuningDurationMs(int max_duration_ms) {
@@ -537,6 +781,26 @@ int TuningContext::GetMaxTuningIterations() const {
     return val < 0 ? 0 : val;
   }
   return max_tuning_iterations_;
+}
+
+void TuningContext::SetCublasLtRequestedAlgoCount(int count) {
+  cublaslt_requested_algo_count_ = std::max(1, count);
+}
+
+int TuningContext::GetCublasLtRequestedAlgoCount() const {
+  static const auto env = c10::utils::get_env(
+      "PYTORCH_TUNABLEOP_CUBLASLT_REQUESTED_ALGO_COUNT");
+  if (env.has_value()) {
+    try {
+      return std::max(1, std::stoi(env.value()));
+    } catch (const std::exception&) {
+      TORCH_WARN_ONCE(
+          "PYTORCH_TUNABLEOP_CUBLASLT_REQUESTED_ALGO_COUNT is not a valid "
+          "integer (got `", env.value(), "`). Falling back to the value set "
+          "via torch.cuda.tunable.set_cublaslt_requested_algo_count.");
+    }
+  }
+  return cublaslt_requested_algo_count_;
 }
 
 void TuningContext::SetMaxWarmupDurationMs(int max_duration_ms) {
@@ -620,11 +884,6 @@ TuningResultsManager& TuningContext::GetTuningResultsManager() {
     auto filename = GetFilename();
     if (!filename.empty() && !IsRecordUntunedEnabled()) {
       ReadFile(filename);
-      // attempt immediately to open file for writing to catch errors early
-      std::ofstream file(filename, std::ios::out | std::ios::app);
-      if (!file.good()) {
-        TORCH_WARN("failed to open file '", filename, "' for writing; your tuning results will not be saved");
-      }
     }
   });
   return manager_;
@@ -730,27 +989,6 @@ bool TuningContext::ReadFile(const std::string& filename_) {
   return true;
 }
 
-bool TuningContext::WriteFile(const std::string& filename_) {
-  std::string filename = filename_.empty() ? GetFilename() : filename_;
-  std::ofstream file(filename, std::ios::out | std::ios::trunc);
-  if (!file.good()) {
-    TUNABLE_LOG1("error opening tuning results file for writing ", filename);
-    return false;
-  }
-  auto validators = GetTuningResultsValidator().GetAllValidators();
-  for (const auto& [key, val] : validators) {
-    file << "Validator," << key << "," << val << std::endl;
-  }
-  auto results = GetTuningResultsManager().Dump();
-  for (const auto& [op_sig, kernelmap] : results) {
-    for (const auto& [param_sig, result] : kernelmap) {
-      file << op_sig << "," << param_sig << "," << result << std::endl;
-    }
-  }
-  file.close();
-  return true;
-}
-
 namespace {
 
 struct MaybeDelete {
@@ -793,6 +1031,56 @@ bool TuningContext::GetLogOkay() const {
 std::ostream& TuningContext::GetLog() const {
   static auto streamptr = get_stream(GetLogFilename());
   return *streamptr;
+}
+
+namespace {
+
+// Per-thread stack of dynamic-dims masks. Producers in Blas.cpp /
+// CUDABlas.cpp / ScaledBlas.cpp read the top via GetCurrentDynamicDimsMask()
+// and stamp it onto the constructed Gemm*Params before calling the
+// TunableOp. The stack semantics let nested wrappers compose naturally:
+// e.g. an outer torch.cuda.tunable.dynamic_dims_mask(...) ctx-mgr around a
+// benchmark loop, with inner per-choice or per-call wrappers; each
+// TunableDynamicDimsGuard pushes on construction and pops on destruction.
+std::vector<DynamicDimsMask>& dynamic_dims_stack() {
+  // Function-local TLS: avoids a static-init dependency on std::vector's
+  // ctor running before any TunableDynamicDimsGuard is constructed.
+  thread_local std::vector<DynamicDimsMask> stack;
+  return stack;
+}
+
+} // namespace
+
+DynamicDimsMask GetCurrentDynamicDimsMask() {
+  const auto& stack = dynamic_dims_stack();
+  if (stack.empty()) {
+    return DynamicDimsMask{};
+  }
+  return stack.back();
+}
+
+TunableDynamicDimsGuard::TunableDynamicDimsGuard(DynamicDimsMask mask)
+    : owner_thread_(std::this_thread::get_id()) {
+  dynamic_dims_stack().push_back(mask);
+}
+
+TunableDynamicDimsGuard::~TunableDynamicDimsGuard() {
+  // The stack is thread-local and unsynchronized, so popping from another
+  // thread would silently corrupt that thread's stack. Skip the pop instead
+  // and leave the owner's entry behind; the owner's stack unwinds with the
+  // thread. See the class comment for the pairing contract.
+  if (std::this_thread::get_id() != owner_thread_) {
+    TORCH_WARN_ONCE(
+        "TunableDynamicDimsGuard destroyed on a different thread than the one "
+        "that created it; skipping the pop. Push and pop must be paired on a "
+        "single thread -- prefer the torch.cuda.tunable.dynamic_dims_mask "
+        "context manager.");
+    return;
+  }
+  auto& stack = dynamic_dims_stack();
+  if (!stack.empty()) {
+    stack.pop_back();
+  }
 }
 
 } // namespace at::cuda::tunable

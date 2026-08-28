@@ -10,8 +10,8 @@ we will import V from this module::
     from .virtualized import V
 
 Various handlers are accessible as attributes on this module; for example,
-you might access ``V.graph.sizevars.size_hint`` to resolve a size hint associated with
-a number.
+you might access ``V.graph.sizevars.optimization_hint`` to resolve a hint
+associated with a symbolic expression.
 
 There are a few distinct usage patterns for virtualized global variables:
 
@@ -59,11 +59,12 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, contextmanager
 from threading import local
-from typing import Any, Callable, Generic, List, Type, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar
 
 from torch.utils._ordered_set import OrderedSet
 
 from .ops_handler import (  # noqa: F401
+    DefaultHandler,
     KernelFormatterHandler,
     MockHandler,
     OpsHandler,
@@ -74,13 +75,48 @@ from .ops_handler import (  # noqa: F401
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+    from typing import Protocol
+
     import torch
     from torch._inductor.choices import InductorChoices
+    from torch._inductor.codegen.common import CSE, CSEVariable, KernelArgs
     from torch._inductor.codegen.cpp_utils import LocalBufferContext
     from torch._inductor.debug import DebugContext
     from torch._inductor.graph import GraphLowering
+    from torch._inductor.ir import ExternKernelNode
     from torch._inductor.loop_body import InterpreterShim
+    from torch._inductor.scheduler import SchedulerNode
     from torch._subclasses import FakeTensorMode
+
+    from .distributed_autotune import _DistributedAutotuneState
+    from .utils import IndentedBuffer, InputType
+
+    class KernelLike(Protocol):
+        """
+        Structural type for ``V.kernel``.  Its backing handler ranges from the
+        ``NullKernelHandler`` sentinel (installed while codegening the wrapper,
+        before any kernel exists) to a concrete ``Kernel`` subclass during
+        kernel codegen, so callers duck-type against this common surface rather
+        than a single class.  The members declared explicitly below are the
+        common surface relied on regardless of backend; the ``__getattr__``
+        fallback keeps backend-specific members (e.g. Triton/CPP tiling state)
+        accessible as ``Any`` without forcing every kernel class to enumerate
+        them here.
+        """
+
+        removed_buffers: OrderedSet[str]
+        inplaced_to_remove: OrderedSet[str]
+        index_dtype: str
+        cse: CSE[Any, Any]
+        compute: IndentedBuffer
+        current_node: SchedulerNode | None
+        args: KernelArgs
+
+        def create_cse_var(self, *args: Any, **kwargs: Any) -> CSEVariable: ...
+        def __getattr__(self, name: str) -> Any: ...
+        def __setattr__(self, name: str, value: Any) -> None: ...
+
 
 threadlocal = local()
 
@@ -93,6 +129,14 @@ class NullHandler:
     attempting to access the global variable before it's set is an error, but with
     NullHandler it won't fail until you try to access an attribute on it.
     """
+
+
+# If a virtualized value is set to _PoisonedVirtual then any attempt to get the
+# value will result in an exception being raised. This is useful if we want to
+# trap uninitialized reads of virtualized globals - for example when compiling
+# in a subprocess we don't want the child reading globals that weren't copied
+# from the parent.
+_PoisonedVirtual = object()
 
 
 class Virtualized(Generic[T]):
@@ -108,12 +152,13 @@ class Virtualized(Generic[T]):
     store other things, like booleans.
     """
 
-    def __init__(self, vname: str, default: Union[Callable[[], T], Type[NullHandler]]):
+    def __init__(self, vname: str, default: Callable[[], T] | type[NullHandler]):
+        self._vname = vname
         self._key: str = f"__torchinductor_{vname}"
         self._default = default
 
     def _set_handler(self, value: T) -> AbstractContextManager[None]:
-        prior = self._get_handler()
+        prior = self._get_handler(False)
         setattr(threadlocal, self._key, value)
 
         @contextmanager
@@ -125,9 +170,14 @@ class Virtualized(Generic[T]):
 
         return ctx()
 
-    def _get_handler(self) -> T:
+    def _get_handler(self, check_poisoned: bool = True) -> T:
         try:
-            return getattr(threadlocal, self._key)
+            value = getattr(threadlocal, self._key)
+            if check_poisoned and value is _PoisonedVirtual:
+                raise RuntimeError(
+                    f"Attempt to use poisoned virtualized value '{self._vname}'."
+                )
+            return value
         except AttributeError:
             # TODO: To be honest, I feel we probably should just error in this
             # case, instead of making a null handler that will probably error
@@ -153,20 +203,48 @@ class NullKernelHandler(NullHandler):
         self.inplaced_to_remove = OrderedSet[Any]()
         self.index_dtype = "tl.int64"
 
+    def get_index_dtype_as_torch_dtype(self):
+        import torch
 
-_ops: Virtualized[OpsHandler[Any]] = Virtualized("ops", MockHandler)
+        if self.index_dtype == "tl.int64":
+            return torch.int64
+        elif self.index_dtype == "tl.int32":
+            return torch.int32
+        else:
+            raise ValueError(f"Unknown dtype: {self.index_dtype}")
+
+
+_ops: Virtualized[OpsHandler[Any]] = Virtualized(
+    "ops", cast(type[OpsHandler[Any]], MockHandler)
+)
 _graph: Virtualized[GraphLowering] = Virtualized("graph", NullHandler)
-_real_inputs: Virtualized[List[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
+_extern_kernel_nodes: Virtualized[list[ExternKernelNode]] = Virtualized(
+    "extern_kernel_nodes", NullHandler
+)
+_real_inputs: Virtualized[Sequence[InputType]] = Virtualized("real_inputs", NullHandler)
 _fake_mode: Virtualized[FakeTensorMode] = Virtualized("fake_mode", NullHandler)
-_kernel: Virtualized[NullKernelHandler] = Virtualized(
-    "kernel", NullKernelHandler
-)  # TODO: improve type
+_kernel: Virtualized[KernelLike] = Virtualized("kernel", NullKernelHandler)
 _debug: Virtualized[DebugContext] = Virtualized("debug", NullHandler)
 _interpreter: Virtualized[InterpreterShim] = Virtualized("interpreter", NullHandler)
 _aot_compilation: Virtualized[bool] = Virtualized("aot_compilation", NullHandler)
 _current_node: Virtualized[torch.fx.Node] = Virtualized("current_node", NullHandler)
 _local_buffer_context: Virtualized[LocalBufferContext] = Virtualized(
     "local_buffer_context", NullHandler
+)
+_distributed_autotune_state: Virtualized[_DistributedAutotuneState] = Virtualized(
+    "distributed_autotune_state", NullHandler
+)
+
+
+def _active_user_lowering_ops_default() -> OrderedSet[Any]:
+    """Default factory for active_user_lowering_ops - returns persisted empty set."""
+    rv: OrderedSet[Any] = OrderedSet()
+    setattr(threadlocal, _active_user_lowering_ops._key, rv)
+    return rv
+
+
+_active_user_lowering_ops: Virtualized[OrderedSet[Any]] = Virtualized(
+    "active_user_lowering_ops", _active_user_lowering_ops_default
 )
 
 
@@ -176,9 +254,10 @@ def _choices_default():
 
     We virtualize InductorChoices to allow changing inductor heuristics from out of tree.
     """
-    from torch._inductor.choices import InductorChoices
+    from torch._inductor import config
+    from torch._inductor.choices import create_inductor_choices
 
-    rv = InductorChoices()
+    rv = create_inductor_choices(config.inductor_choices_class)
     setattr(threadlocal, _choices._key, rv)
     return rv
 
@@ -272,18 +351,15 @@ class OpsValue:
         return ops.bitwise_left_shift(self, n)
 
 
-class OpsWrapper:
+class OpsWrapper(DefaultHandler):
     """This wraps any returned IR values into an `OpsValue` instance, so that we
     can overload the magic methods for writing mathematical expressions fluently.
     """
 
-    def __getattr__(self, name):
-        def inner(*args, **kwargs):
-            new_args = [OpsWrapper._unwrap(a) for a in args]
-            new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
-            return OpsWrapper._wrap(getattr(_ops, name)(*new_args, **new_kwargs))
-
-        return inner
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        new_args = [OpsWrapper._unwrap(a) for a in args]
+        new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
+        return OpsWrapper._wrap(getattr(_ops, name)(*new_args, **new_kwargs))
 
     @staticmethod
     def _unwrap(x):
@@ -300,13 +376,14 @@ class OpsWrapper:
         return OpsValue(x)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def indirect_indexing(index, size, check=True, wrap_neg=True):
         # Returns a sympy value, not IR value
         index = OpsWrapper._unwrap(index)
         return _ops.indirect_indexing(index, size, check, wrap_neg)
 
 
-ops = OpsWrapper()
+ops: OpsHandler[Any] = OpsWrapper()
 
 
 class _V:
@@ -314,23 +391,66 @@ class _V:
     KernelFormatterHandler = KernelFormatterHandler
     WrapperHandler = WrapperHandler
 
-    set_ops_handler: Callable[[Any], Any] = _ops._set_handler
-    get_ops_handler: Callable[[], Any] = _ops._get_handler
-    set_graph_handler: Callable[[GraphLowering], Any] = _graph._set_handler
-    set_real_inputs: Callable[[Any], Any] = _real_inputs._set_handler
-    get_real_inputs: Callable[[], Any] = _real_inputs._get_handler
-    set_fake_mode: Callable[[Any], Any] = _fake_mode._set_handler
-    get_fake_mode: Callable[[], Any] = _fake_mode._get_handler
-    set_kernel_handler: Callable[[Any], Any] = _kernel._set_handler
-    set_debug_handler: Callable[[Any], Any] = _debug._set_handler
-    set_interpreter_handler: Callable[[Any], Any] = _interpreter._set_handler
-    set_aot_compilation: Callable[[bool], Any] = _aot_compilation._set_handler
-    get_aot_compilation: Callable[[], Any] = _aot_compilation._get_handler
-    set_current_node: Callable[[Any], Any] = _current_node._set_handler
-    get_current_node: Callable[[], Any] = _current_node._get_handler
-    set_local_buffer_context: Callable[[Any], Any] = _local_buffer_context._set_handler
-    get_local_buffer_context: Callable[[], Any] = _local_buffer_context._get_handler
-    set_choices_handler: Callable[[Any], Any] = _choices._set_handler
+    set_ops_handler: Callable[[OpsHandler[Any]], AbstractContextManager[None]] = (
+        _ops._set_handler
+    )
+    get_ops_handler: Callable[[], OpsHandler[Any]] = _ops._get_handler
+    set_graph_handler: Callable[[GraphLowering], AbstractContextManager[None]] = (
+        _graph._set_handler
+    )
+    set_extern_kernel_nodes: Callable[
+        [list[ExternKernelNode]], AbstractContextManager[None]
+    ] = _extern_kernel_nodes._set_handler
+    set_real_inputs: Callable[[Sequence[InputType]], AbstractContextManager[None]] = (
+        _real_inputs._set_handler
+    )
+    get_real_inputs: Callable[[], Sequence[InputType]] = _real_inputs._get_handler
+    # Broad param: fake_mode may be installed as None (see compile_fx); the
+    # getter still narrows to FakeTensorMode for the common set-then-read path.
+    set_fake_mode: Callable[[Any], AbstractContextManager[None]] = (
+        _fake_mode._set_handler
+    )
+    get_fake_mode: Callable[[], FakeTensorMode] = _fake_mode._get_handler
+    set_kernel_handler: Callable[[Any], AbstractContextManager[None]] = (
+        _kernel._set_handler
+    )
+    set_debug_handler: Callable[[DebugContext], AbstractContextManager[None]] = (
+        _debug._set_handler
+    )
+    set_interpreter_handler: Callable[
+        [InterpreterShim], AbstractContextManager[None]
+    ] = _interpreter._set_handler
+    set_aot_compilation: Callable[[bool], AbstractContextManager[None]] = (
+        _aot_compilation._set_handler
+    )
+    get_aot_compilation: Callable[[], bool] = _aot_compilation._get_handler
+    set_current_node: Callable[[torch.fx.Node], AbstractContextManager[None]] = (
+        _current_node._set_handler
+    )
+    get_current_node: Callable[[], torch.fx.Node] = _current_node._get_handler
+    set_local_buffer_context: Callable[
+        [LocalBufferContext], AbstractContextManager[None]
+    ] = _local_buffer_context._set_handler
+    get_local_buffer_context: Callable[[], LocalBufferContext] = (
+        _local_buffer_context._get_handler
+    )
+    set_choices_handler: Callable[[InductorChoices], AbstractContextManager[None]] = (
+        _choices._set_handler
+    )
+    # Broad param: the state is reset by installing a NullHandler (see
+    # distributed_autotune.graph_context); the getter narrows on the read path.
+    set_distributed_autotune_state: Callable[[Any], AbstractContextManager[None]] = (
+        _distributed_autotune_state._set_handler
+    )
+    get_distributed_autotune_state: Callable[[], _DistributedAutotuneState] = (
+        _distributed_autotune_state._get_handler
+    )
+    set_active_user_lowering_ops: Callable[
+        [OrderedSet[Any]], AbstractContextManager[None]
+    ] = _active_user_lowering_ops._set_handler
+    get_active_user_lowering_ops: Callable[[], OrderedSet[Any]] = (
+        _active_user_lowering_ops._get_handler
+    )
 
     @property
     def ops(self) -> OpsHandler[Any]:
@@ -343,20 +463,33 @@ class _V:
         return _graph._get_handler()
 
     @property
-    def real_inputs(self):
+    def extern_kernel_nodes(self) -> list[ExternKernelNode]:
+        """
+        The extern_kernel_nodes needed for the entire graph, including the
+        subgraphs.
+        See `ProxyExecutor Design Note` in ir.py for more details
+        """
+        return _extern_kernel_nodes._get_handler()
+
+    @property
+    def real_inputs(self) -> Sequence[InputType]:
         """non-fake example inputs"""
         return _real_inputs._get_handler()
 
     @property
-    def fake_mode(self):
+    def fake_mode(self) -> FakeTensorMode:
         """The graph currently being generated"""
         return _fake_mode._get_handler()
 
     @property
-    def kernel(self):
+    def kernel(self) -> KernelLike:
         """The kernel currently being generated"""
         return _kernel._get_handler()
 
+    # debug and interpreter intentionally keep an inferred (dynamic) return type.
+    # DebugContext dispatches via __getattr__ and InterpreterShim carries an
+    # Optional current_node, so pinning the concrete class here surfaces spurious
+    # callable/None errors at unrelated call sites.
     @property
     def debug(self):
         return _debug._get_handler()
@@ -366,20 +499,29 @@ class _V:
         return _interpreter._get_handler()
 
     @property
-    def aot_compilation(self):
-        return _aot_compilation._get_handler()
+    def aot_compilation(self) -> bool:
+        return _aot_compilation._get_handler() is True
 
     @property
-    def current_node(self):
+    def current_node(self) -> torch.fx.Node:
         return _current_node._get_handler()
 
     @property
-    def local_buffer_context(self):
+    def local_buffer_context(self) -> LocalBufferContext:
         return _local_buffer_context._get_handler()
 
     @property
     def choices(self) -> InductorChoices:
         return _choices._get_handler()
+
+    @property
+    def distributed_autotune_state(self) -> _DistributedAutotuneState:
+        return _distributed_autotune_state._get_handler()
+
+    @property
+    def active_user_lowering_ops(self) -> OrderedSet[Any]:
+        """Set of ops currently being lowered via user_lowerings (for recursion guard)."""
+        return _active_user_lowering_ops._get_handler()
 
 
 V = _V()

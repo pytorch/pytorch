@@ -1,0 +1,10 @@
+# tools/test/header_only_linter_testdata/a.h
+  a
+
+  # indented comment should do nothing
+symC
+
+
+
+# tools/test/header_only_linter_testdata/bbb.h
+  symDef

@@ -19,12 +19,9 @@
 // contains the full, original git history for both files.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Context.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/irange.h>
 
@@ -164,7 +161,7 @@ static void apply_triangular_solve(const Tensor& A, const Tensor& B, bool left, 
   cublasSideMode_t side = left ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT;
   cublasDiagType_t diag = unitriangular ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
 
-  auto A_data = A.data_ptr<scalar_t>();
+  auto A_data = A.const_data_ptr<scalar_t>();
   auto B_data = B.data_ptr<scalar_t>();
   auto A_mat_stride = matrixStride(A);
   auto B_mat_stride = matrixStride(B);
@@ -178,7 +175,7 @@ static void apply_triangular_solve(const Tensor& A, const Tensor& B, bool left, 
   auto alpha = scalar_t{1};
 
   for (decltype(batch_size) i = 0; i < batch_size; i++) {
-    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
+    const scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* B_working_ptr = &B_data[i * B_mat_stride];
     auto handle = at::cuda::getCurrentCUDABlasHandle();
     at::cuda::blas::trsm(handle, side, uplo, trans, diag, m, n, &alpha, A_working_ptr, lda, B_working_ptr, ldb);

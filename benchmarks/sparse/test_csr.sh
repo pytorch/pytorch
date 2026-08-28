@@ -8,11 +8,9 @@ echo "----- USE_MKL=1 -----" >> $OUTFILE
 rm -rf build
 
 export USE_MKL=1
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-python setup.py build --cmake-only
-ccmake build  # or cmake-gui build
-
-python setup.py install
+python -m pip install --no-build-isolation -v .
+# To inspect or adjust the CMake cache: ccmake build (or cmake-gui build),
+# then rerun the pip install above.
 
 cd benchmarks
 echo "!! SPARSE SPMM TIME BENCHMARK!! " >> $OUTFILE
@@ -29,7 +27,7 @@ echo "----- USE_MKL=0 ------" >> $OUTFILE
 rm -rf build
 
 export USE_MKL=0
-python setup.py install
+python -m pip install --no-build-isolation -v .
 
 cd benchmarks
 for dim0 in 1000 5000 10000; do

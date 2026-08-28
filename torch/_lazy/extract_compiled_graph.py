@@ -1,9 +1,9 @@
-# mypy: allow-untyped-defs
 import copy
 import dataclasses
 import itertools
 import os
-from typing import Any, Callable, Dict, List
+from collections.abc import Iterable, Mapping, Sequence
+from typing import cast, Protocol, TypeAlias, TypeVar
 
 import torch
 import torch._lazy as lazy
@@ -11,9 +11,20 @@ import torch._lazy.metrics as metrics
 from torch import fx
 from torch._lazy import computation, debug as lazy_debug
 from torch._lazy.tensor_factory_functions import tensor_factory_functions
+from torch.fx.node import Argument
 
 
 debug = os.environ.get("debug_extract_compiled_graph") is not None
+
+_T = TypeVar("_T")
+
+# A TorchScript graph-input IValue: concretely a const tensor, a device-data
+# node, or a runtime argument, none of which share a useful static type here.
+_IValue: TypeAlias = object
+
+
+class _CompiledFn(Protocol):
+    def __call__(self, *args: torch.Tensor) -> Sequence[torch.Tensor]: ...
 
 
 @dataclasses.dataclass
@@ -28,18 +39,18 @@ class GraphInputMatcher:
     TS/XLA graph inputs.
     """
 
-    tensor_id_to_arg_idx: Dict[int, int]
-    graph_input_tensor_ids: List[int]
+    tensor_id_to_arg_idx: dict[int, int]
+    graph_input_tensor_ids: list[int]
     # there are 2 categories of graph_input_tensors.
     # Category 1: those whose id are not found in tensor_id_to_arg_idx. These are
     # most likely const tensors and we can get its content from graph_input_tensors
     # Category 2: those whose id are found in tensor_id_to_arg_idx. We should get
     #  the tensor from method arguments
-    graph_input_ivalues: List[Any]
+    graph_input_ivalues: list[_IValue]
 
     # get the real graph input tensors
-    def __call__(self, args):
-        real_input = []
+    def __call__(self, args: Sequence[object]) -> list[_IValue]:
+        real_input: list[_IValue] = []
         for tensor_id, traced_ivalue in zip(
             self.graph_input_tensor_ids, self.graph_input_ivalues
         ):
@@ -56,9 +67,9 @@ class ReturnValueHandler:
     r"""
     When ltc_sync_multi is called on multi tensors, the compiled graph
     will contain output only for unique tensors - if a tensor appears multiple
-    times in the input to _ltc_sync_multi, only the first occurance matters.
+    times in the input to _ltc_sync_multi, only the first occurrence matters.
 
-    However from python level, we still expect multi tensors returned with duplciation
+    However from python level, we still expect multi tensors returned with duplication
     even if the TS graph dedup the output. e.g. for method:
 
       def forward(self, a):
@@ -70,13 +81,13 @@ class ReturnValueHandler:
     to duplicate the eager tensors later.
     """
 
-    def __init__(self, lazy_out_list):
-        self.index: List[List[int]] = []
+    def __init__(self, lazy_out_list: Sequence[object]) -> None:
+        self.index: list[list[int]] = []
         self.total_count = len(lazy_out_list)
 
-        tensor_id_to_idx: Dict[int, int] = {}
+        tensor_id_to_idx: dict[int, int] = {}
         for dup_idx, lazy_tensor in enumerate(lazy_out_list):
-            uniq_idx = tensor_id_to_idx.get(id(lazy_tensor), None)
+            uniq_idx = tensor_id_to_idx.get(id(lazy_tensor))
             if uniq_idx is not None:
                 self.index[uniq_idx].append(dup_idx)
             else:
@@ -84,29 +95,33 @@ class ReturnValueHandler:
                 self.index.append([dup_idx])
                 tensor_id_to_idx[id(lazy_tensor)] = uniq_idx
 
-    def duplicate_eager_tensors(self, eager_tensor_list):
-        duplicated_list = [None] * self.total_count
-        assert len(eager_tensor_list) == len(self.index)
+    def duplicate_eager_tensors(self, eager_tensor_list: Sequence[_T]) -> list[_T]:
+        duplicated_list: list[_T | None] = [None] * self.total_count
+        if len(eager_tensor_list) != len(self.index):
+            raise AssertionError(
+                f"eager_tensor_list length {len(eager_tensor_list)} != index length {len(self.index)}"
+            )
 
         for uniq_idx, eager_tensor in enumerate(eager_tensor_list):
             for dup_idx in self.index[uniq_idx]:
                 duplicated_list[dup_idx] = eager_tensor
-        return duplicated_list
+        # every slot is filled: self.index partitions range(total_count).
+        return cast(list[_T], duplicated_list)
 
 
-def force_lazy_device(model: fx.GraphModule):
+def force_lazy_device(model: fx.GraphModule) -> None:
     """
     Factory methods in a Fx graph may create tensors for a specific eager devices.
     If we take no actions, those eager tensors will be mixed with lazy tensors and
     cause crash. This method overwrite those eager device to lazy device.
     """
 
-    def tolazydevice(dev):
+    def tolazydevice(dev: _T) -> _T:
         if isinstance(dev, torch.device):
-            return torch.device("lazy", index=dev.index)
+            return cast(_T, torch.device("lazy", index=dev.index))
         return dev
 
-    def hasDeviceArg(args, kwargs):
+    def hasDeviceArg(args: Iterable[Argument], kwargs: Mapping[str, Argument]) -> bool:
         return any(
             isinstance(arg, torch.device)
             for arg in itertools.chain(args, kwargs.values())
@@ -123,9 +138,9 @@ def force_lazy_device(model: fx.GraphModule):
         # To force those tensors on the lazy device, we can not simply override
         # the device argument since there is no explicit device argument.
         # What we are doing here is, for the list of covered tensor factory methods
-        # we add a lazy device argument explicity.
+        # we add a lazy device argument explicitly.
         #
-        # TODO: This solution is no ideal since we may miss some factory methods. In future
+        # TODO: This solution is not ideal since we may miss some factory methods. In future
         # when we support lazy mode, this method can be replaced by that.
         if nd.target in tensor_factory_functions and not hasDeviceArg(
             nd.args, nd.kwargs
@@ -137,7 +152,7 @@ def force_lazy_device(model: fx.GraphModule):
     model.recompile()
 
 
-def get_fallback_ops():
+def get_fallback_ops() -> list[str]:
     fallback_ops = []
     for opname in metrics.counter_names():
         if "aten::" not in opname:
@@ -149,7 +164,9 @@ def get_fallback_ops():
     return fallback_ops
 
 
-def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
+def extract_compiled_graph(
+    model: fx.GraphModule, example_inputs: Sequence[torch.Tensor]
+) -> _CompiledFn:
     """
     Optimize an eager model with LTC and returns a wrapper to execute the
     compiled graph directly without retracing. It depends on other mechanisms
@@ -170,7 +187,7 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
 
     if len(fallback_ops) > 0:
         raise RuntimeError(
-            f"Fail to extact the compiled graph because of fallback: {','.join(fallback_ops)}"
+            f"Fail to extract the compiled graph because of fallback: {','.join(fallback_ops)}"
         )
 
     if not isinstance(lazy_out, (tuple, list)):
@@ -188,7 +205,11 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
         graph_input_tensor_ids,
         graph_input_ivalues,
     ) = computation.get_tensors_ts_device_data_node(args_and_out)
-    assert len(graph_input_tensor_ids) == len(graph_input_ivalues)
+    if len(graph_input_tensor_ids) != len(graph_input_ivalues):
+        raise AssertionError(
+            f"graph_input_tensor_ids length {len(graph_input_tensor_ids)} "
+            f"!= graph_input_ivalues length {len(graph_input_ivalues)}"
+        )
     graph_input_matcher = GraphInputMatcher(
         tensor_id_to_arg_idx, graph_input_tensor_ids, graph_input_ivalues
     )
@@ -205,7 +226,7 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
     # by graph hash later.
     lazy.sync_multi(args_and_out, [])
 
-    def optimized_mod(*args):
+    def optimized_mod(*args: torch.Tensor) -> Sequence[torch.Tensor]:
         if len(args_and_out) == 0:
             return ()
         graph_input = graph_input_matcher(args)
@@ -213,7 +234,10 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
             computation.run_cached_graph(graph_hash, graph_input)
         )
 
-        assert len(res) == len(args_and_out)
+        if len(res) != len(args_and_out):
+            raise AssertionError(
+                f"result length {len(res)} != args_and_out length {len(args_and_out)}"
+            )
         for i, arg in enumerate(args):
             # only copy those tensors that get inplace updated
             if arg is not res[i]:

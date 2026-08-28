@@ -1,7 +1,5 @@
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/constant_map.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -23,8 +21,7 @@ void ConstantValueMap::SetRank(
 }
 
 bool ConstantValueMap::HasRank(const std::string& tensorName) {
-  return ConstantValueMap::getInstance().rankMap.find(tensorName) !=
-      ConstantValueMap::getInstance().rankMap.end();
+  return ConstantValueMap::getInstance().rankMap.contains(tensorName);
 }
 
 std::optional<size_t> ConstantValueMap::GetRank(const std::string& tensorName) {
@@ -58,8 +55,7 @@ void ConstantValueMap::SetShape(
 }
 
 bool ConstantValueMap::HasShape(const std::string& tensorName) {
-  return ConstantValueMap::getInstance().shapeMap.find(tensorName) !=
-      ConstantValueMap::getInstance().shapeMap.end();
+  return ConstantValueMap::getInstance().shapeMap.contains(tensorName);
 }
 
 std::optional<c10::SymbolicShape> ConstantValueMap::GetShape(
@@ -77,8 +73,7 @@ void ConstantValueMap::SetValue(
 }
 
 bool ConstantValueMap::HasValue(const std::string& tensorName) {
-  return ConstantValueMap::getInstance().tensorValueMap.find(tensorName) !=
-      ConstantValueMap::getInstance().tensorValueMap.end();
+  return ConstantValueMap::getInstance().tensorValueMap.contains(tensorName);
 }
 
 std::optional<at::Tensor> ConstantValueMap::GetValue(
@@ -122,27 +117,24 @@ std::optional<std::vector<int64_t>> ConstantValueMap::
     GetShapeInto1DInt64VectorWithOneUnknown(const std::string& value_name) {
   if (ConstantValueMap::HasShape(value_name)) {
     auto shape_size = ConstantValueMap::GetShape(value_name).value();
-    std::vector<int64_t> shape_value;
     if (shape_size.isComplete()) {
-      shape_value =
-          ConstantValueMap::GetCompleteShapeInto1DInt64Vector(shape_size);
-      return shape_value;
-    } else {
-      size_t count_unknown = 0;
-      auto shape_size_sizes = shape_size.sizes();
-      if (shape_size_sizes.has_value()) {
-        auto shape_symbol_list = shape_size_sizes.value();
-        for (const auto& v : shape_symbol_list) {
-          if (v.is_static()) {
-            shape_value.emplace_back(v.static_size());
-          } else {
-            shape_value.emplace_back(-1);
-            count_unknown += 1;
-          }
+      return ConstantValueMap::GetCompleteShapeInto1DInt64Vector(shape_size);
+    }
+    size_t count_unknown = 0;
+    auto shape_size_sizes = shape_size.sizes();
+    if (shape_size_sizes.has_value()) {
+      std::vector<int64_t> shape_value;
+      auto shape_symbol_list = shape_size_sizes.value();
+      for (const auto& v : shape_symbol_list) {
+        if (v.is_static()) {
+          shape_value.emplace_back(v.static_size());
+        } else {
+          shape_value.emplace_back(-1);
+          count_unknown += 1;
         }
-        if (count_unknown == 1) {
-          return shape_value;
-        }
+      }
+      if (count_unknown == 1) {
+        return shape_value;
       }
     }
   }
@@ -170,8 +162,7 @@ void ConstantValueMap::SetTypeReliable(
 }
 
 bool ConstantValueMap::HasTypeReliable(const std::string& tensorName) {
-  return ConstantValueMap::getInstance().typeReliableMap.find(tensorName) !=
-      ConstantValueMap::getInstance().typeReliableMap.end();
+  return ConstantValueMap::getInstance().typeReliableMap.contains(tensorName);
 }
 
 std::optional<bool> ConstantValueMap::GetTypeReliable(
@@ -189,8 +180,8 @@ void ConstantValueMap::SetUseInferredType(
 }
 
 bool ConstantValueMap::HasUseInferredType(const std::string& tensorName) {
-  return ConstantValueMap::getInstance().useInferredTypeMap.find(tensorName) !=
-      ConstantValueMap::getInstance().useInferredTypeMap.end();
+  return ConstantValueMap::getInstance().useInferredTypeMap.contains(
+      tensorName);
 }
 
 std::optional<bool> ConstantValueMap::GetUseInferredType(
@@ -208,8 +199,7 @@ void ConstantValueMap::SetShapeValue(
 }
 
 bool ConstantValueMap::HasShapeValue(const std::string& tensorName) {
-  return ConstantValueMap::getInstance().shapeValueMap.find(tensorName) !=
-      ConstantValueMap::getInstance().shapeValueMap.end();
+  return ConstantValueMap::getInstance().shapeValueMap.contains(tensorName);
 }
 
 std::optional<c10::SymbolicShape> ConstantValueMap::GetShapeValue(
@@ -234,7 +224,7 @@ DimSymbolMap& ConstantValueMap::GetDimSymbolMap() {
 }
 
 template <typename Map>
-void UpdateStrKey(
+static void UpdateStrKey(
     Map& map,
     const std::string& old_key,
     const std::string& new_key) {
@@ -287,8 +277,7 @@ void ConstantValueMap::PrintMaps() {
   std::cout << "Rank/Shape Map:" << '\n';
   for (const auto& x : ConstantValueMap::getInstance().rankMap) {
     std::stringstream ss;
-    if (ConstantValueMap::getInstance().shapeMap.find(x.first) !=
-        ConstantValueMap::getInstance().shapeMap.end()) {
+    if (ConstantValueMap::getInstance().shapeMap.contains(x.first)) {
       auto shape_symbols =
           ConstantValueMap::getInstance().shapeMap[x.first].sizes();
       if (shape_symbols.has_value()) {
@@ -301,8 +290,8 @@ void ConstantValueMap::PrintMaps() {
         }
       }
     }
-    ss << " (rank = " << x.second << ")";
-    std::cout << "node " << x.first << ": " << ss.str() << '\n';
+    ss << " (rank = " << x.second << ')';
+    std::cout << "node " << x.first << ": " << std::move(ss).str() << '\n';
   }
   std::cout << '\n';
   std::cout << "Value Map:" << '\n';
@@ -346,9 +335,9 @@ void ConstantValueMap::PrintMaps() {
     std::cout << "(node " << x.first << ": ";
     for (const auto& dim : x.second.dim()) {
       if (dim.has_dim_param()) {
-        std::cout << dim.dim_param() << " ";
+        std::cout << dim.dim_param() << ' ';
       } else {
-        std::cout << dim.dim_value() << " ";
+        std::cout << dim.dim_value() << ' ';
       }
     }
     std::cout << "), ";
@@ -361,7 +350,7 @@ void ConstantValueMap::PrintMaps() {
   std::cout << "SymbolDim Map:" << '\n';
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().symbolDimMap) {
-    std::cout << "(" << x.first << ": " << x.second << "), ";
+    std::cout << '(' << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
       std::cout << '\n';
@@ -370,7 +359,7 @@ void ConstantValueMap::PrintMaps() {
   std::cout << "DimSymbol Map:" << '\n';
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().dimSymbolMap) {
-    std::cout << "(" << x.first << ": " << x.second << "), ";
+    std::cout << '(' << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
       std::cout << '\n';

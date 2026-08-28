@@ -25,7 +25,7 @@ into two broad categories:
 
   * `Timer` implements the `blocked_autorange` function which is a
   mixture of `timeit.Timer.repeat` and `timeit.Timer.autorange`. This function
-  selects and appropriate number and runs for a roughly fixed amount of time
+  selects an appropriate number and runs for a roughly fixed amount of time
   (like `autorange`), but is less wasteful than `autorange` which discards
   ~75% of measurements. It runs many times, similar to `repeat`, and returns
   a `Measurement` containing all of the run results.
@@ -46,7 +46,7 @@ table will be generated per unique label.
 may be logically equivalent differ in implementation. Assigning separate
 sub_labels will result in a row per sub_label. If a sublabel is not provided,
 `stmt` is used instead. Statistics (such as computing the fastest
-implementation) are use all sub_labels.
+implementation) use all sub_labels.
 
 * `description`: This describes the inputs. For instance, `stmt=torch.add(x, y)`
 can be run over several values of `x` and `y`. Each pair should be given its

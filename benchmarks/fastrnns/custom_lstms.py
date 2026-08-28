@@ -1,7 +1,6 @@
 import numbers
 import warnings
 from collections import namedtuple
-from typing import List, Tuple
 
 import torch
 import torch.jit as jit
@@ -44,8 +43,10 @@ def script_lstm(
     """Returns a ScriptModule that mimics a PyTorch native LSTM."""
 
     # The following are not implemented.
-    assert bias
-    assert not batch_first
+    if not bias:
+        raise AssertionError("bias=False is not implemented")
+    if batch_first:
+        raise AssertionError("batch_first=True is not implemented")
 
     if bidirectional:
         stack_type = StackedLSTM2
@@ -81,9 +82,12 @@ def script_lnlstm(
     """Returns a ScriptModule that mimics a PyTorch native LSTM."""
 
     # The following are not implemented.
-    assert bias
-    assert not batch_first
-    assert not dropout
+    if not bias:
+        raise AssertionError("bias=False is not implemented")
+    if batch_first:
+        raise AssertionError("batch_first=True is not implemented")
+    if dropout:
+        raise AssertionError("dropout=True is not implemented")
 
     if bidirectional:
         stack_type = StackedLSTM2
@@ -115,7 +119,7 @@ def script_lnlstm(
 LSTMState = namedtuple("LSTMState", ["hx", "cx"])
 
 
-def reverse(lst: List[Tensor]) -> List[Tensor]:
+def reverse(lst: list[Tensor]) -> list[Tensor]:
     return lst[::-1]
 
 
@@ -131,8 +135,8 @@ class LSTMCell(jit.ScriptModule):
 
     @jit.script_method
     def forward(
-        self, input: Tensor, state: Tuple[Tensor, Tensor]
-    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+        self, input: Tensor, state: tuple[Tensor, Tensor]
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         hx, cx = state
         gates = (
             torch.mm(input, self.weight_ih.t())
@@ -161,7 +165,10 @@ class LayerNorm(jit.ScriptModule):
         normalized_shape = torch.Size(normalized_shape)
 
         # XXX: This is true for our LSTM / NLP use case and helps simplify code
-        assert len(normalized_shape) == 1
+        if len(normalized_shape) != 1:
+            raise AssertionError(
+                f"Expected normalized_shape to have length 1, but got {len(normalized_shape)}"
+            )
 
         self.weight = Parameter(torch.ones(normalized_shape))
         self.bias = Parameter(torch.zeros(normalized_shape))
@@ -199,8 +206,8 @@ class LayerNormLSTMCell(jit.ScriptModule):
 
     @jit.script_method
     def forward(
-        self, input: Tensor, state: Tuple[Tensor, Tensor]
-    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+        self, input: Tensor, state: tuple[Tensor, Tensor]
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         hx, cx = state
         igates = self.layernorm_i(torch.mm(input, self.weight_ih.t()))
         hgates = self.layernorm_h(torch.mm(hx, self.weight_hh.t()))
@@ -225,10 +232,10 @@ class LSTMLayer(jit.ScriptModule):
 
     @jit.script_method
     def forward(
-        self, input: Tensor, state: Tuple[Tensor, Tensor]
-    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+        self, input: Tensor, state: tuple[Tensor, Tensor]
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         inputs = input.unbind(0)
-        outputs = torch.jit.annotate(List[Tensor], [])
+        outputs = torch.jit.annotate(list[Tensor], [])
         for i in range(len(inputs)):
             out, state = self.cell(inputs[i], state)
             outputs += [out]
@@ -242,10 +249,10 @@ class ReverseLSTMLayer(jit.ScriptModule):
 
     @jit.script_method
     def forward(
-        self, input: Tensor, state: Tuple[Tensor, Tensor]
-    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+        self, input: Tensor, state: tuple[Tensor, Tensor]
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         inputs = reverse(input.unbind(0))
-        outputs = jit.annotate(List[Tensor], [])
+        outputs = jit.annotate(list[Tensor], [])
         for i in range(len(inputs)):
             out, state = self.cell(inputs[i], state)
             outputs += [out]
@@ -266,11 +273,11 @@ class BidirLSTMLayer(jit.ScriptModule):
 
     @jit.script_method
     def forward(
-        self, input: Tensor, states: List[Tuple[Tensor, Tensor]]
-    ) -> Tuple[Tensor, List[Tuple[Tensor, Tensor]]]:
+        self, input: Tensor, states: list[tuple[Tensor, Tensor]]
+    ) -> tuple[Tensor, list[tuple[Tensor, Tensor]]]:
         # List[LSTMState]: [forward LSTMState, backward LSTMState]
-        outputs = jit.annotate(List[Tensor], [])
-        output_states = jit.annotate(List[Tuple[Tensor, Tensor]], [])
+        outputs = jit.annotate(list[Tensor], [])
+        output_states = jit.annotate(list[tuple[Tensor, Tensor]], [])
         # XXX: enumerate https://github.com/pytorch/pytorch/issues/14471
         i = 0
         for direction in self.directions:
@@ -278,7 +285,7 @@ class BidirLSTMLayer(jit.ScriptModule):
             out, out_state = direction(input, state)
             outputs += [out]
             output_states += [out_state]
-            i += 1
+            i += 1  # noqa: SIM113
         return torch.cat(outputs, -1), output_states
 
 
@@ -300,10 +307,10 @@ class StackedLSTM(jit.ScriptModule):
 
     @jit.script_method
     def forward(
-        self, input: Tensor, states: List[Tuple[Tensor, Tensor]]
-    ) -> Tuple[Tensor, List[Tuple[Tensor, Tensor]]]:
+        self, input: Tensor, states: list[tuple[Tensor, Tensor]]
+    ) -> tuple[Tensor, list[tuple[Tensor, Tensor]]]:
         # List[LSTMState]: One state per layer
-        output_states = jit.annotate(List[Tuple[Tensor, Tensor]], [])
+        output_states = jit.annotate(list[tuple[Tensor, Tensor]], [])
         output = input
         # XXX: enumerate https://github.com/pytorch/pytorch/issues/14471
         i = 0
@@ -311,7 +318,7 @@ class StackedLSTM(jit.ScriptModule):
             state = states[i]
             output, out_state = rnn_layer(output, state)
             output_states += [out_state]
-            i += 1
+            i += 1  # noqa: SIM113
         return output, output_states
 
 
@@ -330,11 +337,11 @@ class StackedLSTM2(jit.ScriptModule):
 
     @jit.script_method
     def forward(
-        self, input: Tensor, states: List[List[Tuple[Tensor, Tensor]]]
-    ) -> Tuple[Tensor, List[List[Tuple[Tensor, Tensor]]]]:
+        self, input: Tensor, states: list[list[tuple[Tensor, Tensor]]]
+    ) -> tuple[Tensor, list[list[tuple[Tensor, Tensor]]]]:
         # List[List[LSTMState]]: The outer list is for layers,
         #                        inner list is for directions.
-        output_states = jit.annotate(List[List[Tuple[Tensor, Tensor]]], [])
+        output_states = jit.annotate(list[list[tuple[Tensor, Tensor]]], [])
         output = input
         # XXX: enumerate https://github.com/pytorch/pytorch/issues/14471
         i = 0
@@ -342,7 +349,7 @@ class StackedLSTM2(jit.ScriptModule):
             state = states[i]
             output, out_state = rnn_layer(output, state)
             output_states += [out_state]
-            i += 1
+            i += 1  # noqa: SIM113
         return output, output_states
 
 
@@ -370,10 +377,10 @@ class StackedLSTMWithDropout(jit.ScriptModule):
 
     @jit.script_method
     def forward(
-        self, input: Tensor, states: List[Tuple[Tensor, Tensor]]
-    ) -> Tuple[Tensor, List[Tuple[Tensor, Tensor]]]:
+        self, input: Tensor, states: list[tuple[Tensor, Tensor]]
+    ) -> tuple[Tensor, list[tuple[Tensor, Tensor]]]:
         # List[LSTMState]: One state per layer
-        output_states = jit.annotate(List[Tuple[Tensor, Tensor]], [])
+        output_states = jit.annotate(list[tuple[Tensor, Tensor]], [])
         output = input
         # XXX: enumerate https://github.com/pytorch/pytorch/issues/14471
         i = 0
@@ -384,13 +391,14 @@ class StackedLSTMWithDropout(jit.ScriptModule):
             if i < self.num_layers - 1:
                 output = self.dropout_layer(output)
             output_states += [out_state]
-            i += 1
+            i += 1  # noqa: SIM113
         return output, output_states
 
 
 def flatten_states(states):
     states = list(zip(*states))
-    assert len(states) == 2
+    if len(states) != 2:
+        raise AssertionError(f"Expected states to have length 2, but got {len(states)}")
     return [torch.stack(state) for state in states]
 
 
@@ -410,14 +418,26 @@ def test_script_rnn_layer(seq_len, batch, input_size, hidden_size):
     lstm = nn.LSTM(input_size, hidden_size, 1)
     lstm_state = LSTMState(state.hx.unsqueeze(0), state.cx.unsqueeze(0))
     for lstm_param, custom_param in zip(lstm.all_weights[0], rnn.parameters()):
-        assert lstm_param.shape == custom_param.shape
+        if lstm_param.shape != custom_param.shape:
+            raise AssertionError(
+                f"Shape mismatch: lstm_param.shape={lstm_param.shape}, custom_param.shape={custom_param.shape}"
+            )
         with torch.no_grad():
             lstm_param.copy_(custom_param)
     lstm_out, lstm_out_state = lstm(inp, lstm_state)
 
-    assert (out - lstm_out).abs().max() < 1e-5
-    assert (out_state[0] - lstm_out_state[0]).abs().max() < 1e-5
-    assert (out_state[1] - lstm_out_state[1]).abs().max() < 1e-5
+    if (out - lstm_out).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Output mismatch: max diff={(out - lstm_out).abs().max()}"
+        )
+    if (out_state[0] - lstm_out_state[0]).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Hidden state mismatch: max diff={(out_state[0] - lstm_out_state[0]).abs().max()}"
+        )
+    if (out_state[1] - lstm_out_state[1]).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Cell state mismatch: max diff={(out_state[1] - lstm_out_state[1]).abs().max()}"
+        )
 
 
 def test_script_stacked_rnn(seq_len, batch, input_size, hidden_size, num_layers):
@@ -436,14 +456,26 @@ def test_script_stacked_rnn(seq_len, batch, input_size, hidden_size, num_layers)
     for layer in range(num_layers):
         custom_params = list(rnn.parameters())[4 * layer : 4 * (layer + 1)]
         for lstm_param, custom_param in zip(lstm.all_weights[layer], custom_params):
-            assert lstm_param.shape == custom_param.shape
+            if lstm_param.shape != custom_param.shape:
+                raise AssertionError(
+                    f"Shape mismatch at layer {layer}: lstm_param.shape={lstm_param.shape}, custom_param.shape={custom_param.shape}"
+                )
             with torch.no_grad():
                 lstm_param.copy_(custom_param)
     lstm_out, lstm_out_state = lstm(inp, lstm_state)
 
-    assert (out - lstm_out).abs().max() < 1e-5
-    assert (custom_state[0] - lstm_out_state[0]).abs().max() < 1e-5
-    assert (custom_state[1] - lstm_out_state[1]).abs().max() < 1e-5
+    if (out - lstm_out).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Output mismatch: max diff={(out - lstm_out).abs().max()}"
+        )
+    if (custom_state[0] - lstm_out_state[0]).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Hidden state mismatch: max diff={(custom_state[0] - lstm_out_state[0]).abs().max()}"
+        )
+    if (custom_state[1] - lstm_out_state[1]).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Cell state mismatch: max diff={(custom_state[1] - lstm_out_state[1]).abs().max()}"
+        )
 
 
 def test_script_stacked_bidir_rnn(seq_len, batch, input_size, hidden_size, num_layers):
@@ -467,14 +499,27 @@ def test_script_stacked_bidir_rnn(seq_len, batch, input_size, hidden_size, num_l
             index = 2 * layer + direct
             custom_params = list(rnn.parameters())[4 * index : 4 * index + 4]
             for lstm_param, custom_param in zip(lstm.all_weights[index], custom_params):
-                assert lstm_param.shape == custom_param.shape
+                if lstm_param.shape != custom_param.shape:
+                    raise AssertionError(
+                        f"Shape mismatch at layer {layer}, direction {direct}: "
+                        f"lstm_param.shape={lstm_param.shape}, custom_param.shape={custom_param.shape}"
+                    )
                 with torch.no_grad():
                     lstm_param.copy_(custom_param)
     lstm_out, lstm_out_state = lstm(inp, lstm_state)
 
-    assert (out - lstm_out).abs().max() < 1e-5
-    assert (custom_state[0] - lstm_out_state[0]).abs().max() < 1e-5
-    assert (custom_state[1] - lstm_out_state[1]).abs().max() < 1e-5
+    if (out - lstm_out).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Output mismatch: max diff={(out - lstm_out).abs().max()}"
+        )
+    if (custom_state[0] - lstm_out_state[0]).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Hidden state mismatch: max diff={(custom_state[0] - lstm_out_state[0]).abs().max()}"
+        )
+    if (custom_state[1] - lstm_out_state[1]).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Cell state mismatch: max diff={(custom_state[1] - lstm_out_state[1]).abs().max()}"
+        )
 
 
 def test_script_stacked_lstm_dropout(

@@ -15,7 +15,7 @@ class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
   // The state is passed to the hook in runHook method, and it can be used to
   // maintain and update any state information during the execution of the hook.
   // The hook performs user-specified processing and returns a future indicating
-  // asychronous communication of gradients.
+  // asynchronous communication of gradients.
   PythonCommHook(py::object state, py::object hook)
       : state_(std::move(state)), hook_(std::move(hook)) {}
 

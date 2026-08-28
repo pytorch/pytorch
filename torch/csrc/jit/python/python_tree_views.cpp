@@ -12,13 +12,13 @@ namespace py = pybind11;
 
 namespace torch::jit {
 
-std::optional<std::string> maybeConvertToString(const py::object& obj) {
+static std::optional<std::string> maybeConvertToString(const py::object& obj) {
   if (obj.is_none()) {
     return std::nullopt;
   }
   std::stringstream ss;
   ss << py::str(obj);
-  return ss.str();
+  return std::move(ss).str();
 }
 
 struct SourceRangeFactory {
@@ -58,14 +58,16 @@ struct SourceRangeFactory {
 };
 
 template <typename T>
-List<T> wrap_list(const SourceRange& fallback_pos, std::vector<T>&& vec) {
+static List<T> wrap_list(
+    const SourceRange& fallback_pos,
+    std::vector<T>&& vec) {
   if (vec.empty())
     return List<T>::create(fallback_pos, std::move(vec));
   return List<T>::create(vec.front().range(), std::move(vec));
 }
 
 template <typename T>
-Maybe<T> wrap_maybe(const SourceRange& fallback_pos, T* val) {
+static Maybe<T> wrap_maybe(const SourceRange& fallback_pos, T* val) {
   return val ? Maybe<T>::create(val->range(), *val)
              : Maybe<T>::create(fallback_pos);
 }
@@ -80,7 +82,7 @@ void initTreeViewBindings(PyObject* module) {
           [](const SourceRange& self) {
             std::ostringstream stream;
             self.highlight(stream);
-            return stream.str();
+            return std::move(stream).str();
           })
       .def("__repr__", [](const SourceRange& self) { return self.str(); })
       .def(
@@ -110,7 +112,7 @@ void initTreeViewBindings(PyObject* module) {
           [](const TreeView& tree) {
             std::ostringstream stream;
             stream << tree.get();
-            return stream.str();
+            return std::move(stream).str();
           })
       .def("dump", [](const TreeView& tree) { tree.dump(); });
 

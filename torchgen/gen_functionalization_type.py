@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
-from torchgen.api import cpp, dispatcher
+from torchgen.api import cpp, dispatcher, functionalization
 from torchgen.api.translate import translate
 from torchgen.api.types import (
     BaseCType,
     Binding,
     CType,
     DispatcherSignature,
-    FunctionalizationLambda,
     iTensorListRefT,
     NativeSignature,
     OptionalCType,
@@ -38,6 +37,7 @@ from torchgen.model import (
     NativeFunction,
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
+    OperatorName,
     Return,
     SchemaKind,
     SelfArgument,
@@ -48,10 +48,12 @@ from torchgen.native_function_generation import (
     MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT,
     OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY,
 )
-from torchgen.utils import dataclass_repr
+from torchgen.utils import concatMap, dataclass_repr, FileManager
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torchgen.selective_build.selector import SelectiveBuilder
 
 
@@ -70,8 +72,18 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
         "resize_as_",
         # This function is used as for testing purposes only.
         "_fill_mem_eff_dropout_mask_",
+        # Inference-only op called behind a custom op graph break.
+        "_flash_attention_forward_no_dropout_inplace",
     ]
 )
+
+# Eager cumulative out variants compute in the out dtype when dtype is omitted.
+# Functionalization normally lowers mutable ops through their functional variants,
+# so these need to thread the out dtype explicitly to preserve eager semantics.
+CUMULATIVE_OUT_OPS_PRESERVING_OUT_DTYPE = {
+    OperatorName.parse("cumsum.out"),
+    OperatorName.parse("cumprod.out"),
+}
 
 # This file contains codegen that relates to the functionalization pass.
 # It includes:
@@ -104,14 +116,20 @@ class GenCompositeViewCopyKernel:
             return None
 
         metadata = self.backend_index.get_kernel(g.view_copy)
-        assert metadata is not None
+        if metadata is None:
+            raise AssertionError(
+                f"Expected metadata for view_copy kernel: {g.view_copy}"
+            )
 
         # We can make view_copy work in more cases by using reshape()
         # when a normal view call would ordinarily fail.
         # This also makes LTC more efficient, because they don't need to include
         # clone() calls in their graph (which is normally needed by reshape).
         if str(g.view_copy.func.name) == "view_copy":
-            assert metadata.kernel == "view_copy_symint"
+            if metadata.kernel != "view_copy_symint":
+                raise AssertionError(
+                    f"Expected kernel 'view_copy_symint', got '{metadata.kernel}'"
+                )
             return """\
 at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
   c10::SymDimVector shape = infer_size_dv(size, self.sym_numel());
@@ -138,10 +156,15 @@ at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
         )
 
         # view ops today always return either a Tensor or a list of Tensors
-        assert len(g.view.func.returns) == 1
-        assert g.view.func.returns[0].type == BaseType(
-            BaseTy.Tensor
-        ) or g.view.func.returns[0].type == ListType(BaseType(BaseTy.Tensor), None)
+        if len(g.view.func.returns) != 1:
+            raise AssertionError(f"Expected 1 return, got {len(g.view.func.returns)}")
+        if not (
+            g.view.func.returns[0].type == BaseType(BaseTy.Tensor)
+            or g.view.func.returns[0].type == ListType(BaseType(BaseTy.Tensor), None)
+        ):
+            raise AssertionError(
+                f"Expected Tensor or Tensor[] return type, got {g.view.func.returns[0].type}"
+            )
 
         if g.view.func.returns[0].type == BaseType(BaseTy.Tensor):
             return_cloned_output = """\
@@ -166,7 +189,8 @@ at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
 
 
 def return_str(rets: tuple[Return, ...], names: list[str]) -> str:
-    assert len(rets) == len(names)
+    if len(rets) != len(names):
+        raise AssertionError(f"Expected {len(rets)} names, got {len(names)}")
     if len(rets) == 0:
         return ""
     elif len(rets) == 1:
@@ -198,7 +222,7 @@ def is_tensor_like(a: Argument | TensorOptionsArguments | SelfArgument) -> bool:
 # We need to wrap / unwrap various arguments from the op in the functionalization kernels.
 # Some op schemas include non-owning types though (like TensorList),
 # and when we unwrap them we expect to get out an owning type!.
-# We also return a lambda that tells you how to conver the non-owning type argument into the owning type.
+# We also return a lambda that tells you how to convert the non-owning type argument into the owning type.
 def get_owning_type(t: CType) -> tuple[CType, Callable[[str], str]]:
     if t == BaseCType(tensorListT):
         return VectorCType(BaseCType(tensorT)), lambda x: f"{x}.vec()"
@@ -278,15 +302,18 @@ def assert_view_op_properties(func: FunctionSchema) -> None:
 
     args = func.arguments.flat_non_out
     # The first argument is a tensor with an alias semantics (annotations)
-    assert (
-        len(args) > 0 and args[0].type == BaseType(BaseTy.Tensor)
-    ), f"""In the functionalization codegen, we expect the first argument of every view operator to be a tensor,
-but found an argument of type {str(args[0].type)} for operator: {str(func.name)}."""
+    if not (len(args) > 0 and args[0].type == BaseType(BaseTy.Tensor)):
+        raise AssertionError(
+            f"In the functionalization codegen, we expect the first argument of every view operator to be a tensor, "
+            f"but found an argument of type {str(args[0].type)} for operator: {str(func.name)}."
+        )
     # No other arguments have aliasing semantics
-    assert (
-        is_alias(args[0]) and not any(is_alias(a) for a in args[1:])
-    ), """In the functionalization codegen, we expect the first argument of every view operator to alias the output.
-View operators with multiple aliasing inputs aren't supported yet. Found an operator that doesn't satisfy this constraint"""
+    if not (is_alias(args[0]) and not any(is_alias(a) for a in args[1:])):
+        raise AssertionError(
+            "In the functionalization codegen, we expect the first argument of every view "
+            "operator to alias the output. View operators with multiple aliasing inputs "
+            "aren't supported yet. Found an operator that doesn't satisfy this constraint"
+        )
 
 
 # One-liner expression for checking if an expression expr of type type has any
@@ -322,7 +349,7 @@ def emit_expr_has_symbolic_values(expr: str, type: CType) -> str:
 
 # Detects whether any of the SymInt arguments are, in fact, symbolic values.
 # This is used in the constructor of ViewMeta.
-def emit_has_symbolic_inputs(sig: DispatcherSignature) -> tuple[str, str]:
+def emit_has_symbolic_inputs(sig: DispatcherSignature) -> str:
     name = "has_symbolic_inputs"
     statements = [
         f"{name} = {name} | ({emit_expr_has_symbolic_values(binding.name, binding.nctype.type)});"
@@ -333,12 +360,9 @@ def emit_has_symbolic_inputs(sig: DispatcherSignature) -> tuple[str, str]:
         )
     ]
     body = "\n      ".join(statements)
-    return (
-        name,
-        f"""
+    return f"""
       bool {name} = false;
-      {body}""",
-    )
+      {body}"""
 
 
 # Generates the Functionalization kernel for:
@@ -356,14 +380,20 @@ def emit_view_functionalization_body(
         # I'm assuming that every inplace-view op has a corresponding out-of-place view op,
         # with the same name but the trailing underscore removed.
         # This is currently asserted at parse time in gen.py (see error_check_native_functions).
-        assert g.view_inplace is not None
+        if g.view_inplace is None:
+            raise AssertionError(
+                "Expected view_inplace to be non-None for inplace view"
+            )
         f = g.view_inplace
     else:
         f = g.view
 
-    assert g.view_copy is not None
+    if g.view_copy is None:
+        raise AssertionError("Expected view_copy to be non-None")
     with native_function_manager(f):
         call_sig = DispatcherSignature.from_schema(g.view_copy.func)
+
+        spec = ViewMetaSpecialization(g, f=f)
 
         # the "view_copy" op name that the functionalization kernels need to call
         api_name = g.view_copy.func.name.unambiguous_name()
@@ -385,19 +415,13 @@ def emit_view_functionalization_body(
             for e in translate(unwrapped_args_ctx, call_sig.arguments(), method=False)
         ]
 
-        forward_lambda = FunctionalizationLambda.from_func(g, is_reverse=False)
-        reverse_lambda = FunctionalizationLambda.from_func(g, is_reverse=True)
-
         # The meta API call should use the same arguments, but convert all tensors to meta tensors first.
         meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
         meta_call_args = [
             e.expr for e in translate(meta_call_ctx, call_sig.arguments(), method=False)
         ]
 
-        (
-            symbolic_inputs_varname,
-            symbolic_inputs_check,
-        ) = emit_has_symbolic_inputs(call_sig)
+        symbolic_inputs_check = emit_has_symbolic_inputs(call_sig)
 
         if "inplace_view" in f.tags:
             # See Note [Functionalization Pass - Inplace View Ops] for more details
@@ -407,7 +431,7 @@ def emit_view_functionalization_body(
         // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
         {unwrap_tensor_args_str}
         at::AutoDispatchSkipFunctionalize guard;
-        return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
+        return at::_ops::{noop_api_name}::call({", ".join(view_redispatch_args)});
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
       auto inverse_return_mode = (
@@ -415,39 +439,27 @@ def emit_view_functionalization_body(
             : at::functionalization::InverseReturnMode::NeverView
       );
       {symbolic_inputs_check}
-      at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
-        {forward_lambda.decl()} {{
-          if (reapply_views) {{
-            return {forward_lambda.inner_call(reapply_views=True)}
-          }} else {{
-            return {forward_lambda.inner_call(reapply_views=False)}
-          }}
-        }},
-        {reverse_lambda.decl()} {{
-          return {reverse_lambda.inner_call()}
-        }},
-        /*has_symbolic_inputs=*/{symbolic_inputs_varname}
-      );
+      auto view_meta = {spec.new()};
       auto compute_reference_meta =
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::LazyBit);
       {return_type} reference_tensor_output;
-      if (compute_reference_meta) {{
+      if (compute_reference_meta && !disable_meta_reference()) {{
         {meta_conversion_str}
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
-        reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
+        reference_tensor_output = at::_ops::{noop_api_name}::call({", ".join(meta_call_args)});
       }}
       // This function adds the above view meta to the current tensor and replays them off the base,
       // mutating the size/stride info of the current FunctionalTensorWrapper.
       // Because of this, we need to make sure to run the reference shape function above,
-      // BEFORE doing this (otherwise we'll end up runnin the reference function using the wrong sizes/strides)
+      // BEFORE doing this (otherwise we'll end up running the reference function using the wrong sizes/strides)
       at::functionalization::impl::mutate_view_meta({view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
       // XLA/LTC don't implement the logic to propagate strides correctly, so we need to rely
       // on a reference implementation here (instead of relying on the output from the forward lambda
       // having the correct stride info)
-      if (compute_reference_meta) {{
+      if (compute_reference_meta && !disable_meta_reference()) {{
         at::functionalization::impl::set_sizes_strides_offset({view_tensor_name}, reference_tensor_output);
       }}
       return {view_tensor_name};
@@ -455,14 +467,13 @@ def emit_view_functionalization_body(
 """
 
         else:
-            is_multi_output_view = isinstance(f.func.returns[0].type, ListType)
             return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       {unwrap_tensor_args_str}
       if (!at::functionalization::impl::isFunctionalTensor({view_tensor_name})) {{
         // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
         at::AutoDispatchSkipFunctionalize guard;
-        return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
+        return at::_ops::{noop_api_name}::call({", ".join(view_redispatch_args)});
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
       auto inverse_return_mode = (
@@ -473,40 +484,26 @@ def emit_view_functionalization_body(
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::LazyBit);
       {return_type} reference_tensor_output;
-      if (compute_reference_meta) {{
+      if (compute_reference_meta && !disable_meta_reference()) {{
         {meta_conversion_str}
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
-        reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
+        reference_tensor_output = at::_ops::{noop_api_name}::call({", ".join(meta_call_args)});
       }}
       {return_type} tmp_output;
       {{
         at::AutoDispatchSkipFunctionalize guard;
         if (reapply_views) {{
-          tmp_output = at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
+          tmp_output = at::_ops::{noop_api_name}::call({", ".join(view_redispatch_args)});
         }} else {{
-          tmp_output = at::_ops::{api_name}::call({', '.join(view_redispatch_args)});
+          tmp_output = at::_ops::{api_name}::call({", ".join(view_redispatch_args)});
         }}
       }}
       {symbolic_inputs_check}
-      at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
-        {forward_lambda.decl()} {{
-          if (reapply_views) {{
-            return {forward_lambda.inner_call(reapply_views=True)}
-          }} else {{
-            return {forward_lambda.inner_call(reapply_views=False)}
-          }}
-        }},
-        {reverse_lambda.decl()} {{
-          return {reverse_lambda.inner_call()}
-        }},
-        /*has_symbolic_inputs=*/{symbolic_inputs_varname},
-        /*is_multi_output=*/{str(is_multi_output_view).lower()},
-        /*is_as_strided=*/{str(str(f.func.name) == 'as_strided').lower()}
-      );
+      auto view_meta = {spec.new()};
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
-      if (compute_reference_meta) {{
+      if (compute_reference_meta && !disable_meta_reference()) {{
         at::functionalization::impl::set_sizes_strides_offset(out, reference_tensor_output);
       }}
       return out;
@@ -566,9 +563,12 @@ def wrap_propagate_mutations_and_return(
     )
     # The outer function may have a mix of aliased and non-aliased outputs,
     # But the inner functional op that we're transforming to should only have non-aliased outputs
-    assert len(mutable_arg_names) + len(non_aliased_outer_rets) == len(
+    if len(mutable_arg_names) + len(non_aliased_outer_rets) != len(
         non_aliased_inner_rets
-    )
+    ):
+        raise AssertionError(
+            f"Expected {len(mutable_arg_names)} + {len(non_aliased_outer_rets)} == {len(non_aliased_inner_rets)}"
+        )
 
     # First, take all of the newly created outputs from the inner call and wrap them into functional tensors
     updates = []
@@ -610,6 +610,40 @@ def wrap_propagate_mutations_and_return(
     {returns_str}"""
 
 
+def maybe_replace_cumulative_out_dtype_exprs(
+    f: NativeFunction,
+    functional_sig: DispatcherSignature,
+    functional_exprs: list[str],
+) -> list[str]:
+    if (
+        f.func.kind() != SchemaKind.out
+        or f.func.name not in CUMULATIVE_OUT_OPS_PRESERVING_OUT_DTYPE
+    ):
+        return functional_exprs
+
+    if len(f.func.arguments.out) != 1:
+        raise AssertionError(
+            f"Expected a single out argument for cumulative out op: {f.func.name}"
+        )
+
+    dtype_arg_idx = next(
+        (i for i, arg in enumerate(functional_sig.arguments()) if arg.name == "dtype"),
+        None,
+    )
+    if dtype_arg_idx is None:
+        raise AssertionError(
+            f"Expected dtype argument for cumulative out op: {f.func.name}"
+        )
+
+    adjusted_exprs = functional_exprs.copy()
+    dtype_expr = adjusted_exprs[dtype_arg_idx]
+    adjusted_exprs[dtype_arg_idx] = (
+        f"{dtype_expr}.has_value() ? {dtype_expr} : "
+        f"std::optional<at::ScalarType>({f.func.arguments.out[0].name}_.scalar_type())"
+    )
+    return adjusted_exprs
+
+
 # Generates the Functionalization kernel for:
 # - mutation ops (inplace and out= ops)
 @with_native_function_and
@@ -617,7 +651,8 @@ def emit_inplace_functionalization_body(
     f: NativeFunction, g: NativeFunctionsGroup
 ) -> str:
     # mutation case
-    assert modifies_arguments(f)
+    if not modifies_arguments(f):
+        raise AssertionError(f"Expected function to modify arguments: {f.func}")
 
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
@@ -680,28 +715,9 @@ def emit_inplace_functionalization_body(
         e.expr
         for e in translate(unwrapped_args_ctx, functional_sig.arguments(), method=False)
     ]
-
-    if f.func.is_out_fn():
-        mutable_input_post_processing = "\n".join(
-            [
-                f"""
-      at::functionalization::impl::replace_(
-        {a.name}, {'std::get<' + str(i) + '>(tmp_output)' if len(f.func.returns) > 1 else 'tmp_output'});
-      at::functionalization::impl::commit_update({a.name});"""
-                for (i, a) in enumerate(f.func.arguments.out)
-                if a.annotation and a.annotation.is_write and a.type.is_tensor_like()
-            ]
-        )
-    else:
-        mutable_input_post_processing = "\n".join(  # noqa: F841
-            [
-                f"""
-      at::functionalization::impl::replace_({a.name}, tmp_output);
-      at::functionalization::impl::commit_update({a.name});"""
-                for a in f.func.arguments.flat_all
-                if a.annotation and a.annotation.is_write and a.type.is_tensor_like()
-            ]
-        )
+    functional_exprs = maybe_replace_cumulative_out_dtype_exprs(
+        f, functional_sig, functional_exprs
+    )
 
     meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
     # We don't want to run the inplace meta func for ops like .set_(), because:
@@ -715,14 +731,14 @@ def emit_inplace_functionalization_body(
 
     return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
-      if ({str(not any_storage_args and f.func.kind() == SchemaKind.inplace).lower()}) {{
+      if ({str(not any_storage_args and f.func.kind() == SchemaKind.inplace).lower()} && !disable_meta_reference()) {{
         // Before converting the mutable op to its functional variant, run meta tensors through the original op.
         // This will help us catch shape errors that apply to inplace ops that wouldn't apply to their functional variants.
         // (We can only do this for inplace ops today though, because they technically all support meta tensors).
         {meta_conversion_str}
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
-        at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(a.name for a in meta_call_ctx)});
+        at::_ops::{f.func.name.unambiguous_name()}::call({", ".join(a.name for a in meta_call_ctx)});
       }}
       {unwrap_tensor_args_str}
       if (!({check_all_mutated_args_are_functional})) {{
@@ -736,16 +752,16 @@ def emit_inplace_functionalization_body(
         }} else {{
          // case 2: arguments are not functional tensors, so we no-op and redispatch.
          at::AutoDispatchSkipFunctionalize guard;
-         {maybe_create_output(f, 'tmp_output')}at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
-         {return_from_mutable_noop_redispatch(f, 'tmp_output')}
+         {maybe_create_output(f, "tmp_output")}at::_ops::{f.func.name.unambiguous_name()}::call({", ".join(inplace_exprs)});
+         {return_from_mutable_noop_redispatch(f, "tmp_output")}
         }}
       }} else {{
         {return_type} tmp_output;
         {{
           at::AutoDispatchSkipFunctionalize guard;
-          tmp_output = at::_ops::{g.functional.func.name.unambiguous_name()}::call({', '.join(functional_exprs)});
+          tmp_output = at::_ops::{g.functional.func.name.unambiguous_name()}::call({", ".join(functional_exprs)});
         }}
-        {wrap_propagate_mutations_and_return(f, g.functional, 'tmp_output')}
+        {wrap_propagate_mutations_and_return(f, g.functional, "tmp_output")}
       }}
     }}"""
 
@@ -771,6 +787,302 @@ def gen_functionalization_view_inverse_declaration(
     return emit_decl_helper(g)
 
 
+# Helper class for generating `ViewMeta` specializations.
+@dataclass
+class ViewMetaSpecialization:
+    g: NativeFunctionsViewGroup
+    f: NativeFunction
+
+    @property
+    def is_multi_output(self) -> bool:
+        return functionalization.is_multi_output(self.f.func)
+
+    @property
+    def is_as_strided(self) -> bool:
+        return str(self.f.func.name) == "as_strided"
+
+    @property
+    def out_index(self) -> str:
+        if self.is_multi_output:
+            return functionalization.out_index_binding.name
+        return "0"
+
+    @property
+    def classname(self) -> str:
+        return functionalization.classname(self.f.func)
+
+    def decl(self) -> list[str]:
+        base_ctor_arguments = functionalization.base_ctor_arguments(self.f.func)
+        extra_ctor_arguments = functionalization.extra_ctor_arguments(self.f.func)
+        attributes = functionalization.attributes(self.f.func)
+
+        # List of types for declaring the `SerializableTuple` type.
+        serializable_tuple_args = ",\n".join(
+            f"      {binding.type} /* {binding.name} */"
+            for binding in (base_ctor_arguments + attributes)
+        )
+
+        # Arguments used for forwarding the tuple elements to the constructor.
+        destructure_tuple_args = ", ".join(
+            f"std::get<{i}>(tpl)"
+            for i in range(len(base_ctor_arguments) + len(extra_ctor_arguments))
+        )
+
+        # List of constructor parameters
+        ctor_parameters = ", ".join(
+            binding.decl() for binding in (base_ctor_arguments + extra_ctor_arguments)
+        )
+
+        # Call the base class `ViewMeta` constructor.
+        #
+        # Both of `is_multi_output` and `is_as_strided` are known values, given the
+        # operation schema.
+        is_multi_output_str = str(self.is_multi_output).lower()
+        is_as_strided_str = str(self.is_as_strided).lower()
+
+        base_ctor_bindings = ", ".join(
+            [
+                # `has_symbolic_inputs` is always taken as parameter.
+                functionalization.has_symbolic_inputs_binding.name,
+                f"/*is_multi_output=*/{is_multi_output_str}",
+                f"/*is_as_strided=*/{is_as_strided_str}",
+                # `out_index` is know if the operation returns only one value. Otherwise,
+                # we also take it as parameter.
+                f"/*out_index=*/{self.out_index}",
+            ]
+        )
+
+        # Assignments of `extra_ctor_arguments` to their corresponding fields.
+        # These are extra fields to-be-declared in this specialization.
+        #
+        # We need to set `allow_expensive_conversions`, since we are storing owned versions
+        # of the non-owning arguments.
+        ctor_assignments = ",\n".join(
+            f"        {e.type.name}({e.expr})"
+            for e in translate(
+                extra_ctor_arguments,
+                attributes,
+                method=False,
+                allow_expensive_conversions=True,
+            )
+        )
+
+        # List of arguments for constructing the `SerializableTuple` from an instance.
+        tuple_arguments = ", ".join(
+            binding.name for binding in (base_ctor_arguments + attributes)
+        )
+
+        # List of field declarations.
+        attr_declarations = "\n".join(f"  {binding.decl()};" for binding in attributes)
+
+        # Override `to_out_index` if this operation returns more than 1 value.
+        to_out_index_decl = ""
+        if self.is_multi_output:
+            to_out_index_decl = (
+                "  std::shared_ptr<ViewMeta> to_out_index(int64_t out_idx) override;"
+            )
+
+        return [
+            f"""
+struct TORCH_API {self.classname} : public ViewMeta {{
+  FUNCTIONALIZATION_VIEWMETA_NAME({self.classname})
+  FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(\n{serializable_tuple_args});
+
+  {self.classname}(const SerializableTuple& tpl)
+      : {self.classname}({destructure_tuple_args}) {{}}
+
+  {self.classname}({ctor_parameters})
+      : at::functionalization::ViewMeta({base_ctor_bindings}),
+{ctor_assignments} {{}}
+
+  Tensor forward(const Tensor& base) override;
+  Tensor reverse(const Tensor& base, const Tensor& mutated_view) override;
+{to_out_index_decl}
+
+  SerializableTuple to_serializable_tuple() {{
+    return std::make_tuple({tuple_arguments});
+  }}
+
+{attr_declarations}
+}};
+"""
+        ]
+
+    # Generate a call to the actual operation.
+    def opcall(self, is_reverse: bool, reapply_views: bool) -> str:
+        opname = functionalization.name(
+            self.g,
+            is_reverse=is_reverse,
+            include_namespace=True,
+            reapply_views=reapply_views,
+        )
+
+        # Expected arguments for the operation.
+        if self.g.view_copy is None:
+            raise AssertionError("Expected view_copy to be non-None")
+        op_arguments = functionalization.op_arguments(self.g.view_copy.func, is_reverse)
+
+        # The context is composed by the constructor arguments (which are also
+        # the field variables stored in the instance), and the `base` tensor.
+        context = [functionalization.base_binding]
+        context += functionalization.base_ctor_arguments(self.f.func)
+        context += functionalization.attributes(self.f.func)
+
+        # If we are generating the call for the reverse function, we also have
+        # access to `mutated_view` argument.
+        if is_reverse:
+            context.append(functionalization.mutated_view_binding)
+
+        arguments = ", ".join(
+            [e.expr for e in translate(context, op_arguments, method=False)]
+        )
+
+        # Index the result if this operation returns multiple values.
+        maybe_index = ""
+        if not is_reverse and self.is_multi_output:
+            maybe_index = f"[{self.out_index}]"
+
+        return f"{opname}({arguments}){maybe_index}"
+
+    def impl(self) -> list[str]:
+        functions = [
+            f"""
+at::Tensor {self.classname}::forward(const at::Tensor& base) {{
+  if (reapply_views) {{
+    return {self.opcall(is_reverse=False, reapply_views=True)};
+  }} else {{
+    return {self.opcall(is_reverse=False, reapply_views=False)};
+  }}
+}}""",
+            f"""
+at::Tensor {self.classname}::reverse(const at::Tensor& base, const Tensor& mutated_view) {{
+  return {self.opcall(is_reverse=True, reapply_views=True)};
+}}""",
+        ]
+
+        # If this operation returns multiple values, also generate a `to_out_index`
+        # implementation.
+        if self.is_multi_output:
+            functions.append(f"""
+std::shared_ptr<at::functionalization::ViewMeta> {self.classname}::to_out_index(int64_t out_index) {{
+  return {self.new("out_index")};
+}}
+""")
+
+        return functions
+
+    # Create the Python binding for this specialized class.
+    def binding(self) -> list[str]:
+        name = functionalization.classname(self.f.func, with_namespace=True)
+        return [f"  create_binding_with_pickle<{name}>(functionalization);"]
+
+    # Generate an instantiation of this specialized class.
+    def new(self, out_index: str = "0") -> str:
+        name = functionalization.classname(self.f.func, with_namespace=True)
+        ctor_arguments = functionalization.base_ctor_arguments(
+            self.f.func
+        ) + functionalization.extra_ctor_arguments(self.f.func)
+        # Replace the `out_index` parameter with the given `out_index`.
+        arguments = ", ".join(
+            binding.name if binding.name != "out_index" else out_index
+            for binding in ctor_arguments
+        )
+        return f"std::make_shared<{name}>({arguments})"
+
+    # Run the function `run` for both: `view` and `view_inplace` functions.
+    @staticmethod
+    def map(
+        g: NativeFunctionsViewGroup, run: Callable[[ViewMetaSpecialization], list[str]]
+    ) -> list[str]:
+        def maybe_run(f: NativeFunction | None) -> list[str]:
+            if f is None:
+                return []
+            with native_function_manager(f):
+                return run(ViewMetaSpecialization(g, f))
+
+        return list(concatMap(maybe_run, (g.view, g.view_inplace)))
+
+
+def gen_functionalization_view_meta_classes_base(
+    selector: SelectiveBuilder,
+    g: NativeFunctionsViewGroup,
+    run: Callable[[ViewMetaSpecialization], list[str]],
+) -> list[str]:
+    if not selector.include_all_operators:
+        return []
+
+    if g.composite:
+        return []
+
+    return ViewMetaSpecialization.map(g, run)
+
+
+def gen_functionalization_view_meta_classes_decl(
+    selector: SelectiveBuilder, g: NativeFunctionsViewGroup
+) -> list[str]:
+    return gen_functionalization_view_meta_classes_base(
+        selector, g, ViewMetaSpecialization.decl
+    )
+
+
+def gen_functionalization_view_meta_classes_impl(
+    selector: SelectiveBuilder, g: NativeFunctionsViewGroup
+) -> list[str]:
+    return gen_functionalization_view_meta_classes_base(
+        selector, g, ViewMetaSpecialization.impl
+    )
+
+
+def gen_functionalization_view_meta_classes_binding(
+    selector: SelectiveBuilder, g: NativeFunctionsViewGroup
+) -> list[str]:
+    return gen_functionalization_view_meta_classes_base(
+        selector, g, ViewMetaSpecialization.binding
+    )
+
+
+# Generates the Python bindings for the `ViewMeta` specialized classes.
+def gen_functionalization_view_meta_classes(
+    native_functions_path: str,
+    tags_path: str,
+    selector: SelectiveBuilder,
+    install_dir: str,
+    template_dir: str,
+) -> None:
+    from torchgen.gen import get_grouped_by_view_native_functions, parse_native_yaml
+
+    # Parse the native_functions.yaml.
+    # Then, group them into `NativeFunctionsViewGroup`.
+    #
+    # This is the same steps we do in gen.py (ATen codegen).
+    native_functions = parse_native_yaml(
+        native_functions_path, tags_path
+    ).native_functions
+    native_functions_with_view_groups = get_grouped_by_view_native_functions(
+        native_functions
+    )
+    view_groups = [
+        g
+        for g in native_functions_with_view_groups
+        if isinstance(g, NativeFunctionsViewGroup)
+    ]
+
+    fm = FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=False)
+    fm.write(
+        "ViewMetaClassesPythonBinding.cpp",
+        lambda: {
+            "view_meta_bindings": list(
+                concatMap(
+                    lambda g: gen_functionalization_view_meta_classes_binding(
+                        selector, g
+                    ),
+                    view_groups,
+                )
+            ),
+        },
+    )
+
+
 def gen_functionalization_registration(
     selector: SelectiveBuilder,
     g: NativeFunction | NativeFunctionsGroup | NativeFunctionsViewGroup,
@@ -778,8 +1090,25 @@ def gen_functionalization_registration(
 ) -> list[str]:
     @with_native_function
     def emit_registration_helper(f: NativeFunction) -> str:
-        assert not f.has_composite_implicit_autograd_kernel
-        registration_str = f"TORCH_FN(functionalization::{wrapper_name(f.func)})"
+        if f.has_composite_implicit_autograd_kernel:
+            metadata = composite_implicit_autograd_index.get_kernel(f)
+            if metadata is None:
+                raise AssertionError(
+                    f"Expected metadata for composite implicit autograd kernel: {f.func}"
+                )
+            native_api_name = metadata.kernel
+            sig = NativeSignature(f.func, symint=metadata.supports_symint())
+            # Note [Composite view ops in the functionalization pass]
+            # We don't need to worry about implemententing functionalization kernels for views with
+            # CompositeImplicitAutograd kernels, because we can just decompose them into their base operators.
+            # We can't just opt the entire Functionalization dispatch key into the composite keyset though,
+            # because we don't want to decompose non-view ops that are composite, like `at::ones`.
+            registration_str = (
+                f"static_cast<{sig.ptr_type()}>(at::native::{native_api_name})"
+            )
+        else:
+            # non-composite view ops (and inplace ops) get a normal registration.
+            registration_str = f"TORCH_FN(functionalization::{wrapper_name(f.func)})"
         return f'm.impl("{f.func.name}", {registration_str});'
 
     # Don't generate kernels in mobile build
@@ -792,13 +1121,12 @@ def gen_functionalization_registration(
         if str(g.view.func.name) == "lift_fresh":
             return []
         view_str = []
-        if not g.view.has_composite_implicit_autograd_kernel:
-            view_str.append(emit_registration_helper(g.view))
-        if (
-            g.view_inplace is not None
-            and not g.view_inplace.has_composite_implicit_autograd_kernel
-        ):
-            assert g.view_inplace.is_view_op
+        view_str.append(emit_registration_helper(g.view))
+        if g.view_inplace is not None:
+            if not g.view_inplace.is_view_op:
+                raise AssertionError(
+                    f"Expected view_inplace to be a view op: {g.view_inplace.func}"
+                )
             view_str.append(emit_registration_helper(g.view_inplace))
         return view_str
 
@@ -824,7 +1152,8 @@ def gen_functionalization_registration(
             # See Note [resize_ in Functionalization]
             return []
         if str(f.func.name.name) != "set_":
-            assert not f.is_view_op
+            if f.is_view_op:
+                raise AssertionError(f"Unexpected view op: {f.func}")
         # functionalization needs to generate and register kernels for inplace ops.
         # We *also* need to directly register CompositeImplicitAUtograd kernels
         # so that they decompose properly before functioanlization.
@@ -851,7 +1180,10 @@ def gen_functionalization_definition(
         if not g.composite:
             # invariant: NativeFunctionsViewGroup's always have a view_copy operator
             # if the view is not composite (implicit autograd)
-            assert g.view_copy is not None, dataclass_repr(g, indent=1)
+            if g.view_copy is None:
+                raise AssertionError(
+                    f"Expected view_copy to be non-None: {dataclass_repr(g, indent=1)}"
+                )
             view_defs.append(emit_view_functionalization_body(g, view_inplace=False))
             if g.view_inplace is not None:
                 view_defs.append(emit_view_functionalization_body(g, view_inplace=True))
@@ -868,7 +1200,12 @@ def gen_functionalization_definition(
             str(g.func.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION
             and str(g.func.name.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION
         ):
-            assert g.has_composite_implicit_autograd_kernel or not modifies_arguments(g)
+            if not (
+                g.has_composite_implicit_autograd_kernel or not modifies_arguments(g)
+            ):
+                raise AssertionError(
+                    f"Expected composite implicit autograd kernel or non-modifying function: {g.func}"
+                )
         return []
     else:
         # Case 2: emit inplace -> out-of-place kernels for the functionalization pass

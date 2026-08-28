@@ -20,6 +20,21 @@ logger = logging.getLogger(__name__)
 logger_test = logging.getLogger("test")
 
 
+class CustomLogger(logging.Logger):
+    def warning_once(self, msg):
+        self.warning(msg)
+
+
+_previous_logger_class = logging.getLoggerClass()
+try:
+    logging.setLoggerClass(CustomLogger)
+    custom_logger = logging.getLogger("test_custom_logger")
+finally:
+    logging.setLoggerClass(_previous_logger_class)
+custom_logger.addHandler(logging.NullHandler())
+custom_logger.propagate = False
+
+
 def f_info(x):
     x = x + x
     logger.info("moo")
@@ -35,29 +50,41 @@ def f_isEnabledFor(x):
     return x
 
 
+def f_warning_once(x):
+    x = x + x
+    custom_logger.warning_once("moo")
+    x = x * x
+    return x
+
+
 @instantiate_parametrized_tests
 class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
     @parametrize(
-        "ignore_method, fn, should_ignore_logger",
+        "ignore_method, fn, captured_logger, should_ignore_logger",
         [
-            (None, f_info, False),
-            (logger_test.info, f_info, False),
-            (None, f_isEnabledFor, False),
-            (logger_test.isEnabledFor, f_isEnabledFor, False),
-            (logger.info, f_info, True),
-            (logging.Logger.info, f_info, True),
-            (logger.isEnabledFor, f_isEnabledFor, True),
-            (logging.Logger.isEnabledFor, f_isEnabledFor, True),
+            (None, f_info, logger, False),
+            (logger_test.info, f_info, logger, False),
+            (None, f_isEnabledFor, logger, False),
+            (logger_test.isEnabledFor, f_isEnabledFor, logger, False),
+            (logger.info, f_info, logger, True),
+            (logging.Logger.info, f_info, logger, True),
+            (logger.isEnabledFor, f_isEnabledFor, logger, True),
+            (logging.Logger.isEnabledFor, f_isEnabledFor, logger, True),
+            (custom_logger.warning_once, f_warning_once, custom_logger, True),
+            (CustomLogger.warning_once, f_warning_once, custom_logger, True),
+            (logging.Logger.warning, f_warning_once, custom_logger, False),
         ],
     )
-    def test_ignore_logger(self, ignore_method, fn, should_ignore_logger):
+    def test_ignore_logger(
+        self, ignore_method, fn, captured_logger, should_ignore_logger
+    ):
         counters.clear()
         x = torch.randn(3, 3)
         orig_out = fn(x)
-        with torch._dynamo.config.patch(ignore_logger_methods={ignore_method}):
+        with torch._dynamo.config.patch(ignore_logging_functions={ignore_method}):
             opt_f = torch.compile(backend="eager")(fn)
-            with self.assertLogs(logger, level="INFO") as captured:
-                logger.info("call logger info to avoid error")
+            with self.assertLogs(captured_logger, level="INFO") as captured:
+                captured_logger.info("call logger info to avoid error")
                 opt_out = opt_f(x)
                 printed_output = [entry.split(":", 2)[2] for entry in captured.output]
 
@@ -67,7 +94,95 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(len(counters["graph_break"]), 0)
         else:
             self.assertIn("moo", printed_output)
-            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertGreater(len(counters["graph_break"]), 0)
+
+    def test_ignore_arbitrary_function_noop(self):
+        counters.clear()
+        calls = []
+
+        def dbg_fn(x):
+            calls.append("ran")
+
+        def f(x):
+            dbg_fn(x)  # must be no-op inside Dynamo
+            return x + 1
+
+        x = torch.randn(3, 3)
+
+        with torch._dynamo.config.patch(ignore_logging_functions={dbg_fn}):
+            opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+            opt_out = opt_f(x)
+
+        # function must never run
+        self.assertEqual(calls, [])
+
+        # output must match eager
+        self.assertTrue(same(opt_out, x + 1))
+
+        # no graph breaks allowed
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_ignore_function_returns_none(self):
+        counters.clear()
+        calls = []
+
+        def ignore_me(x):
+            calls.append("ran")
+            return "should_not_run"
+
+        with torch._dynamo.config.patch(ignore_logging_functions={ignore_me}):
+
+            def f(x):
+                y = ignore_me(x)  # Dynamo must replace with Constant(None)
+                return x * 2, y
+
+            x = torch.randn(3, 3)
+            opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+            opt_out = opt_f(x)
+
+        # ignored function must NOT run
+        self.assertEqual(calls, [])
+
+        # y must be None
+        self.assertIs(opt_out[1], None)
+
+        # output correct
+        self.assertTrue(same(opt_out[0], x * 2))
+
+        # no graph breaks
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_ignore_function_does_not_conflict_with_reorderable(self):
+        counters.clear()
+        log = []
+
+        def ignored(x):
+            log.append("ignored")
+
+        def reordered(x):
+            log.append("reordered")
+
+        def f(x):
+            ignored(x)
+            reordered(x)
+            return x + 1
+
+        x = torch.ones(3, 3)
+
+        with torch._dynamo.config.patch(
+            ignore_logging_functions={ignored},
+            reorderable_logging_functions={reordered},
+        ):
+            opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+            opt_out = opt_f(x)
+
+        # ignored must NOT run
+        self.assertNotIn("ignored", log)
+
+        # reordered MUST run
+        self.assertIn("reordered", log)
+        # output is correct
+        self.assertTrue(same(opt_out, x + 1))
 
 
 class ReorderLogsTests(torch._dynamo.test_case.TestCase):
@@ -110,6 +225,51 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(printed_output, f"moo\n{torch.ones(3, 3) * 2}\n1 2 3")
         self.assertTrue(same(orig_out, opt_out))
+
+    def test_reorder_logger_method(self):
+        def f(x):
+            x = x + x
+            logger.info("moo %s", x.sum())
+            x = x * x
+            return x
+
+        x = torch.ones(3)
+        for reordered in (logger.info, logging.Logger.info):
+            torch._dynamo.reset()
+            with torch._dynamo.config.patch(reorderable_logging_functions={reordered}):
+                opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+                with self.assertLogs(logger, logging.INFO) as captured:
+                    opt_out = opt_f(x)
+            self.assertEqual(len(captured.output), 1)
+            self.assertIn("moo tensor(6.)", captured.output[0])
+            self.assertTrue(same(opt_out, torch.full((3,), 4.0)))
+
+    @torch._dynamo.config.patch(reorderable_logging_functions={logging.Logger.info})
+    def test_dont_reorder_logger_method_kwargs(self):
+        # kwargs must graph break rather than be silently dropped at replay
+        def f(x):
+            x = x + x
+            logger.info("moo %s", x.sum(), stacklevel=2)
+            return x * x
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "attempted to reorder a debugging function that can't actually be reordered",
+        ):
+            torch.compile(backend="eager", fullgraph=True)(f)(torch.ones(3))
+
+    @torch._dynamo.config.patch(reorderable_logging_functions={logging.Logger.info})
+    def test_dont_reorder_logger_method_unsupported_arg(self):
+        def f(x):
+            x = x + x
+            logger.info("moo %s", [x.sum()])
+            return x * x
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "attempted to reorder a debugging function that can't actually be reordered",
+        ):
+            torch.compile(backend="eager", fullgraph=True)(f)(torch.ones(3))
 
     @torch._dynamo.config.patch(reorderable_logging_functions={warnings.warn})
     def test_reorder_warnings(self):
@@ -202,7 +362,46 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
 
         graph_break_key = counters["graph_break"].keys()
         self.assertEqual(len(graph_break_key), 1)
-        self.assertEqual(next(iter(graph_break_key)), "Tensor.item")
+        self.assertExpectedInline(
+            next(iter(graph_break_key)),
+            """\
+Unsupported Tensor.item() call with capture_scalar_outputs=False
+  Explanation: Dynamo does not support tracing `Tensor.item()` with config.capture_scalar_outputs=False.
+  Hint: Set `torch._dynamo.config.capture_scalar_outputs = True` or `export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1` to include these operations in the captured graph.
+
+  Developer debug context: call_method TensorVariable() item () {}
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0124.html""",
+        )
+
+    def test_reorder_print_data_dependent_fstring(self):
+        """Print with data-dependent bool in f-string should graph break on print,
+        but work when print is reorderable."""
+
+        def f(x, mask):
+            make_causal = bool((mask == 0).all())
+            print(f"make_causal={make_causal}")
+            return x + 1
+
+        x = torch.randn(2, 3)
+        mask = torch.zeros(2, 3)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Dynamo does not know how to trace builtin operator `print`",
+        ):
+            torch.compile(backend="eager", fullgraph=True)(f)(x, mask)
+
+        with torch._dynamo.config.patch(
+            reorderable_logging_functions={print}, capture_scalar_outputs=True
+        ):
+            opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+                opt_out = opt_f(x, mask)
+                printed_output = mock_stdout.getvalue().strip()
+
+        self.assertTrue(same(opt_out, x + 1))
+        self.assertEqual(printed_output, "make_causal=True")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -25,6 +26,7 @@ if TEST_NUMPY:
 
 
 class TestLoadStateDict(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -59,6 +61,29 @@ class TestLoadStateDict(NNTestCase):
             TypeError, "Expected state_dict to be dict-like, got"
         ):
             m.load_state_dict(2)
+
+    @swap([True, False])
+    @skipIfTorchDynamo("dynamo installs weakrefs on some params")
+    def test_scalar_param_1d_tensor_raises(self):
+        class SimpleModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.threshold = nn.Parameter(torch.tensor(0.0))
+
+            def forward(self, x):
+                return x
+
+        m = SimpleModule()
+
+        # Test that [3] -> scalar raises error
+        sd = {"threshold": torch.randn(3)}
+        with self.assertRaisesRegex(RuntimeError, "size mismatch for threshold"):
+            m.load_state_dict(sd)
+
+        # Test that [1] -> scalar is allowed (backward compatibility)
+        sd = {"threshold": torch.tensor([1.0])}
+        m.load_state_dict(sd)
+        self.assertEqual(m.threshold.item(), 1.0)
 
     @swap([True, False])
     @skipIfTorchDynamo("dynamo installs weakrefs on some params")
@@ -182,6 +207,7 @@ class TestLoadStateDict(NNTestCase):
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180632")
     @swap([True, False])
     def test_load_state_dict_child(self):
         base_module = nn.Linear(1, 1)
@@ -287,7 +313,7 @@ class TestLoadStateDict(NNTestCase):
 
         # Make sure parameters and persistent buffers were assigned
         net_meta_state_dict = net_meta.state_dict(keep_vars=True)
-        for key in state_dict.keys():
+        for key in state_dict:
             if key in net_meta._parameters:
                 if keep_vars and not swap:
                     # state_dict[key] is an nn.Parameter
@@ -353,7 +379,7 @@ class TestLoadStateDict(NNTestCase):
         x = torch.randn(4, 3)
         num_iters = 3
 
-        for i in range(num_iters):
+        for _ in range(num_iters):
             opt.zero_grad()
             out = net(x)
             out.sum().backward()
@@ -371,7 +397,7 @@ class TestLoadStateDict(NNTestCase):
         opt2.load_state_dict(opt_state_dict)
 
         y = x.clone()
-        for i in range(num_iters):
+        for _ in range(num_iters):
             opt.zero_grad()
             out = net(x)
             out.sum().backward()
@@ -470,14 +496,18 @@ def load_torch_function_handler(cls, func, types, args=(), kwargs=None):
                         return cls(src._data)
                     return cls(src)
         else:
-            assert isinstance(
-                src, cls
-            ), f"Expected isinstance(src, {cls}) but got {type(src)}"
-            assert (
-                type(dest) == torch.Tensor
-                or type(dest) == torch.nn.Parameter
+            if not isinstance(src, cls):
+                raise AssertionError(
+                    f"Expected isinstance(src, {cls}) but got {type(src)}"
+                )
+            if not (
+                type(dest) is torch.Tensor
+                or type(dest) is torch.nn.Parameter
                 or issubclass(cls, type(dest))
-            )
+            ):
+                raise AssertionError(
+                    f"Expected dest to be Tensor, Parameter, or subclass of {cls}, got {type(dest)}"
+                )
             if assign:
                 return src.detach()
             else:
@@ -567,6 +597,8 @@ class MyWrapperLoadTensor(MyLoadTensor):
 
 
 class TestLoadStateDictSwap(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfCrossRef
     @skipIfTorchDynamo("Can't swap with dynamo as dynamo installs weakrefs")
     @swap([True])

@@ -1,8 +1,5 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <c10/util/CallOnce.h>
-
-#include <ATen/mps/IndexKernels.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSStream.h>
@@ -10,19 +7,9 @@
 
 namespace at::mps {
 
-static std::unique_ptr<MPSDevice> mps_device;
-static c10::once_flag mpsdev_init;
-
-static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& device) {
-  // MPS Advanced Indexing needs at least Metal 2.0 (support for Argument Buffers and function constants)
-  // host_name attribute needs at least Metal 2.2 and ulong needs Metal 2.3 (supported on MacOS 11+
-  TORCH_CHECK([device supportsFamily:MTLGPUFamilyMac2], "Missing Metal support for MTLGPUFamilyMac2");
-  return MTLLanguageVersion3_0;
-}
-
 MPSDevice* MPSDevice::getInstance() {
-  c10::call_once(mpsdev_init, [] { mps_device = std::unique_ptr<MPSDevice>(new MPSDevice()); });
-  return mps_device.get();
+  static MPSDevice mps_device;
+  return &mps_device;
 }
 
 MPSDevice::~MPSDevice() {
@@ -32,11 +19,11 @@ MPSDevice::~MPSDevice() {
 
 MPSDevice::MPSDevice() : _mtl_device(nil) {
   // Check that MacOS 13.0+ version of MPS framework is available
-  // Create the MPSGraph and check method introduced in 13.0
+  // Create the MPSGraph and check method introduced in 14.0
   // which is used by MPS backend.
   id mpsCD = NSClassFromString(@"MPSGraph");
 
-  if ([mpsCD instancesRespondToSelector:@selector(cumulativeSumWithTensor:axis:name:)] == NO) {
+  if ([mpsCD instancesRespondToSelector:@selector(HermiteanToRealFFTWithTensor:axes:descriptor:name:)] == NO) {
     return;
   }
 
@@ -66,44 +53,84 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
           isOperatingSystemAtLeastVersion:{.majorVersion = major, .minorVersion = minor, .patchVersion = 0}];
     }
   };
-  static bool _macos_13_1_plus = is_os_version_at_least(13, 1);
-  static bool _macos_13_2_plus = is_os_version_at_least(13, 2);
-  static bool _macos_13_3_plus = is_os_version_at_least(13, 3);
-  static bool _macos_14_0_plus = is_os_version_at_least(14, 0);
   static bool _macos_14_4_plus = is_os_version_at_least(14, 4);
   static bool _macos_15_0_plus = is_os_version_at_least(15, 0);
   static bool _macos_15_1_plus = is_os_version_at_least(15, 1);
+  static bool _macos_15_2_plus = is_os_version_at_least(15, 2);
+  static bool _macos_26_0_plus = is_os_version_at_least(26, 0);
+  static bool _macos_26_2_plus = is_os_version_at_least(26, 2);
+  static bool _macos_26_4_plus = is_os_version_at_least(26, 4);
+  static bool _macos_27_0_plus = is_os_version_at_least(27, 0);
 
   switch (version) {
-    case MacOSVersion::MACOS_VER_13_1_PLUS:
-      return _macos_13_1_plus;
-    case MacOSVersion::MACOS_VER_13_2_PLUS:
-      return _macos_13_2_plus;
-    case MacOSVersion::MACOS_VER_13_3_PLUS:
-      return _macos_13_3_plus;
-    case MacOSVersion::MACOS_VER_14_0_PLUS:
-      return _macos_14_0_plus;
-    case MacOSVersion::MACOS_VER_14_4_PLUS:
+    case MacOSVersion::MACOS_14_4:
       return _macos_14_4_plus;
-    case MacOSVersion::MACOS_VER_15_0_PLUS:
+    case MacOSVersion::MACOS_15_0:
       return _macos_15_0_plus;
-    case MacOSVersion::MACOS_VER_15_1_PLUS:
+    case MacOSVersion::MACOS_15_1:
       return _macos_15_1_plus;
+    case MacOSVersion::MACOS_15_2:
+      return _macos_15_2_plus;
+    case MacOSVersion::MACOS_26_0:
+      return _macos_26_0_plus;
+    case MacOSVersion::MACOS_26_2:
+      return _macos_26_2_plus;
+    case MacOSVersion::MACOS_26_4:
+      return _macos_26_4_plus;
+    case MacOSVersion::MACOS_27_0:
+      return _macos_27_0_plus;
     default:
       return false;
   }
 }
 
-at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
-  return getIMPSAllocator(useSharedAllocator);
+std::string MPSDevice::getName() const {
+  @autoreleasepool {
+    return [[_mtl_device name] UTF8String];
+  }
 }
 
+unsigned MPSDevice::getCoreCount() const {
+  io_iterator_t iterator = 0;
+  io_registry_entry_t entry = 0;
+  int core_count = 0;
+  auto matchingDict = IOServiceMatching("AGXAccelerator");
+  TORCH_INTERNAL_ASSERT(matchingDict, "Failed to create matching dict");
+  const auto status = IOServiceGetMatchingServices(kIOMainPortDefault, matchingDict, &iterator);
+  TORCH_INTERNAL_ASSERT(status == KERN_SUCCESS);
+  while ((entry = IOIteratorNext(iterator)) != 0) {
+    auto property = IORegistryEntryCreateCFProperty(entry, CFSTR("gpu-core-count"), kCFAllocatorDefault, 0);
+    auto found = CFNumberGetValue(static_cast<CFNumberRef>(property), kCFNumberIntType, &core_count);
+    CFRelease(property);
+    IOObjectRelease(entry);
+    if (found) {
+      break;
+    }
+  }
+  IOObjectRelease(iterator);
+  return core_count;
+}
+
+at::Allocator* GetMPSAllocator() {
+  return getIMPSAllocator();
+}
 bool is_available() {
   return MPSDevice::getInstance()->device() != nil;
 }
 
-bool is_macos_13_or_newer(MacOSVersion version) {
+bool is_macos_at_least(MacOSVersion version) {
   return MPSDevice::getInstance()->isMacOS13Plus(version);
+}
+
+bool is_apple_family_or_newer(AppleGPUFamily family) {
+  // some ops which are on MPSGraph behave differently between GPU families
+  auto mtl_family = static_cast<MTLGPUFamily>(family);
+  return [MPSDevice::getInstance()->device() supportsFamily:mtl_family];
+}
+
+bool has_mpp() {
+  // MetalPerformancePrimitives matmul2d (cooperative tensors) needs macOS 26.2+
+  return is_macos_at_least(MacOSVersion::MACOS_26_2);
 }
 
 } // namespace at::mps

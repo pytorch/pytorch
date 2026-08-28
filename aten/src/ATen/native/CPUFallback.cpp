@@ -98,13 +98,13 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   const auto arguments_begin = stack->size() - num_arguments;
 
   std::vector<at::Tensor> tensor_args;
-  std::vector<int> tensor_args_indices;
+  std::vector<size_t> tensor_args_indices;
 
   std::vector<c10::List<at::Tensor>> tensorlist_args;
-  std::vector<int> tensorlist_args_indices;
+  std::vector<size_t> tensorlist_args_indices;
 
   std::vector<c10::List<std::optional<at::Tensor>>> optional_tensorlist_args;
-  std::vector<int> optional_tensorlist_args_indices;
+  std::vector<size_t> optional_tensorlist_args_indices;
 
   std::optional<c10::Device> tgt_device = std::nullopt;
   // save converted cpu tensor for TensorList and optional TensorList
@@ -297,7 +297,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
               op.schema().operator_name(),
               " appears to be a view operator, ",
               "but it has no implementation for the backend \"",
-              dev_str.str(),
+              std::move(dev_str).str(),
               "\". View operators don't support ",
               "since the tensor's storage cannot be shared across devices.");
         } else {
@@ -307,7 +307,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
               op.schema().operator_name(),
               " appears to be a view operator, ",
               "but it has no implementation for the backend \"",
-              dev_str.str(),
+              std::move(dev_str).str(),
               "\". View operators don't support falling back to run on the CPU, ",
               "since the tensor's storage cannot be shared across devices.");
         }

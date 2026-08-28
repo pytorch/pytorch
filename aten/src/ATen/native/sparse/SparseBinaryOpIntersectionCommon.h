@@ -31,7 +31,7 @@ using at::sparse::get_sparse_impl;
 
 // ForwardIt: only legacy random access iterator is supported.
 template<class ForwardIt, class T, bool is_lower = true>
-static FUNCAPI INLINE
+FUNCAPI INLINE
 ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value) {
     ForwardIt RESTRICT it;
     typename std::iterator_traits<ForwardIt>::difference_type count, step;
@@ -51,10 +51,10 @@ ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value) {
       // Similarly, an upper bound is a value at *it with the smallest index
       // such that *it > value if such value exists, or last if does not.
       // Let is_lower = true and *it < value, then we know that *it and values
-      // preceeding *it cannot contain a lower bound, so we adjust initial iterator range
+      // preceding *it cannot contain a lower bound, so we adjust initial iterator range
       // from [first, first + count] to [first + step + 1, first + count - (step + 1)],
       // where +1 skips the element at which we have just evaluated *it < value.
-      // Samilar logic holds when is_lower = false.
+      // Similar logic holds when is_lower = false.
       if (is_lower ? *it < value : value >= *it) {
         first = ++it;
         count -= step + 1;
@@ -113,11 +113,11 @@ TensorIterator make_value_selection_intersection_iter(
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_owned_output(res_values)
-    .add_owned_input(restride_values(lhs_values))
-    .add_owned_input(restride_idx(lhs_select_idx))
-    .add_owned_input(restride_values(rhs_values))
-    .add_owned_input(restride_idx(rhs_select_idx))
-    .add_owned_input(restride_idx(intersection_counts))
+    .add_owned_const_input(restride_values(lhs_values))
+    .add_owned_const_input(restride_idx(lhs_select_idx))
+    .add_owned_const_input(restride_values(rhs_values))
+    .add_owned_const_input(restride_idx(rhs_select_idx))
+    .add_owned_const_input(restride_idx(intersection_counts))
     .build();
 
   return iter;
@@ -246,8 +246,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       source._indices().options());
   const auto probably_coalesced_nnz_arange = nnz_arange.narrow(-1, 0, probably_coalesced._nnz());
 
-  // non-const because of gcc-5/clang-5 issues
-  auto sparse_dim = probably_coalesced.sparse_dim();
+  const auto sparse_dim = probably_coalesced.sparse_dim();
 
   // Apply the hash function to probably_coalesced.indices
   const auto probably_coalesced_indices_hash = [&]() -> Tensor {
@@ -257,16 +256,15 @@ void _sparse_binary_op_intersection_kernel_impl(
     }
 
     const auto indices = probably_coalesced._indices();
-    // non-const because of gcc-5/clang-5 issues
-    auto indices_dim_stride = indices.stride(0);
-    auto indices_nnz_stride = indices.stride(1);
+    const auto indices_dim_stride = indices.stride(0);
+    const auto indices_nnz_stride = indices.stride(1);
 
     auto hash = at::empty({probably_coalesced._nnz()}, indices.options().dtype(kLong));
 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .add_output(hash)
-      .add_input(probably_coalesced_nnz_arange)
+      .add_const_input(probably_coalesced_nnz_arange)
       .build();
 
     {
@@ -299,8 +297,8 @@ void _sparse_binary_op_intersection_kernel_impl(
   std::tie(sorted_hash, argsort_hash) = [&]() -> std::tuple<Tensor, Tensor> {
     if (probably_coalesced.is_coalesced()) {
       // NOTE: argsort.dtype == nnz_arange.dtype
-      const auto argsort = nnz_arange.narrow(-1, 0, probably_coalesced._nnz());
-      return std::make_tuple(probably_coalesced_indices_hash, argsort);
+      auto argsort = nnz_arange.narrow(-1, 0, probably_coalesced._nnz());
+      return std::make_tuple(probably_coalesced_indices_hash, std::move(argsort));
     } else {
       // NOTE: we want argsort.dtype == nnz_arange.dtype,
       // but sort() produces indices of type int64_t,
@@ -308,7 +306,8 @@ void _sparse_binary_op_intersection_kernel_impl(
       // with pointer types in the kernels below.
       Tensor sorted, argsort;
       std::tie(sorted, argsort) = probably_coalesced_indices_hash.sort();
-      return std::make_tuple(sorted, argsort.to(nnz_arange.scalar_type()));
+      return std::make_tuple(
+          std::move(sorted), argsort.to(nnz_arange.scalar_type()));
     }
   }();
 
@@ -340,21 +339,21 @@ void _sparse_binary_op_intersection_kernel_impl(
       ? (*source_indices_hash_opt).contiguous()
       : at::empty({0}, probably_coalesced._indices().options().dtype(kLong));
     const auto* RESTRICT hash_ptr = source_indices_hash_opt.has_value()
-      ? hash.data_ptr<int64_t>()
+      ? hash.const_data_ptr<int64_t>()
       : nullptr;
 
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
       .add_owned_output(dummy.expand_as(source_arange))
-      .add_input(source_arange)
+      .add_const_input(source_arange)
       .build();
 
     {
       const auto* RESTRICT ptr_indices = source_indices.const_data_ptr<index_t>();
       const auto* RESTRICT ptr_sorted_hash = sorted_hash.const_data_ptr<int64_t>();
       const auto sorted_hash_len = sorted_hash.numel();
-      auto* RESTRICT ptr_intersection_count = intersection_count.data_ptr<int64_t>();
-      auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.data_ptr<int64_t>();
+      auto* RESTRICT ptr_intersection_count = intersection_count.mutable_data_ptr<int64_t>();
+      auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.mutable_data_ptr<int64_t>();
 
       // Fusing hash computation with hash intersection.
       KernelLauncher::launch(iter,

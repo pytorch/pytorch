@@ -52,11 +52,11 @@ def _generate_iterdatapipe_msg(datapipe, simplify_dp_name: bool = False):
     return output_string
 
 
-def _gen_invalid_iterdatapipe_msg(datapipe):
+def _gen_invalid_iterdatapipe_msg(datapipe) -> str:
     return (
         "This iterator has been invalidated because another iterator has been created "
         f"from the same IterDataPipe: {_generate_iterdatapipe_msg(datapipe)}\n"
-        "This may be caused multiple references to the same IterDataPipe. We recommend "
+        "This may be caused by multiple references to the same IterDataPipe. We recommend "
         "using `.fork()` if that is necessary."
     )
 
@@ -78,7 +78,7 @@ def _check_iterator_valid(datapipe, iterator_id, next_method_exists=False) -> No
         # The `_valid_iterator_id` should either be never set (`None`), or set by at most one
         # iterator (`0`). Otherwise, it means there are multiple iterators.
         if datapipe._valid_iterator_id is not None and datapipe._valid_iterator_id != 0:
-            extra_msg = "\nNote that this exception is raised inside your IterDataPipe's a `__next__` method"
+            extra_msg = "\nNote that this exception is raised inside your IterDataPipe's `__next__` method"
             raise RuntimeError(
                 _gen_invalid_iterdatapipe_msg(datapipe) + extra_msg + _feedback_msg
             )
@@ -119,7 +119,7 @@ def _set_datapipe_valid_iterator_id(datapipe):
     return datapipe._valid_iterator_id
 
 
-def hook_iterator(namespace):
+def hook_iterator(namespace) -> None:
     r"""
     Define a hook that is applied to all `__iter__` of metaclass `_DataPipeMeta`.
 
@@ -141,7 +141,7 @@ def hook_iterator(namespace):
         Those `__iter__` method commonly returns `self` but not necessarily.
         """
 
-        def __init__(self, iterator, datapipe, iterator_id, has_next_method):
+        def __init__(self, iterator, datapipe, iterator_id, has_next_method) -> None:
             self.iterator = iterator
             self.datapipe = datapipe
             self.iterator_id = iterator_id

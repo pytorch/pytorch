@@ -2,8 +2,6 @@
 
 #include <stack>
 
-#include <c10/util/Logging.h>
-
 namespace torch::lazy {
 
 std::vector<const Node*> Util::ComputePostOrder(

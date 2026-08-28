@@ -1,7 +1,5 @@
 #include <torch/csrc/distributed/rpc/unpickled_python_remote_call.h>
 
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
-
 namespace torch::distributed::rpc {
 
 UnpickledPythonRemoteCall::UnpickledPythonRemoteCall(

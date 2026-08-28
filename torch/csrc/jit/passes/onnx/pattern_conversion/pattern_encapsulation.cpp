@@ -1,8 +1,5 @@
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/common.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
-#include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
 
 // EDITING THIS FILE? READ THIS FIRST!
 // see Note [Edit Pattern Encapsulation] in pattern_encapsulation.h
@@ -53,16 +50,14 @@ Node* EncapsulateInplaceIndexPutForONNX(Node* index_put_node) {
        ++it) {
     auto n = *it;
     auto cloned_n = subblock->appendNode(graph->createClone(
-        n, [&](Value* v) { return env.find(v) != env.end() ? env[v] : v; }));
+        n, [&](Value* v) { return env.contains(v) ? env[v] : v; }));
     for (size_t i = 0; i < cloned_n->outputs().size(); ++i) {
       env[n->outputs().at(i)] = cloned_n->outputs().at(i);
     }
   }
 
-  Node* new_index_put_node =
-      subblock->appendNode(graph->createClone(index_put_node, [&](Value* v) {
-        return env.find(v) != env.end() ? env[v] : v;
-      }));
+  Node* new_index_put_node = subblock->appendNode(graph->createClone(
+      index_put_node, [&](Value* v) { return env.contains(v) ? env[v] : v; }));
   for (auto o : new_index_put_node->outputs()) {
     subblock->registerOutput(o);
   }

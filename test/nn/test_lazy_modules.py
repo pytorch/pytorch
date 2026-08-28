@@ -1,16 +1,16 @@
 # Owner(s): ["module: nn"]
 import pickle
-import unittest
 
 import torch
 import torch.nn as nn
 from torch.nn import Buffer, Parameter
 from torch.nn.parameter import UninitializedBuffer, UninitializedParameter
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     suppress_warnings,
-    TEST_PRIVATEUSE1,
     TestCase,
 )
 
@@ -20,6 +20,8 @@ class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
 
 
 class TestLazyModules(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @suppress_warnings
     def test_lazy_module_parameter(self):
         module = LazyModule()
@@ -33,7 +35,7 @@ class TestLazyModules(TestCase):
         new_module.register_parameter("test_param", nn.Parameter(torch.ones(5, 5)))
         with self.assertRaisesRegex(RuntimeError, "shape of an uninitialized"):
             new_module.load_state_dict(state_dict)
-        # Uninitialized parameters are overriden when the state dict to be loaded contains a valid one
+        # Uninitialized parameters are overridden when the state dict to be loaded contains a valid one
         new_module = LazyModule()
         new_module.register_parameter("test_param", nn.Parameter(torch.ones(5, 5)))
         module.load_state_dict(new_module.state_dict())
@@ -62,7 +64,7 @@ class TestLazyModules(TestCase):
         new_module.test_buffer = Buffer(torch.ones(5, 5))
         with self.assertRaisesRegex(RuntimeError, "shape of an uninitialized"):
             new_module.load_state_dict(state_dict)
-        # Uninitialized parameters are overriden when the state dict to be loaded contains a valid one
+        # Uninitialized parameters are overridden when the state dict to be loaded contains a valid one
         new_module = LazyModule()
         new_module.test_buffer = Buffer(torch.ones(5, 5))
         module.load_state_dict(new_module.state_dict())
@@ -117,11 +119,14 @@ class TestLazyModules(TestCase):
         self.assertIsInstance(module.weight, UninitializedParameter)
         self.assertIsInstance(module.bias, UninitializedParameter)
         input = torch.ones(5, 5)
-        module(input)
+        output = module(input)
         self.assertIsInstance(module, nn.Linear)
         self.assertNotIsInstance(module, nn.LazyLinear)
         self.assertTrue(module.weight.shape == (10, 5))
         self.assertTrue(module.bias.shape == (10,))
+        self.assertTrue((module.weight != 0).any())
+        self.assertTrue((module.bias != 0).any())
+        self.assertTrue((output != 0).any())
         y = module(input)
         self.assertTrue(
             torch.equal(
@@ -164,6 +169,22 @@ class TestLazyModules(TestCase):
         lazy_module = nn.LazyLinear(10)
         with self.assertRaisesRegex(RuntimeError, "shape of an uninitialized"):
             module.load_state_dict(lazy_module.state_dict())
+
+    @suppress_warnings
+    def test_lazy_linear_state_and_forward(self):
+        module = nn.Linear(5, 10)
+        lazy_module = nn.LazyLinear(10)
+        lazy_module.load_state_dict(module.state_dict())
+        # Parameters have been initialized but the module won't become a full
+        # Linear one until the first iteration. This is due to
+        # limitations on the state_dict loading logic
+        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertTrue(isinstance(lazy_module, nn.LazyLinear))
+
+        input = torch.randn(5, 5)
+        lazy_module(input)
+        self.assertFalse(isinstance(lazy_module, nn.LazyLinear))
+        self.assertTrue(lazy_module.in_features == 5)
 
     def _check_lazy_conv(
         self,
@@ -731,25 +752,6 @@ class TestLazyModules(TestCase):
         module.test_param.materialize(10)
         self.assertTrue(module.test_param.dtype == torch.float16)
 
-    @unittest.skipIf(
-        not (TEST_CUDA or TEST_PRIVATEUSE1), "CUDA and PRIVATEUSE1 not available"
-    )
-    @suppress_warnings
-    def test_materialize_device(self):
-        module = LazyModule()
-        module.register_parameter("test_param", UninitializedParameter())
-        module.test_param.materialize(10)
-        self.assertTrue(module.test_param.device.type == "cpu")
-        if TEST_CUDA:
-            device = "cuda"
-        elif TEST_PRIVATEUSE1:
-            device = torch._C._get_privateuse1_backend_name()
-        module = LazyModule()
-        module.register_parameter("test_param", UninitializedParameter())
-        module.to(device)
-        module.test_param.materialize(10)
-        self.assertTrue(module.test_param.device.type == device)
-
     @suppress_warnings
     def test_chained_initialization(self):
         class MyNetwork(torch.nn.Module):
@@ -838,6 +840,27 @@ class TestLazyModules(TestCase):
 
         with self.assertRaisesRegex(ValueError, "uninitialized parameter"):
             param + param
+
+
+class TestLazyModulesDevice(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @suppress_warnings
+    def test_materialize_device(self, device):
+        module = LazyModule()
+        module.register_parameter("test_param", UninitializedParameter())
+        module.test_param.materialize(10)
+        self.assertTrue(module.test_param.device.type == "cpu")
+
+        # Test materialization on the current device
+        module = LazyModule()
+        module.register_parameter("test_param", UninitializedParameter())
+        module.to(device)
+        module.test_param.materialize(10)
+        self.assertEqual(module.test_param.device.type, device.split(":")[0])
+
+
+instantiate_device_type_tests(TestLazyModulesDevice, globals())
 
 
 if __name__ == "__main__":

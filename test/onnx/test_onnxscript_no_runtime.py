@@ -3,7 +3,6 @@
 """Test the support on onnxscript in PyTorch-ONNX converter."""
 
 import io
-from typing import List
 
 import onnx
 
@@ -11,7 +10,7 @@ import onnxscript
 from onnxscript.onnx_types import FLOAT
 
 import torch
-from torch.onnx._internal import jit_utils
+from torch.onnx._internal.torchscript_exporter import jit_utils
 from torch.testing._internal import common_utils
 
 
@@ -51,7 +50,7 @@ class TestONNXScriptExport(common_utils.TestCase):
         # 2. Register layer_norm onnxscript function as custom Op
         @onnxscript.script(custom_opset)
         def layer_norm(
-            X, axes: List[int], weight: FLOAT[...], bias: FLOAT[...], eps: float
+            X, axes: list[int], weight: FLOAT[...], bias: FLOAT[...], eps: float
         ):
             mean = op.ReduceMean(X, axes=axes)
             D = X - mean  # op.Sub(X, mean)
@@ -87,14 +86,20 @@ class TestONNXScriptExport(common_utils.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         model_selu = torch.nn.SELU()
         selu_onnx = io.BytesIO()
-        torch.onnx.export(model_selu, x, selu_onnx, opset_version=self.opset_version)
+        torch.onnx.export(
+            model_selu, x, selu_onnx, opset_version=self.opset_version, dynamo=False
+        )
 
         N, C = 3, 4
         y = torch.randn(N, C)
         model_layer_norm = torch.nn.LayerNorm(C)
         layer_norm_onnx = io.BytesIO()
         torch.onnx.export(
-            model_layer_norm, y, layer_norm_onnx, opset_version=self.opset_version
+            model_layer_norm,
+            y,
+            layer_norm_onnx,
+            opset_version=self.opset_version,
+            dynamo=False,
         )
 
         # 4. test on models
@@ -157,7 +162,18 @@ class TestONNXScriptExport(common_utils.TestCase):
 
         saved_model = io.BytesIO()
         torch.onnx.export(
-            torch.jit.script(model), inputs, f=saved_model, opset_version=15
+            torch.jit.script(model),
+            inputs,
+            f=saved_model,
+            opset_version=15,
+            dynamo=False,
         )
         loop_selu_proto = onnx.load(io.BytesIO(saved_model.getvalue()))
         self.assertEqual(len(loop_selu_proto.functions), 1)
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

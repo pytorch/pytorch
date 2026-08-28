@@ -51,8 +51,8 @@ bool EqualValues(at::Tensor tensor1, at::Tensor tensor2) {
   if (tensor1.sizes() != tensor2.sizes() ||
       tensor1.dtype() != tensor2.dtype()) {
     std::cerr << "Different shape:\n"
-              << tensor1.dtype() << " " << tensor1.sizes() << "\n-vs-\n"
-              << tensor2.dtype() << " " << tensor2.sizes() << "\n";
+              << tensor1.dtype() << ' ' << tensor1.sizes() << "\n-vs-\n"
+              << tensor2.dtype() << ' ' << tensor2.sizes() << '\n';
     return false;
   }
   at::ScalarType type1 = tensor1.scalar_type();
@@ -69,8 +69,8 @@ bool EqualValuesNoElementTypeCheck(at::Tensor tensor1, at::Tensor tensor2) {
   tensor2 = ToCpuTensor(tensor2);
   if (tensor1.sizes() != tensor2.sizes()) {
     std::cerr << "Different shape:\n"
-              << tensor1.dtype() << " " << tensor1.sizes() << "\n-vs-\n"
-              << tensor2.dtype() << " " << tensor2.sizes() << "\n";
+              << tensor1.dtype() << ' ' << tensor1.sizes() << "\n-vs-\n"
+              << tensor2.dtype() << ' ' << tensor2.sizes() << '\n';
     return false;
   }
   at::ScalarType type1 = tensor1.scalar_type();
@@ -106,8 +106,8 @@ bool CloseValues(
   if (tensor1.sizes() != tensor2.sizes() ||
       tensor1.dtype() != tensor2.dtype()) {
     std::cerr << "Different shape:\n"
-              << tensor1.dtype() << " " << tensor1.sizes() << "\n-vs-\n"
-              << tensor2.dtype() << " " << tensor2.sizes() << "\n";
+              << tensor1.dtype() << ' ' << tensor1.sizes() << "\n-vs-\n"
+              << tensor2.dtype() << ' ' << tensor2.sizes() << '\n';
     return false;
   }
   bool equal = tensor1.allclose(tensor2, rtol, atol);
@@ -140,7 +140,7 @@ void TestBackward(
     const torch::Tensor& input = inputs[i];
     if (input.defined()) {
       torch::Tensor oinput =
-          input.clone().detach().set_requires_grad(input.requires_grad());
+          input.detach().clone().set_requires_grad(input.requires_grad());
       input_vars.push_back(oinput);
 
       torch::Tensor xinput = CopyToDevice(input, device)

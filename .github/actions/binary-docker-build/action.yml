@@ -1,0 +1,83 @@
+name: Binary docker build
+
+description: Build docker image for binary builds
+
+inputs:
+  docker-image-name:
+    description: Docker image name for PR builds
+    required: true
+  docker-build-dir:
+    description: Location of the build.sh relative to .ci/docker
+    required: true
+  custom-tag-prefix:
+    description: Custom tag prefix for the docker image
+    required: false
+  DOCKER_TOKEN:
+    description: Docker token for authentication
+    required: true
+  DOCKER_ID:
+    description: Docker ID for authentication
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout PyTorch
+      uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
+    # ciflow/docker publishes to ECR via OIDC (works for fork SHAs too); other refs use Docker Hub
+    - name: Login to ECR
+      if: startsWith(github.ref, 'refs/tags/ciflow/docker/')
+      uses: pytorch/pytorch/.github/actions/ecr-login@main
+      with:
+        aws-role-to-assume: arn:aws:iam::308535385114:role/arc
+
+    # OSDC/ARC has no host docker daemon; build_with_remote_buildkit.sh
+    # registers the remote builder and runs build.sh (which honors
+    # REMOTE_BUILDKIT, see .ci/docker/build.sh) with the cold-pool retry.
+    - name: Build (and, on push, publish) via remote BuildKit
+      env:
+        REMOTE_BUILDKIT: "1"
+        DOCKER_TOKEN: ${{ inputs.DOCKER_TOKEN }}
+        DOCKER_ID: ${{ inputs.DOCKER_ID }}
+        DOCKER_IMAGE_NAME: ${{ inputs.docker-image-name }}
+        DOCKER_IMAGE_PREFIX: ${{ inputs.custom-tag-prefix }}
+        DOCKER_BUILD_DIR: ${{ inputs.docker-build-dir }}
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        # checkout-pytorch may leave the tree owned by a different uid than the
+        # step user on ARC; avoid git's "dubious ownership" error for rev-parse.
+        git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
+        GITHUB_REF=${GITHUB_REF:-$(git symbolic-ref -q HEAD || git describe --tags --exact-match)}
+        GIT_BRANCH_NAME=${GITHUB_REF##*/}
+        GIT_COMMIT_SHA=${GITHUB_SHA:-$(git rev-parse HEAD)}
+        CI_FOLDER_SHA=$(git rev-parse HEAD:.ci/docker)
+
+        # ciflow/docker -> ECR content-addressed tag (<variant>-<.ci/docker hash>); else Docker Hub branch/commit/hash tags (+ floating from main)
+        if [[ "${GITHUB_REF:-}" == refs/tags/ciflow/docker/* ]]; then
+          PREFIX="308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}"
+          TAGS=(-t "${PREFIX}-${CI_FOLDER_SHA}")
+        else
+          PREFIX="docker.io/pytorch/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}"
+          TAGS=(
+            -t "${PREFIX}-${GIT_BRANCH_NAME}"
+            -t "${PREFIX}-${GIT_COMMIT_SHA}"
+            -t "${PREFIX}-${CI_FOLDER_SHA}"
+          )
+          if [[ "${GIT_BRANCH_NAME}" == "main" ]]; then
+            TAGS+=(-t "${PREFIX}")
+          fi
+
+          # WITH_PUSH gates publishing; log in to Docker Hub only on the push path (ECR uses the ecr-login step)
+          set +x
+          if [[ "${WITH_PUSH:-false}" == "true" ]]; then
+            echo "${DOCKER_TOKEN}" | docker login docker.io -u "${DOCKER_ID}" --password-stdin
+          fi
+          set -x
+        fi
+
+        bash .github/scripts/build_with_remote_buildkit.sh \
+          ".ci/docker/${DOCKER_BUILD_DIR}/build.sh" "${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}" "${TAGS[@]}"

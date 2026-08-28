@@ -43,6 +43,10 @@ class ReplaceNaNBenchmark(op_bench.TorchBenchmarkBase):
         self.op_func = op_func
         self.set_module_name("nan_to_num")
 
+        #  To make casename unique as nan_to_num and nan_to_num_ are two different functions.
+        if op_func is torch.nan_to_num_:
+            self.set_module_name("nan_to_num_")
+
     def forward(self, input, replace_inf: bool):
         # compare inplace
         if replace_inf:

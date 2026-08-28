@@ -77,7 +77,7 @@ typedef struct _SerializedModel {
  * Get the physically stored size of a value.  All values are padded out
  * to a multiple of 4 bytes to ensure the next value is 4-byte aligned.
  */
-static uint32_t value_physical_size(uint32_t len) {
+uint32_t value_physical_size(uint32_t len) {
   uint32_t phys = len;
   if (len % 4 == 0) {
     return len;
@@ -174,8 +174,7 @@ int load_nnapi_model(
     uint32_t len = values[i].source_length;
     const uint8_t* stored_pointer = next_pointer;
     const void* value_pointer = nullptr;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t value_length;
+    size_t value_length = 0;
 
     switch ((SourceType)values[i].source_type) {
       case SOURCE_IMMEDIATE:

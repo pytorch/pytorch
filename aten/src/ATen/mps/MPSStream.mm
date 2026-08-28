@@ -3,13 +3,18 @@
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
+#include <c10/metal/error.h>
+#include <c10/util/CallOnce.h>
+#include <c10/util/irange.h>
+
+#include <array>
+#include <atomic>
 
 @interface MPSGraphExecutionDescriptor ()
 @property(readwrite, atomic) BOOL enableCommitAndContinue;
 @end
 
 namespace at::mps {
-
 //-----------------------------------------------------------------
 //  MPSStream
 //-----------------------------------------------------------------
@@ -30,6 +35,10 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
   // Choose level which optimizes for GPU
   _compilationDescriptor.optimizationLevel = MPSGraphOptimizationLevel0;
   _executionDescriptor.compilationDescriptor = _compilationDescriptor;
+
+  _errorBuffer = [MPSDevice::getInstance()->device() newBufferWithLength:sizeof(c10::metal::ErrorMessages)
+                                                                 options:MTLResourceStorageModeShared];
+  std::memset([_errorBuffer contents], 0, 1024);
 }
 
 MPSStream::~MPSStream() {
@@ -38,6 +47,8 @@ MPSStream::~MPSStream() {
   [_executionDescriptor release];
   [_compilationDescriptor release];
   _executionDescriptor = nil;
+  [_errorBuffer release];
+  _errorBuffer = nil;
   _compilationDescriptor = nil;
 
   assert(_commandBuffer == nil);
@@ -49,6 +60,10 @@ MPSCommandBuffer* MPSStream::commandBuffer() {
   }
 
   return _commandBuffer;
+}
+
+id<MTLDevice> MPSStream::device() const {
+  return [_commandQueue device];
 }
 
 id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
@@ -100,6 +115,7 @@ void MPSStream::commitAndWait() {
     [_prevCommandBuffer waitUntilCompleted];
     [_prevCommandBuffer release];
     _prevCommandBuffer = nil;
+    checkLastError();
   }
 
   if (_commandBuffer) {
@@ -107,6 +123,7 @@ void MPSStream::commitAndWait() {
     [_commandBuffer waitUntilCompleted];
     [_commandBuffer release];
     _commandBuffer = nil;
+    checkLastError();
   }
 }
 
@@ -145,22 +162,6 @@ void MPSStream::addCompletedHandler(MTLCommandBufferHandler block) {
   });
 }
 
-void MPSStream::fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t offset, SyncType syncType) {
-  if (length == 0) {
-    return;
-  }
-  dispatch_sync(_serialQueue, ^() {
-    @autoreleasepool {
-      endKernelCoalescing();
-      id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
-
-      [blitEncoder fillBuffer:buffer range:NSMakeRange(offset, length) value:value];
-      [blitEncoder endEncoding];
-      synchronize(syncType);
-    }
-  });
-}
-
 void MPSStream::copy(id<MTLBuffer> srcBuffer,
                      id<MTLBuffer> dstBuffer,
                      size_t length,
@@ -168,7 +169,7 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
                      size_t dstOffset,
                      uint64_t profileId,
                      SyncType syncType) {
-  dispatch_sync(_serialQueue, ^() {
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
     @autoreleasepool {
       endKernelCoalescing();
       id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
@@ -193,7 +194,7 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
 
       // profilerId has a value only if copy profiling is enabled
       if (profileId) {
-        getMPSProfiler().endProfileCopy(profileId, syncType);
+        getMPSProfiler().endProfileCopy(profileId, syncType, this);
       } else {
         synchronize(syncType);
       }
@@ -221,12 +222,12 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
   auto& profiler = getMPSProfiler();
   const bool isGraphProfilingEnabled = profiler.isOperationProfilingEnabled();
 
-  dispatch_sync(_serialQueue, ^() {
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
     endKernelCoalescing();
     if (isGraphProfilingEnabled) {
       // this function call is only relevant for interval-based Signposts
       // which exclude schedule time (only includes GPU run time)
-      profiler.beginProfileGPUInterval(mpsGraph);
+      profiler.beginProfileGPUInterval(mpsGraph, this);
     }
     // note: CommitAndContinue feature is enabled/disabled via "_executionDescriptor"
     [mpsGraph encodeToCommandBuffer:commandBuffer()
@@ -244,11 +245,29 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
     // check if graph execution profiling is enabled
     if (isGraphProfilingEnabled) {
       // with profiler enabled, we commit after adding the completedHandler in MPSProfiler
-      profiler.endProfileKernel(mpsGraph, _syncType);
+      profiler.endProfileKernel(mpsGraph, this, _syncType);
     } else {
       synchronize(_syncType);
     }
   });
+}
+
+id<MTLBuffer> MPSStream::getErrorBuffer() {
+  return _errorBuffer;
+}
+
+void MPSStream::checkLastError() {
+  auto msgs = reinterpret_cast<c10::metal::ErrorMessages*>([_errorBuffer contents]);
+  if (!msgs) {
+    return;
+  }
+  const auto& msg = msgs->msg[0];
+  unsigned int count = 0;
+  std::swap(count, msgs->count);
+  if (!count) {
+    return;
+  }
+  throw c10::AcceleratorError({msg.func, msg.file, msg.line}, 1, msg.message);
 }
 
 //-----------------------------------------------------------------
@@ -266,12 +285,76 @@ MPSStream* MPSStreamImpl::getInstance() {
 
 MPSStreamImpl::MPSStreamImpl() {}
 
+namespace {
+thread_local MPSStream* current_stream = nullptr;
+} // namespace
+
 MPSStream* getCurrentMPSStream() {
-  return getDefaultMPSStream();
+  return current_stream ? current_stream : getDefaultMPSStream();
+}
+
+void setCurrentMPSStream(MPSStream* stream) {
+  current_stream = stream;
 }
 
 MPSStream* getDefaultMPSStream() {
   return MPSStreamImpl::getInstance();
+}
+
+//-----------------------------------------------------------------
+//  MPS stream pool
+//-----------------------------------------------------------------
+
+namespace {
+constexpr int kMPSStreamsPerPool = 32;
+
+std::array<MPSStream*, kMPSStreamsPerPool> stream_pool{};
+c10::once_flag stream_pool_flag;
+std::atomic<uint32_t> stream_pool_counter{0};
+std::atomic<bool> stream_pool_initialized{false};
+
+void initStreamPool() {
+  // Pool ids start at 1; id 0 is reserved for the default stream.
+  for (const auto i : c10::irange(kMPSStreamsPerPool)) {
+    stream_pool[i] = new MPSStream(Stream(Stream::UNSAFE, c10::Device(DeviceType::MPS, 0), i + 1));
+  }
+  stream_pool_initialized.store(true, std::memory_order_release);
+}
+} // namespace
+
+MPSStream* getStreamFromPool() {
+  c10::call_once(stream_pool_flag, initStreamPool);
+  return stream_pool[stream_pool_counter++ % kMPSStreamsPerPool];
+}
+
+void synchronizeAllMPSStreams(SyncType syncType) {
+  auto sync = [syncType](MPSStream* stream) {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      stream->synchronize(syncType);
+    });
+  };
+  sync(getDefaultMPSStream());
+  // don't eagerly create the pool just to synchronize it
+  if (stream_pool_initialized.load(std::memory_order_acquire)) {
+    for (auto* stream : stream_pool) {
+      sync(stream);
+    }
+  }
+}
+
+// Helper methods
+void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)()) {
+  __block std::optional<std::exception_ptr> block_exception;
+  dispatch_sync(queue, ^() {
+    try {
+      block();
+    } catch (...) {
+      block_exception = std::current_exception();
+    }
+  });
+  if (block_exception) {
+    std::rethrow_exception(*block_exception);
+  }
 }
 
 } // namespace at::mps

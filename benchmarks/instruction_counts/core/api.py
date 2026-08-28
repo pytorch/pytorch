@@ -7,7 +7,7 @@ import enum
 import itertools as it
 import re
 import textwrap
-from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from worker.main import WorkerTimerArgs
 
@@ -49,7 +49,7 @@ class AutoLabels:
     language: Language
 
     @property
-    def as_dict(self) -> Dict[str, str]:
+    def as_dict(self) -> dict[str, str]:
         """Dict representation for CI reporting."""
         return {
             "runtime": self.runtime.value,
@@ -66,7 +66,10 @@ class GroupedSetup:
 
     def __post_init__(self) -> None:
         for field in dataclasses.fields(self):
-            assert field.type == str
+            if field.type is not str:
+                raise AssertionError(
+                    f"Expected field {field.name} to be str, but got {field.type}"
+                )
             value: str = getattr(self, field.name)
             object.__setattr__(self, field.name, textwrap.dedent(value))
 
@@ -145,37 +148,37 @@ class GroupedBenchmark:
     # `GroupedStmts` (init_from_stmts) they are passed through from user args.
     # In the case of `GroupedModules` (init_from_model) they are generated
     # using `signature`. (e.g. `f(x, y) -> z` generates `z = model(x, y)`)
-    py_fwd_stmt: Optional[str]
-    cpp_fwd_stmt: Optional[str]
+    py_fwd_stmt: str | None
+    cpp_fwd_stmt: str | None
 
     # Code block used to define a model. `init_from_stmts` will never populate
     # `cpp_model_setup`, but if TorchScript is requested it will generate
     # `py_model_setup` using `torch.jit.script`.
-    py_model_setup: Optional[str]
-    cpp_model_setup: Optional[str]
+    py_model_setup: str | None
+    cpp_model_setup: str | None
 
     # True if this benchmark used `init_from_stmts`, otherwise False.
     inferred_model_setup: bool
 
     # Described above
     setup: GroupedSetup
-    signature_args: Optional[Tuple[str, ...]]
-    signature_output: Optional[str]
+    signature_args: tuple[str, ...] | None
+    signature_output: str | None
     torchscript: bool
     autograd: bool
-    num_threads: Tuple[int, ...]
+    num_threads: tuple[int, ...]
 
     @classmethod
     def init_from_stmts(
         cls,
-        py_stmt: Optional[str] = None,
-        cpp_stmt: Optional[str] = None,
+        py_stmt: str | None = None,
+        cpp_stmt: str | None = None,
         # Generic constructor arguments
         setup: GroupedSetup = GroupedSetup(),
-        signature: Optional[str] = None,
+        signature: str | None = None,
         torchscript: bool = False,
         autograd: bool = False,
-        num_threads: Union[int, Tuple[int, ...]] = 1,
+        num_threads: int | tuple[int, ...] = 1,
     ) -> "GroupedBenchmark":
         """Create a set of benchmarks from free-form statements.
 
@@ -216,14 +219,14 @@ class GroupedBenchmark:
     @classmethod
     def init_from_model(
         cls,
-        py_model_setup: Optional[str] = None,
-        cpp_model_setup: Optional[str] = None,
+        py_model_setup: str | None = None,
+        cpp_model_setup: str | None = None,
         # Generic constructor arguments
         setup: GroupedSetup = GroupedSetup(),
-        signature: Optional[str] = None,
+        signature: str | None = None,
         torchscript: bool = False,
         autograd: bool = False,
-        num_threads: Union[int, Tuple[int, ...]] = 1,
+        num_threads: int | tuple[int, ...] = 1,
     ) -> "GroupedBenchmark":
         """Create a set of benchmarks using torch.nn Modules.
 
@@ -260,8 +263,8 @@ class GroupedBenchmark:
         cls,
         py_block: str = "",
         cpp_block: str = "",
-        num_threads: Union[int, Tuple[int, ...]] = 1,
-    ) -> Dict[Union[Tuple[str, ...], Optional[str]], "GroupedBenchmark"]:
+        num_threads: int | tuple[int, ...] = 1,
+    ) -> dict[tuple[str, ...] | str | None, "GroupedBenchmark"]:
         py_cases, py_setup, py_global_setup = cls._parse_variants(
             py_block, Language.PYTHON
         )
@@ -269,7 +272,10 @@ class GroupedBenchmark:
             cpp_block, Language.CPP
         )
 
-        assert not py_global_setup
+        if py_global_setup:
+            raise AssertionError(
+                f"py_global_setup should be empty, but got: {py_global_setup}"
+            )
         setup = GroupedSetup(
             py_setup=py_setup,
             cpp_setup=cpp_setup,
@@ -279,9 +285,9 @@ class GroupedBenchmark:
         # NB: The key is actually `Tuple[str, ...]`, however MyPy gets confused
         #     and we use the superset `Union[Tuple[str, ...], Optional[str]` to
         #     match the expected signature.
-        variants: Dict[Union[Tuple[str, ...], Optional[str]], GroupedBenchmark] = {}
+        variants: dict[tuple[str, ...] | str | None, GroupedBenchmark] = {}
 
-        seen_labels: Set[str] = set()
+        seen_labels: set[str] = set()
         for label in it.chain(py_cases.keys(), cpp_cases.keys()):
             if label in seen_labels:
                 continue
@@ -332,8 +338,8 @@ class GroupedBenchmark:
 
     @staticmethod
     def _parse_signature(
-        signature: Optional[str],
-    ) -> Tuple[Optional[Tuple[str, ...]], Optional[str]]:
+        signature: str | None,
+    ) -> tuple[tuple[str, ...] | None, str | None]:
         if signature is None:
             return None, None
 
@@ -341,7 +347,7 @@ class GroupedBenchmark:
         if match is None:
             raise ValueError(f"Invalid signature: `{signature}`")
 
-        args: Tuple[str, ...] = tuple(match.groups()[0].split(", "))
+        args: tuple[str, ...] = tuple(match.groups()[0].split(", "))
         output: str = match.groups()[1].strip()
 
         if "," in output:
@@ -356,9 +362,9 @@ class GroupedBenchmark:
 
     @staticmethod
     def _model_from_py_stmt(
-        py_stmt: Optional[str],
-        signature_args: Optional[Tuple[str, ...]],
-        signature_output: Optional[str],
+        py_stmt: str | None,
+        signature_args: tuple[str, ...] | None,
+        signature_output: str | None,
     ) -> str:
         if py_stmt is None:
             raise ValueError("`py_stmt` must be defined in order to derive a model.")
@@ -368,7 +374,7 @@ class GroupedBenchmark:
 
         return textwrap.dedent(
             f"""\
-            def model({', '.join(signature_args)}):
+            def model({", ".join(signature_args)}):
             {{stmt_str}}
                 return {signature_output}
         """
@@ -376,10 +382,10 @@ class GroupedBenchmark:
 
     @staticmethod
     def _make_model_invocation(
-        signature_args: Tuple[str, ...],
-        signature_output: Optional[str],
+        signature_args: tuple[str, ...],
+        signature_output: str | None,
         runtime: RuntimeMode,
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         py_prefix, cpp_prefix = "", ""
         if signature_output is not None:
             py_prefix = f"{signature_output} = "
@@ -392,12 +398,13 @@ class GroupedBenchmark:
             )
 
         else:
-            assert runtime == RuntimeMode.JIT
+            if runtime != RuntimeMode.JIT:
+                raise AssertionError(f"Expected RuntimeMode.JIT, but got {runtime}")
             model_name = "jit_model"
             cpp_invocation = textwrap.dedent(
                 f"""\
                 std::vector<torch::jit::IValue> ivalue_inputs({{
-                    {', '.join([f'torch::jit::IValue({a})' for a in signature_args])}
+                    {", ".join([f"torch::jit::IValue({a})" for a in signature_args])}
                 }});
                 {cpp_prefix}{model_name}.forward(ivalue_inputs);
             """
@@ -415,13 +422,13 @@ class GroupedBenchmark:
     @staticmethod
     def _parse_variants(
         block: str, language: Language
-    ) -> Tuple[Dict[str, List[str]], str, str]:
+    ) -> tuple[dict[str, list[str]], str, str]:
         block = textwrap.dedent(block).strip()
         comment = "#" if language == Language.PYTHON else "//"
         label_pattern = f"{comment} @(.+)$"
         label = ""
 
-        lines_by_label: Dict[str, List[str]] = {"SETUP": [], "GLOBAL_SETUP": []}
+        lines_by_label: dict[str, list[str]] = {"SETUP": [], "GLOBAL_SETUP": []}
         for line in block.splitlines(keepends=False):
             match = re.search(label_pattern, line.strip())
             if match:

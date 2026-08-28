@@ -66,6 +66,9 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual size_t getRecommendedMaxMemory() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  virtual size_t getMaxBufferLength() const {
+    return 0;
+  }
   virtual void setMemoryFraction(double /*ratio*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
@@ -77,6 +80,9 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   }
   virtual uint32_t acquireEvent(bool enable_timing) const {
     FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  Device getDeviceFromPtr(void* data) const override {
+    TORCH_CHECK(false, "Cannot get device of pointer on MPS without ATen_mps library. ");
   }
   virtual void releaseEvent(uint32_t event_id) const {
     FAIL_MPSHOOKS_FUNC(__func__);
@@ -108,9 +114,10 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   #undef FAIL_MPSHOOKS_FUNC
 };
 
+// Deprecated: no longer used internally, kept for ABI compatibility.
 struct TORCH_API MPSHooksArgs {};
 
-TORCH_DECLARE_REGISTRY(MPSHooksRegistry, MPSHooksInterface, MPSHooksArgs);
+TORCH_DECLARE_REGISTRY(MPSHooksRegistry, MPSHooksInterface);
 #define REGISTER_MPS_HOOKS(clsname) \
   C10_REGISTER_CLASS(MPSHooksRegistry, clsname, clsname)
 

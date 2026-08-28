@@ -5,6 +5,7 @@ from copy import copy
 import torch
 from torch import nn
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -15,6 +16,8 @@ from torch.utils.module_tracker import ModuleTracker
 
 
 class TestModuleTracker(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # "https://github.com/pytorch/pytorch/issues/127112
     @xfailIfTorchDynamo
     def test_module_hierarchy(self):
@@ -95,12 +98,12 @@ class TestModuleTracker(TestCase):
         inp = torch.rand(1, 2, requires_grad=True)
 
         # Should not fail
-        with ModuleTracker() as tracker:
+        with ModuleTracker():
             res = mod(inp)
             res.sum().backward()
 
         # Should not fail
-        with ModuleTracker() as tracker:
+        with ModuleTracker():
             res = checkpoint(lambda inp: mod(inp), inp)
             res.sum().backward()
 

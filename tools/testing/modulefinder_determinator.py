@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # These tests are slow enough that it's worth calculating whether the patch
 # touched any related files first. This list was manually generated, but for every
@@ -23,7 +23,6 @@ TARGET_DET_LIST = [
     "test_cpp_extensions_aot_ninja",
     "test_cpp_extensions_aot_no_ninja",
     "test_cpp_extensions_jit",
-    "test_cpp_extensions_open_device_registration",
     "test_cpp_extensions_stream_and_event",
     "test_cpp_extensions_mtia_backend",
     "test_cuda",
@@ -88,7 +87,7 @@ def should_run_test(
             log_test_reason(file_type, touched_file, test, options)
             return True
         elif file_type in ["TORCH", "CAFFE2", "TEST"]:
-            parts = os.path.splitext(touched_file)[0].split(os.sep)
+            parts = _split_path(os.path.splitext(touched_file)[0])
             touched_module = ".".join(parts)
             # test/ path does not have a "test." namespace
             if touched_module.startswith("test."):
@@ -117,8 +116,8 @@ def test_impact_of_file(filename: str) -> str:
         NONE - known to have no effect on test outcome
         CI - CI configuration files
     """
-    parts = filename.split(os.sep)
-    if parts[0] in [".jenkins", ".circleci", ".ci"]:
+    parts = _split_path(filename)
+    if parts[0] in [".jenkins", ".ci"]:
         return "CI"
     if parts[0] in ["docs", "scripts", "CODEOWNERS", "README.md"]:
         return "NONE"
@@ -133,6 +132,10 @@ def test_impact_of_file(filename: str) -> str:
             return "TEST"
 
     return "UNKNOWN"
+
+
+def _split_path(filename: str) -> list[str]:
+    return filename.replace("\\", "/").split("/")
 
 
 def log_test_reason(file_type: str, filename: str, test: str, options: Any) -> None:
@@ -187,7 +190,7 @@ def get_dep_modules(test: str) -> set[str]:
 
 
 def parse_test_module(test: str) -> str:
-    return test.split(".")[0]
+    return test.split(".", maxsplit=1)[0]
 
 
 def print_to_stderr(message: str) -> None:

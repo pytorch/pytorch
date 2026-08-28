@@ -34,7 +34,10 @@ def allgather_object(obj):
 
 def allgather_run(cmd):
     proc = subprocess.run(shlex.split(cmd), capture_output=True)
-    assert proc.returncode == 0
+    if proc.returncode != 0:
+        raise AssertionError(
+            f"Command '{cmd}' failed with return code {proc.returncode}: {proc.stderr.decode('utf-8')}"
+        )
     return allgather_object(proc.stdout.decode("utf-8"))
 
 
@@ -105,21 +108,21 @@ def sweep(benchmark):
 
     def local_print(msg):
         if dist.get_rank() == 0:
-            print(msg, end="", flush=True)  # noqa: E999
+            print(msg, end="", flush=True)
 
     def print_header():
         local_print("\n")
-        local_print("%22s" % "")
-        for p in [50, 75, 90, 95]:
-            local_print("%14s%10s" % ("sec/iter", "ex/sec"))
+        local_print(" " * 22)
+        for _ in [50, 75, 90, 95]:
+            local_print(f"{'sec/iter':14s}{'ex/sec':10s}")
         local_print("\n")
 
     def print_measurements(prefix, nelem, measurements):
         measurements = sorted(measurements)
-        local_print("%8s:" % prefix)
+        local_print(f"{prefix:8s}:")
         for p in [50, 75, 90, 95]:
             v = np.percentile(measurements, p)
-            local_print("  p%02d:  %1.3fs  %6d/s" % (p, v, nelem / v))
+            local_print(f"  p{p:02d}:  {v:1.3f}s  {nelem / v:6d}/s")
         local_print("\n")
 
     # Every process runs once by themselves to warm up (CUDA init, etc).
@@ -133,7 +136,7 @@ def sweep(benchmark):
 
     # Multi-machine benchmarks
     for i in range(1, (dist.get_world_size() // 8) + 1):
-        append_benchmark("   %dM/8G" % i, range(i * 8))
+        append_benchmark(f"   {i:d}M/8G", range(i * 8))
 
     # Run benchmarks in order of increasing number of GPUs
     print_header()
@@ -206,7 +209,10 @@ def main():
     args = parser.parse_args()
 
     num_gpus_per_node = torch.cuda.device_count()
-    assert num_gpus_per_node == 8, "Expected 8 GPUs per machine"
+    if num_gpus_per_node != 8:
+        raise AssertionError(
+            f"Expected 8 GPUs per machine, but found {num_gpus_per_node}"
+        )
 
     # The global process group used only for communicating benchmark
     # metadata, like measurements. Not for benchmarking itself.
@@ -239,7 +245,7 @@ def main():
         print()
 
     torch.cuda.set_device(dist.get_rank() % 8)
-    device = torch.device("cuda:%d" % (dist.get_rank() % 8))
+    device = torch.device(f"cuda:{dist.get_rank() % 8:d}")
 
     benchmarks = []
     if args.model:

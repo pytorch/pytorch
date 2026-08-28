@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch.distributed._shard.op_registry_utils import _decorator_func
@@ -14,7 +14,7 @@ from .api import (
     ShardedTensorMetadata,
     TensorProperties,
 )
-from .metadata import ShardMetadata  # noqa: F401
+from .metadata import ShardMetadata
 
 
 if TYPE_CHECKING:
@@ -356,7 +356,7 @@ def randn(
 
 
 def init_from_local_shards(
-    local_shards: List[Shard], *global_size, process_group=None, init_rrefs=False
+    local_shards: list[Shard], *global_size, process_group=None, init_rrefs=False
 ) -> ShardedTensor:
     """
     Creates an :class:`ShardedTensor` from local shards and the global metadata.
@@ -437,7 +437,7 @@ def pre_load_state_dict_hook(
     Pre-load state dict hook to add ShardedTensor to the module.
     """
     for submodule_name, submodule in module.named_modules():
-        for attr_name in submodule.__dict__.keys():
+        for attr_name in submodule.__dict__:
             mod_prefix = prefix + submodule_name
             key = mod_prefix + ("." if mod_prefix else "") + attr_name
             if key in state_dict:

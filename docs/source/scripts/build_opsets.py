@@ -7,9 +7,9 @@ import torch._prims as prims
 from torchgen.gen import parse_native_yaml
 
 
-ROOT = Path(__file__).absolute().parent.parent.parent.parent
-NATIVE_FUNCTION_YAML_PATH = ROOT / Path("aten/src/ATen/native/native_functions.yaml")
-TAGS_YAML_PATH = ROOT / Path("aten/src/ATen/native/tags.yaml")
+ROOT = Path(__file__).absolute().parents[3]
+NATIVE_FUNCTION_YAML_PATH = ROOT / "aten/src/ATen/native/native_functions.yaml"
+TAGS_YAML_PATH = ROOT / "aten/src/ATen/native/tags.yaml"
 
 BUILD_DIR = "build/ir"
 ATEN_OPS_CSV_FILE = "aten_ops.csv"
@@ -62,13 +62,11 @@ def main():
 
     with open(os.path.join(BUILD_DIR, ATEN_OPS_CSV_FILE), "w") as f:
         f.write("Operator,Schema\n")
-        for name, schema in aten_ops_list:
-            f.write(f'"``{name}``","{schema}"\n')
+        f.writelines(f'"``{name}``","{schema}"\n' for name, schema in aten_ops_list)
 
     with open(os.path.join(BUILD_DIR, PRIMS_OPS_CSV_FILE), "w") as f:
         f.write("Operator,Schema\n")
-        for name, schema in prims_ops_list:
-            f.write(f'"``{name}``","{schema}"\n')
+        f.writelines(f'"``{name}``","{schema}"\n' for name, schema in prims_ops_list)
 
 
 if __name__ == "__main__":

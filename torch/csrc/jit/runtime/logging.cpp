@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/logging.h>
 
+#include <c10/util/Exception.h>
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -19,11 +20,11 @@ void LockingLogger::addStatValue(const std::string& stat_name, int64_t val) {
 
 int64_t LockingLogger::getCounterValue(const std::string& name) const {
   std::unique_lock<std::mutex> lk(m);
-  if (!raw_counters.count(name)) {
+  if (!raw_counters.contains(name)) {
     return 0;
   }
   AggregationType type =
-      agg_types.count(name) ? agg_types.at(name) : AggregationType::SUM;
+      agg_types.contains(name) ? agg_types.at(name) : AggregationType::SUM;
   const auto& raw_counter = raw_counters.at(name);
   switch (type) {
     case AggregationType::SUM: {
@@ -33,7 +34,7 @@ int64_t LockingLogger::getCounterValue(const std::string& name) const {
       return raw_counter.sum / raw_counter.count;
     } break;
   }
-  throw std::runtime_error("Unknown aggregation type!");
+  TORCH_CHECK(false, "Unknown aggregation type!");
 }
 
 void LockingLogger::setAggregationType(
@@ -42,7 +43,7 @@ void LockingLogger::setAggregationType(
   agg_types[stat_name] = type;
 }
 
-std::atomic<LoggerBase*> global_logger{new NoopLogger()};
+static std::atomic<LoggerBase*> global_logger{new NoopLogger()};
 
 LoggerBase* getLogger() {
   return global_logger.load();

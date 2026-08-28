@@ -2,7 +2,6 @@
 import logging
 import math
 from collections import defaultdict
-from typing import Dict
 
 import torch
 import torch.distributed as dist
@@ -23,7 +22,8 @@ def _orthogonalize(matrices, epsilon=0):
 
     QR factorization doesn't work with half-precision, but it is usually faster with a rank > 2.
     """
-    assert len(matrices.shape) == 3 and matrices.shape[2] <= matrices.shape[1]
+    if not (len(matrices.shape) == 3 and matrices.shape[2] <= matrices.shape[1]):
+        raise AssertionError
 
     num_matrices = matrices.shape[0]
     rank = matrices.shape[2]
@@ -46,7 +46,7 @@ def _orthogonalize_gram_schmidt(matrices, epsilon=0):
     """
     Apply Gram-Schmidt procedure to orthogonalize a batch of matrices.
 
-    If epsilon is 0, this is equivalent to `torch.qr(matrices, out=(matrices, _))`,
+    If epsilon is 0, this is equivalent to `torch.linalg.qr(matrices, out=(matrices, _))`,
     """
     num_cols = matrices.shape[2]
     for i in range(num_cols):
@@ -59,7 +59,7 @@ def _orthogonalize_gram_schmidt(matrices, epsilon=0):
             # Note that col ** 2 can underflow/overflow if we use FP16.
             # May need to consider multiplying a scaling factor and dividing it later, or using bfloat16 instead.
             try:
-                col /= torch.norm(col, dim=1, keepdim=True)
+                col /= torch.linalg.vector_norm(col, dim=1, keepdim=True)
             except ZeroDivisionError:
                 logger.error(
                     "The matrices to be orthogonalized has at least a column of all 0s. Please set a small value such as 1e-8 "
@@ -68,7 +68,7 @@ def _orthogonalize_gram_schmidt(matrices, epsilon=0):
                 # Recover the values from NaNs to 0s.
                 col.fill_(0.0)
         else:
-            col /= torch.norm(col, dim=1, keepdim=True) + epsilon
+            col /= torch.linalg.vector_norm(col, dim=1, keepdim=True) + epsilon
         # Project it on the rest and remove it.
         if i + 1 < num_cols:
             rest = matrices[:, :, i + 1 :]
@@ -94,7 +94,7 @@ def _should_compress(
     uncompressed_el_count is the uncompressed element count, i.e. ``num_rows`` * ``num_cols``; and,
 
     compress_el_count is the element count after compression, i.e. (``num_rows`` + ``num_cols``) * ``matrix_approximation_rank``.
-    """  # noqa: B950
+    """
     uncompressed_size = num_rows * num_cols
     compressed_size = (num_rows + num_cols) * matrix_approximation_rank
     return (
@@ -150,7 +150,7 @@ class PowerSGDState:
         If error feedback or warm-up is enabled, the minimum value of ``start_powerSGD_iter`` allowed in DDP is 2.
         This is because there is another internal optimization that rebuilds buckets at iteration 1 in DDP,
         and this can conflict with any tensor memorized before the rebuild process.
-    """  # noqa: B950
+    """
 
     __slots__ = [
         "process_group",
@@ -207,7 +207,7 @@ class PowerSGDState:
 
         self.process_group = process_group
         self.matrix_approximation_rank = matrix_approximation_rank
-        # Deferring PowerSGD compression util step 'start_powerSGD_iter' can have two advantages:
+        # Deferring PowerSGD compression until step 'start_powerSGD_iter' can have two advantages:
         # 1) It turns out that PowerSGD may lead to a non-trivial accuracy loss,
         # even if the matrix approximation rank is increased to a large value.
         # To mitigate the accuracy loss, a simple yet effective way is mixing vanilla allreduce
@@ -252,9 +252,9 @@ class PowerSGDState:
         self.rng = np.random.RandomState(random_seed)
         # Since there is only a single state instance for all the input buckets,
         # need to maintain a dictionary that maps each bucket index to the local error.
-        self.error_dict: Dict[int, torch.Tensor] = {}
-        self.p_memory_dict: Dict[int, torch.Tensor] = {}
-        self.q_memory_dict: Dict[int, torch.Tensor] = {}
+        self.error_dict: dict[int, torch.Tensor] = {}
+        self.p_memory_dict: dict[int, torch.Tensor] = {}
+        self.q_memory_dict: dict[int, torch.Tensor] = {}
         # Iteration/step in the training loop.
         self.iter = 0
         # Compression stats accumulators
@@ -324,7 +324,7 @@ class PowerSGDState:
         numel_before_compression is the total number of elements before compression was applied; and,
 
         numel_after_compression is the total number of elements after compression was applied.
-        """  # noqa: B950
+        """
         compress_rate = (
             self.total_numel_before_compression / self.total_numel_after_compression
             if self.total_numel_after_compression > 0
@@ -397,7 +397,7 @@ def powerSGD_hook(
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1,
                                   start_powerSGD_iter=10, min_compression_rate=0.5)
         >>> ddp_model.register_comm_hook(state, powerSGD_hook)
-    """  # noqa: B950
+    """
     process_group = state.process_group
     group_to_use = (
         process_group if process_group is not None else not_none(dist.group.WORLD)
@@ -435,7 +435,7 @@ def powerSGD_hook(
         # Keep a copy of the input tensor,
         # so that we can compute the local error caused by compression later,
         # by comparing this copy and the input tensor updated after decompression.
-        input_tensor_cp = torch.clone(input_tensor).detach()
+        input_tensor_cp = input_tensor.detach().clone()
 
     # Unflatten the input tensor into per-parameter tensors, for layer-wise compression.
     tensors = bucket.gradients()
@@ -632,6 +632,8 @@ def powerSGD_hook(
 
         if state.use_error_feedback:
             # Memorize the local errors.
+            if input_tensor_cp is None:
+                raise AssertionError
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if not state.warm_start:
             state.p_memory_dict.clear()
@@ -708,7 +710,7 @@ def batched_powerSGD_hook(
         >>> # xdoctest: +SKIP
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1)
         >>> ddp_model.register_comm_hook(state, batched_powerSGD_hook)
-    """  # noqa: B950
+    """
     process_group = state.process_group
     group_to_use = (
         process_group if process_group is not None else not_none(dist.group.WORLD)
@@ -757,7 +759,7 @@ def batched_powerSGD_hook(
         # Keep a copy of the input tensor,
         # so that we can compute the local error caused by compression later,
         # by comparing this copy and the input tensor updated after decompression.
-        input_tensor_cp = torch.clone(input_tensor).detach()
+        input_tensor_cp = input_tensor.detach().clone()
     matrix = input_tensor.view(square_side_length, square_side_length)
 
     # Reuse P and Q from the previous iteration if possible.
@@ -844,6 +846,8 @@ def batched_powerSGD_hook(
 
         if state.use_error_feedback:
             # Memorize the local errors.
+            if input_tensor_cp is None:
+                raise AssertionError
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         # Removing this seemingly unnecessary sync somehow may cause failures.
         # See: https://github.com/pytorch/pytorch/pull/54838

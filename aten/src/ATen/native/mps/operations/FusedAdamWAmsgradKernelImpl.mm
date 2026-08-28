@@ -22,8 +22,8 @@ void _fused_adamw_amsgrad_mps_impl_(TensorList params,
                                     const bool maximize,
                                     const std::optional<Tensor>& grad_scale,
                                     const std::optional<Tensor>& found_inf) {
-  std::vector<std::vector<Tensor>> tensor_lists{
-      params.vec(), grads.vec(), exp_avgs.vec(), exp_avg_sqs.vec(), max_exp_avg_sqs.vec()};
+  auto tensor_lists =
+      c10::make_nested<Tensor>(params.vec(), grads.vec(), exp_avgs.vec(), exp_avg_sqs.vec(), max_exp_avg_sqs.vec());
 
   const auto kernel_name =
       "fused_adamw_amsgrad_" + scalarToMetalTypeString(params[0]) + "_" + scalarToMetalTypeString(state_steps[0]);
@@ -37,7 +37,9 @@ void _fused_adamw_amsgrad_mps_impl_(TensorList params,
                                                  beta2,
                                                  weight_decay,
                                                  eps,
-                                                 maximize);
+                                                 maximize,
+                                                 grad_scale,
+                                                 found_inf);
 }
 void _fused_adamw_amsgrad_mps_impl_(TensorList params,
                                     TensorList grads,
@@ -53,8 +55,8 @@ void _fused_adamw_amsgrad_mps_impl_(TensorList params,
                                     const bool maximize,
                                     const std::optional<Tensor>& grad_scale,
                                     const std::optional<Tensor>& found_inf) {
-  std::vector<std::vector<Tensor>> tensor_lists{
-      params.vec(), grads.vec(), exp_avgs.vec(), exp_avg_sqs.vec(), max_exp_avg_sqs.vec()};
+  auto tensor_lists =
+      c10::make_nested<Tensor>(params.vec(), grads.vec(), exp_avgs.vec(), exp_avg_sqs.vec(), max_exp_avg_sqs.vec());
 
   const auto kernel_name =
       "fused_adamw_amsgrad_" + scalarToMetalTypeString(params[0]) + "_" + scalarToMetalTypeString(state_steps[0]);
@@ -68,7 +70,9 @@ void _fused_adamw_amsgrad_mps_impl_(TensorList params,
                                                  beta2,
                                                  weight_decay,
                                                  eps,
-                                                 maximize);
+                                                 maximize,
+                                                 grad_scale,
+                                                 found_inf);
 }
 
 } // namespace at::native::mps

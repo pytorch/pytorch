@@ -1,8 +1,6 @@
 #include <torch/csrc/utils/throughput_benchmark.h>
 
-#include <pybind11/pybind11.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/utils/pybind.h>
 
 namespace torch::throughput_benchmark {
 
@@ -85,6 +83,7 @@ ScriptModuleOutput ScriptModuleBenchmark::runOnce(
 }
 
 template <>
+// NOLINTNEXTLINE(*-rvalue-reference-param-not-moved)
 void ModuleBenchmark::runOnce(ModuleInput&& input) const {
   CHECK(initialized_);
   pybind11::gil_scoped_acquire gil_guard;
@@ -101,6 +100,7 @@ ModuleOutput ModuleBenchmark::runOnce(
 }
 
 template <>
+// NOLINTNEXTLINE(*-rvalue-reference-param-not-moved)
 void ScriptModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs) {
   jit::Stack stack = jit::createStackForSchema(
       model_.get_method("forward").function().getSchema(),

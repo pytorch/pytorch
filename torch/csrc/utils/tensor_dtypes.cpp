@@ -1,7 +1,6 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 
@@ -9,8 +8,7 @@ namespace torch::utils {
 
 void initializeDtypes() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
-  if (!torch_module)
-    throw python_error();
+  TORCH_CHECK_PYTHON(torch_module);
 
 #define DEFINE_SCALAR_TYPE(_1, n) at::ScalarType::n,
 
@@ -20,20 +18,18 @@ void initializeDtypes() {
 #undef DEFINE_SCALAR_TYPE
 
   for (at::ScalarType scalarType : all_scalar_types) {
-    auto [primary_name, legacy_name] = c10::getDtypeNames(scalarType);
-    PyObject* dtype = THPDtype_New(scalarType, primary_name);
-    torch::registerDtypeObject((THPDtype*)dtype, scalarType);
-    Py_INCREF(dtype);
-    if (PyModule_AddObject(torch_module.get(), primary_name.c_str(), dtype) !=
-        0) {
-      throw python_error();
-    }
+    auto [primary_view, legacy_view] = c10::getDtypeNames(scalarType);
+    std::string primary_name(primary_view);
+    std::string legacy_name(legacy_view);
+    THPObjectPtr dtype(THPDtype_New(scalarType, primary_name));
+    torch::registerDtypeObject((THPDtype*)dtype.get(), scalarType);
+    TORCH_CHECK_PYTHON(
+        PyModule_AddObjectRef(
+            torch_module.get(), primary_name.c_str(), dtype.get()) == 0);
     if (!legacy_name.empty()) {
-      Py_INCREF(dtype);
-      if (PyModule_AddObject(torch_module.get(), legacy_name.c_str(), dtype) !=
-          0) {
-        throw python_error();
-      }
+      TORCH_CHECK_PYTHON(
+          PyModule_AddObjectRef(
+              torch_module.get(), legacy_name.c_str(), dtype.get()) == 0);
     }
   }
 }

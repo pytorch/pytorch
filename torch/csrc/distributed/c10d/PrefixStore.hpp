@@ -8,6 +8,8 @@ class TORCH_API PrefixStore : public Store {
  public:
   explicit PrefixStore(std::string prefix, c10::intrusive_ptr<Store> store);
 
+  c10::intrusive_ptr<Store> clone() override;
+
   using Store::set;
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
 
@@ -47,13 +49,22 @@ class TORCH_API PrefixStore : public Store {
       const std::vector<std::string>& keys,
       const std::vector<std::vector<uint8_t>>& values) override;
 
-  // Returns true if this store support append, multiGet and multiSet
+  // Returns true if this store supports append, multiGet and multiSet
   bool hasExtendedApi() const override;
+
+  void queuePush(const std::string& key, const std::vector<uint8_t>& value)
+      override;
+
+  std::vector<uint8_t> queuePop(const std::string& key, bool block) override;
+
+  int64_t queueLen(const std::string& key) override;
 
   c10::intrusive_ptr<Store> getUnderlyingStore();
 
   // Recursively to fetch the store before layers of wrapping with PrefixStore.
   c10::intrusive_ptr<Store> getUnderlyingNonPrefixStore();
+
+  std::vector<std::string> listKeys() override;
 
  protected:
   std::string prefix_;

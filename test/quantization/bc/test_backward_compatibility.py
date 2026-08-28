@@ -3,7 +3,6 @@
 import os
 import sys
 import unittest
-from typing import Set
 
 # torch
 import torch
@@ -21,7 +20,11 @@ from torch.testing._internal.common_quantized import (
 )
 
 # Testing utils
-from torch.testing._internal.common_utils import IS_AVX512_VNNI_SUPPORTED, TestCase
+from torch.testing._internal.common_utils import (
+    IS_AVX512_VNNI_SUPPORTED,
+    raise_on_run_directly,
+    TestCase,
+)
 from torch.testing._internal.quantization_torch_package_models import (
     LinearReluFunctional,
 )
@@ -42,10 +45,8 @@ def get_filenames(self, subname):
     test_file = os.path.realpath(sys.modules[module_id].__file__)
     base_name = os.path.join(os.path.dirname(test_file), "../serialized", munged_id)
 
-    subname_output = ""
     if subname:
         base_name += "_" + subname
-        subname_output = f" ({subname})"
 
     input_file = base_name + ".input.pt"
     state_dict_file = base_name + ".state_dict.pt"
@@ -67,7 +68,7 @@ def get_filenames(self, subname):
 
 
 class TestSerialization(TestCase):
-    """Test backward compatiblity for serialization and numerics"""
+    """Test backward compatibility for serialization and numerics"""
 
     # Copy and modified from TestCase.assertExpected
     def _test_op(
@@ -143,7 +144,7 @@ class TestSerialization(TestCase):
         """
         (
             input_file,
-            state_dict_file,
+            _,
             scripted_module_file,
             traced_module_file,
             expected_file,
@@ -194,7 +195,7 @@ class TestSerialization(TestCase):
             input_file,
             state_dict_file,
             _,
-            traced_module_file,
+            _,
             expected_file,
             _package_file,
             _get_attr_targets_file,
@@ -218,7 +219,7 @@ class TestSerialization(TestCase):
         """
         (
             input_file,
-            state_dict_file,
+            _,
             _scripted_module_file,
             _traced_module_file,
             expected_file,
@@ -241,7 +242,7 @@ class TestSerialization(TestCase):
             mq = quantize_fx.convert_fx(mp)
             return mq
 
-        def _get_get_attr_target_strings(m: GraphModule) -> Set[str]:
+        def _get_get_attr_target_strings(m: GraphModule) -> set[str]:
             results = set()
             for node in m.graph.nodes:
                 if node.op == "get_attr":
@@ -277,7 +278,7 @@ class TestSerialization(TestCase):
         get_attrs = _get_get_attr_target_strings(mq)
         self.assertTrue(
             get_attrs == expected_get_attrs,
-            f"get_attrs: expected {expected_get_attrs}, got {get_attrs}",
+            lambda msg: f"{msg}\nget_attrs: expected {expected_get_attrs}, got {get_attrs}",
         )
         output_tensor = mq(input_tensor)
         self.assertTrue(torch.allclose(output_tensor, expected_output_tensor))
@@ -568,3 +569,7 @@ class TestSerialization(TestCase):
     def test_linear_relu_package_quantization_transforms(self):
         m = LinearReluFunctional(4).eval()
         self._test_package(m, input_size=(1, 1, 4, 4), generate=False)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

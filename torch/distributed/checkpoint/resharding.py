@@ -1,15 +1,12 @@
-# mypy: allow-untyped-defs
-from typing import List, Tuple
-
 from torch.distributed.checkpoint.metadata import ChunkStorageMetadata
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 
 def _check_shard_metadata_pair_overlap(
     shard1: ChunkStorageMetadata, shard2: ChunkStorageMetadata
-):
+) -> bool:
     """Check if two shards overlap."""
     # For each dim of each shard, check if one shard resides on the other
     # end of second shard with respect to that dim. As an example for a 2D
@@ -27,11 +24,11 @@ def _check_shard_metadata_pair_overlap(
 
 def _shards_get_overlap_region_wrt_saved_tensor(
     saved_shard: ChunkStorageMetadata, current_shard: ChunkStorageMetadata
-) -> List[Tuple[int, int, int, int]]:
+) -> list[tuple[int, int, int, int]]:
     """
     Return the overlapping region between saved_shard and current_shard.
 
-    There returned list has the same number of elements as the tensor's dimension.
+    The returned list has the same number of elements as the tensor's dimension.
     For each element, we produce a tuple with the following contents:
         (dimension, `saved_shard` offset, `current_shard` offset, length)
 

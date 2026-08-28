@@ -52,14 +52,15 @@ constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset |
     // where we would like to support composite implicit kernels but not
     // explicit kernels therefore we manually add the key to the
     // math_dispatch_keyset
-    DispatchKeySet{DispatchKey::NestedTensor} |
-    // Functionalize should always re-use CompositeImplicit decomps.
-    DispatchKeySet{DispatchKey::Functionalize};
+    DispatchKeySet{DispatchKey::NestedTensor};
 
 constexpr DispatchKeySet nested_dispatch_keyset =
     DispatchKeySet(
         {DispatchKey::AutogradNestedTensor, DispatchKey::NestedTensor}) |
     DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+
+constexpr DispatchKeySet functorch_batched_dispatch_keyset =
+    DispatchKeySet(DispatchKey::FuncTorchBatched);
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
@@ -79,6 +80,8 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
       return backend_dispatch_keyset;
     case DispatchKey::CompositeExplicitAutogradNonFunctional:
       return non_functional_backend_dispatch_keyset;
+    case DispatchKey::FuncTorchBatchedDecomposition:
+      return functorch_batched_dispatch_keyset;
     default:
       return DispatchKeySet(t);
   }
@@ -131,6 +134,8 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
       return DispatchKeySet(DispatchKey::IPU);
     case DispatchKey::AutogradXPU:
       return DispatchKeySet(DispatchKey::XPU);
+    case DispatchKey::AutogradMAIA:
+      return DispatchKeySet(DispatchKey::MAIA);
     case DispatchKey::AutogradPrivateUse1:
       return DispatchKeySet(DispatchKey::PrivateUse1);
     case DispatchKey::AutogradPrivateUse2:
@@ -154,7 +159,7 @@ bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {
 std::string toString(DispatchKeySet ts) {
   std::stringstream ss;
   ss << ts;
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::ostream& operator<<(std::ostream& os, DispatchKeySet ts) {
@@ -171,7 +176,7 @@ std::ostream& operator<<(std::ostream& os, DispatchKeySet ts) {
     os << k;
     first = false;
   }
-  os << ")";
+  os << ')';
   return os;
 }
 

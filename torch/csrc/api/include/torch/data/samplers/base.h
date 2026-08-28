@@ -24,7 +24,7 @@ class Sampler {
 
   /// Resets the `Sampler`'s internal state.
   /// Typically called before a new epoch.
-  /// Optionally, accepts a new size when reseting the sampler.
+  /// Optionally, accepts a new size when resetting the sampler.
   virtual void reset(std::optional<size_t> new_size) = 0;
 
   /// Returns the next index if possible, or an empty optional if the

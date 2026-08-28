@@ -11,16 +11,13 @@
 
 struct THPStorage {
   PyObject_HEAD
-  c10::MaybeOwned<c10::Storage> cdata;
-  bool is_hermetic;
+  c10::Storage cdata;
 };
 
 TORCH_PYTHON_API PyObject* THPStorage_Wrap(c10::Storage storage);
 TORCH_PYTHON_API PyObject* THPStorage_NewWithStorage(
     PyTypeObject* type,
-    c10::Storage _storage,
-    c10::impl::PyInterpreterStatus status,
-    bool allow_preexisting_pyobj = false);
+    c10::Storage _storage);
 TORCH_PYTHON_API extern PyTypeObject* THPStorageClass;
 
 inline bool THPStorage_CheckTypeExact(PyTypeObject* tp) {
@@ -36,8 +33,7 @@ inline bool THPStorage_Check(PyObject* obj) {
     return false;
 
   const auto result = PyObject_IsInstance(obj, (PyObject*)THPStorageClass);
-  if (result == -1)
-    throw python_error();
+  TORCH_CHECK_PYTHON(result != -1);
   return result;
 }
 
@@ -45,12 +41,12 @@ bool THPStorage_init(PyObject* module);
 void THPStorage_postInit(PyObject* module);
 
 void THPStorage_assertNotNull(THPStorage* storage);
-void THPStorage_assertNotNull(PyObject* obj);
+TORCH_PYTHON_API void THPStorage_assertNotNull(PyObject* obj);
 
 TORCH_PYTHON_API extern PyTypeObject THPStorageType;
 
 inline const c10::Storage& THPStorage_Unpack(THPStorage* storage) {
-  return *storage->cdata;
+  return storage->cdata;
 }
 
 inline const c10::Storage& THPStorage_Unpack(PyObject* obj) {

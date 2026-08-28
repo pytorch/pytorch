@@ -3,22 +3,11 @@ import copy
 import io
 import math
 import weakref
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    Mapping,
-    MutableMapping,
-    NamedTuple,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from collections.abc import Callable, Mapping, MutableMapping
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
 import torch
+import torch.cuda._pin_memory_utils as pin_memory_utils
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -33,8 +22,8 @@ if dist.is_available() or TYPE_CHECKING:
 
 def _identity_func(
     obj: torch.Tensor,
-    pg: Optional[dist.ProcessGroup],
-    device: Optional[torch.device],
+    pg: dist.ProcessGroup | None,
+    device: torch.device | None,
     companion_obj: Any,
 ) -> torch.Tensor:
     return obj
@@ -42,8 +31,8 @@ def _identity_func(
 
 def _all_gather_sharded_tensor(
     sharded_tensor: "ShardedTensor",
-    pg: Optional[dist.ProcessGroup] = None,
-    device: Optional[torch.device] = None,
+    pg: dist.ProcessGroup | None = None,
+    device: torch.device | None = None,
 ) -> torch.Tensor:
     if pg is None:
         pg = distributed_c10d._get_default_group()
@@ -72,14 +61,14 @@ def _all_gather_sharded_tensor(
         dtype=local_tensor.dtype,
         device=pg_device,
     )
-    dist.all_gather_into_tensor(tensor, local_tensor, group=pg)
+    dist.all_gather_single(tensor, local_tensor, group=pg)
 
     tensor = tensor.narrow(0, 0, tensor_numel).reshape(sharded_tensor.size())
     return tensor
 
 
 class CompanionMismatch(Exception):
-    ...
+    pass
 
 
 def _iterate_state_dict(
@@ -88,14 +77,14 @@ def _iterate_state_dict(
     dtensor_func: Callable,
     tensor_func: Callable,
     *,
-    pg: Optional[dist.ProcessGroup] = None,
-    device: Optional[torch.device] = None,
+    pg: dist.ProcessGroup | None = None,
+    device: torch.device | None = None,
     cpu_offload: bool = False,
     companion_obj: Any = None,
-    ranks_only: Tuple[int, ...] = (),
+    ranks_only: tuple[int, ...] = (),
     type_check: bool = True,
     non_blocking: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Iterate through the state dict, applying the given functions to each tensor type.
 
     Args:
@@ -194,24 +183,42 @@ def _iterate_state_dict(
                 ret = ret.to(cpu_device)
 
             if companion_obj is not None:
-                # TODO: support DTensor
-                companion_obj.copy_(ret, non_blocking=non_blocking)
+                if isinstance(companion_obj, DTensor):
+                    if not isinstance(ret, DTensor):
+                        raise AssertionError(
+                            "ret must be a DTensor when companion_obj is a DTensor"
+                        )
+                    companion_obj._local_tensor.copy_(
+                        ret._local_tensor, non_blocking=non_blocking
+                    )
+                elif isinstance(companion_obj, ShardedTensor):
+                    if not isinstance(ret, ShardedTensor):
+                        raise AssertionError(
+                            "ret must be a ShardedTensor when companion_obj is a ShardedTensor"
+                        )
+                    for idx, shard in enumerate(companion_obj.local_shards()):
+                        shard.tensor.copy_(
+                            ret.local_shards()[idx].tensor, non_blocking=non_blocking
+                        )
+                else:
+                    companion_obj.copy_(ret, non_blocking=non_blocking)
                 ret = companion_obj
     else:
         ret = {} if isinstance(ret, dict) else None
 
+    # pyrefly: ignore [bad-return]
     return ret
 
 
 def _gather_state_dict(
-    state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
     *,
-    pg: Optional[dist.ProcessGroup] = None,
-    device: Optional[torch.device] = None,
+    pg: dist.ProcessGroup | None = None,
+    device: torch.device | None = None,
     cpu_offload: bool = False,
-    ranks_only: Tuple[int, ...] = (),
+    ranks_only: tuple[int, ...] = (),
     type_check: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Given a state_dict, this API gathers all the ShardedTensors or DTensors in
     the state_dict.
@@ -292,11 +299,11 @@ def _gather_state_dict(
 
 
 def _offload_state_dict_to_cpu(
-    state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
     *,
-    ranks_only: Tuple[int, ...] = (),
+    ranks_only: tuple[int, ...] = (),
     type_check: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Given a state_dict, this API offload all the tensors to CPU memory.
 
@@ -331,12 +338,13 @@ def _offload_state_dict_to_cpu(
     return ret
 
 
+@torch.no_grad()
 def _copy_state_dict(
-    state_dict: Dict[str, Any],
-    copy_state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
+    copy_state_dict: dict[str, Any],
     non_blocking: bool = False,
     type_check: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Copies all tensors in a given state dict into a different state_dict with the
     same structure. Additionally, a copied state dict with the same value references
@@ -380,9 +388,10 @@ def _copy_state_dict(
     )
 
 
+@torch.no_grad()
 def _create_cpu_state_dict(
-    state_dict: Dict[str, Any], pin_memory: bool = False, share_memory: bool = False
-) -> Dict[str, Any]:
+    state_dict: dict[str, Any], pin_memory: bool = False, share_memory: bool = False
+) -> dict[str, Any]:
     """
     Given a state_dict, create another state_dict with the same structure and elements.
     However, all tensors in the returned state_dict are new tensors on CPU. These
@@ -400,45 +409,74 @@ def _create_cpu_state_dict(
 
     def tensor_func(
         obj: torch.Tensor,
-        pg: Optional[dist.ProcessGroup],
-        device: Optional[torch.device],
+        pg: dist.ProcessGroup | None,
+        device: torch.device | None,
         _: Any,
     ) -> torch.Tensor:
         if len(obj.size()) == 0:
             return torch.tensor(0, dtype=obj.dtype)
 
+        # sometimes, a tensor might have non-zero size and 0 numel. In this case, pinning memory will fail
+        # so we take a best guess at how to replicate the tensor below to maintain symmetry in the returned
+        # state dict.
+        if obj.numel() == 0 or obj.data_ptr() == 0:
+            t = torch.zeros_like(obj, device="cpu")
+            if share_memory:
+                t = t.share_memory_()
+            return t
+
         if share_memory:
             t = torch.empty(*tuple(obj.size()), dtype=obj.dtype)
             t = t.share_memory_()
             if pin_memory:
+                pin_memory_utils.pin_memory(t.data_ptr(), t.numel() * t.element_size())
+                weakref.finalize(t, pin_memory_utils.unpin_memory, t.data_ptr())
 
-                def unpin_memory(t):
-                    succ = int(torch.cuda.cudart().cudaHostUnregister(t.data_ptr()))
-                    assert (
-                        succ == 0
-                    ), f"Unpinning shared memory failed with error-code: {succ}"
-
-                weakref.finalize(t, unpin_memory, t)
-                succ = int(
-                    torch.cuda.cudart().cudaHostRegister(
-                        t.data_ptr(),
-                        t.numel() * t.element_size(),
-                        1,  # lines up with 'cudaHostRegisterPortable'
-                    )
-                )
-                assert (
-                    succ == 0
-                ), f"Pinning shared memory failed with error-code: {succ}"
             return t
         elif pin_memory:
             return torch.empty(*tuple(obj.size()), dtype=obj.dtype).pin_memory()
         else:
             return torch.empty(*tuple(obj.size()), dtype=obj.dtype)
 
+    def dtensor_func(
+        obj: DTensor,
+        pg: dist.ProcessGroup | None,
+        device: torch.device | None,
+        _: Any,
+    ) -> DTensor:
+        if len(obj.size()) == 0:
+            return obj
+
+        if obj.device != torch.device("cpu"):
+            ret = cast(DTensor, obj.to(device="cpu"))
+        else:
+            ret = copy.deepcopy(obj)
+        ret._local_tensor = tensor_func(ret._local_tensor, pg, device, None)
+        return ret
+
+    def sharded_tensor_func(
+        obj: ShardedTensor,
+        pg: dist.ProcessGroup | None,
+        device: torch.device | None,
+        _: Any,
+    ) -> ShardedTensor:
+        if not obj.local_shards():
+            return obj
+
+        if obj.device != torch.device("cpu"):
+            ret = obj.to(device="cpu")
+        else:
+            ret = copy.deepcopy(obj)
+
+        for shards in ret.local_shards():
+            shards.tensor = tensor_func(shards.tensor, pg, device, None)
+
+        return ret
+
     ret = _iterate_state_dict(
         state_dict,
-        _identity_func,
-        _identity_func,
+        sharded_tensor_func,
+        dtensor_func,
         tensor_func,
         pg=None,
         device=None,
@@ -450,13 +488,13 @@ def _create_cpu_state_dict(
 
 
 def _check_state_dict_similarity(
-    state_dict: Dict[str, Any],
-    compared_state_dict: Dict[str, Any],
+    state_dict: dict[str, Any],
+    compared_state_dict: dict[str, Any],
 ) -> bool:
     """
     Given two state_dicts, check if the structures are the same. And
     if a [key, tensor] pair exist in one state_dict there must be
-    the a corresponding pait, [key, other_tensor], in the other state_dict,
+    a corresponding pair, [key, other_tensor], in the other state_dict,
     where tensor and other_tensor have the same size and dtype.
 
     Return the check result.
@@ -464,8 +502,8 @@ def _check_state_dict_similarity(
 
     def tensor_func(
         obj: torch.Tensor,
-        pg: Optional[dist.ProcessGroup],
-        device: Optional[torch.device],
+        pg: dist.ProcessGroup | None,
+        device: torch.device | None,
         companion_obj: Any,
     ) -> torch.Tensor:
         if companion_obj.dtype != obj.dtype or companion_obj.size() != obj.size():
@@ -497,56 +535,76 @@ class _TensorInfo(NamedTuple):
 
 
 def _broadcast_tensors(
-    full_state_dict: Dict[str, Any],
-    local_state_dict: Dict[str, Any],
-    keys: List[str],
+    full_state_dict: dict[str, Any],
+    local_state_dict: dict[str, Any],
+    keys: list[str],
     device: torch.device,
-    pg: Optional[dist.ProcessGroup] = None,
+    pg: dist.ProcessGroup | None = None,
 ) -> None:
-    tensors = []
+    if pg is None:
+        pg = dist.distributed_c10d._get_default_group()
+    pg_device = (
+        device
+        if device.type in {pg_device.type for pg_device in pg._device_types}
+        else pg._device_types[0]
+    )
+
+    tensors: list[torch.Tensor] = []
     for key in keys:
         if dist.get_rank() == 0:
             full_state = full_state_dict[key]
-            assert isinstance(full_state, torch.Tensor)
-            full_tensor = full_state.detach().to(device)
+            if not isinstance(full_state, torch.Tensor):
+                raise AssertionError("full_state must be a torch.Tensor")
+            full_tensor = full_state.detach().to(pg_device)
         else:
             tensor_info = full_state_dict[key]
             full_tensor = torch.empty(
                 size=tensor_info.size,
-                device=device,
+                device=pg_device,
                 dtype=tensor_info.dtype,
             )
 
         tensors.append(full_tensor)
-        local_state = local_state_dict.get(key, None)
-        if local_state is None:
-            continue
-        elif isinstance(local_state, DTensor):
-            local_state_dict[key] = (local_state, full_tensor)
-        else:
-            local_state_dict[key] = full_tensor
 
-    if pg is None:
-        pg = dist.distributed_c10d._get_default_group()
+        if (local_state := local_state_dict.get(key)) is None:
+            continue
+
+        local_state_dict[key] = (
+            (local_state, full_tensor)
+            if isinstance(local_state, DTensor)
+            else full_tensor
+        )
 
     if len(tensors) > 1:
         dist._broadcast_coalesced(pg, tensors, 500, 0)
     else:
         dist.broadcast(tensors[0], src=0, group=pg)
 
+    if pg_device != device:
+        for key, full_tensor in zip(keys, tensors):
+            if (local_state := local_state_dict.get(key)) is not None:
+                local_state_dict[key] = (
+                    (local_state[0], full_tensor.to(device))
+                    if (
+                        isinstance(local_state, tuple)
+                        and isinstance(local_state[0], DTensor)
+                    )
+                    else full_tensor.to(device)
+                )
+
     _distribute_tensors(local_state_dict, keys, device, pg)
 
 
 def _distribute_tensors(
-    local_state_dict: Dict[str, Any],
-    keys: List[str],
+    local_state_dict: dict[str, Any],
+    keys: list[str],
     device: torch.device,
-    pg: Optional[dist.ProcessGroup] = None,
+    pg: dist.ProcessGroup | None = None,
 ) -> None:
     if pg is None:
         pg = dist.distributed_c10d._get_default_group()
     for key in keys:
-        _local_state = local_state_dict.get(key, None)
+        _local_state = local_state_dict.get(key)
         if _local_state is None or torch.is_tensor(_local_state):
             continue
 
@@ -560,24 +618,32 @@ def _distribute_tensors(
             slice(cur_offset, cur_offset + cur_shape)
             for cur_shape, cur_offset in zip(shape, offset)
         ]
-        local_tensor = full_tensor[slices]
-        # TODO: currently, we cannot handle strided sharding if the dp dimension is not even. For example,
-        # one of the case that is not yet supported is when placements = (Shard(0), _StridedShard(0, sf=2)).
-        local_state_dict[key] = DTensor.from_local(
-            local_tensor,
-            local_state.device_mesh,
-            local_state.placements,
-            shape=local_state.shape,
-            stride=local_state.stride(),
-        )
+        if local_state.is_meta:
+            # Use .clone() here rather than view to clone and return only the sliced portion, minimizing memory access and cost.
+            local_tensor = full_tensor[tuple(slices)].detach().clone()
+            # TODO: currently, we cannot handle strided sharding if the dp dimension is not even. For example,
+            # one of the case that is not yet supported is when placements = (Shard(0), _StridedShard(0, sf=2)).
+            ret = DTensor.from_local(
+                local_tensor,
+                local_state.device_mesh,
+                local_state.placements,
+                shape=local_state.shape,
+                stride=local_state.stride(),
+            )
+        else:
+            ret = local_state
+            # Copy full_tensor[slices] into local_state.to_local() to reduce memory footprint.
+            ret.to_local().copy_(full_tensor[tuple(slices)])
+        local_state_dict[key] = ret
 
 
 def _broadcast_state_dict(
-    full_state_dict: Dict[str, Any],
-    local_state_dict: Dict[str, Any],
+    full_state_dict: dict[str, Any],
+    local_state_dict: dict[str, Any],
     device: torch.device,
-    pg: Optional[dist.ProcessGroup] = None,
+    pg: dist.ProcessGroup | None = None,
     strict: bool = False,
+    cpu_offload: bool = False,
 ) -> None:
     # Broadcast from rank0's `full_state_dict` to all ranks' `local_state_dict`.
     # If strict is True, any keys in `local_state_dict` but not in `full_state_dict`
@@ -595,7 +661,6 @@ def _broadcast_state_dict(
     broadcast_list = [ret]
     dist.broadcast_object_list(broadcast_list, src=0, group=pg)
     ret = broadcast_list[0]
-
     # Gather values
     keys = []
     local_state_dict_keys = set(local_state_dict.keys())
@@ -614,6 +679,9 @@ def _broadcast_state_dict(
         # Broadcast every tensor to avoid OOM for now.
         if len(keys) >= 1:
             _broadcast_tensors(ret, local_state_dict, keys, device, pg)
+            if cpu_offload:
+                for key in keys:
+                    local_state_dict[key] = local_state_dict[key].cpu()
             keys.clear()
 
     if strict:
@@ -623,13 +691,16 @@ def _broadcast_state_dict(
 
     if keys:
         _broadcast_tensors(ret, local_state_dict, keys, device, pg)
+        if cpu_offload:
+            for key in keys:
+                local_state_dict[key] = local_state_dict[key].cpu()
 
 
 def _distribute_state_dict(
-    full_state_dict: Dict[str, Any],
-    local_state_dict: Dict[str, Any],
+    full_state_dict: dict[str, Any],
+    local_state_dict: dict[str, Any],
     device: torch.device,
-    pg: Optional[dist.ProcessGroup] = None,
+    pg: dist.ProcessGroup | None = None,
 ) -> None:
     # Full_state_dict = True, broadcast_from_rank0 = False here. Each rank has
     # full_state_dict. Skip the broadcast in ``_broadcast_state_dict`` and
@@ -642,8 +713,9 @@ def _distribute_state_dict(
         elif value.dim() == 0:
             local_state_dict[key] = value.cpu()
         else:
-            assert isinstance(value, torch.Tensor)
-            local_state = local_state_dict.get(key, None)
+            if not isinstance(value, torch.Tensor):
+                raise AssertionError("value must be a torch.Tensor")
+            local_state = local_state_dict.get(key)
             if local_state is None:
                 continue
             elif isinstance(local_state, DTensor):
@@ -659,10 +731,10 @@ def _distribute_state_dict(
 # These APIs are from torch.distributed.checkpoint.
 # TODO: We should consolidate the code here as some not all modules can depend on
 # DCP.
-PATH_ITEM = Union[str, int]
-OBJ_PATH = Tuple[PATH_ITEM, ...]
-FLATTEN_MAPPING = Dict[str, OBJ_PATH]
-STATE_DICT_TYPE = Dict[str, Any]
+PATH_ITEM = str | int
+OBJ_PATH = tuple[PATH_ITEM, ...]
+FLATTEN_MAPPING = dict[str, OBJ_PATH]
+STATE_DICT_TYPE = dict[str, Any]
 CONTAINER_TYPE = MutableMapping[PATH_ITEM, Any]
 
 
@@ -692,7 +764,7 @@ def _traverse_state_dict(
 
 def _flatten_state_dict(
     state_dict: STATE_DICT_TYPE,
-) -> Tuple[STATE_DICT_TYPE, FLATTEN_MAPPING]:
+) -> tuple[STATE_DICT_TYPE, FLATTEN_MAPPING]:
     """
     Flatten ``state_dict`` made of nested dicts and lists into a top level dictionary.
 
@@ -720,28 +792,29 @@ def _set_element(root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: Any) -> None
     """Set ``value`` in ``root_dict`` along the ``path`` object path."""
     cur_container = cast(CONTAINER_TYPE, root_dict)
 
-    def extend_list(lst: List[Any], idx: int) -> None:
+    def extend_list(lst: list[Any], idx: int) -> None:
         while len(lst) <= idx:
             lst.append(None)
 
     for i in range(1, len(path)):
         prev_key = path[i - 1]
         key = path[i]
-        def_val: Union[CONTAINER_TYPE, List[Any]] = {} if type(key) == str else []
+        def_val: CONTAINER_TYPE | list[Any] = {} if type(key) is str else []
 
         if isinstance(cur_container, Mapping):
             cur_container = cast(
                 CONTAINER_TYPE, cur_container.setdefault(prev_key, def_val)
             )
         else:
+            # pyrefly: ignore [bad-argument-type]
             extend_list(cur_container, prev_key)
             if cur_container[prev_key] is None:
                 cur_container[prev_key] = def_val
             cur_container = cur_container[prev_key]
 
     key = path[-1]
-    if type(key) == int:
-        extend_list(cast(List[Any], cur_container), key)
+    if type(key) is int:
+        extend_list(cast(list[Any], cur_container), key)
 
     cur_container[key] = value
 

@@ -5,6 +5,8 @@
 #include <ATen/native/NonEmptyUtils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/ThrustAllocator.h>
+#include <ATen/cuda/cub.cuh>
+#include <ATen/native/cuda/thrust_compat.h>
 #include <c10/core/DeviceArray.h>
 
 #include <thrust/count.h>
@@ -14,7 +16,6 @@
 #include <thrust/extrema.h>
 #include <thrust/find.h>
 #include <thrust/inner_product.h>
-#include <thrust/iterator/constant_iterator.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 
@@ -33,7 +34,7 @@ struct ModeImpl {
     auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
     auto sort_buffer = c10::DeviceArray<int64_t>(*cuda_allocator, n_element);
     auto sort_buffer_ptr = thrust::device_pointer_cast(sort_buffer.get());
-    auto count_from_zero_iter = thrust::make_counting_iterator(int64_t{0});
+    auto count_from_zero_iter = cccl_counting_iterator<int64_t>{0ll};
     thrust::copy_n(policy, count_from_zero_iter, n_element, sort_buffer_ptr);
 
 
@@ -50,8 +51,8 @@ struct ModeImpl {
                     iter_end - 1,
                     iter_begin + 1,
                     0,
-                    thrust::plus<int>(),
-                    thrust::not_equal_to<scalar_t>());
+                    TORCH_CUDA_STD_NS::plus<int>(),
+                    TORCH_CUDA_STD_NS::not_equal_to<scalar_t>());
 
     // Count frequency of each element
     auto keys = c10::DeviceArray<scalar_t>(*cuda_allocator, unique);
@@ -64,7 +65,7 @@ struct ModeImpl {
         policy,
         iter_begin,
         iter_end,
-        thrust::constant_iterator<int>(1),
+        cccl_constant_iterator<int>{1},
         keys_ptr,
         counts_ptr);
 
@@ -207,7 +208,7 @@ void handle_fused_mode(
   constexpr int num_threads = size / 2;
   int warp_size = at::cuda::warp_size();
   TORCH_INTERNAL_ASSERT(num_threads % warp_size == 0 &&
-                num_threads <= cuda_utils::kCUDABlockReduceMaxThreads, "");
+                num_threads <= cuda_utils::kCUDABlockReduceMaxThreads(), "");
   const auto memsize =
       (sizeof(scalar_t) * size) + (2 * size * sizeof(unsigned int));
   compute_mode<scalar_t, size>

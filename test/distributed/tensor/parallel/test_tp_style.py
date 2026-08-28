@@ -5,13 +5,8 @@ from copy import deepcopy
 
 import torch
 import torch.nn as nn
-from torch.distributed._tensor import (
-    distribute_tensor,
-    DTensor,
-    init_device_mesh,
-    Replicate,
-    Shard,
-)
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.distributed.tensor.parallel.style import (
@@ -24,6 +19,7 @@ from torch.distributed.tensor.parallel.style import (
 from torch.distributed.tensor.placement_types import _Partial
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     NUM_DEVICES,
     RMSNormPython,
@@ -100,6 +96,19 @@ class TensorParallelStyleTest(DTensorTestBase):
             out.sum().backward()
             # no comm in bwd
             self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
+    def test_colwise_parallel_preserves_requires_grad(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        model = nn.Linear(16, 16, device=self.device_type)
+        model.weight.requires_grad = False
+        model.bias.requires_grad = True
+
+        colwise_mod = parallelize_module(deepcopy(model), mesh, ColwiseParallel())
+
+        self.assertFalse(colwise_mod.weight.requires_grad)
+        self.assertTrue(colwise_mod.bias.requires_grad)
 
     @with_comms
     def test_rowwise_parallel_style(self):
@@ -189,6 +198,19 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(
                 comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 1
             )
+
+    @with_comms
+    def test_rowwise_parallel_preserves_requires_grad(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        model = nn.Linear(16, 16, device=self.device_type)
+        model.weight.requires_grad = False
+        model.bias.requires_grad = True
+
+        rowwise_mod = parallelize_module(deepcopy(model), mesh, RowwiseParallel())
+
+        self.assertFalse(rowwise_mod.weight.requires_grad)
+        self.assertTrue(rowwise_mod.bias.requires_grad)
 
     @with_comms
     def test_prepare_module_input(self):
@@ -346,6 +368,8 @@ class TensorParallelStyleTest(DTensorTestBase):
     @with_comms
     def test_sequence_parallel_style(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
+        # early init RNG tracker
+        torch.distributed.tensor._random.manual_seed(0, mesh)
 
         comm_mode = CommDebugMode()
         batch, N, embedding_dim = 20, 8, 12
@@ -436,6 +460,10 @@ class TensorParallelStyleTest(DTensorTestBase):
             # communication happens in both fwd/bwd to redistribute input
             self.assertEqual(comm_mode.get_total_counts(), 2)
 
+
+TensorParallelStyleTestWithLocalTensor = create_local_tensor_test_class(
+    TensorParallelStyleTest,
+)
 
 if __name__ == "__main__":
     run_tests()

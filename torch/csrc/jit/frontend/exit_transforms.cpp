@@ -333,7 +333,7 @@ struct ExitTransformer {
     std::vector<Value*> exit_block_vals;
     // after an exit, the only values that will get used
     // are the hasExited() and exitValues(), so we match the existing
-    // block outputs with unitialized
+    // block outputs with uninitialized
     exit_block_vals = matchValuesWithUnitialized(block->outputs());
 
     // Set the new if to have the same outputs of the original block,
@@ -362,7 +362,7 @@ struct ExitTransformer {
   //    break
   //    j = j + 1
   // where the j + 1 value will be a block output, but since they will
-  // never be used, it is safe to replace them with unitialized value
+  // never be used, it is safe to replace them with uninitialized value
   void destroyNodeAfterExit(Node* n) {
     for (auto output : n->outputs()) {
       if (!output->uses().empty()) {
@@ -511,7 +511,7 @@ struct ExitTransformer {
   //   while i < 3:
   //     continue
   //   break
-  // when we transform the for loop block, target_block_ will be set the for
+  // when we transform the for loop block, target_block_ will be set to the for
   // block. then, when we enter the while loop, target_block_ will be the while
   // loop block. when we are done transforming the while it will be set back to
   // the for block.

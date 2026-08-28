@@ -1,12 +1,31 @@
 # mypy: allow-untyped-defs
 """Defines utilities for interacting with scaled_dot_product_attention"""
+
 import math
-from typing import List, Optional, Union
 
 import torch
 
 
-__all__: List[str] = []
+__all__: list[str] = []
+
+
+def _empty_with_matching_layout(
+    query: torch.Tensor, shape: tuple[int, ...]
+) -> torch.Tensor:
+    """Allocate an output with the query's dimension order."""
+    if tuple(query.shape) == shape:
+        return torch.empty_like(query)
+
+    fill_order = sorted(
+        range(query.dim()),
+        key=lambda idx: query.stride()[idx] if query.stride()[idx] else math.inf,
+    )
+    strides = [0] * len(fill_order)
+    stride = 1
+    for idx in fill_order:
+        strides[idx] = stride
+        stride *= shape[idx]
+    return torch.empty_strided(shape, strides, dtype=query.dtype, device=query.device)
 
 
 def _input_requires_grad(*tensors: torch.Tensor) -> bool:
@@ -21,7 +40,7 @@ def _postprocess_flash_output(inpt_tensor: torch.Tensor, og_size: int) -> torch.
     return inpt_tensor
 
 
-def _calculate_scale(head_dim_size: int, scale: Optional[float]) -> float:
+def _calculate_scale(head_dim_size: int, scale: float | None) -> float:
     """
     For FlashAttention we pad the head dimension to be a multiple of 8 so we need to scale the output
     by the original head size and not the padded.
@@ -31,29 +50,23 @@ def _calculate_scale(head_dim_size: int, scale: Optional[float]) -> float:
     return 1.0 / math.sqrt(head_dim_size)
 
 
-_SUPPORTED_HEAD_DIMS = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
-
-
-def _supported_head_dim(n: Union[int, torch.SymInt]) -> bool:
-    """Returns true if the head dim is supported by FlexAttention"""
-    return n in _SUPPORTED_HEAD_DIMS
-
-
 def _validate_sdpa_input(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attn_mask: Optional[torch.Tensor] = None,
+    attn_mask: torch.Tensor | None = None,
     dropout_p=0.0,
     is_causal=False,
     scale=None,
-):
-    if query.dtype != key.dtype or query.dtype != value.dtype:
-        raise ValueError(
-            f"Expected query, key, and value to have the same dtype, "
-            f"but got query.dtype: {query.dtype}, key.dtype: {key.dtype}, "
-            f"and value.dtype: {value.dtype} instead."
-        )
+    allow_lowp_kv=False,
+) -> None:
+    if not allow_lowp_kv:
+        if query.dtype != key.dtype or query.dtype != value.dtype:
+            raise ValueError(
+                f"Expected query, key, and value to have the same dtype, "
+                f"but got query.dtype: {query.dtype}, key.dtype: {key.dtype}, "
+                f"and value.dtype: {value.dtype} instead."
+            )
     if query.device != key.device or query.device != value.device:
         raise ValueError(
             f"Expected query, key, and value to have the same device type, "

@@ -1,14 +1,13 @@
-# mypy: ignore-errors
-
-""" Implementation of reduction operations, to be wrapped into arrays, dtypes etc
+"""Implementation of reduction operations, to be wrapped into arrays, dtypes etc
 in the 'public' layer.
 
 Anything here only deals with torch objects, e.g. "dtype" is a torch.dtype instance etc
 """
+
 from __future__ import annotations
 
 import functools
-from typing import Optional, TYPE_CHECKING
+from typing import Concatenate, ParamSpec, TYPE_CHECKING, TypeVar
 
 import torch
 
@@ -16,6 +15,8 @@ from . import _dtypes_impl, _util
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ._normalizations import (
         ArrayLike,
         AxisLike,
@@ -26,14 +27,22 @@ if TYPE_CHECKING:
     )
 
 
-def _deco_axis_expand(func):
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _deco_axis_expand(
+    func: Callable[Concatenate[torch.Tensor, AxisLike, _P], _R],
+) -> Callable[Concatenate[torch.Tensor, AxisLike, _P], _R]:
     """
     Generically handle axis arguments in reductions.
     axis is *always* the 2nd arg in the function so no need to have a look at its signature
     """
 
     @functools.wraps(func)
-    def wrapped(a, axis=None, *args, **kwds):
+    def wrapped(
+        a: torch.Tensor, axis: AxisLike = None, *args: _P.args, **kwds: _P.kwargs
+    ) -> _R:
         if axis is not None:
             axis = _util.normalize_axis_tuple(axis, a.ndim)
 
@@ -49,7 +58,7 @@ def _deco_axis_expand(func):
     return wrapped
 
 
-def _atleast_float(dtype, other_dtype):
+def _atleast_float(dtype: torch.dtype | None, other_dtype: torch.dtype) -> torch.dtype:
     """Return a dtype that is real or complex floating-point.
 
     For inputs that are boolean or integer dtypes, this returns the default
@@ -64,7 +73,9 @@ def _atleast_float(dtype, other_dtype):
 
 
 @_deco_axis_expand
-def count_nonzero(a: ArrayLike, axis: AxisLike = None, *, keepdims: KeepDims = False):
+def count_nonzero(
+    a: ArrayLike, axis: AxisLike = None, *, keepdims: KeepDims = False
+) -> torch.Tensor:
     return a.count_nonzero(axis)
 
 
@@ -72,10 +83,10 @@ def count_nonzero(a: ArrayLike, axis: AxisLike = None, *, keepdims: KeepDims = F
 def argmax(
     a: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     *,
     keepdims: KeepDims = False,
-):
+) -> torch.Tensor:
     if a.is_complex():
         raise NotImplementedError(f"argmax with dtype={a.dtype}.")
 
@@ -92,10 +103,10 @@ def argmax(
 def argmin(
     a: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     *,
     keepdims: KeepDims = False,
-):
+) -> torch.Tensor:
     if a.is_complex():
         raise NotImplementedError(f"argmin with dtype={a.dtype}.")
 
@@ -112,43 +123,41 @@ def argmin(
 def any(
     a: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
     *,
     where: NotImplementedType = None,
-):
+) -> torch.Tensor:
     axis = _util.allow_only_single_axis(axis)
-    axis_kw = {} if axis is None else {"dim": axis}
-    return torch.any(a, **axis_kw)
+    return torch.any(a) if axis is None else torch.any(a, dim=axis)
 
 
 @_deco_axis_expand
 def all(
     a: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
     *,
     where: NotImplementedType = None,
-):
+) -> torch.Tensor:
     axis = _util.allow_only_single_axis(axis)
-    axis_kw = {} if axis is None else {"dim": axis}
-    return torch.all(a, **axis_kw)
+    return torch.all(a) if axis is None else torch.all(a, dim=axis)
 
 
 @_deco_axis_expand
 def amax(
     a: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
-):
+) -> torch.Tensor:
     if a.is_complex():
         raise NotImplementedError(f"amax with dtype={a.dtype}")
 
-    return a.amax(axis)
+    return a.amax() if axis is None else a.amax(axis)
 
 
 max = amax
@@ -158,15 +167,15 @@ max = amax
 def amin(
     a: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
-):
+) -> torch.Tensor:
     if a.is_complex():
         raise NotImplementedError(f"amin with dtype={a.dtype}")
 
-    return a.amin(axis)
+    return a.amin() if axis is None else a.amin(axis)
 
 
 min = amin
@@ -176,48 +185,55 @@ min = amin
 def ptp(
     a: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
-):
-    return a.amax(axis) - a.amin(axis)
+) -> torch.Tensor:
+    amax = a.amax() if axis is None else a.amax(axis)
+    amin = a.amin() if axis is None else a.amin(axis)
+    return amax - amin
 
 
 @_deco_axis_expand
 def sum(
     a: ArrayLike,
     axis: AxisLike = None,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
-):
-    assert dtype is None or isinstance(dtype, torch.dtype)
+) -> torch.Tensor:
+    if dtype is not None and not isinstance(dtype, torch.dtype):
+        raise AssertionError(
+            f"dtype must be None or a torch.dtype, got {type(dtype).__name__}"
+        )
 
     if dtype == torch.bool:
         dtype = _dtypes_impl.default_dtypes().int_dtype
 
-    axis_kw = {} if axis is None else {"dim": axis}
-    return a.sum(dtype=dtype, **axis_kw)
+    if axis is None:
+        return a.sum(dtype=dtype)
+    return a.sum(dim=axis, dtype=dtype)
 
 
 @_deco_axis_expand
 def prod(
     a: ArrayLike,
     axis: AxisLike = None,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
-):
+) -> torch.Tensor:
     axis = _util.allow_only_single_axis(axis)
 
     if dtype == torch.bool:
         dtype = _dtypes_impl.default_dtypes().int_dtype
 
-    axis_kw = {} if axis is None else {"dim": axis}
-    return a.prod(dtype=dtype, **axis_kw)
+    if axis is None:
+        return a.prod(dtype=dtype)
+    return a.prod(dim=axis, dtype=dtype)
 
 
 product = prod
@@ -227,31 +243,30 @@ product = prod
 def mean(
     a: ArrayLike,
     axis: AxisLike = None,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
     keepdims: KeepDims = False,
     *,
     where: NotImplementedType = None,
-):
+) -> torch.Tensor:
     dtype = _atleast_float(dtype, a.dtype)
 
-    axis_kw = {} if axis is None else {"dim": axis}
-    result = a.mean(dtype=dtype, **axis_kw)
-
-    return result
+    if axis is None:
+        return a.mean(dtype=dtype)
+    return a.mean(dim=axis, dtype=dtype)
 
 
 @_deco_axis_expand
 def std(
     a: ArrayLike,
     axis: AxisLike = None,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
-    ddof=0,
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
+    ddof: float = 0,
     keepdims: KeepDims = False,
     *,
     where: NotImplementedType = None,
-):
+) -> torch.Tensor:
     in_dtype = dtype
     dtype = _atleast_float(dtype, a.dtype)
     tensor = _util.cast_if_needed(a, dtype)
@@ -263,13 +278,13 @@ def std(
 def var(
     a: ArrayLike,
     axis: AxisLike = None,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
-    ddof=0,
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
+    ddof: float = 0,
     keepdims: KeepDims = False,
     *,
     where: NotImplementedType = None,
-):
+) -> torch.Tensor:
     in_dtype = dtype
     dtype = _atleast_float(dtype, a.dtype)
     tensor = _util.cast_if_needed(a, dtype)
@@ -285,34 +300,40 @@ def var(
 def cumsum(
     a: ArrayLike,
     axis: AxisLike = None,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
-):
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
+) -> torch.Tensor:
     if dtype == torch.bool:
         dtype = _dtypes_impl.default_dtypes().int_dtype
     if dtype is None:
         dtype = a.dtype
 
+    # pyrefly: ignore[bad-argument-type]
     (a,), axis = _util.axis_none_flatten(a, axis=axis)
     axis = _util.normalize_axis_index(axis, a.ndim)
 
+    # torch accepts the numpy-compat `axis=` alias, but its stub only lists `dim`.
+    # pyrefly: ignore[missing-argument, unexpected-keyword]
     return a.cumsum(axis=axis, dtype=dtype)
 
 
 def cumprod(
     a: ArrayLike,
     axis: AxisLike = None,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
-):
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
+) -> torch.Tensor:
     if dtype == torch.bool:
         dtype = _dtypes_impl.default_dtypes().int_dtype
     if dtype is None:
         dtype = a.dtype
 
+    # pyrefly: ignore[bad-argument-type]
     (a,), axis = _util.axis_none_flatten(a, axis=axis)
     axis = _util.normalize_axis_index(axis, a.ndim)
 
+    # torch accepts the numpy-compat `axis=` alias, but its stub only lists `dim`.
+    # pyrefly: ignore[missing-argument, unexpected-keyword]
     return a.cumprod(axis=axis, dtype=dtype)
 
 
@@ -321,14 +342,14 @@ cumproduct = cumprod
 
 def average(
     a: ArrayLike,
-    axis=None,
-    weights: ArrayLike = None,
-    returned=False,
+    axis: int | None = None,
+    weights: ArrayLike | None = None,
+    returned: bool = False,
     *,
-    keepdims=False,
-):
+    keepdims: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     if weights is None:
-        result = mean(a, axis=axis)
+        result = mean(a, axis)
         wsum = torch.as_tensor(a.numel() / result.numel(), dtype=result.dtype)
     else:
         if not a.dtype.is_floating_point:
@@ -376,13 +397,13 @@ def quantile(
     a: ArrayLike,
     q: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
-    overwrite_input=False,
-    method="linear",
+    out: OutArray | None = None,
+    overwrite_input: bool = False,
+    method: str = "linear",
     keepdims: KeepDims = False,
     *,
     interpolation: NotImplementedType = None,
-):
+) -> torch.Tensor:
     if overwrite_input:
         # raise NotImplementedError("overwrite_input in quantile not implemented.")
         # NumPy documents that `overwrite_input` MAY modify inputs:
@@ -412,22 +433,22 @@ def quantile(
 
     q = _util.cast_if_needed(q, a.dtype)
 
-    return torch.quantile(a, q, axis=axis, interpolation=method)
+    return torch.quantile(a, q, axis, interpolation=method)
 
 
 def percentile(
     a: ArrayLike,
     q: ArrayLike,
     axis: AxisLike = None,
-    out: Optional[OutArray] = None,
-    overwrite_input=False,
-    method="linear",
+    out: OutArray | None = None,
+    overwrite_input: bool = False,
+    method: str = "linear",
     keepdims: KeepDims = False,
     *,
     interpolation: NotImplementedType = None,
-):
+) -> torch.Tensor:
     # np.percentile(float_tensor, 30) : q.dtype is int64 => q / 100.0 is float32
-    if _dtypes_impl.python_type_for_torch(q.dtype) == int:
+    if _dtypes_impl.python_type_for_torch(q.dtype) is int:
         q = q.to(_dtypes_impl.default_dtypes().float_dtype)
     qq = q / 100.0
 
@@ -444,11 +465,11 @@ def percentile(
 
 def median(
     a: ArrayLike,
-    axis=None,
-    out: Optional[OutArray] = None,
-    overwrite_input=False,
+    axis: int | None = None,
+    out: OutArray | None = None,
+    overwrite_input: bool = False,
     keepdims: KeepDims = False,
-):
+) -> torch.Tensor:
     return quantile(
         a,
         torch.as_tensor(0.5),

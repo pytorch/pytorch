@@ -16,6 +16,10 @@
 #include <unordered_map>
 #include <utility>
 
+#ifndef __OBJC__
+typedef void* MTLCaptureManager;
+#endif
+
 namespace at::mps {
 
 namespace Profiler {
@@ -58,24 +62,7 @@ struct BaseInfo {
   // builds a string for a tensor (format: Device:ScalarType[tensor.sizes()])
   static std::string buildTensorString(
       const Tensor& tensor,
-      bool includeBufferId = false) {
-    if (tensor.defined()) {
-      std::stringstream tensorStr;
-      auto deviceType = tensor.device().type();
-      tensorStr << c10::DeviceTypeName(deviceType);
-      // see comments for INCLUDE_BUFFER_ID
-      if (includeBufferId && deviceType == at::kMPS) {
-        id<MTLBuffer> buffer =
-            __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
-        tensorStr << "(buf#" << (getIMPSAllocator()->getBufferId(buffer)) << ":"
-                  << buffer.retainCount << ")";
-      }
-      tensorStr << ":" << tensor.scalar_type() << tensor.sizes();
-      return tensorStr.str();
-    } else {
-      return "undefined";
-    }
-  }
+      bool includeBufferId = false);
   static uint64_t getTime() {
     return clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
   }
@@ -104,9 +91,9 @@ struct OperationInfo : BaseInfo {
     std::stringstream kernelStr;
     kernelStr << kernelName;
     for (const Tensor& tensor : tensors) {
-      kernelStr << ":" << BaseInfo::buildTensorString(tensor, includeBufferId);
+      kernelStr << ':' << BaseInfo::buildTensorString(tensor, includeBufferId);
     }
-    return kernelStr.str();
+    return std::move(kernelStr).str();
   }
 };
 
@@ -316,6 +303,15 @@ class MPSProfiler {
   // the handle is either "MPSGraph*" or "id<MTLComputePipelineState>" for Metal
   // Kernels the beginProfile*() functions return a profileId which is unique
   // per graph/kernel/copy
+  //
+  // `stream` is the stream that the profiled work is dispatched on. If `stream`
+  // is nullptr, the default stream will be profiled, but most callers should
+  // specify a non-null stream.
+  uint64_t beginProfileKernel(
+      const void* handle,
+      const std::string& strKey,
+      bool isGraph,
+      MPSStream* stream);
   uint64_t beginProfileKernel(
       const void* handle,
       const std::string& strKey,
@@ -323,7 +319,21 @@ class MPSProfiler {
   uint64_t beginProfileKernel(
       const void* handle,
       const std::string& kernelName,
+      const TensorList& tensors,
+      MPSStream* stream);
+  uint64_t beginProfileKernel(
+      const void* handle,
+      const std::string& kernelName,
       const TensorList& tensors);
+  uint64_t beginProfileCopy(
+      const void* srcBuffer,
+      const void* dstBuffer,
+      const OptionalTensorRef srcTensor,
+      const OptionalTensorRef dstTensor,
+      size_t length,
+      MPSStream* stream,
+      bool isNonBlocking,
+      bool usesBlitter = true);
   uint64_t beginProfileCopy(
       const void* srcBuffer,
       const void* dstBuffer,
@@ -335,9 +345,15 @@ class MPSProfiler {
   uint64_t beginProfileCPUFallback(
       const std::string& opName,
       const TensorList& tensors);
+  void beginProfileGPUInterval(const void* handle, MPSStream* stream);
   void beginProfileGPUInterval(const void* handle);
 
+  void endProfileCopy(uint64_t profileId, SyncType syncType, MPSStream* stream);
   void endProfileCopy(uint64_t profileId, SyncType syncType);
+  void endProfileKernel(
+      const void* handle,
+      MPSStream* stream,
+      SyncType syncType = SyncType::NONE);
   void endProfileKernel(const void* handle, SyncType syncType = SyncType::NONE);
   void endProfileCPUFallback(const std::string& opName);
 
@@ -427,15 +443,21 @@ class MPSProfiler {
   unsigned captureCount = 0;
 
   void initialize();
-  void beginProfileExecution(BaseInfo& info, bool cpuExecution = false);
+  void beginProfileExecution(
+      BaseInfo& info,
+      MPSStream* stream,
+      bool cpuExecution = false);
   void endProfileExecution(
       BaseInfo& info,
       os_signpost_id_t event_signpost_id,
       os_signpost_id_t interval_signpost_id,
       double gpuTime,
       double schedulingTime);
-  void addProfilerScheduledHandler(BaseInfo& info);
-  void addProfilerCompletedHandler(BaseInfo& info, SyncType syncType);
+  void addProfilerScheduledHandler(BaseInfo& info, MPSStream* stream);
+  void addProfilerCompletedHandler(
+      BaseInfo& info,
+      SyncType syncType,
+      MPSStream* stream);
   void emitSignpostEvent(
       SignpostTypes signpost_type,
       os_signpost_id_t signpost_id,

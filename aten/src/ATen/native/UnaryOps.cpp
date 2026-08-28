@@ -1,13 +1,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/MemoryOverlap.h>
-#include <ATen/NamedTensorUtils.h>
-#include <ATen/Parallel.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
-#include <ATen/WrapDimUtils.h>
 
 #include <ATen/native/Resize.h>
 #include <ATen/native/UnaryOps.h>
@@ -250,7 +246,7 @@ TORCH_META_FUNC2(round, decimals)(const Tensor& self, int64_t decimals){
 }
 
 TORCH_META_FUNC(neg)(const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() != kBool,
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
   build_borrowing_unary_op(maybe_get_output(), self);
@@ -258,26 +254,26 @@ TORCH_META_FUNC(neg)(const Tensor& self) {
 
 TORCH_META_FUNC(trunc) (const Tensor& self) {
   // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(),
     "trunc is not supported for complex inputs");
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(floor) (const Tensor& self) {
   // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(),
     "floor is not supported for complex inputs");
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(sign) (const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(),
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(),
               "Unlike NumPy, torch.sign is not intended to support complex numbers. Please use torch.sgn instead.");
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(signbit) (const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "signbit is not implemented for complex tensors.");
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(), "signbit is not implemented for complex tensors.");
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
               "signbit does not support non-boolean outputs.");
   build_borrowing_unary_force_boolean_op(maybe_get_output(), self);
@@ -285,7 +281,7 @@ TORCH_META_FUNC(signbit) (const Tensor& self) {
 
 TORCH_META_FUNC(ceil) (const Tensor& self) {
   // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(),
     "ceil is not supported for complex inputs");
   build_borrowing_unary_op(maybe_get_output(), self);
 }
@@ -387,7 +383,8 @@ TORCH_IMPL_FUNC(polygamma_out)
 }
 
 TORCH_IMPL_FUNC(signbit_out) (const Tensor& self, const Tensor& result) {
-  if (self.dtype() == at::kBool) {
+  auto dt = self.scalar_type();
+  if (at::isIntegralType(dt, /*includeBool=*/true) && !at::isSignedType(dt)) {
     result.fill_(false);
   } else {
     signbit_stub(device_type(), *this);
@@ -490,7 +487,7 @@ Tensor arccos(const Tensor& self) { return self.acos(); }
 Tensor& arccos_(Tensor& self) { return self.acos_(); }
 
 Tensor& rad2deg_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(!self.is_complex(), "rad2deg is not supported for complex tensors.");
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(), "rad2deg is not supported for complex tensors.");
   constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;
   return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_180_PI)));
 }
@@ -508,7 +505,7 @@ Tensor rad2deg(const Tensor& self) {
 Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
 
 Tensor& deg2rad_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(!self.is_complex(), "deg2rad is not supported for complex tensors.");
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(), "deg2rad is not supported for complex tensors.");
   constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
   return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_PI_180)));
 }
@@ -592,7 +589,6 @@ Tensor real(const Tensor& self) {
 Tensor _neg_view(const Tensor& self) {
   Tensor self_ = self.alias();
   self_._set_neg(!self.is_neg());
-  namedinference::propagate_names(self_, self);
   return self_;
 }
 
@@ -608,7 +604,7 @@ Tensor imag(const Tensor& self) {
     }
     return at::select(real_tensor, real_tensor.dim() - 1, 1);
   } else {
-    TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
+    TORCH_CHECK_TYPE(false, "imag is not implemented for tensors with non-complex dtypes.");
   }
 }
 
@@ -620,7 +616,8 @@ Tensor _conj_physical(const Tensor& self) {
   if (self.is_conj()) {
     return self.conj().clone();
   }
-  return unary_op_impl(self, at::conj_physical_out);
+  auto result = at::empty_like(self);
+  return at::conj_physical_out(result, self);
 }
 
 Tensor conj_physical(const Tensor& self) {
@@ -652,7 +649,6 @@ Tensor resolve_conj(const Tensor& self) {
 Tensor _conj(const Tensor& self) {
   Tensor self_ = self.alias();
   self_._set_conj(!self.is_conj());
-  namedinference::propagate_names(self_, self);
   return self_;
 }
 
@@ -743,7 +739,6 @@ Tensor special_ndtr(const Tensor& self) {
   return calc_ndtr(self);
 }
 
-// FIXME: remove const_cast once unary_op_impl_out is updated
 TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {
   if (self.is_complex()) {
     sgn_stub(device_type(), *this);
@@ -846,7 +841,7 @@ Tensor fix(const Tensor& self) { return self.trunc(); }
 Tensor& fix_(Tensor& self) { return self.trunc_(); }
 
 Tensor positive(const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() != kBool, "The `+` operator, on a bool tensor is not supported.");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool, "The `+` operator, on a bool tensor is not supported.");
   return self;
 }
 
@@ -886,7 +881,7 @@ static inline void mvlgamma_check(const Tensor& self, int64_t p) {
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   mvlgamma_check(self, p);
   auto dtype = c10::scalarTypeToTypeMeta(self.scalar_type());
-  if (at::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+  if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     // int -> float promotion
     dtype = c10::get_default_dtype();
   }
@@ -903,22 +898,18 @@ Tensor mvlgamma(const Tensor& self, int64_t p) {
   return args.lgamma_().sum(-1).add_(p2_sub_p * std::log(c10::pi<double>) * QUARTER);
 }
 
+// since mvlgamma_ has different signature from its
+// out and functional variant, we explicitly
+// define it (instead of using structured kernel).
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
-  mvlgamma_check(self, p);
-  Tensor args = native::arange(
-      -p *HALF  + HALF,
-      HALF,
-      HALF,
-      optTypeMetaToScalarType(self.options().dtype_opt()),
-      self.options().layout_opt(),
-      self.options().device_opt(),
-      self.options().pinned_memory_opt());
-  args = args.add(self.unsqueeze(-1));
-  const auto p2_sub_p = static_cast<double>(p * (p - 1));
-  return self.copy_(args.lgamma_().sum(-1).add_(p2_sub_p * std::log(c10::pi<double>) * QUARTER));
+  return at::mvlgamma_out(self, self, p);
 }
 
 Tensor& mvlgamma_out(const Tensor& self, int64_t p, Tensor& result) {
+  TORCH_CHECK(
+    self.device() == result.device(),
+    "Expected tensors to be on the same device, but found ", self.device(), " and ", result.device()
+  );
   auto out = self.mvlgamma(p);
   TORCH_CHECK(
       at::can_cast(out.scalar_type(), result.scalar_type()),
@@ -943,7 +934,7 @@ std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
   Tensor exponent = at::empty_like(self, self.options().dtype(at::kInt));
 
   at::frexp_out(mantissa, exponent, self);
-  return std::tuple<Tensor, Tensor>(mantissa, exponent);
+  return std::tuple<Tensor, Tensor>(std::move(mantissa), std::move(exponent));
 }
 
 std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,

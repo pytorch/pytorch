@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
 import io
-from typing import Dict
 
 import torch
 import torch._C
@@ -19,7 +18,7 @@ from torch.testing._internal.common_quantization import (
     LinearAddModel,
 )
 from torch.testing._internal.common_utils import TestCase
-from torch.utils import bundled_inputs as bundled_inputs
+from torch.utils import bundled_inputs
 
 
 class myMod(torch.nn.Module):
@@ -100,22 +99,21 @@ class OnDevicePTQUtils:
         ):
             raise ValueError("Quantized weight must be produced.")
         fp_weight = weight.inputsAt(0).node()
-        assert (
-            fp_weight.kind() == "prim::GetAttr"
-        ), "Weight must be an attribute of the module."
+        if fp_weight.kind() != "prim::GetAttr":
+            raise AssertionError("Weight must be an attribute of the module.")
         fp_weight_name = fp_weight.s("name")
         return fp_weight_name
 
     @staticmethod
     def is_per_channel_quantized_packed_param(node):
-        assert (
-            node.kind() == "quantized::linear_prepack"
-        ), "Node must corresponds to linear_prepack."
+        if node.kind() != "quantized::linear_prepack":
+            raise AssertionError("Node must corresponds to linear_prepack.")
         weight = node.inputsAt(0).node()
-        assert (
+        if not (
             weight.kind() != "aten::quantize_per_tensor"
             or weight.kind() != "aten::quantize_per_channel"
-        )
+        ):
+            raise AssertionError(f"Unexpected weight kind: {weight.kind()}")
         return weight.kind() != "aten::quantize_per_tensor"
 
 
@@ -178,7 +176,6 @@ class TestOnDeviceDynamicPTQInsertObservers(TestCase):
     def test_weight_only_observers(self):
         model = MyConvLinearModule()
         qconfig_dict = {"": default_dynamic_qconfig}
-        inputs = model.get_example_inputs()
         scripted_model = OnDevicePTQUtils.insert_observers(model, qconfig_dict)
         observe_forward_graph = scripted_model.observe_forward.graph
         num_weight_only_observers = 0
@@ -379,7 +376,7 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         thrown = False
         try:
             m(*inputs)
-        except Exception as e:
+        except Exception:
             thrown = True
         self.assertTrue(thrown)
 
@@ -399,7 +396,7 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         thrown = False
         try:
             m(*inputs)
-        except Exception as e:
+        except Exception:
             thrown = True
         self.assertTrue(thrown)
 
@@ -450,8 +447,8 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
             self.assertTrue(torch.allclose(ref_output, output))
 
             # Now serialize to flabuffer and load from fb and check
-            dict: Dict[str, str] = {}
-            bytes = torch._C._save_mobile_module_to_bytes(m._c, dict)
+            dict_: dict[str, str] = {}
+            bytes = torch._C._save_mobile_module_to_bytes(m._c, dict_)
             m = LiteScriptModule(torch._C._load_mobile_module_from_bytes(bytes))
             fb_output = m(*inputs)
             self.assertTrue(torch.allclose(ref_output, fb_output))
@@ -530,3 +527,10 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
     def test_device_side_api(self):
         model = MyConvLinearModule()
         self._check_device_side_api(model)
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

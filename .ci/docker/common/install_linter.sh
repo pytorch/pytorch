@@ -2,11 +2,9 @@
 
 set -ex
 
-source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
-
 if [ -n "${UBUNTU_VERSION}" ]; then
   apt update
-  apt-get install -y clang doxygen git graphviz nodejs npm libtinfo5
+  apt-get install -y doxygen git graphviz nodejs npm libtinfo5
 fi
 
 # Do shallow clone of PyTorch so that we can init lintrunner in Docker build context
@@ -15,8 +13,8 @@ chown -R jenkins pytorch
 
 pushd pytorch
 # Install all linter dependencies
-pip_install -r requirements.txt
-conda_run lintrunner init
+pip install -r requirements.txt
+lintrunner init
 
 # Cache .lintbin directory as part of the Docker image
 cp -r .lintbin /tmp

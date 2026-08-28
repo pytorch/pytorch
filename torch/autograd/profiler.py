@@ -1,10 +1,16 @@
 # mypy: allow-untyped-defs
+import copy
+import logging
 import uuid
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from time import perf_counter_ns
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Optional
 from warnings import warn
+
+
+log = logging.getLogger(__name__)
 
 import torch
 import torch.cuda
@@ -94,6 +100,7 @@ def _run_on_profiler_stop():
 @dataclass
 class _ProfilerStats:
     "Profiler timing and stats used by developers to catch issues/regressions"
+
     profiling_window_duration_sec: float = 0
     number_of_events: int = 0
     profiler_prepare_call_duration_us: int = 0
@@ -106,6 +113,9 @@ class _ProfilerStats:
 class profile:
     """Context manager that manages autograd profiler state and holds a summary of results.
 
+    .. note::
+        This is the backend, most people should use :mod:`torch.profiler` instead.
+
     Under the hood it just records events of functions being executed in C++ and
     exposes those events to Python. You can wrap any code into it and it will
     only report runtime of PyTorch functions.
@@ -113,9 +123,6 @@ class profile:
 
     Args:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
-
-        use_cuda (bool, optional): Enables timing of CUDA events as well
-            using the cudaEvent API. (will be deprecated)
 
         use_device (str, optional): Enables timing of device events.
             Adds approximately 4us of overhead to each tensor operation when use cuda.
@@ -145,8 +152,12 @@ class profile:
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exist, at the moment, only for TorchScript models
-            and not eager mode models.
+
+            .. deprecated::
+                ``with_modules`` is deprecated and will be removed in a future version.
+                It only collects data for TorchScript models, which are themselves
+                deprecated, and does nothing in eager mode. Use ``with_stack=True``,
+                which records ``nn.Module`` events for eager models.
 
         use_kineto (bool, optional): experimental, enable profiling with Kineto profiler.
 
@@ -158,17 +169,22 @@ class profile:
 
         acc_events (bool): Enable the accumulation of FunctionEvents across multiple profiling cycles
 
+        post_processing_timeout_s (float): Optional timeout in seconds for post-processing profiler
+            results. In this context, post-processing happens after the profiling itself has finished.
+            If specified, event parsing will stop after this duration and return partial results. Useful
+            for handling large traces that may take too long to process.
 
-    .. warning:
+
+    .. warning::
         Enabling memory profiling or source attribution incurs additional profiler
         overhead
 
-    .. warning:
+    .. warning::
         This context managers should not be called recursively, i.e. no nested
         instances are allowed
 
-    .. warning:
-        Due to some CUDA multiprocessing limitations (multiprocessing-cuda-note_),
+    .. warning::
+        Due to some CUDA multiprocessing limitations (see :ref:`multiprocessing-cuda-note`),
         one cannot use the profiler with ``use_device = 'cuda'`` to benchmark
         DataLoaders with ``num_workers > 0``. If you wish to benchmark data loading,
         please use ``use_device = None`` or ``num_workers = 0``.
@@ -199,7 +215,6 @@ class profile:
         self,
         enabled=True,
         *,
-        use_cuda=False,  # Deprecated
         use_device=None,
         record_shapes=False,
         with_flops=False,
@@ -211,24 +226,16 @@ class profile:
         experimental_config=None,
         acc_events=False,
         custom_trace_id_callback=None,
+        post_processing_timeout_s: float | None = None,
+        activity_filters: dict[ProfilerActivity, set[str]] | None = None,
     ):
         self.enabled: bool = enabled
         if not self.enabled:
             return
-        self.use_cuda = use_cuda
-        if self.use_cuda:
-            warn(
-                "The attribute `use_cuda` will be deprecated soon, "
-                "please use ``use_device = 'cuda'`` instead.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            self.use_device: Optional[str] = "cuda"
-        else:
-            self.use_device = use_device
+        self.use_device: str | None = use_device
         # TODO Consider changing _function_events into data structure with size cap
-        self._function_events: Optional[EventList] = None
-        self._old_function_events: Optional[EventList] = None
+        self._function_events: EventList | None = None
+        self._old_function_events: EventList | None = None
         # Function event processing is done lazily
         self._needs_processing = False
         self.entered = False
@@ -242,33 +249,77 @@ class profile:
         self.acc_events = acc_events
         if experimental_config is None:
             experimental_config = _ExperimentalConfig()
+        if experimental_config.trace_only and with_stack:
+            warn(
+                "trace_only=True is incompatible with with_stack=True "
+                "(stack traces require event post-processing). "
+                "Disabling trace_only."
+            )
+            experimental_config = copy.copy(experimental_config)
+            experimental_config.trace_only = False
+        if (
+            experimental_config.profiler_metrics
+            or experimental_config.profiler_measure_per_kernel
+        ):
+            warn(
+                "profiler_metrics and profiler_measure_per_kernel are deprecated "
+                "and ignored. These options will be removed in a future release.",
+                FutureWarning,
+                stacklevel=2,
+            )
+        if experimental_config.adjust_profiler_step:
+            warn(
+                "adjust_profiler_step is deprecated and ignored. It will be "
+                "removed in a future release.",
+                FutureWarning,
+                stacklevel=2,
+            )
+        if with_modules:
+            warn(
+                "with_modules is deprecated and will be removed in a future release. "
+                "It only collects data for TorchScript models, which are themselves "
+                "deprecated, and does nothing in eager mode. Use with_stack=True, "
+                "which records nn.Module events for eager models.",
+                FutureWarning,
+                stacklevel=2,
+            )
         self.experimental_config = experimental_config
-        self.kineto_results: Optional[_ProfilerResult] = None
+        self.kineto_results: _ProfilerResult | None = None
         self.profiling_start_time_ns = 0
         self.profiling_end_time_ns = 0
         self._stats = _ProfilerStats()
         self.custom_trace_id_callback = custom_trace_id_callback
+        self.post_processing_timeout_s = post_processing_timeout_s
+        self.activity_filters = activity_filters or {}
         self.trace_id = ""
         if not self.use_cpu:
-            assert (
-                use_kineto
-            ), "Device-only events supported only with Kineto (use_kineto=True)"
+            if not use_kineto:
+                raise AssertionError(
+                    "Device-only events supported only with Kineto (use_kineto=True)"
+                )
 
         if self.use_device is not None:
-            VALID_DEVICE_OPTIONS = ["cuda", "xpu", "mtia"]
+            VALID_DEVICE_OPTIONS = ["cuda", "xpu", "mtia", "hpu"]
             if _get_privateuse1_backend_name() != "privateuseone":
                 VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
             if self.use_device not in VALID_DEVICE_OPTIONS:
-                warn(f"The {self.use_device} is not a valid device option.")
+                warn(
+                    f"The {self.use_device} is not a valid device option.", stacklevel=2
+                )
                 self.use_device = None
 
             if self.use_device == "cuda" and not torch.cuda.is_available():
-                warn("CUDA is not available, disabling CUDA profiling")
-                self.use_cuda = False
+                warn("CUDA is not available, disabling CUDA profiling", stacklevel=2)
                 self.use_device = None
 
             if self.use_device == "xpu" and not torch.xpu.is_available():
-                warn("XPU is not available, disabling XPU profiling")
+                warn("XPU is not available, disabling XPU profiling", stacklevel=2)
+                self.use_device = None
+
+            if self.use_device == "hpu" and not (
+                hasattr(torch, "hpu") and torch.hpu.is_available()
+            ):
+                warn("HPU is not available, disabling HPU profiling", stacklevel=2)
                 self.use_device = None
 
         self.kineto_activities = set()
@@ -278,35 +329,51 @@ class profile:
         self.profiler_kind = ProfilerState.KINETO
         if self.use_device == "cuda":
             if not use_kineto or ProfilerActivity.CUDA not in _supported_activities():
-                assert self.use_cpu, "Legacy CUDA profiling requires use_cpu=True"
+                if not self.use_cpu:
+                    raise AssertionError("Legacy CUDA profiling requires use_cpu=True")
                 self.profiler_kind = ProfilerState.KINETO_GPU_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.CUDA)
         elif self.use_device == "xpu":
-            assert (
-                use_kineto and ProfilerActivity.XPU in _supported_activities()
-            ), "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
+            if not (use_kineto and ProfilerActivity.XPU in _supported_activities()):
+                raise AssertionError(
+                    "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
+                )
             self.kineto_activities.add(ProfilerActivity.XPU)
         elif self.use_device == "mtia":
-            assert (
-                use_kineto and ProfilerActivity.MTIA in _supported_activities()
-            ), "Legacy MTIA profiling is not supported. Requires use_kineto=True on MTIA devices."
+            if not (use_kineto and ProfilerActivity.MTIA in _supported_activities()):
+                raise AssertionError(
+                    "Legacy MTIA profiling is not supported. Requires use_kineto=True on MTIA devices."
+                )
             self.kineto_activities.add(ProfilerActivity.MTIA)
+        elif self.use_device == "hpu":
+            if not (use_kineto and ProfilerActivity.HPU in _supported_activities()):
+                raise AssertionError(
+                    "Legacy HPU profiling is not supported. Requires use_kineto=True on HPU devices."
+                )
+            self.kineto_activities.add(ProfilerActivity.HPU)
         elif self.use_device is not None and self.use_device != "privateuseone":
-            if (
-                not use_kineto
-                or ProfilerActivity.PrivateUse1 not in _supported_activities()
-            ):
-                assert (
-                    self.use_cpu
-                ), "Legacy custombackend profiling requires use_cpu=True"
-                self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
+            if use_kineto:
+                # Native tracing mode: use KINETO_PRIVATEUSE1 with registered IActivityProfiler
+                self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1
+                if ProfilerActivity.PrivateUse1 in _supported_activities():
+                    self.kineto_activities.add(ProfilerActivity.PrivateUse1)
             else:
-                self.kineto_activities.add(ProfilerActivity.PrivateUse1)
+                # Marker-only mode: use fallback state
+                if not self.use_cpu:
+                    raise AssertionError(
+                        "Legacy privateuse1 profiling requires use_cpu=True"
+                    )
+                self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
 
-        assert (
-            len(self.kineto_activities) > 0
-        ), "No activities specified for the profiler"
+        if len(self.kineto_activities) == 0:
+            raise AssertionError("No activities specified for the profiler")
+
+        if (
+            self.post_processing_timeout_s is not None
+            and self.post_processing_timeout_s < 0
+        ):
+            raise ValueError("post_processing_timeout_s must be non-negative")
 
     def default_trace_id(self):
         # Generate a UUID
@@ -347,7 +414,11 @@ class profile:
     def _prepare_trace(self):
         self.entered = True
         t0 = perf_counter_ns()
-        _prepare_profiler(self.config(create_trace_id=True), self.kineto_activities)
+        _prepare_profiler(
+            self.config(create_trace_id=True),
+            self.kineto_activities,
+            activity_filter=self.activity_filters,
+        )
         t1 = perf_counter_ns()
         self._stats.profiler_prepare_call_duration_us = int((t1 - t0) / 1000)
 
@@ -387,8 +458,8 @@ class profile:
         )
 
         # If we plan to accumulate events we should post process the function events
-        # right away to retain the state across mulitple start/stop calls
-        if self.acc_events:
+        # right away to retain the state across multiple start/stop calls
+        if self.acc_events and not self.experimental_config.trace_only:
             self._ensure_function_events()
         return False
 
@@ -408,6 +479,11 @@ class profile:
 
     def _ensure_function_events(self):
         """Process function events lazily if required"""
+        if self.experimental_config.trace_only:
+            raise RuntimeError(
+                "events() is not available when trace_only=True in "
+                "ExperimentalConfig. Use export_chrome_trace() instead."
+            )
         if self._function_events is not None:
             return
         self._needs_processing = False
@@ -415,7 +491,9 @@ class profile:
         t0 = perf_counter_ns()
         parsed_results = []
         if self.kineto_results:
-            parsed_results = self._parse_kineto_results(self.kineto_results)
+            parsed_results = self._parse_kineto_results(
+                self.kineto_results, timeout_s=self.post_processing_timeout_s
+            )
         t1 = perf_counter_ns()
         self._stats.parse_kineto_call_duration_us = int((t1 - t0) / 1000)
 
@@ -436,9 +514,6 @@ class profile:
                 self._function_events.append(evt)
             self._old_function_events = None
 
-        if self._function_events is None:
-            raise RuntimeError("Profiler didn't finish running")
-
     @property
     def function_events(self):
         if self._function_events is None or self._needs_processing:
@@ -456,7 +531,8 @@ class profile:
         top_level_events_only=False,
     ):
         self._ensure_function_events()
-        assert self._function_events is not None
+        if self._function_events is None:
+            raise AssertionError("Expected profiling results")
         return self._function_events.table(
             sort_by=sort_by,
             row_limit=row_limit,
@@ -469,12 +545,18 @@ class profile:
 
     table.__doc__ = EventList.table.__doc__
 
-    def export_chrome_trace(self, path):
+    def export_chrome_trace(self, path, metadata=None, use_python_export=False):
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
         """
-        if kineto_available():
+        if use_python_export and kineto_available():
+            from torch.profiler._chrome_trace_export import (
+                export_chrome_trace as _export,
+            )
+
+            _export(self.kineto_results, path, metadata)  # type: ignore[union-attr]
+        elif kineto_available():
             self.kineto_results.save(path)  # type: ignore[union-attr]
         else:
             self._ensure_function_events()
@@ -484,8 +566,10 @@ class profile:
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         self._ensure_function_events()
-        assert self._function_events is not None, "Expected profiling results"
-        assert self.with_stack, "export_stacks() requires with_stack=True"
+        if self._function_events is None:
+            raise AssertionError("Expected profiling results")
+        if not self.with_stack:
+            raise AssertionError("export_stacks() requires with_stack=True")
         return self._function_events.export_stacks(path, metric)
 
     def toggle_collection_dynamic(
@@ -496,18 +580,29 @@ class profile:
         """
         return _toggle_collection_dynamic(enabled, set(activities))
 
-    def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
+    def key_averages(
+        self,
+        group_by_input_shape=False,
+        group_by_stack_n=0,
+        group_by_overload_name=False,
+        include_python_functions=False,
+    ):
         self._ensure_function_events()
-        assert self._function_events is not None, "Expected profiling results"
+        if self._function_events is None:
+            raise AssertionError("Expected profiling results")
         return self._function_events.key_averages(
-            group_by_input_shape, group_by_stack_n
+            group_by_input_shape,
+            group_by_stack_n,
+            group_by_overload_name,
+            include_python_functions,
         )
 
     key_averages.__doc__ = EventList.key_averages.__doc__
 
     def total_average(self):
         self._ensure_function_events()
-        assert self._function_events is not None, "Expected profiling results"
+        if self._function_events is None:
+            raise AssertionError("Expected profiling results")
         return self._function_events.total_average()
 
     total_average.__doc__ = EventList.total_average.__doc__
@@ -519,18 +614,37 @@ class profile:
         The total time is a sum of all self times across all the events.
         """
         self._ensure_function_events()
-        assert self._function_events is not None
+        if self._function_events is None:
+            raise AssertionError("Expected profiling results")
         return self._function_events.self_cpu_time_total
 
-    def _parse_kineto_results(self, result: _ProfilerResult):
+    def _parse_kineto_results(
+        self, result: _ProfilerResult, timeout_s: float | None = None
+    ):
         # result.events() has most of the events - PyTorch op-level and device-level events
+
+        timeout_ns = int(timeout_s * 1e9) if timeout_s is not None else None
+        result_events = result.events()
+        if timeout_ns is not None and timeout_ns < 0:
+            raise ValueError("timeout_s must be non-negative")
+        start_time_ns = perf_counter_ns()
+        timed_out = False
+
+        def _check_timeout() -> bool:
+            """Check if timeout has been exceeded. Returns True if timed out."""
+            nonlocal timed_out
+            if timeout_ns is not None and not timed_out:
+                elapsed_ns = perf_counter_ns() - start_time_ns
+                if elapsed_ns >= timeout_ns:
+                    timed_out = True
+            return timed_out
 
         trace_start_ns = result.trace_start_ns()
         mem_records = [
-            [evt, False] for evt in result.events() if evt.name() == MEMORY_EVENT_NAME
+            [evt, False] for evt in result_events if evt.name() == MEMORY_EVENT_NAME
         ]
         oom_records = [
-            evt for evt in result.events() if evt.name() == OUT_OF_MEMORY_EVENT_NAME
+            evt for evt in result_events if evt.name() == OUT_OF_MEMORY_EVENT_NAME
         ]
         mem_records_acc = MemRecordsAcc(mem_records)
 
@@ -546,7 +660,12 @@ class profile:
             return (
                 mem_record.nbytes()
                 if mem_record.device_type()
-                in [DeviceType.CUDA, DeviceType.PrivateUse1, DeviceType.HIP]
+                in [
+                    DeviceType.CUDA,
+                    DeviceType.PrivateUse1,
+                    DeviceType.HIP,
+                    DeviceType.XPU,
+                ]
                 else 0
             )
 
@@ -557,21 +676,26 @@ class profile:
         # frontend_function_events contains the events in aten or torch frontend level,
         # whose correlation id is 0
         frontend_function_events = []
-        device_corr_map: Dict[int, List[FunctionEvent]] = {}
+        device_corr_map: dict[int, list[FunctionEvent]] = {}
         max_evt_id = 0
-        for kineto_event in result.events():
-            if _filter_name(kineto_event.name()):
+        for kineto_event in result_events:
+            if _check_timeout():
+                break
+
+            if (
+                _filter_name(kineto_event.name())
+                or getattr(kineto_event, "is_hidden_event", lambda: False)()
+            ):
                 continue
             rel_start_ns = kineto_event.start_ns() - trace_start_ns
             rel_end_ns = kineto_event.end_ns() - trace_start_ns
-            abs_end_ns = kineto_event.end_ns()
 
             cpu_memory_usage = 0
             device_memory_usage = 0
             if kineto_event.device_type() == DeviceType.CPU:
                 # find the corresponding memory allocation events
                 for mem_record in mem_records_acc.in_interval(
-                    kineto_event.start_ns() / 1000, abs_end_ns / 1000
+                    kineto_event.start_ns(), kineto_event.end_ns()
                 ):
                     cpu_memory_usage += _cpu_memory_usage(mem_record[0])
                     device_memory_usage += _device_memory_usage(mem_record[0])
@@ -584,6 +708,7 @@ class profile:
             fe = FunctionEvent(
                 id=kineto_event.correlation_id(),
                 name=_rewrite_name(name=kineto_event.name(), with_wildcard=True),
+                overload_name=kineto_event.overload_name(),
                 trace_name=_rewrite_name(name=kineto_event.name(), with_wildcard=False),
                 thread=kineto_event.start_thread_id(),
                 start_us=rel_start_ns / 1000,
@@ -608,10 +733,26 @@ class profile:
                 device_resource_id=kineto_event.device_resource_id(),
                 flops=kineto_event.flops(),
                 is_user_annotation=kineto_event.is_user_annotation(),
+                is_python_function=kineto_event.is_python_function(),
+                activity_type=kineto_event.activity_type(),
+                metadata_json=kineto_event.metadata_json(),
+                extra_meta=kineto_event.extra_meta() or None,
+                typed_metadata=kineto_event.typed_metadata() or None,
+                flow_id=kineto_event.flow_id(),
+                flow_type=kineto_event.flow_type(),
+                flow_start=kineto_event.flow_start(),
+                external_id=kineto_event.external_id(),
+                linked_correlation_id=kineto_event.linked_correlation_id(),
+                structured_input_shapes=kineto_event.structured_input_shapes(),
+                structured_input_strides=kineto_event.structured_input_strides(),
+                input_dtypes=kineto_event.dtypes(),
+                python_id=kineto_event.python_id(),
+                python_parent_id=kineto_event.python_parent_id(),
+                python_module_id=kineto_event.python_module_id(),
             )
             max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:
-                if self.use_device == "privateuseone":
+                if self.use_device == _get_privateuse1_backend_name():
                     privateuse1_time = kineto_event.privateuse1_elapsed_us()
                     if privateuse1_time > 0:
                         fe.append_kernel(fe.name, fe.device_index, privateuse1_time)
@@ -629,7 +770,10 @@ class profile:
                     device_corr_map[corr_id] = []
                 device_corr_map[corr_id].append(fe)
             elif corr_id == 0:
-                frontend_function_events.append(fe)
+                # Skip OVERHEAD events (profiler-internal host cost):
+                # they do no device work and would otherwise inflate reported device time.
+                if fe.activity_type != "overhead":
+                    frontend_function_events.append(fe)
             else:
                 raise RuntimeError(
                     f"Got negative correlation id {corr_id} in profiler post processing"
@@ -643,10 +787,11 @@ class profile:
                 and fe.id in device_corr_map
             ):
                 for f_evt in device_corr_map[fe.id]:
-                    if (
-                        f_evt.device_type == DeviceType.CUDA
-                        or f_evt.device_type == DeviceType.PrivateUse1
-                    ):
+                    if f_evt.device_type in [
+                        DeviceType.CUDA,
+                        DeviceType.PrivateUse1,
+                        DeviceType.XPU,
+                    ]:
                         fe.append_kernel(
                             f_evt.name,
                             f_evt.device_index,
@@ -658,11 +803,12 @@ class profile:
                         # parents and children
                         f_evt.thread = fe.thread
 
-        def createFunctionEventForMemoryEvents(evt):
+        def _create_function_event_for_memory_events(evt):
             rel_start_ns = evt.start_ns() - trace_start_ns
             fe = FunctionEvent(
                 id=max_evt_id,
                 name=evt.name(),
+                overload_name="",
                 trace_name=None,  # not outputting in the trace
                 thread=evt.start_thread_id(),
                 start_us=rel_start_ns / 1000,
@@ -683,15 +829,29 @@ class profile:
 
         # output top-level memory events
         for mem_record in mem_records:
+            if _check_timeout():
+                break
+
             if not mem_record[1]:
                 max_evt_id += 1
-                fe = createFunctionEventForMemoryEvents(mem_record[0])
+                fe = _create_function_event_for_memory_events(mem_record[0])
                 all_function_events.append(fe)
 
         for oom_record in oom_records:
+            if _check_timeout():
+                break
+
             max_evt_id += 1
-            fe = createFunctionEventForMemoryEvents(oom_record)
+            fe = _create_function_event_for_memory_events(oom_record)
             all_function_events.append(fe)
+
+        if timed_out:
+            log.warning(
+                "Profiler _parse_kineto_results timed out after %.3f seconds, "
+                "returning partial results with %d events",
+                timeout_s,
+                len(all_function_events),
+            )
 
         all_function_events.sort(
             key=lambda evt: [evt.time_range.start, -evt.time_range.end]
@@ -699,7 +859,20 @@ class profile:
         return all_function_events
 
 
-class record_function(_ContextDecorator):
+# Set by torch.profiler to the active cupti_monitor ProfilerObserver while a session is
+# running (None otherwise). record_function routes regions to it via push/pop_annotation.
+# Held as an opaque object -- NOT imported from the cupti package -- so record_function never
+# pulls in the cupti chain on a non-cupti run, and there is a single "is a session active"
+# signal (this reference) rather than a separate flag.
+_active_cupti_profiler_observer: Any = None
+
+
+def _set_active_cupti_profiler_observer(observer: Any) -> None:
+    global _active_cupti_profiler_observer
+    _active_cupti_profiler_observer = observer
+
+
+class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritance]
     """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
     Label will only appear if CPU activity tracing is enabled.
 
@@ -714,11 +887,12 @@ class record_function(_ContextDecorator):
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
-        ...     y = x ** 2
-        ...     with torch.autograd.profiler.record_function("label-z"): # label the block
-        ...         z = y ** 3
+        ...     y = x**2
+        ...     with torch.autograd.profiler.record_function(
+        ...         "label-z"
+        ...     ):  # label the block
+        ...         z = y**3
         ...     y.backward()
-        ...
         >>> # xdoctest: +IGNORE_WANT
         >>> # NOTE: some columns were removed for brevity
         >>> print(prof.key_averages().table(sort_by="self_cpu_time_total"))
@@ -737,30 +911,48 @@ class record_function(_ContextDecorator):
 
     """
 
-    def __init__(self, name: str, args: Optional[str] = None):
+    def __init__(self, name: str, args: str | None = None):
         self.name: str = name
-        self.args: Optional[str] = args
+        self.args: str | None = args
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit: bool = True
         # TODO: TorchScript ignores standard type annotation here
         # self.record: Optional["torch.classes.profiler._RecordFunction"] = None
         self.record = torch.jit.annotate(
-            Optional["torch.classes.profiler._RecordFunction"], None
+            # pyrefly: ignore [not-a-type]
+            Optional["torch.classes.profiler._RecordFunction"],
+            None,
         )
+        self._cupti_monitor_external_id: int | None = None
 
     def __enter__(self):
         self.record = torch.ops.profiler._record_function_enter_new(
             self.name, self.args
         )
+        # Route the region to the active cupti_monitor observer, if any. The reference is
+        # None unless a cupti_monitor profile is running, so a non-cupti run never touches
+        # the cupti chain. Guarded by is_scripting() (the global access doesn't compile under
+        # TorchScript), and the global is read inside the guard so it is dead-code-eliminated.
+        if not torch.jit.is_scripting():
+            observer = _active_cupti_profiler_observer
+            if observer is not None:
+                self._cupti_monitor_external_id = observer.push_annotation(self.name)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
+        if not torch.jit.is_scripting():
+            if self._cupti_monitor_external_id is not None:
+                observer = _active_cupti_profiler_observer
+                if observer is not None:
+                    observer.pop_annotation()
+                self._cupti_monitor_external_id = None
         if not self.run_callbacks_on_exit:
             return
 
         # Local variable is needed by TorchScript to refine Optional[T] to T
         record = self.record
-        assert record is not None
+        if record is None:
+            raise AssertionError("Expected record to be set")
 
         # TODO: Too slow with __torch_function__ handling enabled
         # See https://github.com/pytorch/pytorch/issues/76410
@@ -797,7 +989,8 @@ class record_function(_ContextDecorator):
 
         # Local variable is needed by TorchScript to refine Optional[T] to T
         record = self.record
-        assert record is not None
+        if record is None:
+            raise AssertionError("Expected record to be set")
 
         # TODO: Too slow with __torch_function__ handling enabled
         # See https://github.com/pytorch/pytorch/issues/76410
@@ -825,7 +1018,7 @@ class emit_itt:
     The Instrumentation and Tracing Technology (ITT) API enables your application to generate and
     control the collection of trace data during its execution across different Intel tools.
     This context manager is to annotate Intel(R) VTune Profiling trace. With help of this context manager,
-    you will be able to see labled ranges in Intel(R) VTune Profiler GUI.
+    you will be able to see labeled ranges in Intel(R) VTune Profiler GUI.
 
     .. warning:
         This context manager should not be called recursively, i.e. at most one
@@ -1008,7 +1201,7 @@ class emit_nvtx:
 
 
 def load_nvprof(path):
-    """Open an nvprof trace file and parses autograd annotations.
+    """Open an nvprof trace file and parse autograd annotations.
 
     Args:
         path (str): path to nvprof trace
@@ -1088,7 +1281,8 @@ def parse_nvprof_trace(path):
     for row in conn.execute(kernel_query):
         unique.see(row["marker_id"], row["runtime_id"])
         # 211 is cudaKernelLaunch for cuda >= 9.2
-        assert row["cbid"] == 211
+        if row["cbid"] != 211:
+            raise AssertionError(f"Expected cbid to be 211, but got {row['cbid']}")
         evt = functions_map[row["marker_id"]]
         evt.append_kernel(
             row["kernel_name"], 0, row["kernel_end"] - row["kernel_start"]
@@ -1141,7 +1335,7 @@ class KinetoStepTracker:
     """
 
     _current_step = 0
-    _step_dict: Dict[str, int] = defaultdict(int)
+    _step_dict: dict[str, int] = defaultdict(int)
 
     @classmethod
     def init_step_count(cls, requester: str):
@@ -1174,9 +1368,10 @@ class KinetoStepTracker:
             if delta > 1:
                 warn(
                     "Profiler step count has increased more than 1 - "
-                    f"current_step = {cls._current_step} step dict =  {cls._step_dict}"
+                    f"current_step = {cls._current_step} step dict =  {cls._step_dict}",
+                    stacklevel=2,
                 )
-            for _ in range(0, delta):
+            for _ in range(delta):
                 _kineto_step()
             cls._current_step = new_step
         return cls._current_step

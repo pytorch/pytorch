@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
-from typing import Dict
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.independent import Independent
@@ -46,9 +46,15 @@ class TransformedDistribution(Distribution):
     :class:`~torch.distributions.relaxed_bernoulli.RelaxedBernoulli` and
     :class:`~torch.distributions.relaxed_categorical.RelaxedOneHotCategorical`
     """
-    arg_constraints: Dict[str, constraints.Constraint] = {}
 
-    def __init__(self, base_distribution, transforms, validate_args=None):
+    arg_constraints: dict[str, constraints.Constraint] = {}
+
+    def __init__(
+        self,
+        base_distribution: Distribution,
+        transforms: Transform | list[Transform],
+        validate_args: bool | None = None,
+    ) -> None:
         if isinstance(transforms, Transform):
             self.transforms = [
                 transforms,
@@ -94,7 +100,10 @@ class TransformedDistribution(Distribution):
             transform.codomain.event_dim,  # the transform is coupled
             base_event_dim + transform_change_in_event_dim,  # the base dist is coupled
         )
-        assert len(forward_shape) >= event_dim
+        if len(forward_shape) < event_dim:
+            raise AssertionError(
+                f"forward_shape length {len(forward_shape)} must be >= event_dim {event_dim}"
+            )
         cut = len(forward_shape) - event_dim
         batch_shape = forward_shape[:cut]
         event_shape = forward_shape[cut:]
@@ -116,6 +125,7 @@ class TransformedDistribution(Distribution):
         return new
 
     @constraints.dependent_property(is_discrete=False)
+    # pyrefly: ignore [bad-override]
     def support(self):
         if not self.transforms:
             return self.base_dist.support
@@ -127,7 +137,7 @@ class TransformedDistribution(Distribution):
         return support
 
     @property
-    def has_rsample(self):
+    def has_rsample(self) -> bool:  # type: ignore[override]
         return self.base_dist.has_rsample
 
     def sample(self, sample_shape=torch.Size()):
@@ -143,7 +153,7 @@ class TransformedDistribution(Distribution):
                 x = transform(x)
             return x
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters
@@ -163,7 +173,7 @@ class TransformedDistribution(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         event_dim = len(self.event_shape)
-        log_prob = 0.0
+        log_prob: Tensor | float = 0.0
         y = value
         for transform in reversed(self.transforms):
             x = transform.inv(y)

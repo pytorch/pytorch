@@ -13,10 +13,11 @@
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/trie.h>
 #include <torch/csrc/lazy/python/python_util.h>
-#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+#if defined(BUILD_LAZY_TS_BACKEND) && \
+    !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
-#endif // FBCODE_CAFFE2 || OVRSOURCE
+#endif // BUILD_LAZY_TS_BACKEND && !(FBCODE_CAFFE2 || OVRSOURCE)
 #include <string>
 #include <utility>
 #include <vector>
@@ -27,7 +28,8 @@ namespace torch::lazy {
 // be simplified but it should probably be done together with
 // designing/refactoring the overall approach to get/set of default eager/lazy
 // device types
-torch::lazy::BackendDevice GetDeviceOrCurrent(const std::string& device_str) {
+static torch::lazy::BackendDevice GetDeviceOrCurrent(
+    const std::string& device_str) {
   if (device_str.empty()) {
     getBackend()->GetDefaultDeviceType();
     return torch::lazy::BackendDevice();
@@ -35,15 +37,15 @@ torch::lazy::BackendDevice GetDeviceOrCurrent(const std::string& device_str) {
   return torch::lazy::atenDeviceToBackendDevice(c10::Device(device_str));
 }
 
-std::ptrdiff_t GetTensorId(const at::Tensor& tensor) {
+static std::ptrdiff_t GetTensorId(const at::Tensor& tensor) {
   torch::lazy::LazyTensorPtr lazy_tensor = torch::lazy::TryGetLtcTensor(tensor);
   return lazy_tensor->GetUniqueId();
 }
 
-std::string GetTensorsDump(
+static std::string GetTensorsDump(
     const std::vector<at::Tensor>& tensors,
     const std::function<std::string(c10::ArrayRef<const torch::lazy::Node*>)>&
-        coverter) {
+        converter) {
   std::vector<const torch::lazy::Node*> nodes;
   std::vector<torch::lazy::Value> values;
   for (auto& tensor : tensors) {
@@ -53,10 +55,10 @@ std::string GetTensorsDump(
     values.push_back(lazy_tensor->GetIrValue());
     nodes.push_back(values.back().node.get());
   }
-  return coverter(nodes);
+  return converter(nodes);
 }
 
-std::vector<torch::lazy::LazyTensorPtr> GetLtcTensors(
+static std::vector<torch::lazy::LazyTensorPtr> GetLtcTensors(
     const std::vector<at::Tensor>& tensors,
     bool want_all) {
   std::vector<torch::lazy::LazyTensorPtr> lazy_tensors;
@@ -76,14 +78,15 @@ std::vector<torch::lazy::LazyTensorPtr> GetLtcTensors(
   return lazy_tensors;
 }
 
-std::string GetTensorsBackendGraph(const std::vector<at::Tensor>& tensors) {
+static std::string GetTensorsBackendGraph(
+    const std::vector<at::Tensor>& tensors) {
   std::vector<torch::lazy::LazyTensorPtr> lazy_tensors =
       GetLtcTensors(tensors, /*want_all=*/false);
   return torch::lazy::LazyGraphExecutor::Get()->DumpBackendComputation(
       lazy_tensors);
 }
 
-void SyncTensors(
+static void SyncTensors(
     const std::vector<at::Tensor>& tensors,
     const std::vector<std::string>& devices,
     bool wait,
@@ -101,7 +104,7 @@ void initLazyBindings(PyObject* module) {
 
   lazy.def(
       "_mark_step",
-      // TODO(whc) this API should probably change from vector<string> to
+      // TODO(whc) this API should probably change from vector<std::string> to
       // vector<c10::device> but in a separate PR
       [](const std::string& device_str,
          const std::vector<std::string>& devices,
@@ -144,18 +147,18 @@ void initLazyBindings(PyObject* module) {
   lazy.def(
       "_get_tensors_text",
       [](const std::vector<at::Tensor>& tensors) -> std::string {
-        auto coverter = [](c10::ArrayRef<const torch::lazy::Node*> nodes) {
+        auto converter = [](c10::ArrayRef<const torch::lazy::Node*> nodes) {
           return torch::lazy::DumpUtil::ToText(nodes);
         };
-        return GetTensorsDump(tensors, coverter);
+        return GetTensorsDump(tensors, converter);
       });
   lazy.def(
       "_get_tensors_dot",
       [](const std::vector<at::Tensor>& tensors) -> std::string {
-        auto coverter = [](c10::ArrayRef<const torch::lazy::Node*> nodes) {
+        auto converter = [](c10::ArrayRef<const torch::lazy::Node*> nodes) {
           return torch::lazy::DumpUtil::ToDot(nodes);
         };
-        return GetTensorsDump(tensors, coverter);
+        return GetTensorsDump(tensors, converter);
       });
   lazy.def(
       "_get_tensors_backend",
@@ -208,11 +211,12 @@ void initLazyBindings(PyObject* module) {
   });
 
   lazy_ts_backend.def("_init", []() {
-#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+#if defined(BUILD_LAZY_TS_BACKEND) && \
+    !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
     torch::lazy::InitTorchScriptBackend();
 #else
-      TORCH_CHECK(false, "TorchScript backend not yet supported in FBCODE/OVRSOURCE builds");
-#endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+      TORCH_CHECK(false, "TorchScript backend not available");
+#endif // BUILD_LAZY_TS_BACKEND && !(FBCODE_CAFFE2 || OVRSOURCE)
   });
 
   /*
@@ -223,7 +227,8 @@ void initLazyBindings(PyObject* module) {
       "_get_tensors_ts_device_data_node",
       [](const std::vector<at::Tensor>& tensors)
           -> std::pair<std::vector<int64_t>, std::vector<at::IValue>> {
-#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+#if defined(BUILD_LAZY_TS_BACKEND) && \
+    !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
         std::vector<const Node*> roots;
         for (auto& tensor : tensors) {
           auto xtensor = TryGetLtcTensor(tensor);
@@ -268,11 +273,8 @@ void initLazyBindings(PyObject* module) {
         }
         return std::make_pair(tensor_ids, ivalues);
 #else
-        TORCH_CHECK(
-            false, "TorchScript backend not yet supported in FBCODE builds");
-        return std::make_pair(
-            std::vector<int64_t>(), std::vector<at::IValue>());
-#endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+        TORCH_CHECK(false, "TorchScript backend not available");
+#endif // BUILD_LAZY_TS_BACKEND && !(FBCODE_CAFFE2 || OVRSOURCE)
       });
   // TODO(shunting) revisit this part for XLA
   lazy_ts_backend.def(
@@ -280,7 +282,8 @@ void initLazyBindings(PyObject* module) {
       [](const std::string& hash_str,
          const std::vector<at::IValue>& graph_inputs) {
         std::vector<at::Tensor> result;
-#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+#if defined(BUILD_LAZY_TS_BACKEND) && \
+    !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
         TORCH_CHECK(hash_str.size() == sizeof(hash_t));
         hash_t hash = *(hash_t*)(hash_str.c_str());
         auto cachedComputation =
@@ -301,14 +304,14 @@ void initLazyBindings(PyObject* module) {
         for (torch::jit::IValue elem : stack) {
           result.push_back(elem.toTensor());
         }
-#else
-        TORCH_CHECK(
-            false, "TorchScript backend not yet supported in FBCODE builds");
-#endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
         return result;
+#else
+        TORCH_CHECK(false, "TorchScript backend not available");
+#endif // BUILD_LAZY_TS_BACKEND && !(FBCODE_CAFFE2 || OVRSOURCE)
       });
-  lazy_ts_backend.def("_get_latest_computation_graph", []() {
-#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+  lazy_ts_backend.def("_get_latest_computation_graph", []() -> std::string {
+#if defined(BUILD_LAZY_TS_BACKEND) && \
+    !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
     auto computation = LazyGraphExecutor::Get()
                            ->GetComputationCache()
                            ->GetLatest()
@@ -317,24 +320,19 @@ void initLazyBindings(PyObject* module) {
     TORCH_CHECK(ts_computation, "Found non-TSComputation in cache");
     return ts_computation->graph()->toString();
 #else
-    TORCH_CHECK(
-        false, "TorchScript backend not yet supported in FBCODE builds");
-    return "";
-#endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+    TORCH_CHECK(false, "TorchScript backend not available");
+#endif // BUILD_LAZY_TS_BACKEND && !(FBCODE_CAFFE2 || OVRSOURCE)
   });
 
-  // GetPythonFramesFunction() has not ever worked with torchdeploy/multipy
-  // possibly becuase GetPythonFrames resolves to external cpython rather
-  // than embedded cpython. So far this problem has only been observed
-  // internally, so we will just block it off there.
-
-#if !(defined(USE_DEPLOY))
+  // GetPythonFramesFunction() has not ever worked with
+  // torchdeploy/multipy possibly because  // codespell:ignore multipy
+  // GetPythonFrames resolves to external cpython rather than embedded cpython.
+  // So far this problem has only been observed internally, so we will just
+  // block it off there.
 
   // When libtorch_python is loaded, we register the python frame getter
   // otherwise, debug util simply omits python frames
   GetPythonFramesFunction() = GetPythonFrames;
-
-#endif // USE_DEPLOY
 }
 
 } // namespace torch::lazy

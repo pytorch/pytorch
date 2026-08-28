@@ -1,7 +1,6 @@
 # Owner(s): ["module: fx"]
 
 import copy
-import unittest
 from collections import defaultdict
 
 import torch
@@ -12,9 +11,12 @@ from torch.fx.experimental.shape_inference.infer_symbol_values import (
     infer_symbol_values,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
-class TestShapeInference(unittest.TestCase):
+class TestShapeInference(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_infer_symbol_values(self):
         def mksym(shape_env, value, source, dynamic_dim) -> None:
             return shape_env.create_symintnode(
@@ -108,3 +110,10 @@ class TestShapeInference(unittest.TestCase):
         gm = generate_graph_module(m)
         input_tensors = [torch.randn(1, 1)]
         infer_shape(gm, input_tensors)
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

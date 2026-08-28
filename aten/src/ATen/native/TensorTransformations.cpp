@@ -2,7 +2,6 @@
 #include <ATen/native/IndexKernel.h> // for flip_stub
 #include <ATen/native/TensorTransformations.h>
 
-#include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/core/DimVector.h>
@@ -24,7 +23,6 @@
 #include <ATen/ops/flipud_native.h>
 #include <ATen/ops/roll_native.h>
 #include <ATen/ops/rot90_native.h>
-#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 #include <algorithm>
@@ -34,6 +32,11 @@
 namespace at::native {
 
 Tensor flip(const Tensor& self, IntArrayRef dims) {
+  TORCH_CHECK(
+      self.scalar_type() != at::kQUInt4x2 &&
+          self.scalar_type() != at::kQUInt2x4,
+      "flip is not supported for tensor with data type ",
+      self.scalar_type());
   const int64_t total_dims = self.dim();
   // It wraps the dims and checks that there are no repeated dims
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
@@ -139,22 +142,16 @@ Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
       "expected total dims >= 2, but got total dims = ",
       total_dims);
 
+  // Validate range first so out-of-range dims raise IndexError, then normalize
+  // before checking for duplicates (e.g. [1, -1] on a 2D tensor).
+  const auto dim0 = maybe_wrap_dim(dims[0], total_dims);
+  const auto dim1 = maybe_wrap_dim(dims[1], total_dims);
+
   TORCH_CHECK(
-      dims[0] != dims[1] && std::abs(dims[0] - dims[1]) != total_dims,
+      dim0 != dim1,
       "expected rotation dims to be different, but got dim0 = ",
       dims[0],
       " and dim1 = ",
-      dims[1]);
-
-  // check range of dims
-  TORCH_CHECK(
-      dims[0] < total_dims && dims[0] >= -total_dims,
-      "Rotation dim0 out of range, dim0 = ",
-      dims[0]);
-
-  TORCH_CHECK(
-      dims[1] < total_dims && dims[1] >= -total_dims,
-      "Rotation dim1 out of range, dim1 = ",
       dims[1]);
 
   // handle modulo with negative k
@@ -162,11 +159,11 @@ Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
 
   switch (k) {
     case 1:
-      return self.flip({dims[1]}).transpose_(dims[0], dims[1]);
+      return self.flip({dim1}).transpose_(dim0, dim1);
     case 2:
-      return self.flip(dims);
+      return self.flip({dim0, dim1});
     case 3:
-      return self.flip({dims[0]}).transpose_(dims[0], dims[1]);
+      return self.flip({dim0}).transpose_(dim0, dim1);
     default:
       return self.clone(at::MemoryFormat::Contiguous);
   }

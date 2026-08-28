@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Tuple, Union
 from numbers import Number
 import torch
 from torch.utils.benchmark import FuzzedTensor
@@ -9,17 +8,17 @@ class FuzzedSparseTensor(FuzzedTensor):
     def __init__(
         self,
         name: str,
-        size: Tuple[Union[str, int], ...],
-        min_elements: Optional[int] = None,
-        max_elements: Optional[int] = None,
-        dim_parameter: Optional[str] = None,
-        sparse_dim: Optional[str] = None,
-        nnz: Optional[str] = None,
-        density: Optional[str] = None,
-        coalesced: Optional[str] = None,
+        size: tuple[str | int, ...],
+        min_elements: int | None = None,
+        max_elements: int | None = None,
+        dim_parameter: str | None = None,
+        sparse_dim: str | None = None,
+        nnz: str | None = None,
+        density: str | None = None,
+        coalesced: str | None = None,
         dtype=torch.float32,
         cuda=False
-    ):
+    ) -> None:
         """
         Args:
             name:
@@ -64,13 +63,14 @@ class FuzzedSparseTensor(FuzzedTensor):
         with the same sparsity pattern. Moreover, most of the sparse operation will use coalesce() method
         and what we want here is to get a sparse tensor with the same `nnz` even if this is coalesced or not.
 
-        In the other hand when `is_coalesced` is True the number of elements is reduced in the coalescing process
+        On the other hand when `is_coalesced` is True the number of elements is reduced in the coalescing process
         by an unclear amount however the probability to generate duplicates indices are low for most of the cases.
         This decision was taken on purpose to maintain the construction cost as low as possible.
         """
         if isinstance(size, Number):
             size = [size] * sparse_dim
-        assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
+        if all(size[d] <= 0 for d in range(sparse_dim)) and nnz != 0:
+            raise AssertionError('invalid arguments')
         v_size = [nnz] + list(size[sparse_dim:])
         if dtype.is_floating_point:
             v = torch.rand(size=v_size, dtype=dtype, device="cpu")
@@ -94,7 +94,8 @@ class FuzzedSparseTensor(FuzzedTensor):
         size, _, _ = self._get_size_and_steps(params)
         density = params['density']
         nnz = math.ceil(sum(size) * density)
-        assert nnz <= sum(size)
+        if nnz > sum(size):
+            raise AssertionError('nnz cannot exceed total number of elements')
 
         is_coalesced = params['coalesced']
         sparse_dim = params['sparse_dim'] if self._sparse_dim else len(size)
@@ -108,7 +109,7 @@ class FuzzedSparseTensor(FuzzedTensor):
         is_hybrid = len(size[sparse_dim:]) > 0
 
         properties = {
-            "numel": int(tensor.numel()),
+            "numel": tensor.numel(),
             "shape": tensor.size(),
             "is_coalesced": tensor.is_coalesced(),
             "density": density,

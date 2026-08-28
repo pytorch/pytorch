@@ -20,14 +20,17 @@ import re
 import sys
 import textwrap
 import traceback
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, TypeVar
+from typing import Any, TypeVar
 
 import torch
 import torch.cuda._gpu_trace as gpu_trace
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 
+
+aten = torch.ops.aten
 
 DEFAULT_STREAM_ID = 0
 
@@ -74,7 +77,7 @@ class Access:
     seq_num: SeqNum
     stream: StreamId
     operator: str
-    aliases: List[str]
+    aliases: list[str]
     is_output: bool
     stack_trace: traceback.StackSummary
 
@@ -89,7 +92,7 @@ class UnsynchronizedAccessError(SynchronizationError):
     def __init__(
         self,
         data_ptr: DataPtr,
-        allocation_stack_trace: Optional[traceback.StackSummary],
+        allocation_stack_trace: traceback.StackSummary | None,
         current_access: Access,
         previous_access: Access,
     ):
@@ -141,7 +144,7 @@ class UnsynchronizedAccessError(SynchronizationError):
 class CUDASanitizerErrors(Exception):
     """Wrapper class for errors reported by CUDA Sanitizer."""
 
-    def __init__(self, errors: List[SynchronizationError]):
+    def __init__(self, errors: list[SynchronizationError]):
         self.errors = errors
 
     def __str__(self):
@@ -160,14 +163,14 @@ class TensorInfo:
         write: the last write access to the tensor.
     """
 
-    allocation_stack_trace: Optional[traceback.StackSummary]
-    reads: List[Access] = field(default_factory=list)
-    write: Optional[Access] = None
+    allocation_stack_trace: traceback.StackSummary | None
+    reads: list[Access] = field(default_factory=list)
+    write: Access | None = None
 
 
 class _TensorsAccessed:
     def __init__(self) -> None:
-        self.accesses: Dict[DataPtr, TensorInfo] = {}
+        self.accesses: dict[DataPtr, TensorInfo] = {}
 
     def ensure_tensor_exists(self, data_ptr: DataPtr) -> None:
         if data_ptr not in self.accesses:
@@ -191,7 +194,7 @@ class _TensorsAccessed:
             self.delete_tensor(data_ptr)
 
     def create_tensor(
-        self, data_ptr: DataPtr, stack_trace: Optional[traceback.StackSummary]
+        self, data_ptr: DataPtr, stack_trace: traceback.StackSummary | None
     ) -> None:
         self.accesses[data_ptr] = TensorInfo(stack_trace)
 
@@ -199,17 +202,17 @@ class _TensorsAccessed:
         del self.accesses[data_ptr]
 
     def were_there_reads_since_last_write(self, data_ptr: DataPtr) -> bool:
-        return True if self.accesses[data_ptr].reads else False
+        return bool(self.accesses[data_ptr].reads)
 
     def get_allocation_stack_trace(
         self, data_ptr: DataPtr
-    ) -> Optional[traceback.StackSummary]:
+    ) -> traceback.StackSummary | None:
         return self.accesses[data_ptr].allocation_stack_trace
 
-    def get_write(self, data_ptr: DataPtr) -> Optional[Access]:
+    def get_write(self, data_ptr: DataPtr) -> Access | None:
         return self.accesses[data_ptr].write
 
-    def get_reads(self, data_ptr: DataPtr) -> List[Access]:
+    def get_reads(self, data_ptr: DataPtr) -> list[Access]:
         return self.accesses[data_ptr].reads
 
     def add_read(self, data_ptr: DataPtr, access: Access) -> None:
@@ -222,9 +225,9 @@ class _TensorsAccessed:
 
 class StreamSynchronizations:
     def __init__(self) -> None:
-        self.current_sync_states: Dict[StreamId, Dict[StreamId, SeqNum]] = {}
-        self.recorded_sync_states: Dict[EventId, Dict[StreamId, SeqNum]] = {}
-        self.host_sync_state: Dict[StreamId, SeqNum] = {}
+        self.current_sync_states: dict[StreamId, dict[StreamId, SeqNum]] = {}
+        self.recorded_sync_states: dict[EventId, dict[StreamId, SeqNum]] = {}
+        self.host_sync_state: dict[StreamId, SeqNum] = {}
         self.create_stream(DEFAULT_STREAM_ID)
 
     def _ensure_stream_exists(self, stream: StreamId) -> None:
@@ -288,7 +291,7 @@ class StreamSynchronizations:
         self.recorded_sync_states[event] = self.current_sync_states[stream].copy()
 
     def _state_wait_for_other(
-        self, state: Dict[StreamId, SeqNum], other: Dict[StreamId, SeqNum]
+        self, state: dict[StreamId, SeqNum], other: dict[StreamId, SeqNum]
     ) -> None:
         for stream, seq_num in other.items():
             state[stream] = max(state.get(stream, -1), seq_num)
@@ -302,7 +305,7 @@ class StreamSynchronizations:
 
     def all_streams_wait_for_event(self, event: EventId) -> None:
         self._ensure_event_exists(event)
-        for stream in self.current_sync_states.keys():
+        for stream in self.current_sync_states:
             self.stream_wait_for_event(stream, event)
 
         self._state_wait_for_other(
@@ -349,14 +352,14 @@ class EventHandler:
     def _handle_kernel_launch(
         self,
         stream: StreamId,
-        read_only: Set[DataPtr],
-        read_write: Set[DataPtr],
-        outputs: Set[DataPtr],
+        read_only: set[DataPtr],
+        read_write: set[DataPtr],
+        outputs: set[DataPtr],
         operator: str,
-        tensor_aliases: Dict[int, List[str]],
-    ) -> List[SynchronizationError]:
+        tensor_aliases: dict[int, list[str]],
+    ) -> list[SynchronizationError]:
         def check_conflict(
-            data_ptr: DataPtr, current_access: Access, previous_access: Optional[Access]
+            data_ptr: DataPtr, current_access: Access, previous_access: Access | None
         ) -> None:
             if previous_access is None:
                 return
@@ -372,7 +375,7 @@ class EventHandler:
                     )
                 )
 
-        error_list: List[SynchronizationError] = []
+        error_list: list[SynchronizationError] = []
         self.seq_num += 1
         self.syncs.update_seq_num(stream, self.seq_num)
         stack_trace = traceback.StackSummary.extract(
@@ -462,15 +465,15 @@ class EventHandler:
         self.syncs.all_streams_wait_for_event(event)
 
 
-def zip_by_key(a: Dict[TK, TVa], b: Dict[TK, TVb]) -> Iterator[Tuple[TK, TVa, TVb]]:
+def zip_by_key(a: dict[TK, TVa], b: dict[TK, TVb]) -> Iterator[tuple[TK, TVa, TVb]]:
     for arg, value in a.items():
         if arg in b:
             yield arg, value, b[arg]
 
 
 def zip_arguments(
-    schema: torch.FunctionSchema, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-) -> Iterator[Tuple[torch.Argument, Any]]:
+    schema: torch.FunctionSchema, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Iterator[tuple[torch.Argument, Any]]:
     schema_args = schema.arguments[: len(args)]
     schema_kwargs = {arg.name: arg for arg in schema.arguments[len(args) :]}
 
@@ -482,21 +485,23 @@ def zip_arguments(
 
 class ArgumentHandler:
     def __init__(self) -> None:
-        self.dataptrs_read: Set[DataPtr] = set()
-        self.dataptrs_written: Set[DataPtr] = set()
-        self.tensor_aliases: Dict[DataPtr, List[str]] = {}
-        self.outputs: Set[DataPtr] = set()
+        self.dataptrs_read: set[DataPtr] = set()
+        self.dataptrs_written: set[DataPtr] = set()
+        self.tensor_aliases: dict[DataPtr, list[str]] = {}
+        self.outputs: set[DataPtr] = set()
 
     def _handle_argument(
         self,
         value: Any,
         is_write: bool,
         metadata_only: bool,
-        name: Optional[str] = None,
+        name: str | None = None,
         is_output: bool = False,
     ) -> None:
         if isinstance(value, torch.Tensor) and value.is_cuda:
-            data_ptr = value.data_ptr()
+            # data_ptr() is preferred, but distinguish Tensors with null data_ptr()
+            # otherwise two empty Tensors could incorrectly match as a conflict
+            data_ptr = value.data_ptr() if value.data_ptr() else id(value)
             if is_write:
                 self.dataptrs_written.add(data_ptr)
             elif not metadata_only:
@@ -511,8 +516,8 @@ class ArgumentHandler:
     def parse_inputs(
         self,
         schema: torch.FunctionSchema,
-        args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
         *,
         is_factory: bool,
     ) -> None:
@@ -589,6 +594,10 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+
+        # record_stream is not a kernel dispatch, skip it
+        if func is aten.record_stream.default:
+            return func(*args, **kwargs)
 
         is_factory = bool(FACTORY_FUNCTION_REGEX.match(func._schema.name))
 

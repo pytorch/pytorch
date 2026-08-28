@@ -15,7 +15,7 @@ namespace torch::data {
 /// A dataloader for stateless datasets.
 ///
 /// This dataloader follows the traditional PyTorch dataloader design, whereby a
-/// (posssibly) stateful sampler produces *batch requests* for a stateless
+/// (possibly) stateful sampler produces *batch requests* for a stateless
 /// dataset, which acts as a simple batch request to batch mapping. The batch
 /// request will often be an array of indices, and if the dataset is a simple
 /// image dataset, the dataset would produce the images at those indices.

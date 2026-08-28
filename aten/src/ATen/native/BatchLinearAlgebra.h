@@ -1,7 +1,7 @@
 #pragma once
 
 #include <optional>
-#include <c10/util/string_view.h>
+#include <string_view>
 #include <ATen/Config.h>
 #include <ATen/native/DispatchStub.h>
 
@@ -235,6 +235,17 @@ DECLARE_DISPATCH(cholesky_inverse_fn, cholesky_inverse_stub)
 using linalg_eig_fn = void (*)(Tensor& /*eigenvalues*/, Tensor& /*eigenvectors*/, Tensor& /*infos*/, const Tensor& /*input*/, bool /*compute_eigenvectors*/);
 
 DECLARE_DISPATCH(linalg_eig_fn, linalg_eig_stub)
+
+// Converts LAPACK's real-valued eigenvector encoding to complex eigenvectors
+TORCH_API void linalg_eig_make_complex_eigenvectors(
+    const Tensor& complex_vectors,
+    const Tensor& complex_values,
+    const Tensor& real_vectors);
+
+DECLARE_DISPATCH(
+    void(*)(const Tensor&, const Tensor&, const Tensor&),
+    linalg_eig_make_complex_eigenvectors_stub)
+
 
 using geqrf_fn = void (*)(const Tensor& /*input*/, const Tensor& /*tau*/);
 DECLARE_DISPATCH(geqrf_fn, geqrf_stub)

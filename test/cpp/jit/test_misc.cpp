@@ -92,13 +92,13 @@ inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 template <typename T>
 std::ostream& operator<<(std::ostream& out, const std::vector<T>& list) {
   size_t i = 0;
-  out << "{";
+  out << '{';
   for (auto&& e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;
   }
-  out << "}";
+  out << '}';
   return out;
 }
 
@@ -143,7 +143,7 @@ TEST(FromQualStringTest, Basic) {
     try {
       Symbol::fromQualString(input);
       ASSERT_TRUE(0);
-    } catch (const std::exception& c) {
+    } catch (const std::exception&) {
     }
   }
 }
@@ -863,8 +863,12 @@ void checkScopeCallbacks() {
 
   {
     RECORD_TORCHSCRIPT_FUNCTION("test_method", {});
-    { RECORD_FUNCTION("test_function", {}); }
-    { RECORD_USER_SCOPE("test_user_scope"); }
+    {
+      RECORD_FUNCTION("test_function", {});
+    }
+    {
+      RECORD_USER_SCOPE("test_user_scope");
+    }
   }
 
   TORCH_CHECK(!bad_scope);
@@ -1057,7 +1061,9 @@ TEST(RecordFunctionTest, RecordFunctionGuard) {
           RECORD_USER_SCOPE("C");
         }
       }
-      { RECORD_USER_SCOPE("D"); }
+      {
+        RECORD_USER_SCOPE("D");
+      }
     }
   }
   TORCH_CHECK(fn_names.size() == 1);
@@ -1084,7 +1090,9 @@ TEST(RecordFunctionTest, Callbacks) {
   add_remove_test_add_cb<2>();
   auto h3 = add_remove_test_add_cb<3>();
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 3);
   TORCH_CHECK(std::find(ids.begin(), ids.end(), 1) != ids.end());
@@ -1094,7 +1102,9 @@ TEST(RecordFunctionTest, Callbacks) {
   ids.clear();
   removeCallback(h1);
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 2);
   TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
@@ -1103,7 +1113,9 @@ TEST(RecordFunctionTest, Callbacks) {
   ids.clear();
   removeCallback(h3);
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 1);
   TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
@@ -1115,7 +1127,9 @@ TEST(RecordFunctionTest, Callbacks) {
   ids.clear();
   add_remove_test_add_cb<1>();
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 1);
   TORCH_CHECK(ids[0] == 1);
@@ -1128,7 +1142,9 @@ TEST(RecordFunctionTest, Callbacks) {
           return nullptr;
         }));
 
-    { RECORD_USER_SCOPE("test_thread"); }
+    {
+      RECORD_USER_SCOPE("test_thread");
+    }
   });
   th.join();
   TORCH_CHECK(ids.size() == 2);
@@ -1136,7 +1152,9 @@ TEST(RecordFunctionTest, Callbacks) {
   TORCH_CHECK(std::find(ids.begin(), ids.end(), 2) != ids.end());
   ids.clear();
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   TORCH_CHECK(ids.size() == 1);
   TORCH_CHECK(ids[0] == 1);
@@ -1167,7 +1185,9 @@ TEST(RecordFunctionTest, Callbacks) {
           TORCH_CHECK(ctx->b == "test_str");
         }));
 
-    { RECORD_USER_SCOPE("test"); }
+    {
+      RECORD_USER_SCOPE("test");
+    }
 
     TORCH_CHECK(ids.size() == 1);
     TORCH_CHECK(ids[0] == 1);
@@ -1193,7 +1213,9 @@ TEST(RecordFunctionTest, Callbacks) {
           }));
 
       // Will call both global and thread local callbacks.
-      { RECORD_USER_SCOPE("test_thread"); }
+      {
+        RECORD_USER_SCOPE("test_thread");
+      }
     });
     ctx_th.join();
     TORCH_CHECK(ids.size() == 2);
@@ -1216,21 +1238,27 @@ TEST(RecordFunctionTest, ShouldRun) {
         return nullptr;
       }));
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   EXPECT_TRUE(ran) << "first run didn't happen";
   ran = false;
 
   disableCallback(handle);
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   EXPECT_FALSE(ran) << "second run happened but shouldn't have";
   ran = false;
 
   reenableCallback(handle);
 
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
 
   EXPECT_TRUE(ran) << "run after re-enable didn't happen";
   ran = false;
@@ -1273,7 +1301,9 @@ TEST(RecordFunctionTest, Basic) {
             return nullptr;
           })
           .needsIds(true));
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
   TORCH_CHECK(has_ids);
   clearCallbacks();
   has_ids = false;
@@ -1282,7 +1312,9 @@ TEST(RecordFunctionTest, Basic) {
         has_ids = fn.handle() > 0;
         return nullptr;
       }));
-  { RECORD_USER_SCOPE("test"); }
+  {
+    RECORD_USER_SCOPE("test");
+  }
   TORCH_CHECK(!has_ids);
   clearCallbacks();
 }
@@ -2272,12 +2304,12 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
   ASSERT_NE(add_ss.str().find("line 4"), std::string::npos);
   ASSERT_NE(
       add_ss.str().find("return self.A0.forward(x, y, z)"), std::string::npos);
-  ASSERT_NE(add_ss.str().find("return x + y"), std::string::npos);
+  ASSERT_NE(std::move(add_ss).str().find("return x + y"), std::string::npos);
   ASSERT_NE(mul_ss.str().find("line 3"), std::string::npos);
   ASSERT_NE(mul_ss.str().find("line 6"), std::string::npos);
   ASSERT_NE(
       mul_ss.str().find("return self.A0.forward(x, y, z)"), std::string::npos);
-  ASSERT_NE(mul_ss.str().find("return x * y"), std::string::npos);
+  ASSERT_NE(std::move(mul_ss).str().find("return x * y"), std::string::npos);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -2363,7 +2395,7 @@ def a(x, y:int=1):
   try {
     compile(text_non_hinted);
     ASSERT_TRUE(0);
-  } catch (const std::exception& c) {
+  } catch (const std::exception&) {
   }
 
   auto cu = compile(text_hinted);
@@ -2677,6 +2709,7 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
 }
 
 TEST(RecordDebugHandles, Basic) {
+  GTEST_SKIP() << "Test is flaky and sometimes hangs on CI. ";
   // Enable the profiler in this thread
   const std::set<torch::autograd::profiler::ActivityType> activities(
       {torch::autograd::profiler::ActivityType::CPU});
@@ -3124,6 +3157,11 @@ TEST_F(Composed, ComposedOp) {
 }
 
 TEST(ConstantPropagation, CustomClassesCanBePropagated) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  // See https://github.com/pytorch/pytorch/issues/178522.
+  GTEST_SKIP()
+      << "Skipping ConstantPropagation.CustomClassesCanBePropagated on AArch64.";
+#endif
 #ifdef USE_PYTORCH_QNNPACK
   const auto src = R"IR(
     graph():

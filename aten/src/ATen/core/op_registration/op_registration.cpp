@@ -4,7 +4,6 @@
 #include <ATen/core/op_registration/op_allowlist.h>
 #include <ATen/core/op_registration/op_registration.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #endif
 
 namespace c10 {
@@ -16,10 +15,10 @@ void build_feature_required_feature_not_available(const char* feature) {
 }
 } // namespace impl
 
-static_assert(std::is_nothrow_move_constructible<
-              std::optional<RegistrationHandleRAII>>::value);
-static_assert(std::is_nothrow_move_assignable<
-              std::optional<RegistrationHandleRAII>>::value);
+static_assert(std::is_nothrow_move_constructible_v<
+              std::optional<RegistrationHandleRAII>>);
+static_assert(std::is_nothrow_move_assignable_v<
+              std::optional<RegistrationHandleRAII>>);
 
 void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
   TORCH_CHECK(
@@ -73,7 +72,7 @@ c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(
 
   std::optional<FunctionSchema> inferred_schema = std::nullopt;
   for (const auto& kernel : options.kernels) {
-    if (nullptr != kernel.inferred_function_schema.get()) {
+    if (nullptr != kernel.inferred_function_schema) {
       if (!inferred_schema.has_value()) {
         inferred_schema = *kernel.inferred_function_schema;
         break;
@@ -96,7 +95,7 @@ void RegisterOperators::checkNoDuplicateKernels_(const Options& options) {
   for (const auto& kernel : options.kernels) {
     if (kernel.dispatch_key.has_value()) {
       TORCH_CHECK(
-          0 == dispatch_keys.count(*kernel.dispatch_key),
+          !dispatch_keys.contains(*kernel.dispatch_key),
           "In operator registration: Tried to register multiple kernels with same dispatch key ",
           *kernel.dispatch_key,
           " for operator schema ",

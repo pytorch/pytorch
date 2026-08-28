@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 # Note [Manual Backend kernels]
 # For these ops, we want to manually register to dispatch key Backend and
-# skip codegen-ed registeration to all keys before Backend.
+# skip codegen-ed registration to all keys before Backend.
 # For codegen this means:
 #   - op set below must match ops with manual_kernel_registration=True in native_functions.yaml
 #     where we skip codegen backend kernels
@@ -182,6 +182,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
             ADD_TRACE_INPUT.substitute(
                 name=f.func.arguments.out[i].name, input=f.func.arguments.out[i].name
             )
+            # pyrefly: ignore [unbound-name]
             for i in range(num_out_args)
         ]
 
@@ -381,9 +382,9 @@ def format_postrecord_trace(f: NativeFunction) -> str:
 
 def tie_return_values(f: NativeFunction) -> str:
     if len(f.func.returns) == 1:
-        return f'auto {f.func.returns[0].name or "result"}'
+        return f"auto {f.func.returns[0].name or 'result'}"
     names = cpp.return_names(f)
-    return f'auto [{", ".join(names)}]'
+    return f"auto [{', '.join(names)}]"
 
 
 def get_return_value(f: NativeFunction) -> str:
@@ -391,7 +392,7 @@ def get_return_value(f: NativeFunction) -> str:
     if len(f.func.returns) == 1:
         return names[0]
     if f.func.kind() == SchemaKind.out:
-        return f'std::forward_as_tuple({", ".join(names)})'
+        return f"std::forward_as_tuple({', '.join(names)})"
     else:
         moved = ", ".join(f"std::move({name})" for name in names)
         return f"std::make_tuple({moved})"
@@ -467,14 +468,15 @@ def type_wrapper_name(f: NativeFunction, key: str = "Default") -> str:
 
 @with_native_function
 def method_definition(f: NativeFunction) -> str:
-    assert cpp.name(f.func) not in MANUAL_TRACER
+    if cpp.name(f.func) in MANUAL_TRACER:
+        raise AssertionError(f"Function {cpp.name(f.func)} is in MANUAL_TRACER")
 
     formals = ", ".join(
         # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ["c10::DispatchKeySet ks"]
         + [
-            f'{cpp.argument_type(a, binds="__placeholder__", symint=True).cpp_type()} {a.name}'
+            f"{cpp.argument_type(a, binds='__placeholder__', symint=True).cpp_type()} {a.name}"
             for a in f.func.schema_order_arguments()
         ]
     )
@@ -498,7 +500,8 @@ m.impl("${name}",
 
 @with_native_function
 def method_registration(f: NativeFunction) -> str:
-    assert cpp.name(f.func) not in MANUAL_TRACER
+    if cpp.name(f.func) in MANUAL_TRACER:
+        raise AssertionError(f"Function {cpp.name(f.func)} is in MANUAL_TRACER")
 
     return WRAPPER_REGISTRATION.substitute(
         name=f.func.name,
@@ -530,7 +533,7 @@ def gen_trace_type(
             + f"generated from {fm.template_dir_for_comments()}/TraceType.cpp",
         },
         env_callable=gen_trace_type_func,
-        num_shards=5,
+        num_shards=10,
         sharded_keys={
             "ops_headers",
             "trace_method_definitions",

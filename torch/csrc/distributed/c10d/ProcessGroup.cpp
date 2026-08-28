@@ -1,19 +1,45 @@
-#include <ATen/ThreadLocalState.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
 
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
-#include <string_view>
+#include <fmt/ranges.h>
+
+#include <algorithm>
+#include <typeinfo>
+#include <unordered_set>
 
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupMPI.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
 
 namespace c10d {
+
+namespace {
+
+// Options handed to a child backend must never alias the parent's (or the
+// caller's) object: Backend::getBackendOptions() returns the backend's live
+// options_, and split()/merge() implementations write into what they are given
+// (ProcessGroupGloo::split overwrites global_ranks_in_group,
+// ProcessGroupNCCL::split also sets split_from/split_color). Sharing one object
+// leaves the parent describing its child's ranks, which the parent's next split
+// then indexes out of bounds.
+c10::intrusive_ptr<Backend::Options> cloneOptions(
+    const c10::intrusive_ptr<Backend::Options>& opts) {
+  auto copy = opts->clone();
+  // An out-of-tree Options subclass that does not override clone() would be
+  // sliced. Keep the legacy aliasing behavior for it rather than handing its
+  // backend an object of the wrong type.
+  if (copy == nullptr) {
+    return opts;
+  }
+  const Backend::Options& copyRef = *copy;
+  const Backend::Options& optsRef = *opts;
+  if (typeid(copyRef) != typeid(optsRef)) {
+    return opts;
+  }
+  return copy;
+}
+
+} // namespace
 
 std::string opTypeToString(OpType opType) {
   switch (opType) {
@@ -57,10 +83,13 @@ std::string opTypeToString(OpType opType) {
       return "COALESCED";
     case OpType::_ALLREDUCE_SPARSE:
       return "_ALLREDUCE_SPARSE";
+    case OpType::REDUCE_SCATTER_TENSOR_COALESCED:
+      return "REDUCE_SCATTER_TENSOR_COALESCED";
+    case OpType::ALLGATHER_INTO_TENSOR_COALESCED:
+      return "ALLGATHER_INTO_TENSOR_COALESCED";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }
-  return "UNKNOWN";
 }
 
 bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
@@ -73,7 +102,7 @@ bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
 c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     c10::DeviceType deviceType) {
   // If there is a backend associated with this device type then return it
-  if (deviceTypeToBackend_.find(deviceType) != deviceTypeToBackend_.end()) {
+  if (deviceTypeToBackend_.contains(deviceType)) {
     return deviceTypeToBackend_.at(deviceType);
   }
 
@@ -81,13 +110,13 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
   ProcessGroup::BackendType backendType{ProcessGroup::BackendType::UNDEFINED};
   try {
     backendType = deviceTypeToBackendType_.at(deviceType);
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     TORCH_CHECK(
         false, "No backend type associated with device type ", deviceType);
   }
 
   // Check if the backend has already been initialized
-  if (backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end()) {
+  if (backendTypeToBackend_.contains(backendType)) {
     auto backend = backendTypeToBackend_.at(backendType);
     deviceTypeToBackend_[deviceType] = backend;
     return backend;
@@ -158,10 +187,163 @@ void ProcessGroup::release_resources() {
   backendTypeToBackend_.clear();
 }
 
+c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
+    const std::vector<int>& ranks,
+    const std::optional<std::chrono::milliseconds>& timeout,
+    const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
+    const std::optional<std::string>& name,
+    const std::optional<std::string>& desc,
+    const std::optional<std::vector<c10::Device>>& devices) {
+  TORCH_CHECK(
+      !ranks.empty(),
+      "Split ranks cannot be empty. Please provide a non-empty list of ranks to split the group.");
+  TORCH_CHECK(
+      ranks.size() <= static_cast<size_t>(getSize()),
+      "the split group's size should be no larger than the world_size set by init_process_group");
+  std::unordered_set<int> ranks_set(ranks.begin(), ranks.end());
+  TORCH_CHECK(
+      ranks_set.size() == ranks.size(),
+      "Split ranks should not have duplicates. Please provide a list of unique ranks to split the group.");
+  std::set<c10::DeviceType> deviceTypeFilter;
+  for (const auto& d : devices.value_or(std::vector<c10::Device>{})) {
+    deviceTypeFilter.insert(d.type());
+  }
+  if (!deviceTypeFilter.empty()) {
+    for (const auto& deviceType : deviceTypeFilter) {
+      TORCH_CHECK(
+          deviceTypeToBackendType_.contains(deviceType),
+          "Requested device type for splitGroup is not present in the parent process group: ",
+          deviceType);
+    }
+    auto defaultBackendIt = std::ranges::find_if(
+        deviceTypeToBackendType_,
+        [&](const auto& p) { return p.second == backendType_; });
+    TORCH_CHECK(
+        defaultBackendIt != deviceTypeToBackendType_.end() &&
+            deviceTypeFilter.contains(defaultBackendIt->first),
+        "splitGroup deviceTypes filter must include the parent process group's default backend device type.");
+  }
+  c10::intrusive_ptr<ProcessGroup> newGroup;
+  std::string groupName = name.has_value()
+      ? name.value()
+      : c10::str(getGroupName(), ":split:", fmt::format("{}", ranks));
+  c10::intrusive_ptr<Store> store = c10::static_intrusive_pointer_cast<Store>(
+      c10::make_intrusive<PrefixStore>(
+          fmt::format("{}/", groupName), store_->clone()));
+  std::string groupDesc = desc.has_value()
+      ? desc.value()
+      : c10::str(getGroupDesc(), ":split:", incrementSplitCount());
+  std::unordered_map<BackendType, c10::intrusive_ptr<Backend>> splitBackends;
+  for (const auto& pair : deviceTypeToBackendType_) {
+    c10::DeviceType deviceType = pair.first;
+    BackendType backendType = pair.second;
+
+    if (!deviceTypeFilter.empty() && !deviceTypeFilter.contains(deviceType)) {
+      continue;
+    }
+
+    // One backend instance can serve several device types -- a gloo world maps
+    // both cpu and cuda to the same ProcessGroupGloo, and setBackend() reuses
+    // whatever is already registered for a backend type. Split it once: the
+    // second child would be thrown away by setBackend() below, but only after
+    // rendezvousing on the same store prefix as the real child, which races
+    // with it and hangs.
+    auto splitIt = splitBackends.find(backendType);
+    if (splitIt != splitBackends.end()) {
+      newGroup->setBackend(deviceType, backendType, splitIt->second);
+      continue;
+    }
+
+    auto parentBackend = getBackend(deviceType);
+    // `opts` describes the group's default backend, mirroring what
+    // `pg_options` means for init_process_group; a backend of another type
+    // would reject it (or worse, silently fall back to defaults and drop the
+    // caller's timeout), so those inherit the parent's own options instead.
+    auto backendOpts = cloneOptions(
+        opts.has_value() && backendType == backendType_
+            ? opts.value()
+            : parentBackend->getBackendOptions());
+    backendOpts->group_name = groupName;
+    backendOpts->timeout =
+        timeout.has_value() ? timeout.value() : backendOpts->timeout;
+    backendOpts->group_desc = groupDesc;
+    auto splitBackend = parentBackend->split(store, ranks, backendOpts);
+    if (splitBackend == nullptr) {
+      continue;
+    }
+    splitBackend->setGroupDesc(groupDesc);
+    if (!newGroup) {
+      newGroup = c10::make_intrusive<ProcessGroup>(
+          store, splitBackend->getRank(), splitBackend->getSize());
+      newGroup->setDefaultBackend(backendType_);
+    }
+    newGroup->setBackend(deviceType, backendType, splitBackend);
+    splitBackends.emplace(backendType, splitBackend);
+  }
+
+  if (!newGroup) {
+    return nullptr;
+  }
+  newGroup->setGroupName(groupName);
+  newGroup->setGroupDesc(groupDesc);
+  return newGroup;
+}
+
+c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
+    const c10::intrusive_ptr<Store>& store,
+    const MergeOptions& opts,
+    const int& size) {
+  c10::intrusive_ptr<ProcessGroup> newGroup;
+  // We assume rank number is within the range of int32_t, so it won't overflow.
+  int rank = static_cast<int>(store->add("mergeGroupRank", 1) - 1);
+  // TODO: Do we need to check all groups have same deviceTypeToBackendType_?
+  std::string groupName = opts.group_name.has_value()
+      ? opts.group_name.value()
+      : c10::str(getGroupName(), ":merge");
+  std::string groupDesc = opts.group_desc.has_value()
+      ? opts.group_desc.value()
+      : c10::str(getGroupDesc(), ":merge");
+  std::unordered_map<BackendType, c10::intrusive_ptr<Backend>> mergedBackends;
+  for (const auto& pair : deviceTypeToBackendType_) {
+    c10::DeviceType deviceType = pair.first;
+    BackendType backendType = pair.second;
+    // Merge each backend instance once; see the same guard in splitGroup().
+    auto mergedIt = mergedBackends.find(backendType);
+    if (mergedIt != mergedBackends.end()) {
+      newGroup->setBackend(deviceType, backendType, mergedIt->second);
+      continue;
+    }
+    auto parentBackend = getBackend(deviceType);
+    auto backendOpts = cloneOptions(parentBackend->getBackendOptions());
+    backendOpts->group_name = groupName;
+    backendOpts->timeout = opts.timeout;
+    auto mergedBackend = parentBackend->merge(store, backendOpts, rank, size);
+    mergedBackend->setGroupDesc(groupDesc);
+
+    // Historically, we have been using one process_group to map to all
+    // backends. but in our new design, we will have one process_group per
+    // backend. This logic is mostly for backward compatibility.
+    if (!newGroup) {
+      newGroup = c10::make_intrusive<ProcessGroup>(store, rank, size);
+      newGroup->setDefaultBackend(backendType_);
+    }
+    newGroup->setBackend(deviceType, backendType, mergedBackend);
+    mergedBackends.emplace(backendType, mergedBackend);
+  }
+
+  if (!newGroup) {
+    return nullptr;
+  }
+  newGroup->setGroupName(groupName);
+  newGroup->setGroupDesc(groupDesc);
+  return newGroup;
+}
+
 } // namespace c10d
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class WorkRegistry {
  public:
   void register_work(
@@ -301,12 +483,59 @@ void register_work(
   RankLocal<WorkRegistry>::get().register_work(tensor, work);
 }
 
-at::Tensor wait_tensor(const at::Tensor& tensor) {
+namespace {
+
+std::vector<c10::intrusive_ptr<c10d::Work>> pop_works(
+    const at::Tensor& tensor) {
+  // First try to find work in the current thread's registry (fast path)
   auto works = RankLocal<WorkRegistry>::get().pop_works(tensor);
+
+  // If no work found in current thread's registry, search all registries.
+  // This handles the case where wait() is called from a different thread
+  // than where the collective was initiated (e.g., user-created threads).
+  if (works.empty()) {
+    auto result = RankLocal<WorkRegistry>::find_across_all(
+        [&tensor](WorkRegistry& registry)
+            -> std::optional<std::vector<c10::intrusive_ptr<c10d::Work>>> {
+          auto w = registry.pop_works(tensor);
+          if (!w.empty()) {
+            return w;
+          }
+          return std::nullopt;
+        });
+    if (result.has_value()) {
+      works = std::move(result.value());
+    }
+  }
+  return works;
+}
+
+} // namespace
+
+at::Tensor wait_tensor(const at::Tensor& tensor) {
+  auto works = pop_works(tensor);
+
   for (const auto& work : works) {
     work->wait();
   }
   return tensor;
+}
+
+std::vector<at::Tensor> wait_tensors(at::TensorList tensors) {
+  TORCH_CHECK(!tensors.empty(), "wait_tensors requires at least one tensor");
+  std::vector<c10::intrusive_ptr<c10d::Work>> works;
+  std::unordered_set<c10d::Work*> seen;
+  for (const auto& tensor : tensors) {
+    for (auto& work : pop_works(tensor)) {
+      if (seen.insert(work.get()).second) {
+        works.push_back(std::move(work));
+      }
+    }
+  }
+  for (const auto& work : works) {
+    work->wait();
+  }
+  return tensors.vec();
 }
 
 void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {
@@ -325,6 +554,15 @@ void set_allow_inflight_collective_as_graph_input(bool value) {
 bool allow_inflight_collective_as_graph_input() {
   return RankLocal<WorkRegistry>::get()
       .allow_inflight_collective_as_graph_input();
+}
+
+c10::intrusive_ptr<ProcessGroup>& currentProcessGroup() {
+  thread_local static c10::intrusive_ptr<ProcessGroup> pg = nullptr;
+  return pg;
+}
+
+void setProcessGroup(c10::intrusive_ptr<ProcessGroup> pg) {
+  currentProcessGroup() = std::move(pg);
 }
 
 } // namespace c10d

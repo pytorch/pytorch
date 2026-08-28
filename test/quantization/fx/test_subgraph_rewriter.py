@@ -287,10 +287,10 @@ class TestSubgraphRewriter(JitTestCase):
     def test_subgraph_rewriter_internal_pattern_nodes_cannot_have_users_that_are_not_matched(self):
         class M(torch.nn.Module):
             def forward(self, x, w1, w2, b1, b2):
-                m0 = torch.cat([w1, w2])
+                m0 = torch.cat([w1, w2])  # noqa: F841
                 m1 = torch.cat([w1, w2])
                 m2 = torch.cat([x, b2])
-                t0 = torch.addmm(b1, m1, m2.t())
+                t0 = torch.addmm(b1, m1, m2.t())  # noqa: F841
                 t1 = torch.sum(w1, 1)
                 t2 = torch.addmm(b1, m1, m2.t())
                 return torch.sum(t1), torch.sum(t2)
@@ -454,8 +454,10 @@ class TestSubgraphRewriter(JitTestCase):
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
         for n, m in zip(symbolic_traced.graph.nodes, graph.nodes):
             if n.op == 'placeholder':
-                assert n.type == int
-                assert m.type == int
+                if n.type is not int:
+                    raise AssertionError(f"Expected n.type to be int, got {n.type}")
+                if m.type is not int:
+                    raise AssertionError(f"Expected m.type to be int, got {m.type}")
 
     def test_subgraph_writer_replace_consecutive_submodules(self):
 

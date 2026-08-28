@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: jit"]
 
-import os
 import unittest
 
 import torch
@@ -9,21 +8,24 @@ import torch._lazy.config
 import torch._lazy.ir_cache
 import torch._lazy.metrics as metrics
 import torch._lazy.ts_backend
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 
 
 torch._lazy.ts_backend.init()
 torch._lazy.config.set_reuse_ir(True)
 
 
-def get_test_device():
-    return "cuda" if "LTC_TS_CUDA" in os.environ else "cpu"
-
-
 @unittest.skipIf(IS_WINDOWS, "To be fixed")
-class TestLazyReuseIr(TestCase):
-    def testAdd(self):
-        device = get_test_device()
+class TestLazyReuseIrDevice(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def testAdd(self, device):
         x = torch.randn(2, 3, 4, device=device)
         y = torch.randn(2, 3, 4, device=device)
         z = torch.zeros(2, 3, 4, device=device)
@@ -33,20 +35,23 @@ class TestLazyReuseIr(TestCase):
         y_lazy = y.detach().clone().to(device=device)
         z_lazy = z.detach().clone().to(device=device)
 
-        for i in range(10):
+        for _ in range(10):
             z += x + y
 
-        for i in range(10):
+        for _ in range(10):
             z_lazy += x_lazy + y_lazy
             torch._lazy.mark_step()
 
         torch.testing.assert_close(z.cpu(), z_lazy.cpu())
-        assert metrics.counter_value("IrNodeReused_torch::lazy::AddTensor") >= 14
+        reused = metrics.counter_value("IrNodeReused_torch::lazy::AddTensor")
+        if reused < 14:
+            raise AssertionError(
+                f"Expected at least 14 reused AddTensor nodes, got {reused}"
+            )
         metrics.reset()
         torch._lazy.ir_cache.reset()
 
-    def testAddSub(self):
-        device = get_test_device()
+    def testAddSub(self, device):
         x = torch.randn(2, 3, 4, device=device)
         y = torch.randn(2, 3, 4, device=device)
         z = torch.zeros(2, 3, 4, device=device)
@@ -70,13 +75,16 @@ class TestLazyReuseIr(TestCase):
             torch._lazy.mark_step()
 
         torch.testing.assert_close(z.cpu(), z_lazy.cpu())
-        assert metrics.counter_value("IrNodeReused_torch::lazy::AddTensor") >= 8
+        reused = metrics.counter_value("IrNodeReused_torch::lazy::AddTensor")
+        if reused < 8:
+            raise AssertionError(
+                f"Expected at least 8 reused AddTensor nodes, got {reused}"
+            )
         metrics.reset()
         torch._lazy.ir_cache.reset()
 
-    def testAddSubFallback(self):
+    def testAddSubFallback(self, device):
         torch._lazy.config.set_force_fallback("aten::sub")
-        device = get_test_device()
         x = torch.randn(2, 3, 4, device=device)
         y = torch.randn(2, 3, 4, device=device)
         z = torch.zeros(2, 3, 4, device=device)
@@ -100,18 +108,21 @@ class TestLazyReuseIr(TestCase):
             torch._lazy.mark_step()
 
         torch.testing.assert_close(z.cpu(), z_lazy.cpu())
-        assert metrics.counter_value("IrNodeReused_torch::lazy::AddTensor") >= 8
+        reused = metrics.counter_value("IrNodeReused_torch::lazy::AddTensor")
+        if reused < 8:
+            raise AssertionError(
+                f"Expected at least 8 reused AddTensor nodes, got {reused}"
+            )
         metrics.reset()
         torch._lazy.ir_cache.reset()
         torch._lazy.config.set_force_fallback("")
 
-    def testBatchNorm(self):
-        device = get_test_device()
+    def testBatchNorm(self, device):
         x = torch.randn(16, 3, 224, 224, device=device)
         weight = torch.randn(3, device=device)
         bias = torch.randn(3, device=device)
 
-        for i in range(10):
+        for _ in range(10):
             # BatchNorm2d does extra checks on dimensions which SymInts don't support yet
             # so we call `torch.ops.aten.native_batch_norm` to bypass the checks.
             z, _, _ = torch.ops.aten.native_batch_norm(
@@ -125,7 +136,7 @@ class TestLazyReuseIr(TestCase):
         x_lazy = x.detach().clone().to(device=device)
         weight_lazy = weight.detach().clone().to(device=device)
         bias_lazy = bias.detach().clone().to(device=device)
-        for i in range(10):
+        for _ in range(10):
             z_lazy, _, _ = torch.ops.aten.native_batch_norm(
                 x_lazy, weight_lazy, bias_lazy, None, None, True, 0.1, 1e-5
             )
@@ -136,9 +147,21 @@ class TestLazyReuseIr(TestCase):
 
         torch.testing.assert_close(z.cpu(), z_lazy.cpu())
         torch.testing.assert_close(z_legit.cpu(), z_legit_lazy.cpu())
-        assert metrics.counter_value("IrNodeReused_torch::lazy::NativeBatchNorm") >= 7
+        reused = metrics.counter_value("IrNodeReused_torch::lazy::NativeBatchNorm")
+        if reused < 7:
+            raise AssertionError(
+                f"Expected at least 7 reused NativeBatchNorm nodes, got {reused}"
+            )
         metrics.reset()
         torch._lazy.ir_cache.reset()
+
+
+instantiate_device_type_tests(
+    TestLazyReuseIrDevice,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

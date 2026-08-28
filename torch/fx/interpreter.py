@@ -1,10 +1,12 @@
-# mypy: allow-untyped-defs
 import inspect
+import logging
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any
 
 import torch
 import torch.fx.traceback as fx_traceback
+from torch._logging import LazyString, trace_structured
 from torch.hub import tqdm
 
 from . import config
@@ -17,7 +19,33 @@ from .node import Argument, map_aggregate, map_arg, Node, Target
 from .proxy import Proxy
 
 
+log = logging.getLogger(__name__)
+
 __all__ = ["Interpreter", "Transformer"]
+
+
+def _format_fx_node(n: Node) -> str:
+    """
+    Format a torch.fx.Node into a human-readable string for debug logging.
+
+    Args:
+        n (torch.fx.Node): The FX node being executed.
+
+    Returns:
+        str: A formatted string describing the node operation, including its
+        name, target, positional arguments, and keyword arguments.
+    """
+    module_prefix = getattr(n.target, "__module__", "")
+    module_prefix = f"{module_prefix}." if module_prefix else ""
+
+    # Handle positional and keyword arguments
+    args = ", ".join(map(str, n.args))
+    kwargs = ", ".join(f"{k}={v}" for k, v in n.kwargs.items())
+    joined = ", ".join(filter(None, [args, kwargs]))
+
+    return (
+        f"{n.name} = {module_prefix}{getattr(n.target, '__name__', n.target)}({joined})"
+    )
 
 
 @compatibility(is_backward_compatible=True)
@@ -28,7 +56,7 @@ class Interpreter:
     transformations as well as analysis passes.
 
     Methods in the Interpreter class can be overridden to customize
-    the behavior of execution. The map of overrideable methods
+    the behavior of execution. The map of overridable methods
     in terms of call hierarchy::
 
         run()
@@ -47,8 +75,10 @@ class Interpreter:
         method equivalents). We could subclass Interpreter like so::
 
             class NegSigmSwapInterpreter(Interpreter):
-                def call_function(self, target: Target, args: Tuple, kwargs: Dict) -> Any:
-                    if target == torch.sigmoid:
+                def call_function(
+                    self, target: Target, args: Tuple, kwargs: Dict
+                ) -> Any:
+                    if target is torch.sigmoid:
                         return torch.neg(*args, **kwargs)
                     return super().call_function(target, args, kwargs)
 
@@ -84,15 +114,15 @@ class Interpreter:
         self,
         module: torch.nn.Module,
         garbage_collect_values: bool = True,
-        graph: Optional[Graph] = None,
-    ):
+        graph: Graph | None = None,
+    ) -> None:
         self.module = module
         self.submodules = dict(self.module.named_modules())
         if graph is not None:
             self.graph = graph
         else:
             self.graph = self.module.graph  # type: ignore[assignment]
-        self.env: Dict[Node, Any] = {}
+        self.env: dict[Node, Any] = {}
         self.name = "Interpreter"
         self.garbage_collect_values = garbage_collect_values
         self.extra_traceback = True
@@ -102,23 +132,23 @@ class Interpreter:
             # of a given node. This represents the *last* use of the node in the
             # execution order of the program, which we will use to free unused
             # values
-            node_to_last_use: Dict[Node, Node] = {}
-            self.user_to_last_uses: Dict[Node, List[Node]] = {}
+            node_to_last_use: dict[Node, Node] = {}
+            self.user_to_last_uses: dict[Node, list[Node]] = {}
 
-            def register_last_uses(n: Node, user: Node):
+            def register_last_uses(n: Node, user: Node) -> None:
                 if n not in node_to_last_use:
                     node_to_last_use[n] = user
                     self.user_to_last_uses.setdefault(user, []).append(n)
 
             for node in reversed(self.graph.nodes):
-                map_arg(node.args, lambda n: register_last_uses(n, node))
-                map_arg(node.kwargs, lambda n: register_last_uses(n, node))
+                for n in node._input_nodes:
+                    register_last_uses(n, node)
 
     @compatibility(is_backward_compatible=True)
     def run(
         self,
-        *args,
-        initial_env: Optional[Dict[Node, Any]] = None,
+        *args: Any,
+        initial_env: dict[Node, Any] | None = None,
         enable_io_processing: bool = True,
     ) -> Any:
         """
@@ -170,6 +200,25 @@ class Interpreter:
                     msg = f"While executing {node.format_node()}"
                     msg = f"{e.args[0]}\n\n{msg}" if e.args else str(msg)
                     msg += f"\nOriginal traceback:\n{node.stack_trace}"
+                    if (
+                        isinstance(self.module, GraphModule)
+                        and self.module.graph is not None
+                        and isinstance(self.module.graph, torch.fx.Graph)
+                    ):
+                        trace_structured(
+                            "artifact",
+                            metadata_fn=lambda: {
+                                "name": "fx_interpreter_error",
+                                "encoding": "string",
+                            },
+                            payload_fn=lambda: (
+                                f"{msg}\nGraphModule: "
+                                f"{self.module.print_readable(print_output=False, include_stride=True)}"  # type: ignore[operator]
+                            ),
+                        )
+
+                    msg += "\nUse tlparse to see full graph. "
+                    msg += "(https://github.com/pytorch/tlparse?tab=readme-ov-file#tlparse-parse-structured-pt2-logs)"
                     e.args = (msg,) + e.args[1:]
                     if isinstance(e, KeyError):
                         raise RuntimeError(*e.args) from e
@@ -188,22 +237,34 @@ class Interpreter:
                 )
 
     @compatibility(is_backward_compatible=True)
-    def boxed_run(self, args_list):
+    def boxed_run(self, args_list: list[Any]) -> Any:
         """
         Run `module` via interpretation and return the result.  This uses the "boxed"
         calling convention, where you pass a list of arguments, which will be cleared
         by the interpreter.  This ensures that input tensors are promptly deallocated.
         """
-        args_iter = iter(args_list)
-        env = {}
-        for n in self.graph.nodes:
-            if n.op == "placeholder":
-                env[n] = next(args_iter)
+        # Collect placeholder nodes first
+        placeholder_nodes = [n for n in self.graph.nodes if n.op == "placeholder"]
+
+        # Check argument count
+        if len(args_list) != len(placeholder_nodes):
+            detail = (
+                "extra arguments"
+                if len(args_list) > len(placeholder_nodes)
+                else "missing arguments"
+            )
+            raise RuntimeError(
+                f"Interpreter.boxed_run expected {len(placeholder_nodes)} arguments for placeholders "
+                f"but received {len(args_list)} ({detail})"
+            )
+
+        # Assign arguments to placeholders
+        env = dict(zip(placeholder_nodes, args_list))
         args_list.clear()
         return self.run(initial_env=env)
 
     @contextmanager
-    def _set_current_node(self, node):
+    def _set_current_node(self, node: Node) -> Iterator[None]:
         with fx_traceback.set_current_meta(
             node, f"Interpreter_{self.__class__.__name__}"
         ):
@@ -223,16 +284,19 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
+        log.debug("run_node %s", LazyString(lambda: _format_fx_node(n)))
         with self._set_current_node(n):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
-            assert isinstance(args, tuple)
-            assert isinstance(kwargs, dict)
+            if not isinstance(args, tuple):
+                raise AssertionError(f"Expected args to be tuple, got {type(args)}")
+            if not isinstance(kwargs, dict):
+                raise AssertionError(f"Expected kwargs to be dict, got {type(kwargs)}")
             return getattr(self, n.op)(n.target, args, kwargs)
 
     # Main Node running APIs
     @compatibility(is_backward_compatible=True)
     def placeholder(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: dict[str, Any]
     ) -> Any:
         """
         Execute a ``placeholder`` node. Note that this is stateful:
@@ -250,7 +314,8 @@ class Interpreter:
         Returns:
             Any: The argument value that was retrieved.
         """
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected target to be str, got {type(target)}")
         if target.startswith("*"):
             # For a starred parameter e.g. `*args`, retrieve all
             # remaining values from the args list.
@@ -268,7 +333,7 @@ class Interpreter:
 
     @compatibility(is_backward_compatible=True)
     def get_attr(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: dict[str, Any]
     ) -> Any:
         """
         Execute a ``get_attr`` node. Will retrieve an attribute
@@ -284,12 +349,13 @@ class Interpreter:
         Return:
             Any: The value of the attribute that was retrieved
         """
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected target to be str, got {type(target)}")
         return self.fetch_attr(target)
 
     @compatibility(is_backward_compatible=True)
     def call_function(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: dict[str, Any]
     ) -> Any:
         """
         Execute a ``call_function`` node and return the result.
@@ -304,14 +370,15 @@ class Interpreter:
         Return
             Any: The value returned by the function invocation
         """
-        assert not isinstance(target, str)
+        if isinstance(target, str):
+            raise AssertionError("target should not be a string for call_function")
 
         # Execute the function and return the result
         return target(*args, **kwargs)
 
     @compatibility(is_backward_compatible=True)
     def call_method(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: dict[str, Any]
     ) -> Any:
         """
         Execute a ``call_method`` node and return the result.
@@ -330,12 +397,13 @@ class Interpreter:
         self_obj, *args_tail = args
 
         # Execute the method and return the result
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected target to be str, got {type(target)}")
         return getattr(self_obj, target)(*args_tail, **kwargs)
 
     @compatibility(is_backward_compatible=True)
     def call_module(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: dict[str, Any]
     ) -> Any:
         """
         Execute a ``call_module`` node and return the result.
@@ -353,14 +421,15 @@ class Interpreter:
         # Retrieve executed args and kwargs values from the environment
 
         # Execute the method and return the result
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected target to be str, got {type(target)}")
         submod = self.fetch_attr(target)
 
         return submod(*args, **kwargs)
 
     @compatibility(is_backward_compatible=True)
     def output(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: dict[str, Any]
     ) -> Any:
         """
         Execute an ``output`` node. This really just retrieves
@@ -380,7 +449,7 @@ class Interpreter:
 
     # Helper methods
     @compatibility(is_backward_compatible=True)
-    def fetch_attr(self, target: str):
+    def fetch_attr(self, target: str) -> Any:
         """
         Fetch an attribute from the ``Module`` hierarchy of ``self.module``.
 
@@ -395,13 +464,15 @@ class Interpreter:
         for i, atom in enumerate(target_atoms):
             if not hasattr(attr_itr, atom):
                 raise RuntimeError(
-                    f"Node referenced nonexistent target {'.'.join(target_atoms[:i + 1])}"
+                    f"Node referenced nonexistent target {'.'.join(target_atoms[: i + 1])}"
                 )
             attr_itr = getattr(attr_itr, atom)
         return attr_itr
 
     @compatibility(is_backward_compatible=True)
-    def fetch_args_kwargs_from_env(self, n: Node) -> Tuple[Tuple, Dict]:
+    def fetch_args_kwargs_from_env(
+        self, n: Node
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         """
         Fetch the concrete values of ``args`` and ``kwargs`` of node ``n``
         from the current execution environment.
@@ -413,9 +484,11 @@ class Interpreter:
             Tuple[Tuple, Dict]: ``args`` and ``kwargs`` with concrete values for ``n``.
         """
         args = self.map_nodes_to_values(n.args, n)
-        assert isinstance(args, tuple)
+        if not isinstance(args, tuple):
+            raise AssertionError(f"Expected args to be tuple, got {type(args)}")
         kwargs = self.map_nodes_to_values(n.kwargs, n)
-        assert isinstance(kwargs, dict)
+        if not isinstance(kwargs, dict):
+            raise AssertionError(f"Expected kwargs to be dict, got {type(kwargs)}")
         return args, kwargs
 
     @compatibility(is_backward_compatible=True)
@@ -458,14 +531,20 @@ class Transformer(Interpreter):
 
             class NegSigmSwapXformer(Transformer):
                 def call_function(
-                    self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+                    self,
+                    target: "Target",
+                    args: Tuple[Argument, ...],
+                    kwargs: Dict[str, Any],
                 ) -> Any:
-                    if target == torch.sigmoid:
+                    if target is torch.sigmoid:
                         return torch.neg(*args, **kwargs)
                     return super().call_function(target, args, kwargs)
 
                 def call_method(
-                    self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+                    self,
+                    target: "Target",
+                    args: Tuple[Argument, ...],
+                    kwargs: Dict[str, Any],
                 ) -> Any:
                     if target == "neg":
                         call_self, *args_tail = args
@@ -488,18 +567,18 @@ class Transformer(Interpreter):
     """
 
     @compatibility(is_backward_compatible=True)
-    def __init__(self, module):
+    def __init__(self, module: GraphModule) -> None:
         super().__init__(module)
         self.new_graph = Graph()
         self.new_graph.set_codegen(module.graph._codegen)
 
         class TransformerTracer(Tracer):
-            def __init__(self, graph: Graph):
+            def __init__(self, graph: Graph) -> None:
                 super().__init__()
                 self.graph = graph
-                self.tensor_attrs: Dict[torch.Tensor, str] = {}  # type: ignore[assignment]
+                self.tensor_attrs: dict[torch.Tensor, str] = {}  # type: ignore[assignment]
 
-            def is_leaf_module(self, _, __) -> bool:
+            def is_leaf_module(self, _: torch.nn.Module, __: str) -> bool:
                 return True
 
         self.tracer = TransformerTracer(self.new_graph)
@@ -507,7 +586,7 @@ class Transformer(Interpreter):
 
     @compatibility(is_backward_compatible=True)
     def placeholder(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: dict[str, Any]
     ) -> Proxy:
         """
         Execute a ``placeholder`` node. In ``Transformer``, this is
@@ -521,7 +600,8 @@ class Transformer(Interpreter):
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
         """
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected target to be str, got {type(target)}")
         default_value = next(iter(args)) if args else inspect.Signature.empty
         return Proxy(
             self.new_graph.placeholder(target, default_value=default_value), self.tracer
@@ -529,7 +609,7 @@ class Transformer(Interpreter):
 
     @compatibility(is_backward_compatible=True)
     def get_attr(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: dict[str, Any]
     ) -> Proxy:
         """
         Execute a ``get_attr`` node. In ``Transformer``, this is
@@ -543,21 +623,23 @@ class Transformer(Interpreter):
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
         """
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected target to be str, got {type(target)}")
         return self.tracer.create_proxy("get_attr", target, args, kwargs)
 
     @compatibility(is_backward_compatible=True)
     def call_module(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: dict[str, Any]
     ) -> Any:
         # Override so that the leaf module policy from `self.tracer` is respected.
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected target to be str, got {type(target)}")
         submod = self.fetch_attr(target)
         return self.tracer.call_module(submod, submod.forward, args, kwargs)
 
     @compatibility(is_backward_compatible=True)
     def call_function(
-        self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: "Target", args: tuple[Argument, ...], kwargs: dict[str, Any]
     ) -> Any:
         # Override so that functions that were wrapped are still wrapped.
         return self.tracer.create_proxy("call_function", target, args, kwargs)
@@ -572,13 +654,16 @@ class Transformer(Interpreter):
             result = super().run(enable_io_processing=False)
         if result is not None:
 
-            def strip_proxy(a: Union[Argument, Proxy]) -> Any:
+            def strip_proxy(a: Argument | Proxy) -> Any:
                 return a.node if isinstance(a, Proxy) else a
 
             new_output_node = self.new_graph.output(map_aggregate(result, strip_proxy))
             # also preserve the metadata from the old output node, if it exists
             old_output_node = list(self.graph.nodes)[-1]
-            assert old_output_node.op == "output"
+            if old_output_node.op != "output":
+                raise AssertionError(
+                    f"Expected output node, got op={old_output_node.op}"
+                )
             for k, v in old_output_node.meta.items():
                 new_output_node.meta[k] = v
 

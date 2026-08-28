@@ -25,15 +25,14 @@ template <typename T, template <class> class Op>
 std::vector<Tensor> foreach_binary_op(
     TensorList tensors,
     const Scalar& scalar) {
-  std::vector<std::vector<at::Tensor>> tensor_lists;
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(tensors.size());
   for (const auto& t : tensors) {
     vec_res.emplace_back(at::native::empty_like(t));
   }
 
-  tensor_lists.emplace_back(tensors.vec());
-  tensor_lists.emplace_back(std::move(vec_res));
+  auto tensor_lists =
+      c10::make_nested<Tensor>(tensors.vec(), std::move(vec_res));
 
   using opmath_t = at::opmath_type<T>;
   multi_tensor_apply<2>(
@@ -45,13 +44,12 @@ std::vector<Tensor> foreach_binary_op(
           /* res_arg_index */ 1>(),
       Op<opmath_t>(),
       scalar.to<opmath_t>());
-  return tensor_lists[1];
+  return std::move(tensor_lists[1]);
 }
 
 template <typename T, template <class> class Op>
 void foreach_binary_op_(TensorList tensors, const Scalar& scalar) {
-  std::vector<std::vector<at::Tensor>> tensor_lists;
-  tensor_lists.emplace_back(tensors.vec());
+  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
 
   using opmath_t = at::opmath_type<T>;
   multi_tensor_apply<1>(
@@ -204,7 +202,7 @@ Scalar scalar_reciprocal(const Scalar& scalar) {
     return Scalar(1. / scalar.toComplexDouble());
   }
   TORCH_INTERNAL_ASSERT(
-      false, "divison with ", scalar.type(), " not supported");
+      false, "division with ", scalar.type(), " not supported");
 }
 
 void foreach_tensor_div_scalar_kernel_cuda_(

@@ -4,7 +4,7 @@
 # If you want to build with CUDA, run this with USE_CUDA=1
 # If you want to build without CUDA, run this with USE_CUDA=0
 
-if [ ! -f setup.py ]; then
+if [ ! -f pyproject.toml ]; then
   echo "ERROR: Please run this build script from PyTorch root directory."
   exit 1
 fi
@@ -31,7 +31,7 @@ PYLONG_API_CHECK=$?
 if [[ $PYLONG_API_CHECK == 0 ]]; then
   echo "Usage of PyLong_{From,As}{Unsigned}Long API may lead to overflow errors on Windows"
   echo "because \`sizeof(long) == 4\` and \`sizeof(unsigned long) == 4\`."
-  echo "Please include \"torch/csrc/utils/python_numbers.h\" and use the correspoding APIs instead."
+  echo "Please include \"torch/csrc/utils/python_numbers.h\" and use the corresponding APIs instead."
   echo "PyLong_FromLong -> THPUtils_packInt32 / THPUtils_packInt64"
   echo "PyLong_AsLong -> THPUtils_unpackInt (32-bit) / THPUtils_unpackLong (64-bit)"
   echo "PyLong_FromUnsignedLong -> THPUtils_packUInt32 / THPUtils_packUInt64"

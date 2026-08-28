@@ -15,12 +15,12 @@ namespace at::native {
 inline namespace CPU_CAPABILITY {
 
 namespace {
-static bool reduced_input(ScalarType input_t, ScalarType output_t) {
+bool reduced_input(ScalarType input_t, ScalarType output_t) {
   return !at::isFloat8Type(input_t) && at::isReducedFloatingType(input_t) &&
       output_t == kFloat;
 }
 
-static bool reduced_output(ScalarType input_t, ScalarType output_t) {
+bool reduced_output(ScalarType input_t, ScalarType output_t) {
   return !at::isFloat8Type(output_t) && at::isReducedFloatingType(output_t) &&
       input_t == kFloat;
 }
@@ -77,9 +77,7 @@ static void reduced_float_copy_kernel(TensorIteratorBase &iter, bool requires_ne
 
       int64_t grain_size = at::internal::GRAIN_SIZE;
 
-      auto loop = [strides_in, requires_neg](char** base, const int64_t* strides, int64_t size0, int64_t size1) {
-        std::array<char*, 2> data;
-        std::copy_n(base, 2, data.data());
+      auto loop = [strides_in, requires_neg](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
         const int64_t *outer_strides = &strides[2];
 
         for ([[maybe_unused]] const auto it : c10::irange(size1)) {
@@ -146,9 +144,7 @@ static void reduced_float_copy_kernel(TensorIteratorBase &iter, bool requires_ne
 
       int64_t grain_size = at::internal::GRAIN_SIZE;
 
-      auto loop = [strides_in, requires_neg](char** base, const int64_t* strides, int64_t size0, int64_t size1) {
-        std::array<char*, 2> data;
-        std::copy_n(base, 2, data.data());
+      auto loop = [strides_in, requires_neg](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
         const int64_t *outer_strides = &strides[2];
 
         for ([[maybe_unused]] const auto it : c10::irange(size1)) {
@@ -203,17 +199,17 @@ static void reduced_float_copy_kernel(TensorIteratorBase &iter, bool requires_ne
 #if !defined(C10_MOBILE)
 #define _AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...)                                       \
         AT_DISPATCH_V2(TYPE, NAME, AT_WRAP(__VA_ARGS__),                                       \
-            kComplexHalf, kHalf, kBool,              \
-            kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
-            kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
+            kComplexHalf, kBComplex32, kHalf, kBool, \
+            kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), \
+            AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #define _AT_DISPATCH_ALL_TYPES_NO_CF(TYPE, NAME, ...)              \
         AT_DISPATCH_V2(TYPE, NAME, AT_WRAP(__VA_ARGS__),                    \
-            kBool, kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
-            kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
+            kBool, kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), \
+            AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #else
 #define _AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...)                                               \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                                               \
-            ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool,ScalarType::BFloat16, \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(                                               \
+            ScalarType::ComplexHalf, ScalarType::BComplex32, ScalarType::Half, ScalarType::Bool,ScalarType::BFloat16, \
             TYPE, NAME, __VA_ARGS__)
 #define _AT_DISPATCH_ALL_TYPES_NO_CF(TYPE, NAME, ...) \
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(       \
@@ -239,6 +235,10 @@ void direct_copy_kernel(TensorIteratorBase &iter) {
     });
   } else if (dtype == ScalarType::ComplexHalf) {
     cpu_kernel(iter, [=](c10::complex<at::Half> a) -> c10::complex<at::Half> { return a; });
+  } else if (dtype == ScalarType::BComplex32) {
+    cpu_kernel(iter, [=](c10::complex<at::BFloat16> a) -> c10::complex<at::BFloat16> { return a; });
+  } else if (dtype == ScalarType::Float4_e2m1fn_x2) {
+    cpu_kernel(iter, [=](Float4_e2m1fn_x2 a) -> Float4_e2m1fn_x2 { return a; });
   } else if (isBitsType(dtype)) {
     AT_DISPATCH_BIT_TYPES(dtype, "copy_kernel", [&] {
       cpu_kernel(

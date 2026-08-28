@@ -1,5 +1,5 @@
 project(libshm C CXX)
-cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 
 set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../../)
 
@@ -21,7 +21,7 @@ target_include_directories(shm PUBLIC
 set_target_properties(shm PROPERTIES
   PREFIX "lib"
   IMPORT_PREFIX "lib"
-  CXX_STANDARD 17)
+  CXX_STANDARD 20)
 target_link_libraries(shm PRIVATE ${TORCH_CPU_LIB})
 
 if(UNIX AND NOT APPLE)

@@ -1,4 +1,5 @@
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <ATen/ATen.h>
@@ -37,7 +38,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<
     unpacked_weights = kSpatialDim == 2
         ? at::_empty_affine_quantized(
               {output_channels, C_per_G, kernel_h, kernel_w},
-              device(c10::kCPU)
+              at::device(c10::kCPU)
                   .dtype(c10::kQInt8)
                   .memory_format(c10::MemoryFormat::ChannelsLast),
               w_scale[0],
@@ -50,7 +51,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<
                   kernel_d,
                   kernel_h,
                   kernel_w,
-                  device(c10::kCPU).dtype(c10::kQInt8),
+                  at::device(c10::kCPU).dtype(c10::kQInt8),
                   w_scale[0],
                   w_zp[0]);
   } else if (q_scheme == c10::kPerChannelAffine) {
@@ -58,16 +59,16 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<
         !transpose(),
         "Per Channel Quantization is currently disabled for transposed conv");
     auto scales = at::from_blob(
-        w_scale.data(), w_scale.size(), device(c10::kCPU).dtype(c10::kFloat));
+        w_scale.data(), w_scale.size(), at::device(c10::kCPU).dtype(c10::kFloat));
     auto zero_points = at::from_blob(
-        w_zp.data(), w_zp.size(), device(c10::kCPU).dtype(c10::kInt));
+        w_zp.data(), w_zp.size(), at::device(c10::kCPU).dtype(c10::kInt));
     unpacked_weights = kSpatialDim == 2
         ? at::_empty_per_channel_affine_quantized(
               {output_channels, C_per_G, kernel_h, kernel_w},
               scales.toType(c10::kDouble),
               zero_points.toType(c10::kLong),
               0, /* The output channel axis is 0 */
-              device(c10::kCPU).dtype(c10::kQInt8),
+              at::device(c10::kCPU).dtype(c10::kQInt8),
               c10::MemoryFormat::ChannelsLast)
         : at::native::fbgemm_utils::
               MakeEmptyPerChannelAffineQuantizedChannelsLast3dTensor(
@@ -76,7 +77,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<
                   kernel_d,
                   kernel_h,
                   kernel_w,
-                  device(c10::kCPU).dtype(c10::kQInt8),
+                  at::device(c10::kCPU).dtype(c10::kQInt8),
                   scales.toType(c10::kDouble),
                   zero_points.toType(c10::kLong));
   } else {
@@ -91,7 +92,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<
             kSpatialDim>(unpacked_weights, groups);
   }
   return std::tuple<at::Tensor, std::optional<at::Tensor>>(
-      unpacked_weights, bias);
+      std::move(unpacked_weights), bias);
 }
 
 template std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<

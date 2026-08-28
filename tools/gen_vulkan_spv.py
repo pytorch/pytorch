@@ -10,23 +10,27 @@ import glob
 import io
 import os
 import re
-import sys
-from itertools import product
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import subprocess
+import sys
 import textwrap
 from dataclasses import dataclass
+from itertools import product
+from pathlib import Path
 from typing import Any
 
 import yaml
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
+
 try:
     from yaml import CLoader as Loader
 except ImportError:
     from yaml import Loader  # type: ignore[assignment, misc]
+
+
+REPO_ROOT = Path(__file__).absolute().parent.parent
+sys.path.append(str(REPO_ROOT))
 
 CPP_H_NAME = "spv.h"
 CPP_SRC_NAME = "spv.cpp"
@@ -114,6 +118,7 @@ def extract_filename(path: str, keep_ext: bool = True) -> Any:
 
 
 # https://gist.github.com/pypt/94d747fe5180851196eb
+# pyrefly: ignore [invalid-inheritance]
 class UniqueKeyLoader(Loader):
     def construct_mapping(self, node, deep=False):  # type: ignore[no-untyped-def]
         if not isinstance(node, MappingNode):
@@ -186,7 +191,7 @@ def preprocess(
     # Indicates whether this is the first line inside Python
     # code block (i.e. for, while, if, elif, else)
     python_block_start = True
-    for i, input_line in enumerate(input_lines):
+    for input_line in input_lines:
         if input_line == "":
             blank_lines += 1
             continue
@@ -196,11 +201,13 @@ def preprocess(
 
         input_indent = extract_leading_whitespace(input_line)
         if python_block_start:
-            assert input_indent.startswith(last_indent)
+            if not input_indent.startswith(last_indent):
+                raise AssertionError("input_indent must start with last_indent")
             extra_python_indent = input_indent[len(last_indent) :]
             python_indent = indent_stack[-1][1] + extra_python_indent
             indent_stack.append((input_indent, python_indent))
-            assert input_indent.startswith(indent_stack[-1][0])
+            if not input_indent.startswith(indent_stack[-1][0]):
+                raise AssertionError("input_indent must start with indent_stack top")
         else:
             while not input_indent.startswith(indent_stack[-1][0]):
                 del indent_stack[-1]
@@ -218,7 +225,8 @@ def preprocess(
                 blank_lines -= 1
             python_lines.append(python_indent + stripped_input_line.replace("$", ""))
         else:
-            assert input_line.startswith(python_indent)
+            if not input_line.startswith(python_indent):
+                raise AssertionError("input_line must start with python_indent")
             while blank_lines != 0:
                 python_lines.append(python_indent + "print(file=OUT_STREAM)")
                 blank_lines -= 1
@@ -229,6 +237,7 @@ def preprocess(
         last_indent = input_indent
 
     while blank_lines != 0:
+        # pyrefly: ignore [unbound-name]
         python_lines.append(python_indent + "print(file=OUT_STREAM)")
         blank_lines -= 1
 
@@ -326,7 +335,8 @@ class SPVGenerator:
                         - params_names
                         - {"generate_variant_forall"}
                     )
-                    assert len(invalid_keys) == 0
+                    if len(invalid_keys) != 0:
+                        raise AssertionError(f"Invalid keys found: {invalid_keys}")
 
                     iterated_params = variant.get(
                         "generate_variant_forall", default_iterated_params
@@ -663,6 +673,7 @@ def generateShaderDispatchStr(shader_info: ShaderInfo, name: str) -> str:
             "    ",
         )
 
+    # pyrefly: ignore [unbound-name]
     return shader_dispatch_str
 
 

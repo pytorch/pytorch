@@ -1,6 +1,9 @@
 # Owner(s): ["module: inductor"]
 import importlib
-from typing import Any, Callable, List, Optional
+import unittest.mock
+from collections.abc import Callable
+from typing import Any
+from unittest import skipIf
 
 import torch
 import torch.utils._pytree as pytree
@@ -15,6 +18,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
+    requires_block_ptr,
     requires_gpu,
 )
 
@@ -28,8 +32,10 @@ class CodegenInductorTest(InductorTestCase):
         self,
         func: Callable[..., Any],
         *args,
-        compile_kwargs: Optional[dict] = None,
-        config_patches: Optional[dict] = None,
+        compile_kwargs: dict | None = None,
+        config_patches: dict | None = None,
+        atol: float | None = 1e-05,
+        rtol: float | None = 1e-08,
     ):
         """
         Runs the module through Inductor, comparing to eager reference.
@@ -51,11 +57,11 @@ class CodegenInductorTest(InductorTestCase):
         ref_tensors = flatten_tensors(func(*args))
         actual_tensors = flatten_tensors(result)
         for ref, actual in zip(ref_tensors, actual_tensors):
-            self.assertTrue(torch.allclose(ref, actual))
+            self.assertTrue(torch.allclose(ref, actual, atol=atol, rtol=rtol))
 
         return result, code
 
-    def count_code(self, substr: str, code: List[str], expected: Optional[int]):
+    def count_code(self, substr: str, code: list[str], expected: int | None):
         count = sum(prog.count(substr) for prog in code)
         if expected is not None:
             self.assertEqual(count, expected)
@@ -77,12 +83,116 @@ class CodegenInductorTest(InductorTestCase):
             config_patches=config_patches,
         )
 
+        reinterpret_call = (
+            "= reinterpret_tensor_wrapper("
+            if config.cpp_wrapper
+            else "= reinterpret_tensor("
+        )
         if force_pointwise_cat:
-            self.count_code("= reinterpret_tensor(", code, 0)
+            self.count_code(reinterpret_call, code, 0)
         else:
-            self.count_code("= reinterpret_tensor(", code, 2)
+            self.count_code(reinterpret_call, code, 2)
 
     @requires_gpu()
+    @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
+    @requires_block_ptr
+    def test_cse_make_block_ptr_reduction(self):
+        def func(a, b):
+            tmp0 = a * b
+            tmp1 = a + b
+            c = tmp0 + tmp1
+            return c.sum(dim=0)
+
+        config_patches = {
+            "triton.use_block_ptr": True,
+            "triton.tile_reductions": True,
+            "triton.prefer_nd_tiling": True,
+            "triton.max_tiles": 3,
+            "split_reductions": False,
+        }
+        a = torch.randn((512, 4096), device=torch.device(GPU_TYPE))
+        b = torch.randn((512, 4096), device=torch.device(GPU_TYPE))
+        _, code = self.run_and_compare(
+            func,
+            a,
+            b,
+            config_patches=config_patches,
+            atol=1e-4,
+        )
+        self.count_code("= tl.make_block_ptr(in_ptr", code, 2)
+        self.count_code("= tl.load(block_ptr", code, 2)
+
+    @requires_gpu()
+    @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
+    def test_block_ptr_falls_back_when_api_missing(self):
+        # use_block_ptr=True but the Triton block-pointer API is gone: codegen
+        # must not emit tl.make_block_ptr and must fall back to masked indexing
+        # with correct numerics. Runs on any Triton by mocking the capability
+        # probe, so unlike the block-ptr tests above it is not requires_block_ptr.
+        def func(a, b):
+            tmp0 = a * b
+            tmp1 = a + b
+            c = tmp0 + tmp1
+            return c.sum(dim=0)
+
+        config_patches = {
+            "triton.use_block_ptr": True,
+            "triton.tile_reductions": True,
+            "triton.prefer_nd_tiling": True,
+            "triton.max_tiles": 3,
+            "split_reductions": False,
+            # Disable caches so the mocked gate cannot be defeated by a
+            # block-pointer kernel cached under the same config key.
+            "force_disable_caches": True,
+        }
+        a = torch.randn((512, 4096), device=torch.device(GPU_TYPE))
+        b = torch.randn((512, 4096), device=torch.device(GPU_TYPE))
+        # Patch the triton_utils binding: has_triton_block_ptr is imported by
+        # value there (triton_utils.py) and functools.cache'd.
+        with unittest.mock.patch(
+            "torch._inductor.codegen.triton_utils.has_triton_block_ptr",
+            lambda: False,
+        ):
+            _, code = self.run_and_compare(
+                func,
+                a,
+                b,
+                config_patches=config_patches,
+                atol=1e-4,
+            )
+        self.count_code("tl.make_block_ptr", code, 0)
+
+    @requires_gpu()
+    @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
+    @parametrize("disable_welford_reduction", [True, False])
+    def test_disable_welford_reduction(self, disable_welford_reduction: bool):
+        def func(x):
+            return torch.var_mean(x, dim=1)
+
+        # Use a reduction larger than the CUDA two-step variance threshold to
+        # force codegen to prefer Welford reduction, in order to test
+        # effectiveness of config flag disable_welford_reduction.
+        # This test should run fine on GPU as the configuration is not specific to MTIA backend.
+        x = torch.randn((4, 65536), device=torch.device(GPU_TYPE))
+        config_patches = {
+            "mtia.disable_welford_reduction": disable_welford_reduction,
+        }
+        _, code = self.run_and_compare(
+            func,
+            x,
+            config_patches=config_patches,
+            atol=1e-2,
+            rtol=1e-4,
+        )
+
+        welford_count = sum(prog.count("triton_helpers.welford") for prog in code)
+        if disable_welford_reduction:
+            self.assertEqual(welford_count, 0)
+        else:
+            self.assertGreater(welford_count, 0)
+
+    @requires_gpu()
+    @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
     def test_kernel_fusion_thresholds(self):
         def func(a, b):
             tmp0 = a + 1

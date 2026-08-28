@@ -51,14 +51,14 @@ void removePackedParamInsertionAndFPWeightsSetAttr(
   while ((n = it.next()) != nullptr) {
     if (n->kind() == prim::SetAttr) {
       const std::string& attr_name = n->s(attr::name);
-      if (packed_param_attr_names.count(attr_name)) {
+      if (packed_param_attr_names.contains(attr_name)) {
         nodes_to_delete.push_back(n);
       } else {
         Value* v = n->input(0);
         Value* self = g->inputs()[0];
         std::vector<std::string> paths = getModuleAccessPath(v, self);
         std::string path = joinPaths(paths);
-        if (packed_param_attr_names.count(path)) {
+        if (packed_param_attr_names.contains(path)) {
           nodes_to_delete.push_back(n);
         }
       }
@@ -188,11 +188,11 @@ Module Finalize(
     Module& module,
     QuantType quant_type,
     const std::vector<std::string>& preserved_attrs) {
-  // Tracing annotates the resulting graph with shape information. In many case,
-  // user applies different input shapes to traced graph. It is on the user to
-  // know it is correct to do so. The quantized module needs to be clean up and
-  // To prevent the JIT optimizations from leveraging the annotated shape info,
-  // clear shape information in the graph.
+  // Tracing annotates the resulting graph with shape information. In many
+  // cases, user applies different input shapes to traced graph. It is on the
+  // user to know it is correct to do so. The quantized module needs to be clean
+  // up and To prevent the JIT optimizations from leveraging the annotated shape
+  // info, clear shape information in the graph.
   for (auto func : module.type()->methods()) {
     ClearProfilingInformation(toGraphFunction(*func).graph());
   }
@@ -210,11 +210,11 @@ Module FinalizeOnDevicePTQ(
     Module& module,
     QuantType quant_type,
     const std::string& method_name) {
-  // Tracing annotates the resulting graph with shape information. In many case,
-  // user applies different input shapes to traced graph. It is on the user to
-  // know it is correct to do so. The quantized module needs to be clean up and
-  // To prevent the JIT optimizations from leveraging the annotated shape info,
-  // clear shape information in the graph.
+  // Tracing annotates the resulting graph with shape information. In many
+  // cases, user applies different input shapes to traced graph. It is on the
+  // user to know it is correct to do so. The quantized module needs to be clean
+  // up and To prevent the JIT optimizations from leveraging the annotated shape
+  // info, clear shape information in the graph.
   for (auto func : module.type()->methods()) {
     ClearProfilingInformation(toGraphFunction(*func).graph());
   }

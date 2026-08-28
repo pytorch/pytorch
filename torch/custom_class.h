@@ -6,7 +6,6 @@
 #include <ATen/core/class_type.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/stack.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
@@ -90,7 +89,7 @@ class class_ : public ::torch::detail::class_base {
   /// constructor taking an `int` and a `std::string` as argument.
   template <typename... Types>
   class_& def(
-      torch::detail::types<void, Types...>,
+      torch::detail::types<void, Types...> /*unused*/,
       std::string doc_string = "",
       std::initializer_list<arg> default_args =
           {}) { // Used in combination with
@@ -168,10 +167,31 @@ class class_ : public ::torch::detail::class_base {
 
   /// Method registration API for static methods.
   template <typename Func>
-  class_& def_static(std::string name, Func func, std::string doc_string = "") {
+  class_& def_static(
+      std::string name,
+      Func func,
+      std::string doc_string = "",
+      std::initializer_list<arg> default_args = {}) {
     auto qualMethodName = qualClassName + "." + name;
     auto schema =
         c10::inferFunctionSchemaSingleReturn<Func>(std::move(name), "");
+
+    // If default values are provided for function arguments, there must be
+    // none (no default values) or default values for all function
+    // arguments. This is because argument names are not extracted by
+    // inferFunctionSchemaSingleReturn, and so there must be a torch::arg
+    // instance in default_args even for arguments that do not have an actual
+    // default value provided.
+    TORCH_CHECK(
+        default_args.size() == 0 ||
+            default_args.size() == schema.arguments().size(),
+        "Default values must be specified for none or all arguments");
+
+    // If there are default args, copy the argument names and default values to
+    // the function schema.
+    if (default_args.size() > 0) {
+        schema = withNewArgumentsStatic(schema, default_args);
+    }
 
     auto wrapped_func =
         [func = std::move(func)](jit::Stack& stack) mutable -> void {
@@ -287,7 +307,7 @@ class class_ : public ::torch::detail::class_base {
   ///     __getstate__(intrusive_ptr<CurClass>) -> T1
   ///     __setstate__(T2) -> intrusive_ptr<CurClass>
   ///
-  /// `T1` must be an object that is convertable to IValue by the same rules
+  /// `T1` must be an object that is convertible to IValue by the same rules
   /// for custom op/method registration.
   ///
   /// For the common case, T1 == T2. T1 can also be a subtype of T2. An
@@ -306,7 +326,6 @@ class class_ : public ::torch::detail::class_base {
   ///               std::vector<std::string>{"i", "was", "deserialized"});
   ///         })
   template <typename GetStateFn, typename SetStateFn>
-  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   class_& def_pickle(GetStateFn&& get_state, SetStateFn&& set_state) {
     static_assert(
         c10::guts::is_stateless_lambda<std::decay_t<GetStateFn>>::value &&
@@ -342,7 +361,7 @@ class class_ : public ::torch::detail::class_base {
     auto format_getstate_schema = [&getstate_schema]() {
       std::stringstream ss;
       ss << getstate_schema;
-      return ss.str();
+      return std::move(ss).str();
     };
 #endif
     TORCH_CHECK(
@@ -445,7 +464,7 @@ c10::IValue make_custom_class(CtorArgs&&... args) {
 }
 
 // Alternative api for creating a torchbind class over torch::class_ this api is
-// preffered to prevent size regressions on Edge usecases. Must be used in
+// preferred to prevent size regressions on Edge usecases. Must be used in
 // conjunction with TORCH_SELECTIVE_CLASS macro aka
 // selective_class<foo>("foo_namespace", TORCH_SELECTIVE_CLASS("foo"))
 template <class CurClass>
@@ -458,8 +477,8 @@ inline class_<CurClass> selective_class_(
 
 template <class CurClass>
 inline detail::ClassNotSelected selective_class_(
-    const std::string&,
-    detail::SelectiveStr<false>) {
+    const std::string& /*unused*/,
+    detail::SelectiveStr<false> /*unused*/) {
   return detail::ClassNotSelected();
 }
 
@@ -513,7 +532,7 @@ inline class_<CurClass> Library::class_(detail::SelectiveStr<true> className) {
 }
 
 template <class CurClass>
-inline detail::ClassNotSelected Library::class_(detail::SelectiveStr<false>) {
+inline detail::ClassNotSelected Library::class_(detail::SelectiveStr<false> /*unused*/) {
   return detail::ClassNotSelected();
 }
 

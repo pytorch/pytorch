@@ -1,8 +1,7 @@
-# mypy: allow-untyped-defs
 import logging
 import weakref
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Any
 
 from torch._guards import CompileId
 
@@ -10,7 +9,7 @@ from . import config
 from .types import DynamoFrameType
 
 
-log = logging.getLogger(__name__)
+log: logging.Logger = logging.getLogger(__name__)
 """
 [Note on cache size limit]
 
@@ -22,22 +21,22 @@ of the guard_manager's returns True, we recompile and add a new entry. To ensure
 don't end up recompiling infinitely, we put limits on the cache size.
 
 There are two limits
-1) cache_size_limit
-2) accumulated_cache_size_limit
+1) recompile_limit
+2) accumulated_recompile_limit
 
 
-Earlier we used to have only limit - maximum number of entries in 1 cache line
-(which is now represented by (2) above). So, why do we need two limits? Lets try
+Earlier we used to have only one limit - maximum number of entries in 1 cache line
+(which is now represented by (2) above). So, why do we need two limits? Let's try
 to understand that.
 
 In general, we want our cache limit value to be a small number (e.g. 8 or even
-lower). This ensures that for frames that cause too many recompilation fall to
+lower). This ensures that for frames that cause too many recompilations fall to
 eager quickly. However, there is another problem that prevents us from lowering
-the value of cache_size_limit. This is due to ID_MATCH'd guards. Today, we put
+the value of recompile_limit. This is due to ID_MATCH'd guards. Today, we put
 ID_MATCH guards on nn module if there is a graph break. This means we will have
 many recompilations for the same code object because the ID_MATCH guard fails
 for different instances of the nn module. This is a common pattern in how models
-are authored. Therefore, this requires us to keep the cache_size_limit high.
+are authored. Therefore, this requires us to keep the recompile_limit high.
 
 We resolve this by introducing these two limits. The first limit (1) limits the
 number of cache entries that have an ID_MATCH'd guard for an nn module instance.
@@ -46,7 +45,7 @@ for a code object. One important question is - what is the limit for the code
 object that does not have any ID_MATCH guard? For such code objects, we choose
 (1) as the cache size limit.
 
-Lets take an example to understand how these limits help. Suppose, we have 16
+Let's take an example to understand how these limits help. Suppose, we have 16
 instances of a nn module and we ID_MATCH on the self object. Further, suppose
 the inputs to these functions have varying batch size, leading to one
 recompilation. In total, there will be 32 recompilations, and therefore 32 cache
@@ -58,8 +57,8 @@ compilations to burst the cache and fallback to eager. These 32 recompilations
 are too many and we want to fallback for these compilation-unfriendly functions
 sooner.
 
-In the new scenario, we can have (1) cache_size_limit = 2, (2)
-accumulated_cache_size_limit = 32. This means that each ID_MATCH'd object can
+In the new scenario, we can have (1) recompile_limit = 2, (2)
+accumulated_recompile_limit = 32. This means that each ID_MATCH'd object can
 have maximum of two cache entries, and the maximum number of cache entries
 (irrespective of ID_MATCH obj) is 32. This covers the case of forward code
 object which has 32 recompilations. For the other function, the one unsuitable
@@ -80,27 +79,36 @@ class CacheSizeRelevantForFrame:
     could be useful for debugging as well.
     """
 
-    # Total number of CacheEntry objects in the Dynamo linked list
+    # Number of CacheEntry objects in this region's cache list
     num_cache_entries: int = 0
 
     # Number of CacheEntry objects having same ID_MATCH'd objects as given frame.
     num_cache_entries_with_same_id_matched_objs: int = 0
 
+    # Total cache entries across ALL regions on this code object.
+    # Used for accumulated_recompile_limit which is a global safety cap.
+    total_cache_entries_all_regions: int = 0
+
     def will_compilation_exceed(self, limit: int) -> bool:
-        # Checks if a compilation will exceed the given limit (thats why >=).
+        # Checks if a compilation will exceed the given limit (that's why >=).
         return (
             self.will_compilation_exceed_accumulated_limit()
             or self.will_compilation_exceed_specific_limit(limit)
         )
 
     def will_compilation_exceed_accumulated_limit(self) -> bool:
-        return self.num_cache_entries >= config.accumulated_cache_size_limit
+        # accumulated_recompile_limit is a global safety cap across all regions.
+        return (
+            self.total_cache_entries_all_regions >= config.accumulated_recompile_limit
+        )
 
     def will_compilation_exceed_specific_limit(self, limit: int) -> bool:
         return self.num_cache_entries_with_same_id_matched_objs >= limit
 
 
-def _get_weakref_from_f_locals(frame: DynamoFrameType, local_name: str):
+def _get_weakref_from_f_locals(
+    frame: DynamoFrameType, local_name: str
+) -> weakref.ref[Any] | None:
     obj = frame.f_locals.get(local_name, None)
     weak_id = None
     try:
@@ -110,7 +118,7 @@ def _get_weakref_from_f_locals(frame: DynamoFrameType, local_name: str):
     return weak_id
 
 
-def _has_same_id_matched_objs(frame: DynamoFrameType, cache_entry) -> bool:
+def _has_same_id_matched_objs(frame: DynamoFrameType, cache_entry: Any) -> bool:
     """
     Checks if the ID_MATCH'd objects saved on cache_entry are same as the ones
     in frame.f_locals.
@@ -132,23 +140,25 @@ def _has_same_id_matched_objs(frame: DynamoFrameType, cache_entry) -> bool:
 
 
 def compute_cache_size(
-    frame: DynamoFrameType, cache_entry
+    frame: DynamoFrameType,
+    cache_entries: list[Any],
+    total_cache_entries_all_regions: int = 0,
 ) -> CacheSizeRelevantForFrame:
-    # Walk the linked list to calculate the cache size
+    # cache_entries is already scoped to a single isolate_recompiles region.
+    # recompile_limit is checked per-region. accumulated_recompile_limit uses
+    # total_cache_entries_all_regions as a global safety cap.
     num_cache_entries = 0
     num_cache_entries_with_same_id_matched_objs = 0
 
-    while cache_entry:
+    for cache_entry in cache_entries:
         num_cache_entries += 1
-        # Track the number of cache entries having same ID_MATCH'd objects as
-        # that of frame.f_locals. This will be used later to compare against the
-        # cache_size_limit.
         if _has_same_id_matched_objs(frame, cache_entry):
             num_cache_entries_with_same_id_matched_objs += 1
-        cache_entry = cache_entry.next
 
     return CacheSizeRelevantForFrame(
-        num_cache_entries, num_cache_entries_with_same_id_matched_objs
+        num_cache_entries,
+        num_cache_entries_with_same_id_matched_objs,
+        max(total_cache_entries_all_regions, num_cache_entries),
     )
 
 
@@ -165,21 +175,23 @@ def is_recompilation(cache_size: CacheSizeRelevantForFrame) -> bool:
     return cache_size.will_compilation_exceed(1)
 
 
-def exceeds_cache_size_limit(
+def exceeds_recompile_limit(
     cache_size: CacheSizeRelevantForFrame, compile_id: CompileId
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """
     Checks if we are exceeding the cache size limit.
     """
     if cache_size.will_compilation_exceed_accumulated_limit():
-        return True, "accumulated_cache_size_limit"
-    if cache_size.will_compilation_exceed_specific_limit(config.cache_size_limit):
-        return True, "cache_size_limit"
+        return True, "accumulated_recompile_limit"
+    if cache_size.will_compilation_exceed_specific_limit(config.recompile_limit):
+        return True, "recompile_limit"
     # NOTE this check is needed in the case that the frame's cache doesn't grow
     # and we keep recompiling. This can happen if the guard guard_manager becomes invalidated,
     # e.g. due to guarded objects being freed. This technically makes the
     # will_compilation_exceed_accumulated_limit check unnecessary, but we will keep the
     # check in case we have a better fix in the future.
-    if compile_id.frame_compile_id >= config.accumulated_cache_size_limit:
-        return True, "accumulated_cache_size_limit"
+    if compile_id.frame_compile_id is None:
+        raise AssertionError("compile_id.frame_compile_id must not be None")
+    if compile_id.frame_compile_id >= config.accumulated_recompile_limit:
+        return True, "accumulated_recompile_limit"
     return False, ""

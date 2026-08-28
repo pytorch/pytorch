@@ -1,8 +1,15 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "usort==1.1.3",
+#   "isort==6.0.1",
+#   "ruff==0.14.4",
+# ]
+# ///
 from __future__ import annotations
 
 import argparse
 import concurrent.futures
-import fnmatch
 import json
 import logging
 import os
@@ -11,68 +18,14 @@ import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
-import black
 import isort
 import usort
 
 
 IS_WINDOWS: bool = os.name == "nt"
 REPO_ROOT = Path(__file__).absolute().parents[3]
-
-# TODO: remove this when it gets empty and remove `black` in PYFMT
-USE_BLACK_FILELIST = re.compile(
-    "|".join(
-        (
-            r"\A\Z",  # empty string
-            *map(
-                fnmatch.translate,
-                [
-                    # **
-                    # .ci/**
-                    # .github/**
-                    # benchmarks/**
-                    # functorch/**
-                    # tools/**
-                    # torchgen/**
-                    # test/**
-                    # test/[a-h]*/**
-                    "test/[a-h]*/**",
-                    # test/[i-j]*/**
-                    "test/[i-j]*/**",
-                    # test/[k-n]*/**
-                    "test/[k-n]*/**",
-                    # test/optim/**
-                    "test/optim/**",
-                    # "test/[p-z]*/**",
-                    "test/[p-z]*/**",
-                    # torch/**
-                    # torch/_[a-h]*/**
-                    "torch/_[a-h]*/**",
-                    # torch/_i*/**
-                    "torch/_i*/**",
-                    # torch/_[j-z]*/**
-                    "torch/_[j-z]*/**",
-                    # torch/[a-c]*/**
-                    "torch/[a-c]*/**",
-                    # torch/d*/**
-                    "torch/d*/**",
-                    # torch/[e-n]*/**
-                    "torch/[e-n]*/**",
-                    # torch/optim/**
-                    "torch/optim/**",
-                    # torch/[p-z]*/**
-                    "torch/[p-z]*/**",
-                ],
-            ),
-        )
-    )
-)
-
-
-def eprint(*args: Any, **kwargs: Any) -> None:
-    print(*args, file=sys.stderr, flush=True, **kwargs)
 
 
 class LintSeverity(str, Enum):
@@ -133,23 +86,6 @@ def run_usort(content: str, path: Path) -> str:
     return usort.usort_string(content, path=path, config=usort_config)
 
 
-def run_black(content: str, path: Path) -> str:
-    black_config = black.parse_pyproject_toml(black.find_pyproject_toml((str(path),)))  # type: ignore[attr-defined,arg-type]
-    # manually patch options that do not have a 1-to-1 match in Mode arguments
-    black_config["target_versions"] = {
-        black.TargetVersion[ver.upper()]  # type: ignore[attr-defined]
-        for ver in black_config.pop("target_version", [])
-    }
-    black_config["string_normalization"] = not black_config.pop(
-        "skip_string_normalization", False
-    )
-    black_mode = black.Mode(**black_config)
-    black_mode.is_pyi = path.suffix.lower() == ".pyi"
-    black_mode.is_ipynb = path.suffix.lower() == ".ipynb"
-
-    return black.format_str(content, mode=black_mode)
-
-
 def run_ruff_format(content: str, path: Path) -> str:
     try:
         return subprocess.check_output(
@@ -181,10 +117,7 @@ def check_file(filename: str) -> list[LintMessage]:
         # NB: run isort first to enforce style for blank lines
         replacement = run_isort(replacement, path=path)
         replacement = run_usort(replacement, path=path)
-        if USE_BLACK_FILELIST.match(path.absolute().relative_to(REPO_ROOT).as_posix()):
-            replacement = run_black(replacement, path=path)
-        else:
-            replacement = run_ruff_format(replacement, path=path)
+        replacement = run_ruff_format(replacement, path=path)
 
         if original == replacement:
             return []
@@ -206,6 +139,14 @@ def check_file(filename: str) -> list[LintMessage]:
         return [format_error_message(filename, err)]
 
 
+def _default_num_workers() -> int | None:
+    # Forks one process per file batch, so respect MAX_JOBS to cap parallelism.
+    max_jobs = os.environ.get("MAX_JOBS")
+    if max_jobs and max_jobs.isdigit() and int(max_jobs) > 0:
+        return int(max_jobs)
+    return os.cpu_count()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Format files with usort + ruff-format.",
@@ -217,11 +158,19 @@ def main() -> None:
         help="verbose logging",
     )
     parser.add_argument(
+        "-j",
+        "--num-workers",
+        type=int,
+        default=None,
+        help="number of parallel workers (defaults to MAX_JOBS or the CPU count)",
+    )
+    parser.add_argument(
         "filenames",
         nargs="+",
         help="paths to lint",
     )
     args = parser.parse_args()
+    num_workers = args.num_workers or _default_num_workers()
 
     logging.basicConfig(
         format="<%(processName)s:%(levelname)s> %(message)s",
@@ -234,7 +183,7 @@ def main() -> None:
     )
 
     with concurrent.futures.ProcessPoolExecutor(
-        max_workers=os.cpu_count(),
+        max_workers=num_workers,
     ) as executor:
         futures = {executor.submit(check_file, x): x for x in args.filenames}
         for future in concurrent.futures.as_completed(futures):

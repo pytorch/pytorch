@@ -1,12 +1,9 @@
 #include <ATen/ATen.h>
-#include <ATen/NestedTensorImpl.h>
-#include <c10/core/ScalarType.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/nested.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/torch.h>
-#include <stdexcept>
 #include <vector>
 
 namespace torch::utils {
@@ -59,14 +56,14 @@ at::Tensor nested_tensor_ctor(
           "We do not accept non-strided layouts as input to nested tensors");
     } else {
       PythonArgs elem_r(r);
-      std::array<PyObject*, 6> elem_args = {
+      auto elem_args = std::to_array<PyObject*>({
           elem.get(), // data
-          r.args[1], // dtpye
+          r.args[1], // dtype
           nullptr, // device (cpu)
           nullptr, // no pinned memory
           r.args[4], // requires grad
           nullptr // names
-      };
+      });
       elem_r.args = elem_args.data();
       new_list[i] = tensor_ctor(dispatch_key, scalar_type, elem_r);
     }

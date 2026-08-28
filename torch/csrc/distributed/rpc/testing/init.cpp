@@ -22,9 +22,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
   // Add the FaultyTensorPipeAgent and its backend options object
   // to the python module torch._C._distributed_rpc_testing
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
-  if (!torch_C_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(torch_C_module);
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
   auto m = torch_C_m.def_submodule(
@@ -106,23 +104,23 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (TensorPipeAgent::*)(void) const) &
-              RpcAgent::getWorkerInfo,
+          static_cast<const WorkerInfo& (TensorPipeAgent::*)(void) const>(
+              &RpcAgent::getWorkerInfo),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (TensorPipeAgent::*)(const std::string&) const) &
-              TensorPipeAgent::getWorkerInfo,
+          static_cast<const WorkerInfo& (TensorPipeAgent::*)(const std::string&)
+                          const>(&TensorPipeAgent::getWorkerInfo),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (TensorPipeAgent::*)(worker_id_t id) const) &
-              TensorPipeAgent::getWorkerInfo,
+          static_cast<const WorkerInfo& (TensorPipeAgent::*)(worker_id_t id)
+                          const>(&TensorPipeAgent::getWorkerInfo),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_infos",
-          (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
-              TensorPipeAgent::getWorkerInfos,
+          static_cast<std::vector<WorkerInfo> (TensorPipeAgent::*)() const>(
+              &TensorPipeAgent::getWorkerInfos),
           py::call_guard<py::gil_scoped_release>());
 #endif // USE_TENSORPIPE
 

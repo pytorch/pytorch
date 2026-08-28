@@ -4,12 +4,15 @@
 import ctypes
 import os
 import unittest
-from typing import Tuple
 
 import torch
 from torch.backends._nnapi.prepare import convert_model_to_nnapi
 from torch.testing._internal.common_quantized import supported_qengines
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def qpt(t, scale, zero_point, dtype=torch.quint8):
@@ -28,7 +31,10 @@ def nhwc(t):
     "This Pytorch Build has not been built with or does not support QNNPACK",
 )
 class TestNNAPI(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
+        super().setUp()
         # Avoid saturation in fbgemm
         torch.backends.quantized.engine = "qnnpack"
 
@@ -700,7 +706,7 @@ class TestNNAPI(TestCase):
 
     def test_multi_output(self):
         class MultiModel(torch.nn.Module):
-            def forward(self, lhs, rhs) -> Tuple[torch.Tensor, torch.Tensor]:
+            def forward(self, lhs, rhs) -> tuple[torch.Tensor, torch.Tensor]:
                 the_sum = lhs + rhs
                 the_diff = lhs - rhs
                 return the_sum, the_diff

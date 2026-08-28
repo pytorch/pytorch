@@ -277,7 +277,7 @@ struct BilinearFilterFunctor {
     return 0;
   }
 
-  static const int size = 2;
+  static constexpr int size = 2;
 };
 
 // taken from
@@ -301,7 +301,7 @@ struct BicubicFilterFunctor {
     return 0;
   }
 
-  static const int size = 4;
+  static constexpr int size = 4;
 };
 
 template <typename accscalar_t>
@@ -350,8 +350,8 @@ __device__ __forceinline__ accscalar_t interpolate_aa_single_dim(
     const scalar_t* src,
     const scalar_t* weights,
     int size) {
-  scalar_t t = static_cast<accscalar_t>(*src);
-  scalar_t wts = static_cast<accscalar_t>(weights[0]);
+  accscalar_t t = static_cast<accscalar_t>(*src);
+  accscalar_t wts = static_cast<accscalar_t>(weights[0]);
   accscalar_t output = t * wts;
 
   int j = 1;

@@ -114,9 +114,6 @@ static void autogradBasedTransformSendToNext(
     if (!tensor.defined()) {
       return tensor;
     }
-    // if (c10::show_dispatch_trace_enabled()) {
-    //   std::cout << "wrap " << current_level << std::endl;
-    // }
     return makeTensorWrapper(tensor, interpreter, is_immutable);
   };
 
@@ -201,7 +198,7 @@ static void autogradBasedTransformSendToNext(
   }
 
   // Step 6
-  stack->erase(stack->end() - std::ptrdiff_t(args_size + ret_size), stack->end() - std::ptrdiff_t(ret_size));
+  stack->erase(stack->end() - static_cast<std::ptrdiff_t>(args_size + ret_size), stack->end() - static_cast<std::ptrdiff_t>(ret_size));
 }
 
 void GradInterpreterPtr::processImpl(

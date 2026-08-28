@@ -5,14 +5,11 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/functorch/BatchRulesHelper.h>
-#include <ATen/functorch/PlumbingHelper.h>
-#include <ATen/functorch/BatchedFallback.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 
 namespace at::functorch {
 
 template <typename Func>
-std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>>
+static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>>
 max_pool_with_indices_batch_rule_helper(
   const Tensor& self, std::optional<int64_t> self_bdim,
   IntArrayRef kernel_size, IntArrayRef stride,

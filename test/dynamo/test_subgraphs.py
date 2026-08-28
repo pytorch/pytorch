@@ -32,7 +32,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             cnt.frame_count,
             frame_count,
-            f"actual {cnt.frame_count} != expected {frame_count}",
+            lambda msg: f"{msg}\nactual {cnt.frame_count} != expected {frame_count}",
         )
         self.assertEqual(cnt.op_count, op_count)
 
@@ -119,7 +119,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             c2 = b - a
             return indirectly_unsupported(c1, c2)
 
-        self._common(fn, 2, 3)
+        self._common(fn, 1, 3)
 
     def test_indirect_unsupported2(self):
         def fn(a, b):
@@ -129,14 +129,14 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             c2 = b - a
             return local_const1 / (local_const2 - indirectly_unsupported(c1, c2))
 
-        self._common(fn, 3, 5)
+        self._common(fn, 2, 5)
 
     def test_indirect_unsupported3(self):
         def fn(a, b):
             args = [a - b, b - a]
             return indirectly_unsupported(*args)
 
-        self._common(fn, 2, 3)
+        self._common(fn, 1, 3)
 
     def test_stack_state1(self):
         def fn(a, b):
@@ -156,7 +156,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             c2 = b - a
             return t1 / (t2 - indirectly_unsupported(c1, c2))
 
-        self._common(fn, 3, 7)
+        self._common(fn, 2, 7)
 
     def test_multigraph(self):
         def fn(a, b):
@@ -199,7 +199,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 2.0
             return x
 
-        self._common(fn, 3, 7)
+        self._common(fn, 2, 7)
 
     def test_resume3(self):
         def fn(a, b):
@@ -212,7 +212,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 2.0
             return x
 
-        self._common(fn, 3, 7)
+        self._common(fn, 2, 7)
 
     def test_resume4(self):
         def fn(a, b):
@@ -225,7 +225,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 2.0
             return x
 
-        self._common(fn, 3, 7)
+        self._common(fn, 2, 7)
 
     def test_resume5(self):
         def fn(a, b):
@@ -401,7 +401,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(3)
         self.assertEqual(opt_fn(x, y), fn(x, y))
         self.assertEqual(opt_fn(x, x), fn(x, x))
-        # NB: This COULD validly be 2, but we don't test disjointness in the
+        # NB: This COULD validly be 2, but we don't test disjointedness in the
         # guards for when x and y didn't duck size together, so we end up
         # with a generic graph that also works when x and y happen to duck
         # size together.
@@ -580,7 +580,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
     def test_enumerate_not_break_graph(self):
         def fn(a, b):
-            for i, x in enumerate(a.shape):
+            for _, x in enumerate(a.shape):
                 b = b + x
             for i, x in enumerate(b.shape, 8):
                 b = b + x * i

@@ -12,6 +12,7 @@ import torchgen.gen as gen
 from torchgen.gen import LineLoader, parse_native_yaml_struct
 from torchgen.model import (
     Annotation,
+    BaseOperatorName,
     CustomClassType,
     DispatchKey,
     NativeFunctionsGroup,
@@ -40,10 +41,15 @@ class TestCodegenModel(expecttest.TestCase):
             parsed_yaml.backend_indices,
         )
         grouped_native_functions = gen.get_grouped_native_functions(native_functions)
-        assert len(grouped_native_functions) == 1
+        if len(grouped_native_functions) != 1:
+            raise AssertionError(
+                f"Expected 1 grouped function, got {len(grouped_native_functions)}"
+            )
         g = grouped_native_functions[0]
-        assert isinstance(g, NativeFunctionsGroup)
-        assert g.out.ufunc_inner_loop
+        if not isinstance(g, NativeFunctionsGroup):
+            raise AssertionError(f"Expected NativeFunctionsGroup, got {type(g)}")
+        if not g.out.ufunc_inner_loop:
+            raise AssertionError("Expected g.out.ufunc_inner_loop to be truthy")
         # this is not ufunc codegen per se, but it does some basic sanity tests for
         # ufunc generation
         gen.compute_meta_function_declaration(g)
@@ -200,6 +206,21 @@ class TestAnnotation(expecttest.TestCase):
             r"before alias set and after alias set cannot be larger than 1 at the same time",
         ):
             Annotation.parse("a|b -> c|d")
+
+
+class TestBaseOperatorName(expecttest.TestCase):
+    def test_base_operator_name_with_ns_has_same_attributes_as_the_one_without_ns(
+        self,
+    ) -> None:
+        op = "aten::__lshift__"
+        op_without_ns = "__lshift__"
+
+        op_name = BaseOperatorName.parse(op)
+        op_name_without_ns = BaseOperatorName.parse(op_without_ns)
+
+        self.assertEqual(op_name.base, op_name_without_ns.base)
+        self.assertEqual(op_name.inplace, op_name_without_ns.inplace)
+        self.assertEqual(op_name.dunder_method, op_name_without_ns.dunder_method)
 
 
 if __name__ == "__main__":

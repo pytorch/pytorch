@@ -25,6 +25,9 @@ template<> inline cudaDataType getCudaDataType<double>() {
 template<> inline cudaDataType getCudaDataType<c10::complex<c10::Half>>() {
   return CUDA_C_16F;
 }
+template<> inline cudaDataType getCudaDataType<c10::complex<c10::BFloat16>>() {
+  return CUDA_C_16BF;
+}
 template<> inline cudaDataType getCudaDataType<c10::complex<float>>() {
   return CUDA_C_32F;
 }
@@ -78,24 +81,21 @@ inline cudaDataType ScalarTypeToCudaDataType(const c10::ScalarType& scalar_type)
       return CUDA_R_64I;
     case c10::ScalarType::BFloat16:
       return CUDA_R_16BF;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11080
+#if !defined(USE_ROCM) || ROCM_VERSION >= 60300
     case c10::ScalarType::Float8_e4m3fn:
       return CUDA_R_8F_E4M3;
     case c10::ScalarType::Float8_e5m2:
       return CUDA_R_8F_E5M2;
 #endif
 #if defined(USE_ROCM)
-#if defined(HIP_NEW_TYPE_ENUMS)
     case c10::ScalarType::Float8_e4m3fnuz:
       return HIP_R_8F_E4M3_FNUZ;
     case c10::ScalarType::Float8_e5m2fnuz:
       return HIP_R_8F_E5M2_FNUZ;
-#else
-    case c10::ScalarType::Float8_e4m3fnuz:
-      return static_cast<hipDataType>(1000);
-    case c10::ScalarType::Float8_e5m2fnuz:
-      return static_cast<hipDataType>(1001);
 #endif
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12080) || (defined(USE_ROCM) && ROCM_VERSION >= 70000)
+    case c10::ScalarType::Float4_e2m1fn_x2:
+      return CUDA_R_4F_E2M1;
 #endif
     default:
       TORCH_INTERNAL_ASSERT(false, "Cannot convert ScalarType ", scalar_type, " to cudaDataType.")

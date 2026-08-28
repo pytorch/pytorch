@@ -2,15 +2,28 @@
 
 import torch
 from torch.cuda.amp import autocast
-from typing import Optional, Tuple
 
+import sys
 import unittest
-from test_jit import JitTestCase
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    IS_LINUX,
+    IS_CPU_EXT_SVE_SUPPORTED,
+    parse_cmd_line_args,
+    run_tests,
+    skipIfTorchDynamo,
+    xfailIf,
+)
 from torch.testing import FileCheck
 from jit.test_models import MnistNet
 
+if __name__ == '__main__':
+    # The value of GRAPH_EXECUTOR depends on command line arguments so make sure they're parsed
+    # before instantiating tests.
+    parse_cmd_line_args()
+
+from test_jit import JitTestCase
 TEST_BFLOAT16 = TEST_CUDA and torch.cuda.is_bf16_supported()
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
@@ -106,7 +119,7 @@ class TestAutocast(JitTestCase):
     def test_runtime_autocast_state_expr(self):
         @torch.jit.script
         def fn(a, b):
-            with autocast(enabled=True if a[0][0] > 0.5 else False):
+            with autocast(enabled=bool((a[0][0] > 0.5).item())):
                 return torch.mm(a, b)
         # runtime values for autocast enable argument are not supported
         with self.assertRaises(RuntimeError):
@@ -182,7 +195,7 @@ class TestAutocast(JitTestCase):
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_fp32_set_opt_dtype_policy(self):
         @torch.jit.script
-        def fn(a, b, c, d, dtype: Optional[int]):
+        def fn(a, b, c, d, dtype: int | None):
             with autocast(enabled=True):
                 x = torch.softmax(a, 0)
                 y = torch.softmax(b, 0, None)
@@ -198,7 +211,7 @@ class TestAutocast(JitTestCase):
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_fp32_set_opt_dtype_policy_fp64(self):
         @torch.jit.script
-        def fn(a, b, c, d, dtype: Optional[int]):
+        def fn(a, b, c, d, dtype: int | None):
             with autocast(enabled=True):
                 x = torch.softmax(a, 0)
                 y = torch.softmax(b, 0, None)
@@ -319,7 +332,7 @@ class TestAutocast(JitTestCase):
 
     # TODO: fix and enable this test?
     #   (we could technically fix this, but is it really worth it?)
-    @unittest.skipIf(True, "unsuported autocast syntax")
+    @unittest.skipIf(True, "unsupported autocast syntax")
     def test_reused_autocast_expr(self):
         @torch.jit.script
         def fn(a, b, c, d):
@@ -576,7 +589,7 @@ class TestAutocast(JitTestCase):
                     cuda_o = torch.mm(cuda0, cuda1)
                     return cpu_o, cuda_o
 
-        jit_t = torch.jit.script(t)
+        torch.jit.script(t)
         cpu0 = torch.randn(5, 5, device="cpu", dtype=torch.float32)
         cpu1 = torch.randn(5, 5, device="cpu", dtype=torch.float32)
         cuda0 = torch.randn(5, 5, device="cuda", dtype=torch.float32)
@@ -591,7 +604,7 @@ class TestAutocast(JitTestCase):
             cuda_o = torch.mm(cuda0, cuda1)
             return cpu_o, cuda_o
 
-        jit_t = torch.jit.script(t)
+        torch.jit.script(t)
         cpu0 = torch.randn(5, 5, device="cpu", dtype=torch.float32)
         cpu1 = torch.randn(5, 5, device="cpu", dtype=torch.float32)
         cuda0 = torch.randn(5, 5, device="cuda", dtype=torch.float32)
@@ -621,7 +634,7 @@ class TestAutocast(JitTestCase):
         t1 = torch.randn(5, 5, device="cuda", dtype=torch.float32).requires_grad_()
 
         # run optimization
-        for i in range(5):
+        for _ in range(5):
             with torch.autocast("cuda", torch.float16):
                 jit_o = jit_t(t0, t1)
             jit_o.sum().backward()
@@ -803,6 +816,8 @@ class TestJitTraceAutocast(JitTestCase):
         for i in range(self.models.__len__()):
             test_generate_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
+    @xfailIf(IS_ARM64 and IS_LINUX and not IS_CPU_EXT_SVE_SUPPORTED)
+    # see https://github.com/pytorch/pytorch/issues/177247
     def test_nchw_autocast_jit_trace_model(self):
         def test_nchw_autocast_jit_trace_model(model, x):
             model.eval()
@@ -817,6 +832,8 @@ class TestJitTraceAutocast(JitTestCase):
         for i in range(self.models.__len__()):
             test_nchw_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
+    @xfailIf(IS_ARM64 and IS_LINUX and not IS_CPU_EXT_SVE_SUPPORTED)
+    # see https://github.com/pytorch/pytorch/issues/177247
     def test_nhwc_autocast_jit_trace_model(self):
         def test_nhwc_autocast_jit_trace_model(model, x):
             model = model.to(memory_format=torch.channels_last)
@@ -923,7 +940,7 @@ class TestJitTraceAutocast(JitTestCase):
 
 
     def test_script_autocast_enable_and_check(self):
-        def fn(x, y) -> Tuple[torch.Tensor, bool, torch.Tensor, bool, torch.Tensor, bool]:
+        def fn(x, y) -> tuple[torch.Tensor, bool, torch.Tensor, bool, torch.Tensor, bool]:
             b1 = torch.is_autocast_cpu_enabled()
             v1 = torch.mm(x, y)
             with torch.autocast(device_type="cpu", enabled=True):
@@ -956,4 +973,5 @@ class TestJitTraceAutocast(JitTestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if sys.version_info < (3, 14):
+        run_tests()

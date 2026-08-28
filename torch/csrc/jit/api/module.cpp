@@ -1,22 +1,15 @@
-#include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/frontend/error_report.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <torch/csrc/jit/passes/frozen_linear_transpose.h>
 #include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
-#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <iostream>
@@ -43,7 +36,7 @@ void assert_ignored_methods_not_called(
   std::unordered_set<std::string> encountered_ignored_methods;
 
   for (Node* n : all_nodes) {
-    if (ignored_methods.count(n->s(attr::name)) > 0 &&
+    if (ignored_methods.contains(n->s(attr::name)) &&
         getInputDebugName(*n, 0) == "self") {
       encountered_ignored_methods.insert(
           getInputDebugName(*n, 0) + "." + n->s(attr::name));
@@ -80,7 +73,7 @@ void assert_ignored_attributes_not_referenced(
   std::unordered_set<std::string> encountered_ignored_attributes;
 
   for (Node* n : all_nodes) {
-    if (ignored_attributes.count(n->s(attr::name)) > 0 &&
+    if (ignored_attributes.contains(n->s(attr::name)) &&
         getInputDebugName(*n, 0) == "self") {
       encountered_ignored_attributes.insert(
           getInputDebugName(*n, 0) + "." + n->s(attr::name));
@@ -148,7 +141,7 @@ Module::Module(
 // as we bring up the system since it will degrade performance
 // and may introduce bugs. test_jit.py provides context managers
 // that enable it for specific tests.
-thread_local bool inline_everything = false;
+static thread_local bool inline_everything = false;
 bool& getInlineEverythingMode() {
   return inline_everything;
 }
@@ -351,7 +344,7 @@ Module Module::clone_impl(
   // ClassType during cloning, so we first need to check if the type
   // is already cloned, if so, we'll create a new module with the cloned
   // ClassType, if not, we'll create a new module and a new ClassType.
-  bool type_already_cloned = type_remap.find(type()) != type_remap.end();
+  bool type_already_cloned = type_remap.contains(type());
   Module r;
   if (type_already_cloned) {
     // if we cloned the class type before, we'll reuse it
@@ -372,7 +365,7 @@ Module Module::clone_impl(
 
     // If this attribute is in the list of ignored attributes, skip it
     // (i.e. do not clone it).
-    if (ignored_attributes.count(attr_name) != 0) {
+    if (ignored_attributes.contains(attr_name)) {
       continue;
     }
 
@@ -416,7 +409,7 @@ Module Module::clone_impl(
     // clone methods, remapping the types to the cloned ones.
     for (auto& fn : type()->methods()) {
       // If this method is not in the list of ignored methods, clone it.
-      if (ignored_methods.count(fn->name()) == 0) {
+      if (!ignored_methods.contains(fn->name())) {
         assert_ignored_methods_not_called(*fn, ignored_methods);
         assert_ignored_attributes_not_referenced(*fn, ignored_attributes);
         r.clone_method(*this, *fn, type_remap);
@@ -596,13 +589,13 @@ std::string Module::dump_to_str(
 
   ss << "module " << type()->name()->qualifiedName() << " {" << '\n';
   ss << "  parameters {" << '\n';
-  ss << torch::jit::jit_log_prefix("    ", parameters_ss.str());
+  ss << torch::jit::jit_log_prefix("    ", std::move(parameters_ss).str());
   ss << "  }" << '\n';
   ss << "  attributes {" << '\n';
-  ss << torch::jit::jit_log_prefix("    ", attributes_ss.str());
+  ss << torch::jit::jit_log_prefix("    ", std::move(attributes_ss).str());
   ss << "  }" << '\n';
   ss << "  methods {" << '\n';
-  ss << torch::jit::jit_log_prefix("  ", methods_ss.str());
+  ss << torch::jit::jit_log_prefix("  ", std::move(methods_ss).str());
   ss << "  }" << '\n';
   ss << "  submodules {" << '\n';
   for (const NameModule& s : named_children()) {
@@ -615,9 +608,9 @@ std::string Module::dump_to_str(
             print_method_bodies, print_attr_values, print_param_values));
   }
   ss << "  }" << '\n';
-  ss << "}" << '\n';
+  ss << '}' << '\n';
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void Module::dump(

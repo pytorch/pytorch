@@ -43,7 +43,6 @@ struct ExecutionPlan {
 // They are only valid only right after you call getDebugState() and should
 // never be used again once another GraphExecutor function is called.
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct GraphExecutorState {
   const Graph* graph = nullptr;
   ExecutionPlan fallback; // XXX: members of this field are optional
@@ -88,6 +87,11 @@ struct TORCH_API GraphExecutor {
   const ExecutionPlan& getPlanFor(
       Stack& inputs,
       std::optional<size_t> remaining_bailout_depth = std::nullopt);
+  // Returns an optimized execution plan without requiring input arguments.
+  // Runs input-independent optimization passes (e.g. inlining, constant
+  // propagation, peephole, CSE) but skips profiling-based specializations
+  // that require runtime type/shape information.
+  const ExecutionPlan& getInputIndependentPlan();
   GraphExecutorState getDebugState();
 
   void debugFlushCompilationCache();

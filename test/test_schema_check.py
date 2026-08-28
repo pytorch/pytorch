@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: jit"]
+# ruff: noqa: F841
 
 import os
 import sys
@@ -6,7 +7,13 @@ import torch
 from torch.utils._pytree import tree_map
 import unittest
 
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    slowTestIf,
+    TEST_WITH_TORCHDYNAMO,
+)
 from torch.fx.operator_schemas import normalize_function
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -15,6 +22,8 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_device_type import ops, OpDTypes, instantiate_device_type_tests
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+
+
 
 def secretly_aliasing(x):
     return x.view(-1)
@@ -26,17 +35,17 @@ def secretly_mutating(x):
 def output_is_input(x):
     return x
 
-custom_lib = torch.library.Library("bad_schemas", "DEF")  # noqa: TOR901
+custom_lib = torch.library.Library("bad_schemas", "DEF")  # noqa: SCOPED_LIBRARY
 custom_lib.define("secretly_aliasing(Tensor x) -> Tensor")
 custom_lib.define("secretly_mutating(Tensor x) -> Tensor")
 custom_lib.define("output_is_input(Tensor(a) x) -> Tensor(a)")
 
-custom_lib_cpu = torch.library.Library("bad_schemas", "IMPL", "CPU")  # noqa: TOR901
+custom_lib_cpu = torch.library.Library("bad_schemas", "IMPL", "CPU")  # noqa: SCOPED_LIBRARY
 custom_lib_cpu.impl("secretly_aliasing", secretly_aliasing)
 custom_lib_cpu.impl("secretly_mutating", secretly_mutating)
 custom_lib_cpu.impl("output_is_input", output_is_input)
 
-custom_lib_meta = torch.library.Library("bad_schemas", "IMPL", "Meta")  # noqa: TOR901
+custom_lib_meta = torch.library.Library("bad_schemas", "IMPL", "Meta")  # noqa: SCOPED_LIBRARY
 custom_lib_meta.impl("secretly_aliasing", secretly_aliasing)
 custom_lib_meta.impl("secretly_mutating", secretly_mutating)
 custom_lib_meta.impl("output_is_input", output_is_input)
@@ -94,6 +103,8 @@ class IncorrectAliasTensor(torch.Tensor):
 
 # Tests various schema checking functionalities.
 class TestSchemaCheck(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         if TEST_WITH_TORCHDYNAMO:
             self.skipTest("SchemaCheckMode is ignored by dynamo")
@@ -231,7 +242,7 @@ class TestSchemaCheck(JitTestCase):
             actual = x.relu().sin()
         self.assertEqual(expected, actual)
 
-    # Tests that SchemaCheckMode wraps torch.Tensor when an argument's default is overriden
+    # Tests that SchemaCheckMode wraps torch.Tensor when an argument's default is overridden
     def test_schema_check_mode_functionality_default_replaced(self):
         x = torch.rand((3, 3), requires_grad=True)
         expected = x.add(x, alpha=2)
@@ -492,19 +503,21 @@ class TestSchemaCheck(JitTestCase):
         with SchemaInfoBindTestMode(self) as schemaInfoCheck:
             x.add(x)
 
-
 class TestSchemaCheckModeOpInfo(JitTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @ops(op_db, dtypes=OpDTypes.supported)
+    @slowTestIf(IS_WINDOWS)
     def test_schema_correctness(self, device, dtype, op):
-        # Currently torch.equal isn't supported with torch.complex32
+        # Currently torch.equal isn't supported with torch.complex32 or torch.bcomplex32.
         # There's also errors with complex64 and complex128
-        if (dtype == torch.complex32):
+        if (dtype in (torch.complex32, torch.bcomplex32)):
             return
         for sample in op.sample_inputs(device, dtype, requires_grad=False):
             with SchemaCheckMode():
                 op(sample.input, *sample.args, **sample.kwargs)
 
-instantiate_device_type_tests(TestSchemaCheckModeOpInfo, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(TestSchemaCheckModeOpInfo, globals())
 
 if __name__ == '__main__':
     run_tests()

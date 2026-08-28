@@ -1,7 +1,7 @@
 import itertools
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from functools import partial
-from typing import Callable, List, Union
 
 import numpy as np
 from tabulate import tabulate
@@ -50,7 +50,7 @@ class ExperimentResults:
     materialized_mask_time: float
     attn_mask_subclass_time: float
 
-    def get_entries(self) -> List:
+    def get_entries(self) -> list:
         return [
             f"{self.materialized_mask_time:2f}",
             f"{self.attn_mask_subclass_time:2f}",
@@ -62,7 +62,7 @@ class Experiment:
     config: ExperimentConfig
     results: ExperimentResults
 
-    def get_entries(self) -> List:
+    def get_entries(self) -> list:
         return self.config.get_entries() + self.results.get_entries()
 
 
@@ -84,9 +84,10 @@ class CompositeMHA(torch.nn.Module):
 
         self.head_dim = embed_dim // num_heads
         self.embed_dim = embed_dim
-        assert (
-            self.head_dim * num_heads == self.embed_dim
-        ), "embed_dim must be divisible by num_heads"
+        if self.head_dim * num_heads != self.embed_dim:
+            raise AssertionError(
+                f"embed_dim ({self.embed_dim}) must be divisible by num_heads ({num_heads})"
+            )
 
         self.q_proj_weight = Parameter(
             torch.empty((embed_dim, embed_dim), **factory_kwargs)
@@ -105,7 +106,7 @@ class CompositeMHA(torch.nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        mask: Union[torch.Tensor, CausalBias],
+        mask: torch.Tensor | CausalBias,
     ):
         query_projected = F.linear(query, self.q_proj_weight)
         key_projected = F.linear(key, self.k_proj_weight)
@@ -176,7 +177,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
     )
 
 
-def generate_experiment_configs() -> List[ExperimentConfig]:
+def generate_experiment_configs() -> list[ExperimentConfig]:
     batch_sizes = [1, 8, 16, 128]
     num_heads = [16, 32]
     q_kv_seq_lens = [(128, 256), (256, 416), (512, 4097), (1024, 2048), (1, 2048)]
@@ -206,7 +207,7 @@ def calculate_speedup(results: ExperimentResults) -> float:
     return results.materialized_mask_time / results.attn_mask_subclass_time
 
 
-def print_results(results: List[Experiment]):
+def print_results(results: list[Experiment]):
     # Calculate speedups
     speedups = [calculate_speedup(r.results) for r in results]
 

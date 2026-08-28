@@ -3,11 +3,13 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/mkl/Sparse.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/TensorConversions.h>
@@ -28,8 +30,6 @@
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
-#include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_prod_native.h>
 #include <ATen/ops/_sparse_csr_sum_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
@@ -127,6 +127,10 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+#if AT_USE_EIGEN_SPARSE()
+#include <ATen/native/sparse/eigen/SparseBlasImpl.h>
+#endif
+
 #include <algorithm>
 
 namespace at {
@@ -136,6 +140,7 @@ TORCH_META_FUNC(_convert_indices_from_coo_to_csr)
 (const Tensor& self, const int64_t size, const bool out_int32) {
   TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector, but got ",
               self.dim(), " dimensional tensor.");
+  TORCH_CHECK(size >= 0, "size must be non-negative, got ", size);
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options =
       TensorOptions().device(self.options().device()).dtype(scalar_type);
@@ -153,7 +158,7 @@ TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
     crow_indices.dim(), " dimensional tensors, respectively.");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
-  set_output_raw_strided(0, {col_indices.dim() + 1, col_indices.numel()}, {}, options, {});
+  set_output_raw_strided(0, {col_indices.dim() + 1, col_indices.numel()}, {}, options);
 }
 
 } // namespace meta
@@ -219,7 +224,7 @@ Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
 }
 
 template <typename op_t>
-Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar, const op_t& op) {
+static Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar, const op_t& op) {
   // NOTE: intersection_binary_op_with_wrapped_scalar assumes scalar.numel() == 1.
   const auto result_values = op(sparse.values(), scalar.squeeze()).to(at::result_type(sparse, scalar));
   const auto result_sizes = infer_size(sparse.sizes(), scalar.sizes());
@@ -233,7 +238,7 @@ Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Te
 }
 
 template <typename op_t>
-Tensor& intersection_binary_op_with_wrapped_scalar_(Tensor& sparse, const Tensor& scalar, const string& op_name, const op_t& op) {
+static Tensor& intersection_binary_op_with_wrapped_scalar_(Tensor& sparse, const Tensor& scalar, const std::string& op_name, const op_t& op) {
   // NOTE: intersection_binary_op_with_wrapped_scalar_ assumes scalar.numel() == 1.
   const auto broadcasted_shape = infer_size(sparse.sizes(), scalar.sizes());
   if (sparse.sizes() != broadcasted_shape) {
@@ -344,7 +349,7 @@ Tensor sparse_mask_sparse_compressed(
   }
 
   if (!mask.numel() || !mask._nnz()) {
-    return mask.clone().to(self.device(), self.scalar_type());
+    return mask.to(self.device(), self.scalar_type(), /*non_blocking=*/false, /*copy=*/true);
   }
 
   if (self.layout() == kStrided) {
@@ -467,9 +472,8 @@ CREATE_UNARY_UFUNC(tanh)
 CREATE_UNARY_UFUNC(trunc)
 CREATE_UNARY_UFUNC(conj_physical)
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
-static CREATE_UNARY_UFUNC(relu)
-C10_DIAGNOSTIC_POP()
+CREATE_UNARY_UFUNC_FUNCTIONAL(relu)
+CREATE_UNARY_UFUNC_INPLACE(relu)
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.
@@ -522,12 +526,12 @@ CREATE_UNARY_UFUNC_FUNCTIONAL(isnan)
 CREATE_UNARY_UFUNC_FUNCTIONAL(isinf)
 
 template <typename scalar_t>
-void addmm_out_sparse_csr_native_cpu(
+static void addmm_out_sparse_csr_native_cpu(
     const Tensor& sparse,
     const Tensor& dense,
     const Tensor& r,
     Scalar alpha,
-    Scalar beta) {
+    const Scalar& beta) {
   auto dim_i = sparse.size(0);
   auto dim_k = dense.size(1);
 
@@ -536,7 +540,12 @@ void addmm_out_sparse_csr_native_cpu(
   auto values = sparse.values();
 
   scalar_t cast_alpha = alpha.to<scalar_t>();
-  r.mul_(beta);
+  // If beta is zero NaN and Inf should not be propagated to the result
+  if (beta.toComplexDouble() == 0.) {
+    r.zero_();
+  } else {
+    r.mul_(beta);
+  }
   AT_DISPATCH_INDEX_TYPES(
       col_indices.scalar_type(), "csr_mm_crow_indices", [&]() {
         auto csr_accessor = csr.accessor<index_t, 1>();
@@ -584,15 +593,7 @@ Tensor& addmm_out_sparse_compressed_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  // All the checks are from addmm_out_cuda_impl (ATen/native/cuda/Blas.cpp) and
-  // TORCH_META_FUNC(addmm) (ATen/native/LinearAlgebra.cpp)
-  // TODO: remove code duplication and unify code
-  sparse::impl::_check_dim(mat1, 2, "mat1");
-  sparse::impl::_check_dim(mat2, 2, "mat2");
-
-  TORCH_CHECK(
-      mat1.size(1) == mat2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.size(0), "x", mat1.size(1), " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+  check_mm_shapes(mat1, mat2, "addmm");
 
   c10::MaybeOwned<at::Tensor> self_;
   // Don't expand self if this is an in-place operation
@@ -647,6 +648,15 @@ Tensor& addmm_out_sparse_compressed_cpu(
     }
     return result;
   }
+
+#if AT_USE_EIGEN_SPARSE()
+  if ((result.layout() == kSparseCsr || result.layout() == kSparseCsc) &&
+      (mat1.layout() == kSparseCsr || mat1.layout() == kSparseCsc) &&
+      (mat2.layout() == kSparseCsr || mat2.layout() == kSparseCsc)) {
+    sparse::impl::eigen::addmm_out_sparse(mat1, mat2, result, alpha, beta);
+    return result;
+  }
+#endif
 
 #if !AT_USE_MKL_SPARSE()
   // The custom impl addmm_out_sparse_csr_native_cpu only supports CSR @
@@ -714,8 +724,8 @@ Tensor& addmm_out_sparse_compressed_cpu(
       " without MKL. PyTorch built with MKL has better support for addmm with sparse CPU tensors.");
 #else
   sparse::impl::mkl::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
-#endif
   return result;
+#endif
 }
 
 Tensor addmm_sparse_compressed_dense(
@@ -1076,14 +1086,13 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
   using acc_t = at::acc_type<scalar_t, true>;
   auto acc_buffer = at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
       values.options(), values.scalar_type(), nnz);
-  Tensor new_values = std::get<0>(acc_buffer);
-  Tensor new_values_acc = std::get<1>(acc_buffer);
+  Tensor new_values = std::move(std::get<0>(acc_buffer));
+  Tensor new_values_acc = std::move(std::get<1>(acc_buffer));
   new_values_acc.fill_(rop.identity());
 
-  int64_t* columns_map_ptr = columns_map.data_ptr<int64_t>();
-  scalar_t* values_ptr = values.data_ptr<scalar_t>();
-  acc_t* new_values_acc_ptr =
-      new_values_acc.data_ptr<acc_t>();
+  const int64_t* columns_map_ptr = columns_map.const_data_ptr<int64_t>();
+  const scalar_t* values_ptr = values.const_data_ptr<scalar_t>();
+  acc_t* new_values_acc_ptr = new_values_acc.data_ptr<acc_t>();
 
   // There is no point in parallelizing the following for-loop
   // because about 99.3% of the computation time is spent in the
@@ -1164,12 +1173,12 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
   using acc_t = at::acc_type<scalar_t, true>;
   auto acc_buffer = at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
       values.options(), values.scalar_type());
-  Tensor new_values = std::get<0>(acc_buffer);
-  Tensor new_values_acc = std::get<1>(acc_buffer);
+  Tensor new_values = std::move(std::get<0>(acc_buffer));
+  Tensor new_values_acc = std::move(std::get<1>(acc_buffer));
 
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "reduce_sparse_csr_dim1_cpu_indices",
                           [&]() {
-    index_t* crow_indices_ptr = crow_indices.data_ptr<index_t>();
+    const index_t* crow_indices_ptr = crow_indices.const_data_ptr<index_t>();
     index_t* new_crow_indices_ptr = new_crow_indices.data_ptr<index_t>();
     index_t* row_map_ptr = row_map.data_ptr<index_t>();
     int64_t nnz = 0;
@@ -1312,18 +1321,18 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, IntArrayRef dims_to_
 
 template <typename scalar_t>
 struct ReductionAddOp {
-  inline scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
+  scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
     return a + b;
   }
-  inline scalar_t identity() const { return 0; }
+  scalar_t identity() const { return 0; }
 };
 
 template <typename scalar_t>
 struct ReductionMulOp {
-  inline scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
+  scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
     return a * b;
   }
-  inline scalar_t identity() const { return 1; }
+  scalar_t identity() const { return 1; }
 };
 
 }  // namespace
@@ -1386,7 +1395,7 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
 
   int64_t nnz = self._nnz();
   if (nnz == 0) {
-    return std::make_tuple(out, arg_out);
+    return std::make_tuple(std::move(out), std::move(arg_out));
   }
 
   // only need to calculate the out args

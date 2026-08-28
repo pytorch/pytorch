@@ -9,8 +9,8 @@
 
 #include <gtest/gtest.h>
 
-namespace qnnpack {
-namespace testing {
+
+namespace qnnpack::testing {
 
 enum class Mode {
   Static,
@@ -32,4 +32,4 @@ enum class Mode {
   _STATIC_TEST(TestClass, test_name, test_body)                   \
   _RUNTIME_TEST(TestClass, test_name, test_body)
 
-}}  // namespace qnnpack::testing
+} // namespace qnnpack::testing

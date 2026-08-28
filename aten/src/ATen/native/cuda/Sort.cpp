@@ -4,19 +4,15 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/WrapDimUtils.h>
 #include <ATen/native/Sorting.h>
-#include <ATen/native/Resize.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/arange.h>
-#include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/sort_native.h>
-#include <ATen/ops/zeros.h>
 #endif
 
 #include <limits>
@@ -63,8 +59,17 @@ void sort_cuda_kernel(
     "The dimension being sorted can not have more than INT_MAX elements.");
 
   const auto self_dtype = self.dtype();
-  TORCH_CHECK(self_dtype != ScalarType::ComplexFloat && self_dtype != ScalarType::ComplexDouble,
+  TORCH_CHECK_TYPE(self_dtype != ScalarType::ComplexFloat && self_dtype != ScalarType::ComplexDouble,
     "Sort currently does not support complex dtypes on CUDA.");
+#if defined(USE_ROCM)
+  // ROCm has undefined behavior for non-standard bools. Here we are converting bool to uint8 which will
+  // convert false to 0 and true or any non-zero value to a 1. copy_ on const Tensors only changes the
+  // data in the tensor and not the metadata.
+  // That's why, tensor's dtype stays as bool. It just becomes a standard bool.
+  if (self_dtype == ScalarType::Bool) {
+      self.copy_(self.to(at::kByte));
+  }
+#endif
 
   // use inplace algorithm for smaller input sizes without stable=True
   if (should_use_small_sort(self, dim)) {

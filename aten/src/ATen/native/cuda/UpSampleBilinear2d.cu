@@ -10,6 +10,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/LaunchUtils.h>
 
@@ -79,7 +80,7 @@ __global__ void upsample_bilinear2d_out_frame(
   }
 }
 
-template <typename scalar_t, typename accscalar_t>
+template <typename scalar_t, typename accscalar_t, typename index_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_bilinear2d_nhwc_out_frame(
     const accscalar_t rheight,
@@ -92,15 +93,15 @@ __global__ void upsample_bilinear2d_nhwc_out_frame(
     const int width2,
     const scalar_t* idata,
     scalar_t* odata,
-    const int out_numel) {
+    const index_t out_numel) {
 
-  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  const index_t index = static_cast<index_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
   if (index < out_numel) {
-    const int c = index % channels;
-    const int w2 = (index / channels) % width2;
-    const int h2 = (index / channels / width2) % height2;
-    const int n = index / channels / width2 / height2;
+    const index_t c = index % channels;
+    const index_t w2 = (index / channels) % width2;
+    const index_t h2 = (index / channels / width2) % height2;
+    const index_t n = index / channels / width2 / height2;
 
     const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
         rheight, h2, align_corners, /*cubic=*/false);
@@ -117,15 +118,38 @@ __global__ void upsample_bilinear2d_nhwc_out_frame(
     const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
 
     const accscalar_t val = h0lambda * (
-        w0lambda * idata[idx_cl(n, h1, w1, c, height1, width1, channels)] +
-        w1lambda * idata[idx_cl(n, h1, w1 + w1p, c, height1, width1, channels)]
+        w0lambda * idata[idx_cl<index_t>(n, h1, w1, c, height1, width1, channels)] +
+        w1lambda * idata[idx_cl<index_t>(n, h1, w1 + w1p, c, height1, width1, channels)]
       ) + h1lambda * (
-        w0lambda * idata[idx_cl(n, h1 + h1p, w1, c, height1, width1, channels)] +
-        w1lambda * idata[idx_cl(n, h1 + h1p, w1 + w1p, c, height1, width1, channels)]
+        w0lambda * idata[idx_cl<index_t>(n, h1 + h1p, w1, c, height1, width1, channels)] +
+        w1lambda * idata[idx_cl<index_t>(n, h1 + h1p, w1 + w1p, c, height1, width1, channels)]
       );
-    odata[idx_cl(n, h2, w2, c, height2, width2, channels)] = static_cast<scalar_t>(val);
+    odata[idx_cl<index_t>(n, h2, w2, c, height2, width2, channels)] = static_cast<scalar_t>(val);
   }
 }
+
+#ifdef USE_ROCM
+// Helper function to compute output pixel range that can contribute to input pixel
+template <typename accscalar_t>
+__device__ __forceinline__ void compute_output_range(
+    int input_pos,
+    accscalar_t scale,
+    int output_size,
+    bool align_corners,
+    int& min_output,
+    int& max_output) {
+  accscalar_t lo, hi;
+  if (align_corners) {
+      lo = static_cast<accscalar_t>(input_pos - 1) / scale;
+      hi = static_cast<accscalar_t>(input_pos + 1) / scale;
+  } else {
+      lo = (input_pos - static_cast<accscalar_t>(0.5)) / scale - static_cast<accscalar_t>(0.5);
+      hi = (input_pos + static_cast<accscalar_t>(1.5)) / scale - static_cast<accscalar_t>(0.5);
+  }
+  min_output = max(0, static_cast<int>(std::ceil(lo)));
+  max_output = min(output_size - 1, static_cast<int>(std::floor(hi)));
+}
+#endif
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename scalar_t, typename accscalar_t>
@@ -141,8 +165,74 @@ __global__ void upsample_bilinear2d_backward_out_frame(
     const bool align_corners,
     scalar_t* __restrict__ idata,
     const scalar_t* __restrict__ odata) {
-  const size_t o_numel = nc * width2 * height2;
+  // In C++, integer multiplication, like in standard arithmetic, is generally commutative.
   const size_t i_numel = nc * width1 * height1;
+#ifdef USE_ROCM
+  for (size_t index = blockDim.x * blockIdx.x + threadIdx.x; index < i_numel;
+       index += blockDim.x * gridDim.x) {
+    // Decode input pixel coordinates
+    size_t index_temp = index;
+    const int w1 = index_temp % width1;
+    index_temp /= width1;
+    const int h1 = index_temp % height1;
+    const size_t nc_idx = index_temp / height1;
+
+    accscalar_t grad_sum = 0;
+
+    // Find range of output pixels that could interpolate from this input pixel
+    int h2_min, h2_max, w2_min, w2_max;
+    compute_output_range<accscalar_t>(h1, rheight, height2, align_corners, h2_min, h2_max);
+    compute_output_range<accscalar_t>(w1, rwidth, width2, align_corners, w2_min, w2_max);
+
+    // Iterate over potential output pixels
+    for (int h2 = h2_min; h2 <= h2_max; h2++) {
+      for (int w2 = w2_min; w2 <= w2_max; w2++) {
+        // Compute source coordinates for this output pixel
+        const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
+            rheight, h2, align_corners, /*cubic=*/false);
+        const int h1_base = (int)h1r;
+        const int h1p = (h1_base < height1 - 1) ? 1 : 0;
+        const accscalar_t h1lambda = h1r - h1_base;
+        const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
+
+        const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
+            rwidth, w2, align_corners, /*cubic=*/false);
+        const int w1_base = (int)w1r;
+        const int w1p = (w1_base < width1 - 1) ? 1 : 0;
+        const accscalar_t w1lambda = w1r - w1_base;
+        const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+
+        // Check if our input pixel participates in this interpolation and accumulate all weights
+        // At boundaries, h1p=0 or w1p=0 causes some sampling positions to collapse
+        // to the same pixel, so we need to accumulate weights from all matching positions
+        accscalar_t weight = 0;
+
+        // Check all four interpolation positions and accumulate weights
+        if (h1 == h1_base && w1 == w1_base) {
+          weight += h0lambda * w0lambda;  // top-left
+        }
+        if (h1 == h1_base && w1 == w1_base + w1p) {
+          weight += h0lambda * w1lambda;  // top-right (may be same as top-left if w1p=0)
+        }
+        if (h1 == h1_base + h1p && w1 == w1_base) {
+          weight += h1lambda * w0lambda;  // bottom-left (may be same as top-left if h1p=0)
+        }
+        if (h1 == h1_base + h1p && w1 == w1_base + w1p) {
+          weight += h1lambda * w1lambda;  // bottom-right (may collapse to other positions)
+        }
+
+        if (weight > 0) {
+          const size_t output_idx = nc_idx * height2 * width2 + h2 * width2 + w2;
+          grad_sum += weight * static_cast<accscalar_t>(odata[output_idx]);
+        }
+      }
+    }
+
+    // Write accumulated gradient (no atomics needed)
+    idata[index] = static_cast<scalar_t>(grad_sum);
+  }
+#else
+  const size_t o_numel = nc * width2 * height2;
   for (size_t index = blockDim.x * blockIdx.x + threadIdx.x; index < o_numel;
        index += blockDim.x * gridDim.x) {
     size_t index_temp = index;
@@ -191,9 +281,10 @@ __global__ void upsample_bilinear2d_backward_out_frame(
         static_cast<scalar_t>(h1lambda * w1lambda * d2val),
         true);
   }
+#endif
 }
 
-template <typename scalar_t, typename accscalar_t>
+template <typename scalar_t, typename accscalar_t, typename index_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_bilinear2d_backward_nhwc_out_frame(
     const int height1,
@@ -206,16 +297,16 @@ __global__ void upsample_bilinear2d_backward_nhwc_out_frame(
     scalar_t* __restrict__ idata,
     const scalar_t* __restrict__ odata,
     const int channels,
-    const size_t o_numel,
-    const size_t i_numel) {
+    const index_t o_numel,
+    const index_t i_numel) {
 
-  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  const index_t index = static_cast<index_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
   if (index < o_numel) {
-    const int c = index % channels;
-    const int w2 = (index / channels) % width2;
-    const int h2 = (index / channels / width2) % height2;
-    const int n = index / channels / width2 / height2;
+    const index_t c = index % channels;
+    const index_t w2 = (index / channels) % width2;
+    const index_t h2 = (index / channels / width2) % height2;
+    const index_t n = index / channels / width2 / height2;
 
     const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
         rheight, h2, align_corners, /*cubic=*/false);
@@ -234,25 +325,25 @@ __global__ void upsample_bilinear2d_backward_nhwc_out_frame(
     const scalar_t d2val = odata[index];
     fastAtomicAdd(
         idata,
-        idx_cl(n, h1, w1, c, height1, width1, channels),
+        idx_cl<index_t>(n, h1, w1, c, height1, width1, channels),
         i_numel,
         static_cast<scalar_t>(h0lambda * w0lambda * d2val),
         true);
     fastAtomicAdd(
         idata,
-        idx_cl(n, h1, w1 + w1p, c, height1, width1, channels),
+        idx_cl<index_t>(n, h1, w1 + w1p, c, height1, width1, channels),
         i_numel,
         static_cast<scalar_t>(h0lambda * w1lambda * d2val),
         true);
     fastAtomicAdd(
         idata,
-        idx_cl(n, h1 + h1p, w1, c, height1, width1, channels),
+        idx_cl<index_t>(n, h1 + h1p, w1, c, height1, width1, channels),
         i_numel,
         static_cast<scalar_t>(h1lambda * w0lambda * d2val),
         true);
     fastAtomicAdd(
         idata,
-        idx_cl(n, h1 + h1p, w1 + w1p, c, height1, width1, channels),
+        idx_cl<index_t>(n, h1 + h1p, w1 + w1p, c, height1, width1, channels),
         i_numel,
         static_cast<scalar_t>(h1lambda * w1lambda * d2val),
         true);
@@ -291,11 +382,6 @@ static void upsample_bilinear2d_out_cuda_template(
           output.is_contiguous(memory_format)) {
       using accscalar_t = at::acc_type<scalar_t, true>;
 
-      TORCH_CHECK(input.numel() < std::numeric_limits<int>::max(),
-        "upsample_bilinear2d_nhwc only supports input tensors with less than INT_MAX elements, but got ", input.sizes());
-      TORCH_CHECK(output.numel() < std::numeric_limits<int>::max(),
-        "upsample_bilinear2d_nhwc only supports output tensors with less than INT_MAX elements, but got ", output.sizes());
-
       const int channels = input.size(1);
       const int height1 = input.size(2);
       const int width1 = input.size(3);
@@ -303,9 +389,22 @@ static void upsample_bilinear2d_out_cuda_template(
       const int width2 = output.size(3);
 
       // const int num_kernels = output_height * output_width;
-      const int num_kernels = output.numel();
-      const int num_threads = std::min(
+      const int64_t num_kernels = output.numel();
+
+      if (num_kernels == 0) {
+        return;
+      }
+
+      const int64_t num_threads = std::min(
           at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+      // One thread per output element, so the grid is bounded by maxGridSize[0].
+      const int64_t num_blocks = ceil_div(num_kernels, num_threads);
+      TORCH_CHECK(
+          num_blocks <= at::cuda::getCurrentDeviceProperties()->maxGridSize[0],
+          "upsample_bilinear2d: output ", output.sizes(),
+          " is too large for the channels_last CUDA kernel launch");
 
       at::Tensor input_cl = input.contiguous(at::MemoryFormat::ChannelsLast);
 
@@ -317,21 +416,26 @@ static void upsample_bilinear2d_out_cuda_template(
       const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
           input_width, output_width, align_corners, scales_w);
 
-      upsample_bilinear2d_nhwc_out_frame<scalar_t, accscalar_t>
-        <<<ceil_div(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-          rheight, rwidth, align_corners,
-          channels,
-          height1,
-          width1,
-          height2,
-          width2,
-          idata, odata,
-          output.numel());
+      if (canUse32BitIndexMath(input_cl) && canUse32BitIndexMath(output)) {
+        upsample_bilinear2d_nhwc_out_frame<scalar_t, accscalar_t, int32_t>
+          <<<num_blocks, num_threads, 0, stream>>>(
+            rheight, rwidth, align_corners,
+            channels, height1, width1, height2, width2,
+            idata, odata,
+            static_cast<int32_t>(output.numel()));
+      } else {
+        upsample_bilinear2d_nhwc_out_frame<scalar_t, accscalar_t, int64_t>
+          <<<num_blocks, num_threads, 0, stream>>>(
+            rheight, rwidth, align_corners,
+            channels, height1, width1, height2, width2,
+            idata, odata,
+            output.numel());
+      }
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       // non-channels_last case, not necessarily contiguous
-      const int num_kernels = output_height * output_width;
-      const int num_threads = std::min(
+      const int64_t num_kernels = output_height * output_width;
+      const int64_t num_threads = std::min(
           at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
       cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -387,7 +491,6 @@ static void upsample_bilinear2d_backward_out_cuda_template(
   // threads are not covering the whole input tensor.
   grad_input.zero_();
 
-  const size_t num_kernels = nbatch * channels * output_height * output_width;
   const int num_threads = std::min(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -396,6 +499,12 @@ static void upsample_bilinear2d_backward_out_cuda_template(
     grad_input.copy_(grad_output_);
     return;
   }
+
+#ifdef USE_ROCM
+  constexpr bool use_input = true;
+#else
+  constexpr bool use_input = false;
+#endif
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -414,20 +523,32 @@ static void upsample_bilinear2d_backward_out_cuda_template(
       const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
           input_width, output_width, align_corners, scales_w);
 
-      upsample_bilinear2d_backward_nhwc_out_frame<scalar_t, accscalar_t>
-          <<<ceil_div(num_kernels, static_cast<size_t>(num_threads)), num_threads, 0, stream>>>(
-              input_height,
-              input_width,
-              output_height,
-              output_width,
-              rheight,
-              rwidth,
-              align_corners,
-              idata,
-              odata,
-              channels,
-              grad_output.numel(),
-              grad_input.numel());
+      const size_t num_kernels = static_cast<size_t>(nbatch) * channels * output_height * output_width;
+
+      // One thread per output element, so the grid is bounded by maxGridSize[0].
+      const size_t num_blocks = ceil_div(num_kernels, static_cast<size_t>(num_threads));
+      TORCH_CHECK(
+          num_blocks <= static_cast<size_t>(at::cuda::getCurrentDeviceProperties()->maxGridSize[0]),
+          "upsample_bilinear2d_backward: grad_output ", grad_output.sizes(),
+          " is too large for the channels_last CUDA kernel launch");
+
+      if (canUse32BitIndexMath(grad_input) && canUse32BitIndexMath(grad_output)) {
+        upsample_bilinear2d_backward_nhwc_out_frame<scalar_t, accscalar_t, int32_t>
+            <<<num_blocks, num_threads, 0, stream>>>(
+                input_height, input_width, output_height, output_width,
+                rheight, rwidth, align_corners,
+                idata, odata, channels,
+                static_cast<int32_t>(grad_output.numel()),
+                static_cast<int32_t>(grad_input.numel()));
+      } else {
+        upsample_bilinear2d_backward_nhwc_out_frame<scalar_t, accscalar_t, int64_t>
+            <<<num_blocks, num_threads, 0, stream>>>(
+                input_height, input_width, output_height, output_width,
+                rheight, rwidth, align_corners,
+                idata, odata, channels,
+                grad_output.numel(),
+                grad_input.numel());
+      }
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       using accscalar_t = at::acc_type<scalar_t, true>;
@@ -443,6 +564,8 @@ static void upsample_bilinear2d_backward_out_cuda_template(
           input_height, output_height, align_corners, scales_h);
       const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
           input_width, output_width, align_corners, scales_w);
+
+      const size_t num_kernels = static_cast<size_t>(nbatch) * channels * (use_input ? input_height * input_width : output_height * output_width);
 
       upsample_bilinear2d_backward_out_frame<scalar_t, accscalar_t>
           <<<ceil_div(num_kernels, static_cast<size_t>(num_threads)),
@@ -707,7 +830,7 @@ static void upsample_gen2d_aa_out_cuda_template(
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = input.packed_accessor64<const scalar_t, 4>();
-        auto odata = output_c.packed_accessor64<scalar_t, 4>();
+        auto odata = output_c.template packed_accessor64<scalar_t, 4>();
 
         const accscalar_t height_scale = area_pixel_compute_scale<accscalar_t>(
             input_height, output_height, align_corners, scales_h);

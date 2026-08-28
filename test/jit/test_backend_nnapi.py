@@ -7,13 +7,17 @@ from pathlib import Path
 
 import torch
 import torch._C
-from torch.testing._internal.common_utils import IS_FBCODE, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+)
 
 
 # hacky way to skip these tests in fbcode:
 # during test execution in fbcode, test_nnapi is available during test discovery,
 # but not during test execution. So we can't try-catch here, otherwise it'll think
-# it sees tests but then fails when it tries to actuall run them.
+# it sees tests but then fails when it tries to actually run them.
 if not IS_FBCODE:
     from test_nnapi import TestNNAPI
 
@@ -28,20 +32,13 @@ else:
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
-
 """
 Unit Tests for Nnapi backend with delegate
 Inherits most tests from TestNNAPI, which loads Android NNAPI models
 without the delegate API.
 """
 # First skip is needed for IS_WINDOWS or IS_MACOS to skip the tests.
-torch_root = Path(__file__).resolve().parent.parent.parent
+torch_root = Path(__file__).resolve().parents[2]
 lib_path = torch_root / "build" / "lib" / "libnnapi_backend.so"
 
 
@@ -139,3 +136,7 @@ method_compile_spec must use the following format:
     def tearDown(self):
         # Change dtype back to default (Otherwise, other unit tests will complain)
         torch.set_default_dtype(self.default_dtype)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

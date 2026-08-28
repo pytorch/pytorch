@@ -16,7 +16,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace at { namespace native { namespace detail {
+namespace at::native::detail {
 
 // Enum representing the FFT type
 enum class CuFFTTransformType : int8_t {
@@ -58,7 +58,7 @@ struct CuFFTParams
   }
 };
 
-static_assert(std::is_trivial_v<CuFFTParams>, "");
+static_assert(std::is_trivial_v<CuFFTParams> );
 
 // Returns true if the transform type has complex input
 inline bool cufft_complex_input(CuFFTTransformType type) {
@@ -223,7 +223,7 @@ inline CuFFTDataLayout as_cufft_embed(IntArrayRef strides, IntArrayRef sizes, bo
 class CuFFTConfig {
 public:
 
-  // Only move semantics is enought for this class. Although we already use
+  // Only move semantics is enough for this class. Although we already use
   // unique_ptr for the plan, still remove copy constructor and assignment op so
   // we don't accidentally copy and take perf hit.
   CuFFTConfig(const CuFFTConfig&) = delete;
@@ -310,6 +310,31 @@ public:
       itype = complex_input ? CUDA_C_16F : CUDA_R_16F;
       otype = complex_output ? CUDA_C_16F : CUDA_R_16F;
       exec_type = CUDA_C_16F;
+#if !defined(USE_ROCM)
+    } else if (dtype == ScalarType::BFloat16) {
+      // cuFFT native bfloat16 support: SM_80 (Ampere) or higher required.
+      // Constraints mirror the half-precision path:
+      //   - minimum SM_80 architecture
+      //   - signal sizes must be powers of two
+      //   - strides on the real part of R2C/C2R are not supported (clone enforced below)
+      // Not available on ROCm/hipFFT — bfloat16 is promoted to float32 upstream.
+      // See: https://docs.nvidia.com/cuda/cufft/ section 2.3.2
+      auto dev_prop = at::cuda::getCurrentDeviceProperties();
+      TORCH_CHECK(dev_prop->major >= 8,
+          "cuFFT doesn't support bfloat16 with compute capability less than SM_80, "
+          "but the device containing input bfloat16 tensor only has SM_",
+          dev_prop->major, dev_prop->minor);
+      for (const auto i : c10::irange(signal_ndim)) {
+        TORCH_CHECK(is_pow_of_two(sizes[i + 1]),
+            "cuFFT only supports dimensions whose sizes are powers of two when "
+            "computing in bfloat16 precision, but got a signal size of",
+            sizes.slice(1));
+      }
+      clone_input |= in_strides.back() != 1;
+      itype = complex_input ? CUDA_C_16BF : CUDA_R_16BF;
+      otype = complex_output ? CUDA_C_16BF : CUDA_R_16BF;
+      exec_type = CUDA_C_16BF;
+#endif // !defined(USE_ROCM)
     } else {
       TORCH_CHECK(false, "cuFFT doesn't support tensor of type: ", dtype);
     }
@@ -491,4 +516,4 @@ void cufft_set_plan_cache_max_size_impl(DeviceIndex device_index, int64_t max_si
 int64_t cufft_get_plan_cache_size_impl(DeviceIndex device_index);
 void cufft_clear_plan_cache_impl(DeviceIndex device_index);
 
-}}} // namespace at::native::detail
+} // namespace at::native::detail

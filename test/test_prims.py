@@ -6,13 +6,20 @@ import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import (parametrize, run_tests, TestCase, TEST_SCIPY,
-                                                  set_default_dtype)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+    TestCase,
+    TEST_SCIPY,
+    set_default_dtype,
+)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
     dtypes,
     OpDTypes,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -34,8 +41,10 @@ if TEST_SCIPY:
 NVPRIM_ATEN_FALLBACK_WARNING = "fallback to aten executor"
 GET_ISOLATED_GRAPHMODULE_ERROR = "get_isolated_graphmodule failed on decomposition"
 
-class TestPrims(TestCase):
-    @onlyCUDA
+class TestPrimsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
     @dtypes(torch.float32)
     def test_broadcast_in_dim(self, device, dtype):
         def _wrapper(a, b, broadcast_dimensions):
@@ -84,7 +93,7 @@ class TestPrims(TestCase):
             self.assertEqual(result.shape, b.shape)
             self.assertEqual(a.unsqueeze(2), result)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32)
     def test_broadcast_in_dim_sum(self, device, dtype):
         def _wrapper(a):
@@ -142,7 +151,7 @@ class TestPrims(TestCase):
             self.assertTrue(view._is_view())
 
         t_discontig = t.transpose(0, 1)
-        with self.assertRaises(ValueError, msg="no such view exists"):
+        with self.assertRaises(RuntimeError, msg="Attempting to view a collapsed tensor, but no such view exists!"):
             view = prims.collapse_view(t_discontig, 0, 2)
 
         copy = prims.collapse(t_discontig, 0, 1)
@@ -175,7 +184,7 @@ class TestPrims(TestCase):
         )
         self.assertTrue(all_prims_namespace)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32)
     @parametrize("correction", [0, 1])
     def test_var(self, device, dtype, correction):
@@ -321,6 +330,17 @@ class TestPrims(TestCase):
         self.assertEqual(ref1, res3)
         self.assertEqual(ref2, res4)
 
+    def test_functional_rng_wrapper_with_positional_device(self):
+        import torch._inductor.inductor_prims
+
+        rng_state, result = torch._prims.rng_prims.run_and_save_rng_state(
+            torch.ops.prims.inductor_seeds.default, 1, torch.device("cpu")
+        )
+
+        self.assertEqual(rng_state.device.type, "cpu")
+        self.assertEqual(result.device.type, "cpu")
+        self.assertEqual(result.shape, (1,))
+
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)
@@ -340,14 +360,26 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
     def test_clone_complex(self):
         with torch._dispatch.python.enable_python_dispatcher():
             x = torch.randn(4, dtype=torch.complex64, device='meta').conj()
-            out = x + 1
+            x + 1
+
+    def test_clone_meta_stride_preservation_dense(self):
+        tensor = torch.randn(1, 5).t()
+        meta_clone = prims._clone_meta(tensor, memory_format=torch.preserve_format)
+        self.assertEqual(tensor.stride(), meta_clone.stride())
+
+    def test_clone_meta_stride_preservation_sparse(self):
+        tensor = torch.arange(12).float().view(3, 4)[1:, ::2]
+        meta_clone = prims._clone_meta(tensor, memory_format=torch.preserve_format)
+        self.assertEqual(tensor.contiguous().stride(), meta_clone.stride())
 
     def test_check_deprecation_warning(self):
         with self.assertWarnsRegex(FutureWarning, 'will be removed in the future'):
             torch._prims_common.check(True, lambda: 'message')
 
 
-instantiate_device_type_tests(TestPrims, globals())
+instantiate_device_type_tests(
+    TestPrimsDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
+)
 
 
 class TestRefs(TestCase):
@@ -408,7 +440,7 @@ class TestRefs(TestCase):
         # enables prim decomps
         with torch._dispatch.python.enable_python_dispatcher():
             x = torch.ones(4)
-            y = x.to(device="meta")
+            x.to(device="meta")
 
     def test_inferred_tags(self):
         self.assertEqual(torch.ops.prims.normal.default.tags, (torch.Tag.nondeterministic_seeded, torch.Tag.pt2_compliant_tag))

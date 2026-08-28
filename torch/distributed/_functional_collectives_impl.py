@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import List, Optional
 
 import torch
 import torch.distributed.distributed_c10d as c10d
@@ -60,7 +59,7 @@ def _reduce_scatter_tensor(
     input: torch.Tensor,
     reduce_op: str,
     tag: str,
-    ranks: List[int],
+    ranks: list[int],
     group_size: int,
 ):
     group_name = c10d._resolve_group_name_by_ranks_and_tag(ranks, tag)
@@ -73,10 +72,10 @@ def _reduce_scatter_tensor(
 
 
 def _reduce_scatter_tensor_coalesced(
-    inputs: List[torch.Tensor],
+    inputs: list[torch.Tensor],
     reduce_op: str,
     tag: str,
-    ranks: List[int],
+    ranks: list[int],
     group_size: int,
 ):
     group_name = c10d._resolve_group_name_by_ranks_and_tag(ranks, tag)
@@ -90,17 +89,18 @@ def _reduce_scatter_tensor_coalesced(
 
 def _all_to_all_single(
     input: torch.Tensor,
-    output_split_sizes: Optional[List[int]],
-    input_split_sizes: Optional[List[int]],
+    output_split_sizes: list[int] | None,
+    input_split_sizes: list[int] | None,
     tag: str,
-    ranks: List[int],
+    ranks: list[int],
     group_size: int,
 ):
     if output_split_sizes is None or input_split_sizes is None:
-        assert output_split_sizes is None and input_split_sizes is None, (
-            "output_split_sizes and input_split_sizes must either be "
-            "specified together or both set to None"
-        )
+        if not (output_split_sizes is None and input_split_sizes is None):
+            raise AssertionError(
+                "output_split_sizes and input_split_sizes must either be "
+                "specified together or both set to None"
+            )
         output_split_sizes = [input.shape[0] // group_size] * group_size
         input_split_sizes = output_split_sizes
 
@@ -115,3 +115,23 @@ def _all_to_all_single(
 
 def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     return torch.ops._c10d_functional.wait_tensor(tensor)
+
+
+def _isend(tensor: torch.Tensor, dst: int, tag: str, group_name):
+    return torch.ops._c10d_functional.isend(tensor, dst, tag, group_name)
+
+
+def _irecv(tensor: torch.Tensor, src: int, tag: str, group_name):
+    return torch.ops._c10d_functional.irecv(tensor, src, tag, group_name)
+
+
+def _batch_p2p_ops(
+    op_list: list[str],
+    peer_list: list[int],
+    tag_list: list[int],
+    tensors: list[torch.Tensor],
+    group_name: str,
+):
+    return torch.ops._c10d_functional.batch_p2p_ops(
+        op_list, peer_list, tag_list, tensors, group_name
+    )

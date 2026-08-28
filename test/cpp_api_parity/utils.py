@@ -177,7 +177,10 @@ def add_test(unit_test_class, test_name, test_fn):
 
 
 def set_cpp_tensors_requires_grad(cpp_tensor_stmts, python_tensors):
-    assert len(cpp_tensor_stmts) == len(python_tensors)
+    if len(cpp_tensor_stmts) != len(python_tensors):
+        raise AssertionError(
+            f"Expected len(cpp_tensor_stmts) == len(python_tensors), got {len(cpp_tensor_stmts)} vs {len(python_tensors)}"
+        )
     return [
         f"{tensor_stmt}.requires_grad_(true)"
         if tensor.dtype != torch.long
@@ -259,7 +262,10 @@ def serialize_arg_dict_as_script_module(arg_dict):
     )
     arg_dict_module = torch.nn.Module()
     for arg_name, arg_value in arg_dict_flat.items():
-        assert isinstance(arg_value, torch.Tensor)
+        if not isinstance(arg_value, torch.Tensor):
+            raise AssertionError(
+                f"Expected arg_value to be Tensor, got {type(arg_value)} for arg '{arg_name}'"
+            )
         arg_dict_module.register_buffer(arg_name, arg_value)
 
     return torch.jit.script(arg_dict_module)
@@ -337,7 +343,10 @@ def compute_arg_dict(test_params_dict, test_instance):
 def decorate_test_fn(test_fn, test_cuda, has_impl_parity, device):
     if device == "cuda":
         test_fn = unittest.skipIf(not TEST_CUDA, "CUDA unavailable")(test_fn)
-        test_fn = unittest.skipIf(not test_cuda, "Excluded from CUDA tests")(test_fn)
+    if device != "cpu":
+        test_fn = unittest.skipIf(not test_cuda, "Excluded from accelerator tests")(
+            test_fn
+        )
 
     # If `Implementation Parity` entry in parity table for this module is `No`,
     # or `has_parity` entry in test params dict is `False`, we mark the test as

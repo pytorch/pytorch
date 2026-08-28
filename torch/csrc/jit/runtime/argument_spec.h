@@ -2,6 +2,7 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <c10/util/bit_cast.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/Export.h>
@@ -18,7 +19,7 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 namespace torch::jit {
 
 // GraphExecutor creates specializations of Graphs for different
-// dimensionalitities and types of inputs.
+// dimensionalities and types of inputs.
 
 struct ArgumentInfo {
   friend struct ArgumentSpec;
@@ -101,7 +102,7 @@ struct ArgumentSpec {
     const at::Tensor* t = reinterpret_cast<const at::Tensor*>(&input);
     arg.defined_ = t->defined();
     if (arg.defined_) {
-      arg.requires_grad_ = with_grad && autograd::Variable(*t).requires_grad();
+      arg.requires_grad_ = with_grad && t->requires_grad();
       arg.dim_ = t->dim();
       at::Device device = t->device();
       arg.dev_type_ =
@@ -115,9 +116,8 @@ struct ArgumentSpec {
   }
 
   void combineHash(const ArgumentInfo& arg) {
-    ArgumentInfo::plain_data_type arg_data = 0;
-    std::memcpy(&arg_data, &arg, sizeof(ArgumentInfo));
-    hash_code = c10::hash_combine(hash_code, arg_data);
+    hash_code = c10::hash_combine(
+        hash_code, c10::bit_cast<ArgumentInfo::plain_data_type>(arg));
   }
 
   // equality is fast: check ninputs, and then check the raw array data,
@@ -153,7 +153,7 @@ struct ArgumentSpec {
   bool isPresent(size_t i) const {
     return optional_presence[i];
   }
-  size_t hashCode() const {
+  size_t hashCode() const noexcept {
     return hash_code;
   }
 
@@ -181,7 +181,7 @@ struct TORCH_API ArgumentSpecCreator {
     ENTER_OBJECT, // same as ENTER_TUPLE, but the input is a class
     LEAVE, // pop the top-most list from the stack
     SKIP, // consume an element from the top-most list, and discard
-    SPECIALIZE_OPTIONAL_TENSOR, // consume a optional tensor for the top-most
+    SPECIALIZE_OPTIONAL_TENSOR, // consume an optional tensor for the top-most
                                 // list, and add it to the ArgSpec key being
                                 // created
     SPECIALIZE_TENSOR, // consume a tensor for the top-most
@@ -240,8 +240,8 @@ struct CompleteArgumentInfo;
 
 struct CompleteArgumentSpec {
   CompleteArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs)
-      : hash_code(0), ninputs(inputs.size()) {
-    int32_t all_dims = 0;
+      : ninputs(inputs.size()) {
+    int64_t all_dims = 0;
     const auto num_inputs = inputs.size();
     for (const auto i : c10::irange(num_inputs)) {
       if (!inputs[i].isTensor())
@@ -308,7 +308,7 @@ struct CompleteArgumentSpec {
   size_t size() const {
     return ninputs;
   }
-  size_t hashCode() const {
+  size_t hashCode() const noexcept {
     return hash_code;
   }
 
@@ -325,7 +325,7 @@ struct CompleteArgumentSpec {
   int64_t* sizes_strides() {
     return data.data() + ninputs;
   }
-  size_t hash_code; // precomputed on construction
+  size_t hash_code{0}; // precomputed on construction
   size_t ninputs;
   // layout is ninputs of TensorPOD (each 64-bit) followed by their size and
   // stride info for 3 tensors:
@@ -380,7 +380,7 @@ struct CompleteArgumentInfo {
   }
 
  private:
-  // offsetinto sizes_strides() array where the sizes start for tensor j
+  // offset into sizes_strides() array where the sizes start for tensor j
   // [valid range] valid range is [0, ninputs]
   // (i.e. you can ask for the offset at ninputs, which would be the offset of
   // the next tensor if it existed)
@@ -402,12 +402,12 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentInfo& info) {
   }
   out << "Tensor(device=" << info.device() << ", type=" << toString(info.type())
       << ", requires_grad=" << info.requires_grad() << ", dims=" << info.dim()
-      << ")";
+      << ')';
   return out;
 }
 
 inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
-  out << "{";
+  out << '{';
   for (const auto i : c10::irange(spec.numTensors())) {
     if (i > 0)
       out << ", ";
@@ -419,7 +419,7 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
       out << ", ";
     out << spec.isPresent(i);
   }
-  out << "}";
+  out << '}';
   return out;
 }
 
@@ -431,20 +431,20 @@ inline std::ostream& operator<<(
   }
   out << "Tensor(device=" << info.device() << ", type=" << toString(info.type())
       << ", requires_grad=" << info.requires_grad()
-      << ", sizes=" << info.sizes() << ", strides=" << info.strides() << ")";
+      << ", sizes=" << info.sizes() << ", strides=" << info.strides() << ')';
   return out;
 }
 
 inline std::ostream& operator<<(
     std::ostream& out,
     const CompleteArgumentSpec& spec) {
-  out << "{";
+  out << '{';
   for (const auto i : c10::irange(spec.size())) {
     if (i > 0)
       out << ", ";
     out << spec.at(i);
   }
-  out << "}";
+  out << '}';
   return out;
 }
 
@@ -454,8 +454,8 @@ inline CompleteArgumentInfo CompleteArgumentSpec::at(size_t i) const {
 
 inline std::optional<int8_t> convertOptional(
     std::optional<c10::ScalarType> const& from) {
-  return (from) ? std::optional<int8_t>(static_cast<int8_t>(*from))
-                : std::optional<int8_t>{};
+  return from ? std::optional<int8_t>(static_cast<int8_t>(*from))
+              : std::optional<int8_t>{};
 }
 
 } // namespace torch::jit
@@ -488,13 +488,14 @@ struct hash<c10::TensorType> {
 
 template <>
 struct hash<torch::jit::ArgumentSpec> {
-  size_t operator()(const torch::jit::ArgumentSpec& spec) const {
+  size_t operator()(const torch::jit::ArgumentSpec& spec) const noexcept {
     return spec.hashCode();
   }
 };
 template <>
 struct hash<torch::jit::CompleteArgumentSpec> {
-  size_t operator()(const torch::jit::CompleteArgumentSpec& spec) const {
+  size_t operator()(
+      const torch::jit::CompleteArgumentSpec& spec) const noexcept {
     return spec.hashCode();
   }
 };

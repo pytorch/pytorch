@@ -17,10 +17,6 @@
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
-#include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
-#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_native.h>
 #include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
@@ -67,7 +63,7 @@ namespace at::native {
 namespace {
 // dense_to_sparse_{csr,bsr,csc,bsc} common helpers
 
-// Preparation fo the N-D dense -> sparse compressed conversion.
+// Preparation for the N-D dense -> sparse compressed conversion.
 // The N-D input is converted to 3-D (single batch dim) where we check that the
 // product of batch dims is nonzero and for each batch the sparse matrix
 // contained within has the same number of non-zero elements.
@@ -343,7 +339,8 @@ Tensor _to_copy(
   }
 
   bool pin_out =
-      (non_blocking && (self.is_cuda() || self.is_privateuseone()) &&
+      (non_blocking &&
+       at::accelerator::isAcceleratorExcluded(self.device().type(), at::kMPS) &&
        options.device().is_cpu() && (options.layout() == c10::kStrided));
 
   if (memory_format == MemoryFormat::Preserve) {
@@ -584,6 +581,7 @@ Tensor to(
 // across tensors.
 std::vector<Tensor> _to_cpu(TensorList tensors) {
   std::vector<Tensor> cpu_tensors;
+  cpu_tensors.reserve(tensors.size());
   for (const auto& t : tensors) {
     cpu_tensors.push_back(t.cpu());
   }
@@ -651,7 +649,6 @@ Tensor to_dense_backward(
     default:
       TORCH_CHECK(
           false, "to_dense_backward: Unsupported input layout: ", input_layout);
-      return Tensor{};
   }
 }
 
@@ -751,7 +748,20 @@ Tensor sparse_compressed_to_dense(
     dense_reshaped_sizes.erase(
         dense_reshaped_sizes.begin(), dense_reshaped_sizes.begin() + 2);
   } else {
+    TORCH_CHECK(
+        values.dim() >= 4,
+        "sparse_compressed_to_dense: expected values to have at least 4 dimensions, but got ",
+        values.dim());
+
     std::array<int64_t, 2> blocksize = {values.size(2), values.size(3)};
+
+    TORCH_CHECK(
+        blocksize[0] > 0 && blocksize[1] > 0,
+        "sparse_compressed_to_dense: expected block sizes to be strictly positive, but got ",
+        blocksize[0],
+        " and ",
+        blocksize[1]);
+
     nrows = self.size(batch_ndim) / blocksize[0];
     ncols = self.size(batch_ndim + 1) / blocksize[1];
     dense_reshaped_sizes[1] = blocksize[0];
@@ -805,7 +815,7 @@ Tensor sparse_compressed_to_dense(
 
 // Computes the strides for view_dtype output when the view dtype is
 // smaller than the original dtype
-inline SymDimVector compute_strides_for_view_dtype_downsize(
+static inline SymDimVector compute_strides_for_view_dtype_downsize(
     SymIntArrayRef old_strides,
     int64_t size_ratio,
     ScalarType old_dtype,
@@ -831,7 +841,7 @@ inline SymDimVector compute_strides_for_view_dtype_downsize(
 
 // Computes the strides for view_dtype output when the view dtype is
 // larger than the original dtype
-inline SymDimVector compute_strides_for_view_dtype_upsize(
+static inline SymDimVector compute_strides_for_view_dtype_upsize(
     SymIntArrayRef old_strides,
     int64_t size_ratio,
     ScalarType old_dtype,
@@ -1012,32 +1022,23 @@ static Tensor _batch_tile_tensor(
 
 static Tensor _mask_to_indices(const Tensor& mask) {
   // This function returns a vector of the indices at which given
-  // boolean mask is True. at::nonzero can achieve the same, but
-  // we yet have to compare the performance difference.
-  TORCH_CHECK(
-      mask.dim() == 1, "Currently _mask_to_indices only supports 1-d masks.");
-  TORCH_CHECK(mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
-  return at::native::arange(mask.numel(), at::kLong, kStrided, mask.device())
-      .masked_select(mask);
+  // boolean mask is True. Here at::nonzero performs test (time/mem).
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      mask.dim() == 1, "_mask_to_indices only supports 1-d masks.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
+  return at::native::flatten(at::nonzero(mask));
 }
 
 static std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
-    Tensor not_zero_mask,
-    ScalarType index_dtype,
-    Device index_device) {
-  auto col_indices =
-      at::native::arange(
-          not_zero_mask.size(-1), index_dtype, kStrided, index_device)
-          .view({1, not_zero_mask.size(-1)})
-          .expand_as(not_zero_mask)
-          .masked_select(not_zero_mask);
-  auto row_indices =
-      at::native::arange(
-          not_zero_mask.size(-2), index_dtype, kStrided, index_device)
-          .view({not_zero_mask.size(-2), 1})
-          .expand_as(not_zero_mask)
-          .masked_select(not_zero_mask);
-  return std::pair<Tensor, Tensor>(col_indices, row_indices);
+    Tensor not_zero_mask) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      not_zero_mask.dim() == 2,
+      "_not_zero_mask_to_col_row_indices only supports 2-d masks.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      not_zero_mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
+  auto nz = not_zero_mask.nonzero();
+  return {nz.select(1, 1), nz.select(1, 0)};
 }
 
 // Sparse layout conversions Start
@@ -1190,7 +1191,7 @@ static inline void _to_sparse_check_arguments(
               ": tensor sparse size (",
               self.size(sparse_row_dim),
               ",",
-              self.size(sparse_row_dim),
+              self.size(sparse_col_dim),
               ") must be divisible by given blocksize (",
               blocksize_to[0],
               ",",
@@ -1318,8 +1319,8 @@ static Tensor dense_to_sparse_compressed(
   Tensor col_indices;
   Tensor compressed_indices;
   if (compressed_rows_layout) {
-    std::tie(col_indices, row_indices) = _not_zero_mask_to_col_row_indices(
-        not_zero_mask, at::kLong, not_zero_mask.device());
+    std::tie(col_indices, row_indices) =
+        _not_zero_mask_to_col_row_indices(not_zero_mask);
     compressed_indices = at::_convert_indices_from_coo_to_csr(
         row_indices, not_zero_mask.size(0), false /*out_int32*/);
     {
@@ -1327,8 +1328,8 @@ static Tensor dense_to_sparse_compressed(
       values = values.flatten(0, 1).index_select(0, mask_indices);
     }
   } else {
-    std::tie(row_indices, col_indices) = _not_zero_mask_to_col_row_indices(
-        not_zero_mask.transpose(1, 0), at::kLong, not_zero_mask.device());
+    std::tie(row_indices, col_indices) =
+        _not_zero_mask_to_col_row_indices(not_zero_mask.transpose(1, 0));
     compressed_indices = at::_convert_indices_from_coo_to_csr(
         col_indices, not_zero_mask.size(-1), false /*out_int32*/);
     {
@@ -1407,7 +1408,6 @@ Tensor dense_to_sparse_with_mask(
       " to ",
       layout_to,
       " conversion not supported");
-  return Tensor{};
 }
 
 Tensor dense_to_sparse_csr(
@@ -1490,7 +1490,6 @@ Tensor dense_to_sparse(
       " to ",
       layout_to,
       " conversion not supported");
-  return Tensor{};
 }
 
 Tensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
@@ -1707,7 +1706,7 @@ static Tensor sparse_compressed_to_flipped(
 
   // Step 4:
   // Convert the COO indices to the CSC/BSC indices and form the output.
-  // We need to sort COO indices along the "tranposed" dim to satisfy the
+  // We need to sort COO indices along the "transposed" dim to satisfy the
   // invariant of sorted plain indices.
   // Hash coo indices by converting 2d indices to linear offsets with
   // more "weight" (aka stride) placed on the "transposed" dimension.
@@ -1774,7 +1773,6 @@ Tensor sparse_compressed_to_sparse_csr(
       false,
       "sparse_compressed_to_sparse_csr: expected SparseCsr or SparseCsc layout but got ",
       self.layout());
-  return Tensor{};
 }
 
 Tensor sparse_compressed_to_sparse_csc(
@@ -1795,7 +1793,6 @@ Tensor sparse_compressed_to_sparse_csc(
       false,
       "sparse_compressed_to_sparse_csc: expected SparseCsr or SparseCsc layout but got ",
       self.layout());
-  return Tensor{};
 }
 
 Tensor coo_to_sparse_csr(
@@ -1988,7 +1985,7 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu)
  * Modified to ensure sorted BSR column indices.
  */
 template <class index_t, class scalar_t, bool compressed_rows>
-void _compressed_to_block_compressed_cpu_kernel(
+static void _compressed_to_block_compressed_cpu_kernel(
     const index_t n_compressed, // Tensor size along compressed dimension
     const index_t n_plain, // Tensor size along plain dimension
     const index_t C, // Block size along compressed dimensions
@@ -2085,7 +2082,7 @@ void _compressed_to_block_compressed_cpu_kernel(
  * https://github.com/scipy/scipy/blob/8a64c938ddf1ae4c02a08d2c5e38daeb8d061d38/scipy/sparse/sparsetools/csr.h
  */
 template <class index_t>
-index_t compressed_count_blocks(
+static index_t compressed_count_blocks(
     const index_t n_compressed, // Tensor size along compressed dimension
     const index_t n_plain, // Tensor size along plain dimension
     const index_t C, // Block size along compressed dimensions
@@ -2109,7 +2106,7 @@ index_t compressed_count_blocks(
 }
 
 template <Layout target_layout>
-Tensor _compressed_to_block_compressed_cpu(
+static Tensor _compressed_to_block_compressed_cpu(
     const Tensor& self,
     IntArrayRef blocksize) {
   static_assert(
@@ -2146,8 +2143,8 @@ Tensor _compressed_to_block_compressed_cpu(
             plain_dim,
             compressed_blocksize,
             plain_blocksize,
-            input_compressed_indices.data_ptr<index_t>(),
-            input_plain_indices.data_ptr<index_t>());
+            input_compressed_indices.const_data_ptr<index_t>(),
+            input_plain_indices.const_data_ptr<index_t>());
       });
   DimVector dense_shape{input_values.sizes().slice(1, input_values.dim() - 1)};
   DimVector values_shape{num_blocks, blocksize[0], blocksize[1]};
@@ -2178,9 +2175,9 @@ Tensor _compressed_to_block_compressed_cpu(
                   compressed_blocksize,
                   plain_blocksize,
                   n_dense,
-                  input_compressed_indices.data_ptr<index_t>(),
-                  input_plain_indices.data_ptr<index_t>(),
-                  input_values.data_ptr<scalar_t>(),
+                  input_compressed_indices.const_data_ptr<index_t>(),
+                  input_plain_indices.const_data_ptr<index_t>(),
+                  input_values.const_data_ptr<scalar_t>(),
                   result_compressed_indices.data_ptr<index_t>(),
                   result_plain_indices.data_ptr<index_t>(),
                   result_values.data_ptr<scalar_t>());
@@ -2230,7 +2227,6 @@ Tensor sparse_compressed_to_sparse_bsr(
       false,
       "sparse_compressed_to_sparse_bsr: expected SparseCsr, SparseCsc, SparseBsr or SparseBsc layout but got ",
       self.layout());
-  return Tensor{};
 }
 
 Tensor sparse_compressed_to_sparse_bsc(
@@ -2268,7 +2264,6 @@ Tensor sparse_compressed_to_sparse_bsc(
       false,
       "sparse_compressed_to_sparse_bsc: expected SparseCsr, SparseCsc, SparseBsr or SparseBsc layout but got ",
       self.layout());
-  return Tensor{};
 }
 
 Tensor sparse_coo_to_sparse(const Tensor& self, const int64_t sparse_dim) {
@@ -2281,7 +2276,6 @@ Tensor sparse_coo_to_sparse(const Tensor& self, const int64_t sparse_dim) {
       " to ",
       kSparse,
       " conversion not supported");
-  return Tensor{};
 }
 
 Tensor sparse_compressed_to_sparse(
@@ -2385,7 +2379,6 @@ Tensor sparse_compressed_to_sparse(
       " to ",
       layout_to,
       " conversion not supported");
-  return Tensor{};
 }
 
 Tensor sparse_coo_to_sparse(
@@ -2422,7 +2415,6 @@ Tensor sparse_coo_to_sparse(
       " to ",
       layout_to,
       " conversion not supported");
-  return Tensor{};
 }
 
 Tensor to_sparse(const Tensor& self, const int64_t sparse_dim) {

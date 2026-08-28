@@ -58,10 +58,7 @@ static void sigmoid_kernel(TensorIteratorBase& iter) {
             return (static_cast<scalar_t>(1) / (static_cast<scalar_t>(1) + std::exp((-a))));
           },
           [=](Vectorized<scalar_t> a) {
-            a = Vectorized<scalar_t>(static_cast<scalar_t>(0)) - a;
-            a = a.exp();
-            a = Vectorized<scalar_t>(static_cast<scalar_t>(1)) + a;
-            a = a.reciprocal();
+            a = (Vectorized<scalar_t>(static_cast<scalar_t>(1)) + a.neg().exp()).reciprocal();
             return a;
           });
     });
@@ -171,7 +168,12 @@ static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
                     : std::log(x / (scalar_t(1) - x));
               },
               [kOneVec, lo_vec, hi_vec](Vectorized<scalar_t> x_vec) {
-                x_vec = vec::clamp(x_vec, lo_vec, hi_vec);
+                // Apply lo last so it wins when eps > 1 - eps, matching
+                // the scalar `x < lo ? lo : (x > hi ? hi : x)` priority.
+                x_vec = Vectorized<scalar_t>::blendv(
+                    Vectorized<scalar_t>::blendv(x_vec, hi_vec, x_vec > hi_vec),
+                    lo_vec,
+                    x_vec < lo_vec);
                 return (x_vec / (kOneVec - x_vec)).log();
               });
         }

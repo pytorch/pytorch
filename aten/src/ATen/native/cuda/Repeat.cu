@@ -17,16 +17,23 @@ __global__ static void compute_cuda_kernel(
     index_t* result_ptr,
     int64_t size,
     int64_t result_size) {
-  CUDA_KERNEL_ASSERT(result_size == cumsum_ptr[size - 1]);
-  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  CUDA_KERNEL_ASSERT_PRINTF(
+      result_size == cumsum_ptr[size - 1],
+      "Invalid input! In `repeat_interleave`, the `output_size` argument (%ld) must be the same as the sum of the elements in the `repeats` tensor (%ld).\n",
+      result_size,
+      cumsum_ptr[size - 1]);
+
+  int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   int64_t stride = (blockDim.x * gridDim.x) / C10_WARP_SIZE;
   int warp_id = idx / C10_WARP_SIZE;
   int tid_in_warp = idx % C10_WARP_SIZE;
   for (int64_t i = warp_id; i < size; i += stride) {
     int64_t end = cumsum_ptr[i];
     index_t repeat = repeat_ptr[i];
-    CUDA_KERNEL_ASSERT(repeat >= 0);
     int64_t start = end - repeat;
+    // A negative repeat makes the cumsum non-monotonic, so even a non-negative
+    // element can yield start < 0 or end > result_size and write out of bounds.
+    CUDA_KERNEL_ASSERT(repeat >= 0 && start >= 0 && end <= result_size);
     for (int64_t j = start + tid_in_warp; j < end; j += C10_WARP_SIZE) {
       result_ptr[j] = i;
     }

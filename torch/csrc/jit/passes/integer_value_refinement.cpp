@@ -1,4 +1,3 @@
-#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/integer_value_refinement.h>
@@ -61,7 +60,7 @@ struct IntegerValueRefiner {
     // same value, which opens up further optimization opportunities. The pass
     // will already handle if both outputs are refined to the same constant.
     // Here, we look for cases where one block output has been refined in the
-    // other block to be equal to the same constant value as the other other
+    // other block to be equal to the same constant value as the other
     // block output:
     //  graph(%y.1 : int):
     //   %one_constant : int = prim::Constant[value=1]()
@@ -103,7 +102,7 @@ struct IntegerValueRefiner {
         // to the constant value of %one_constant
         const auto& other_block_refinements =
             block_index == 0 ? false_block_refinements : true_block_refinements;
-        if (!other_block_refinements.count(block_output)) {
+        if (!other_block_refinements.contains(block_output)) {
           continue;
         }
         if (other_block_refinements.at(block_output) == *other_const_value) {
@@ -151,7 +150,7 @@ struct IntegerValueRefiner {
 
       if (n->kind() == prim::If) {
         IfView if_n(n);
-        bool has_cond_ref = info_.count(if_n.cond()) != 0;
+        bool has_cond_ref = info_.contains(if_n.cond());
         IntegerRefinement empty;
         auto true_block_refinements = RefineIntegerValues(
             if_n.thenBlock(),

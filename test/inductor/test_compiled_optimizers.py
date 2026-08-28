@@ -1,16 +1,21 @@
 # Owner(s): ["module: inductor"]
 
+import random
 import sys
+import types
 import unittest
 import weakref
 from contextlib import ExitStack
 from copy import deepcopy
 from typing import NamedTuple
 
+from expecttest import assert_expected_inline
+
 import torch
 import torch._inductor
 import torch._inductor.cudagraph_trees
 import torch.optim.lr_scheduler
+from torch._higher_order_ops import foreach_map
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch.optim import (
@@ -41,6 +46,7 @@ from torch.optim.lr_scheduler import (
     OneCycleLR,
     PolynomialLR,
     ReduceLROnPlateau,
+    SequentialLR,
     StepLR,
 )
 from torch.testing._internal.common_device_type import (
@@ -53,14 +59,91 @@ from torch.testing._internal.common_optimizers import (
     optim_db,
     optims,
 )
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import (
+    parametrize,
+    skipIfRocm,
+    skipIfWindows,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
     has_triton,
 )
-from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
+from torch.testing._internal.triton_utils import requires_gpu, requires_gpu_and_triton
+
+
+def get_inputs(optim):
+    steps = []
+    params = []
+    grads = []
+    exp_avgs = []
+    exp_avg_sqs = []
+    for group in optim.param_groups:
+        for p in group["params"]:
+            params.append(p)
+            grads.append(p.grad)
+            state = optim.state[p]
+            exp_avgs.append(state["exp_avg"])
+            exp_avg_sqs.append(state["exp_avg_sq"])
+            steps.append(state["step"])
+
+    return steps, params, exp_avgs, exp_avg_sqs
+
+
+def update_exp_avg_sq(exp_avg_sq, grad, beta2):
+    return exp_avg_sq.mul(beta2).addcmul(grad, grad, value=1 - beta2)
+
+
+def update_param(param, step, exp_avg, exp_avg_sq, beta1, beta2, lr, eps):
+    bias_correction1 = 1 - torch.pow(beta1, step)
+    bias_correction2 = (1 - torch.pow(beta2, step)).sqrt()
+    step_size = (lr / bias_correction1).neg()
+    denom = (exp_avg_sq.sqrt() / (bias_correction2 * step_size)).add(eps / step_size)
+    return torch.add(param, torch.div(exp_avg, denom))
+
+
+def foreach_map_adam(
+    steps,
+    params,
+    exp_avgs,
+    exp_avg_sqs,
+    weight_decay=0,
+    beta1=0.9,
+    beta2=0.999,
+    lr=1e-3,
+    eps=1e-8,
+):
+    with torch.no_grad():
+        grads = [param.grad for param in params]
+        # update step
+        updated_steps = foreach_map(lambda x: x + 1, steps)
+        torch._foreach_copy_(steps, updated_steps)
+
+        if weight_decay != 0:
+            foreach_map(torch.add, (grads,), alpha=weight_decay)
+
+        # HOPS cannot have multiple outputs at the moment
+        # need to call foreach_map once for each output
+        exp_avgs_updated = foreach_map(torch.lerp, exp_avgs, grads, 1 - beta1)
+        exp_avgs_sq_updated = foreach_map(update_exp_avg_sq, exp_avg_sqs, grads, beta2)
+        params_updated = foreach_map(
+            update_param,
+            params,
+            steps,
+            exp_avgs_updated,
+            exp_avgs_sq_updated,
+            beta1,
+            beta2,
+            lr,
+            eps,
+        )
+        # No input mutation for HOPS
+        torch._foreach_copy_(exp_avgs, exp_avgs_updated)
+        torch._foreach_copy_(exp_avg_sqs, exp_avgs_sq_updated)
+        torch._foreach_copy_(params, params_updated)
+    return
 
 
 # Note: we use atypical values to amplify error
@@ -70,11 +153,9 @@ LR_SCHEDULER_TO_KWARGS = {
     StepLR: {"step_size": 1, "gamma": 100},
     MultiStepLR: {"milestones": [1, 2], "gamma": 100},
     ExponentialLR: {"gamma": 100},
+    SequentialLR: {"schedulers": None, "milestones": [1, 2]},
     CosineAnnealingLR: {"T_max": 7},
-    # These schedulers have memory leaks in eager
-    # https://github.com/pytorch/pytorch/issues/126131
-    # SequentialLR: {"schedulers": None, "milestones": [1, 2]},
-    # ChainedScheduler: {"schedulers": None},
+    ChainedScheduler: {"schedulers": None},
     CyclicLR: {"base_lr": 0.001, "max_lr": 0.02, "cycle_momentum": False},
     CosineAnnealingWarmRestarts: {"T_0": 1},
     OneCycleLR: {
@@ -91,7 +172,7 @@ LR_SCHEDULER_TO_KWARGS = {
 
 
 def create_scheduler(scheduler, optim):
-    kwargs = LR_SCHEDULER_TO_KWARGS[scheduler]
+    kwargs = deepcopy(LR_SCHEDULER_TO_KWARGS[scheduler])
     if "schedulers" in kwargs:
         kwargs["schedulers"] = [
             create_scheduler(torch.optim.lr_scheduler.ConstantLR, optim)
@@ -113,69 +194,78 @@ class KernelCounts(NamedTuple):
 # tests you can get different kernel counts
 # This maps the test name to the
 # expected kernel count
+
+# fmt: off
+# expecttest got error after PYFMT add line break for the triple quotes
 KERNEL_COUNT_OVERRIDES = {
-    "test_rmsprop_foreach_weight_decay_cpu": 12,
-    "test_nadam_foreach_weight_decay_momentum_decay_cpu": 20,
-    "test_adamw_amsgrad_capturable_foreach_cuda": 3,
-    "test_adamw_amsgrad_capturable_foreach_xpu": 3,
-    "test_adamw_amsgrad_capturable_cuda": 6,
-    "test_adamw_amsgrad_capturable_xpu": 6,
-    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_cuda": 6,
-    "test_adamw_tensor_lr_tensor_betas_capturable_cuda": 6,
-    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_xpu": 6,
-    "test_adamw_tensor_lr_amsgrad_capturable_cuda": 6,
-    "test_adamw_tensor_lr_amsgrad_capturable_xpu": 6,
-    "test_adam_tensor_lr_amsgrad_capturable_cuda": 6,
-    "test_adam_tensor_lr_amsgrad_capturable_xpu": 6,
-    "test_adam_tensor_lr_tensor_betas_amsgrad_capturable_cuda": 6,
-    "test_adam_tensor_lr_tensor_betas_capturable_cuda": 6,
-    "test_adam_amsgrad_capturable_cuda": 6,
-    "test_adam_amsgrad_capturable_xpu": 6,
-    "test_adadelta_tensor_lr_capturable_cuda": 6,
-    "test_adadelta_tensor_lr_capturable_xpu": 6,
-    "test_rmsprop_tensor_lr_capturable_cuda": 6,
-    "test_rmsprop_tensor_lr_capturable_xpu": 6,
-    "test_adadelta_foreach_weight_decay_maximize_cpu": 12,
-    "test_adadelta_foreach_rho_weight_decay_cpu": 12,
-    "test_adadelta_foreach_weight_decay_cpu": 12,
-    "test_sgd_foreach_momentum_weight_decay_cpu": 16,
-    "test_sgd_foreach_momentum_nesterov_weight_decay_cpu": 16,
-    "test_sgd_momentum_dampening_foreach_cuda": 5,
-    "test_sgd_momentum_dampening_foreach_xpu": 5,
-    "test_sgd_momentum_foreach_cuda": 5,
-    "test_sgd_momentum_foreach_xpu": 5,
-    "test_sgd_weight_decay_maximize_cuda": 4,
-    "test_sgd_weight_decay_maximize_xpu": 4,
-    "test_sgd_weight_decay_maximize_cpu": 4,
-    "test_sgd_weight_decay_cpu": 4,
-    "test_sgd_weight_decay_cuda": 4,
-    "test_sgd_weight_decay_xpu": 4,
-    "test_sgd_momentum_weight_decay_foreach_cuda": 2,
-    "test_sgd_momentum_weight_decay_foreach_xpu": 2,
-    "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": 2,
-    "test_sgd_momentum_nesterov_weight_decay_foreach_xpu": 2,
-    "test_sgd_cuda": 4,
-    "test_sgd_cpu": 4,
-    "test_sgd_xpu": 4,
-    "test_adagrad_initial_accumulator_value_weight_decay_foreach_xpu": 2,
-    "test_adagrad_lr_decay_weight_decay_foreach_xpu": 2,
-    "test_adagrad_weight_decay_foreach_xpu": 2,
-    "test_adagrad_weight_decay_maximize_foreach_xpu": 2,
-    "test_adagrad_tensor_lr_cpu": 6,
-    "test_adagrad_tensor_lr_cuda": 6,
-    "test_adagrad_tensor_lr_xpu": 6,
-    "test_adamax_tensor_lr_weight_decay_capturable_cuda": 6,
-    "test_adamax_tensor_lr_weight_decay_capturable_xpu": 6,
-    "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 5,
-    "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": 8,
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 6,
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": 9,
-    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": 6,
-    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": 6,
-    "test_sgd_tensor_lr_cpu": 2,
-    "test_sgd_tensor_lr_cuda": 2,
-    "test_sgd_tensor_lr_xpu": 2,
+    "test_rmsprop_foreach_weight_decay_cpu": lambda x: assert_expected_inline(x, """12""") ,
+    "test_nadam_foreach_weight_decay_momentum_decay_cpu": lambda x: assert_expected_inline(x, """20"""),
+    "test_adam_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_amsgrad_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_amsgrad_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adam_weight_decay_maximize_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adamw_amsgrad_capturable_foreach_cuda": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_amsgrad_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_tensor_lr_tensor_betas_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_tensor_lr_tensor_betas_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_tensor_lr_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_tensor_lr_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_tensor_lr_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_tensor_lr_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_tensor_lr_tensor_betas_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_tensor_lr_tensor_betas_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_tensor_lr_tensor_betas_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_tensor_lr_tensor_betas_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adadelta_tensor_lr_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adadelta_tensor_lr_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_rmsprop_tensor_lr_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_rmsprop_tensor_lr_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adadelta_foreach_weight_decay_maximize_cpu": lambda x: assert_expected_inline(x, """12"""),
+    "test_adadelta_foreach_rho_weight_decay_cpu": lambda x: assert_expected_inline(x, """12"""),
+    "test_adadelta_foreach_weight_decay_cpu": lambda x: assert_expected_inline(x, """12"""),
+    "test_sgd_foreach_momentum_weight_decay_cpu": lambda x: assert_expected_inline(x, """16"""),
+    "test_sgd_foreach_momentum_nesterov_weight_decay_cpu": lambda x: assert_expected_inline(x, """16"""),
+    "test_sgd_momentum_dampening_foreach_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_sgd_momentum_dampening_foreach_xpu": lambda x: assert_expected_inline(x, """5"""),
+    "test_sgd_momentum_foreach_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_sgd_momentum_foreach_xpu": lambda x: assert_expected_inline(x, """5"""),
+    "test_sgd_weight_decay_maximize_cuda": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_weight_decay_maximize_xpu": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_weight_decay_maximize_cpu": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_weight_decay_cpu": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_weight_decay_cuda": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_weight_decay_xpu": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_momentum_weight_decay_foreach_cuda": lambda x: assert_expected_inline(x, """2"""),
+    "test_sgd_momentum_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": lambda x: assert_expected_inline(x, """2"""),
+    "test_sgd_momentum_nesterov_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_sgd_cuda": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_cpu": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_xpu": lambda x: assert_expected_inline(x, """4"""),
+    "test_adagrad_tensor_lr_cpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adagrad_tensor_lr_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adagrad_tensor_lr_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamax_tensor_lr_weight_decay_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamax_tensor_lr_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": lambda x: assert_expected_inline(x, """5"""),
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_sgd_tensor_lr_cpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_sgd_tensor_lr_cuda": lambda x: assert_expected_inline(x, """2"""),
+    "test_sgd_tensor_lr_xpu": lambda x: assert_expected_inline(x, """2"""),
 }
+# fmt: on
 
 # also tracks currently supported optimizers
 KERNEL_COUNTS = {
@@ -208,7 +298,7 @@ def build_opt_kwarg_db():
 
                 has_tensor_lr = False
                 for key, val in kwargs.items():
-                    if (not key == "lr" and not key == "betas") and (
+                    if (key != "lr" and key != "betas") and (
                         not isinstance(val, bool) or (isinstance(val, bool) and val)
                     ):
                         name += "_" + key
@@ -236,7 +326,7 @@ def build_opt_kwarg_db():
                     continue
 
                 if has_tensor_lr:
-                    for scheduler_cls in LR_SCHEDULER_TO_KWARGS.keys():
+                    for scheduler_cls in LR_SCHEDULER_TO_KWARGS:
                         name_w_scheduler = name + f"_{scheduler_cls.__name__.lower()}"
                         compiled_opt_db.append(
                             (
@@ -355,7 +445,7 @@ def make_test(
     closure=None,
     scheduler_cls=None,
     kernel_count=2,
-    device="cuda",
+    device=GPU_TYPE,
     **kwargs,
 ):
     @config.patch("score_fusion_memory_threshold", 1)
@@ -369,7 +459,7 @@ def make_test(
                 stack.enter_context(config.patch({"triton.cudagraphs": True}))
 
             kwargs_compiled = deepcopy(kwargs)
-            if isinstance(kwargs.get("lr", None), torch.Tensor):
+            if isinstance(kwargs.get("lr"), torch.Tensor):
                 kwargs["lr"] = kwargs["lr"].to(device)
                 kwargs_compiled["lr"] = kwargs_compiled["lr"].to(device)
 
@@ -407,7 +497,7 @@ def make_test(
                 scheduler_eager.last_epoch = 1
 
             with torch.set_grad_enabled(False):
-                for i in range(2):
+                for _ in range(2):
                     compiled_step()
                     opt_eager.step()
                     if scheduler_cls:
@@ -430,9 +520,12 @@ def make_test(
                 # currently, we compile the step and the rest of the computation
                 # separately because the step is a single element tensor
                 # hence, the usual kernel count is 2
-                self.assertEqual(
-                    torch._inductor.metrics.generated_kernel_count, kernel_count
-                )
+                if isinstance(kernel_count, types.LambdaType):
+                    kernel_count(str(torch._inductor.metrics.generated_kernel_count))
+                else:
+                    self.assertEqual(
+                        torch._inductor.metrics.generated_kernel_count, kernel_count
+                    )
         finally:
             stack.close()
 
@@ -463,10 +556,16 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
                 compiled_step()
 
             # perturb state to force recompile
-            # Adagrad doesn't reinitialize state on each step
             # SGD has an empty state
-            if optim_cls in (Adagrad, SGD):
+            if optim_cls is SGD:
                 opt_compiled.param_groups[0]["lr"] = 0.02
+            elif optim_cls is Adagrad:
+                state_tensor = opt_compiled.state[
+                    opt_compiled.param_groups[0]["params"][0]
+                ]["sum"]
+                opt_compiled.state[opt_compiled.param_groups[0]["params"][0]]["sum"] = (
+                    torch.zeros_like(state_tensor)
+                )
             elif optim_cls is Adam:  # ensure we are guarding on the data_ptr of states
                 state_tensor = opt_compiled.state[
                     opt_compiled.param_groups[0]["params"][0]
@@ -479,7 +578,7 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
             compiled_step()
 
-        if self.check_kernel_count:
+        if self.check_kernel_count and kernel_count is not None:
             # currently, we compile the step and the rest of the computation
             # separately because the step is a single element tensor
             # hence, the usual kernel count is 2
@@ -500,6 +599,9 @@ class CompiledOptimizerParityTests(TestCase):
     @optims(optim_db, dtypes=[torch.float32])
     @parametrize("use_closure", [True, False])
     def test_correctness(self, device, dtype, optim_info, use_closure):
+        torch.get_device_module(device).manual_seed_all(0)
+        torch.manual_seed(0)
+        random.seed(0)
         optim_cls = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable",)
@@ -521,7 +623,10 @@ class CompiledOptimizerParityTests(TestCase):
                 torch._inductor.metrics.reset()
                 input = torch.ones([10, 10], device=device)
                 model_eager = torch.nn.Sequential(
-                    *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
+                    *[
+                        torch.nn.Linear(10, 10, device=device, bias=False)
+                        for _ in range(2)
+                    ]
                 )
                 model_eager(input).sum().backward()
                 model_compiled = deepcopy(model_eager)
@@ -621,6 +726,16 @@ class CompiledOptimizerTests(TestCase):
         self.assertIsNotNone(manager)
         self.assertEqual(manager.new_graph_id().id, 1)
 
+    def test_create_scheduler_does_not_mutate_kwargs(self):
+        for scheduler_cls in (ChainedScheduler, SequentialLR):
+            expected_kwargs = deepcopy(LR_SCHEDULER_TO_KWARGS[scheduler_cls])
+            model = torch.nn.Linear(1, 1)
+            opt = SGD(model.parameters(), lr=0.1)
+
+            create_scheduler(scheduler_cls, opt)
+
+            self.assertEqual(LR_SCHEDULER_TO_KWARGS[scheduler_cls], expected_kwargs)
+
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
@@ -628,7 +743,7 @@ class CompiledOptimizerTests(TestCase):
     test_rprop_recompile = make_recompile_test(Rprop, lr=0.01, kernel_count=2)
     test_rmsprop_recompile = make_recompile_test(RMSprop, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, lr=0.01)
-    test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)
+    test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01, kernel_count=None)
     test_asgd_recompile_default = make_recompile_test(ASGD, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
         ASGD, kernel_count=8, lr=0.01, foreach=False
@@ -641,6 +756,7 @@ class CompiledOptimizerTests(TestCase):
         SGD, kernel_count=1, lr=0.01, foreach=True
     )
 
+    @skipIfWindows
     @requires_gpu
     def test_static_address_finalizer(self):
         import gc
@@ -808,7 +924,7 @@ class CompiledOptimizerTests(TestCase):
         compiled = torch.compile(_get_value)
 
         x = torch.ones(2, 2)
-        mark_static_address(x)
+        mark_static_address(x, guard=True)
 
         ret_val = compiled(x)
 
@@ -833,7 +949,76 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertLess(end - start, 90)
 
-    @requires_cuda
+    @requires_gpu_and_triton
+    @skipIfRocm(msg="ROCm Triton compile time regresses on joined foreach bodies")
+    def test_foreach_shared_body_codegen(self):
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        def fn(xs, ys):
+            return torch._foreach_add(xs, ys)
+
+        for sizes, last_branch in (
+            ((1536, 2048, 2560), "elif pid < num_xblocks_2"),
+            ((1536, 2048, 2304), "elif pid % 3 == 2"),
+        ):
+            with (
+                self.subTest(sizes=sizes),
+                fresh_cache(),
+                config.patch(combo_kernel_allow_mixed_sizes=2),
+            ):
+                xs = [torch.randn(n, device=GPU_TYPE) for n in sizes]
+                ys = [torch.randn_like(x) for x in xs]
+                expected = torch._foreach_add(xs, ys)
+                actual, codes = run_and_get_code(
+                    torch.compile(fn, fullgraph=True), xs, ys
+                )
+
+            self.assertEqual(actual, expected)
+            foreach_codes = [
+                code for code in codes if "@triton_heuristics.foreach" in code
+            ]
+            self.assertEqual(len(foreach_codes), 1)
+            code = foreach_codes[0]
+            self.assertEqual(code.count("tl.load("), 2)
+            self.assertEqual(code.count("tl.store("), 1)
+            self.assertIn("foreach_arg0 = in_ptr0", code)
+            self.assertIn("foreach_arg0 = in_ptr2", code)
+            self.assertGreater(
+                code.rfind("tmp0 = tl.load(foreach_arg0"),
+                code.rfind(last_branch),
+            )
+
+    @requires_gpu_and_triton
+    def test_foreach_optimizer_shared_body_correctness(self):
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        def opt_step(params, grads, momentum):
+            torch._foreach_mul_(momentum, 0.9)
+            torch._foreach_add_(momentum, grads, alpha=0.1)
+            torch._foreach_add_(params, momentum, alpha=-0.01)
+            return params, momentum
+
+        params = [torch.randn(n, device=GPU_TYPE) for n in (1536, 2048, 2560)]
+        grads = [torch.randn_like(p) for p in params]
+        momentum = [torch.zeros_like(p) for p in params]
+        params_ref = [p.clone() for p in params]
+        momentum_ref = [m.clone() for m in momentum]
+
+        with fresh_cache():
+            _, codes = run_and_get_code(
+                torch.compile(opt_step, fullgraph=True), params, grads, momentum
+            )
+        opt_step(params_ref, grads, momentum_ref)
+
+        self.assertEqual(params, params_ref)
+        self.assertEqual(momentum, momentum_ref)
+        foreach_codes = [code for code in codes if "@triton_heuristics.foreach" in code]
+        if torch.version.hip is not None:
+            self.assertFalse(any("foreach_arg0" in code for code in foreach_codes))
+        else:
+            self.assertTrue(any("foreach_arg0" in code for code in foreach_codes))
+
+    @requires_gpu_and_triton
     def test_S429861(self):
         # Just verify we can compile this function without error
         try:
@@ -846,11 +1031,171 @@ class CompiledOptimizerTests(TestCase):
         import torch._dynamo
         import torch._inductor
         from torch._dynamo.debug_utils import aot_graph_input_parser
-        from torch._inductor.utils import fresh_inductor_cache
+        from torch._inductor.utils import fresh_cache
 
-        with fresh_inductor_cache():
-            kwargs = aot_graph_input_parser(forward)
+        with fresh_cache():
+            kwargs = aot_graph_input_parser(forward, device=GPU_TYPE)
             torch.compile(forward)(**kwargs)
+
+    @requires_gpu_and_triton
+    def test_foreach_map_adam(self):
+        params = [
+            torch.rand(
+                1000, 1000, dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+            )
+            for _ in range(10)
+        ]
+
+        for param in params:
+            param.grad = torch.rand_like(param)
+
+        params_ref = [p.detach().clone().requires_grad_(True) for p in params]
+        for param, param_ref in zip(params, params_ref):
+            param_ref.grad = param.grad.detach().clone()
+
+        optimizer = torch.optim.Adam(params, capturable=True, foreach=True)
+        optimizer_ref = torch.optim.Adam(params_ref, capturable=True, foreach=True)
+
+        # warm up the optimizer state
+        optimizer.step()
+        optimizer_ref.step()
+
+        inps = get_inputs(optimizer)
+
+        @torch.compile()
+        def foreach_map_adam_step():
+            foreach_map_adam(*inps)
+
+        def loop():
+            foreach_map_adam_step()
+            optimizer_ref.step()
+
+        loop()
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+        for param, param_ref in zip(params, params_ref):
+            self.assertEqual(param, param_ref)
+
+
+@skipIfRocm(msg="ROCm may have different numerical behavior")
+@requires_gpu_and_triton
+class CompiledOptimizerBitwiseTests(TestCase):
+    """
+    Tests that compiled optimizers produce bitwise identical results to eager
+    when precision configs are enabled.
+
+    These tests verify that with the following config options:
+    - eager_numerics.division_rounding = True
+    - eager_numerics.use_pytorch_libdevice = True
+    - emulate_precision_casts = True
+
+    The compiled optimizer step produces results that are bitwise identical
+    to the eager optimizer step.
+    """
+
+    @config.patch(
+        {
+            "score_fusion_memory_threshold": 1,
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.use_pytorch_libdevice": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_foreach_lerp_scalar_high_weight_bitwise(self):
+        cases = [
+            (0.9, (torch.float32, torch.float32)),
+            (0.1, (torch.float32, torch.float32)),
+            (0.9, (torch.float32, torch.float64)),
+            (0.49999999, (torch.float32, torch.float64)),
+            (0.9, (torch.float16, torch.float16)),
+        ]
+
+        for weight, dtypes in cases:
+            with self.subTest(weight=weight, dtypes=dtypes):
+
+                def fn(start, end):
+                    return torch._foreach_lerp(start, end, weight)
+
+                torch.manual_seed(42)
+                start = [
+                    torch.randn(32, device=GPU_TYPE, dtype=dtypes[0]),
+                    torch.randn(16, device=GPU_TYPE, dtype=dtypes[1]),
+                ]
+                end = [
+                    torch.randn(32, device=GPU_TYPE, dtype=dtypes[0]),
+                    torch.randn(16, device=GPU_TYPE, dtype=dtypes[1]),
+                ]
+                expected = fn(start, end)
+                actual = torch.compile(fn)(start, end)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @staticmethod
+    def _test_optimizer_bitwise(
+        test_case,
+        optim_cls,
+        kernel_count=None,
+        num_steps=10,
+        **optim_kwargs,
+    ):
+        """Helper to test optimizer bitwise equality."""
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        torch.manual_seed(42)
+
+        input = torch.ones([10, 10], device=GPU_TYPE)
+        model_eager = torch.nn.Sequential(
+            *[torch.nn.Linear(10, 10, device=GPU_TYPE) for _ in range(2)]
+        )
+        model_eager(input).sum().backward()
+
+        model_compiled = deepcopy(model_eager)
+        model_compiled(input).sum().backward()
+
+        opt_eager = optim_cls(model_eager.parameters(), **optim_kwargs)
+        opt_compiled = optim_cls(model_compiled.parameters(), **optim_kwargs)
+        compiled_step = compile_opt(opt_compiled)
+
+        with torch.set_grad_enabled(False):
+            for step in range(num_steps):
+                compiled_step()
+                opt_eager.step()
+
+                # Check bitwise equality
+                for i, (p_eager, p_compiled) in enumerate(
+                    zip(model_eager.parameters(), model_compiled.parameters())
+                ):
+                    test_case.assertEqual(
+                        p_eager,
+                        p_compiled,
+                        atol=0,
+                        rtol=0,
+                        msg=lambda msg: f"{msg}\nStep {step + 1}, param {i}: params differ",
+                    )
+
+        # Also check optimizer state
+        for p_eager, p_compiled in zip(
+            model_eager.parameters(), model_compiled.parameters()
+        ):
+            for key in opt_eager.state[p_eager]:
+                eager_val = opt_eager.state[p_eager][key]
+                compiled_val = opt_compiled.state[p_compiled][key]
+                if isinstance(eager_val, torch.Tensor):
+                    test_case.assertEqual(
+                        eager_val,
+                        compiled_val,
+                        atol=0,
+                        rtol=0,
+                        msg=lambda msg: f"{msg}\nState '{key}' differs",
+                    )
+
+        if kernel_count is not None and test_case.check_kernel_count:
+            if isinstance(kernel_count, types.LambdaType):
+                kernel_count(str(torch._inductor.metrics.generated_kernel_count))
+            else:
+                test_case.assertEqual(
+                    torch._inductor.metrics.generated_kernel_count, kernel_count
+                )
 
 
 for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
@@ -859,6 +1204,76 @@ for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
         name,
         make_test(optim_cls, scheduler_cls=scheduler_cls, **kwargs),
     )
+
+
+def _make_bitwise_test(optim_cls, kernel_count=None, **optim_kwargs):
+    @skipIfRocm(msg="ROCm may have different numerical behavior")
+    @skipIfXpu(msg="AttributeError, torch-xpu-ops: #2999")
+    @requires_gpu_and_triton
+    @config.patch(
+        {
+            "score_fusion_memory_threshold": 1,
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.use_pytorch_libdevice": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_fn(self):
+        CompiledOptimizerBitwiseTests._test_optimizer_bitwise(
+            self, optim_cls, kernel_count=kernel_count, **optim_kwargs
+        )
+
+    return test_fn
+
+
+_BITWISE_CAPTURABLE_OPTIMS = (
+    Adam,
+    AdamW,
+    Adadelta,
+    Adamax,
+    ASGD,
+    NAdam,
+    RAdam,
+    RMSprop,
+    Rprop,
+)
+# SGD doesn't support capturable but has no item() calls
+# so it compiles without graph breaks and can be tested bitwise.
+_BITWISE_NON_CAPTURABLE_OPTIMS = (SGD,)
+
+for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
+    if (
+        kwargs.get("device") == GPU_TYPE
+        and "tensor_lr" not in name
+        and scheduler_cls is None
+        and (
+            (
+                optim_cls in _BITWISE_CAPTURABLE_OPTIMS
+                and kwargs.get("capturable", False)
+            )
+            or optim_cls in _BITWISE_NON_CAPTURABLE_OPTIMS
+        )
+    ):
+        bitwise_name = name.replace("test_", "test_bitwise_")
+        # Use the same kernel count as the non-bitwise test, including
+        # any overrides for specific test configurations.
+        if name in KERNEL_COUNT_OVERRIDES:
+            kernel_count = KERNEL_COUNT_OVERRIDES[name]
+        else:
+            kernel_count = (
+                KERNEL_COUNTS[optim_cls].multitensor
+                if kwargs.get("foreach", False)
+                else KERNEL_COUNTS[optim_cls].singletensor
+            )
+        optim_kwargs = {
+            k: v for k, v in kwargs.items() if k not in ("device", "kernel_count")
+        }
+        setattr(
+            CompiledOptimizerTests,
+            bitwise_name,
+            _make_bitwise_test(optim_cls, kernel_count=kernel_count, **optim_kwargs),
+        )
+
 
 instantiate_device_type_tests(
     CompiledOptimizerParityTests, globals(), allow_xpu=True, except_for="cpu"

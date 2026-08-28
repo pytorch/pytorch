@@ -1,13 +1,14 @@
 def get_blas_gomp_arch_deps():
-    return [
-        ("x86_64", [
+    return select({
+        "ovr_config//cpu:x86_64": [
             "fbsource//third-party/mkl:{}".format(native.read_config("fbcode", "mkl_lp64", "mkl_lp64_omp")),
-        ]),
-        ("aarch64", [
-            "third-party//OpenBLAS:OpenBLAS",
+        ],
+        "ovr_config//cpu:arm64": [
+            "third-party//Arm-Performance-Libraries:armpl_lp64_mp",
             "third-party//openmp:omp",
-        ]),
-    ]
+        ],
+        "DEFAULT": [],
+    })
 
 default_compiler_flags = [
     "-Wall",
@@ -15,6 +16,9 @@ default_compiler_flags = [
     "-Wno-unused-function",
     "-Wno-unused-parameter",
     "-Wno-error=strict-aliasing",
+    # Deprecated APIs (e.g. c10::checked_convert) must warn, not break the build,
+    # so they can be retired while external/BC callers migrate.
+    "-Wno-error=deprecated-declarations",
     "-Wno-shadow-compatible-local",
     "-Wno-maybe-uninitialized",  # aten is built with gcc as part of HHVM
     "-Wno-unknown-pragmas",
@@ -45,7 +49,7 @@ default_compiler_flags = [
     # includes <pthread.h> - a header not available on Windows.
     "DEFAULT": ["-DUSE_XNNPACK"],
     "ovr_config//os:windows": [],
-}) + (["-O1"] if native.read_config("fbcode", "build_mode_test_label", "") == "dev-nosan" else [])
+})
 
 compiler_specific_flags = {
     "clang": [

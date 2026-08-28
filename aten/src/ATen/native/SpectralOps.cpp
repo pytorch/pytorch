@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/Config.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/SpectralOpsUtils.h>
@@ -58,7 +57,6 @@
 #include <ATen/ops/view_as_complex.h>
 #include <ATen/ops/view_as_real.h>
 #include <ATen/ops/zeros.h>
-#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 #include <algorithm>
@@ -70,7 +68,11 @@ namespace {
 // Promote inputs to FFT functions
 // * Integers are promoted to the default floating type
 // * If require_complex=True, all types are promoted to complex
-// * Raises an error for half-precision dtypes to allow future support
+// * float16/bfloat16 on XPU: promoted to float32 (no native XPU FFT kernel)
+// * float16 on CUDA: passed through; cuFFT handles natively (SM53+, pow2)
+// * bfloat16 on CUDA: passed through; cuFFT handles natively (SM80+, pow2)
+//   or falls back to float32 promotion for older hardware
+// * Raises an error for half-precision types on CPU
 ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device) {
   if (at::isComplexType(type)) {
     return type;
@@ -81,14 +83,26 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
   }
 
   const bool maybe_support_half = (
-    // Only CUDA supports half precision, but since meta tensors don't have a
+    // CUDA and XPU support half precision, but since meta tensors don't have a
     // device we err on the side of accepting it
-    device.is_cuda() || device.is_meta()
+    device.is_cuda() || device.is_meta() || device.is_xpu()
   );
   if (maybe_support_half) {
-    TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
+    // XPU has no native bfloat16 FFT kernel; promote to float32.
+    // ROCm (hipFFT) has no native bfloat16 FFT kernel; promote to float32.
+    // On CUDA, cuFFT handles them natively (see CuFFTPlanCache.h for constraints),
+    // so we leave them unchanged here and let the cuFFT planner decide.
+    if (type == kBFloat16 && device.is_xpu()) {
+      type = kFloat;
+    }
+    // ROCm/hipFFT does not support bfloat16; promote to float32
+    if (type == kBFloat16 && device.is_cuda() && at::globalContext().hasROCM()) {
+      type = kFloat;
+    }
+    TORCH_CHECK_NOT_IMPLEMENTED(type == kHalf || type == kBFloat16 || type == kFloat || type == kDouble,
+                "Unsupported dtype ", type);
   } else {
-    TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
+    TORCH_CHECK_NOT_IMPLEMENTED(type == kFloat || type == kDouble, "Unsupported dtype ", type);
   }
 
   if (!require_complex) {
@@ -100,6 +114,9 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
   case kHalf: return kComplexHalf;
   case kFloat: return kComplexFloat;
   case kDouble: return kComplexDouble;
+  // bfloat16 on CUDA: cuFFT produces CUDA_C_16BF which is upcast to ComplexFloat.
+  // Returning kComplexFloat keeps output-tensor allocation consistent.
+  case kBFloat16: return kComplexFloat;
   default: TORCH_INTERNAL_ASSERT(false, "Unhandled dtype");
   }
 }
@@ -224,10 +241,12 @@ Tensor fft_r2c(std::string_view function_name,
                Tensor out, Tensor input, std::optional<SymInt> n_opt,
                int64_t unwrapped_dim, std::optional<std::string_view> norm_str,
                bool forward, bool onesided) {
-  TORCH_CHECK(!input.is_complex(), function_name,
+  TORCH_CHECK_TYPE(!input.is_complex(), function_name,
               " expects a real input tensor, but got ", input.scalar_type());
   TORCH_CHECK(!out.defined() || out.is_complex(), function_name,
               " expects a complex output tensor, but got ", out.scalar_type());
+  TORCH_CHECK(!out.defined() || out.device() == input.device(), function_name,
+              " expects out tensor on device ", input.device(), " but got ", out.device());
   input = promote_tensor_fft(input);
   const auto input_dim = input.dim();
   const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim, /*wrap_scalar=*/false);
@@ -477,7 +496,7 @@ static Tensor fft_rfftn_impl(Tensor out, const Tensor& self,
                              at::OptionalSymIntArrayRef s,
                              at::OptionalIntArrayRef dim,
                              const std::optional<std::string_view>& norm_str) {
-  TORCH_CHECK(!self.is_complex(), "rfftn expects a real-valued input tensor, but got ", self.scalar_type());
+  TORCH_CHECK_TYPE(!self.is_complex(), "rfftn expects a real-valued input tensor, but got ", self.scalar_type());
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   TORCH_CHECK(!desc.shape.empty(), "rfftn must transform at least one axis");
   Tensor input = promote_tensor_fft(self, /*require_complex=*/false);
@@ -574,7 +593,7 @@ static Tensor fft_hfftn_impl(
     auto c2c_dims = IntArrayRef(desc.dim).slice(0, desc.dim.size() - 1);
     tmp = at::_fft_c2c(x, c2c_dims, norm, /*forward=*/true);
   } else {
-    tmp = x;
+    tmp = std::move(x);
   }
 
   const auto last_dim = desc.dim.back();
@@ -590,11 +609,11 @@ Tensor fft_hfftn_symint(
   return fft_hfftn_impl(self, s, dim, norm, {});
 }
 
-const Tensor& fft_hfftn_symint_out(
+Tensor& fft_hfftn_symint_out(
     const Tensor& self,
     at::OptionalSymIntArrayRef s,
     at::OptionalIntArrayRef dim, std::optional<std::string_view> norm,
-    const Tensor& out) {
+    Tensor& out) {
   fft_hfftn_impl(self, s, dim, norm, out);
   return out;
 }
@@ -632,12 +651,12 @@ Tensor fft_ihfftn_symint(
   return fft_ihfftn_impl(self, s, dim, norm, {});
 }
 
-const Tensor& fft_ihfftn_symint_out(
+Tensor& fft_ihfftn_symint_out(
     const Tensor& self,
     at::OptionalSymIntArrayRef s,
     at::OptionalIntArrayRef dim,
     std::optional<std::string_view> norm,
-    const Tensor& out) {
+    Tensor& out) {
   fft_ihfftn_impl(self, s, dim, norm, out);
   return out;
 }
@@ -682,9 +701,9 @@ Tensor& fft_irfft2_symint_out(const Tensor& self, at::OptionalSymIntArrayRef s,
   return native::fft_irfftn_symint_out(self, s, dim, std::move(norm), out);
 }
 
-const Tensor& fft_hfft2_symint_out(
+Tensor& fft_hfft2_symint_out(
     const Tensor& self, at::OptionalSymIntArrayRef s, IntArrayRef dim,
-    std::optional<std::string_view> norm, const Tensor& out) {
+    std::optional<std::string_view> norm, Tensor& out) {
   return native::fft_hfftn_symint_out(self, s, dim, std::move(norm), out);
 }
 
@@ -693,9 +712,9 @@ Tensor fft_hfft2_symint(const Tensor& self, at::OptionalSymIntArrayRef s,
   return native::fft_hfftn_symint(self, s, dim, std::move(norm));
 }
 
-const Tensor& fft_ihfft2_symint_out(
+Tensor& fft_ihfft2_symint_out(
     const Tensor& self, at::OptionalSymIntArrayRef s, IntArrayRef dim,
-    std::optional<std::string_view> norm, const Tensor& out) {
+    std::optional<std::string_view> norm, Tensor& out) {
   return native::fft_ihfftn_symint_out(self, s, dim, std::move(norm), out);
 }
 
@@ -756,7 +775,7 @@ static DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim
     IntArrayRef dim_unwrapped = *dim_opt;
     dim.resize(dim_unwrapped.size());
     for (const auto i : c10::irange(dim.size())) {
-      dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim(), /*wrap_scalars=*/false);
+      dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim(), /*wrap_scalar=*/false);
     }
   } else {
     dim.resize(self.dim());
@@ -826,7 +845,7 @@ static Stream& write_opt(Stream& SS, const std::optional<T>& value) {
 Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t> hop_lengthOpt,
             const std::optional<int64_t> win_lengthOpt, const std::optional<Tensor>& window_opt,
             const bool center, std::string_view mode, const bool normalized,
-            const std::optional<bool> onesidedOpt, const std::optional<bool> return_complexOpt) {
+            const std::optional<bool> onesidedOpt, const std::optional<bool> return_complexOpt, const std::optional<bool> align_to_windowOpt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
@@ -837,7 +856,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
         "A window was not provided. A rectangular window will be applied,"
         "which is known to cause spectral leakage. "
         "Other windows such as torch.hann_window or torch.hamming_window "
-        "can are recommended to reduce spectral leakage."
+        "are recommended to reduce spectral leakage."
         "To suppress this warning and use a rectangular window, explicitly set "
         "`window=torch.ones(n_fft, device=<device>)`.");
   }
@@ -847,17 +866,20 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
        << ", window="; \
     if (window.defined()) { \
-      SS << window.toString() << "{" << window.sizes() << "}"; \
+      SS << window.toString() << '{' << window.sizes() << '}'; \
     } else { \
       SS << "None"; \
     } \
     SS << ", normalized=" << normalized << ", onesided="; \
     write_opt(SS, onesidedOpt) << ", return_complex="; \
-    write_opt(SS, return_complexOpt) << ") "
+    write_opt(SS, return_complexOpt) << ", align_to_window="; \
+    write_opt(SS, align_to_windowOpt) << ") "
 
   TORCH_CHECK(!window.defined() || window.device() == self.device(),
               "stft input and window must be on the same device but got self on ",
               self.device(), " and window on ", window.device())
+  TORCH_CHECK(!center || !align_to_windowOpt.has_value(),
+          "stft align_to_window should only be set when center = false.")
 
   // default_init hop_length and win_length
   auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
@@ -868,7 +890,6 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
     TORCH_CHECK(return_complexOpt.has_value(),
         "stft requires the return_complex parameter be given for real inputs, "
         "and will further require that return_complex=True in a future PyTorch release.");
-
 
     TORCH_WARN_ONCE(
         "stft with return_complex=False is deprecated. In a future pytorch "
@@ -881,12 +902,12 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {
     std::ostringstream ss;
     REPR(ss) << ": expected a tensor of floating point or complex values";
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK_NOT_IMPLEMENTED(false, std::move(ss).str());
   }
   if (self.dim() > 2 || self.dim() < 1) {
     std::ostringstream ss;
     REPR(ss) << ": expected a 1D or 2D tensor";
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   Tensor input = self;
   if (self.dim() == 1) {
@@ -911,24 +932,24 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < n_fft < " << len
              << ", but got n_fft=" << win_length;
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   if (hop_length <= 0) {
     std::ostringstream ss;
     REPR(ss) << ": expected hop_length > 0, but got hop_length=" << hop_length;
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   if (win_length <= 0 || win_length > n_fft) {
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < win_length <= n_fft, but got win_length="
              << win_length;
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   if (window.defined() && (window.dim() != 1 || window.size(0) != win_length)) {
     std::ostringstream ss;
     REPR(ss) << ": expected a 1D window tensor of size equal to win_length="
              << win_length << ", but got window with size " << window.sizes();
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   #undef REPR
   auto window_ = window;
@@ -943,7 +964,17 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
       window_.narrow(0, left, win_length).fill_(1);
     }
   }
-  int64_t n_frames = 1 + (len - n_fft) / hop_length;
+
+  const bool align_to_window = align_to_windowOpt.value_or(false);
+  int64_t n_frames;
+  if (!center && align_to_window) {
+    // Calculate n_frames based on window length, since we are aligning start of window with t = 0.
+    n_frames = 1 + (len - win_length) / hop_length;
+    // Window-based padding.
+    input = at::pad(input, {(n_fft - win_length) / 2, (n_fft - win_length) / 2}, mode);
+  } else {
+    n_frames = 1 + (len - n_fft) / hop_length;
+  }
   // time2col
   input = input.as_strided(
     {batch, n_frames, n_fft},
@@ -982,11 +1013,12 @@ Tensor stft(
     const Tensor& self, const int64_t n_fft, const std::optional<int64_t> hop_lengthOpt,
     const std::optional<int64_t> win_lengthOpt, const std::optional<Tensor>& window_opt,
     const bool normalized,
-    const std::optional<bool> onesidedOpt, const std::optional<bool> return_complexOpt) {
+    const std::optional<bool> onesidedOpt, const std::optional<bool> return_complexOpt,
+    const std::optional<bool> align_to_windowOpt) {
   return at::stft(
       self, n_fft, hop_lengthOpt, win_lengthOpt, window_opt,
       /*center=*/false, /*mode=*/"constant", normalized, onesidedOpt,
-      return_complexOpt);
+      return_complexOpt, align_to_windowOpt);
 }
 
 // Create complex tensor from the old style of real tensor with size=(..., 2)
@@ -1033,7 +1065,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
        << ", window="; \
     if (window.defined()) { \
-      SS << window.toString() << "{" << window.sizes() << "}"; \
+      SS << window.toString() << '{' << window.sizes() << '}'; \
     } else { \
       SS << "None"; \
     } \
@@ -1049,7 +1081,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
   const auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
   const auto win_length = win_lengthOpt.value_or(n_fft);
 
-  TORCH_CHECK(self.is_complex(),
+  TORCH_CHECK_TYPE(self.is_complex(),
               "istft requires a complex-valued input tensor matching the "
               "output from stft with return_complex=True.");
   Tensor input = at::view_as_real(self.resolve_conj());
@@ -1063,17 +1095,17 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
   if (input.numel() == 0) {
     std::ostringstream ss;
     REPR(ss) << ": input tensor cannot be empty.";
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   if (input_dim != 3 && input_dim != 4) {
     std::ostringstream ss;
     REPR(ss) << ": expected a tensor with 3 or 4 dimensions, but got " << input_dim;
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   if (input.size(-1) != 2) {
     std::ostringstream ss;
     REPR(ss) << ": expected the last dimension to be 2 (corresponding to real and imaginary parts), but got " << self.size(-1);
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
 
   const bool onesided = onesidedOpt.value_or(fft_size != n_fft);
@@ -1081,32 +1113,32 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
     if (n_fft / 2 + 1 != fft_size) {
       std::ostringstream ss;
       REPR(ss) << ": expected the frequency dimension (3rd to the last) of the input tensor to match n_fft / 2 + 1 when onesided=True, but got " << fft_size;
-      TORCH_CHECK(false, ss.str());
+      TORCH_CHECK(false, std::move(ss).str());
     }
   } else {
     if (n_fft != fft_size) {
       std::ostringstream ss;
       REPR(ss) << ": expected the frequency dimension (3rd to the last) of the input tensor to match n_fft when onesided=False, but got " << fft_size;
-      TORCH_CHECK(false, ss.str());
+      TORCH_CHECK(false, std::move(ss).str());
     }
   }
 
   if (!(0 < hop_length && hop_length <= win_length)) {
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < hop_length <= win_length";
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
 
   if (!(0 < win_length && win_length <= n_fft)) {
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < win_length <= n_fft";
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
   if (window.defined()) {
     if (window.dim() != 1 || window.size(0) != win_length) {
       std::ostringstream ss;
       REPR(ss) << ": Invalid window shape. window has to be 1D and length of `win_length`";
-      TORCH_CHECK(false, ss.str());
+      TORCH_CHECK(false, std::move(ss).str());
     }
   }
 
@@ -1175,7 +1207,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
   if (at::is_scalar_tensor_true(window_envelop_lowest)) {
     std::ostringstream ss;
     REPR(ss) << "window overlap add min: " << window_envelop_lowest;
-    TORCH_CHECK(false, ss.str());
+    TORCH_CHECK(false, std::move(ss).str());
   }
 
   y = (y / window_envelop);  // size: (channel, expected_output_signal_len)

@@ -2,7 +2,7 @@
 import copy
 import warnings
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import torch
 from torch import nn
@@ -75,13 +75,18 @@ class ActivationSparsifier:
         >>>     return torch.eye(data.shape).to(data.device)
         >>>
         >>>
-        >>> act_sparsifier.register_layer(model.some_layer, aggregate_fn=agg_fn, reduce_fn=reduce_fn, mask_fn=mask_fn)
+        >>> act_sparsifier.register_layer(
+        ...     model.some_layer,
+        ...     aggregate_fn=agg_fn,
+        ...     reduce_fn=reduce_fn,
+        ...     mask_fn=mask_fn,
+        ... )
         >>>
         >>> # start training process
         >>> for _ in [...]:
-        >>>     # epoch starts
-        >>>         # model.forward(), compute_loss() and model.backwards()
-        >>>     # epoch ends
+        >>> # epoch starts
+        >>> # model.forward(), compute_loss() and model.backwards()
+        >>> # epoch ends
         >>>     act_sparsifier.step()
         >>> # end training process
         >>> sparsifier.squash_mask()
@@ -98,7 +103,7 @@ class ActivationSparsifier:
         **sparse_config,
     ):
         self.model = model
-        self.defaults: Dict[str, Any] = defaultdict()
+        self.defaults: dict[str, Any] = defaultdict()
         self.defaults["sparse_config"] = sparse_config
 
         # functions
@@ -110,11 +115,11 @@ class ActivationSparsifier:
         self.defaults["features"] = features
         self.defaults["feature_dim"] = feature_dim
 
-        self.data_groups: Dict[str, Dict] = defaultdict(
+        self.data_groups: dict[str, dict] = defaultdict(
             dict
         )  # contains all relevant info w.r.t each registered layer
 
-        self.state: Dict[str, Any] = defaultdict(dict)  # layer name -> mask
+        self.state: dict[str, Any] = defaultdict(dict)  # layer name -> mask
 
     @staticmethod
     def _safe_rail_checks(args):
@@ -123,13 +128,15 @@ class ActivationSparsifier:
         # if features are not None, then feature_dim must not be None
         features, feature_dim = args["features"], args["feature_dim"]
         if features is not None:
-            assert feature_dim is not None, "need feature dim to select features"
+            if feature_dim is None:
+                raise AssertionError("need feature dim to select features")
 
         # all the *_fns should be callable
         fn_keys = ["aggregate_fn", "reduce_fn", "mask_fn"]
         for key in fn_keys:
             fn = args[key]
-            assert callable(fn), "function should be callable"
+            if not callable(fn):
+                raise AssertionError(f"{fn} must be callable")
 
     def _aggregate_hook(self, name):
         """Returns hook that computes aggregate of activations passing through."""
@@ -153,9 +160,9 @@ class ActivationSparsifier:
                 # data should be a list [aggregated over each feature only]
                 if data is None:
                     out_data = [
-                        0 for _ in range(0, len(features))
-                    ]  # create one incase of 1st forward
-                    self.state[name]["mask"] = [0 for _ in range(0, len(features))]
+                        0 for _ in range(len(features))
+                    ]  # create one in case of 1st forward
+                    self.state[name]["mask"] = [0 for _ in range(len(features))]
                 else:
                     out_data = data  # a list
 
@@ -204,11 +211,13 @@ class ActivationSparsifier:
             - All the functions (fn) passed as argument will be called at a dim, feature level.
         """
         name = module_to_fqn(self.model, layer)
-        assert name is not None, "layer not found in the model"  # satisfy mypy
+        if name is None:
+            raise AssertionError("layer not found in the model")
 
         if name in self.data_groups:  # unregister layer if already present
             warnings.warn(
-                "layer already attached to the sparsifier, deregistering the layer and registering with new config"
+                "layer already attached to the sparsifier, deregistering the layer and registering with new config",
+                stacklevel=2,
             )
             self.unregister_layer(name=name)
 
@@ -231,9 +240,9 @@ class ActivationSparsifier:
         self.data_groups[name] = local_args
         agg_hook = layer.register_forward_pre_hook(self._aggregate_hook(name=name))
 
-        self.state[name][
-            "mask"
-        ] = None  # mask will be created when model forward is called.
+        self.state[name]["mask"] = (
+            None  # mask will be created when model forward is called.
+        )
 
         # attach agg hook
         self.data_groups[name]["hook"] = agg_hook
@@ -242,7 +251,7 @@ class ActivationSparsifier:
         # or sparsify_hook()
         self.data_groups[name]["hook_state"] = "aggregate"  # aggregate hook is attached
 
-    def get_mask(self, name: Optional[str] = None, layer: Optional[nn.Module] = None):
+    def get_mask(self, name: str | None = None, layer: nn.Module | None = None):
         """
         Returns mask associated to the layer.
 
@@ -255,14 +264,15 @@ class ActivationSparsifier:
             Hence, if get_mask() is called before model.forward(), an
             error will be raised.
         """
-        assert (
-            name is not None or layer is not None
-        ), "Need at least name or layer obj to retrieve mask"
+        if name is None and layer is None:
+            raise AssertionError("Need at least name or layer obj to retrieve mask")
 
         if name is None:
-            assert layer is not None
+            if layer is None:
+                raise AssertionError("layer must be provided when name is None")
             name = module_to_fqn(self.model, layer)
-            assert name is not None, "layer not found in the specified model"
+            if name is None:
+                raise AssertionError("layer not found in the specified model")
 
         if name not in self.state:
             raise ValueError("Error: layer with the given name not found")
@@ -331,7 +341,7 @@ class ActivationSparsifier:
                 return input_data * mask
             else:
                 # apply per feature, feature_dim
-                for feature_idx in range(0, len(features)):
+                for feature_idx in range(len(features)):
                     feature = (
                         torch.Tensor([features[feature_idx]])
                         .long()
@@ -360,9 +370,9 @@ class ActivationSparsifier:
                 configs["hook"] = configs["layer"].register_forward_pre_hook(
                     self._sparsify_hook(name)
                 )
-            configs[
-                "hook_state"
-            ] = "sparsify"  # signals that sparsify hook is now attached
+            configs["hook_state"] = (
+                "sparsify"  # signals that sparsify hook is now attached
+            )
 
     def _get_serializable_data_groups(self):
         """Exclude hook and layer from the config keys before serializing
@@ -370,7 +380,7 @@ class ActivationSparsifier:
         TODO: Might have to treat functions (reduce_fn, mask_fn etc) in a different manner while serializing.
               For time-being, functions are treated the same way as other attributes
         """
-        data_groups: Dict[str, Any] = defaultdict()
+        data_groups: dict[str, Any] = defaultdict()
         for name, config in self.data_groups.items():
             new_config = {
                 key: value
@@ -387,7 +397,7 @@ class ActivationSparsifier:
         states = copy.deepcopy(states_dict)
         for state in states.values():
             if state["mask"] is not None:
-                if isinstance(state["mask"], List):
+                if isinstance(state["mask"], list):
                     for idx in range(len(state["mask"])):
                         if sparse_coo:
                             state["mask"][idx] = state["mask"][idx].to_sparse_coo()
@@ -400,7 +410,7 @@ class ActivationSparsifier:
                         state["mask"] = state["mask"].to_dense()
         return states
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         r"""Returns the state of the sparsifier as a :class:`dict`.
 
         It contains:
@@ -413,11 +423,11 @@ class ActivationSparsifier:
         state = self._convert_mask(self.state)
         return {"state": state, "data_groups": data_groups, "defaults": self.defaults}
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         r"""The load_state_dict() restores the state of the sparsifier based on the state_dict
 
         Args:
-        * state_dict - the dictionary that to which the current sparsifier needs to be restored to
+        * state_dict - the dictionary to which the current sparsifier needs to be restored to
         """
         state = state_dict["state"]
         data_groups, defaults = state_dict["data_groups"], state_dict["defaults"]
@@ -426,7 +436,7 @@ class ActivationSparsifier:
             {"state": state, "data_groups": data_groups, "defaults": defaults}
         )
 
-    def __get_state__(self) -> Dict[str, Any]:
+    def __get_state__(self) -> dict[str, Any]:
         data_groups = self._get_serializable_data_groups()
         state = self._convert_mask(self.state)
         return {
@@ -435,7 +445,7 @@ class ActivationSparsifier:
             "data_groups": data_groups,
         }
 
-    def __set_state__(self, state: Dict[str, Any]) -> None:
+    def __set_state__(self, state: dict[str, Any]) -> None:
         state["state"] = self._convert_mask(
             state["state"], sparse_coo=False
         )  # convert mask to dense tensor
@@ -445,7 +455,8 @@ class ActivationSparsifier:
         for name, config in self.data_groups.items():
             # fetch layer
             layer = fqn_to_module(self.model, name)
-            assert layer is not None  # satisfy mypy
+            if layer is None:
+                raise AssertionError(f"layer {name} not found in the model")
 
             # if agg_mode is True, then layer in aggregate mode
             if "hook_state" in config and config["hook_state"] == "aggregate":

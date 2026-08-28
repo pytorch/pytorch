@@ -1,17 +1,14 @@
 #include <torch/csrc/jit/mobile/module.h>
 
 #include <torch/csrc/jit/backends/backend_exception.h>
-#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
-#include <torch/csrc/jit/runtime/jit_exception.h>
 
-#include <ATen/record_function.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 
 namespace torch::jit {
-std::ostream& operator<<(std::ostream& out, Instruction inst);
+
 namespace mobile {
 
 void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
@@ -178,7 +175,7 @@ const std::vector<at::Tensor> Module::parameters() const {
 // loading of a mobile module. TODO
 const std::map<std::string, at::Tensor> Module::named_parameters() const {
   std::map<std::string, at::Tensor> params;
-  const std::string name = "";
+  const std::string name;
   slot_named_params_recurse(object_, &params, name);
   return params;
 }

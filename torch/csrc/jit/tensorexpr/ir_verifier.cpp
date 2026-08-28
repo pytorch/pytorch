@@ -1,9 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_verifier.h>
 
 #include <torch/csrc/jit/tensorexpr/ir.h>
-#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-#include <torch/csrc/jit/tensorexpr/reduction.h>
-#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch::jit::tensorexpr {
 
@@ -19,7 +16,7 @@ template <
     std::enable_if_t<
         std::is_same_v<decltype(detail::deducer(std::declval<D>())), void>>* =
         nullptr>
-void verifyBitwiseOp(NodePtr<D> v, IRVerifier* verifier) {
+static void verifyBitwiseOp(NodePtr<D> v, IRVerifier* verifier) {
   if (!v->lhs()->dtype().is_integral()) {
     throw unsupported_dtype();
   }

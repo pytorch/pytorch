@@ -8,13 +8,14 @@
 struct THPGenerator {
   PyObject_HEAD
   at::Generator cdata;
+  PyObject* weakreflist;
 };
 
 // Creates a new Python object wrapping the default at::Generator. The reference
 // is borrowed. The caller should ensure that the at::Generator object lifetime
 // last at least as long as the Python wrapper.
 TORCH_PYTHON_API PyObject* THPGenerator_initDefaultGenerator(
-    at::Generator cdata);
+    const at::Generator& cdata);
 
 #define THPGenerator_Check(obj) PyObject_IsInstance(obj, THPGeneratorClass)
 

@@ -1,11 +1,8 @@
 #include <c10/core/alignment.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 
-#include <ATen/Tensor.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
-#include <iterator>
 
 namespace torch::jit {
 
@@ -32,7 +29,7 @@ c10::FastMap<const Value*, at::Tensor*> tensorValueToTensor(
     for (const auto output_idx : c10::irange(node->outputs().size())) {
       auto* output = node->output(output_idx);
 
-      if (managed_tensor_values.find(output) == managed_tensor_values.end()) {
+      if (!managed_tensor_values.contains(output)) {
         continue;
       }
 
@@ -76,7 +73,7 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
   // This set maps each Value* to its assigned storage group.
   c10::FastMap<const Value*, size_t> storage_group_mapping;
   // On each iteration, this vector stores the set of storage groups that
-  // are available for re-use.
+  // are available for reuse.
   std::vector<size_t> free_storage_groups;
 
   auto makeNewStorageGroup = [&](const Value* value) {
@@ -97,7 +94,7 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
   };
 
   auto isManagedTensor = [&](const Value* value) {
-    return tensor_value_to_tensor.find(value) != tensor_value_to_tensor.end();
+    return tensor_value_to_tensor.contains(value);
   };
 
   for (auto* node : nodes) {
@@ -134,8 +131,7 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
   return managed_tensor_groups;
 }
 
-ManagedStorages::ManagedStorages()
-    : storages_(nullptr), size_(0), capacity_(0) {}
+ManagedStorages::ManagedStorages() = default;
 
 ManagedStorages::~ManagedStorages() {
   deallocate();
@@ -175,7 +171,7 @@ void ManagedStorages::append(at::StorageImpl& storageImpl) {
 namespace {
 
 bool setIncludes(const c10::FastSet<const Value*>& set, const Value* v) {
-  return set.find(v) != set.end();
+  return set.contains(v);
 }
 
 std::vector<std::pair<size_t, at::Tensor*>> assignStorageToOutputTensors(
@@ -344,7 +340,7 @@ void MemoryPlanner::deallocate() {
     c10::MaybeOwnedTraits<c10::IValue>::destroyBorrow(*iv);
   }
   // It's important to call this function after all other owning refs
-  // of the managed StorageImpls are cleaned up. It can reset the
+  // of the managed StorageImpls are cleaned up. It can reset
   // the StorageImpl's refcount to (# tensors in storage group),
   // so destructing any owning refs afterwards will bring the refcount
   // lower than expected and trigger the debug assertion in

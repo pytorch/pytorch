@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
@@ -22,6 +23,8 @@
 #include <ATen/ops/tensor.h>
 #endif
 
+#include <cmath>
+#include <limits>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -61,6 +64,17 @@ inline at::Tensor wrap_buffer(
 
 inline at::Tensor get_buffer(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_buffer();
+}
+
+// Helper to clamp infinite padding sentinels to dtype min/max for integral types
+template <typename scalar_t>
+inline scalar_t _get_padding_value(double padding_value, bool is_floating_point) {
+  if (std::isinf(padding_value) && !is_floating_point) {
+    return padding_value > 0
+      ? std::numeric_limits<scalar_t>::max()
+      : std::numeric_limits<scalar_t>::lowest();
+  }
+  return static_cast<scalar_t>(padding_value);
 }
 
 /**
@@ -202,15 +216,11 @@ inline IntArrayRef get_stride_for_index(const Tensor& tensor, int64_t i) {
 
 inline int64_t get_offset_for_index(const Tensor& tensor, int64_t i) {
   if (tensor.is_nested()) {
-    int64_t* offsets_ptr = get_nested_tensor_impl(tensor)
-                               ->get_storage_offsets()
-                               .data_ptr<int64_t>();
-    return offsets_ptr[i];
-
-  } else {
-    int64_t offset = tensor.storage_offset();
-    return offset + tensor.strides()[0] * i;
+    return get_nested_tensor_impl(tensor)
+        ->get_storage_offsets()
+        .const_data_ptr<int64_t>()[i];
   }
+  return tensor.storage_offset() + tensor.strides()[0] * i;
 }
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Data structures and functions for generically applying a function on a nested
@@ -419,6 +429,8 @@ inline Tensor wrap_tensor_node(
   } else { // Slow path
     std::vector<Tensor> flat_tensors;
     std::vector<Tensor> sizes;
+    flat_tensors.reserve(tensor_node.degree());
+    sizes.reserve(tensor_node.degree());
     for (const auto i : c10::irange(tensor_node.degree())) {
       flat_tensors.push_back(tensor_node.children(i).reshape(-1).contiguous());
       sizes.push_back(

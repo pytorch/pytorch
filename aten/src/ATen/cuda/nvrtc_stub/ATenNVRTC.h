@@ -43,6 +43,7 @@ namespace at::cuda {
   _(nvrtcGetProgramLogSize)                      \
   _(nvrtcGetProgramLog)                          \
   _(nvrtcGetLoweredName)                         \
+  _(cuModuleLoad)                                \
   _(cuModuleLoadData)                            \
   _(cuModuleLoadDataEx)                          \
   _(cuModuleGetFunction)                         \
@@ -60,8 +61,13 @@ namespace at::cuda {
   _(cuLinkComplete)                              \
   _(cuFuncSetAttribute)                          \
   _(cuFuncGetAttribute)                          \
+  _(cuPointerGetAttribute)                       \
+  _(cuFuncSetCacheConfig)                        \
+  _(cuDeviceGetAttribute)                        \
+  _(cuDeviceGet)                        \
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+
+#if defined(CUDA_VERSION)
 #define AT_FORALL_NVRTC_EXTENDED(_)              \
   AT_FORALL_NVRTC_BASE(_)                        \
   _(cuTensorMapEncodeTiled)
@@ -70,7 +76,7 @@ namespace at::cuda {
   AT_FORALL_NVRTC_BASE(_)
 #endif
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
+#if defined(CUDA_VERSION)
 #define AT_FORALL_NVRTC(_) \
   AT_FORALL_NVRTC_EXTENDED(_)  \
   _(nvrtcGetCUBINSize)     \
@@ -91,18 +97,6 @@ namespace at::cuda {
 //
 // The macro below strips out certain unsupported operations on HIP from the full
 // list above.
-//
-// HIP doesn't have
-//   cuGetErrorString  (maps to non-functional hipGetErrorString___)
-//
-// HIP from ROCm 3.5 on renamed hipOccupancyMaxActiveBlocksPerMultiprocessor
-// to hipModuleOccupancyMaxActiveBlocksPerMultiprocessor.
-#if TORCH_HIP_VERSION < 305
-#define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR hipOccupancyMaxActiveBlocksPerMultiprocessor
-#else
-#define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR cuOccupancyMaxActiveBlocksPerMultiprocessor
-#endif
-
 #define AT_FORALL_NVRTC(_)                        \
   _(nvrtcVersion)                                 \
   _(nvrtcCreateProgram)                           \
@@ -111,8 +105,10 @@ namespace at::cuda {
   _(nvrtcGetPTXSize)                              \
   _(nvrtcGetPTX)                                  \
   _(cuModuleLoadData)                             \
+  _(cuModuleLoad)                                 \
+  _(cuGetErrorString)                             \
   _(cuModuleGetFunction)                          \
-  _(HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR) \
+  _(cuOccupancyMaxActiveBlocksPerMultiprocessor)  \
   _(nvrtcGetErrorString)                          \
   _(nvrtcGetProgramLogSize)                       \
   _(nvrtcGetProgramLog)                           \

@@ -1,29 +1,30 @@
 # mypy: allow-untyped-defs
 # Owner(s): ["module: unknown"]
 
+import multiprocessing
 import os
 import random
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import textwrap
 import traceback
+import types
 import unittest
 import warnings
-from typing import Any, Dict, List
+from typing import Any, cast
 
 import torch
-import torch.cuda
 import torch.nn as nn
 import torch.utils.cpp_extension
 import torch.utils.data
-from torch.autograd._functions.utils import check_onnx_broadcast
-from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch._utils import try_import
+from torch._utils_internal import deprecated
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
     ops,
 )
@@ -33,6 +34,8 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
+    skipIfTorchDynamo,
+    TEST_WITH_ASAN,
 )
 from torch.utils._device import set_device
 from torch.utils._pytree import tree_all_only, tree_any
@@ -52,12 +55,12 @@ from torch.utils.data import DataLoader
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
-
-HAS_CUDA = torch.cuda.is_available()
-
+load_tests = load_tests  # noqa: PLW0127
 
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+# mypy: disable-error-code="name-defined"
 
 
 class RandomDatasetMock(torch.utils.data.Dataset):
@@ -115,6 +118,7 @@ class TestCheckpoint(TestCase):
 
     # Test whether checkpoint is being triggered or not. For this, we check
     # the number of times forward pass happens
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/97402")
     def test_checkpoint_trigger(self):
         class Net(nn.Module):
             def __init__(self) -> None:
@@ -300,46 +304,6 @@ class TestCheckpoint(TestCase):
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
-    def test_checkpoint_rng_cuda(self):
-        for _ in range(5):
-            inp = torch.randn(20000, device="cuda").requires_grad_()
-            phase1 = torch.nn.Dropout()
-            phase2 = torch.nn.Dropout()
-
-            def run_fn(input):
-                return phase2(input)
-
-            state = torch.cuda.get_rng_state()
-
-            out = phase1(inp)
-            out = checkpoint(run_fn, out, use_reentrant=True)
-            out.sum().backward()
-            grad_with_checkpointing = inp.grad
-
-            torch.cuda.set_rng_state(state)
-
-            inp.grad = None
-
-            out = phase1(inp)
-            out = run_fn(out)
-            out.sum().backward()
-            grad_no_checkpointing = inp.grad
-
-            self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
-
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
-    def test_checkpoint_not_preserve_rng_state_and_without_reentrant(self):
-        inp = torch.randn(2, device="cuda").requires_grad_()
-        layer = torch.nn.Dropout()
-
-        def run_fn(input):
-            return layer(input)
-
-        out = checkpoint(run_fn, inp, use_reentrant=False, preserve_rng_state=False)
-        out.sum().backward()
-        # This should run without error
-
     def test_checkpoint_non_tensor(self):
         def run_fn(tensor1, tensor2):
             if tensor2 is None:
@@ -433,22 +397,30 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2, use_reentrant=True)
             out.sum().backward()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    @unittest.skipIf(not torch.accelerator.is_available(), "No accelerator")
     def test_checkpointing_without_reentrant_early_free(self):
-        # I don't know how to check if the temporary saved variable buffer
-        # get de-allocated directly. So using cuda memory usage as a proxy
+        _acc = torch.accelerator.current_accelerator()
+        if _acc is None:
+            self.skipTest("current_accelerator() not supported")
+
+        _device_type = _acc.type
+
+        # Functional check: verify memory tracking actually works on this backend
+        test_tensor = torch.zeros(1024, device=_device_type)
+        torch.accelerator.synchronize()
+        if torch.accelerator.memory_allocated() == 0:
+            del test_tensor
+            self.skipTest(f"{_device_type} does not support memory_allocated tracking")
+        del test_tensor
 
         def _do_test(fn, should_free):
-            stats: List[int] = []
+            stats: list[int] = []
 
             def track(x, idx):
-                # Track that at each step of the backward, some Tensor were
-                # de-allocated (which correspond to the checkpoint storage being
-                # emptied at each step)
                 def hook(_unused):
                     self.assertEqual(len(stats), idx)
-                    torch.cuda.synchronize()
-                    stats.append(torch.cuda.memory_allocated())
+                    torch.accelerator.synchronize()
+                    stats.append(torch.accelerator.memory_allocated())
                     if idx > 0:
                         if should_free:
                             self.assertLess(stats[idx], stats[idx - 1])
@@ -458,8 +430,6 @@ class TestCheckpoint(TestCase):
                 x.register_hook(hook)
 
             def test_fn(x):
-                # The main property of this function is that it contains multiple
-                # operations that save gradients in a chain.
                 x = x**2
                 track(x, 2)
                 x = x**2
@@ -473,23 +443,19 @@ class TestCheckpoint(TestCase):
 
             return stats
 
-        x = torch.zeros(10, device="cuda", requires_grad=True)
+        x = torch.zeros(10, device=_device_type, requires_grad=True)
         x.grad = torch.zeros_like(x)
 
-        # In a regular backward, buffers get eagerly freed
         non_retain_stats = _do_test(lambda fn: fn(x).backward(), True)
 
-        # In a retain_grad backward, buffers get preserved
         _unused_retain_stats = _do_test(
             lambda fn: fn(x).backward(retain_graph=True), False
         )
 
-        # In a regular backward with checkpoint, buffers get eagerly freed
         checkpoint_non_retain_stats = _do_test(
             lambda fn: checkpoint(fn, x, use_reentrant=False).backward(), True
         )
 
-        # In a retain_grad backward with checkpoint, buffers get eagerly freed
         checkpoint_retain_stats = _do_test(
             lambda fn: checkpoint(fn, x, use_reentrant=False).backward(
                 retain_graph=True
@@ -500,11 +466,59 @@ class TestCheckpoint(TestCase):
         self.assertEqual(non_retain_stats, checkpoint_non_retain_stats)
         self.assertEqual(non_retain_stats, checkpoint_retain_stats)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_get_device_states_recursive(self):
+    def test_infer_device_state_recursive_meta(self):
+        inp = {"foo": torch.rand(10, device="meta")}
+        device_type = _infer_device_type(inp)
+        self.assertEqual("meta", device_type)
+
+
+class TestCheckpointDeviceType(TestCase):
+    @onlyAccelerator
+    def test_checkpoint_rng_accelerator(self, device):
+        for _ in range(5):
+            inp = torch.randn(20000, device=device).requires_grad_()
+            phase1 = torch.nn.Dropout()
+            phase2 = torch.nn.Dropout()
+
+            def run_fn(input):
+                return phase2(input)
+
+            state = torch.get_device_module(device).get_rng_state()
+
+            out = phase1(inp)
+            out = checkpoint(run_fn, out, use_reentrant=True)
+            out.sum().backward()
+            grad_with_checkpointing = inp.grad
+
+            torch.get_device_module(device).set_rng_state(state)
+
+            inp.grad = None
+
+            out = phase1(inp)
+            out = run_fn(out)
+            out.sum().backward()
+            grad_no_checkpointing = inp.grad
+
+            self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
+    @onlyAccelerator
+    def test_checkpoint_not_preserve_rng_state_and_without_reentrant(self, device):
+        inp = torch.randn(2, device=device).requires_grad_()
+        layer = torch.nn.Dropout()
+
+        def run_fn(input):
+            return layer(input)
+
+        out = checkpoint(run_fn, inp, use_reentrant=False, preserve_rng_state=False)
+        out.sum().backward()
+
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    def test_get_device_states_recursive(self, devices):
+        dev_type = torch.device(devices[0]).type
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
-            "bar": [torch.rand(10, device="cuda:1")],
+            "foo": torch.rand(10, device=f"{dev_type}:0"),
+            "bar": [torch.rand(10, device=f"{dev_type}:1")],
         }
         device_ids, device_states = get_device_states(inp)
         self.assertEqual(2, len(device_ids))
@@ -514,53 +528,73 @@ class TestCheckpoint(TestCase):
         self.assertTrue(isinstance(device_states[0], torch.Tensor))
         self.assertTrue(isinstance(device_states[1], torch.Tensor))
 
-    def test_infer_device_state_recursive_meta(self):
-        inp = {"foo": torch.rand(10, device="meta")}
-        device_type = _infer_device_type(inp)
-        self.assertEqual("meta", device_type)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_infer_device_state_recursive_multi_cuda(self):
-        # Check that no warning is issued for either cuda:0, cuda:1 or
-        # cuda:0, cuda:0 cases since they are both the same device type
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    def test_infer_device_state_recursive_multi_device(self, devices):
+        dev_type = torch.device(devices[0]).type
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
-            "bar": [torch.rand(10, device="cuda:1")],
+            "foo": torch.rand(10, device=f"{dev_type}:0"),
+            "bar": [torch.rand(10, device=f"{dev_type}:1")],
         }
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            device_type = _infer_device_type(inp)
-            self.assertEqual("cuda", device_type)
+            _device_type = _infer_device_type(inp)
+            self.assertEqual(dev_type, _device_type)
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
-            "bar": [torch.rand(10, device="cuda:0")],
+            "foo": torch.rand(10, device=f"{dev_type}:0"),
+            "bar": [torch.rand(10, device=f"{dev_type}:0")],
         }
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            device_type = _infer_device_type(inp)
-            self.assertEqual("cuda", device_type)
-        # Check that a warning is issued for cuda:0, meta and that it includes
-        # device type information
+            _device_type = _infer_device_type(inp)
+            self.assertEqual(dev_type, _device_type)
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
+            "foo": torch.rand(10, device=f"{dev_type}:0"),
             "bar": [torch.rand(10, device="meta")],
         }
         with warnings.catch_warnings(record=True) as w:
-            device_type = _infer_device_type(inp)
-            self.assertEqual("cuda", device_type)
+            _device_type = _infer_device_type(inp)
+            self.assertEqual(dev_type, _device_type)
         self.assertEqual(len(w), 1)
         warning_msg = str(w[-1].message)
         self.assertTrue(
             "Tensor arguments, excluding CPU tensors, are detected on at least two types of devices"
             in warning_msg
         )
-        self.assertTrue("Device types: ['cuda', 'meta']" in warning_msg)
-        self.assertTrue("first device type: cuda" in warning_msg)
+        self.assertTrue(f"Device types: ['{dev_type}', 'meta']" in warning_msg)
+        self.assertTrue(f"first device type: {dev_type}" in warning_msg)
+
+    @onlyAccelerator
+    def test_checkpoint_preserves_device_context(self, device):
+        """Test that checkpoint preserves torch.device() context during recomputation."""
+        recomputed_devices = []
+        dev_type = torch.device(device).type
+
+        def fn_creates_tensor(x):
+            intermediate = torch.empty(4)
+            recomputed_devices.append(intermediate.device)
+            return x * intermediate.sum()
+
+        x = torch.randn(4, device=device, requires_grad=True)
+
+        with torch.device(dev_type):
+            y = checkpoint(fn_creates_tensor, x, use_reentrant=False)
+            self.assertEqual(recomputed_devices[-1].type, dev_type)
+
+            y.sum().backward()
+            self.assertEqual(len(recomputed_devices), 2)
+            self.assertEqual(recomputed_devices[-1].type, dev_type)
+
+
+instantiate_device_type_tests(
+    TestCheckpointDeviceType, globals(), except_for=["cpu"], allow_xpu=True
+)
 
 
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
 
+    @unittest.skipIf(TEST_WITH_ASAN, "https://github.com/pytorch/pytorch/issues/84937")
     def test_random_seed(self):
         def run():
             dataloader = torch.utils.data.DataLoader(
@@ -602,7 +636,7 @@ class TestDataLoaderUtils(TestCase):
         self.assertEqual(len(list(dataiter)), 1)
 
     @unittest.skip(
-        "FIXME: Intermittent CUDA out-of-memory error on Windows and time-out under ASAN"
+        "FIXME: Intermittent GPU out-of-memory error on Windows and time-out under ASAN"
     )
     def test_multi_keep(self):
         dataloader: DataLoader = DataLoader(
@@ -630,151 +664,6 @@ class TestDataLoaderUtils(TestCase):
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
-@unittest.skipIf(
-    "SKIP_TEST_BOTTLENECK" in os.environ.keys(), "SKIP_TEST_BOTTLENECK is set"
-)
-class TestBottleneck(TestCase):
-    def _run(self, command, timeout=30):
-        """Returns (return-code, stdout, stderr)"""
-        import subprocess
-
-        p = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            shell=True,
-        )
-        try:
-            output, err = p.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            p.kill()
-            output, err = p.communicate()
-        rc = p.returncode
-        output_str = output.decode("ascii")
-        err_str = err.decode("ascii")
-        return (rc, output_str, err_str)
-
-    def _run_bottleneck(self, test_file, scriptargs=""):
-        curdir = os.path.dirname(os.path.abspath(__file__))
-        filepath = f"{curdir}/{test_file}"
-        if scriptargs != "":
-            scriptargs = f" {scriptargs}"
-        rc, out, err = self._run(
-            f"{sys.executable} -m torch.utils.bottleneck {filepath}{scriptargs}"
-        )
-        return rc, out, err
-
-    def _check_run_args(self):
-        # Check that this fails due to missing args
-        rc, out, err = self._run_bottleneck("bottleneck_test/test_args.py")
-        self.assertEqual(
-            rc,
-            2,
-            atol=0,
-            rtol=0,
-            msg=self._fail_msg("Missing args should error", out + err),
-        )
-
-        # This should succeed
-        rc, out, err = self._run_bottleneck(
-            "bottleneck_test/test_args.py", "--foo foo --bar bar"
-        )
-        self.assertEqual(
-            rc,
-            0,
-            atol=0,
-            rtol=0,
-            msg=self._fail_msg("Should pass args to script", out + err),
-        )
-
-    def _fail_msg(self, msg, output):
-        return f"{msg}, output was:\n{output}"
-
-    def _check_environment_summary(self, output):
-        results = re.search("Environment Summary", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have Environment Summary", output)
-        )
-
-        # Up to five lines away from the heading, there should be the version number
-        results = re.search(
-            r"Environment Summary.*(\n.*){,5}\nPyTorch \d+\.\d+", output
-        )
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have PyTorch version", output)
-        )
-
-    def _check_cprof_summary(self, output):
-        results = re.search("cProfile output", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have cProfile output", output)
-        )
-
-        # This assumes that after the cProfile output section we have
-        # the autograd profiler output
-        results = re.search(
-            r"cProfile output.*(\n.*){6,50}\n.*autograd profiler output", output
-        )
-        self.assertIsNotNone(
-            results,
-            self._fail_msg(
-                "Distance between cProfile and autograd prof out not in [6, 50] lines",
-                output,
-            ),
-        )
-
-    def _check_autograd_summary(self, output):
-        results = re.search("autograd profiler output", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have autograd profiler output", output)
-        )
-
-        # This assumes that after the autograd profiler output is the end of the
-        # output.
-        results = re.search(r"autograd profiler output.*(\n.*){6,100}", output)
-        self.assertIsNotNone(
-            results,
-            self._fail_msg(
-                "Distance between autograd prof output and end of output not in [6, 100] lines",
-                output,
-            ),
-        )
-
-    def _check_cuda(self, output):
-        if HAS_CUDA:
-            results = re.search("CUDA mode", output)
-            self.assertIsNotNone(
-                results, self._fail_msg("Should tell users CUDA", output)
-            )
-        else:
-            results = re.search("CUDA mode", output)
-            self.assertIsNone(
-                results, self._fail_msg("Should not tell users about CUDA", output)
-            )
-
-    @unittest.skipIf(HAS_CUDA, "CPU-only test")
-    def test_bottleneck_cpu_only(self):
-        rc, out, err = self._run_bottleneck("bottleneck_test/test.py")
-        self.assertEqual(rc, 0, msg=f"Run failed with\n{err}")
-
-        self._check_run_args()
-        self._check_environment_summary(out)
-        self._check_autograd_summary(out)
-        self._check_cprof_summary(out)
-        self._check_cuda(out)
-
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
-    def test_bottleneck_cuda(self):
-        rc, out, err = self._run_bottleneck("bottleneck_test/test_cuda.py")
-        self.assertEqual(rc, 0, msg=f"Run failed with\n{err}")
-
-        self._check_run_args()
-        self._check_environment_summary(out)
-        self._check_autograd_summary(out)
-        self._check_cprof_summary(out)
-        self._check_cuda(out)
-
-
 from torch.utils.collect_env import get_pretty_env_info
 
 
@@ -785,65 +674,6 @@ class TestCollectEnv(TestCase):
         self.assertTrue(info_output.count("\n") >= 17)
 
 
-class TestONNXUtils(TestCase):
-    def test_prepare_onnx_paddings(self):
-        sizes = [2, 3, 4]
-        pad = [1, 2, 3, 4]
-        paddings = _prepare_onnx_paddings(len(sizes), pad)
-        self.assertEqual(paddings, [0, 3, 1, 0, 4, 2])
-
-    def test_check_onnx_broadcast(self):
-        def try_check_onnx_broadcast(dims1, dims2, expect_broadcast, expect_fail):
-            broadcast = True
-            fail = False
-            try:
-                broadcast = check_onnx_broadcast(dims1, dims2)
-            except ValueError:
-                fail = True
-            self.assertEqual(broadcast, expect_broadcast)
-            self.assertEqual(fail, expect_fail)
-
-        # Case 1, check the case when len(dims1) < len(dims2) and numel(dims2) > 1
-        dims1 = [3, 4]
-        dims2 = [2, 3, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 2, check the case when len(dims1) < len(dims2) and numel(dims2) == 1
-        dims1 = [3, 4]
-        dims2 = [1, 1, 1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 3, check the case when len(dims1) > len(dims2) and numel(dims2) == 1
-        dims1 = [1, 1]
-        dims2 = [1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 4, check the case when len(dims1) > len(dims2) and dims1[x:] == dims2
-        dims1 = [2, 3, 4]
-        dims2 = [3, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 5, check the case when len(dims1) > len(dims2), but dims1[x:] != dims2
-        dims1 = [2, 3, 4]
-        dims2 = [1, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 6, check the equal case, no broadcast
-        dims1 = [3, 4]
-        dims2 = [3, 4]
-        try_check_onnx_broadcast(dims1, dims2, False, False)
-
-        # Case 7, check the case when len(dims1) == len(dims2), but dims1 != dims2
-        dims1 = [3, 4]
-        dims2 = [1, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 8, check the case when len(dims1) == len(dims2) and numel(s2) == 1
-        dims1 = [3, 4]
-        dims2 = [1, 1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
@@ -851,7 +681,10 @@ class TestHipify(TestCase):
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
-        self.trie = torch.utils.hipify.hipify_python.Trie()
+        super().setUp()
+        from torch.utils.hipify import hipify_python
+
+        self.trie = hipify_python.Trie()
 
     def test_add_and_search_trie(self):
         self.trie.add("banana")
@@ -1002,85 +835,6 @@ class TestStandaloneCPPJIT(TestCase):
             shutil.rmtree(build_dir)
 
 
-class DummyPrivateUse1Module:
-    @staticmethod
-    def is_available():
-        return True
-
-    @staticmethod
-    def is_autocast_enabled():
-        return True
-
-    @staticmethod
-    def get_autocast_dtype():
-        return torch.float16
-
-    @staticmethod
-    def set_autocast_enabled(enable):
-        pass
-
-    @staticmethod
-    def set_autocast_dtype(dtype):
-        pass
-
-    @staticmethod
-    def get_amp_supported_dtype():
-        return [torch.float16]
-
-
-class TestExtensionUtils(TestCase):
-    def tearDown(self):
-        # Clean up
-        backend_name = torch._C._get_privateuse1_backend_name()
-        if hasattr(torch, backend_name):
-            delattr(torch, backend_name)
-        if f"torch.{backend_name}" in sys.modules:
-            del sys.modules[f"torch.{backend_name}"]
-
-    def test_external_module_register(self):
-        # Built-in module
-        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
-            torch._register_device_module("cuda", torch.cuda)
-
-        # Wrong device type
-        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
-            torch._register_device_module("dummmy", DummyPrivateUse1Module)
-
-        with self.assertRaises(AttributeError):
-            torch.privateuseone.is_available()  # type: ignore[attr-defined]
-
-        torch._register_device_module("privateuseone", DummyPrivateUse1Module)
-
-        torch.privateuseone.is_available()  # type: ignore[attr-defined]
-
-        # No supporting for override
-        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
-            torch._register_device_module("privateuseone", DummyPrivateUse1Module)
-
-    def test_external_module_register_with_renamed_backend(self):
-        torch.utils.rename_privateuse1_backend("foo")
-        with self.assertRaisesRegex(RuntimeError, "has already been set"):
-            torch.utils.rename_privateuse1_backend("dummmy")
-
-        custom_backend_name = torch._C._get_privateuse1_backend_name()
-        self.assertEqual(custom_backend_name, "foo")
-
-        with self.assertRaises(AttributeError):
-            torch.foo.is_available()  # type: ignore[attr-defined]
-
-        with self.assertRaisesRegex(AssertionError, "Tried to use AMP with the"):
-            with torch.autocast(device_type=custom_backend_name):
-                pass
-        torch._register_device_module("foo", DummyPrivateUse1Module)
-
-        torch.foo.is_available()  # type: ignore[attr-defined]
-        with torch.autocast(device_type=custom_backend_name):
-            pass
-
-        self.assertEqual(torch._utils._get_device_index("foo:1"), 1)
-        self.assertEqual(torch._utils._get_device_index(torch.device("foo:2")), 2)
-
-
 class TestRenderUtils(TestCase):
     def test_basic(self):
         self.assertExpectedInline(
@@ -1136,20 +890,42 @@ class TestDeviceUtils(TestCase):
         self.assertEqual(torch.get_default_device().type, "meta")
         torch.set_default_device(None)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_get_default_device_more(self):
-        torch.set_default_device("cuda")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    def test_get_default_device_more(self, devices):
+        dev_type = torch.device(devices[0]).type
+        try:
+            torch.set_default_device(dev_type)
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
 
-        torch.set_default_device("cuda")
-        torch.cuda.set_device("cuda:1")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+            torch.set_default_device(dev_type)
+            torch.get_device_module(dev_type).set_device(f"{dev_type}:1")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.accelerator.set_device_index(1)
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
 
-        torch.set_default_device("cuda:1")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+            torch.set_default_device(f"{dev_type}:1")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
+
+            torch.set_default_device(f"{dev_type}:1")
+            with torch.device(f"{dev_type}:0"):
+                self.assertEqual(
+                    torch.get_default_device(), torch.device(f"{dev_type}", 0)
+                )
+
+            torch.set_default_device("cpu")
+            self.assertEqual(torch.get_default_device(), torch.device("cpu"))
+            with torch.device(f"{dev_type}:0"):
+                self.assertEqual(
+                    torch.get_default_device(), torch.device(f"{dev_type}", 0)
+                )
+
+            self.assertEqual(torch.get_default_device(), torch.device("cpu"))
+        finally:
+            torch.set_default_device(None)
 
     @onlyCPU
     @ops(op_db)
@@ -1191,8 +967,78 @@ class TestCppExtensionUtils(TestCase):
     def test_cc_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("cc"))
 
+    @staticmethod
+    def _fake_version_module(**attrs):
+        module = types.ModuleType("fake_torch_version")
+        for name, value in attrs.items():
+            setattr(module, name, value)
+        return module
+
+    def test_derive_rocm_version_prefers_rocm(self):
+        version = self._fake_version_module(hip="7.0.51831", rocm="6.4.2")
+        derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (6, 4))
+
+    def test_derive_rocm_version_falls_back_when_attribute_absent(self):
+        version = self._fake_version_module(hip="7.0.51831")
+        with self.assertLogs("torch.utils.cpp_extension", level="WARNING") as logs:
+            derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (7, 0))
+        self.assertIn("torch.version.rocm", logs.output[0])
+
+    def test_derive_rocm_version_falls_back_when_rocm_is_none(self):
+        version = self._fake_version_module(hip="7.0.51831", rocm=None)
+        with self.assertLogs("torch.utils.cpp_extension", level="WARNING"):
+            derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (7, 0))
+
+    def test_derive_rocm_version_is_none_off_rocm(self):
+        version = self._fake_version_module(hip=None, rocm=None)
+        self.assertIsNone(torch.utils.cpp_extension._derive_rocm_version(version))
+
 
 class TestTraceback(TestCase):
+    @staticmethod
+    @torch._dynamo.disable
+    def _context_decorator_traceback_frame_names():
+        @torch.no_grad()
+        def decorated():
+            raise RuntimeError("test")
+
+        try:
+            decorated()
+        except RuntimeError as e:
+            return [frame.name for frame in traceback.extract_tb(e.__traceback__)]
+        else:
+            raise AssertionError("Expected RuntimeError")
+
+    def test_context_decorator_traceback_frame_name(self):
+        frame_names = self._context_decorator_traceback_frame_names()
+        self.assertIn("no_grad", frame_names)
+        self.assertNotIn("decorate_context", frame_names)
+
+    @staticmethod
+    @torch._dynamo.disable
+    def _context_decorator_generator_traceback_frame_names():
+        @torch.no_grad()
+        def decorated_generator():
+            yield None
+            raise RuntimeError("test")
+
+        gen = decorated_generator()
+        next(gen)
+        try:
+            next(gen)
+        except RuntimeError as e:
+            return [frame.name for frame in traceback.extract_tb(e.__traceback__)]
+        else:
+            raise AssertionError("Expected RuntimeError")
+
+    def test_context_decorator_generator_traceback_frame_name(self):
+        frame_names = self._context_decorator_generator_traceback_frame_names()
+        self.assertIn("no_grad", frame_names)
+        self.assertNotIn("generator_context", frame_names)
+
     def test_basic(self):
         source = """\
 def f(x):
@@ -1203,7 +1049,7 @@ def f(x):
     return g(x) + 1
 """
 
-        out: Dict[str, Any] = {}
+        out: dict[str, Any] = {}
         scope = {"__compile_source__": source}
         exec(source, scope, out)
 
@@ -1240,6 +1086,167 @@ def f(x):
         rs = CapturedTraceback.format_all([tb, CapturedTraceback.extract()])
         self.assertEqual(len(rs), 2)
         self.assertIn("test_captured_traceback_format_all", "".join(rs[0]))
+
+
+class TestTryImport(TestCase):
+    def test_import_imported(self):
+        self.assertIn("os", sys.modules)
+        os_module = try_import("os")
+        self.assertIs(os_module, os)
+
+    def test_import_existing(self):
+        self.assertNotIn("imaplib", sys.modules)
+        imaplib_module = try_import("imaplib")
+        self.assertIsNotNone(imaplib_module)
+        self.assertFalse(hasattr(imaplib_module, "not_attribute"))
+        self.assertTrue(hasattr(imaplib_module, "IMAP4"))
+
+    def test_import_missing(self):
+        missing_module = try_import("missing_module")
+        self.assertIsNone(missing_module)
+
+
+class TestUtilsInternal(TestCase):
+    def test_max_clock_rate_falls_back_to_pynvml_when_nvidia_smi_missing(self):
+        def nvsmi(_query):
+            raise FileNotFoundError("nvidia-smi")
+
+        triton = types.ModuleType("triton")
+        triton_testing = types.ModuleType("triton.testing")
+        cast(Any, triton_testing).nvsmi = nvsmi
+        cast(Any, triton).testing = triton_testing
+
+        pynvml = types.ModuleType("pynvml")
+        cast(Any, pynvml).NVML_CLOCK_SM = 1
+        calls = []
+
+        def nvmlDeviceGetMaxClockInfo(handle, clock_type):
+            calls.append(("max_clock", handle, clock_type))
+            return 1980
+
+        def nvmlShutdown():
+            calls.append("shutdown")
+
+        cast(Any, pynvml).nvmlDeviceGetMaxClockInfo = nvmlDeviceGetMaxClockInfo
+        cast(Any, pynvml).nvmlShutdown = nvmlShutdown
+
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.dict(
+                    sys.modules,
+                    {
+                        "triton": triton,
+                        "triton.testing": triton_testing,
+                        "pynvml": pynvml,
+                    },
+                ),
+                unittest.mock.patch.object(torch.version, "hip", None),
+                unittest.mock.patch.object(
+                    torch.cuda, "_get_pynvml_handler", return_value="handle"
+                ) as get_pynvml_handler,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(), 1980)
+                get_pynvml_handler.assert_called_once_with()
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
+
+        self.assertEqual(
+            calls,
+            [("max_clock", "handle", 1), "shutdown"],
+        )
+
+
+@deprecated()
+def _deprecated_api(x, y=15):
+    return x + y
+
+
+class TestDeprecate(TestCase):
+    def test_deprecated(self):
+        with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            # pyrefly: ignore [unknown-name]
+            deprecated_api(1, 2)  # noqa: F821
+        with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            # pyrefly: ignore [unknown-name]
+            deprecated_api(1, y=2)  # noqa: F821
+        _deprecated_api(1, 2)
+        _deprecated_api(1, y=2)
+
+
+class TestDeviceLazyInit(TestCase):
+    @unittest.skipIf(IS_WINDOWS, "pthread_atfork not available on Windows")
+    def test_fork_poison_on_lazy_init(self, device):
+        torch.empty(1, device=device)
+
+        def child(q):
+            try:
+                torch.empty(1, device=device)
+            except Exception as e:
+                q.put(e)
+
+        ctx = multiprocessing.get_context("fork")
+        q = ctx.Queue()
+        p = ctx.Process(target=child, args=(q,))
+        p.start()
+        p.join()
+        self.assertTrue(not q.empty())
+        exc = q.get()
+        pattern = (
+            r"Cannot re-initialize .* in forked subprocess\. "
+            r"To use .* with multiprocessing, you must use the 'spawn' start method"
+        )
+        self.assertIsInstance(exc, RuntimeError)
+        self.assertRegex(str(exc), pattern)
+
+
+instantiate_device_type_tests(
+    TestDeviceLazyInit, globals(), except_for=["cpu"], allow_xpu=True
+)
+
+
+class TestEnv(TestCase):
+    def test_getenv_matches_os(self):
+        for name in ("PATH", "PATH_DOES_NOT_EXIST_TORCH_TEST"):
+            self.assertEqual(torch._utils.getenv(name), os.environ.get(name))
+
+    def test_setenv_roundtrip(self):
+        name = "TORCH_TEST_SETENV_VAR"
+        torch._utils.setenv(name, "hello")
+        self.assertEqual(torch._utils.getenv(name), "hello")
+
+    def test_setenv_overwrite(self):
+        name = "TORCH_TEST_SETENV_OVERWRITE"
+        torch._utils.setenv(name, "first")
+        torch._utils.setenv(name, "second", overwrite=False)
+        self.assertEqual(torch._utils.getenv(name), "first")
+        torch._utils.setenv(name, "second")
+        self.assertEqual(torch._utils.getenv(name), "second")
+
+    def test_unsetenv(self):
+        name = "TORCH_TEST_UNSETENV"
+        torch._utils.setenv(name, "gone")
+        self.assertEqual(torch._utils.getenv(name), "gone")
+        torch._utils.unsetenv(name)
+        self.assertIsNone(torch._utils.getenv(name))
+
+    def test_os_environ_hook(self):
+        name = "TORCH_TEST_ENVIRON_HOOK"
+        torch._utils.install_os_environ_hook()
+        try:
+            os.environ[name] = "hooked"
+            # Both the cached os.environ dict and c10 observe the write.
+            self.assertEqual(os.environ.get(name), "hooked")
+            self.assertEqual(torch._utils.getenv(name), "hooked")
+            del os.environ[name]
+            self.assertIsNone(os.environ.get(name))
+            self.assertIsNone(torch._utils.getenv(name))
+            # Idempotent while installed.
+            torch._utils.install_os_environ_hook()
+        finally:
+            torch._utils.remove_os_environ_hook()
+        # After removal os.putenv is restored, so it is no longer our hook.
+        self.assertIsNot(os.putenv, torch._utils._torch_putenv)
 
 
 if __name__ == "__main__":

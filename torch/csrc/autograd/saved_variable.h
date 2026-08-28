@@ -1,7 +1,9 @@
 #pragma once
 
+#include <c10/core/SafePyObject.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/forward_grad.h>
+#include <torch/csrc/autograd/node.h>
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 
 #include <ATen/core/Tensor.h>
@@ -12,7 +14,6 @@
 namespace torch::autograd {
 
 using Variable = at::Tensor;
-struct Node;
 
 TORCH_API extern const char* ERR_BACKWARD_TWICE;
 
@@ -43,7 +44,7 @@ class TORCH_API SavedVariable {
   /// Reconstructs the saved variable. Pass `saved_for` as the gradient
   /// function if constructing the `SavedVariable` with it would have caused a
   /// circular reference.
-  Variable unpack(std::shared_ptr<Node> saved_for = nullptr) const;
+  Variable unpack(c10::intrusive_ptr<Node> saved_for = nullptr) const;
 
   void register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks);
 
@@ -53,13 +54,30 @@ class TORCH_API SavedVariable {
     return (bool)hooks_;
   }
 
+  std::optional<at::Tensor> get_raw_data() const {
+    if (hooks_) {
+      return std::nullopt;
+    } else {
+      return data_;
+    }
+  }
+
+  // Used by compiled autograd
+  std::optional<std::pair<c10::SafePyObject, c10::SafePyObject>>
+  retrieve_unpack_hook_data() const {
+    if (!hooks_) {
+      return std::nullopt;
+    }
+    return hooks_->retrieve_unpack_hook_data();
+  }
+
  private:
   // This field contains either:
   // 1. the variable to save
   // 2. or its tensor_data.
   // If storing the variable itself would create a circular reference,
   // we fall into the second case and its metadata is also saved separately.
-  // In that case, the grad_fn must be passed in to the unpack function when
+  // In that case, the grad_fn must be passed into the unpack function when
   // reconstructing the Variable (except when we are doing an inplace operation
   // on a view, see below). The field saved_original_ below reflects the two
   // cases: its value is true in the first case and false in the second case.
@@ -85,9 +103,9 @@ class TORCH_API SavedVariable {
   // inplace views.
   // This variable is used when the user chooses to create a SavedVariable with
   // is_inplace_on_view = true.
-  // In that case, the grad_fn passed in to the unpack function at unwrapping
+  // In that case, the grad_fn passed into the unpack function at unwrapping
   // time is unused.
-  std::weak_ptr<Node> weak_grad_fn_;
+  c10::weak_intrusive_ptr<Node> weak_grad_fn_{c10::intrusive_ptr<Node>()};
 
   uint32_t saved_version_ = 0;
   uint32_t output_nr_ = 0;
@@ -105,12 +123,12 @@ class TORCH_API SavedVariable {
   // Fields grad_fn_, grad_accumulator_, and requires_grad_ are only used if
   // hooks are defined. They are set before pack_hook is called and used after
   // unpack_hook is called.
-  std::shared_ptr<Node> grad_fn_;
+  c10::intrusive_ptr<Node> grad_fn_;
   // For the usual case where leaf tensors are the input, we expect its
   // grad_acc to be kept alive by the graph. The reason SavedVariable holds
-  // a owning reference is to support the case where a custom autograd Function
+  // an owning reference is to support the case where a custom autograd Function
   // saves an intermediate.
-  std::shared_ptr<Node> grad_accumulator_;
+  c10::intrusive_ptr<Node> grad_accumulator_;
   bool requires_grad_ = false;
 
   void save_metadata(const Variable& data);

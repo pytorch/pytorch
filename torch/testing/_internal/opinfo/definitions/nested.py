@@ -4,7 +4,6 @@ import math
 from copy import copy
 from dataclasses import dataclass
 from functools import partial
-from typing import List, Optional, Tuple
 
 import torch
 from torch.fx.experimental.symbolic_shapes import is_nested_int
@@ -41,13 +40,13 @@ class ExtraOpData:
     # each is simply "dim". Its entry should be: [["dim"], ["dim..."]].
     #
     # If no overload of the op accepts dim-related args, this should be None.
-    dim_args: List[List[str]] = None
+    dim_args: list[list[str]] = None
 
     # Helper function to extract names of dim-related args.
     # Returns: tuple of (single dim argname if available, dim list argname if available)
     # If the op doesn't support dim-related args at all OR this op only has overloads
     # with multiple dim args (e.g. transpose()), then this returns (None, None).
-    def get_dim_argnames(self) -> Tuple[Optional[str], Optional[str]]:
+    def get_dim_argnames(self) -> tuple[str | None, str | None]:
         if self.dim_args is None:
             return (None, None)
 
@@ -107,6 +106,7 @@ extra_op_data = {
     "flatten": ExtraOpData(is_view=True, dim_args=[["start_dim", "end_dim"]]),
     "flip": ExtraOpData(dim_args=[["dims..."]]),
     "gather": ExtraOpData(dim_args=[["dim"]]),
+    "hash_tensor": ExtraOpData(dim_args=[["dim..."]]),
     "imag": ExtraOpData(is_view=True),
     "index_add": ExtraOpData(dim_args=[["dim"]]),
     "index_copy": ExtraOpData(dim_args=[["dim"]]),
@@ -226,7 +226,7 @@ def _raggedness_matches(nt1, nt2):
 # as this causes autograd problems.
 def _clone(t):
     requires_grad = t.requires_grad
-    return t.clone().detach().requires_grad_(requires_grad)
+    return t.detach().clone().requires_grad_(requires_grad)
 
 
 # Helper function to update a sample with new kwargs / name
@@ -410,7 +410,10 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
         ):
             num_returns = len(out_ref_components[0])
             # ensure we get the same number of returns for each invocation
-            assert all(len(o) == num_returns for o in out_ref_components)
+            if not all(len(o) == num_returns for o in out_ref_components):
+                raise AssertionError(
+                    f"Expected all outputs to have {num_returns} returns"
+                )
             # construct NJTs from same index returns from each invocation
             njt_returns = [
                 torch.nested.as_nested_tensor(
@@ -427,33 +430,40 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
 # Computes the reference value for a non-reduction unary op with dim-wise application.
 def unary_dimwise_reference(op, sample, batchwise_reference=None):
     # extract info about the dim args this op supports
-    assert op._extra_op_data.dim_args is not None
+    if op._extra_op_data.dim_args is None:
+        raise AssertionError("Expected op._extra_op_data.dim_args to not be None")
     single_dim_argname, dimlist_argname = op._extra_op_data.get_dim_argnames()
     # only support a single non-list dim arg for now
-    assert dimlist_argname is None
-    assert single_dim_argname is not None
+    if dimlist_argname is not None:
+        raise AssertionError("Expected dimlist_argname to be None")
+    if single_dim_argname is None:
+        raise AssertionError("Expected single_dim_argname to not be None")
     if sample.kwargs[single_dim_argname] == 0:
         # unbind reference won't work for batch-wise operation; handle this case here
-        assert batchwise_reference is not None
+        if batchwise_reference is None:
+            raise AssertionError("Expected batchwise_reference to not be None")
         return batchwise_reference(op, sample)
     return unbind_reference(op, sample)
 
 
 # Computes the reference value for a reduction op.
 def reduction_reference(op, sample):
-    assert sample.input.is_nested
+    if not sample.input.is_nested:
+        raise AssertionError("Expected sample.input.is_nested to be True")
 
     # extract info about the dim args this op supports
-    assert op._extra_op_data.dim_args is not None
+    if op._extra_op_data.dim_args is None:
+        raise AssertionError("Expected op._extra_op_data.dim_args to not be None")
     single_dim_argname, dimlist_argname = op._extra_op_data.get_dim_argnames()
-    assert single_dim_argname is not None
-    supports_dimlist = dimlist_argname is not None
+    if single_dim_argname is None:
+        raise AssertionError("Expected single_dim_argname to not be None")
 
     dim = sample.kwargs.get(
         dimlist_argname, sample.kwargs.get(single_dim_argname, None)
     )
     keepdim = sample.kwargs.get("keepdim", False)
-    assert dim != 0, "reductions over just the batch dim are not supported"
+    if dim == 0:
+        raise AssertionError("reductions over just the batch dim are not supported")
     if isinstance(dim, (tuple, list)):
         reduce_on_ragged = sample.input._ragged_idx in dim
         reduce_on_batch = 0 in dim
@@ -470,7 +480,8 @@ def reduction_reference(op, sample):
         from torch.nested._internal.ops import _outer_to_inner_dim
 
         ref_kwargs = dict(sample.kwargs)
-        assert dimlist_argname is not None
+        if dimlist_argname is None:
+            raise AssertionError("Expected dimlist_argname to not be None")
         ref_kwargs[dimlist_argname] = _outer_to_inner_dim(
             sample.input.dim(), dim, sample.input._ragged_idx, canonicalize=True
         )
@@ -492,7 +503,10 @@ def reduction_reference(op, sample):
             # some ops return multiple things; stack all of them
             num_returns = len(out_ref_components[0])
             # ensure we get the same number of returns for each invocation
-            assert all(len(o) == num_returns for o in out_ref_components)
+            if not all(len(o) == num_returns for o in out_ref_components):
+                raise AssertionError(
+                    f"Expected all outputs to have {num_returns} returns"
+                )
             # stack same index returns from each invocation
             stacked_returns = [
                 torch.stack([o[r] for o in out_ref_components], dim=0)
@@ -675,12 +689,14 @@ def sample_inputs_njt_reduction(
         op_kwargs = {}
 
     # extract info about the dim args this op supports
-    assert op_info._extra_op_data.dim_args is not None
+    if op_info._extra_op_data.dim_args is None:
+        raise AssertionError("Expected op_info._extra_op_data.dim_args to not be None")
     (
         single_dim_argname,
         dimlist_argname,
     ) = op_info._extra_op_data.get_dim_argnames()
-    assert single_dim_argname is not None
+    if single_dim_argname is None:
+        raise AssertionError("Expected single_dim_argname to not be None")
     supports_dimlist = dimlist_argname is not None
 
     for njt in _sample_njts(
@@ -794,10 +810,13 @@ def sample_inputs_unary_dimwise(
         op_kwargs = {}
 
     # only support a single non-list dim arg for now
-    assert op_info._extra_op_data is not None
+    if op_info._extra_op_data is None:
+        raise AssertionError("Expected op_info._extra_op_data to not be None")
     single_dim_argname, dimlist_argname = op_info._extra_op_data.get_dim_argnames()
-    assert single_dim_argname is not None
-    assert dimlist_argname is None
+    if single_dim_argname is None:
+        raise AssertionError("Expected single_dim_argname to not be None")
+    if dimlist_argname is not None:
+        raise AssertionError("Expected dimlist_argname to be None")
 
     for njt in _sample_njts(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
@@ -814,7 +833,6 @@ def sample_inputs_unary_dimwise(
 
 def batchwise_reference_chunk(op, sample):
     # reference for chunk() over dim=0
-    kwargs = sample.kwargs
     B = sample.input.size(0)
     num_chunks = sample.kwargs["chunks"]
     chunk_size = math.ceil(B / num_chunks)
@@ -833,7 +851,7 @@ def batchwise_reference_chunk(op, sample):
         start += chunk_size
 
     # rejoin into NJT outputs
-    return [torch.nested.nested_tensor(lst, layout=torch.jagged) for lst in chunks]
+    return [torch.nested.as_nested_tensor(lst, layout=torch.jagged) for lst in chunks]
 
 
 def batchwise_reference_narrow(op, sample):
@@ -889,6 +907,14 @@ def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
             kwargs={"memory_format": memory_format},
             name=f"{njt_desc}: {memory_format})",
         )
+
+
+def sample_inputs_fill(op_info, device, dtype, requires_grad, **kwargs):
+    # scalar case
+    unary_func = partial(sample_inputs_elementwise_njt_unary, op_kwargs={"value": 42.0})
+    yield from unary_func(op_info, device, dtype, requires_grad)
+
+    # TODO: add Tensor case
 
 
 def sample_inputs_mvl_gamma(p):
@@ -1013,6 +1039,53 @@ def sample_inputs_matmul(
                 _clone(njt_4d),
                 kwargs={"other": torch.randn(E, F, device=device, dtype=dtype)},
                 name=f"{njt_desc}: (B, j, D, E) x (E, F)",
+            )
+
+    # Dense x NJT cases
+    for njt_3d in _sample_njts(
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+        dims=[3],
+    ):
+        # (B, F, E) x (B, E, j1) => (B, F, j1)
+        if njt_3d._ragged_idx == 2:
+            B = njt_3d.shape[0]
+            E = njt_3d.shape[1]
+            F = E + 2
+            njt_desc = _describe_njt(njt_3d)
+            dense_t = torch.randn(
+                B, F, E, device=device, dtype=dtype, requires_grad=requires_grad
+            )
+            dense_t._batch_dim = 0  # for unbind_reference()
+            yield SampleInput(
+                dense_t,
+                args=(_clone(njt_3d),),
+                name=f"{njt_desc}: (B, F, E) x (B, E, j1)",
+            )
+
+    # NJT x NJT => Dense case
+    for njt_3d in _sample_njts(
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+        dims=[3],
+    ):
+        # (B, E, j1) x (B, j1, F) => (B, E, F)
+        if njt_3d._ragged_idx == 2 and njt_3d.is_contiguous():
+            B, E, _ = njt_3d.shape
+            sum_j1 = len(njt_3d.values())
+            other_cont = torch.randn(
+                sum_j1, E + 2, device=device, dtype=dtype, requires_grad=requires_grad
+            )
+            other_njt = torch.nested.nested_tensor_from_jagged(
+                other_cont, njt_3d.offsets(), lengths=njt_3d._lengths
+            )
+            njt_desc = _describe_njt(njt_3d)
+            yield SampleInput(
+                _clone(njt_3d),
+                kwargs={"other": _clone(other_njt)},
+                name=f"{njt_desc}: (B, E, j1) x (B, j1, F)",
             )
 
         # TODO (need factory functions):
@@ -1219,6 +1292,41 @@ def sample_inputs_nn_functional_linear(op_info, device, dtype, requires_grad, **
         )
 
 
+def sample_inputs_nn_functional_prelu(op_info, device, dtype, requires_grad, **kwargs):
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[3, 4]
+    ):
+        # Second dim is interpreted as number of channels; this should be non-ragged for now
+        num_channels = njt.size(1)
+        if is_nested_int(num_channels):
+            continue
+
+        # 1D weight
+        weight = torch.randn(
+            num_channels,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+
+        yield SampleInput(
+            _clone(njt),
+            kwargs={
+                "weight": _clone(weight),
+            },
+            name=f"{_describe_njt(njt)}: 1D weight",
+        )
+
+        # scalar tensor weight
+        yield SampleInput(
+            _clone(njt),
+            kwargs={
+                "weight": torch.tensor(4.2, device=device, dtype=dtype),
+            },
+            name=f"{_describe_njt(njt)}: scalar tensor weight",
+        )
+
+
 def sample_inputs_nn_functional_rms_norm(
     op_info, device, dtype, requires_grad, **kwargs
 ):
@@ -1318,10 +1426,10 @@ def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
         # non-contiguous transposed
         yield njt.transpose(1, 3)
         # non-contiguous with holes
-        values = njt.values().clone().detach()
-        offsets = njt.offsets().clone().detach()
+        values = njt.values().detach().clone()
+        offsets = njt.offsets().detach().clone()
         # subtract 1 to cause holes
-        lengths = (offsets.diff() - 1).clone().detach()
+        lengths = (offsets.diff() - 1).detach().clone()
         yield torch.nested.nested_tensor_from_jagged(
             values=values,
             offsets=offsets,
@@ -1410,10 +1518,12 @@ njt_sample_inputs = {
     "chunk": sample_inputs_chunk,
     "clone": sample_inputs_clone,
     "count_nonzero": partial(sample_inputs_njt_reduction, supports_keepdim=False),
+    "fill": sample_inputs_fill,
     **{f"mvlgamma.mvlgamma_p_{p}": sample_inputs_mvl_gamma(p=1) for p in (1, 3, 5)},
     "nn.functional.embedding": sample_inputs_nn_functional_embedding,
     "nn.functional.embedding_bag": sample_inputs_nn_functional_embedding_bag,
     "nn.functional.linear": sample_inputs_nn_functional_linear,
+    "nn.functional.prelu": sample_inputs_nn_functional_prelu,
     "nn.functional.rms_norm": sample_inputs_nn_functional_rms_norm,
     "nn.functional.threshold": sample_inputs_nn_functional_threshold,
     **{f"polygamma.polygamma_n_{n}": sample_inputs_polygamma_n(n=n) for n in range(5)},

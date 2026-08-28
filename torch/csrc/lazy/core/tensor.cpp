@@ -252,7 +252,7 @@ at::Tensor LazyTensor::ToTensor(bool detached) {
     tensor = *tensor_data;
     if (detached) {
       if (data()->ir_value || data()->handle != nullptr) {
-        // If we have other authoritive sources, just drop our reference and
+        // If we have other authoritative sources, just drop our reference and
         // transfer it to the caller.
         data()->tensor_data = std::nullopt;
       } else {

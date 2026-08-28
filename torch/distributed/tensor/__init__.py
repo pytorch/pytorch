@@ -2,19 +2,22 @@
 
 import torch
 import torch.distributed.tensor._ops  # force import all built-in dtensor ops
-from torch.distributed.device_mesh import DeviceMesh, init_device_mesh  # noqa: F401
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor._api import (
     distribute_module,
     distribute_tensor,
     DTensor,
     empty,
     full,
+    linspace,
+    logspace,
     ones,
     rand,
     randn,
     zeros,
 )
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -40,13 +43,19 @@ __all__ = [
     "ones",
     "empty",
     "full",
+    "linspace",
+    "logspace",
     "rand",
     "randn",
     "zeros",
 ]
 
 # For weights_only torch.load
-from ._dtensor_spec import DTensorSpec as _DTensorSpec, TensorMeta as _TensorMeta
+from ._dtensor_spec import (
+    DTensorSpec as _DTensorSpec,
+    ShardOrderEntry as _ShardOrderEntry,
+    TensorMeta as _TensorMeta,
+)
 
 
 torch.serialization.add_safe_globals(
@@ -54,10 +63,12 @@ torch.serialization.add_safe_globals(
         DeviceMesh,
         _DTensorSpec,
         _TensorMeta,
+        _ShardOrderEntry,
         DTensor,
         Partial,
         Replicate,
         Shard,
+        _StridedShard,
     ]
 )
 
@@ -68,7 +79,7 @@ if DTensor not in _optim_foreach_supported_types:
     _optim_foreach_supported_types.append(DTensor)
 
 if DTensor not in _util_foreach_supported_types:
-    _util_foreach_supported_types.append(DTensor)
+    _util_foreach_supported_types.append(DTensor)  # type: ignore[arg-type]
 
 
 # Set namespace for exposed private names
@@ -78,6 +89,14 @@ distribute_module.__module__ = "torch.distributed.tensor"
 ones.__module__ = "torch.distributed.tensor"
 empty.__module__ = "torch.distributed.tensor"
 full.__module__ = "torch.distributed.tensor"
+linspace.__module__ = "torch.distributed.tensor"
+logspace.__module__ = "torch.distributed.tensor"
 rand.__module__ = "torch.distributed.tensor"
 randn.__module__ = "torch.distributed.tensor"
 zeros.__module__ = "torch.distributed.tensor"
+
+# Register DTensor dispatch for higher order operators
+from torch._higher_order_ops.print import _register_dtensor_impl
+
+
+_register_dtensor_impl()

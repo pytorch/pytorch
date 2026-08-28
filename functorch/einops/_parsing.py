@@ -27,7 +27,11 @@ from __future__ import annotations
 
 import keyword
 import warnings
-from typing import Collection, List, Mapping, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Collection, Mapping
 
 
 _ellipsis: str = "\u2026"  # NB, this is a single unicode symbol. String is used as it is not a list, but can be iterated
@@ -68,12 +72,12 @@ class ParsedExpression:
             allow_duplicates (bool): whether to allow an identifier to appear more than once in the expression
         """
         self.has_ellipsis: bool = False
-        self.has_ellipsis_parenthesized: Optional[bool] = None
-        self.identifiers: Set[Union[str, AnonymousAxis]] = set()
+        self.has_ellipsis_parenthesized: bool | None = None
+        self.identifiers: set[str | AnonymousAxis] = set()
         # that's axes like 2, 3, 4 or 5. Axes with size 1 are exceptional and replaced with empty composition
         self.has_non_unitary_anonymous_axes: bool = False
         # composition keeps structure of composite axes, see how different corner cases are handled in tests
-        self.composition: List[Union[List[Union[str, AnonymousAxis]], str]] = []
+        self.composition: list[list[str | AnonymousAxis] | str] = []
         if "." in expression:
             if "..." not in expression:
                 raise ValueError(
@@ -86,7 +90,7 @@ class ParsedExpression:
             expression = expression.replace("...", _ellipsis)
             self.has_ellipsis = True
 
-        bracket_group: Optional[List[Union[str, AnonymousAxis]]] = None
+        bracket_group: list[str | AnonymousAxis] | None = None
 
         def add_axis_name(x: str) -> None:
             if x in self.identifiers:
@@ -116,9 +120,7 @@ class ParsedExpression:
                 )
                 if not (is_number or is_axis_name):
                     raise ValueError(f"Invalid axis identifier: {x}\n{reason}")
-                axis_name: Union[str, AnonymousAxis] = (
-                    AnonymousAxis(x) if is_number else x
-                )
+                axis_name: str | AnonymousAxis = AnonymousAxis(x) if is_number else x
                 self.identifiers.add(axis_name)
                 if is_number:
                     self.has_non_unitary_anonymous_axes = True
@@ -160,7 +162,7 @@ class ParsedExpression:
     @staticmethod
     def check_axis_name_return_reason(
         name: str, allow_underscore: bool = False
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """Check if the given axis name is valid, and a message explaining why if not.
 
         Valid axes names are python identifiers except keywords, and should not start or end with an underscore.
@@ -170,7 +172,7 @@ class ParsedExpression:
             allow_underscore (bool): whether axis names are allowed to start with an underscore
 
         Returns:
-            Tuple[bool, str]: whether the axis name is valid, a message explaining why if not
+            tuple[bool, str]: whether the axis name is valid, a message explaining why if not
         """
         if not str.isidentifier(name):
             return False, "not a valid python identifier"
@@ -184,7 +186,7 @@ class ParsedExpression:
                     f"It is discouraged to use axes names that are keywords: {name}",
                     RuntimeWarning,
                 )
-            if name in ["axis"]:
+            if name == "axis":
                 warnings.warn(
                     "It is discouraged to use 'axis' as an axis name and will raise an error in future",
                     FutureWarning,
@@ -207,7 +209,7 @@ class ParsedExpression:
 
 def parse_pattern(
     pattern: str, axes_lengths: Mapping[str, int]
-) -> Tuple[ParsedExpression, ParsedExpression]:
+) -> tuple[ParsedExpression, ParsedExpression]:
     """Parse an `einops`-style pattern into a left-hand side and right-hand side `ParsedExpression` object.
 
     Args:
@@ -215,7 +217,7 @@ def parse_pattern(
         axes_lengths (Mapping[str, int]): any additional length specifications for dimensions
 
     Returns:
-       Tuple[ParsedExpression, ParsedExpression]: a tuple containing the left-hand side and right-hand side expressions
+       tuple[ParsedExpression, ParsedExpression]: a tuple containing the left-hand side and right-hand side expressions
     """
     # adapted from einops.einops._prepare_transformation_recipe
     # https://github.com/arogozhnikov/einops/blob/230ac1526c1f42c9e1f7373912c7f8047496df11/einops/einops.py
@@ -274,7 +276,7 @@ def validate_rearrange_expressions(
         )
 
 
-def comma_separate(collection: Collection[Union[str, Collection[str]]]) -> str:
+def comma_separate(collection: Collection[str | Collection[str]]) -> str:
     """Convert a collection of strings representing first class dims into a comma-separated string.
 
     Args:

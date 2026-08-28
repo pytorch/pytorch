@@ -90,6 +90,22 @@ def define_targets(rules):
         alwayslink = True,
     )
 
+    rules.cc_library(
+        name = "base_headers",
+        srcs = [],
+        hdrs = rules.glob(
+            [
+                "*.h",
+                "impl/*.h",
+            ],
+            exclude = [
+                "CPUAllocator.h",
+                "impl/alloc_cpu.h",
+            ],
+        ),
+        visibility = ["//visibility:public"],
+    )
+
     rules.filegroup(
         name = "headers",
         srcs = rules.glob(
@@ -101,5 +117,5 @@ def define_targets(rules):
                 "alignment.h",
             ],
         ),
-        visibility = ["//c10:__pkg__"],
+        visibility = ["//visibility:public"],
     )

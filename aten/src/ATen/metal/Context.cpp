@@ -1,6 +1,5 @@
 #include <atomic>
 
-#include <ATen/Tensor.h>
 #include <ATen/metal/Context.h>
 
 namespace at::metal {

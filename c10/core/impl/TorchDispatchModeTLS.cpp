@@ -1,5 +1,4 @@
 #include <c10/core/DispatchKey.h>
-#include <c10/core/SafePyObject.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/irange.h>
@@ -8,7 +7,7 @@
 
 namespace c10::impl {
 
-thread_local TorchDispatchModeTLS torchDispatchModeState;
+thread_local static TorchDispatchModeTLS torchDispatchModeState;
 
 bool TorchDispatchModeTLS::any_modes_set(bool skip_infra_modes) {
   if (!torchDispatchModeState.stack_.empty())

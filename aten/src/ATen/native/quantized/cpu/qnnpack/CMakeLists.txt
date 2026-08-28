@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 
 include(GNUInstallDirs)
 
@@ -233,6 +233,10 @@ set(PYTORCH_QNNPACK_AARCH64_ASM_UKERNELS
   src/q8conv/8x8-aarch64-neon.S
   src/q8gemm/8x8-aarch64-neon.S
   src/q8gemm/8x8-dq-aarch64-neon.S
+  src/q8gemm/4x8-dq-aarch64-neon.S
+  src/q8gemm/3x8-dq-aarch64-neon.S
+  src/q8gemm/2x8-dq-aarch64-neon.S
+  src/q8gemm/1x8-dq-aarch64-neon.S
   src/q8gemm_sparse/8x4-packA-aarch64-neon.S
   src/q8gemm_sparse/8x8c1x4-dq-packedA-aarch64-neon.S
   src/q8gemm_sparse/8x8c8x1-dq-packedA-aarch64-neon.S)
@@ -331,6 +335,9 @@ if(NOT TARGET clog)
     "${CONFU_DEPENDENCIES_BINARY_DIR}/clog")
   # We build static version of clog but a dynamic library may indirectly depend on it
   set_property(TARGET clog PROPERTY POSITION_INDEPENDENT_CODE ON)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(clog PRIVATE "-Wno-unused-result")
+  endif()
 endif()
 target_link_libraries(pytorch_qnnpack PUBLIC clog)
 
@@ -391,6 +398,12 @@ elseif(NOT TARGET fxdiv AND USE_SYSTEM_FXDIV)
 endif()
 target_link_libraries(pytorch_qnnpack PRIVATE fxdiv)
 
+# -- [ CMake-4 compat mode
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0" AND NOT (USE_SYSTEM_PSIMD OR USE_SYSTEM_FP16))
+  message(WARNING "Ancient psimd/FP16 forces CMake compatibility")
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+endif()
+
 # ---[ Configure psimd
 if(NOT TARGET psimd AND NOT USE_SYSTEM_PSIMD)
   add_subdirectory(
@@ -422,6 +435,11 @@ elseif(NOT TARGET fp16 AND USE_SYSTEM_FP16)
   set_target_properties(fp16 PROPERTIES LINKER_LANGUAGE C)
 endif()
 target_link_libraries(pytorch_qnnpack PRIVATE fp16)
+
+# -- [ Undo cmake-4 compat mode
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
+  unset(CMAKE_POLICY_VERSION_MINIMUM)
+endif()
 
 install(TARGETS pytorch_qnnpack
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -646,6 +664,15 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
   target_include_directories(q8gavgpool-test PRIVATE src test)
   target_link_libraries(q8gavgpool-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
   add_test(q8gavgpool-test q8gavgpool-test)
+
+  add_executable(requantization-test test/requantization.cc)
+  set_target_properties(requantization-test PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  target_include_directories(requantization-test PRIVATE src test)
+  target_link_libraries(requantization-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  add_test(requantization-test requantization-test)
 
   add_executable(u8maxpool-test test/u8maxpool.cc)
   set_target_properties(u8maxpool-test PROPERTIES

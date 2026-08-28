@@ -21,12 +21,9 @@
 #include <type_traits>
 #include <utility>
 
-namespace c10 {
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
 
-DispatchKey computeDispatchKey(
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device);
+namespace c10 {
 
 inline ScalarType dtype_or_default(std::optional<ScalarType> dtype) {
   return dtype.value_or(get_default_dtype_as_scalartype());
@@ -137,15 +134,8 @@ DispatchKey computeDispatchKey(
     std::optional<Device> device);
 
 struct C10_API TensorOptions {
-  TensorOptions()
-      : requires_grad_(false),
-        pinned_memory_(false),
-        has_device_(false),
-        has_dtype_(false),
-        has_layout_(false),
-        has_requires_grad_(false),
-        has_pinned_memory_(false),
-        has_memory_format_(false) {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  TensorOptions() noexcept {}
 
   /// Constructs a `TensorOptions` object with the given layout.
   /* implicit */ TensorOptions(Layout layout) : TensorOptions() {
@@ -555,15 +545,15 @@ struct C10_API TensorOptions {
   // Bitmask required here to get this to fit inside 32 bits (or even 64 bits,
   // for that matter)
 
-  bool requires_grad_ : 1;
-  bool pinned_memory_ : 1;
+  bool requires_grad_ : 1 = false;
+  bool pinned_memory_ : 1 = false;
 
-  bool has_device_ : 1;
-  bool has_dtype_ : 1;
-  bool has_layout_ : 1;
-  bool has_requires_grad_ : 1;
-  bool has_pinned_memory_ : 1;
-  bool has_memory_format_ : 1;
+  bool has_device_ : 1 = false;
+  bool has_dtype_ : 1 = false;
+  bool has_layout_ : 1 = false;
+  bool has_requires_grad_ : 1 = false;
+  bool has_pinned_memory_ : 1 = false;
+  bool has_memory_format_ : 1 = false;
 };
 
 // We should aspire to fit in one machine-size word; but a size greater than two
@@ -626,7 +616,7 @@ inline TensorOptions dtype() {
 inline std::string toString(const TensorOptions& options) {
   std::ostringstream stream;
   stream << options;
-  return stream.str();
+  return std::move(stream).str();
 }
 
 // This is intended to be a centralized location by which we can determine
@@ -660,6 +650,11 @@ inline DispatchKey computeDispatchKey(
         case c10::DeviceType::Metal:
           return DispatchKey::Metal;
         case c10::DeviceType::MKLDNN:
+          TORCH_CHECK_NOT_IMPLEMENTED(
+              false,
+              "The 'mkldnn' device type is deprecated and cannot be used "
+              "to allocate dense tensors. Please use a supported device type "
+              "instead.");
         case c10::DeviceType::OPENGL:
         case c10::DeviceType::OPENCL:
         case c10::DeviceType::IDEEP:
@@ -785,3 +780,5 @@ inline bool backend_supports_empty_operator(const TensorOptions& options) {
 } // namespace detail
 
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()

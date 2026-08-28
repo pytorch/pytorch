@@ -79,7 +79,7 @@ std::unordered_map<CacheKey, cudnn_frontend::ExecutionPlan, at::native::ParamsHa
 }
 // TODO: we can use cudnn_frontend::ExecutionPlanCache when it supports caching
 // multiple operators
-// reference: https://github.com/NVIDIA/cudnn-frontend/blob/main/samples/conv_sample.cpp#L293
+// reference: https://github.com/NVIDIA/cudnn-frontend/blob/main/samples/legacy_samples/conv_sample.cpp#L295
 //static cudnn_frontend::ExecutionPlanCache plan_cache("sample_cache");
 
 // currently we only support int8 symmetric (zero_point = 0 for inputs and output) quantized linear op
@@ -171,7 +171,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     return;
   }
 
-  // linear_op computes act_int8 * tranpose(w_int8) (matrix multiplication)
+  // linear_op computes act_int8 * transpose(w_int8) (matrix multiplication)
   // where act_int8 and w_int8 are the input and weight variables, resp.
   // output is a fp32 tensor
   auto linear_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR)

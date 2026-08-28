@@ -108,7 +108,7 @@ def failures_histogram(eager_dir, dynamo_dir, verbose=False, format_issues=False
 def as_issue(count, msg, repro, tests):
     tests = "\n".join(tests)
     result = f"""
-{'-' * 50}
+{"-" * 50}
 {count} Dynamo test are failing with \"{msg}\".
 
 ## Repro

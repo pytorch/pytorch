@@ -1,50 +1,65 @@
 # mypy: allow-untyped-defs
 import logging
 import os
-from typing import List, Optional
 
 from torch._inductor import config
-from torch._inductor.utils import is_linux
+from torch._inductor.utils import is_linux, try_import_ck_lib
 
 
 log = logging.getLogger(__name__)
 
 
-def _rocm_include_paths(dst_file_ext: str) -> List[str]:
+def _rocm_system_include_dir(rocm_home: str | None = None) -> str:
     from torch.utils import cpp_extension
 
-    rocm_include = (
-        os.path.join(config.rocm.rocm_home, "include")
-        if config.rocm.rocm_home
-        else cpp_extension._join_rocm_home("include")
-    )
-    if not config.rocm.ck_dir:
-        log.warning("Unspecified Composable Kernel include dir")
+    if rocm_home:
+        return os.path.join(rocm_home, "include")
+    if config.rocm.rocm_home:
+        return os.path.join(config.rocm.rocm_home, "include")
+    return cpp_extension._join_rocm_home("include")
+
+
+def _ck_dir() -> str:
+    from torch.utils import cpp_extension
 
     if config.is_fbcode():
         from libfb.py import parutil
 
-        ck_path = parutil.get_dir_path("composable-kernel-headers")
-    else:
-        ck_path = config.rocm.ck_dir or cpp_extension._join_rocm_home(
-            "composable_kernel"
+        return parutil.get_dir_path("composable-kernel-headers")
+
+    if not config.rocm.ck_dir:
+        ck_dir, _, _, _ = try_import_ck_lib()
+        if not ck_dir:
+            log.warning("Unspecified Composable Kernel directory")
+        config.rocm.ck_dir = ck_dir
+    return config.rocm.ck_dir or cpp_extension._join_rocm_home("composable_kernel")
+
+
+def _rocm_header_search_dirs(
+    rocm_home: str | None = None, ck_dir: str | None = None
+) -> list[str]:
+    # CK has to take priority over ROCm since CK is potentially more up-to-date.
+    ck_path = ck_dir or _ck_dir()
+    log.debug("Using ck path %s", ck_path)
+    return [
+        os.path.realpath(p)
+        for p in (
+            os.path.join(ck_path, "include"),
+            os.path.join(ck_path, "library", "include"),
+            _rocm_system_include_dir(rocm_home),
         )
-
-    ck_include = os.path.join(ck_path, "include")
-    ck_library_include = os.path.join(ck_path, "library", "include")
-
-    # CK has to take priority over ROCm include paths
-    # Since CK is potentially more up-to-date
-    paths = [
-        os.path.realpath(p) for p in (ck_include, ck_library_include, rocm_include)
     ]
+
+
+def _rocm_include_paths(dst_file_ext: str) -> list[str]:
+    paths = _rocm_header_search_dirs()
     if dst_file_ext == "exe":
-        ck_utility_include = os.path.join(ck_path, "library", "src", "utility")
+        ck_utility_include = os.path.join(_ck_dir(), "library", "src", "utility")
         paths.append(os.path.realpath(ck_utility_include))
     return paths
 
 
-def _rocm_lib_options(dst_file_ext: str) -> List[str]:
+def _rocm_lib_options(dst_file_ext: str) -> list[str]:
     from torch.utils import cpp_extension
 
     rocm_lib_dir = (
@@ -69,17 +84,18 @@ def _rocm_lib_options(dst_file_ext: str) -> List[str]:
     return opts
 
 
-def _rocm_compiler_options() -> List[str]:
+def _rocm_compiler_options() -> list[str]:
     arch_list = config.rocm.arch or ["native"]
     gpu_arch_flags = [f"--offload-arch={arch}" for arch in arch_list]
     opts = [
         config.rocm.compile_opt_level,
         "-x",
         "hip",
-        "-std=c++17",
+        "-std=c++20",
         *gpu_arch_flags,
         "-fno-gpu-rdc",
         "-fPIC",
+        "-fvisibility=hidden",
         "-mllvm",
         "-amdgpu-early-inline-all=true",
         "-mllvm",
@@ -100,7 +116,7 @@ def _rocm_compiler_options() -> List[str]:
     return opts
 
 
-def rocm_compiler() -> Optional[str]:
+def rocm_compiler() -> str | None:
     if is_linux():
         if config.rocm.rocm_home:
             return os.path.realpath(
@@ -119,10 +135,10 @@ def rocm_compiler() -> Optional[str]:
 
 
 def rocm_compile_command(
-    src_files: List[str],
+    src_files: list[str],
     dst_file: str,
     dst_file_ext: str,
-    extra_args: Optional[List[str]] = None,
+    extra_args: list[str] | None = None,
 ) -> str:
     include_paths = _rocm_include_paths(dst_file_ext)
     lib_options = _rocm_lib_options(dst_file_ext)

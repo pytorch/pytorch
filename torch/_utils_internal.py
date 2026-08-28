@@ -4,7 +4,9 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+import typing_extensions
+from collections.abc import Callable
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -28,20 +30,32 @@ if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
         StrobelightCompileTimeProfiler.enable()
 
 # this arbitrary-looking assortment of functionality is provided here
-# to have a central place for overrideable behavior. The motivating
+# to have a central place for overridable behavior. The motivating
 # use is the FB build environment, where this source file is replaced
 # by an equivalent.
 
-if torch._running_with_deploy():
-    # __file__ is meaningless in the context of frozen torch used in torch deploy.
-    # setting empty torch_parent should allow below functions to operate without crashing,
-    # but it's unclear if there is a valid use case for them in the context of deploy.
-    torch_parent = ""
-else:
-    if os.path.basename(os.path.dirname(__file__)) == "shared":
-        torch_parent = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    else:
-        torch_parent = os.path.dirname(os.path.dirname(__file__))
+
+def _compute_torch_parent() -> str:
+    torch_dir = os.path.dirname(os.path.abspath(__file__))
+    if os.path.basename(torch_dir) == "shared":
+        return os.path.dirname(os.path.dirname(torch_dir))
+    # In scikit-build-core editable installs with redirect mode, binary
+    # artifacts (bin/, lib/) are installed to the dist package directory
+    # rather than the source tree. Fall back to the installed package
+    # location for get_file_path.
+    if not os.path.isdir(os.path.join(torch_dir, "bin")):
+        try:
+            from importlib.metadata import distribution
+
+            installed = str(distribution("torch").locate_file("torch"))
+            if os.path.isdir(os.path.join(installed, "bin")):
+                return os.path.dirname(installed)
+        except Exception:
+            pass
+    return os.path.dirname(torch_dir)
+
+
+torch_parent = _compute_torch_parent()
 
 
 def get_file_path(*path_components: str) -> str:
@@ -88,9 +102,14 @@ def compile_time_strobelight_meta(
     ) -> Callable[_P, _T]:
         @functools.wraps(function)
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-            if "skip" in kwargs and isinstance(skip := kwargs["skip"], int):
+            if "skip" in kwargs and isinstance(
+                skip := kwargs["skip"],
+                int,
+            ):
                 kwargs["skip"] = skip + 1
 
+            # This is not needed but we have it here to avoid having profile_compile_time
+            # in stack traces when profiling is not enabled.
             if not StrobelightCompileTimeProfiler.enabled:
                 return function(*args, **kwargs)
 
@@ -116,8 +135,12 @@ def compile_time_strobelight_meta(
 #
 # Killswitch is at
 # https://www.internalfb.com/intern/justknobs/?name=pytorch%2Fsignpost#event
-def signpost_event(category: str, name: str, parameters: Dict[str, Any]):
+def signpost_event(category: str, name: str, parameters: dict[str, Any]):
     log.info("%s %s: %r", category, name, parameters)
+
+
+def add_mlhub_insight(category: str, insight: str, insight_description: str):
+    pass
 
 
 def log_compilation_event(metrics):
@@ -133,6 +156,10 @@ def set_pytorch_distributed_envs_from_justknobs():
 
 
 def log_export_usage(**kwargs):
+    pass
+
+
+def log_draft_export_usage(**kwargs):
     pass
 
 
@@ -157,6 +184,10 @@ def export_training_ir_rollout_check() -> bool:
     return True
 
 
+def full_aoti_runtime_assert() -> bool:
+    return True
+
+
 def log_torch_jit_trace_exportability(
     api: str,
     type_of_export: str,
@@ -165,6 +196,9 @@ def log_torch_jit_trace_exportability(
 ):
     _, _, _, _ = api, type_of_export, export_outcome, result
     return
+
+
+DISABLE_JUSTKNOBS = True
 
 
 def justknobs_check(name: str, default: bool = True) -> bool:
@@ -204,12 +238,24 @@ def is_fb_unit_test() -> bool:
     return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def max_clock_rate():
+    """
+    unit: MHz
+    """
     if not torch.version.hip:
         from triton.testing import nvsmi
 
-        return nvsmi(["clocks.max.sm"])[0]
+        try:
+            return nvsmi(["clocks.max.sm"])[0]
+        except FileNotFoundError:
+            import pynvml  # type: ignore[import]
+
+            handle = torch.cuda._get_pynvml_handler()
+            try:
+                return pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_SM)
+            finally:
+                pynvml.nvmlShutdown()
     else:
         # Manually set max-clock speeds on ROCm until equivalent nvmsi
         # functionality in triton.testing or via pyamdsmi enablement. Required
@@ -221,17 +267,21 @@ def max_clock_rate():
             return 1700
         elif "gfx908" in gcn_arch:
             return 1502
+        elif "gfx12" in gcn_arch:
+            return 1700
         elif "gfx11" in gcn_arch:
             return 1700
         elif "gfx103" in gcn_arch:
             return 1967
         elif "gfx101" in gcn_arch:
             return 1144
+        elif "gfx95" in gcn_arch:
+            return 1700  # TODO: placeholder, get actual value
         else:
             return 1100
 
 
-def get_mast_job_name_version() -> Optional[Tuple[str, int]]:
+def get_mast_job_name_version() -> tuple[str, int] | None:
     return None
 
 
@@ -250,14 +300,14 @@ USE_RTLD_GLOBAL_WITH_LIBTORCH = False
 REQUIRES_SET_PYTHON_MODULE = False
 
 
-def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
+def maybe_upload_prof_stats_to_manifold(profile_path: str) -> str | None:
     print("Uploading profile stats (fb-only otherwise no-op)")
     return None
 
 
 def log_chromium_event_internal(
-    event: Dict[str, Any],
-    stack: List[str],
+    event: dict[str, Any],
+    stack: list[str],
     logger_uuid: str,
     start_time_ns: int,
 ):
@@ -265,6 +315,97 @@ def log_chromium_event_internal(
 
 
 def record_chromium_event_internal(
-    event: Dict[str, Any],
+    event: dict[str, Any],
 ):
     return None
+
+
+def profiler_allow_cudagraph_cupti_lazy_reinit_cuda12():
+    return True
+
+
+def deprecated():
+    """
+    When we deprecate a function that might still be in use, we make it internal
+    by adding a leading underscore. This decorator is used with a private function,
+    and creates a public alias without the leading underscore, but has a deprecation
+    warning. This tells users "THIS FUNCTION IS DEPRECATED, please use something else"
+    without breaking them, however, if they still really really want to use the
+    deprecated function without the warning, they can do so by using the internal
+    function name.
+    """
+
+    def decorator(func: Callable[_P, _T]) -> Callable[_P, _T]:
+        # Validate naming convention - single leading underscore, not dunder
+        if not (func.__name__.startswith("_")):
+            raise ValueError(
+                "@deprecate must decorate a function whose name "
+                "starts with a single leading underscore (e.g. '_foo') as the api should be considered internal for deprecation."
+            )
+
+        public_name = func.__name__[1:]  # drop exactly one leading underscore
+        module = sys.modules[func.__module__]
+
+        # Don't clobber an existing symbol accidentally.
+        if hasattr(module, public_name):
+            raise RuntimeError(
+                f"Cannot create alias '{public_name}' -> symbol already exists in {module.__name__}. \
+                 Please rename it or consult a pytorch developer on what to do"
+            )
+
+        warning_msg = f"{func.__name__[1:]} is DEPRECATED, please consider using an alternative API(s). "
+
+        # public deprecated alias
+        alias = typing_extensions.deprecated(
+            # pyrefly: ignore [bad-argument-type]
+            warning_msg,
+            category=UserWarning,
+            stacklevel=1,
+        )(func)
+
+        alias.__name__ = public_name
+
+        # Adjust qualname if nested inside a class or another function
+        if "." in func.__qualname__:
+            alias.__qualname__ = func.__qualname__.rsplit(".", 1)[0] + "." + public_name
+        else:
+            alias.__qualname__ = public_name
+
+        setattr(module, public_name, alias)
+
+        return func
+
+    return decorator
+
+
+def get_default_numa_options():
+    """
+    When using elastic agent, if no numa options are provided, we will use these
+    as the default.
+
+    For external use cases, we return None, i.e. no numa binding. If you would like
+    to use torch's automatic numa binding capabilities, you should provide
+    NumaOptions to your launch config directly or use the numa binding option
+    available in torchrun.
+
+    Must return None or NumaOptions, but not specifying to avoid circular import.
+    """
+    return None
+
+
+def log_triton_builds(fail: str | None):
+    pass
+
+
+def find_compile_subproc_binary() -> str | None:
+    """
+    Allows overriding the binary used for subprocesses
+    """
+    return None
+
+
+def get_torch_source_version() -> str:
+    """Return the source commit hash for the current PyTorch build."""
+    import torch.version as torch_version
+
+    return getattr(torch_version, "git_version", "")

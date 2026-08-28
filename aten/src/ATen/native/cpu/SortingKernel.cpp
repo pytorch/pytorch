@@ -1,6 +1,8 @@
 #define TORCH_ASSERT_NO_OPERATORS
 
 #include <limits>
+#include <utility>
+#include <vector>
 
 #include <ATen/native/Sorting.h>
 #include <ATen/core/TensorBase.h>
@@ -75,8 +77,8 @@ template <typename scalar_t>
 struct KeyValueCompAsc {
   template <typename LHS, typename RHS>
   constexpr bool operator()(LHS lhs, RHS rhs) const {
-    return (!_isnan<scalar_t>(get<0>(lhs)) && _isnan<scalar_t>(get<0>(rhs)))
-      || (get<0>(lhs) < get<0>(rhs));
+    return (get<0>(lhs) < get<0>(rhs))
+      || (!_isnan<scalar_t>(get<0>(lhs)) && _isnan<scalar_t>(get<0>(rhs)));
   }
 };
 
@@ -84,13 +86,13 @@ template <typename scalar_t>
 struct KeyValueCompDesc {
   template <typename LHS, typename RHS>
   constexpr bool operator()(LHS lhs, RHS rhs) const {
-    return (_isnan<scalar_t>(get<0>(lhs)) && !_isnan<scalar_t>(get<0>(rhs)))
-      || (get<0>(lhs) > get<0>(rhs));
+    return (get<0>(lhs) > get<0>(rhs))
+      || (_isnan<scalar_t>(get<0>(lhs)) && !_isnan<scalar_t>(get<0>(rhs)));
   }
 };
 
 #ifdef USE_FBGEMM
-static bool can_use_radix_sort(const TensorBase& values, const bool descending) {
+bool can_use_radix_sort(const TensorBase& values, const bool descending) {
   // radix_sort can be used only for 1D data
   if (values.dim() != 1) return false;
   // radix_sort sorts in ascending order
@@ -106,7 +108,7 @@ static bool can_use_radix_sort(const TensorBase& values, const bool descending) 
   return true;
 }
 
-static void parallel_sort1d_kernel(
+void parallel_sort1d_kernel(
     const TensorBase& values,
     const TensorBase& indices) {
   AT_DISPATCH_INTEGRAL_TYPES(values.scalar_type(), "parallel_sort1d_kernel", [&] {
@@ -140,32 +142,54 @@ static void parallel_sort1d_kernel(
 #endif
 
 template <typename scalar_t, typename value_accessor_t, typename indices_accessor_t>
-static inline void sort_kernel_impl(const value_accessor_t& value_accessor,
+inline void sort_kernel_impl(const value_accessor_t& value_accessor,
             const indices_accessor_t& indices_accessor,
             int64_t dim_size, bool descending, bool stable) {
-  auto composite_accessor = CompositeRandomAccessorCPU<
-    value_accessor_t, indices_accessor_t
-  >(value_accessor, indices_accessor);
+  using elem_t = std::pair<scalar_t, int64_t>;
+  // Pack (value, index) pairs into one contiguous buffer to sort, then scatter
+  // back. Common-size rows reuse a grow-only thread_local buffer; rows larger
+  // than kMaxCachedElems use a transient buffer so that a one-off huge sort does
+  // not permanently retain memory for the lifetime of the thread. The cached
+  // buffer is per (scalar_t, accessor) template instantiation, so keep the cap
+  // modest: worst-case retained memory is kMaxCachedElems * sizeof(elem_t) per
+  // instantiation, per thread.
+  constexpr int64_t kMaxCachedElems = 1 << 12;
+  static thread_local std::vector<elem_t> cached_buffer;
+  std::vector<elem_t> transient_buffer;
+  elem_t* first = nullptr;
+  if (dim_size <= kMaxCachedElems) {
+    if (static_cast<int64_t>(cached_buffer.size()) < dim_size) {
+      cached_buffer.resize(dim_size);
+    }
+    first = cached_buffer.data();
+  } else {
+    transient_buffer.resize(dim_size);
+    first = transient_buffer.data();
+  }
+  for (const auto i : c10::irange(dim_size)) {
+    first[i] = elem_t(value_accessor[i], indices_accessor[i]);
+  }
+  auto* last = first + dim_size;
   if (descending) {
     if (stable) {
-      std::stable_sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompDesc<scalar_t>());
+      std::stable_sort(first, last, KeyValueCompDesc<scalar_t>());
     } else {
-      std::sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompDesc<scalar_t>());
+      std::sort(first, last, KeyValueCompDesc<scalar_t>());
     }
   } else {
     if (stable) {
-      std::stable_sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompAsc<scalar_t>());
+      std::stable_sort(first, last, KeyValueCompAsc<scalar_t>());
     } else {
-      std::sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompAsc<scalar_t>());
+      std::sort(first, last, KeyValueCompAsc<scalar_t>());
     }
+  }
+  for (const auto i : c10::irange(dim_size)) {
+    value_accessor[i] = first[i].first;
+    indices_accessor[i] = first[i].second;
   }
 }
 
-static void sort_kernel(
+void sort_kernel(
     const TensorBase& self,
     const TensorBase& values,
     const TensorBase& indices,
@@ -222,7 +246,7 @@ static void sort_kernel(
   );
 }
 
-static void topk_kernel(
+void topk_kernel(
     const TensorBase &values,
     const TensorBase &indices,
     const TensorBase &self,

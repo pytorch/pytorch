@@ -1,12 +1,16 @@
 # Owner(s): ["module: nn"]
-
 import itertools
 import random
-from typing import List
+import sys
+import unittest
 
 import torch
 import torch.nn.utils.rnn as rnn_utils
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
 
 
 class PackedSequenceTest(TestCase):
@@ -48,6 +52,10 @@ class PackedSequenceTest(TestCase):
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 12),
+        "Frame Handling Difference between Python versions",
+    )
     def test_type_casts(self):
         """Test type casting of `PackedSequence` against type casting of tensor"""
         for input_type, _ in self._type_by_name.values():
@@ -59,7 +67,7 @@ class PackedSequenceTest(TestCase):
                     )
                     # Apply cast to `PackedSequence` instance and unpack
                     masked = getattr(packed, cast_str)()
-                    unpacked, lengths_out = rnn_utils.pad_packed_sequence(masked)
+                    unpacked, _ = rnn_utils.pad_packed_sequence(masked)
                     self.assertEqual(unpacked.type(), expected_type_str)
 
     def test_wrong_order(self):
@@ -86,6 +94,10 @@ class PackedSequenceTest(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.nn.utils.rnn.pad_sequence(5)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 12),
+        "Frame Handling Difference between Python versions",
+    )
     def test_total_length(self):
         padded, lengths = self._padded_sequence(torch.FloatTensor)
         max_length = max(lengths)
@@ -131,6 +143,10 @@ class PackedSequenceTest(TestCase):
                     ref_output = torch.cat([no_extra_pad, extra_pad], 0)
                 self.assertEqual(unpacked, ref_output)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 13),
+        "Frame Handling Difference between Python versions",
+    )
     def test_to(self):
         for enforce_sorted in (True, False):
             padded, lengths = self._padded_sequence(torch.IntTensor)
@@ -219,7 +235,7 @@ class PackedSequenceTest(TestCase):
         # more dimensions
         maxlen = 9
         for num_dim in (0, 1, 2, 3):
-            sequences: List[torch.Tensor] = []
+            sequences: list[torch.Tensor] = []
             trailing_dims = [4] * num_dim
             for i in range(1, maxlen + 1):
                 seq_len = i * i
@@ -492,6 +508,36 @@ class PackedSequenceTest(TestCase):
             packed = rnn_utils.pack_padded_sequence(
                 torch.randn([0, 1, 10]), torch.randn([11, 14, 14, 2]), True
             )
+
+    def test_empty_packed_sequence(self):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/149622
+        Tests that pad_packed_sequence and unpack_sequence handle empty tensors
+        without segmentation fault (CVE-2025-2998, CVE-2025-2999)
+        """
+        # Test case 1: pad_packed_sequence with empty tensors
+        # Previously caused segmentation fault
+        empty_data = torch.randn(0, 5)
+        empty_batch_sizes = torch.tensor([], dtype=torch.int64)
+        empty_packed = rnn_utils.PackedSequence(
+            empty_data, empty_batch_sizes, None, None
+        )
+
+        # Should not crash - either return empty result or raise informative error
+        with self.assertRaises(RuntimeError):
+            rnn_utils.pad_packed_sequence(empty_packed, batch_first=True)
+
+        # Test case 2: unpack_sequence with empty tensors
+        # Previously caused segmentation fault
+        empty_data = torch.tensor([])
+        empty_batch_sizes = torch.tensor([], dtype=torch.int64)
+        packed = rnn_utils.PackedSequence(
+            data=empty_data, batch_sizes=empty_batch_sizes
+        )
+
+        # Should not crash - either return empty list or raise informative error
+        with self.assertRaises(RuntimeError):
+            rnn_utils.unpack_sequence(packed)
 
 
 if __name__ == "__main__":

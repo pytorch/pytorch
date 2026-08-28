@@ -1,10 +1,8 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 
-#include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -355,7 +353,7 @@ struct ConstantPropagator {
           noMutableValues(n->inputs()) && noMutableValues(n->outputs());
     }
     return no_mutation && !n->kind().is_onnx() &&
-        skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
+        !skip_list.contains(n->kind()) && !n->isNondeterministic() &&
         !n->hasSideEffects() && n->blocks().empty();
   }
 

@@ -11,6 +11,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <llvm/ExecutionEngine/JITSymbol.h>
 C10_DIAGNOSTIC_POP()
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <llvm/ExecutionEngine/Orc/CompileUtils.h>
 #include <llvm/ExecutionEngine/Orc/ExecutionUtils.h>
 #include <llvm/ExecutionEngine/Orc/IRCompileLayer.h>
@@ -35,6 +36,7 @@ C10_DIAGNOSTIC_POP()
 #endif
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetMachine.h>
+C10_DIAGNOSTIC_POP()
 
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
@@ -174,11 +176,23 @@ class TORCH_API PytorchLLVMJITImpl {
                 .setJITTargetMachineBuilder(
                     makeTargetMachineBuilder(triple, cpu, attrs))
 #if LLVM_VERSION_MAJOR >= 17
-                .setObjectLinkingLayerCreator([&](ExecutionSession& ES,
-                                                  const Triple& TT) {
+                .setObjectLinkingLayerCreator([&](ExecutionSession& ES
+#if LLVM_VERSION_MAJOR < 21
+                                                  ,
+                                                  const Triple& TT
+#elif LLVM_VERSION_MAJOR >= 23
+                                                  ,
+                                                  jitlink::JITLinkMemoryManager&
+                                                      JLMM
+#endif
+                                              ) {
+#if LLVM_VERSION_MAJOR >= 23
+                  return std::make_unique<ObjectLinkingLayer>(ES, JLMM);
+#else
                   return std::make_unique<ObjectLinkingLayer>(
                       ES,
                       assertSuccess(jitlink::InProcessMemoryManager::Create()));
+#endif
                 })
 #endif
                 .create())) {
@@ -232,7 +246,7 @@ class TORCH_API PytorchLLVMJITImpl {
   JITSymbol findSymbol(const std::string Name) {
 #if LLVM_VERSION_MAJOR >= 15
     // Starting with llvm-15, LLJIT::lookup returns an address rather than a
-    // symbol. Even though an address is what we ultimately we want, we also
+    // symbol. Even though an address is what we ultimately want, we also
     // want to avoid churning our internal APIs, so we wrap the returned address
     // in a fake JITSymbol.
     auto result = assertSuccess(LLJ->lookup(Name));

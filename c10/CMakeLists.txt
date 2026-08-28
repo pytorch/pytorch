@@ -1,7 +1,7 @@
-cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 project(c10 CXX)
 
-set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Main build file for the C10 library.
@@ -18,21 +18,17 @@ else()
   set(C10_LIB c10)
 endif()
 
-  # ---[ Configure macro file.
-  set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
-  set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
-  set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
-  set(C10_USE_NUMA ${USE_NUMA})
-  set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-  set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT})
-  configure_file(
-      ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
-      ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h)
+set(C10_USE_GFLAGS ${USE_GFLAGS})  # also used in torch/headeronly
+set(C10_USE_GLOG ${USE_GLOG})  # also used in torch/headeronly
+set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})  # also used in torch/headeronly
+set(C10_USE_NUMA ${USE_NUMA})  # also used in torch/headeronly
+set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})  # also used in torch/headeronly
+set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT})  # also used in torch/headeronly
 
   # Note: if you want to add ANY dependency to the c10 library, make sure you
   # check with the core PyTorch developers as the dependency will be
   # transitively passed on to all libraries dependent on PyTorch.
-  file(GLOB C10_SRCS
+  file(GLOB C10_SRCS CONFIGURE_DEPENDS
           *.cpp
           core/*.cpp
           core/impl/*.cpp
@@ -40,7 +36,7 @@ endif()
           macros/*.cpp
           util/*.cpp
         )
-  file(GLOB C10_HEADERS
+  file(GLOB C10_HEADERS CONFIGURE_DEPENDS
           *.h
           core/*.h
           core/impl/*.h
@@ -50,7 +46,8 @@ endif()
         )
 if(NOT BUILD_LIBTORCHLESS)
   add_library(c10 ${C10_SRCS} ${C10_HEADERS})
-  target_compile_options_if_supported(c10 "-Wdeprecated")
+  torch_compile_options(c10)
+  torch_optimize_layout_if_enabled(c10)
   if(HAVE_SOVERSION)
     set_target_properties(c10 PROPERTIES
         VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -94,8 +91,11 @@ if(NOT BUILD_LIBTORCHLESS)
   if(C10_USE_GLOG)
     target_link_libraries(c10 PUBLIC glog::glog)
   endif()
+
+  target_link_libraries(c10 PUBLIC headeronly)
   target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
   target_link_libraries(c10 PRIVATE nlohmann)
+  target_link_libraries(c10 PRIVATE moodycamel)
 
   if(C10_USE_NUMA)
     message(STATUS "NUMA paths:")
@@ -103,12 +103,25 @@ if(NOT BUILD_LIBTORCHLESS)
     message(STATUS ${Numa_LIBRARIES})
     target_include_directories(c10 PRIVATE ${Numa_INCLUDE_DIR})
     target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
+    # libnuma is a PRIVATE impl detail of c10, but libc10.so's DT_NEEDED
+    # libnuma.so.1 still has to resolve at link time when in-tree targets
+    # (test executables, extensions) link c10. The conda compat linker has a
+    # narrow sysroot view, so propagate libnuma's directory as an INTERFACE
+    # rpath-link entry. Wrapped in BUILD_INTERFACE so this build-machine path
+    # is not baked into the installed Caffe2Targets.cmake export (it is
+    # meaningless to downstream find_package(Torch) consumers). ELF/GNU-ld only.
+    if(NOT WIN32 AND NOT APPLE)
+      get_filename_component(_numa_dir "${Numa_LIBRARIES}" DIRECTORY)
+      target_link_options(
+        c10 INTERFACE "$<BUILD_INTERFACE:LINKER:-rpath-link,${_numa_dir}>")
+    endif()
   else()
     message(STATUS "don't use NUMA")
   endif()
 
-  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
-    target_link_libraries(c10 PRIVATE cpuinfo)
+  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
+    target_link_libraries(c10 INTERFACE "$<BUILD_INTERFACE:cpuinfo>")
+    target_link_libraries(c10 PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,cpuinfo>")
   endif()
 
   find_package(Backtrace)
@@ -169,8 +182,6 @@ endif()
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")
-install(FILES ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h
-        DESTINATION include/c10/macros)
 
 if(MSVC AND C10_BUILD_SHARED_LIBS)
   install(FILES $<TARGET_PDB_FILE:c10> DESTINATION lib OPTIONAL)

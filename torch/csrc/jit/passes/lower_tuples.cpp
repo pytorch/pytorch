@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 
-#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -28,7 +27,6 @@ std::unordered_set<Symbol> supported_ops = {
     prim::Return,
     prim::PythonOp,
     aten::format,
-    prim::Uninitialized,
     aten::__getitem__};
 
 // Flatten block inputs and insert a tuple construct in the block
@@ -193,7 +191,7 @@ static void flattenInputs(Node* n, Node* insert_point) {
           (input->node()->kind() == prim::TupleConstruct),
           "tuple use not matched to tuple construct. Instead found: ",
           n->kind().toQualString());
-      if (supported_ops.count(n->kind()) > 0) {
+      if (supported_ops.contains(n->kind())) {
         if (n->kind() == prim::Loop) {
           // This function supports all node types with blocks that take tuple
           // inputs.
@@ -237,7 +235,7 @@ static void flattenOutputs(Node* n, Node* insert_point) {
     //    tup = (t0, t1)
     // is placed at the current insertion point
     if (TupleTypePtr tt = output->type()->cast<TupleType>()) {
-      if (supported_ops.count(n->kind()) > 0) {
+      if (supported_ops.contains(n->kind())) {
         for (const auto j : c10::irange(tt->elements().size())) {
           n->insertOutput(i + 1 + j)->setType(tt->elements()[j]);
         }

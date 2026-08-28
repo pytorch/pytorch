@@ -4,6 +4,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <c10/core/impl/COW.h>
 
 using namespace at;
 

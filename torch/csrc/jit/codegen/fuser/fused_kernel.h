@@ -40,7 +40,7 @@ struct FusedKernel {
   // CUDA code), and the remainder are pointers to the TensorInfo<T> structs
   // that compiled code uses to load Tensor data.
   // launch_with_tensors handles packing at::Tensors into this arguments array.
-  // CPU code uses the same convension so that launch_with_tensors can be
+  // CPU code uses the same convention so that launch_with_tensors can be
   // shared.
   virtual void launch_raw(const uint32_t numel, std::vector<void*>& arguments)
       const = 0;

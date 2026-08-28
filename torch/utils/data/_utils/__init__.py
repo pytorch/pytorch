@@ -1,5 +1,4 @@
-# mypy: allow-untyped-defs
-r"""Utility classes & functions for data loading. Code in this folder is mostly used by ../dataloder.py.
+r"""Utility classes & functions for data loading. Code in this folder is mostly used by ../dataloader.py.
 
 A lot of multiprocessing is used in data loading, which only supports running
 functions defined in global environment (py2 can't serialize static methods).
@@ -43,7 +42,7 @@ except ModuleNotFoundError:
     HAS_NUMPY = False
 
 
-def _set_python_exit_flag():
+def _set_python_exit_flag() -> None:
     global python_exit_status
     python_exit_status = True
 

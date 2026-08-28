@@ -11,6 +11,21 @@ from torch._dynamo import bytecode_analysis, bytecode_transformation
 from torch._dynamo.testing import skipIfNotPy311, skipIfNotPy312
 
 
+def coalesced_co_lines(code):
+    # co_lines() entries are not guaranteed to be maximally coalesced: our
+    # linetable assembler can emit adjacent entries with the same line number
+    # (e.g. around EXTENDED_ARG) that CPython's compiler would fold into one.
+    # This is a benign encoding difference (co_positions is unaffected), so
+    # merge contiguous same-line entries before comparing.
+    result = []
+    for start, end, lineno in code.co_lines():
+        if result and result[-1][2] == lineno and result[-1][1] == start:
+            result[-1] = (result[-1][0], end, lineno)
+        else:
+            result.append((start, end, lineno))
+    return result
+
+
 class BytecodeTests(torch._dynamo.test_case.TestCase):
     @skipIfNotPy311
     def test_linetable_311_writer1(self):
@@ -33,10 +48,7 @@ class BytecodeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(l1), len(l2))
         for p1, p2 in zip(l1, l2):
             self.assertEqual(p1, p2)
-        # TODO co_lnotab is deprecated in 3.12 and will be removed in 3.14
-        # In 3.11+,. it is computed lazily from other linetable attributes (e.g. co_linetable),
-        # so we do not set this attribute ourselves.
-        self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
+        self.assertEqual(coalesced_co_lines(fn.__code__), coalesced_co_lines(result[1]))
 
     @skipIfNotPy311
     def test_linetable_311_writer2(self):
@@ -53,8 +65,8 @@ class BytecodeTests(torch._dynamo.test_case.TestCase):
         fn_str = f"""\
 def fn():
     foo.bar(1, 2, 3)
-{str(chr(10)).join(' ' * 4 + 'x' + str(i) + ' = 1' for i in range(1 << 9))}
-    l = [{' '.join('x' + str(i) + ',' for i in range(1 << 9))}]
+{str(chr(10)).join(" " * 4 + "x" + str(i) + " = 1" for i in range(1 << 9))}
+    l = [{" ".join("x" + str(i) + "," for i in range(1 << 9))}]
         """
         locals = {}
         exec(fn_str, {}, locals)
@@ -73,14 +85,25 @@ def fn():
         new_inst_str = "\n".join(list(map(str, result[0])))
         self.assertIn("EXTENDED_ARG", new_inst_str)
         self.assertIn(load_method_str, new_inst_str)
-        l1, l2 = list(fn.__code__.co_positions()), list(result[1].co_positions())
-        self.assertEqual(len(l1), len(l2))
-        for p1, p2 in zip(l1, l2):
-            self.assertEqual(p1, p2)
-        self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
+        # Verify positions by checking the reassembled code's co_positions()
+        # matches the positions we set on each instruction. We compare against
+        # the instruction list rather than the original code because
+        # cleaned_instructions may normalize the instruction set (e.g.,
+        # LOAD_ATTR method variant -> LOAD_ATTR + PUSH_NULL on 3.12+).
+        expected_positions = []
+        for inst in result[0]:
+            if inst.opname == "EXTENDED_ARG":
+                expected_positions.append(inst.positions)
+            else:
+                n = bytecode_transformation.instruction_size(inst) // 2
+                expected_positions.extend([inst.positions] * n)
+        actual_positions = list(result[1].co_positions())
+        self.assertEqual(len(expected_positions), len(actual_positions))
+        for ep, ap in zip(expected_positions, actual_positions):
+            self.assertEqual(ep, ap)
 
     @unittest.skipIf(
-        sys.version_info < (3, 10) or sys.version_info >= (3, 11),
+        sys.version_info >= (3, 11),
         "linetable test for Python 3.10",
     )
     def test_linetable_310_writer(self):
@@ -94,19 +117,6 @@ def fn():
         inst = dis.get_instructions(fn)
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_linetable)
-
-    @unittest.skipIf(sys.version_info >= (3, 10), "use lnotab when python < 3.10")
-    def test_lnotab_writer(self):
-        def fn():
-            a = 10
-            b = 20
-            c = a + b
-            f = "lnotab_writer"
-            return f"Test if {f} generates correct co_lnotab: {c}"
-
-        inst = dis.get_instructions(fn)
-        result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
-        self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
     def test_if_tensor_is_none(self):
         """
@@ -284,7 +294,7 @@ def fn():
         def nothing(*args):
             pass
 
-        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
+        code, _ = bytecode_transformation.transform_code_object(fn.__code__, nothing)
         self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
 
     @skipIfNotPy311
@@ -300,7 +310,7 @@ def fn():
         def nothing(*args):
             pass
 
-        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
+        code, _ = bytecode_transformation.transform_code_object(fn.__code__, nothing)
         self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
 
     @skipIfNotPy311
@@ -425,7 +435,11 @@ def fn():
             self.assertIsNone(inst.starts_line)
             if inst.opname.startswith("LOAD"):
                 self.assertNotIn(inst.argval, varname_map)
-                if inst.opname not in ("LOAD_GLOBAL", "LOAD_ATTR"):
+                if inst.opname not in (
+                    "LOAD_GLOBAL",
+                    "LOAD_ATTR",
+                    "LOAD_COMMON_CONSTANT",
+                ):
                     self.assertIsNone(inst.arg)
             self.assertFalse(inst.opname.startswith("RETURN"))
 
@@ -500,6 +514,7 @@ def fn():
                 self.assertIn("JUMP", i1.opname)
                 self.assertIs(i1.target, insts[-1])
 
+    @unittest.skipIf(sys.version_info >= (3, 14), "3.14+ removed RETURN_CONST")
     @skipIfNotPy312
     def test_bytecode_from_template_noreturn_const(self):
         # Test 3.12+ RETURN_CONST
@@ -544,6 +559,36 @@ def fn():
 
         self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
 
+    # https://github.com/pytorch/pytorch/issues/160471
+    def test_extended_args_starts_line(self):
+        # NOTE: need to LOAD_CONST i before LOAD_FAST x
+        # in order to get an EXTENDED_ARG with starts_line set
+        # NOTE: 3.14+ introduced LOAD_SMALL_INT, so integers need to be >= 256
+        # in order for LOAD_CONST to be generated
+        lines = "\n".join(f"    x = {i + 1000} + x" for i in range(300))
+        fn_str = f"def fn(x):\n{lines}"
+        locals = {}
+        exec(fn_str, {}, locals)
+        fn = locals["fn"]
+
+        for inst in dis.get_instructions(fn):
+            if inst.opname == "EXTENDED_ARG" and inst.starts_line:
+                break
+        else:
+            self.assertTrue(
+                False, "bad test case: no EXTENDED_ARG with starts_line found"
+            )
+
+        def transformations(instructions, _):
+            for inst in instructions:
+                if inst.starts_line == 301:
+                    break
+            else:
+                self.assertTrue(False, "test failure: 301 starts_line not found")
+            return instructions
+
+        bytecode_transformation.transform_code_object(fn.__code__, transformations)
+
 
 class BytecodeHookTests(torch._dynamo.test_case.TestCase):
     def test_bytecode_hook(self):
@@ -558,7 +603,7 @@ class BytecodeHookTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(hook)
         try:
-            opt_fn = torch.compile(fn)
+            opt_fn = torch.compile(fn, backend="eager")
             for i in range(2, 12):
                 opt_fn(torch.randn(i), torch.randn(i))
         finally:

@@ -3,7 +3,7 @@
 
 import collections
 import enum
-from typing import cast, Dict, List, Set, Tuple
+from typing import cast
 
 import torch
 import torch.distributed as dist
@@ -58,7 +58,7 @@ def backend_registered(backend_name):
         True if the backend has been registered with ``register_backend``, else
         False.
     """
-    return backend_name in BackendType.__members__.keys()
+    return backend_name in BackendType.__members__
 
 
 def register_backend(
@@ -70,10 +70,10 @@ def register_backend(
         backend_name (str): backend string to identify the handler.
         construct_rpc_backend_options_handler (function):
             Handler that is invoked when
-            rpc_backend.construct_rpc_backend_options(**dict) is called.
+            ``rpc_backend.construct_rpc_backend_options(**dict)`` is called.
         init_backend_handler (function): Handler that is invoked when the
             `_init_rpc_backend()` function is called with a backend.
-             This returns the agent.
+            This returns the agent.
     """
     global BackendType
     if backend_registered(backend_name):
@@ -95,6 +95,7 @@ def register_backend(
     BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
     if BackendType.__doc__:
         BackendType.__doc__ = _backend_type_doc
+
     return BackendType[backend_name]
 
 
@@ -121,7 +122,8 @@ def _init_process_group(store, rank, world_size):
     # default group to be initialized.
     group = dist.ProcessGroupGloo(store, rank, world_size, process_group_timeout)
 
-    assert group is not None, "Failed to initialize default ProcessGroup."
+    if group is None:
+        raise AssertionError("Failed to initialize default ProcessGroup.")
 
     if (rank != -1) and (rank != group.rank()):
         raise RuntimeError(f"rank argument {rank} doesn't match pg rank {group.rank()}")
@@ -152,8 +154,11 @@ def _tensorpipe_construct_rpc_backend_options_handler(
 
 
 def _tensorpipe_validate_devices(devices, device_count):
+    device_type = (
+        acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+    )
     return all(
-        d.type == "cpu" or (d.type == "cuda" and 0 <= d.index < device_count)
+        d.type == "cpu" or (d.type == device_type and 0 <= d.index < device_count)
         for d in devices
     )
 
@@ -163,8 +168,8 @@ def _tensorpipe_validate_devices(devices, device_count):
 def _tensorpipe_exchange_and_check_all_device_maps(
     my_name, my_device_count, my_device_maps, my_devices, group
 ):
-    gathered: List[
-        Tuple[str, int, Dict[str, Dict[torch.device, torch.device]], List[torch.device]]
+    gathered: list[
+        tuple[str, int, dict[str, dict[torch.device, torch.device]], list[torch.device]]
     ] = [("", 0, {}, []) for _ in range(group.size())]
     dist.all_gather_object(
         gathered, (my_name, my_device_count, my_device_maps, my_devices), group
@@ -176,7 +181,7 @@ def _tensorpipe_exchange_and_check_all_device_maps(
 
     _validate_device_maps(all_names, all_device_counts, all_device_maps, all_devices)
 
-    # passed all checked, construct reverse mapping and get list of devices handled by this agent
+    # passed all checks, construct reverse mapping and get list of devices handled by this agent
     reverse_device_maps = _create_reverse_mapping(my_name, all_names, all_device_maps)
     my_devices = _create_device_list(my_devices, my_device_maps, reverse_device_maps)
     return reverse_device_maps, my_devices
@@ -188,9 +193,7 @@ def _validate_device_maps(
     for node in all_names:
         devices = all_devices[node]
         if len(set(devices)) != len(devices):
-            raise ValueError(
-                f"Node {node} has duplicated devices\n" f"devices = {devices}"
-            )
+            raise ValueError(f"Node {node} has duplicated devices\ndevices = {devices}")
         if not _tensorpipe_validate_devices(devices, all_device_counts[node]):
             raise ValueError(
                 f"Node {node} has devices with invalid indices\n"
@@ -253,7 +256,7 @@ def _validate_device_maps(
 
 def _create_device_list(my_devices, my_device_maps, reverse_device_maps):
     if not my_devices:
-        devices_set: Set[torch.device] = set()
+        devices_set: set[torch.device] = set()
         for map_ in my_device_maps.values():
             devices_set.update(map_.keys())
         for map_ in reverse_device_maps.values():
@@ -265,7 +268,7 @@ def _create_device_list(my_devices, my_device_maps, reverse_device_maps):
 
 
 def _create_reverse_mapping(my_name, all_names, all_device_maps):
-    reverse_device_maps: Dict[str, Dict[torch.device, torch.device]] = {}
+    reverse_device_maps: dict[str, dict[torch.device, torch.device]] = {}
     for node in all_names:
         if my_name in all_device_maps[node]:
             reverse_device_maps[node] = {
@@ -279,9 +282,10 @@ def _get_device_infos():
 
     agent = cast(TensorPipeAgent, api._get_current_rpc_agent())
     opts = agent._get_backend_options()
-    device_count = torch.cuda.device_count()
-    if torch.cuda.is_available() and opts.devices:
-        torch.cuda.init()
+    device_count = torch.accelerator.device_count()
+    if torch.accelerator.is_available() and opts.devices:
+        mod = torch.get_device_module(torch.accelerator.current_accelerator())
+        mod.init()
     return device_count, opts.device_maps, opts.devices
 
 
@@ -306,7 +310,7 @@ def _set_devices_and_reverse_device_map(agent):
         else:
             opts = agent._get_backend_options()
             device_count, device_map, devices = (
-                torch.cuda.device_count(),
+                torch.accelerator.device_count(),
                 opts.device_maps,
                 opts.devices,
             )
@@ -350,9 +354,9 @@ def _tensorpipe_init_backend_handler(
             f"`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`. {rpc_backend_options}"
         )
 
-    device_count = torch.cuda.device_count()
+    device_count = torch.accelerator.device_count()
 
-    is_static_group = True if world_size else False
+    is_static_group = bool(world_size)
     # world_size is specified so this is a static group (ranks cannot join and leave)
     if is_static_group:
         # The agent's join method is required to behave like a barrier and perform
@@ -368,13 +372,14 @@ def _tensorpipe_init_backend_handler(
             group,
         )
 
-        if torch.cuda.is_available() and devices:
+        if torch.accelerator.is_available() and devices:
             # It's necessary to initialize PyTorch CUDA states here (e.g.,
             # CUDACachingAllocator). If this is missing, we could hit errors like
             # "allocator not initialized", because other processes might send
             # CUDA-related RPC request to this process before user code in this
             # process initializes its PyTorch CUDA states.
-            torch.cuda.init()
+            mod = torch.get_device_module(torch.accelerator.current_accelerator())
+            mod.init()
 
         # TODO: add try-except and destroy _agent in all processes if any fails.
         agent = TensorPipeAgent(

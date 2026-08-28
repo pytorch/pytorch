@@ -109,7 +109,7 @@ def bias_correction(
 
     Args:
         float_model: a trained model that serves as a reference to what bias correction should aim for
-        quantized_model: quantized form of float_model that bias correction is to applied to
+        quantized_model: quantized form of float_model that bias correction is to be applied to
         img_data: calibration data to estimate the expected output (used to find quantization error)
         target_modules: specifies what submodules in quantized_model need bias correction (can be extended to
                 unquantized submodules)
@@ -119,19 +119,18 @@ def bias_correction(
         float_model, quantized_model, _supported_modules, MeanShadowLogger
     )
 
-    uncorrected_modules = {}
-    for name, submodule in quantized_model.named_modules():
-        if type(submodule) in target_modules:
-            uncorrected_modules[name] = submodule
+    uncorrected_modules = {
+        name: submodule
+        for name, submodule in quantized_model.named_modules()
+        if type(submodule) in target_modules
+    }
 
     for uncorrected_module in uncorrected_modules:
         quantized_submodule = get_module(quantized_model, uncorrected_module)
         bias = get_param(quantized_submodule, "bias")
         if bias is not None:
-            count = 0
-            for data in img_data:
+            for count, data in enumerate(img_data, start=1):
                 quantized_model(data[0])
-                count += 1
                 if count == neval_batches:
                     break
             ob_dict = ns.get_logger_dict(quantized_model)
@@ -152,6 +151,6 @@ def bias_correction(
             bias.data = updated_bias
 
             # Resets the data contained in the loggers
-            for name, submodule in quantized_model.named_modules():
+            for submodule in quantized_model.modules():
                 if isinstance(submodule, MeanShadowLogger):
                     submodule.clear()

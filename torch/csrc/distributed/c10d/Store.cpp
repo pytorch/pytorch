@@ -66,4 +66,20 @@ bool Store::hasExtendedApi() const {
   return false;
 }
 
+void Store::barrier(
+    const std::string& key,
+    int64_t world_size,
+    const std::chrono::milliseconds& timeout) {
+  // Default implementation using add() + wait() pattern.
+  // Subclasses can override this with optimized implementations.
+  std::string numMembersKey = key + "/num_members";
+  std::string lastMemberKey = key + "/last_member";
+
+  int64_t idx = add(numMembersKey, 1);
+  if (idx == world_size) {
+    set(lastMemberKey, std::vector<uint8_t>{'1'});
+  }
+  wait({lastMemberKey}, timeout);
+}
+
 } // namespace c10d

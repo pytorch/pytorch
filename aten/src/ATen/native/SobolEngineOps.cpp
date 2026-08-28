@@ -21,6 +21,36 @@ namespace at::native {
 
 using namespace sobol_utils;
 
+static void check_sobol_engine_inputs(
+    const Tensor& quasi,
+    int64_t n,
+    const Tensor& sobolstate,
+    int64_t dimension,
+    int64_t num_generated) {
+  TORCH_CHECK_VALUE(n >= 0, "n must be non-negative, but got ", n);
+  TORCH_CHECK_VALUE(
+      quasi.dim() == 1 && quasi.size(0) == dimension,
+      "dimension must match the size of quasi, but got dimension ",
+      dimension,
+      " and quasi with shape ",
+      quasi.sizes());
+  TORCH_CHECK_VALUE(
+      sobolstate.dim() == 2 && sobolstate.size(0) == dimension &&
+          sobolstate.size(1) >= MAXBIT,
+      "sobolstate must have shape [",
+      dimension,
+      ", at least ",
+      MAXBIT,
+      "], but got ",
+      sobolstate.sizes());
+  TORCH_CHECK_VALUE(
+      num_generated >= 0 && num_generated < LARGEST_NUMBER &&
+          n <= LARGEST_NUMBER - 1 - num_generated,
+      "SobolEngine can generate at most ",
+      LARGEST_NUMBER,
+      " points");
+}
+
 /// This is the core function to draw samples from a `SobolEngine` given
 /// its state variables (`sobolstate` and `quasi`). `dimension` can be
 /// inferred from `sobolstate`, but choosing to pass it explicitly to avoid
@@ -32,6 +62,8 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
            "sobolstate needs to be of type ", at::kLong);
   TORCH_CHECK(quasi.dtype() == at::kLong,
            "quasi needs to be of type ", at::kLong);
+  check_sobol_engine_inputs(
+      quasi, n, sobolstate, dimension, num_generated);
 
   Tensor wquasi = quasi.clone(at::MemoryFormat::Contiguous);
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kFloat;
@@ -41,7 +73,7 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
     // We deal with `data` and `strides` due to performance issues.
     int64_t l;
     int64_t* wquasi_data = wquasi.data_ptr<int64_t>();
-    int64_t* sobolstate_data = sobolstate.data_ptr<int64_t>();
+    const int64_t* sobolstate_data = sobolstate.const_data_ptr<int64_t>();
     scalar_t* result_data = result.data_ptr<scalar_t>();
 
     int64_t wquasi_stride = wquasi.stride(0);
@@ -58,7 +90,7 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
   });
 
   result.mul_(RECIPD);
-  return std::tuple<Tensor, Tensor>(result, wquasi);
+  return std::tuple<Tensor, Tensor>(std::move(result), std::move(wquasi));
 }
 
 /// This is the core function to fast-forward a `SobolEngine` given
@@ -71,18 +103,18 @@ Tensor& _sobol_engine_ff_(Tensor& quasi, int64_t n, const Tensor& sobolstate,
            "sobolstate needs to be of type ", at::kLong);
   TORCH_CHECK(quasi.dtype() == at::kLong,
            "quasi needs to be of type ", at::kLong);
+  check_sobol_engine_inputs(
+      quasi, n, sobolstate, dimension, num_generated);
 
   // We deal with `data` and `strides` due to performance issues.
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t l;
   int64_t* quasi_data = quasi.data_ptr<int64_t>();
-  int64_t* sobolstate_data = sobolstate.data_ptr<int64_t>();
+  const int64_t* sobolstate_data = sobolstate.const_data_ptr<int64_t>();
 
   int64_t quasi_stride = quasi.stride(0);
   int64_t sobolstate_row_stride = sobolstate.stride(0), sobolstate_col_stride = sobolstate.stride(1);
 
   for (int64_t i = 0; i < n; i++, num_generated++) {
-    l = rightmost_zero(num_generated);
+    auto l = rightmost_zero(num_generated);
     for (const auto j : c10::irange(dimension)) {
       quasi_data[j * quasi_stride] ^= sobolstate_data[j * sobolstate_row_stride + l * sobolstate_col_stride];
     }
@@ -136,6 +168,21 @@ Tensor& _sobol_engine_scramble_(Tensor& sobolstate, const Tensor& ltm, int64_t d
 Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
   TORCH_CHECK(sobolstate.dtype() == at::kLong,
            "sobolstate needs to be of type ", at::kLong);
+  TORCH_CHECK_VALUE(
+      dimension >= 1 && dimension <= MAXDIM,
+      "dimension must be between 1 and ",
+      MAXDIM,
+      ", but got ",
+      dimension);
+  TORCH_CHECK_VALUE(
+      sobolstate.dim() == 2 && sobolstate.size(0) == dimension &&
+          sobolstate.size(1) >= MAXBIT,
+      "sobolstate must have shape [",
+      dimension,
+      ", at least ",
+      MAXBIT,
+      "], but got ",
+      sobolstate.sizes());
 
   /// Use a tensor accessor for `sobolstate`
   auto ss_a = sobolstate.accessor<int64_t, 2>();

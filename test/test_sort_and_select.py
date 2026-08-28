@@ -14,9 +14,8 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     instantiate_device_type_tests,
     largeTensorTest,
+    onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
-    onlyNativeDeviceTypes,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -25,6 +24,7 @@ from torch.testing._internal.common_dtype import (
     integral_types,
 )
 from torch.testing._internal.common_utils import (
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     slowTest,
@@ -32,7 +32,31 @@ from torch.testing._internal.common_utils import (
 )
 
 
+class TestSortAndSelectCPU(TestCase):
+    def test_complex_unsupported_cpu(self, device):
+        x = torch.tensor([3.0 + 2j, 4.0 + 3j], device=device)
+        with self.assertRaisesRegex(
+            TypeError, " Sort does not support complex dtypes on CPU"
+        ):
+            torch.sort(input=x)
+
+
 class TestSortAndSelect(TestCase):
+    def test_sort_stable_none(self):
+        # Called sort with stable=None used to trigger an assertion
+        # See https://github.com/pytorch/pytorch/issues/117255
+        x = torch.ones(10)
+        y = x.sort(stable=None).values
+        self.assertTrue(torch.all(y == torch.ones(10)).item())
+
+    def test_topk_quantized_scalar_input(self):
+        # Calling topk on a quantized scalar input used to segfault,
+        # see https://github.com/pytorch/pytorch/issues/116324
+        x = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
+        x.topk(1)
+
+
+class TestSortAndSelectDevice(TestCase):
     def assertIsOrdered(self, order, x, mxx, ixx, task):
         SIZE = x.size(1)
         if order == "descending":
@@ -50,19 +74,17 @@ class TestSortAndSelect(TestCase):
                 return ((b != b) | (a <= b)).all().item()
 
         else:
-            error(  # noqa: F821
+            raise ValueError(
                 f'unknown order "{order}", must be "ascending" or "descending"'
             )
 
-        are_ordered = True
         for k in range(1, SIZE):
             self.assertTrue(
                 check_order(mxx[:, k - 1], mxx[:, k]),
-                f"torch.sort ({order}) values unordered for {task}",
+                lambda msg: f"{msg}\ntorch.sort ({order}) values unordered for {task}",
             )
 
         seen = set()
-        indicesCorrect = True
         size0 = x.size(0)
         size = x.size(x.dim() - 1)
         x = x.tolist()
@@ -74,7 +96,7 @@ class TestSortAndSelect(TestCase):
                 self.assertEqual(
                     x[k][ixx[k][j]],
                     mxx[k][j],
-                    msg=f"torch.sort ({order}) indices wrong for {task}",
+                    msg=lambda msg: f"{msg}\ntorch.sort ({order}) indices wrong for {task}",
                 )
                 seen.add(ixx[k][j])
             self.assertEqual(len(seen), size)
@@ -170,28 +192,21 @@ class TestSortAndSelect(TestCase):
             torch.sort(x, out=(res2val, res2ind), descending=True)
             self.assertIsOrdered("descending", x, res2val, res2ind, "random with NaNs")
 
-    def test_sort_stable_none(self):
-        # Called sort with stable=None used to trigger an assertion
-        # See https://github.com/pytorch/pytorch/issues/117255
-        x = torch.ones(10)
-        y = x.sort(stable=None).values
-        self.assertTrue(torch.all(y == torch.ones(10)).item())
-
-    @onlyCUDA
+    @onlyAccelerator
     def test_sort_large_slice(self, device):
         # tests direct cub path
         x = torch.randn(4, 1024000, device=device)
         res1val, res1ind = torch.sort(x, stable=True)
-        torch.cuda.synchronize()
+        torch.get_device_module().synchronize()
         # assertIsOrdered is too slow, so just compare to cpu
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), stable=True)
-        self.assertEqual(res1val, res1val_cpu.cuda())
-        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        self.assertEqual(res1val, res1val_cpu.to(device))
+        self.assertEqual(res1ind, res1ind_cpu.to(device))
         res1val, res1ind = torch.sort(x, descending=True, stable=True)
-        torch.cuda.synchronize()
+        torch.get_device_module().synchronize()
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), descending=True, stable=True)
-        self.assertEqual(res1val, res1val_cpu.cuda())
-        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        self.assertEqual(res1val, res1val_cpu.to(device))
+        self.assertEqual(res1ind, res1ind_cpu.to(device))
 
     @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort(self, device, dtype):
@@ -208,22 +223,22 @@ class TestSortAndSelect(TestCase):
                 torch.arange(start=1, end=2 * ncopies, step=2, device=device),
             )
 
-    @onlyCUDA
-    @dtypes(torch.uint8)
+    @onlyAccelerator
+    @dtypes(torch.float16)
     @largeTensorTest("200GB")  # Unfortunately 80GB A100 is not large enough
     def test_sort_large(self, device, dtype):
         t0 = torch.randperm(8192, device=device).to(dtype)
         t = t0.view(1, 8192).expand(2**18 + 1, -1).contiguous()
         v, i = t.sort()
         del t
-        iv, im = i.var_mean(dim=0)
+        iv, im = torch.var_mean(i.to(dtype), dim=0)
         del i
-        vv, vm = v.var_mean(dim=0)
+        vv, vm = torch.var_mean(v.to(dtype), dim=0)
         del v
         self.assertEqual(vv, torch.zeros_like(vv))
         self.assertEqual(iv, torch.zeros_like(iv))
-        self.assertEqual(vm, torch.arange(255, dtype=dtype, device=device))
-        self.assertEqual(im, t0.sort().indices)
+        self.assertEqual(vm, torch.arange(8192, dtype=dtype, device=device))
+        self.assertEqual(im, t0.sort().indices, exact_dtype=False)
 
     @dtypes(torch.float32)
     def test_sort_restride(self, device, dtype):
@@ -277,16 +292,29 @@ class TestSortAndSelect(TestCase):
                         self.assertEqual(r1.values.stride(), t.stride())
                         self.assertEqual(r1.indices.stride(), t.stride())
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32)
     def test_sort_discontiguous(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
 
+    # TODO: consolidate with test_sort_discontiguous once slowTest supports
+    # device/accelerator-level granularity.
     @slowTest  # this test is slow on CPU, but not on CUDA
     @onlyCPU
     @dtypes(torch.float32)
     def test_sort_discontiguous_slow(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
+
+    @slowTest  # this test is slow on CPU
+    @onlyCPU
+    @dtypes(*integral_types())
+    def test_sort_1d_parallel(self, device, dtype):
+        low = 0 if dtype == torch.uint8 else -128
+        tensor = torch.randint(
+            low=low, high=127, size=(100000,), device=device, dtype=dtype
+        )
+        vals, _ = torch.sort(tensor, stable=True)
+        self.assertEqual(True, torch.all(vals[:-1] <= vals[1:]))
 
     @dtypes(torch.float32)
     def test_sort_1d_output_discontiguous(self, device, dtype):
@@ -297,17 +325,6 @@ class TestSortAndSelect(TestCase):
         values_cont, indices_cont = tensor.sort()
         self.assertEqual(indices, indices_cont)
         self.assertEqual(values, values_cont)
-
-    @slowTest
-    @onlyCPU
-    @dtypes(*integral_types())
-    def test_sort_1d_parallel(self, device, dtype):
-        low = 0 if dtype == torch.uint8 else -128
-        tensor = torch.randint(
-            low=low, high=127, size=(100000,), device=device, dtype=dtype
-        )
-        vals, _ = torch.sort(tensor, stable=True)
-        self.assertEqual(True, torch.all(vals[:-1] <= vals[1:]))
 
     @dtypes(torch.float32)
     def test_topk_1d_output_discontiguous(self, device, dtype):
@@ -500,12 +517,6 @@ class TestSortAndSelect(TestCase):
         t = torch.randn((2, 10000), device=device)
         compare(t, 2000, 1, True)
         compare(t, 2000, 1, False)
-
-    def test_topk_quantized_scalar_input(self):
-        # Calling topk on a quantized scalar input used to segfault,
-        # see https://github.com/pytorch/pytorch/issues/116324
-        x = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
-        x.topk(1)
 
     def test_topk_arguments(self, device):
         q = torch.randn(10, 2, 10, device=device)
@@ -720,7 +731,8 @@ class TestSortAndSelect(TestCase):
                     dtype=dtype,
                     device=device,
                 )
-            expected_y_unique = torch.tensor(
+
+            expected_y_unique = torch.tensor(  # noqa: F841
                 [[0, 1], [1, 2], [3, 4], [0, 1], [3, 4], [1, 2]],
                 dtype=dtype,
                 device=device,
@@ -796,21 +808,6 @@ class TestSortAndSelect(TestCase):
         run_test(device, torch.uint8)
         run_test(device, torch.bool)
 
-    @onlyCUDA
-    def test_topk_noncontiguous_gpu(self, device):
-        # test different topk paths on cuda
-        single_block_t = torch.randn(20, device=device)[::2]
-        multi_block_t = torch.randn(20000, device=device)[::2]
-        sort_t = torch.randn(200000, device=device)[::2]
-        for t in (single_block_t, multi_block_t, sort_t):
-            for k in (5, 2000, 10000):
-                if k >= t.shape[0]:
-                    continue
-                top1, idx1 = t.topk(k)
-                top2, idx2 = t.contiguous().topk(k)
-                self.assertEqual(top1, top2)
-                self.assertEqual(idx1, idx2)
-
     def _test_topk_dtype(self, device, dtype, integral, size):
         if integral:
             a = torch.randint(
@@ -835,6 +832,44 @@ class TestSortAndSelect(TestCase):
         verylarge = 8192  # multi_block topk on cuda
         for curr_size in (small, large, verylarge):
             self._test_topk_dtype(device, dtype, True, curr_size)
+
+    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
+    def test_topk_integral_warp_sort_path(self, device, dtype):
+        # Regression test for the warpMergeSortTopK integer-sentinel bug on
+        # ROCm >= 7.0: slice sizes in (0, 256] and k == slice_size dispatched
+        # through warpMergeSortTopK, which used numeric_limits::infinity() as a
+        # padding sentinel. For integer scalar_t that evaluates to 0, a legal
+        # input value, and OOB placeholder indices leaked into the output.
+        #
+        # Exercise the k == slice_size boundary and a few neighbouring sizes,
+        # in both largest=True and largest=False modes, with enough slices to
+        # flush out the bad case.
+        torch.manual_seed(0)
+        num_slices = 1024
+        for slice_size in (1, 33, 63, 64, 65, 71, 127, 128, 129, 255, 256):
+            iinfo = torch.iinfo(dtype)
+            a = torch.randint(
+                iinfo.min,
+                iinfo.max,
+                size=(num_slices, slice_size),
+                dtype=dtype,
+                device=device,
+            )
+            for largest in (True, False):
+                for k in (1, slice_size // 2 or 1, slice_size):
+                    vals, idx = a.topk(k, dim=1, largest=largest)
+                    self.assertTrue(
+                        (idx >= 0).all().item() and (idx < slice_size).all().item(),
+                        lambda msg: f"{msg}\nOOB index from topk k={k} slice_size={slice_size} "
+                        f"dtype={dtype} largest={largest}",
+                    )
+                    ref = a.gather(1, idx)
+                    self.assertEqual(
+                        vals,
+                        ref,
+                        lambda msg: f"{msg}\nvalue/index mismatch k={k} slice_size={slice_size} "
+                        f"dtype={dtype} largest={largest}",
+                    )
 
     @dtypes(torch.bfloat16, torch.half)
     def test_topk_lower_precision(self, device, dtype):
@@ -880,7 +915,6 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(val, expected_val, atol=0, rtol=0)
             self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
-    @onlyNativeDeviceTypes
     @dtypesIfCUDA(*all_types_and(torch.bfloat16))
     @dtypes(*all_types_and(torch.bfloat16, torch.half))
     def test_topk_zero(self, device, dtype):
@@ -1135,7 +1169,6 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
 
     @dtypes(torch.float)
-    @onlyNativeDeviceTypes  # Fails on XLA
     def test_kthvalue_scalar(self, device, dtype):
         # Test scalar input (test case from https://github.com/pytorch/pytorch/issues/30818)
         # Tests that passing a scalar tensor or 1D tensor with 1 element work either way
@@ -1295,7 +1328,7 @@ class TestSortAndSelect(TestCase):
                     c = torch.isin(a, b, assume_unique=assume_unique)
                     self.assertEqual(c, ec)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(*all_types())
     def test_isin_different_devices(self, device, dtype):
         a = torch.arange(6, device=device, dtype=dtype).reshape([2, 3])
@@ -1323,7 +1356,112 @@ class TestSortAndSelect(TestCase):
             torch.set_num_threads(prev_num_threads)
 
 
-instantiate_device_type_tests(TestSortAndSelect, globals())
+class TestSortAndSelectCUDA(TestCase):
+    def test_topk_noncontiguous_gpu(self, device):
+        # test different topk paths on cuda
+        single_block_t = torch.randn(20, device=device)[::2]
+        multi_block_t = torch.randn(20000, device=device)[::2]
+        sort_t = torch.randn(200000, device=device)[::2]
+        for t in (single_block_t, multi_block_t, sort_t):
+            for k in (5, 2000, 10000):
+                if k >= t.shape[0]:
+                    continue
+                top1, idx1 = t.topk(k)
+                top2, idx2 = t.contiguous().topk(k)
+                self.assertEqual(top1, top2)
+                self.assertEqual(idx1, idx2)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @slowTest
+    @largeTensorTest("170GB", "cpu")
+    @largeTensorTest("72GB", "cuda")
+    @parametrize("test_case", ["random", "identical"])
+    def test_topk_large_k(self, device, dtype, test_case):
+        """Test topk with k > 2^32 (integer overflow bug fix).
+
+        Tests both random and edge case (all identical values) inputs.
+        The edge case will force billions of elements to enter the same radix bin.
+
+        Memory requirements (in float32 case):
+        - GPU: ~72 GB (data ~16GB + values ~16GB + indices ~32GB + other ~8GB)
+        - CPU: ~170 GB (indices copy ~32GB + torch.unique extra memory ~130GB + other ~8GB)
+        """
+        extra = random.randint(500, 2000)
+        n = 2**32 + extra
+        k = random.randint(2**32 + 100, n - 100)
+        largest = random.choice([True, False])
+
+        # check correctness chunkwise later to avoid OOM
+        chunk_size = 100_000_000
+        num_chunks = (k + chunk_size - 1) // chunk_size
+
+        # pre-allocate GPU tensors
+        data = torch.empty((1, n), device=device, dtype=dtype)
+        gpu_values = torch.empty((1, k), device=device, dtype=dtype)
+        gpu_indices = torch.empty((1, k), device=device, dtype=torch.long)
+        gpu_chunk_values = torch.empty(chunk_size, device=device, dtype=dtype)
+
+        # pre-allocate CPU tensors
+        cpu_indices_copy = torch.empty(k, dtype=torch.long, device="cpu")
+
+        random_constant = random.random()
+        if test_case == "random":
+            data.random_()
+        else:
+            data.fill_(random_constant)
+
+        torch.topk(
+            data, k, dim=1, largest=largest, sorted=False, out=(gpu_values, gpu_indices)
+        )
+
+        indices = gpu_indices
+        values = gpu_values
+
+        # all indices must be in valid range
+        self.assertGreaterEqual(indices.min().item(), 0)
+        self.assertLess(indices.max().item(), n)
+
+        # all indices must be unique
+        cpu_indices_copy.copy_(indices.squeeze(0))
+        total_unique = torch.unique(cpu_indices_copy).numel()
+        self.assertEqual(
+            total_unique,
+            k,
+            lambda msg: f"{msg}\nDuplicates found in topk test: {k - total_unique}",
+        )
+        # for random case, values must match at returned indices (use pre-allocated tensor)
+        if test_case == "random":
+            for i in range(num_chunks):
+                start = i * chunk_size
+                end = min((i + 1) * chunk_size, k)
+                chunk_size_actual = end - start
+
+                chunk_indices = indices[0, start:end]
+                chunk_values = values[0, start:end]
+
+                actual_values = torch.index_select(
+                    data[0], 0, chunk_indices, out=gpu_chunk_values[:chunk_size_actual]
+                )
+                self.assertEqual(
+                    chunk_values,
+                    actual_values,
+                    msg=lambda msg: f"{msg}\nValue mismatch in chunk {i + 1}",
+                )
+
+        # for identical case, all values must equal to constant
+        if test_case == "identical":
+            # use .all() instead of self.assertEqualBroadcasting because the latter
+            # allocates a full-size tensor with the same size as values, causing OOM
+            self.assertEqual(
+                (values == random_constant).all().item(),
+                True,
+                "Values not equal to random constant",
+            )
+
+
+instantiate_device_type_tests(TestSortAndSelectCPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestSortAndSelectDevice, globals())
+instantiate_device_type_tests(TestSortAndSelectCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()

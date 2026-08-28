@@ -64,7 +64,7 @@ static PyObject* THXPStream_pynew(
 
 static void THXPStream_dealloc(THXPStream* self) {
   self->xpu_stream.~XPUStream();
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  THPStream_dealloc_common(reinterpret_cast<THPStream*>(self));
 }
 
 static PyObject* THXPStream_get_sycl_queue(THXPStream* self, void* unused) {
@@ -138,7 +138,7 @@ static PyMethodDef THXPStream_methods[] = {
     {"__eq__", THXPStream_eq, METH_O, nullptr},
     {nullptr}};
 
-PyTypeObject THXPStreamType = {
+static PyTypeObject THXPStreamType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._XpuStreamBase", /* tp_name */
     sizeof(THXPStream), /* tp_basicsize */
@@ -163,7 +163,7 @@ PyTypeObject THXPStreamType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    0, /* tp_weaklistoffset (inherited from THPStreamType via tp_base) */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THXPStream_methods, /* tp_methods */
@@ -183,12 +183,9 @@ void THXPStream_init(PyObject* module) {
   Py_INCREF(THPStreamClass);
   THXPStreamType.tp_base = THPStreamClass;
   THXPStreamClass = (PyObject*)&THXPStreamType;
-  if (PyType_Ready(&THXPStreamType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&THXPStreamType) >= 0);
   Py_INCREF(&THXPStreamType);
-  if (PyModule_AddObject(module, "_XpuStreamBase", (PyObject*)&THXPStreamType) <
-      0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(
+          module, "_XpuStreamBase", (PyObject*)&THXPStreamType) >= 0);
 }

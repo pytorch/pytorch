@@ -43,7 +43,7 @@ struct FunctionExtractor {
 
     void PopulateInputsOutputs(
         const std::unordered_set<std::string>& param_names);
-    bool IsIdenticalFuncion(const ScopeContext& other_ctx) const;
+    bool IsIdenticalFunction(const ScopeContext& other_ctx) const;
   };
 
   using ScopeCtxPtr = ScopeContext*;
@@ -87,14 +87,14 @@ struct FunctionExtractor {
       const std::shared_ptr<Graph>& graph);
 
   static void HandleNoScopeNodes(
-      scope_ctx_map&,
+      scope_ctx_map& /*scope_ctxs*/,
       const node_list& no_scope_nlist);
   std::tuple<scope_ctx_map, node_list> PartitionNodesByScope(Block* b);
   scope_ctx_map PartitionNodesByScope(const std::shared_ptr<Graph>& graph);
   static std::unordered_map<ScopePtr, scope_list> PartitionIdenticalScopes(
       scope_ctx_map& scope_ctxs);
   static scope_list SortScopesByMaxDepth(
-      std::unordered_map<ScopePtr, scope_list>&);
+      std::unordered_map<ScopePtr, scope_list>& /*identical_scope_map*/);
   Node* CreateFunctionDefNode(
       FunctionContext& func_ctx,
       const std::shared_ptr<Graph>& graph,
@@ -107,7 +107,7 @@ struct FunctionExtractor {
       const std::string& domain_name,
       const std::string& func_name);
 
-  static void DebugPrintScopeContexts(const scope_ctx_map&);
+  static void DebugPrintScopeContexts(const scope_ctx_map& /*scope_ctxs*/);
   static void DebugPrintGraphWithFunction(const std::shared_ptr<Graph>& g);
   static void DebugPrintConstantDiff(const FunctionContext&);
 
@@ -160,6 +160,9 @@ FunctionExtractor::FunctionContext::FunctionContext(
       auto n_b_attr_names = n_b->attributeNames();
       std::sort(n_a_attr_names.begin(), n_a_attr_names.end());
       std::sort(n_b_attr_names.begin(), n_b_attr_names.end());
+      diff_attrs.reserve(n_a_attr_names.size());
+      same_attrs.reserve(
+          std::min(n_a_attr_names.size(), n_b_attr_names.size()));
       std::set_difference(
           n_a_attr_names.begin(),
           n_a_attr_names.end(),
@@ -216,7 +219,7 @@ void FunctionExtractor::FunctionContext::SetAttrName(
   TORCH_INTERNAL_ASSERT(
       v_it != scope_ctxs_[scope_key_]->env_to_subgraph_.end());
   auto* n_in_def = v_it->second->node();
-  auto n_attr_it = node_attr_to_name_[n_in_def][attr.toUnqualString()] = name;
+  node_attr_to_name_[n_in_def][attr.toUnqualString()] = name;
 }
 
 std::optional<std::string> FunctionExtractor::FunctionContext::FindAttrName(
@@ -250,16 +253,16 @@ void FunctionExtractor::DebugPrintScopeContexts(
     GRAPH_UPDATE("Children scopes: ", [&]() {
       std::stringstream ss;
       for (const auto& child_scope : it.second->children_) {
-        ss << child_scope->name().toDisplayString() << " ";
+        ss << child_scope->name().toDisplayString() << ' ';
       }
-      return ss.str();
+      return std::move(ss).str();
     }());
     GRAPH_UPDATE("Node types: \n", [&]() {
       std::stringstream ss;
       for (auto n : it.second->nlist_) {
         ss << "  " << *n;
       }
-      return ss.str();
+      return std::move(ss).str();
     }());
     GRAPH_UPDATE("Node count: ", it.second->nlist_.size());
   }
@@ -405,7 +408,7 @@ std::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
       auto common_ancestor = FindCommonAncestor(scopes);
       if (common_ancestor.has_value() &&
           IsValidScope(common_ancestor.value())) {
-        return common_ancestor.value();
+        return common_ancestor;
       }
     }
   }
@@ -485,7 +488,7 @@ Node* FunctionExtractor::CreateFunctionDefNode(
   std::vector<std::string> final_attr_names;
 
   auto adjust_attr_name = [&](std::string attr_name) {
-    if (base_attr_name_count.find(attr_name) != base_attr_name_count.end()) {
+    if (base_attr_name_count.contains(attr_name)) {
       attr_name =
           attr_name + "." + std::to_string(base_attr_name_count[attr_name]++);
     } else {
@@ -528,8 +531,7 @@ Node* FunctionExtractor::CreateFunctionDefNode(
             names.begin(),
             names.end(),
             [&annotated_attr_names](const Symbol& name) {
-              return annotated_attr_names.find(name) ==
-                  annotated_attr_names.end();
+              return !annotated_attr_names.contains(name);
             });
         TORCH_CHECK(
             unseen_attr_name == names.end(),
@@ -616,7 +618,7 @@ Node* FunctionExtractor::CreateFunctionNode(
       auto attr_name = func_ctx.FindAttrName(ref_n, attr).value();
       copy_attr(ref_n, func_n, attr, attr_name);
       for (auto* n : scope_ctx.nlist_) {
-        if (attr_it.second.find(n) != attr_it.second.end()) {
+        if (attr_it.second.contains(n)) {
           copy_attr(n, func_n, attr, attr_name);
           break;
         }
@@ -710,14 +712,8 @@ void FunctionExtractor::ConvertScopeToFunction(
       ctx_nlist.insert(last_n_it, func_n);
 
       // remove replaced nodes from list
-      ctx_nlist.erase(
-          std::remove_if(
-              ctx_nlist.begin(),
-              ctx_nlist.end(),
-              [&old_nodes](Node* n) {
-                return old_nodes.find(n) != old_nodes.end();
-              }),
-          ctx_nlist.end());
+      std::erase_if(
+          ctx_nlist, [&old_nodes](Node* n) { return old_nodes.contains(n); });
 
       GRAPH_DEBUG("Parent total nodes after remove: ", ctx_nlist.size());
 
@@ -738,7 +734,7 @@ void FunctionExtractor::ConvertScopeToFunction(
   }
 }
 
-bool FunctionExtractor::ScopeContext::IsIdenticalFuncion(
+bool FunctionExtractor::ScopeContext::IsIdenticalFunction(
     const ScopeContext& other_ctx) const {
   // Differentiate same function under different inputs.
   // When constants are passed in place of inputs, it leads to different
@@ -786,8 +782,8 @@ void FunctionExtractor::ScopeContext::PopulateInputsOutputs(
   // Add initializers after inputs.
   for (auto* n : nlist) {
     for (auto* v : n->inputs()) {
-      if (v_set.find(v) == v_set.end()) {
-        if (param_names.find(v->debugName()) != param_names.end()) {
+      if (!v_set.contains(v)) {
+        if (param_names.contains(v->debugName())) {
           initializer_list.emplace_back(v);
         } else {
           input_list.emplace_back(v);
@@ -811,7 +807,7 @@ void FunctionExtractor::ScopeContext::PopulateInputsOutputs(
     for (auto* v : n->outputs()) {
       bool used_outside = false;
       for (auto use : v->uses()) {
-        used_outside |= (n_set.find(use.user) == n_set.end());
+        used_outside |= (!n_set.contains(use.user));
       }
       if (used_outside) {
         outputs_.emplace_back(v);
@@ -840,7 +836,7 @@ std::tuple<FunctionExtractor::scope_ctx_map, node_list> FunctionExtractor::
 
   auto find_or_create_scope_ctx = [](scope_ctx_map& scope_ctxs,
                                      const ScopePtr& scope) {
-    if (scope_ctxs.find(scope) == scope_ctxs.end()) {
+    if (!scope_ctxs.contains(scope)) {
       scope_ctxs.insert(std::make_pair(scope, new ScopeContext()));
     }
     return scope_ctxs[scope];
@@ -881,7 +877,7 @@ std::tuple<FunctionExtractor::scope_ctx_map, node_list> FunctionExtractor::
           PartitionNodesByScope(sub_b);
 
       for (auto& it : subblock_scope_ctxs) {
-        if (scope_ctxs.find(it.first) == scope_ctxs.end()) {
+        if (!scope_ctxs.contains(it.first)) {
           scope_ctxs.insert(std::make_pair(it.first, it.second));
         } else {
           for (auto* s_n : it.second->nlist_) {
@@ -931,7 +927,7 @@ std::unordered_map<ScopePtr, scope_list> FunctionExtractor::
       auto key_scope = kv_it.first;
       const auto& key_scope_ctx = scope_ctxs[key_scope];
       auto& key_scope_vec = kv_it.second;
-      if (key_scope_ctx->IsIdenticalFuncion(*scope_ctx)) {
+      if (key_scope_ctx->IsIdenticalFunction(*scope_ctx)) {
         key_scope_vec.emplace_back(scope);
         unique = false;
         break;
@@ -1047,8 +1043,7 @@ NodeAttrNameMap FunctionExtractor::run() {
   // Deepest scope comes first, guaranteeing no other scope can be its child.
   auto sorted_scope_keys = SortScopesByMaxDepth(identical_scope_map);
   for (const auto& scope_key : sorted_scope_keys) {
-    if (module_names_.find(ONNXScopeName::className(scope_key)) !=
-        module_names_.end()) {
+    if (module_names_.contains(ONNXScopeName::className(scope_key))) {
       ConvertScopeToFunction(
           scope_key, identical_scope_map[scope_key], scope_ctxs, graph_);
     }
@@ -1092,7 +1087,7 @@ Node* NodeOfMostRecentScope(Node* forward_node) {
   for (auto* node : block->nodes().reverse()) {
     if (node->kind() == prim::TracedModuleForward) {
       Node* target_node = NodeOfMostRecentScope(node);
-      if (scope_attr_map_.find(node->scope()) == scope_attr_map_.end()) {
+      if (!scope_attr_map_.contains(node->scope())) {
         return target_node;
       }
     }
@@ -1123,20 +1118,6 @@ NodeAttrNameMap ONNXFunctionExtraction(
       std::vector<std::string>{module_names.begin(), module_names.end()});
   FunctionExtractor fe(graph, module_names, param_names);
   return fe.run();
-}
-
-Node* ONNXGetPreviousScope(std::shared_ptr<Graph>& graph) {
-  auto* last_node = graph->nodes().back()->prev();
-  auto* scope_node = NodeOfMostRecentScope(last_node);
-  auto* attr_node = scope_attr_graph_->create(prim::TracedModuleForward);
-  attr_node->setScope(scope_node->scope());
-  TORCH_INTERNAL_ASSERT(
-      scope_attr_map_.find(scope_node->scope()) == scope_attr_map_.end(),
-      "Found duplicated scope. Scope ",
-      scope_node->scope()->namesFromRoot(),
-      " already processed.");
-  scope_attr_map_[scope_node->scope()] = attr_node;
-  return attr_node;
 }
 
 void ONNXClearScopeRecords() {

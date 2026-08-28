@@ -8,7 +8,6 @@ import subprocess
 import textwrap
 import threading
 import time
-from typing import Dict, List, Optional, Set, Tuple, Union
 
 from worker.main import WorkerFailure, WorkerOutput
 
@@ -21,9 +20,9 @@ CPU_COUNT: int = multiprocessing.cpu_count()
 class WorkerFailed(Exception):
     """Raised in the main process when a worker failure is detected."""
 
-    def __init__(self, cmd: str, wrapped_trace: Optional[str] = None) -> None:
+    def __init__(self, cmd: str, wrapped_trace: str | None = None) -> None:
         self.cmd: str = cmd
-        self.wrapped_trace: Optional[str] = wrapped_trace
+        self.wrapped_trace: str | None = wrapped_trace
         super().__init__()
 
 
@@ -42,23 +41,30 @@ class CorePool:
     """
 
     def __init__(self, min_core_id: int, max_core_id: int) -> None:
-        assert min_core_id >= 0
-        assert max_core_id >= min_core_id
-        assert max_core_id < CPU_COUNT
+        if min_core_id < 0:
+            raise AssertionError(f"min_core_id must be >= 0, got {min_core_id}")
+        if max_core_id < min_core_id:
+            raise AssertionError(
+                f"max_core_id ({max_core_id}) must be >= min_core_id ({min_core_id})"
+            )
+        if max_core_id >= CPU_COUNT:
+            raise AssertionError(
+                f"max_core_id ({max_core_id}) must be < CPU_COUNT ({CPU_COUNT})"
+            )
 
         self._min_core_id: int = min_core_id
         self._max_core_id: int = max_core_id
         self._num_cores = max_core_id - min_core_id + 1
         print(f"Core pool created: cores {self._min_core_id}-{self._max_core_id}")
 
-        self._available: List[bool] = [
+        self._available: list[bool] = [
             True for _ in range(min_core_id, min_core_id + self._num_cores)
         ]
 
-        self._reservations: Dict[str, Tuple[int, ...]] = {}
+        self._reservations: dict[str, tuple[int, ...]] = {}
         self._lock = threading.Lock()
 
-    def reserve(self, n: int) -> Optional[str]:
+    def reserve(self, n: int) -> str | None:
         """Simple first-fit policy.
 
         If successful, return a string for `taskset`. Otherwise, return None.
@@ -87,28 +93,28 @@ class CorePool:
 class Runner:
     def __init__(
         self,
-        work_items: Tuple[WorkOrder, ...],
-        core_pool: Optional[CorePool] = None,
+        work_items: tuple[WorkOrder, ...],
+        core_pool: CorePool | None = None,
         cadence: float = 1.0,
     ) -> None:
-        self._work_items: Tuple[WorkOrder, ...] = work_items
+        self._work_items: tuple[WorkOrder, ...] = work_items
         self._core_pool: CorePool = core_pool or CorePool(0, CPU_COUNT - 4)
         self._cadence: float = cadence
 
         # Working state.
-        self._work_queue: List[WorkOrder] = list(work_items)
-        self._active_jobs: List[InProgress] = []
-        self._results: Dict[WorkOrder, WorkerOutput] = {}
+        self._work_queue: list[WorkOrder] = list(work_items)
+        self._active_jobs: list[InProgress] = []
+        self._results: dict[WorkOrder, WorkerOutput] = {}
 
         # Debug information for ETA and error messages.
         self._start_time: float = -1
-        self._durations: Dict[WorkOrder, float] = {}
-        self._currently_processed: Optional[WorkOrder] = None
+        self._durations: dict[WorkOrder, float] = {}
+        self._currently_processed: WorkOrder | None = None
 
         if len(work_items) != len(set(work_items)):
             raise ValueError("Duplicate work items.")
 
-    def run(self) -> Dict[WorkOrder, WorkerOutput]:
+    def run(self) -> dict[WorkOrder, WorkerOutput]:
         try:
             return self._run()
 
@@ -137,7 +143,7 @@ class Runner:
             self._force_shutdown(verbose=True)
             raise
 
-    def _run(self) -> Dict[WorkOrder, WorkerOutput]:
+    def _run(self) -> dict[WorkOrder, WorkerOutput]:
         self._start_time = time.time()
         self._canary_import()
         while self._work_queue or self._active_jobs:
@@ -150,29 +156,31 @@ class Runner:
         return self._results.copy()
 
     def _update_active_jobs(self) -> None:
-        active_jobs: List[InProgress] = []
+        active_jobs: list[InProgress] = []
         for job in self._active_jobs:
             self._currently_processed = job.work_order
             if not job.check_finished():
                 active_jobs.append(job)
                 continue
 
-            result: Union[WorkerOutput, WorkerFailure] = job.result
+            result: WorkerOutput | WorkerFailure = job.result
             if isinstance(result, WorkerOutput):
                 self._results[job.work_order] = result
-                assert job.cpu_list is not None
+                if job.cpu_list is None:
+                    raise AssertionError("job.cpu_list must not be None")
                 self._core_pool.release(job.cpu_list)
                 self._durations[job.work_order] = job.duration
 
             else:
-                assert isinstance(result, WorkerFailure)
+                if not isinstance(result, WorkerFailure):
+                    raise AssertionError(f"expected WorkerFailure, got {type(result)}")
                 raise WorkerFailed(cmd=job.proc.cmd, wrapped_trace=result.failure_trace)
         self._currently_processed = None
         self._active_jobs.clear()
         self._active_jobs.extend(active_jobs)
 
     def _enqueue_new_jobs(self) -> None:
-        work_queue: List[WorkOrder] = []
+        work_queue: list[WorkOrder] = []
         for i, work_order in enumerate(self._work_queue):
             self._currently_processed = work_order
             cpu_list = self._core_pool.reserve(work_order.timer_args.num_threads)
@@ -249,7 +257,7 @@ class Runner:
 
     def _canary_import(self) -> None:
         """Make sure we can import torch before launching a slew of workers."""
-        source_cmds: Set[str] = set()
+        source_cmds: set[str] = set()
         for w in self._work_items:
             if w.source_cmd is not None:
                 source_cmds.add(f"{w.source_cmd} && ")

@@ -107,12 +107,12 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
             ? std::optional<TensorAccessor<const input_t, 1>>(weight.value().accessor<const input_t, 1>())
             : std::optional<TensorAccessor<const input_t, 1>>();
 
-    std::vector<input_t*> bin_seq(D);
+    std::vector<const input_t*> bin_seq(D);
     std::vector<int64_t> num_bin_edges(D);
     std::vector<input_t> leftmost_edge(D), rightmost_edge(D);
 
     for (const auto dim : c10::irange(D)) {
-        bin_seq[dim] = bin_edges[dim].data_ptr<input_t>();
+        bin_seq[dim] = bin_edges[dim].const_data_ptr<input_t>();
         num_bin_edges[dim] = bin_edges[dim].numel();
         leftmost_edge[dim] = bin_seq[dim][0];
         rightmost_edge[dim] = bin_seq[dim][num_bin_edges[dim] - 1];
@@ -259,7 +259,7 @@ void histogramdd_out_cpu_template(const Tensor& self, const std::optional<Tensor
  *
  * Refer to histogramdd_out_cpu_template for more details.
  */
-static void histogramdd_kernel_impl(const Tensor& self, const std::optional<Tensor>& weight, bool density,
+void histogramdd_kernel_impl(const Tensor& self, const std::optional<Tensor>& weight, bool density,
         Tensor& hist, const TensorList& bin_edges) {
     histogramdd_out_cpu_template<BINARY_SEARCH>(self, weight, density, hist, bin_edges);
 }
@@ -269,7 +269,7 @@ static void histogramdd_kernel_impl(const Tensor& self, const std::optional<Tens
  *
  * Refer to histogramdd_out_cpu_template for more details.
  */
-static void histogramdd_linear_kernel_impl(const Tensor& self, const std::optional<Tensor>& weight,
+void histogramdd_linear_kernel_impl(const Tensor& self, const std::optional<Tensor>& weight,
         bool density, Tensor& hist, const TensorList& bin_edges, bool local_search) {
     if (local_search) {
         // histogramdd codepath: both hist and bin_edges are eventually returned as output,
@@ -298,7 +298,7 @@ void infer_bin_edges_from_input(const Tensor& input, const int64_t N,
     std::copy(max_data, max_data + N, rightmost_edges.begin());
 }
 
-static void histogram_select_outer_bin_edges_impl(const Tensor& input, const int64_t N,
+void histogram_select_outer_bin_edges_impl(const Tensor& input, const int64_t N,
         std::vector<double> &leftmost_edges, std::vector<double> &rightmost_edges) {
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "histogramdd", [&]() {
         infer_bin_edges_from_input<scalar_t>(input, N, leftmost_edges, rightmost_edges);

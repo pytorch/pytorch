@@ -1,5 +1,4 @@
 #include <torch/csrc/python_headers.h>
-#include <system_error>
 #include <vector>
 
 #include <ATen/ops/from_blob.h>
@@ -9,10 +8,10 @@
 #include <torch/csrc/serialization.h>
 
 template <class io>
-Py_ssize_t doPartialRead(io fildes, void* buf, size_t nbytes);
+static Py_ssize_t doPartialRead(io fildes, void* buf, size_t nbytes);
 
 template <class io>
-Py_ssize_t doPartialWrite(io fildes, void* buf, size_t nbytes);
+static Py_ssize_t doPartialWrite(io fildes, void* buf, size_t nbytes);
 
 static Py_ssize_t doPartialPythonReadBuffered(
     PyObject* fildes,
@@ -62,11 +61,9 @@ Py_ssize_t doPartialWrite<PyObject*>(
 
 static bool isUnsupportedOperation() {
   THPObjectPtr io(PyImport_ImportModule("io"));
-  if (!io)
-    throw python_error();
+  TORCH_CHECK_PYTHON(io);
   THPObjectPtr exception(PyObject_GetAttrString(io, "UnsupportedOperation"));
-  if (!exception)
-    throw python_error();
+  TORCH_CHECK_PYTHON(exception);
   return PyErr_ExceptionMatches(exception.get());
 }
 
@@ -83,8 +80,7 @@ static Py_ssize_t doPartialPythonReadBuffered(
   const size_t nbytes = std::min<size_t>(raw_nbytes, 262144u); // 2^18 (~260 KB)
 
   THPObjectPtr r(PyObject_CallMethod(fildes, "read", "i", nbytes));
-  if (!r)
-    throw python_error();
+  TORCH_CHECK_PYTHON(r);
 
   auto size = PyBytes_GET_SIZE(r.get());
   const void* py_buf = PyBytes_AsString(r.get());
@@ -109,8 +105,7 @@ static Py_ssize_t doPartialPythonIO(
   auto rw_flag = is_read ? PyBUF_WRITE : PyBUF_READ;
   THPObjectPtr memview(PyMemoryView_FromMemory(
       reinterpret_cast<char*>(buf), static_cast<Py_ssize_t>(nbytes), rw_flag));
-  if (!memview)
-    throw python_error();
+  TORCH_CHECK_PYTHON(memview);
 
   std::string method = "write";
   if (is_read) {
@@ -128,6 +123,7 @@ static Py_ssize_t doPartialPythonIO(
     PyErr_Clear();
     return doPartialPythonReadBuffered(fildes, buf, nbytes);
   }
+  // @allow-raw-throw: raises the error left set by the failed call above
   throw python_error();
 }
 
@@ -258,7 +254,7 @@ void THPStorage_writeFileRaw(
         at::device(self->device()).dtype(c10::kByte),
         {self->device()});
     cpu_tensor = device_tensor.to(at::kCPU);
-    data = (uint8_t*)cpu_tensor.data_ptr();
+    data = static_cast<uint8_t*>(cpu_tensor.data_ptr());
   }
   if (save_size) {
     if (torch::utils::THP_nativeByteOrder() ==
@@ -267,8 +263,8 @@ void THPStorage_writeFileRaw(
     else {
       int64_t nsize{}; // convert big endian cpu to little endian storage
       torch::utils::THP_encodeBuffer(
-          (uint8_t*)&nsize,
-          (const int64_t*)&numel,
+          reinterpret_cast<uint8_t*>(&nsize),
+          reinterpret_cast<const int64_t*>(&numel),
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
           1);
       doWrite(fd, &nsize, sizeof(int64_t));
@@ -280,7 +276,7 @@ void THPStorage_writeFileRaw(
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN) {
     doWrite(fd, data, size_bytes);
   } else {
-    size_t buffer_size = std::min(numel, (size_t)5000);
+    size_t buffer_size = std::min(numel, static_cast<size_t>(5000));
     std::vector<uint8_t> le_buffer;
     le_buffer.resize(buffer_size * element_size);
     for (size_t i = 0; i < numel; i += buffer_size) {
@@ -288,19 +284,19 @@ void THPStorage_writeFileRaw(
       if (element_size == 2) {
         torch::utils::THP_encodeBuffer(
             le_buffer.data(),
-            (const int16_t*)data + i,
+            reinterpret_cast<const int16_t*>(data) + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       } else if (element_size == 4) {
         torch::utils::THP_encodeBuffer(
             le_buffer.data(),
-            (const int32_t*)data + i,
+            reinterpret_cast<const int32_t*>(data) + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       } else if (element_size == 8) {
         torch::utils::THP_encodeBuffer(
             le_buffer.data(),
-            (const int64_t*)data + i,
+            reinterpret_cast<const int64_t*>(data) + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       }
@@ -334,7 +330,8 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
   if (torch::utils::THP_nativeByteOrder() ==
       torch::utils::THPByteOrder::THP_BIG_ENDIAN) {
     int64_t tsize = size; // convert little endian storage to big endian cpu
-    torch::utils::THP_decodeBuffer(&size, (const uint8_t*)&tsize, true, 1);
+    torch::utils::THP_decodeBuffer(
+        &size, reinterpret_cast<const uint8_t*>(&tsize), true, 1);
   }
   size_t nbytes = element_size * size;
   if (!storage.defined()) {
@@ -347,21 +344,20 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     size_t _storage_nbytes = storage->nbytes();
     TORCH_CHECK(
         _storage_nbytes == nbytes,
-        "storage has wrong byte size: expected %ld got %ld",
+        "storage has wrong byte size: expected ",
         nbytes,
+        " got ",
         _storage_nbytes);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  std::unique_ptr<char[]> cpu_data;
+  std::string cpu_data;
 
   uint8_t* data{};
   if (storage->device_type() == at::kCPU) {
     data = static_cast<uint8_t*>(storage->mutable_data());
   } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    cpu_data = std::unique_ptr<char[]>(new char[nbytes]);
-    data = (uint8_t*)cpu_data.get();
+    cpu_data.resize(nbytes);
+    data = reinterpret_cast<uint8_t*>(cpu_data.data());
   }
 
   // fast track for bytes and little endian
@@ -370,25 +366,33 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN) {
     doRead(file, data, storage->nbytes());
   } else {
-    int64_t buffer_size = std::min(size, (int64_t)5000);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    std::unique_ptr<uint8_t[]> le_buffer(
-        new uint8_t[buffer_size * element_size]);
+    int64_t buffer_size = std::min(size, static_cast<int64_t>(5000));
+    std::vector<uint8_t> le_buffer;
+    le_buffer.resize(buffer_size * element_size);
 
     for (int64_t i = 0; i < size; i += buffer_size) {
       size_t to_convert = std::min(size - i, buffer_size);
-      doRead(file, le_buffer.get(), element_size * to_convert);
+      doRead(file, le_buffer.data(), element_size * to_convert);
 
       // NOLINTNEXTLINE(bugprone-branch-clone)
       if (element_size == 2) {
         torch::utils::THP_decodeBuffer(
-            (int16_t*)data + i, le_buffer.get(), true, to_convert);
+            reinterpret_cast<int16_t*>(data) + i,
+            le_buffer.data(),
+            true,
+            to_convert);
       } else if (element_size == 4) {
         torch::utils::THP_decodeBuffer(
-            (int32_t*)data + i, le_buffer.get(), true, to_convert);
+            reinterpret_cast<int32_t*>(data) + i,
+            le_buffer.data(),
+            true,
+            to_convert);
       } else if (element_size == 8) {
         torch::utils::THP_decodeBuffer(
-            (int64_t*)data + i, le_buffer.get(), true, to_convert);
+            reinterpret_cast<int64_t*>(data) + i,
+            le_buffer.data(),
+            true,
+            to_convert);
       }
     }
   }

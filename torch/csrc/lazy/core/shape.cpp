@@ -1,10 +1,9 @@
-#include <c10/util/irange.h>
+#include <c10/util/env.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/tensor.h>
 
 #include <utility>
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_DEFINE_bool(
     ltc_enable_symbolic_shapes,
     false,
@@ -58,7 +57,7 @@ Shape Shape::with_symbolic_dims(
 }
 
 bool symbolicShapeEnabled() {
-  static bool enabled = std::getenv("LTC_ENABLE_SYMBOLIC_SHAPES") != nullptr;
+  static bool enabled = c10::utils::has_env("LTC_ENABLE_SYMBOLIC_SHAPES");
   return enabled || FLAGS_ltc_enable_symbolic_shapes;
 }
 
@@ -105,8 +104,7 @@ void applySymbolicShapesOnLT(
         converted_args.emplace_back(get_symbolic_shape(tensor));
       }
     } else if (arg.isTensor()) {
-      auto ss = get_symbolic_shape(arg.toTensor());
-      converted_args.emplace_back(ss);
+      converted_args.emplace_back(get_symbolic_shape(arg.toTensor()));
     } else {
       // If we need to support symbolic ints, here is the place
       // to add it.

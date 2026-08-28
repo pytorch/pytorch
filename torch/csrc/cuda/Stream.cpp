@@ -1,14 +1,9 @@
 #include <pybind11/pybind11.h>
-#include <torch/csrc/Device.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/cuda/Module.h>
 #include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 
-#include <c10/cuda/CUDAGuard.h>
-
-#include <cuda_runtime_api.h>
 #include <structmember.h>
 
 PyObject* THCPStreamClass = nullptr;
@@ -25,7 +20,11 @@ static PyObject* THCPStream_pynew(
   int64_t stream_id = 0;
   int64_t device_index = 0;
   int64_t device_type = 0;
-  uint64_t stream_ptr = 0;
+  // stream_ptr is parsed as a Python object (default Py_None) rather than a
+  // raw uint64_t so we can distinguish "kwarg omitted" from "kwarg explicitly
+  // set to 0". The legacy "|iLLLK" format collapsed those two cases and
+  // caused ExternalStream(0) to land in getStreamFromPool.
+  PyObject* stream_ptr_obj = Py_None;
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   constexpr const char* kwlist[] = {
@@ -38,15 +37,28 @@ static PyObject* THCPStream_pynew(
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|iLLLK",
+          "|iLLLO",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &priority,
           &stream_id,
           &device_index,
           &device_type,
-          &stream_ptr)) {
+          &stream_ptr_obj)) {
     return nullptr;
+  }
+
+  const bool stream_ptr_provided = (stream_ptr_obj != Py_None);
+  uint64_t stream_ptr = 0;
+  if (stream_ptr_provided) {
+    TORCH_CHECK(
+        PyLong_Check(stream_ptr_obj),
+        "stream_ptr must be an int or None, got ",
+        Py_TYPE(stream_ptr_obj)->tp_name);
+    stream_ptr = PyLong_AsUnsignedLongLong(stream_ptr_obj);
+    if (PyErr_Occurred()) {
+      return nullptr;
+    }
   }
 
   THPObjectPtr ptr(type->tp_alloc(type, 0));
@@ -54,20 +66,20 @@ static PyObject* THCPStream_pynew(
     return nullptr;
   }
 
-  if (stream_ptr) {
+  if (stream_ptr_provided) {
     TORCH_CHECK(
-        priority == 0, "Priority was explicitly set for a external stream")
+        priority == 0, "Priority was explicitly set for an external stream")
   }
   at::cuda::CUDAStream stream = (stream_id || device_index || device_type)
       ? at::cuda::CUDAStream::unpack3(
             stream_id,
             static_cast<c10::DeviceIndex>(device_index),
             static_cast<c10::DeviceType>(device_type))
-      : stream_ptr ? at::cuda::getStreamFromExternal(
-                         // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                         reinterpret_cast<cudaStream_t>(stream_ptr),
-                         current_device)
-                   : at::cuda::getStreamFromPool(priority);
+      : stream_ptr_provided ? at::cuda::getStreamFromExternal(
+                                  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                                  reinterpret_cast<cudaStream_t>(stream_ptr),
+                                  current_device)
+                            : at::cuda::getStreamFromPool(priority);
 
   THCPStream* self = (THCPStream*)ptr.get();
   self->stream_id = static_cast<int64_t>(stream.id());
@@ -82,7 +94,7 @@ static PyObject* THCPStream_pynew(
 
 static void THCPStream_dealloc(THCPStream* self) {
   self->cuda_stream.~CUDAStream();
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  THPStream_dealloc_common(reinterpret_cast<THPStream*>(self));
 }
 
 static PyObject* THCPStream_get_cuda_stream(THCPStream* self, void* unused) {
@@ -181,7 +193,7 @@ PyTypeObject THCPStreamType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    0, /* tp_weaklistoffset (inherited from THPStreamType via tp_base) */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THCPStream_methods, /* tp_methods */
@@ -201,12 +213,9 @@ void THCPStream_init(PyObject* module) {
   Py_INCREF(THPStreamClass);
   THCPStreamType.tp_base = THPStreamClass;
   THCPStreamClass = (PyObject*)&THCPStreamType;
-  if (PyType_Ready(&THCPStreamType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&THCPStreamType) >= 0);
   Py_INCREF(&THCPStreamType);
-  if (PyModule_AddObject(
-          module, "_CudaStreamBase", (PyObject*)&THCPStreamType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(
+          module, "_CudaStreamBase", (PyObject*)&THCPStreamType) >= 0);
 }

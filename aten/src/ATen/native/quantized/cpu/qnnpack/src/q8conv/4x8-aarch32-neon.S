@@ -20,28 +20,28 @@
 
 #  Args passed via stack.
 #  TOS
-#  |-----------|
-#  |a          | 0
-#  |w          | 4
-#  |c          | 8
-#  |c_stride   | 12
-#  |out ch indx| 16
-#  |params     | 20
-#  |-----------|
+#  |------------|
+#  |a           | 0
+#  |w           | 4
+#  |c           | 8
+#  |c_stride    | 12
+#  |out ch index| 16
+#  |params      | 20
+#  |------------|
 #
 
 #  After loading w pointer in ip reg.
 #  And after pushing r4-r8 and d8-d15 on stack
-#  |-----------|
-#  |d8 - d15   | 0
-#  |r4 - r11   | 64
-#  |a          | 96
-#  |w          | 100
-#  |c          | 104
-#  |c_stride   | 108
-#  |out ch indx| 112
-#  |params     | 116
-#  |-----------|
+#  |------------|
+#  |d8 - d15    | 0
+#  |r4 - r11    | 64
+#  |a           | 96
+#  |w           | 100
+#  |c           | 104
+#  |c_stride    | 108
+#  |out ch index| 112
+#  |params      | 116
+#  |------------|
 #
 
 # void pytorch_q8conv_ukernel_4x8__aarch32_neon(

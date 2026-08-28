@@ -7,14 +7,13 @@
 // TODO: Refacto QnnpackUtils.h so as to separate code
 // needed for quantized op from the generic qnnpack specific
 // quantization utilities.
+#include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <pack_block_sparse.h>
-#include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 
 namespace ao::sparse {
 
-struct TORCH_API PackedLinearWeightQnnp
-    : public LinearPackedParamsBase {
+struct TORCH_API PackedLinearWeightQnnp : public LinearPackedParamsBase {
   PackedLinearWeightQnnp(const at::Tensor& weight, const std::optional<at::Tensor>& bias, const int64_t out_features_block_size /* block sparsity size across output_features */, const int64_t in_features_block_size /* block sparsity size across input_features */);
   explicit PackedLinearWeightQnnp(const BCSRSerializationType& serialized);
   std::optional<at::Tensor> orig_bias_;
@@ -24,7 +23,7 @@ struct TORCH_API PackedLinearWeightQnnp
   // In case bias is present bias_ is just a reference to orig_bias_
   at::Tensor bias_;
   c10::QScheme q_scheme_;
-  double input_scale_;
+  double input_scale_{};
   std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix_;
   at::Tensor w_scales_;
   std::vector<uint8_t> w_zero_points_;
@@ -86,6 +85,6 @@ struct TORCH_API PackedLinearWeightQnnp
   at::Tensor apply_dynamic_impl(const at::Tensor& input);
 };
 
-}  // namespace ao::sparse
+} // namespace ao::sparse
 
 #endif // USE_PYTORCH_QNNPACK

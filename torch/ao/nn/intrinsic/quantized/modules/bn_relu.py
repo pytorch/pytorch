@@ -19,6 +19,7 @@ class BNReLU2d(nnq.BatchNorm2d):
         Same as torch.ao.nn.quantized.BatchNorm2d
 
     """
+
     _FLOAT_MODULE = torch.ao.nn.intrinsic.BNReLU2d
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
@@ -27,6 +28,7 @@ class BNReLU2d(nnq.BatchNorm2d):
         )
 
     def forward(self, input):
+        r"""Applies fused BatchNorm2d and ReLU."""
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
@@ -46,7 +48,8 @@ class BNReLU2d(nnq.BatchNorm2d):
         return "QuantizedBNReLU2d"
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
+        r"""Creates a quantized module from a float module."""
         # TODO: Add qat support for BNReLU2d
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
@@ -54,6 +57,7 @@ class BNReLU2d(nnq.BatchNorm2d):
 
     @classmethod
     def from_reference(cls, bn_relu, output_scale, output_zero_point):
+        r"""Creates a quantized module from a reference module."""
         return super().from_reference(bn_relu[0], output_scale, output_zero_point)
 
 
@@ -67,6 +71,7 @@ class BNReLU3d(nnq.BatchNorm3d):
         Same as torch.ao.nn.quantized.BatchNorm3d
 
     """
+
     _FLOAT_MODULE = torch.ao.nn.intrinsic.BNReLU3d
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
@@ -75,6 +80,7 @@ class BNReLU3d(nnq.BatchNorm3d):
         )
 
     def forward(self, input):
+        r"""Applies fused BatchNorm3d and ReLU."""
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 5:
@@ -94,7 +100,8 @@ class BNReLU3d(nnq.BatchNorm3d):
         return "QuantizedBNReLU3d"
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
+        r"""Creates a quantized module from a float module."""
         # TODO: Add qat support for BNReLU3d
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
@@ -102,4 +109,5 @@ class BNReLU3d(nnq.BatchNorm3d):
 
     @classmethod
     def from_reference(cls, bn_relu, output_scale, output_zero_point):
+        r"""Creates a quantized module from a reference module."""
         return super().from_reference(bn_relu[0], output_scale, output_zero_point)

@@ -97,7 +97,7 @@ def gen_case_where_all_bdims_are_none(
         e.expr for e in translate(outer_sig.arguments(), sig.arguments())
     )
     return f"""\
-if ({' && '.join(conditions)}) {{
+if ({" && ".join(conditions)}) {{
   return at::_ops::{sig.func.name.unambiguous_name()}::call({translated_args});
 }}"""
 
@@ -124,7 +124,7 @@ def gen_returns(
     if len(wrapped_returns) == 1:
         result = f"return {wrapped_returns[0]};"
     else:
-        result = f'return std::make_tuple({", ".join(wrapped_returns)});'
+        result = f"return std::make_tuple({', '.join(wrapped_returns)});"
     return result
 
 
@@ -147,10 +147,11 @@ def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> str | None:
 
     # Check assumptions. If these are invalid we return None
     # and punt the work to handle them to the future.
-    assert schema.kind() == SchemaKind.inplace
+    if schema.kind() != SchemaKind.inplace:
+        raise AssertionError(f"Expected inplace schema, got {schema.kind()}")
     if not is_mutated_arg(schema.arguments.flat_all[0]):
         return None
-    if not len([arg for arg in schema.arguments.flat_all if is_mutated_arg(arg)]) == 1:
+    if len([arg for arg in schema.arguments.flat_all if is_mutated_arg(arg)]) != 1:
         return None
 
     # Only support cases where all returns are Tensors or vector<Tensor>
@@ -168,14 +169,14 @@ def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> str | None:
 
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
-{sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
+{sig.decl(name=schema.name.unambiguous_name() + "_generated_plumbing")} {{
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "gen_vmap_inplace_plumbing");
   int64_t {cur_level_var} = maybe_layer->layerId();
 {textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
-  batch_rule({', '.join(unwrapped_arg_list)});
+  batch_rule({", ".join(unwrapped_arg_list)});
   return {schema.arguments.flat_all[0].name};
 }}"""
 
@@ -190,14 +191,14 @@ def gen_vmap_plumbing_no_returns(native_function: NativeFunction) -> str:
 
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
-{sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
+{sig.decl(name=schema.name.unambiguous_name() + "_generated_plumbing")} {{
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "gen_vmap_plumbing_no_returns");
   int64_t {cur_level_var} = maybe_layer->layerId();
 {textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
-  batch_rule({', '.join(unwrapped_arg_list)});
+  batch_rule({", ".join(unwrapped_arg_list)});
 }}"""
 
 
@@ -214,6 +215,7 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> str | None:
     return_symint_overrides = [
         "_scaled_dot_product_flash_attention",
         "_scaled_dot_product_cudnn_attention",
+        "_scaled_dot_product_flash_attention_quantized",
     ]
     if (
         not all(ret.type.is_tensor_like() for ret in returns)
@@ -240,14 +242,14 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> str | None:
     wrapped_returns = gen_returns(returns, cur_level_var, results_var)
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
-{sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
+{sig.decl(name=schema.name.unambiguous_name() + "_generated_plumbing")} {{
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "gen_vmap_plumbing");
   int64_t {cur_level_var} = maybe_layer->layerId();
 {textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
-  auto {results_var} = batch_rule({', '.join(unwrapped_arg_list)});
+  auto {results_var} = batch_rule({", ".join(unwrapped_arg_list)});
   {wrapped_returns}
 }}"""
 

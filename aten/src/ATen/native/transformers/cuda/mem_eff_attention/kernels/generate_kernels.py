@@ -13,7 +13,7 @@ import collections
 import itertools
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, TypeVar
+from typing import TypeVar
 
 
 DTYPES = {
@@ -22,7 +22,7 @@ DTYPES = {
     "bf16": "cutlass::bfloat16_t",
 }
 
-SM = [50, 70, 75, 80, 100]  # Sm80 kernels support up to Sm100
+SM_RANGES: list[tuple[int, int]] = [(50, 69), (70, 74), (75, 79), (80, 121)]
 
 KERNEL_IMPL_TEMPLATE = """__global__ void __launch_bounds__(
     {CPP_CLASS}::kNumThreads,
@@ -30,7 +30,7 @@ KERNEL_IMPL_TEMPLATE = """__global__ void __launch_bounds__(
 {NAME}(typename {CPP_CLASS}::Params p) {{
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= {SM}0
-#if __CUDA_ARCH__ < {SM_MAX}0
+#if __CUDA_ARCH__ <= {SM_MAX}0
   if (!p.advance_to_block()) {{
     return;
   }}
@@ -48,16 +48,16 @@ KERNEL_IMPL_TEMPLATE = """__global__ void __launch_bounds__(
 
 @dataclass(order=True)
 class FwdKernel:
-    sort_index: Tuple[int, ...] = field(init=False, repr=False)
+    sort_index: tuple[int, ...] = field(init=False, repr=False)
     aligned: bool
     dtype: str
-    sm_range: Tuple[int, int]
+    sm_range: tuple[int, int]
     q: int
     k: int
     max_k: int
     supports_dropout: bool = True
     supports_bias: bool = True
-    dispatch_cond: Optional[str] = None
+    dispatch_cond: str | None = None
 
     def __post_init__(self) -> None:
         # Set kernel selection priority
@@ -114,10 +114,10 @@ class FwdKernel:
         )
 
     @classmethod
-    def get_all(cls) -> List["FwdKernel"]:
-        kernels: List[FwdKernel] = []
+    def get_all(cls) -> list["FwdKernel"]:
+        kernels: list[FwdKernel] = []
         for aligned, dtype, (sm, sm_max) in itertools.product(
-            [True, False], DTYPES.keys(), zip(SM, SM[1:])
+            [True, False], DTYPES.keys(), SM_RANGES
         ):
             # Remove some kernels we don't use
             if dtype == "bf16" and sm < 80:
@@ -145,8 +145,8 @@ class FwdKernel:
 
 @dataclass(order=True)
 class BwdKernel:
-    sort_index: Tuple[int, ...] = field(init=False, repr=False)
-    sm_range: Tuple[int, int]
+    sort_index: tuple[int, ...] = field(init=False, repr=False)
+    sm_range: tuple[int, int]
     dtype: str
     aligned: bool
     apply_dropout: bool
@@ -154,7 +154,7 @@ class BwdKernel:
     block_i: int
     block_j: int
     max_k: int
-    dispatch_cond: Optional[str] = None
+    dispatch_cond: str | None = None
     keys_queries_aligned_to_blocksizes: bool = False
 
     def __post_init__(self) -> None:
@@ -223,12 +223,12 @@ class BwdKernel:
         )
 
     @classmethod
-    def get_all(cls) -> List["BwdKernel"]:
-        kernels: List[BwdKernel] = []
+    def get_all(cls) -> list["BwdKernel"]:
+        kernels: list[BwdKernel] = []
         for aligned, dtype, (sm, sm_max), apply_dropout, max_k in itertools.product(
             [True, False],
             DTYPES.keys(),
-            zip(SM, SM[1:]),
+            SM_RANGES,
             [True, False],
             [32, 64, 128, 2**16],
         ):
@@ -282,12 +282,13 @@ class BwdKernel:
         # Add some specialized kernels for stable diffusion BW (K=80)
         # This is the only kernel that can keep the outputs on RF on
         # Sm86/Sm89, so it's much faster than the 64x64 one
+        sm80_range = next(sm_range for sm_range in SM_RANGES if sm_range[0] == 80)
         for dtype in ["f16", "bf16"]:
             kernels.append(
                 cls(
                     aligned=True,
                     dtype=dtype,
-                    sm_range=(80, SM[SM.index(80) + 1]),
+                    sm_range=sm80_range,
                     apply_dropout=False,
                     preload_mmas=True,
                     block_i=128,
@@ -304,11 +305,11 @@ T = TypeVar("T", FwdKernel, BwdKernel)
 
 
 def write_decl_impl(
-    kernels: List[T],
+    kernels: list[T],
     family_name: str,
     impl_file: str,
     autogen_dir: Path,
-    disable_def: Optional[str] = None,
+    disable_def: str | None = None,
 ) -> None:
     cpp_file_header = """/*
  * Copyright (c) Meta Platforms, Inc. and affiliates.
@@ -322,8 +323,8 @@ def write_decl_impl(
 
     kernels.sort()
 
-    implfile_to_kernels: Dict[str, List[T]] = collections.defaultdict(list)
-    cat_to_kernels: Dict[Tuple[str, int, int], List[T]] = collections.defaultdict(list)
+    implfile_to_kernels: dict[str, list[T]] = collections.defaultdict(list)
+    cat_to_kernels: dict[tuple[str, int, int], list[T]] = collections.defaultdict(list)
 
     dispatch_all = ""
     declarations = cpp_file_header + "#pragma once\n"
@@ -352,7 +353,7 @@ def write_decl_impl(
             declarations += f"    {_call}"
         declarations += "}\n\n"
         dispatch_all += f"""
-    if (std::is_same_v<DT, {DTYPES[cat_dt]}> && {cat_sm} <= cc && cc < {cat_sm_max}) {{
+    if (std::is_same_v<DT, {DTYPES[cat_dt]}> && {cat_sm} <= cc && cc <= {cat_sm_max}) {{
         {dispatch_category_fn}(cb, cc);
     }}"""
 
@@ -378,7 +379,7 @@ void dispatch_{family_name}(T cb, int cc = 0) {{
         (autogen_dir / f"{family_name}_{f}.cu").write_text(impl_cu)
 
 
-def main(output_dir: Optional[str]) -> None:
+def main(output_dir: str | None) -> None:
     if output_dir is None:
         output_dir = Path(__file__).parent
     else:

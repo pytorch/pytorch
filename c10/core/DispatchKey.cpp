@@ -1,6 +1,8 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 
+#include <algorithm>
+#include <regex>
 #include <unordered_map>
 
 namespace c10 {
@@ -31,6 +33,8 @@ const char* toString(BackendComponent t) {
       return "VEBit";
     case BackendComponent::MTIABit:
       return "MTIA";
+    case BackendComponent::MAIABit:
+      return "MAIA";
     case BackendComponent::PrivateUse1Bit:
       return "PrivateUse1Bit";
     case BackendComponent::PrivateUse2Bit:
@@ -114,9 +118,6 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Functionalize:
       return "Functionalize";
 
-    case DispatchKey::Named:
-      return "Named";
-
     case DispatchKey::Conjugate:
       return "Conjugate";
     case DispatchKey::Negative:
@@ -139,6 +140,10 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::AutocastCPU:
       return "AutocastCPU";
+    case DispatchKey::AutocastMTIA:
+      return "AutocastMTIA";
+    case DispatchKey::AutocastMAIA:
+      return "AutocastMAIA";
     case DispatchKey::AutocastXPU:
       return "AutocastXPU";
     case DispatchKey::AutocastIPU:
@@ -268,7 +273,6 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Dense", c10::DispatchKey::Dense},
       {"FPGA", c10::DispatchKey::FPGA},
       {"MAIA", c10::DispatchKey::MAIA},
-      {"MPS", c10::DispatchKey::MPS},
       {"Vulkan", c10::DispatchKey::Vulkan},
       {"Metal", c10::DispatchKey::Metal},
       {"VE", c10::DispatchKey::VE},
@@ -282,7 +286,6 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Python", c10::DispatchKey::Python},
       {"PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot},
       {"Fake", c10::DispatchKey::Fake},
-      {"Named", c10::DispatchKey::Named},
       {"Conjugate", c10::DispatchKey::Conjugate},
       {"Negative", c10::DispatchKey::Negative},
       {"ZeroTensor", c10::DispatchKey::ZeroTensor},
@@ -295,6 +298,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
       {"Tracer", c10::DispatchKey::Tracer},
       {"AutocastCPU", c10::DispatchKey::AutocastCPU},
+      {"AutocastMTIA", c10::DispatchKey::AutocastMTIA},
+      {"AutocastMAIA", c10::DispatchKey::AutocastMAIA},
       {"AutocastXPU", c10::DispatchKey::AutocastXPU},
       {"AutocastIPU", c10::DispatchKey::AutocastIPU},
       {"AutocastHPU", c10::DispatchKey::AutocastHPU},
@@ -331,6 +336,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"NestedTensorCPU", c10::DispatchKey::NestedTensorCPU},
       {"NestedTensorCUDA", c10::DispatchKey::NestedTensorCUDA},
       {"NestedTensorXPU", c10::DispatchKey::NestedTensorXPU},
+      {"NestedTensorHPU", c10::DispatchKey::NestedTensorHPU},
       {"NestedTensorMeta", c10::DispatchKey::NestedTensorMeta},
       {"NestedTensorPrivateUse1", c10::DispatchKey::NestedTensorPrivateUse1},
       {"PrivateUse1", c10::DispatchKey::PrivateUse1},
@@ -344,6 +350,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
 
       {"SparseCPU", c10::DispatchKey::SparseCPU},
       {"SparseCUDA", c10::DispatchKey::SparseCUDA},
+      {"SparseMPS", c10::DispatchKey::SparseMPS},
+      {"SparseCsrMPS", c10::DispatchKey::SparseCsrMPS},
       {"SparseHIP", c10::DispatchKey::SparseHIP},
       {"SparseXPU", c10::DispatchKey::SparseXPU},
       {"SparseVE", c10::DispatchKey::SparseVE},
@@ -384,6 +392,14 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
        c10::DispatchKey::FuncTorchBatchedDecomposition},
   };
   auto it = key_map.find(k);
+  if (it == key_map.end() && c10::get_privateuse1_backend() != "PrivateUse1") {
+    std::string pu1_backend_name = c10::get_privateuse1_backend();
+    std::ranges::transform(
+        pu1_backend_name, pu1_backend_name.begin(), ::toupper);
+    std::string processed_k =
+        std::regex_replace(k, std::regex(pu1_backend_name), "PrivateUse1");
+    it = key_map.find(processed_k);
+  }
   TORCH_CHECK(it != key_map.end(), "could not parse dispatch key: ", k);
   return it->second;
 }

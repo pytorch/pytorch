@@ -2,23 +2,45 @@
 
 set -ex
 
+# Build sccache from source at v0.16.0 with the nvcc 13.3 dryrun-parsing fix
+# backported from mozilla/sccache#2722 (see
+# patches/sccache-nvcc-13.3-dryrun-parsing.patch). The prebuilt release binary
+# mis-parses nvcc 13.3+ --dryrun output (it skips the device compile, leaving
+# "fatbinary: Could not open input file '*.cubin'"), so build from source until
+# a fixed sccache release ships. Reverts #189365 (prebuilt-binary download).
+build_sccache_from_source() {
+  local VERSION=0.16.0
+  echo "Building sccache ${VERSION} from source with the nvcc 13.3 dryrun fix"
+  # The builder images pre-install a pinned rust at CARGO_HOME=/opt/rust with its
+  # bin on PATH (see #186302), so build with that toolchain directly instead of
+  # (re)installing rustup and sourcing its env.
+  apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev curl git ca-certificates
+  git clone --depth 1 --branch "v${VERSION}" https://github.com/mozilla/sccache /tmp/sccache
+  local patch=/opt/cache/patches/sccache-nvcc-13.3-dryrun-parsing.patch
+  [ -f "$patch" ] || { echo "ERROR: $patch missing; the Dockerfile must 'COPY ./common/patches /opt/cache/patches'"; exit 1; }
+  git -C /tmp/sccache apply "$patch"
+  cargo build --manifest-path /tmp/sccache/Cargo.toml --release --features="dist-client dist-server"
+  cp /tmp/sccache/target/release/sccache /opt/cache/bin
+  cp /tmp/sccache/target/release/sccache-dist /opt/cache/bin
+  chmod a+x /opt/cache/bin/sccache /opt/cache/bin/sccache-dist
+  rm -rf /tmp/sccache
+}
+
 install_ubuntu() {
-  echo "Preparing to build sccache from source"
-  apt-get update
-  # libssl-dev will not work as it is upgraded to libssl3 in Ubuntu-22.04.
-  # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
-  apt-get install -y cargo
-  echo "Checking out sccache repo"
-  git clone https://github.com/mozilla/sccache -b v0.9.0
-  cd sccache
-  echo "Building sccache"
-  cargo build --release
-  cp target/release/sccache /opt/cache/bin
-  echo "Cleaning up"
-  cd ..
-  rm -rf sccache
-  apt-get remove -y cargo rustc
-  apt-get autoclean && apt-get clean
+  # riscv64 (built under QEMU emulation) has no nvcc, so it is unaffected by the
+  # --simt-only bug; it also has no sccache-dist, and a from-source build under
+  # emulation would be impractically slow. Use the prebuilt binary there and
+  # build from source everywhere else.
+  if [[ "$(uname -m)" == "riscv64" ]]; then
+    local VERSION=0.16.0
+    # Rust's riscv64 arch is riscv64gc; sccache-dist is not available on riscv64.
+    echo "Downloading prebuilt sccache ${VERSION} for riscv64"
+    curl --retry 3 -fsSL https://github.com/mozilla/sccache/releases/download/v${VERSION}/sccache-v${VERSION}-riscv64gc-unknown-linux-musl.tar.gz | \
+      tar -xz -C /opt/cache/bin --strip-components=1 sccache-v${VERSION}-riscv64gc-unknown-linux-musl/sccache
+    chmod a+x /opt/cache/bin/sccache
+  else
+    build_sccache_from_source
+  fi
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"
   curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
@@ -36,12 +58,7 @@ sed -e 's|PATH="\(.*\)"|PATH="/opt/cache/bin:\1"|g' -i /etc/environment
 export PATH="/opt/cache/bin:$PATH"
 
 # Setup compiler cache
-if [ -n "$ROCM_VERSION" ]; then
-  curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
-else
-  install_ubuntu
-fi
-chmod a+x /opt/cache/bin/sccache
+install_ubuntu
 
 function write_sccache_stub() {
   # Unset LD_PRELOAD for ps because of asan + ps issues
@@ -79,10 +96,15 @@ EOF
   chmod a+x "/opt/cache/bin/$1"
 }
 
-write_sccache_stub cc
-write_sccache_stub c++
-write_sccache_stub gcc
-write_sccache_stub g++
+# Skip all sccache wrapping for TheRock ROCm: sccache PATH wrappers
+# intercept assembly (.s) compilation and fail because the assembler does not
+# produce the .d dependency file that sccache expects.
+if [ -z "$ROCM_VERSION" ]; then
+  write_sccache_stub cc
+  write_sccache_stub c++
+  write_sccache_stub gcc
+  write_sccache_stub g++
+fi
 
 # NOTE: See specific ROCM_VERSION case below.
 if [ "x$ROCM_VERSION" = x ]; then
@@ -102,45 +124,5 @@ if [ -n "$CUDA_VERSION" ]; then
 fi
 
 if [ -n "$ROCM_VERSION" ]; then
-  # ROCm compiler is hcc or clang. However, it is commonly invoked via hipcc wrapper.
-  # hipcc will call either hcc or clang using an absolute path starting with /opt/rocm,
-  # causing the /opt/cache/bin to be skipped. We must create the sccache wrappers
-  # directly under /opt/rocm while also preserving the original compiler names.
-  # Note symlinks will chain as follows: [hcc or clang++] -> clang -> clang-??
-  # Final link in symlink chain must point back to original directory.
-
-  # Original compiler is moved one directory deeper. Wrapper replaces it.
-  function write_sccache_stub_rocm() {
-    OLDCOMP=$1
-    COMPNAME=$(basename $OLDCOMP)
-    TOPDIR=$(dirname $OLDCOMP)
-    WRAPPED="$TOPDIR/original/$COMPNAME"
-    mv "$OLDCOMP" "$WRAPPED"
-    printf "#!/bin/sh\nexec sccache $WRAPPED \"\$@\"" >"$OLDCOMP"
-    chmod a+x "$OLDCOMP"
-  }
-
-  if [[ -e "/opt/rocm/hcc/bin/hcc" ]]; then
-    # ROCm 3.3 or earlier.
-    mkdir /opt/rocm/hcc/bin/original
-    write_sccache_stub_rocm /opt/rocm/hcc/bin/hcc
-    write_sccache_stub_rocm /opt/rocm/hcc/bin/clang
-    write_sccache_stub_rocm /opt/rocm/hcc/bin/clang++
-    # Fix last link in symlink chain, clang points to versioned clang in prior dir
-    pushd /opt/rocm/hcc/bin/original
-    ln -s ../$(readlink clang)
-    popd
-  elif [[ -e "/opt/rocm/llvm/bin/clang" ]]; then
-    # ROCm 3.5 and beyond.
-    mkdir /opt/rocm/llvm/bin/original
-    write_sccache_stub_rocm /opt/rocm/llvm/bin/clang
-    write_sccache_stub_rocm /opt/rocm/llvm/bin/clang++
-    # Fix last link in symlink chain, clang points to versioned clang in prior dir
-    pushd /opt/rocm/llvm/bin/original
-    ln -s ../$(readlink clang)
-    popd
-  else
-    echo "Cannot find ROCm compiler."
-    exit 1
-  fi
+  echo "Deferring TheRock ROCm compiler launchers to the PyTorch build"
 fi

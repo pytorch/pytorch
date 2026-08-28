@@ -32,7 +32,7 @@ c10::intrusive_ptr<GeneratorImpl> GeneratorImpl::clone() const {
 }
 
 void GeneratorImpl::graphsafe_set_state(
-    const c10::intrusive_ptr<c10::GeneratorImpl>& state) {
+    const c10::intrusive_ptr<c10::GeneratorImpl>& /*state*/) {
   TORCH_CHECK_NOT_IMPLEMENTED(
       false, "graphsafe_set_state is not supported in this Generator");
 }
@@ -41,6 +41,15 @@ c10::intrusive_ptr<c10::GeneratorImpl> GeneratorImpl::graphsafe_get_state()
     const {
   TORCH_CHECK_NOT_IMPLEMENTED(
       false, "graphsafe_get_state is not supported in this Generator");
+}
+
+void GeneratorImpl::philox_state(
+    uint64_t /*increment*/,
+    at::Tensor& /*seed*/,
+    at::Tensor& /*offset*/,
+    at::Tensor& /*intragraph_offset*/) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false, "philox_state is not supported in this Generator");
 }
 
 /**
@@ -91,9 +100,7 @@ uint64_t getNonDeterministicRandom(bool is_cuda) {
   uint64_t s = 0;
   if (!is_cuda) {
 #ifdef _WIN32
-    s = (uint64_t)std::chrono::high_resolution_clock::now()
-            .time_since_epoch()
-            .count();
+    s = (uint64_t)std::chrono::steady_clock::now().time_since_epoch().count();
 #elif defined(__SGX_ENABLED__)
     TORCH_CHECK(
         sgx_read_rand(reinterpret_cast<uint8_t*>(&s), sizeof(s)) == SGX_SUCCESS,
@@ -104,7 +111,7 @@ uint64_t getNonDeterministicRandom(bool is_cuda) {
   } else {
     std::random_device rd;
     // limit to 53 bits to ensure unique representation in double
-    s = ((((uint64_t)rd()) << 32) + rd()) & 0x1FFFFFFFFFFFFF;
+    s = (((static_cast<uint64_t>(rd())) << 32) + rd()) & 0x1FFFFFFFFFFFFF;
   }
   return s;
 }

@@ -6,7 +6,6 @@
 #include <system_error>
 
 #include <ATen/detail/FunctionTraits.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <pybind11/pybind11.h>
@@ -74,6 +73,8 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
   _CATCH_GENERIC_ERROR(TypeError, PyExc_TypeError, retstmnt)                  \
   _CATCH_GENERIC_ERROR(                                                       \
       NotImplementedError, PyExc_NotImplementedError, retstmnt)               \
+  _CATCH_GENERIC_ERROR(BufferError, PyExc_BufferError, retstmnt)              \
+  _CATCH_GENERIC_ERROR(SyntaxError, PyExc_SyntaxError, retstmnt)              \
   _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt)       \
   _CATCH_GENERIC_ERROR(                                                       \
       OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)              \
@@ -81,8 +82,16 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
       DistBackendError, THPException_DistBackendError, retstmnt)              \
   _CATCH_GENERIC_ERROR(                                                       \
       DistNetworkError, THPException_DistNetworkError, retstmnt)              \
+  _CATCH_GENERIC_ERROR(                                                       \
+      DistQueueEmptyError, THPException_DistQueueEmptyError, retstmnt)        \
   _CATCH_GENERIC_ERROR(DistStoreError, THPException_DistStoreError, retstmnt) \
   _CATCH_GENERIC_ERROR(DistError, THPException_DistError, retstmnt)           \
+  catch (c10::AcceleratorError & e) {                                         \
+    auto exc = torch::detail::_new_accelerator_error_object(e);               \
+    PyErr_SetObject(THPException_AcceleratorError, exc);                      \
+    Py_XDECREF(exc);                                                          \
+    retstmnt;                                                                 \
+  }                                                                           \
   _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)                   \
   catch (torch::PyTorchError & e) {                                           \
     auto msg = torch::processErrorMsg(e.what());                              \
@@ -107,16 +116,16 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
     throw;                                                          \
   }                                                                 \
   }                                                                 \
-  catch (py::error_already_set & e) {                               \
+  catch (py::error_already_set&) {                                  \
     throw;                                                          \
   }                                                                 \
-  catch (py::builtin_exception & e) {                               \
+  catch (py::builtin_exception&) {                                  \
     throw;                                                          \
   }                                                                 \
-  catch (torch::jit::JITException & e) {                            \
+  catch (torch::jit::JITException&) {                               \
     throw;                                                          \
   }                                                                 \
-  catch (const std::exception& e) {                                 \
+  catch (const std::exception&) {                                   \
     torch::translate_exception_to_python(std::current_exception()); \
     throw py::error_already_set();                                  \
   }
@@ -128,7 +137,7 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
     throw;                                                          \
   }                                                                 \
   }                                                                 \
-  catch (const std::exception& e) {                                 \
+  catch (const std::exception&) {                                   \
     torch::translate_exception_to_python(std::current_exception()); \
     return retval;                                                  \
   }
@@ -138,7 +147,8 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
 extern PyObject *THPException_FatalError, *THPException_LinAlgError,
     *THPException_OutOfMemoryError, *THPException_DistError,
     *THPException_DistBackendError, *THPException_DistNetworkError,
-    *THPException_DistStoreError;
+    *THPException_DistStoreError, *THPException_DistQueueEmptyError,
+    *THPException_AcceleratorError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
@@ -253,12 +263,55 @@ struct python_error : public std::exception {
   std::string message;
 };
 
+// Hand control back to the interpreter when `cond` is false, propagating the
+// error CPython has already set. Unlike TORCH_CHECK this takes no message,
+// because the message is whatever CPython raised; a TORCH_CHECK here would
+// replace a real Python exception with a RuntimeError.
+#define TORCH_CHECK_PYTHON(cond)                                        \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                                 \
+    /* @allow-raw-throw: this macro is the sanctioned wrapper for it */ \
+    throw python_error();                                               \
+  }
+
 bool THPException_init(PyObject* module);
 
 namespace torch {
 
+// Note [ Persisting PyErr state across autograd engine threads ]
+//
+// Since the autograd engine is multi-threaded, and Python error state is local
+// to each thread, it must preserve the python error from the worker thread and
+// rethrow it as-is in the calling thread. persist() does that by taking the
+// error indicator with PyErr_Fetch - which clears it - and storing the type,
+// value and traceback on the exception object, so that restore() can set it
+// again wherever the exception is finally caught. It is idempotent: an
+// exception that has already been persisted is left alone, which is why the
+// engine can persist a second time harmlessly.
+//
+// The engine persists in the two places that can encounter Python errors:
+// (1) evaluate function and (2) queued callbacks.
+//
+// TODO: the engine is not actually responsible for persisting the error in the
+// custom autograd Function case today. It still seems to be needed for the
+// DistEngine; the reproducer is
+//
+//   python test/distributed/rpc/test_tensorpipe_agent.py -k
+//   test_backward_autograd_engine_error
+//
+// See also https://github.com/pytorch/pytorch/pull/34845.
+//
+// Prefer TORCH_CHECK_PYTHON where there is a condition to check; this is for
+// the paths that have already decided to fail.
+[[noreturn]] inline void throw_python_error() {
+  python_error err;
+  err.persist();
+  // @allow-raw-throw: persist() above has to run before the stack unwinds
+  throw std::move(err);
+}
+
 // Set python current exception from a C++ exception
-TORCH_PYTHON_API void translate_exception_to_python(const std::exception_ptr&);
+TORCH_PYTHON_API void translate_exception_to_python(
+    const std::exception_ptr& /*e_ptr*/);
 
 TORCH_PYTHON_API std::string processErrorMsg(std::string str);
 
@@ -273,19 +326,12 @@ struct PyTorchError : public std::exception {
   std::string msg;
 };
 
-// Declare a printf-like function on gcc & clang
-// The compiler can then warn on invalid format specifiers
-#ifdef __GNUC__
-#define TORCH_FORMAT_FUNC(FORMAT_INDEX, VA_ARGS_INDEX) \
-  __attribute__((format(printf, FORMAT_INDEX, VA_ARGS_INDEX)))
-#else
-#define TORCH_FORMAT_FUNC(FORMAT_INDEX, VA_ARGS_INDEX)
-#endif
-
 // Translates to Python TypeError
 struct TypeError : public PyTorchError {
+  TORCH_PYTHON_API TypeError() = default;
+  TORCH_PYTHON_API TypeError(std::string msg_)
+      : PyTorchError(std::move(msg_)) {}
   using PyTorchError::PyTorchError;
-  TORCH_PYTHON_API TypeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
   PyObject* python_type() override {
     return PyExc_TypeError;
   }
@@ -293,7 +339,7 @@ struct TypeError : public PyTorchError {
 
 // Translates to Python AttributeError
 struct AttributeError : public PyTorchError {
-  AttributeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  using PyTorchError::PyTorchError;
   PyObject* python_type() override {
     return PyExc_AttributeError;
   }
@@ -319,7 +365,7 @@ struct PyWarningHandler {
 
   /** Call if an exception has been thrown
 
-   *  Necessary to determine if it is safe to throw from the desctructor since
+   *  Necessary to determine if it is safe to throw from the destructor since
    *  std::uncaught_exception is buggy on some platforms and generally
    *  unreliable across dynamic library calls.
    */
@@ -330,7 +376,7 @@ struct PyWarningHandler {
  private:
   InternalHandler internal_handler_;
   at::WarningHandler* prev_handler_;
-  bool in_exception_;
+  bool in_exception_{false};
 };
 
 namespace detail {
@@ -354,8 +400,8 @@ using Arg = typename invoke_traits<Func>::template arg<i>::type;
 template <typename Func, size_t... Is, bool release_gil>
 auto wrap_pybind_function_impl_(
     Func&& f,
-    std::index_sequence<Is...>,
-    std::bool_constant<release_gil>) {
+    std::index_sequence<Is...> /*unused*/,
+    std::bool_constant<release_gil> /*unused*/) {
   namespace py = pybind11;
 
   // f=f is needed to handle function references on older compilers
@@ -366,6 +412,8 @@ auto wrap_pybind_function_impl_(
     END_HANDLE_TH_ERRORS_PYBIND
   };
 }
+
+PyObject* _new_accelerator_error_object(const c10::AcceleratorError& /*e*/);
 } // namespace detail
 
 // Wrap a function with TH error and warning handling.

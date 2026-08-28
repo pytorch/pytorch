@@ -1,6 +1,6 @@
 // Original TunableOp is from onnxruntime.
 // https://github.com/microsoft/onnxruntime/blob/main/onnxruntime/core/framework/tunable.h
-// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/rocm/tunable
+// https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/providers/cuda/tunable
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 //
@@ -10,8 +10,10 @@
 #pragma once
 
 #include <string>
+#include <c10/core/ScalarType.h>
 
 #include <ATen/cuda/tunable/TunableOp.h>
+#include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/util/StringUtil.h>
@@ -27,6 +29,8 @@
 #include <fmt/printf.h>
 
 namespace at::cuda::tunable {
+
+using at::blas::ScalingType;
 
 enum class BlasOp {
   N = 0,
@@ -44,35 +48,261 @@ inline char BlasOpToString(BlasOp op) {
   return 'N';
 }
 
+template <typename T>
+inline const char* BLASTypeName(T v) {
+  return "unknown";
+}
+
+template <>
+inline const char* BLASTypeName(float v) {
+  return "f32_r";
+}
+
+template <>
+inline const char* BLASTypeName(double v) {
+  return "f64_r";
+}
+
+template <>
+inline const char* BLASTypeName(BFloat16 v) {
+  return "bf16_r";
+}
+
+template <>
+inline const char* BLASTypeName(Half v) {
+  return "f16_r";
+}
+
+//https://github.com/ROCm/hipBLASLt/blob/develop/library/src/amd_detail/include/auxiliary.hpp
+template <>
+inline const char* BLASTypeName(Float8_e4m3fn v) {
+  return "f8_r";
+}
+
+template <>
+inline const char* BLASTypeName(Float8_e5m2 v) {
+  return "bf8_r";
+}
+
+template <>
+inline const char* BLASTypeName(Float8_e4m3fnuz v) {
+  return "f8_fnuz_r";
+}
+
+template <>
+inline const char* BLASTypeName(Float8_e5m2fnuz v) {
+  return "bf8_fnuz_r";
+}
+
+template <>
+inline const char* BLASTypeName(c10::complex<double> v) {
+  return "f64_r";
+}
+
+template <>
+inline const char* BLASTypeName(c10::complex<float> v) {
+  return "f32_r";
+}
+
+inline std::string MaybeWildcardInt(int64_t value, bool wildcard) {
+  return wildcard ? "*" : c10::str(value);
+}
+
+inline bool UsesMForLda(char transa) {
+  // lda is the leading dim of A. For non-transposed A (transa == 'N'), A is
+  // laid out with lda >= m, so lda tracks M; for transposed A (transa == 'T'),
+  // lda >= k, so lda tracks K. This mirrors GetSizeA's stride computation.
+  return transa == 'N' || transa == 'n';
+}
+
+inline bool UsesKForLdb(char transb) {
+  return transb == 'N' || transb == 'n';
+}
+
+// A leading dim is "tight" (equals its logical extent, no independent padding)
+// only when lda==m/k, ldb==k/n, ldc==m. Wildcard a leading dim only when it is
+// tight AND tracks a dynamic logical dim. A padded leading dim is not a
+// function of m/n/k, so replacing it with '*' would let the entry match shapes
+// with different padding/alignment -- exactly the input that decides hipBLASLt
+// algo validity and workspace size. See the sub-matrix check in
+// torch/cuda/tunable.py and ROCm/TheRock#5553.
+inline bool ShouldWildcardLda(char transa, bool dynamic_m, bool dynamic_k,
+                              int64_t lda, int64_t m, int64_t k) {
+  return UsesMForLda(transa) ? (dynamic_m && lda == m)
+                             : (dynamic_k && lda == k);
+}
+
+inline bool ShouldWildcardLdb(char transb, bool dynamic_n, bool dynamic_k,
+                              int64_t ldb, int64_t n, int64_t k) {
+  return UsesKForLdb(transb) ? (dynamic_k && ldb == k)
+                             : (dynamic_n && ldb == n);
+}
+
+inline bool ShouldWildcardLdc(bool dynamic_m, int64_t ldc, int64_t m) {
+  return dynamic_m && ldc == m;
+}
+
+inline std::string ScalarTypeToBLASType(c10::ScalarType scalar_type) {
+  std::string BLASType;
+  switch (scalar_type) {
+    case c10::ScalarType::Float:{
+      BLASType = "f32_r";
+      break;
+    }
+    case c10::ScalarType::Double:{
+      BLASType = "f64_r";
+      break;
+    }
+    case c10::ScalarType::BFloat16:{
+      BLASType = "bf16_r";
+      break;
+    }
+    case c10::ScalarType::Half: {
+      BLASType = "f16_r";
+      break;
+    }
+    case c10::ScalarType::Float8_e4m3fn: {
+      BLASType = "f8_r";
+      break;
+    }
+    case c10::ScalarType::Float8_e5m2: {
+      BLASType = "bf8_r";
+      break;
+    }
+    case c10::ScalarType::Float8_e4m3fnuz: {
+      BLASType = "f8_fnuz_r";
+      break;
+    }
+    case c10::ScalarType::Float8_e5m2fnuz: {
+      BLASType = "bf8_fnuz_r";
+      break;
+    }
+    case c10::ScalarType::ComplexFloat:{
+      BLASType = "f32_c";
+      break;
+    }
+    case c10::ScalarType::ComplexDouble:{
+      BLASType = "f64_c";
+      break;
+    }
+    default:
+      BLASType = "unknown";
+  }
+  return BLASType;
+
+}
+
+// Similar to Compute Type in GemmRocblas.h
+template <typename T>
+inline std::string ComputeTypeFor() {
+  return "Unknown ComputeType";
+}
+
+// This is a union of the compute types for
+// ROCBLAS and hipBLASLt.
+template <>
+inline std::string ComputeTypeFor<float>() {
+  if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) != at::Float32Precision::TF32) {
+    return "f32_r";
+  } else {
+    return "xf32_r";
+  }
+}
+
+template <>
+inline std::string ComputeTypeFor<double>() {
+  return "f64_r";
+}
+
+template <>
+inline std::string ComputeTypeFor<Half>() {
+  return "f32_r";
+}
+
+template <>
+inline std::string ComputeTypeFor<BFloat16>() {
+  return "f32_r";
+}
+
+template <>
+inline std::string ComputeTypeFor<c10::complex<float>>() {
+  return "f32_c";
+}
+
+template <>
+inline std::string ComputeTypeFor<c10::complex<double>>() {
+  return "f64_c";
+}
+
+template <>
+inline std::string ComputeTypeFor<Float8_e4m3fn>() {
+  return "f32_r";
+}
+
+template <>
+inline std::string ComputeTypeFor<Float8_e5m2>() {
+  return "f32_r";
+}
+
+template <>
+inline std::string ComputeTypeFor<Float8_e4m3fnuz>() {
+  return "f32_r";
+}
+
+template <>
+inline std::string ComputeTypeFor<Float8_e5m2fnuz>() {
+  return "f32_r";
+}
+
+// Convert opmath_type<T> to string
+template <typename T>
+inline std::string to_string_opmath(const at::opmath_type<T>& value) {
+    if constexpr (std::is_same_v<at::opmath_type<T>, c10::complex<float>> ||
+                  std::is_same_v<at::opmath_type<T>, c10::complex<double>>) {
+        return fmt::format("({:.4f}, {:.4f})", value.real(), value.imag());
+    } else {
+        return fmt::format("{:.4f}", value);
+    }
+}
+
+// convert activation epilogue to string
+inline std::string to_string_epilogue(const at::cuda::blas::GEMMAndBiasActivationEpilogue& value) {
+  switch (value) {
+    case at::cuda::blas::GEMMAndBiasActivationEpilogue::None:
+      return std::string("None");
+      break;
+    case at::cuda::blas::GEMMAndBiasActivationEpilogue::RELU:
+      return std::string("RELU");
+      break;
+    case cuda::blas::GEMMAndBiasActivationEpilogue::GELU:
+      return std::string("GELU");
+      break;
+    default:
+      return std::string("unknown");
+  }
+}
+
 namespace detail {
 
-static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size) {
+static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size, const NumericalCheckConfig& config) {
+
+  if (!config.enabled) {
+    return true; // skip when disabled
+  }
+
   auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA);
-  // comparison done as 1D tensor
   at::Tensor ref = at::from_blob(c,       {size}, options);
   at::Tensor oth = at::from_blob(other_c, {size}, options);
   at::Tensor ref_float = ref.to(at::kFloat);
   at::Tensor oth_float = oth.to(at::kFloat);
-  std::vector<double> atols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
-  std::vector<double> rtols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
-  double last_succeed_atol = 1;
-  double last_succeed_rtol = 1;
-  for (auto& atol : atols) {
-    for (auto& rtol : rtols) {
-      if (at::allclose(ref_float, oth_float, rtol, atol)) {
-        last_succeed_atol = atol;
-        last_succeed_rtol = rtol;
-      }
-    }
-  }
-  if (last_succeed_atol == 1) {
-    return false;
-  }
-  else {
-    TUNABLE_LOG3("├──verify numerics: atol=", last_succeed_atol, ", rtol=", last_succeed_rtol);
-  }
 
-  return true;
+  const bool ok = at::allclose(ref_float, oth_float, config.rtol, config.atol);
+  if (ok) {
+    TUNABLE_LOG3("├──verify numerics: PASSED with atol=", config.atol, ", rtol=", config.rtol);
+  } else {
+    TUNABLE_LOG3("├──verify numerics: FAILED with atol=", config.atol, ", rtol=", config.rtol);
+  }
+  return ok;
 }
 
 }
@@ -85,9 +315,38 @@ static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t siz
 template <typename T>
 struct GemmParams : OpParams {
   GemmParams() = default;
+  GemmParams(const GemmParams&) = default;
+  GemmParams& operator=(const GemmParams&) = default;
+  ~GemmParams() override = default;
+
+  std::string BLASSignature() const override {
+    std::string alpha_str = to_string_opmath<T>(alpha);
+    std::string beta_str = to_string_opmath<T>(beta);
+    return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, "
+      "alpha: %s, beta: %s, transA: %c, transB: %c, batch_count: 1, a_type: %s, b_type: %s, c_type: %s, d_type: %s, scale_type: %s, bias_type: %s, compute_type: %s }",
+      m, n, k, lda, ldb, ldc, ldc, alpha_str, beta_str, transa, transb,
+      BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), ComputeTypeFor<T>(), ComputeTypeFor<T>(), ComputeTypeFor<T>());
+  }
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+    return fmt::sprintf(
+        "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld",
+        transa, transb, m, n, k, lda, ldb, ldc);
+  }
+
+  std::string DynamicSignature() const override {
+    const bool dynamic_m = this->IsDynamicM();
+    const bool dynamic_n = this->IsDynamicN();
+    const bool dynamic_k = this->IsDynamicK();
+    return fmt::sprintf(
+        "%c%c_%s_%s_%s_ld_%s_%s_%s",
+        transa, transb,
+        MaybeWildcardInt(m, dynamic_m),
+        MaybeWildcardInt(n, dynamic_n),
+        MaybeWildcardInt(k, dynamic_k),
+        MaybeWildcardInt(lda, ShouldWildcardLda(transa, dynamic_m, dynamic_k, lda, m, k)),
+        MaybeWildcardInt(ldb, ShouldWildcardLdb(transb, dynamic_n, dynamic_k, ldb, n, k)),
+        MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)));
   }
 
   size_t GetSizeA() const {
@@ -118,8 +377,7 @@ struct GemmParams : OpParams {
   }
 
   GemmParams* DeepCopy(bool duplicate_inputs) const {
-    GemmParams* copy = new GemmParams;
-    *copy = *this;
+    GemmParams* copy = new GemmParams(*this);
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = GetSizeC();
@@ -148,8 +406,10 @@ struct GemmParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmParams<T> *other) {
+    auto* ctx = getTuningContext();
+    auto cfg = ctx->GetNumericalCheckConfig();
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
   }
 
   char transa{};
@@ -171,8 +431,41 @@ private:
 
 template <typename T>
 struct GemmAndBiasParams : OpParams {
+  GemmAndBiasParams() = default;
+  GemmAndBiasParams(const GemmAndBiasParams&) = default;
+  GemmAndBiasParams(GemmAndBiasParams&&) noexcept = default;
+  GemmAndBiasParams& operator=(const GemmAndBiasParams&) = default;
+  GemmAndBiasParams& operator=(GemmAndBiasParams&&) noexcept = default;
+  ~GemmAndBiasParams() override = default;
+
+  std::string BLASSignature() const override {
+    std::string alpha_str = to_string_opmath<T>(alpha);
+    std::string activation_str = to_string_epilogue(activation);
+    return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, "
+      "alpha: %s, transA: %c, transB: %c, batch_count: 1, a_type: %s, b_type: %s, c_type: %s, d_type: %s, activation: %s, bias_type: %s, scale_type: %s, compute_type: %s }",
+      m, n, k, lda, ldb, ldc, ldc, alpha_str, transa, transb,
+      BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), activation_str, BLASTypeName<T>(T{}), ComputeTypeFor<T>(), ComputeTypeFor<T>(), ComputeTypeFor<T>());
+  }
+
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+    return fmt::sprintf(
+        "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld",
+        transa, transb, m, n, k, lda, ldb, ldc);
+  }
+
+  std::string DynamicSignature() const override {
+    const bool dynamic_m = this->IsDynamicM();
+    const bool dynamic_n = this->IsDynamicN();
+    const bool dynamic_k = this->IsDynamicK();
+    return fmt::sprintf(
+        "%c%c_%s_%s_%s_ld_%s_%s_%s",
+        transa, transb,
+        MaybeWildcardInt(m, dynamic_m),
+        MaybeWildcardInt(n, dynamic_n),
+        MaybeWildcardInt(k, dynamic_k),
+        MaybeWildcardInt(lda, ShouldWildcardLda(transa, dynamic_m, dynamic_k, lda, m, k)),
+        MaybeWildcardInt(ldb, ShouldWildcardLdb(transb, dynamic_n, dynamic_k, ldb, n, k)),
+        MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)));
   }
 
   size_t GetSizeA() const {
@@ -203,8 +496,7 @@ struct GemmAndBiasParams : OpParams {
   }
 
   GemmAndBiasParams* DeepCopy(bool duplicate_inputs) const {
-    GemmAndBiasParams* copy = new GemmAndBiasParams;
-    *copy = *this;
+    GemmAndBiasParams* copy = new GemmAndBiasParams(*this);
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = GetSizeC();
@@ -233,8 +525,10 @@ struct GemmAndBiasParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmAndBiasParams<T> *other) {
+    auto* ctx = getTuningContext();
+    auto cfg = ctx->GetNumericalCheckConfig();
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
   }
 
   char transa{};
@@ -255,10 +549,45 @@ private:
   bool duplicate_inputs_{false};
 };
 
-template <typename T>
+template <typename T, typename C_Dtype = T>
 struct GemmStridedBatchedParams : OpParams {
+  GemmStridedBatchedParams() = default;
+  GemmStridedBatchedParams(const GemmStridedBatchedParams&) = default;
+  GemmStridedBatchedParams(GemmStridedBatchedParams&&) noexcept = default;
+  GemmStridedBatchedParams& operator=(const GemmStridedBatchedParams&) = default;
+  GemmStridedBatchedParams& operator=(GemmStridedBatchedParams&&) noexcept = default;
+  ~GemmStridedBatchedParams() override = default;
+
+  std::string BLASSignature() const override {
+    std::string alpha_str = to_string_opmath<T>(alpha);
+    std::string beta_str = to_string_opmath<T>(beta);
+    return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: %ld, stride_b: %ld, stride_c: %ld, stride_d: %ld, "
+      "alpha: %s, beta: %s, transA: %c, transB: %c, batch_count: %ld, a_type: %s, b_type: %s, c_type: %s, d_type: %s, scale_type: %s, compute_type: %s }",
+      m, n, k, lda, ldb, ldc, ldc, stride_a, stride_b, stride_c, stride_c, alpha_str, beta_str, transa, transb, batch,
+      BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<C_Dtype>(C_Dtype{}), BLASTypeName<T>(T{}), ComputeTypeFor<T>(), ComputeTypeFor<T>());
+  }
+
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld", transa, transb, m, n, k, batch);
+    return fmt::sprintf(
+        "%c%c_%ld_%ld_%ld_B_%ld_ld_%ld_%ld_%ld",
+        transa, transb, m, n, k, batch, lda, ldb, ldc);
+  }
+
+  std::string DynamicSignature() const override {
+    const bool dynamic_m = this->IsDynamicM();
+    const bool dynamic_n = this->IsDynamicN();
+    const bool dynamic_k = this->IsDynamicK();
+    const bool dynamic_batch = this->IsDynamicBatch();
+    return fmt::sprintf(
+        "%c%c_%s_%s_%s_B_%s_ld_%s_%s_%s",
+        transa, transb,
+        MaybeWildcardInt(m, dynamic_m),
+        MaybeWildcardInt(n, dynamic_n),
+        MaybeWildcardInt(k, dynamic_k),
+        MaybeWildcardInt(batch, dynamic_batch),
+        MaybeWildcardInt(lda, ShouldWildcardLda(transa, dynamic_m, dynamic_k, lda, m, k)),
+        MaybeWildcardInt(ldb, ShouldWildcardLdb(transb, dynamic_n, dynamic_k, ldb, n, k)),
+        MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)));
   }
 
   size_t GetSizeA() const {
@@ -289,12 +618,11 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   GemmStridedBatchedParams* DeepCopy(bool duplicate_inputs) const {
-    GemmStridedBatchedParams* copy = new GemmStridedBatchedParams;
-    *copy = *this;
+    GemmStridedBatchedParams* copy = new GemmStridedBatchedParams(*this);
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = GetSizeC();
-    copy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
+    copy->c = static_cast<C_Dtype*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
     AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
         copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
     if (duplicate_inputs) {
@@ -321,8 +649,10 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmStridedBatchedParams<T> *other) {
-    auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
+    auto* ctx = getTuningContext();
+    auto cfg = ctx->GetNumericalCheckConfig();
+    auto c_dtype = c10::CppTypeToScalarType<C_Dtype>::value;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
   }
 
   char transa{};
@@ -338,7 +668,7 @@ struct GemmStridedBatchedParams : OpParams {
   int64_t ldb{};
   int64_t stride_b{};
   at::opmath_type<T> beta;
-  T* c{};
+  C_Dtype* c{};
   int64_t ldc{};
   int64_t stride_c{};
   int64_t batch{};
@@ -349,9 +679,58 @@ private:
 template <typename T>
 struct ScaledGemmParams : OpParams {
   ScaledGemmParams() = default;
+  ScaledGemmParams(const ScaledGemmParams&) = default;
+  ScaledGemmParams(ScaledGemmParams&&) noexcept = default;
+  ScaledGemmParams& operator=(const ScaledGemmParams&) = default;
+  ScaledGemmParams& operator=(ScaledGemmParams&&) noexcept = default;
+  ~ScaledGemmParams() override = default;
+
+  std::string BLASSignature() const override {
+    // Excluding use_fast_accum and use_rowise booleans for now
+    if (bias_ptr == nullptr) {
+      return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, "
+        "transA: %c, transB: %c, batch_count: 1, scaleA: f32_r, scaleB: f32_r, a_type: %s, b_type: %s, c_type: %s, d_type: %s, scale_type: %s, compute_type: %s }",
+        m, n, k, lda, ldb, ldc, ldc, transa, transb,
+        ScalarTypeToBLASType(a_dtype), ScalarTypeToBLASType(b_dtype), ScalarTypeToBLASType(c_dtype), ScalarTypeToBLASType(c_dtype),
+        ComputeTypeFor<T>(), ComputeTypeFor<T>());
+    }
+    else {
+      return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, "
+        "transA: %c, transB: %c, batch_count: 1, scaleA: f32_r, scaleB: f32_r, a_type: %s, b_type: %s, c_type: %s, d_type: %s, bias_type: %s, scale_type: %s, compute_type: %s }",
+        m, n, k, lda, ldb, ldc, ldc, transa, transb,
+        ScalarTypeToBLASType(a_dtype), ScalarTypeToBLASType(b_dtype), ScalarTypeToBLASType(c_dtype), ScalarTypeToBLASType(c_dtype), ScalarTypeToBLASType(bias_dtype),
+        ComputeTypeFor<T>(), ComputeTypeFor<T>());
+    }
+  }
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+    // In Blas.cpp, code defaults to a bias_dtype of Half even when there is no bias vector.
+    // Search for this line::
+    // params.bias_dtype = bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_;
+    //
+    // In TunableOp, we must distinguish in param signature these two cases: with and without a bias vector.
+    return fmt::sprintf(
+      "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_rw_%d_bias_%s",
+      transa, transb, m, n, k, lda, ldb, ldc,
+      a_scaling_type == ScalingType::RowWise && b_scaling_type == ScalingType::RowWise,
+      bias_ptr == nullptr ? "None" : at::toString(bias_dtype));
+  }
+
+  std::string DynamicSignature() const override {
+    const bool dynamic_m = this->IsDynamicM();
+    const bool dynamic_n = this->IsDynamicN();
+    const bool dynamic_k = this->IsDynamicK();
+    return fmt::sprintf(
+      "%c%c_%s_%s_%s_ld_%s_%s_%s_rw_%d_bias_%s",
+      transa, transb,
+      MaybeWildcardInt(m, dynamic_m),
+      MaybeWildcardInt(n, dynamic_n),
+      MaybeWildcardInt(k, dynamic_k),
+      MaybeWildcardInt(lda, ShouldWildcardLda(transa, dynamic_m, dynamic_k, lda, m, k)),
+      MaybeWildcardInt(ldb, ShouldWildcardLdb(transb, dynamic_n, dynamic_k, ldb, n, k)),
+      MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)),
+      a_scaling_type == ScalingType::RowWise && b_scaling_type == ScalingType::RowWise,
+      bias_ptr == nullptr ? "None" : at::toString(bias_dtype));
   }
 
   size_t GetSizeA() const {
@@ -382,8 +761,7 @@ struct ScaledGemmParams : OpParams {
   }
 
   ScaledGemmParams* DeepCopy(bool duplicate_inputs) const {
-    ScaledGemmParams* copy = new ScaledGemmParams;
-    *copy = *this;
+    ScaledGemmParams* copy = new ScaledGemmParams(*this);
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = GetSizeC();
@@ -412,7 +790,9 @@ struct ScaledGemmParams : OpParams {
   }
 
   TuningStatus NumericalCheck(ScaledGemmParams<T> *other) {
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
+    auto* ctx = getTuningContext();
+    auto cfg = ctx->GetNumericalCheckConfig();
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
   }
 
   char transa{};
@@ -424,10 +804,14 @@ struct ScaledGemmParams : OpParams {
   const void* a_scale_ptr{};
   int64_t lda{};
   ScalarType a_dtype{};
+  ScalarType a_scale_dtype{};
+  ScalingType a_scaling_type{};
   const void* b{};
   const void* b_scale_ptr{};
   int64_t ldb{};
   ScalarType b_dtype{};
+  ScalarType b_scale_dtype{};
+  ScalingType b_scaling_type{};
   const void* bias_ptr{};
   ScalarType bias_dtype{};
   void* c{};

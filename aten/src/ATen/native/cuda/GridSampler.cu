@@ -57,7 +57,7 @@ namespace {
       const index_t n = index / (out_H * out_W);
       const index_t grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
 
-      // get the corresponding input x, y co-ordinates from grid
+      // get the corresponding input x, y coordinates from grid
       opmath_t x = grid.data[grid_offset];
       opmath_t y = grid.data[grid_offset + grid_sCoor];
 
@@ -193,7 +193,7 @@ namespace {
       const index_t n = index / (out_D * out_H * out_W);
       const index_t grid_offset = n * grid_sN + d * grid_sD + h * grid_sH + w * grid_sW;
 
-      // get the corresponding input x, y, z co-ordinates from grid
+      // get the corresponding input x, y, z coordinates from grid
       opmath_t x = grid.data[grid_offset];
       opmath_t y = grid.data[grid_offset + grid_sCoor];
       opmath_t z = grid.data[grid_offset + 2 * grid_sCoor];
@@ -358,7 +358,7 @@ namespace {
       const index_t n = index / (out_H * out_W);
       const auto grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
 
-      // get the corresponding input x, y co-ordinates from grid
+      // get the corresponding input x, y coordinates from grid
       scalar_t x = grid.data[grid_offset];
       scalar_t y = grid.data[grid_offset + grid_sCoor];
 
@@ -572,7 +572,7 @@ namespace {
       const index_t n = index / (out_D * out_H * out_W);
       const auto grid_offset = n * grid_sN + d * grid_sD + h * grid_sH + w * grid_sW;
 
-      // get the corresponding input x, y, z co-ordinates from grid
+      // get the corresponding input x, y, z coordinates from grid
       scalar_t ix = grid.data[grid_offset];
       scalar_t iy = grid.data[grid_offset + grid_sCoor];
       scalar_t iz = grid.data[grid_offset + 2 * grid_sCoor];
@@ -843,8 +843,7 @@ void launch_grid_sampler_2d_backward_kernel(
     bool align_corners, std::array<bool,2> output_mask) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
-  check_grid_sampler_common(input, grid);
-  check_grid_sampler_2d(input, grid);
+  check_grid_sampler_2d_backward(input, grid, grad_output);
 
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
@@ -906,8 +905,7 @@ void launch_grid_sampler_3d_backward_kernel(
     bool align_corners, std::array<bool,2> output_mask) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
-  check_grid_sampler_common(input, grid);
-  check_grid_sampler_3d(input, grid, interpolation_mode);
+  check_grid_sampler_3d_backward(input, grid, grad_output, interpolation_mode);
 
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

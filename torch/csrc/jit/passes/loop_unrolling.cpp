@@ -91,7 +91,7 @@ void inlineBody(Node* loop) {
 }
 
 // inserts a copy of body, passing inputs to the inputs of the block
-// it returns the a list of the Values for the output of the block
+// it returns a list of the Values for the output of the block
 std::vector<Value*> insertBlockCopy(
     Graph& graph,
     Block* body,
@@ -337,7 +337,7 @@ Node* PeelLoop(Node* n, size_t times) {
   // only run until the peeled count
   new_lv.replaceMaxTripCount(min_trip_count);
 
-  // subtract `maxTripCount` of the original loop by the number iterations
+  // subtract `maxTripCount` of the original loop by the number of iterations
   // the peeled loop runs
   auto new_max_trip_count =
       graph->insert(aten::sub, {orig_loop.maxTripCount(), min_trip_count});

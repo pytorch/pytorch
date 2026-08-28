@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <filesystem>
+
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/runtime/graph_executor.h"
 #include "torch/jit.h"
@@ -45,9 +47,8 @@ TEST(GraphExecutorTest, runAsync_executor) {
   demo = DemoModule()
   torch.jit.save(torch.jit.script(demo), 'test_interpreter_async.pt')
   */
-  std::string filePath(__FILE__);
-  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  testModelFile.append("test_interpreter_async.pt");
+  auto testModelFile =
+      resolveTestDataFile(__FILE__, "test_interpreter_async.pt");
   auto module = load(testModelFile);
   auto graph = module.get_method("forward").graph();
   GraphExecutor graphExecutor(graph, "");

@@ -77,20 +77,20 @@ bool SchemaInfo::is_mutable(const c10::SchemaArgument& argument) {
             });
 
         bool special_case = (is_training_op != training_ops.end()) &&
-            is_training_op->second.count(
+            is_training_op->second.contains(
                 this->schema_.arguments()[aliasing_index].name());
         if (special_case) {
           bool has_training = (hasInputArgumentNamed("training") &&
-                               !value_map_.count("training")) ||
-              (value_map_.count("training") &&
+                               !value_map_.contains("training")) ||
+              (value_map_.contains("training") &&
                value_map_.at("training").toBool());
-          bool has_train =
-              (hasInputArgumentNamed("train") && !value_map_.count("train")) ||
-              (value_map_.count("train") && value_map_.at("train").toBool());
+          bool has_train = (hasInputArgumentNamed("train") &&
+                            !value_map_.contains("train")) ||
+              (value_map_.contains("train") && value_map_.at("train").toBool());
           bool has_use_input_stats =
               (hasInputArgumentNamed("use_input_stats") &&
-               !value_map_.count("use_input_stats")) ||
-              (value_map_.count("use_input_stats") &&
+               !value_map_.contains("use_input_stats")) ||
+              (value_map_.contains("use_input_stats") &&
                value_map_.at("use_input_stats").toBool());
           return has_training || has_train || has_use_input_stats;
         } else {
@@ -115,7 +115,7 @@ bool SchemaInfo::is_mutable(std::string_view name) {
 bool SchemaInfo::is_nondeterministic() const {
   static const c10::FunctionSchema dropout_schema = torch::jit::parseSchema(
       "aten::dropout(Tensor input, float p, bool train) -> Tensor");
-  if (dropout_schema == schema_ && value_map_.count("train") &&
+  if (dropout_schema == schema_ && value_map_.contains("train") &&
       !value_map_.at("train").toBool()) {
     return false;
   }
@@ -159,27 +159,27 @@ bool SchemaInfo::may_alias(
     generateAliasMaps();
   }
   bool wildcard_alias_check =
-      wildcardSet().count(lhs) && wildcardSet().count(rhs);
+      wildcardSet().contains(lhs) && wildcardSet().contains(rhs);
   if (wildcard_alias_check) {
     return true;
   }
 
   if (lhs.type == c10::SchemaArgType::input &&
       rhs.type == c10::SchemaArgType::input) {
-    return input_alias_map_[lhs.index].count(rhs.index);
+    return input_alias_map_[lhs.index].contains(rhs.index);
   } else if (
       lhs.type == c10::SchemaArgType::output &&
       rhs.type == c10::SchemaArgType::output) {
     for (size_t lhs_alias_input : output_alias_map_[lhs.index]) {
-      if (output_alias_map_[rhs.index].count(lhs_alias_input)) {
+      if (output_alias_map_[rhs.index].contains(lhs_alias_input)) {
         return true;
       }
     }
     return false;
   } else if (lhs.type == c10::SchemaArgType::output) {
-    return output_alias_map_[lhs.index].count(rhs.index);
+    return output_alias_map_[lhs.index].contains(rhs.index);
   } else {
-    return output_alias_map_[rhs.index].count(lhs.index);
+    return output_alias_map_[rhs.index].contains(lhs.index);
   }
 }
 
@@ -212,8 +212,8 @@ bool SchemaInfo::mayContainAliasImpl(
           schema_.getCorrectList(rhs.type)[rhs.index].type());
   bool types_can_alias =
       schema_.canAliasTypeSetsAlias(lhsContainedAliasTypeSet, rhsAliasTypeSet);
-  return types_can_alias && containerSet().count(lhs) &&
-      wildcardSet().count(rhs);
+  return types_can_alias && containerSet().contains(lhs) &&
+      wildcardSet().contains(rhs);
 }
 
 void SchemaInfo::ensureConservativity(
@@ -223,7 +223,7 @@ void SchemaInfo::ensureConservativity(
   for (size_t i = 0; i < arguments_list.size(); i++) {
     if (arguments_list[i].alias_info()) {
       for (const auto& set : arguments_list[i].alias_info()->afterSets()) {
-        if (duplicates.count(set)) {
+        if (duplicates.contains(set)) {
           wildcard_set_.insert({type, i});
         }
       }
@@ -250,12 +250,18 @@ std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
       "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
       "aten::rand_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::rand_like.generator(Tensor self, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
       "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
       "aten::randint_like(Tensor self, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randint_like(Tensor self, int low, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like.generator(Tensor self, int high, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like.Tensor(Tensor self, Tensor high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like.Tensor_generator(Tensor self, Tensor high, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like.low_dtype(Tensor self, int low, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like.low_generator_dtype(Tensor self, int low, int high, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
       "aten::randn_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randn_like.generator(Tensor self, *, Generator? generator, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
 
   std::vector<c10::FunctionSchema> nondeterministic_ops;
@@ -269,9 +275,9 @@ std::vector<c10::FunctionSchema> SchemaInfo::getNonDeterministicOps() {
 
 std::vector<SchemaSpecialCasePair> SchemaInfo::getTrainingOps() {
   // This is a list of pairs of ops to sets of strings
-  //  where the a boolean variable (either "training",
+  //  where a boolean variable (either "training",
   // "train" or "use_input_stats") affects the mutability
-  // of the unorderered set of strings.
+  // of the unordered set of strings.
   static const std::vector<std::pair<std::string, std::unordered_set<std::string>>> training_op_pairs =
       {{"aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
         {"running_mean", "running_var"}},
@@ -327,7 +333,7 @@ void SchemaInfo::initSchemaInfo() {
           // on schemas with more than one argument within arguments_list that
           // shares an alias set.
           for (const auto& set : argument.alias_info()->afterSets()) {
-            if (seen.count(set)) {
+            if (seen.contains(set)) {
               TORCH_WARN(
                   set.toQualString(),
                   " appears twice in same argument list which will make aliasing checks more conservative.");
@@ -380,15 +386,15 @@ void SchemaInfo::generateAliasMaps() {
       if (i == j) {
         input_alias_map_[i].insert(i);
       } else if (
-          value_map_.count(schema_.arguments()[i].name()) &&
-          value_map_.count(schema_.arguments()[j].name())) {
+          value_map_.contains(schema_.arguments()[i].name()) &&
+          value_map_.contains(schema_.arguments()[j].name())) {
         if (value_map_[schema_.arguments()[i].name()].isAliasOf(
                 value_map_[schema_.arguments()[j].name()])) {
           input_alias_map_[i].insert(j);
           input_alias_map_[j].insert(i);
-          if (wildcard_set_.count({c10::SchemaArgType::input, i})) {
+          if (wildcard_set_.contains({c10::SchemaArgType::input, i})) {
             wildcard_set_.insert({c10::SchemaArgType::input, j});
-          } else if (wildcard_set_.count({c10::SchemaArgType::input, j})) {
+          } else if (wildcard_set_.contains({c10::SchemaArgType::input, j})) {
             wildcard_set_.insert({c10::SchemaArgType::input, i});
           }
         }
@@ -404,12 +410,12 @@ void SchemaInfo::generateAliasMaps() {
   for (size_t i = 0; i < schema_.arguments().size(); i++) {
     for (size_t j = 0; j < schema_.arguments().size(); j++) {
       // if they are already aliasing, there is no way one contains the other
-      if (!input_alias_map_[i].count(j) &&
-          value_map_.count(schema_.arguments()[i].name()) &&
-          value_map_.count(schema_.arguments()[j].name())) {
+      if (!input_alias_map_[i].contains(j) &&
+          value_map_.contains(schema_.arguments()[i].name()) &&
+          value_map_.contains(schema_.arguments()[j].name())) {
         c10::IValue::HashAliasedIValues subValues;
         value_map_[schema_.arguments()[i].name()].getSubValues(subValues);
-        if (subValues.count(value_map_[schema_.arguments()[j].name()])) {
+        if (subValues.contains(value_map_[schema_.arguments()[j].name()])) {
           wildcard_set_.insert({c10::SchemaArgType::input, j});
         }
       }
@@ -422,7 +428,7 @@ void SchemaInfo::generateAliasMaps() {
       if (schema_.may_alias(
               {c10::SchemaArgType::input, i},
               {c10::SchemaArgType::output, j})) {
-        if (wildcard_set_.count({c10::SchemaArgType::input, i})) {
+        if (wildcard_set_.contains({c10::SchemaArgType::input, i})) {
           wildcard_set_.insert({c10::SchemaArgType::output, j});
         }
         output_alias_map_[j].insert(

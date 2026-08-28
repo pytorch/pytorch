@@ -2,13 +2,13 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ResizeCommon.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/resize_as_native.h>
+#include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/resize.h>
 #include <ATen/ops/_resize_output.h>
@@ -21,7 +21,7 @@ namespace at::native {
 
 // Returns true if resize is necessary
 template <typename T>
-bool _resize_output_check(const Tensor& output, ArrayRef<T> shape) {
+static bool _resize_output_check(const Tensor& output, ArrayRef<T> shape) {
   // Tests for resizing of tensors with one or more elements
   if (at::symint::sizes<T>(output).equals(shape)) {
     return false;
@@ -56,7 +56,7 @@ static void native_resize_(const Tensor& output, SymIntArrayRef shape) {
 }
 
 template <typename T>
-bool _resize_output(const Tensor& output, ArrayRef<T> shape) {
+static bool _resize_output(const Tensor& output, ArrayRef<T> shape) {
   if (_resize_output_check<T>(output, shape)) {
     // avoid a redispatch for cpu and cuda.
     // TODO: when resize_cuda_ is re-written to be unified with resize_,
@@ -106,11 +106,6 @@ void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes) {
   storage->set_nbytes(size_bytes);
 }
 
-// Call the sparse implementation in SparseTensor.cpp directly.
-// A dynamic dispatch here is NOT necessary, so I didn't put
-// this function in native_functions.yaml
-const Tensor& resize_as_sparse_(const Tensor& self, const Tensor& src);
-
 // TODO(VitalyFedyunin): Move it to HTML docs.
 //
 // Strides of the output tensor of `resize_as_` operator is defined by input
@@ -154,7 +149,6 @@ const Tensor& resize_as_(
     }
     self.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   }
-  namedinference::propagate_names(result, the_template);
   return result;
 }
 
@@ -196,7 +190,7 @@ static void _maybe_resize_storage(TensorImpl* self, c10::SymInt new_size_bytes) 
 }
 
 template <typename T>
-TensorImpl* _resize_impl_(
+static TensorImpl* _resize_impl_(
     TensorImpl* self,
     ArrayRef<T> size,
     at::OptionalArrayRef<T> stride,
@@ -234,7 +228,7 @@ TensorImpl* resize_impl_cpu_(
 }
 
 template <typename T>
-const Tensor& _resize_(
+static const Tensor& _resize_(
     const Tensor& self,
     ArrayRef<T> size,
     std::optional<MemoryFormat> optional_memory_format) {
@@ -261,9 +255,6 @@ const Tensor& resize_(
     const Tensor& self,
     IntArrayRef size,
     std::optional<MemoryFormat> optional_memory_format) {
-  if (self.has_names()) {
-    return resize_named_tensor_(self, size, optional_memory_format);
-  }
   return _resize_(self, size, optional_memory_format);
 }
 
@@ -271,7 +262,6 @@ const Tensor& resize__symint(
     const Tensor& self,
     c10::SymIntArrayRef size,
     std::optional<MemoryFormat> optional_memory_format) {
-  TORCH_INTERNAL_ASSERT(!self.has_names())
   return _resize_(self, size, optional_memory_format);
 }
 

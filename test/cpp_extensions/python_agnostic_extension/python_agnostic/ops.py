@@ -1,5 +1,3 @@
-from typing import List
-
 import torch
 from torch import Tensor
 
@@ -8,7 +6,7 @@ lib = torch.library._scoped_library("python_agnostic", "FRAGMENT")
 lib.define("ultra_norm(Tensor[] inputs) -> Tensor")
 
 
-def ultra_norm(inputs: List[Tensor]) -> Tensor:
+def ultra_norm(inputs: list[Tensor]) -> Tensor:
     """
     Computes the ultra-L2-norm of a list of tensors via computing the norm of norms.
 

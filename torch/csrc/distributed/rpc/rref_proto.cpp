@@ -15,7 +15,7 @@ c10::ivalue::TupleElements toIValues(const Message& message, MessageType type) {
       type,
       ", but got ",
       message.type());
-  auto payload = static_cast<const char*>(message.payload().data());
+  auto payload = message.payload().data();
   auto payload_size = message.payload().size();
 
   auto value = jit::unpickle(
@@ -83,11 +83,10 @@ std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
       values.size() == 2, "ScriptRRefFetchCall expects 2 IValues from message");
   auto id = values[1].toInt();
   TORCH_INTERNAL_ASSERT(
-      id >= std::numeric_limits<worker_id_t>::min() &&
-          id <= std::numeric_limits<worker_id_t>::max(),
+      std::in_range<worker_id_t>(id),
       "ScriptRRefFetchCall fromWorkerId exceeds worker_id_t limit.")
   return std::make_unique<ScriptRRefFetchCall>(
-      worker_id_t(id), RRefId::fromIValue(values[0]));
+      static_cast<worker_id_t>(id), RRefId::fromIValue(values[0]));
 }
 
 c10::intrusive_ptr<Message> PythonRRefFetchCall::toMessageImpl() && {
@@ -105,11 +104,10 @@ std::unique_ptr<PythonRRefFetchCall> PythonRRefFetchCall::fromMessage(
       values.size() == 2, "PythonRRefFetchCall expects 2 IValues from message");
   auto id = values[1].toInt();
   TORCH_INTERNAL_ASSERT(
-      id >= std::numeric_limits<worker_id_t>::min() &&
-          id <= std::numeric_limits<worker_id_t>::max(),
+      std::in_range<worker_id_t>(id),
       "PythonRRefFetchCall fromWorkerId exceeds worker_id_t limit.")
   return std::make_unique<PythonRRefFetchCall>(
-      worker_id_t(id), RRefId::fromIValue(values[0]));
+      static_cast<worker_id_t>(id), RRefId::fromIValue(values[0]));
 }
 
 const std::vector<at::IValue>& RRefFetchRet::values() {

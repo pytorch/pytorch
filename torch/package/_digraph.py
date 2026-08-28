@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 from collections import deque
-from typing import List, Set
 
 
 class DiGraph:
@@ -28,7 +27,7 @@ class DiGraph:
         """Add a node to the graph.
 
         Args:
-            n: the node. Can we any object that is a valid dict key.
+            n: the node. Can be any object that is a valid dict key.
             **kwargs: any attributes you want to attach to the node.
         """
         if n not in self._node:
@@ -61,7 +60,7 @@ class DiGraph:
             raise ValueError(f"The node {n} is not in the digraph.") from e
 
     def predecessors(self, n):
-        """Returns an iterator over predecessors nodes of n."""
+        """Returns an iterator over predecessor nodes of n."""
         try:
             return iter(self._pred[n])
         except KeyError as e:
@@ -90,7 +89,7 @@ class DiGraph:
         except TypeError:
             return False
 
-    def forward_transitive_closure(self, src: str) -> Set[str]:
+    def forward_transitive_closure(self, src: str) -> set[str]:
         """Returns a set of nodes that are reachable from src"""
 
         result = set(src)
@@ -103,7 +102,7 @@ class DiGraph:
                     working_set.append(n)
         return result
 
-    def backward_transitive_closure(self, src: str) -> Set[str]:
+    def backward_transitive_closure(self, src: str) -> set[str]:
         """Returns a set of nodes that are reachable from src in reverse direction"""
 
         result = set(src)
@@ -140,7 +139,7 @@ class DiGraph:
 
         return result_graph.to_dot()
 
-    def first_path(self, dst: str) -> List[str]:
+    def first_path(self, dst: str) -> list[str]:
         """Returns a list of nodes that show the first path that resulted in dst being added to the graph."""
         path = []
 

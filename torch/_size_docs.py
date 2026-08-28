@@ -1,11 +1,10 @@
-# mypy: allow-untyped-defs
 """Adds docstrings to torch.Size functions"""
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
 
 
-def add_docstr_all(method, docstr):
+def add_docstr_all(method: str, docstr: str) -> None:
     add_docstr(getattr(torch._C.Size, method), docstr)
 
 
@@ -20,6 +19,7 @@ More formally, for a tensor ``x = tensor.ones(10, 10)`` with size ``s = torch.Si
 ``x.numel() == x.size().numel() == s.numel() == 100`` holds true.
 
 Example::
+
     >>> x=torch.ones(10, 10)
     >>> s=x.size()
     >>> s

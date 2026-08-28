@@ -105,7 +105,7 @@ std::unordered_map<std::string, std::string> MobileModelRunner::
       function_and_info_dict[key.toStringRef()] = data_list;
     }
 
-    // Could store the full mapping of std types, but the 'info' section isnt
+    // Could store the full mapping of std types, but the 'info' section isn't
     // needed here
     std::string input_function =
         function_and_info_dict["get_inputs_function_name"][0];
@@ -200,8 +200,8 @@ void MobileModelRunner::run_argless_functions(
 bool MobileModelRunner::set_has_metal_gpu_operators(
     std::set<std::string> const& op_list) {
   for (std::string const& op : op_list) {
-    if (op.find("metal::") == 0 || op.find("metal_prepack::") == 0 ||
-        op.find("metal_prepack_unet::") == 0) {
+    if (op.starts_with("metal::") || op.starts_with("metal_prepack::") ||
+        op.starts_with("metal_prepack_unet::")) {
       return true;
     }
   }

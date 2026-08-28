@@ -50,7 +50,7 @@ struct RawTensors {
   }
 
   template <typename T>
-  void operator()(T&) {}
+  void operator()(T& /*unused*/) {}
 
   std::vector<RawTensorInfo> tensors_;
 };
@@ -58,7 +58,7 @@ struct RawTensors {
 
 void calculateUniqueTensorIDs(
     std::vector<std::shared_ptr<Result>>& sorted_results) {
-  // This task is equivilent to https://leetcode.com/problems/number-of-islands/
+  // This task is equivalent to https://leetcode.com/problems/number-of-islands/
   // We first cluster events with a greedy index assignment, and then merge
   // groups that overlap.
   std::vector<RawTensorInfo> tensors;
@@ -131,15 +131,10 @@ void calculateUniqueTensorIDs(
         tensor_set.insert(t.allocation_id_ref_.get().value());
       }
     }
-    tensors.erase(
-        std::remove_if(
-            tensors.begin(),
-            tensors.end(),
-            [&tensor_set](const auto& i) {
-              auto it = tensor_set.find(i.allocation_id_ref_.get().value());
-              return it == tensor_set.end();
-            }),
-        tensors.end());
+    std::erase_if(tensors, [&tensor_set](const auto& i) {
+      auto it = tensor_set.find(i.allocation_id_ref_.get().value());
+      return it == tensor_set.end();
+    });
   }
 
   // Handle the case that the storage of a TensorImpl changed.

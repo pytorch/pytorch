@@ -10,8 +10,6 @@
 
 #include <c10/util/irange.h>
 
-#include <limits>
-
 namespace torch::jit {
 
 namespace {
@@ -193,8 +191,7 @@ std::pair<Value*, Value*> PrepareCopyForONNX(Node* node) {
   expanded_value->node()->copyMetadata(node);
 
   auto index_put = graph->insert(
-      aten::index_put_,
-      {node->input(0), dummy_list, expanded_value, node->input(2)});
+      aten::index_put_, {node->input(0), dummy_list, expanded_value});
   index_put->node()->copyMetadata(node);
   index_put->copyMetadata(node->output());
   node->output()->replaceAllUsesWith(index_put);
@@ -344,7 +341,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
         auto it =
             std::find(node->inputs().begin(), node->inputs().end(), input);
         if (it != node->inputs().end()) {
-          int index = std::distance(node->inputs().begin(), it);
+          auto index = std::distance(node->inputs().begin(), it);
           TORCH_WARN(
               "ONNX Preprocess - Removing mutation from node ",
               node->kind().toQualString(),
@@ -443,7 +440,7 @@ std::string InplaceConverter::ValueTracker::toString() const {
     ss << "Value[" << idx << "]: " << it.first->debugName() << '\n';
     ss << "  Mapping to ";
     for (auto v : it.second) {
-      ss << v->debugName() << " ";
+      ss << v->debugName() << ' ';
     }
     ss << '\n';
     idx++;
@@ -455,7 +452,7 @@ std::string InplaceConverter::ValueTracker::toString() const {
     ss << " map to " << it.second->debugName() << '\n';
   }
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void InplaceConverter::ValueTracker::recordSetValue(
@@ -470,7 +467,7 @@ void InplaceConverter::ValueTracker::recordSetValue(
   auto* n = new_v->node();
   auto* owning_block = n->owningBlock();
 
-  if (alias_to_value_.find(old_v) == alias_to_value_.end()) {
+  if (!alias_to_value_.contains(old_v)) {
     alias_to_value_[old_v] = old_v;
     value_to_sorted_aliases_[old_v] = {old_v};
   }
@@ -592,7 +589,7 @@ Value* InplaceConverter::ValueTracker::findAliasForValueAtNode(
     Value* v,
     const Node* n) const {
   GRAPH_UPDATE("Finding alias for value:", v->debugName(), " at node ", *n);
-  if (alias_to_value_.find(v) == alias_to_value_.end()) {
+  if (!alias_to_value_.contains(v)) {
     // This value was not affected by any inplace operator.
     return v;
   }
@@ -654,7 +651,7 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
     auto moduleNames =
         findSubModuleAttr(n->inputs().at(0), name, attrModule, graph_);
 
-    std::string fullName("");
+    std::string fullName;
     for (auto& name : moduleNames) {
       fullName += name + '.';
     }
@@ -662,8 +659,7 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
 
     attr_node_fullname_map.insert({n, fullName});
 
-    if (attr_name_value_map.find(fullName) == attr_name_value_map.end() &&
-        attrModule.hasattr(name)) {
+    if (!attr_name_value_map.contains(fullName) && attrModule.hasattr(name)) {
       auto attr = attrModule.attr(name);
       auto type = attrModule.type();
       auto slot = *type->findAttributeSlot(name);
@@ -695,7 +691,7 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
 
     // Create dummy initial value, if initial value does not exist for this
     // attribute.
-    if (attr_name_value_map.find(fullName) == attr_name_value_map.end()) {
+    if (!attr_name_value_map.contains(fullName)) {
       auto* noneNode = graph_->create(prim::Constant);
       noneNode->output()->setType(NoneType::get());
       noneNode->insertBefore(graph_->nodes().front());

@@ -12,10 +12,9 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/input_buffer.h>
+#include <torch/csrc/autograd/node_creation_hook.h>
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/warnings.h>
-
-#include <c10/util/CallOnce.h>
 
 #include <exception>
 #include <functional>
@@ -47,10 +46,12 @@ TORCH_API void validate_outputs(
     const std::vector<std::optional<InputMetadata>>& input_metadata,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error);
+TORCH_API std::vector<std::optional<InputMetadata>> collect_input_metadata(
+    const edge_list& edges);
 
 struct NodeTask {
   std::weak_ptr<GraphTask> base_;
-  std::shared_ptr<Node> fn_;
+  c10::intrusive_ptr<Node> fn_;
   // This buffer serves as an implicit "addition" node for all of the
   // gradients flowing here.  Once all the dependencies are finished, we
   // use the contents of this buffer to run the function.
@@ -63,7 +64,7 @@ struct NodeTask {
 
   NodeTask(
       std::weak_ptr<GraphTask> base,
-      std::shared_ptr<Node> fn,
+      c10::intrusive_ptr<Node> fn,
       InputBuffer inputs,
       bool isShutdownTask = false)
       : base_(std::move(base)),
@@ -137,8 +138,8 @@ struct TORCH_API Engine {
   // can have python symbols, so we add a layer of indirection
   // see [Note: Compiled Autograd]
   typedef variable_list (*compiled_autograd_fn)(
-      const std::shared_ptr<Node>& graph_root,
-      GraphTask& graph_task,
+      const c10::intrusive_ptr<Node>& graph_root,
+      const GraphTask& graph_task,
       bool accumulate_grad,
       const edge_list& outputs);
   static void set_compiled_autograd(compiled_autograd_fn fn);
@@ -161,10 +162,10 @@ struct TORCH_API Engine {
   // for the graph.
   //
   // NB: This API should only be used by internal autograd specific
-  // machinery and shouldn't be exposed to users in anyway.
+  // machinery and shouldn't be exposed to users in any way.
   virtual c10::intrusive_ptr<at::ivalue::Future> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
-      std::shared_ptr<Node> graph_root,
+      c10::intrusive_ptr<Node> graph_root,
       InputBuffer&& input_buffer);
 
   virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() {
@@ -173,6 +174,15 @@ struct TORCH_API Engine {
 
   virtual std::unique_ptr<SavedVariableHooks> get_default_saved_variable_hooks() {
     return nullptr;
+  }
+
+  // Wraps the currently registered torch.autograd.graph.node_creation_hook
+  // callbacks (a Python-only feature) into callable objects, outermost first.
+  // Returns empty when none are registered; only the Python engine can produce
+  // non-empty results.
+  virtual std::vector<std::unique_ptr<NodeCreationHook>>
+  get_node_creation_hooks() {
+    return {};
   }
 
   // We pass cpu_ready_queue to evaluate_function, so that it knows
@@ -186,7 +196,7 @@ struct TORCH_API Engine {
   void initialize_device_threads_pool();
   virtual void thread_on_exception(
       const std::shared_ptr<GraphTask>& graph_task,
-      const std::shared_ptr<Node>& fn,
+      const c10::intrusive_ptr<Node>& fn,
       std::exception& e);
 
   void queue_callback(std::function<void()> callback);
@@ -228,11 +238,8 @@ struct TORCH_API Engine {
   void decrement_non_reentrant_thread_count();
   virtual void thread_main(const std::shared_ptr<GraphTask>& task);
   void reentrant_thread_init();
-  void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
+  void add_thread_pool_task(std::weak_ptr<GraphTask> graph_task);
 
-  // Ensures device_ready_queues_ are initialized only once
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  c10::once_flag start_device_threads_flag_;
   // Safe to read device_ready_queues_ without synchronization after
   // initialization
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -246,7 +253,7 @@ struct TORCH_API Engine {
 
   // How many nested reentrant calls are allowed until a new thread is used
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  int max_recursion_depth_;
+  int max_recursion_depth_{MAX_DEPTH};
 
   struct ThreadPoolShared {
     // Data structures used by the threads for executing reentrant backwards

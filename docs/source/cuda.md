@@ -1,0 +1,502 @@
+# torch.cuda
+
+```{eval-rst}
+.. automodule:: torch.cuda
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    StreamContext
+    can_device_access_peer
+    check_error
+    current_blas_handle
+    current_solver_handle
+    current_device
+    current_stream
+    cudart
+    default_stream
+    device
+    device_count
+    device_memory_used
+    device_of
+    get_arch_list
+    get_device_capability
+    get_device_name
+    get_device_properties
+    get_gencode_flags
+    get_stream_from_external
+    get_sync_debug_mode
+    init
+    ipc_collect
+    is_available
+    is_bf16_supported
+    is_initialized
+    is_tf32_supported
+    memory_usage
+    set_device
+    set_stream
+    set_sync_debug_mode
+    stream
+    synchronize
+    utilization
+    temperature
+    power_draw
+    clock_rate
+    AcceleratorError
+    OutOfMemoryError
+```
+
+## Random Number Generator
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    get_rng_state
+    get_rng_state_all
+    set_rng_state
+    set_rng_state_all
+    manual_seed
+    manual_seed_all
+    seed
+    seed_all
+    initial_seed
+
+```
+
+## Communication collectives
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    comm.broadcast
+    comm.broadcast_coalesced
+    comm.reduce_add
+    comm.reduce_add_coalesced
+    comm.scatter
+    comm.gather
+```
+
+## Streams and events
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Stream
+    ExternalStream
+    Event
+```
+
+## Graphs (beta)
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    is_current_stream_capturing
+    graph_pool_handle
+    CUDAGraph
+    graph
+    make_graphed_callables
+    export_dot
+    export_graph_data
+```
+
+### CUDA graph lifecycle hooks
+
+Register callbacks that fire at each point in any CUDA graph's lifecycle -- capture
+start, capture end, instantiate, each replay, and destroy -- for example, a profiler
+observing graph lifecycle without the graph code carrying any consumer knowledge, and
+including graphs the consumer did not build. Registering a hook is the opt-in and the whole
+API -- the graph fires them; with none registered they are no-ops. Each has a per-graph
+counterpart on {class}`torch.cuda.CUDAGraph`. Live in `torch.cuda.graphs`.
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.graphs
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    register_graph_capture_start_hook
+    register_graph_capture_end_hook
+    register_graph_instantiate_hook
+    register_graph_replay_start_hook
+    register_graph_replay_end_hook
+    register_graph_destroy_hook
+
+.. currentmodule:: torch.cuda
+```
+
+## Graph Kernel Annotations (prototype)
+
+`torch.cuda.graph_annotations` annotates the kernels captured in a CUDA
+graph with user metadata, keyed so the annotations can be joined against
+the ``graph node id`` field on kernel events in profiler traces. Enable
+recording per capture with the ``enable_annotations`` argument of
+{class}`torch.cuda.graph`, then wrap regions of the captured workload in
+{func}`~torch.cuda.graph_annotations.mark_kernels` scopes.
+
+These APIs require the `cuda-bindings` package and a CUDA driver that
+supports ``cudaGraphNodeGetToolsId`` (CUDA 13.1 or newer, or an equivalent
+cuda-compat package); recording silently degrades to a no-op otherwise, and
+is not supported on ROCm. Use
+{func}`~torch.cuda.graph_annotations.is_available` to check support.
+
+The end-to-end workflow: annotate during capture, profile the replay,
+then merge the annotations into the exported trace and view it in
+[Perfetto](https://ui.perfetto.dev). During capture:
+
+```python
+import torch
+from torch.cuda.graph_annotations import mark_kernels, get_kernel_annotations
+
+x = torch.randn(1024, 1024, device="cuda")
+
+# Warmup: run the workload once outside capture so lazy initialization
+# (e.g. cuBLAS handles) does not end up in -- or invalidate -- the capture.
+y = x @ x.t()
+z = torch.relu(y) @ x
+torch.cuda.synchronize()
+
+g = torch.cuda.CUDAGraph()
+with torch.cuda.graph(g, enable_annotations=True):
+    with mark_kernels("attention"):
+        y = x @ x.t()
+    with mark_kernels({"name": "mlp", "layer": 3}):
+        z = torch.relu(y) @ x
+
+with torch.profiler.profile() as prof:
+    g.replay()
+    torch.cuda.synchronize()
+prof.export_chrome_trace("trace.json")
+```
+
+Each kernel event in the exported trace carries a ``graph node id`` in its
+``args``; the recorded annotations are keyed by the same ids, so merging
+them into the trace is a dictionary lookup:
+
+```python
+import json
+
+annotations = get_kernel_annotations()
+with open("trace.json") as f:
+    trace = json.load(f)
+for event in trace["traceEvents"]:
+    node_id = event.get("args", {}).get("graph node id")
+    for ann in annotations.get(node_id, []):
+        event["args"].update(ann)
+with open("trace_annotated.json", "w") as f:
+    json.dump(trace, f)
+```
+
+Opening ``trace_annotated.json`` in [Perfetto](https://ui.perfetto.dev)
+(or ``chrome://tracing``) and clicking a kernel from the graph replay now
+shows the annotation fields -- ``name: attention`` or ``name: mlp``,
+``layer: 3`` -- alongside the kernel's grid and block sizes, identifying
+which region of the captured workload each kernel came from.
+
+Because annotations live in a process-global registry keyed by ids that
+match the profiler's, the pickle of ``dict(get_kernel_annotations())``
+can equally be saved next to a trace and joined offline.
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.graph_annotations
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    is_available
+    mark_kernels
+    get_kernel_annotations
+    clear_kernel_annotations
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda
+```
+
+(cuda-memory-management-api)=
+
+```{eval-rst}
+.. automodule:: torch.cuda.memory
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.memory
+```
+
+## Memory management
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+     empty_cache
+     get_per_process_memory_fraction
+     list_gpu_processes
+     mem_get_info
+     memory_stats
+     memory_stats_as_nested_dict
+     reset_accumulated_memory_stats
+     host_memory_stats
+     host_memory_stats_as_nested_dict
+     reset_accumulated_host_memory_stats
+     memory_summary
+     memory_snapshot
+     memory_allocated
+     max_memory_allocated
+     reset_max_memory_allocated
+     memory_reserved
+     max_memory_reserved
+     set_per_process_memory_fraction
+     memory_cached
+     max_memory_cached
+     reset_max_memory_cached
+     reset_peak_memory_stats
+     reset_peak_host_memory_stats
+     caching_allocator_alloc
+     caching_allocator_delete
+     get_allocator_backend
+     CUDAPluggableAllocator
+     change_current_allocator
+     MemPool
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    caching_allocator_disabled
+    caching_allocator_enable
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda
+```
+
+```{eval-rst}
+.. autoclass:: torch.cuda.use_mem_pool
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.nccl
+```
+
+```{eval-rst}
+.. autofunction:: version
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.profiler
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    profile
+    start
+    stop
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda
+```
+
+## NVIDIA Tools Extension (NVTX)
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    nvtx.mark
+    nvtx.range_push
+    nvtx.range_pop
+    nvtx.range
+    nvtx.range_end
+    nvtx.range_start
+```
+
+## Jiterator (beta)
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    jiterator._create_jit_fn
+    jiterator._create_multi_output_jit_fn
+```
+
+## TunableOp
+
+Some operations could be implemented using more than one library or more than
+one technique. For example, a GEMM could be implemented for CUDA or ROCm using
+either the cublas/cublasLt libraries or hipblas/hipblasLt libraries,
+respectively. How does one know which implementation is the fastest and should
+be chosen? That's what TunableOp provides. Certain operators have been
+implemented using multiple strategies as Tunable Operators. At runtime, all
+strategies are profiled and the fastest is selected for all subsequent
+operations.
+
+See the {doc}`documentation <cuda.tunable>` for information on how to use it.
+
+```{toctree}
+:hidden: true
+
+cuda.tunable
+```
+
+## Stream Sanitizer (prototype)
+
+CUDA Sanitizer is a prototype tool for detecting synchronization errors between streams in PyTorch.
+See the {doc}`documentation <cuda._sanitizer>` for information on how to use it.
+
+```{toctree}
+:hidden: true
+
+cuda._sanitizer
+```
+
+## GPUDirect Storage (prototype)
+
+The APIs in `torch.cuda.gds` provide thin wrappers around certain cuFile APIs that allow
+direct memory access transfers between GPU memory and storage, avoiding a bounce buffer in the CPU. See the
+[cufile api documentation](https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api)
+for more details.
+
+These APIs can be used in versions greater than or equal to CUDA 12.6. In order to use these APIs, one must
+ensure that their system is appropriately configured to use GPUDirect Storage per the
+[GPUDirect Storage documentation](https://docs.nvidia.com/gpudirect-storage/troubleshooting-guide/contents.html).
+
+See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use these.
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.gds
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    is_available
+    gds_register_buffer
+    gds_deregister_buffer
+    GdsFile
+
+```
+
+## Green Contexts (experimental)
+
+`torch.cuda.green_contexts` provides thin wrappers around the CUDA Green Context APIs
+to enable more general carveout of SM resources for CUDA kernels.
+
+These APIs require the `cuda.bindings` package and can be used in PyTorch with
+CUDA versions greater than or equal to 12.8. Workqueue configuration requires
+CUDA 13.1 or newer.
+
+Install instructions for `cuda.bindings` can be found here:
+https://nvidia.github.io/cuda-python/
+
+Create streams from the green context and use them like other custom CUDA
+streams:
+
+```python
+ctx = GreenContext(...)
+stream = ctx.Stream()
+with torch.cuda.stream(stream):
+    # torch operations here are using resources from `ctx`
+    pass
+```
+
+Synchronization between green-context streams and other streams is the user's
+responsibility. Use CUDA events to order work, just as you would for any other
+custom stream.
+
+The `GreenContext.set_context()` and `GreenContext.pop_context()` methods are
+deprecated compatibility APIs.
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.green_contexts
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    GreenContext
+```
+
+
+% This module needs to be documented. Adding here in the meantime
+
+% for tracking purposes
+
+```{eval-rst}
+.. py:module:: torch.cuda.comm
+```
+
+```{eval-rst}
+.. py:module:: torch.cuda.gds
+```
+
+```{eval-rst}
+.. py:module:: torch.cuda.graph_annotations
+```
+
+```{eval-rst}
+.. py:module:: torch.cuda.green_contexts
+```
+
+```{eval-rst}
+.. py:module:: torch.cuda.jiterator
+```
+
+```{eval-rst}
+.. py:module:: torch.cuda.nccl
+
+.. autofunction:: torch.cuda.nccl.is_available
+```
+
+```{eval-rst}
+.. automodule:: torch.cuda.nvtx
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.nvtx
+```
+
+```{eval-rst}
+.. py:module:: torch.cuda.profiler
+```
+
+```{eval-rst}
+.. py:module:: torch.cuda.sparse
+```
+
+```{eval-rst}
+.. toctree::
+    :hidden:
+
+    cuda.aliases.md
+```

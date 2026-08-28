@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 # noqa: F401, E501
 # This is an auto-generated file. Please do not modify it by hand.
 # To re-generate, run:
@@ -7,6 +5,7 @@
 
 import torch
 import torch._inductor
+import operator
 
 aten = torch.ops.aten
 prims = torch.ops.prims

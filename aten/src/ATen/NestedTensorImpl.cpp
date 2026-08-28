@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
@@ -71,7 +70,7 @@ c10::DispatchKeySet get_view_key_set(const at::Tensor& base) {
 
 namespace at::native {
 
-inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
+inline static std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   // torch.tensor([]) is considered to have `dim() = 1` and `size(0) = 0`
   // torch.nested_tensor([]) should also has `dim() = 1` and `size(0) = 0`
   if (sizes.dim() == 0) {
@@ -182,7 +181,7 @@ NestedTensorImpl::NestedTensorImpl(
       "coverage, and works with torch.compile.");
   auto storage_device = storage_.device();
   TORCH_INTERNAL_ASSERT(
-      storage_device.is_cpu() || storage_device.is_cuda() || storage_device.is_xpu() || storage_device.is_privateuseone(),
+      storage_device.is_cpu() || storage_device.is_cuda() || storage_device.is_xpu() || storage_device.is_hpu() || storage_device.is_privateuseone(),
       "NestedTensorImpl storage must be either CUDA, CPU, XPU or ", get_privateuse1_backend(), " but got ",
       storage_device);
   validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);
@@ -211,7 +210,7 @@ NestedTensorImpl::NestedTensorImpl(
 }
 
 // assume contiguous, `nested_strides` and `offsets`
-// can be infered from `nested_sizes`
+// can be inferred from `nested_sizes`
 NestedTensorImpl::NestedTensorImpl(
     const at::Tensor& buffer,
     const at::Tensor& nested_sizes)
@@ -273,7 +272,7 @@ c10::SymInt NestedTensorImpl::sym_numel_custom() const {
   return NestedTensorImpl::numel_custom();
 }
 
-bool NestedTensorImpl::is_contiguous_custom(MemoryFormat) const {
+c10::SymBool NestedTensorImpl::sym_is_contiguous_custom(MemoryFormat /*memory_format*/) const {
   return nested_tensor_impl_is_contiguous(this);
 }
 IntArrayRef NestedTensorImpl::sizes_custom() const {
@@ -302,7 +301,7 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
     bool allow_tensor_metadata_change) const {
   if (key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = pyobj_slot_.load_pyobj_interpreter()->detach(this);
+    auto r = (*c10::impl::getGlobalPyInterpreter())->detach(this);
     if (r) {
       r->set_version_counter(std::forward<VariableVersion>(version_counter));
       r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);

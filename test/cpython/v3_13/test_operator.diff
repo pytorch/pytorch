@@ -1,0 +1,104 @@
+diff --git a/test/cpython/v3_13/test_operator.py b/test/cpython/v3_13/test_operator.py
+index d90f820052c..20a56bd738b 100644
+--- a/test/cpython/v3_13/test_operator.py
++++ b/test/cpython/v3_13/test_operator.py
+@@ -1,3 +1,23 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_operator.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++# ======= END DYNAMO PATCH =======
++
+ import unittest
+ import inspect
+ import pickle
+@@ -276,9 +296,9 @@ class OperatorTestCase:
+ 
+     def test_pow(self):
+         operator = self.module
+-        self.assertRaises(TypeError, operator.pow)
+         self.assertRaises(TypeError, operator.pow, None, None)
+         self.assertEqual(operator.pow(3,5), 3**5)
++        self.assertRaises(TypeError, operator.pow)
+         self.assertRaises(TypeError, operator.pow, 1)
+         self.assertRaises(TypeError, operator.pow, 1, 2, 3)
+ 
+@@ -335,17 +355,17 @@ class OperatorTestCase:
+         operator = self.module
+         a = b = 'xyzpdq'
+         c = a[:3] + b[3:]
+-        self.assertRaises(TypeError, operator.is_)
+         self.assertTrue(operator.is_(a, b))
+         self.assertFalse(operator.is_(a,c))
++        self.assertRaises(TypeError, operator.is_)
+ 
+     def test_is_not(self):
+         operator = self.module
+         a = b = 'xyzpdq'
+         c = a[:3] + b[3:]
+-        self.assertRaises(TypeError, operator.is_not)
+         self.assertFalse(operator.is_not(a, b))
+         self.assertTrue(operator.is_not(a,c))
++        self.assertRaises(TypeError, operator.is_not)
+ 
+     def test_attrgetter(self):
+         operator = self.module
+@@ -628,11 +648,11 @@ class OperatorTestCase:
+         self.assertEqual(str(sig), '(obj, /)')
+ 
+ 
+-class PyOperatorTestCase(OperatorTestCase, unittest.TestCase):
++class PyOperatorTestCase(OperatorTestCase, __TestCase):
+     module = py_operator
+ 
+ @unittest.skipUnless(c_operator, 'requires _operator')
+-class COperatorTestCase(OperatorTestCase, unittest.TestCase):
++class COperatorTestCase(OperatorTestCase, __TestCase):
+     module = c_operator
+ 
+ 
+@@ -717,25 +737,25 @@ class OperatorPickleTestCase:
+                 # Can't test repr consistently with multiple keyword args
+                 self.assertEqual(f2(a), f(a))
+ 
+-class PyPyOperatorPickleTestCase(OperatorPickleTestCase, unittest.TestCase):
++class PyPyOperatorPickleTestCase(OperatorPickleTestCase, __TestCase):
+     module = py_operator
+     module2 = py_operator
+ 
+ @unittest.skipUnless(c_operator, 'requires _operator')
+-class PyCOperatorPickleTestCase(OperatorPickleTestCase, unittest.TestCase):
++class PyCOperatorPickleTestCase(OperatorPickleTestCase, __TestCase):
+     module = py_operator
+     module2 = c_operator
+ 
+ @unittest.skipUnless(c_operator, 'requires _operator')
+-class CPyOperatorPickleTestCase(OperatorPickleTestCase, unittest.TestCase):
++class CPyOperatorPickleTestCase(OperatorPickleTestCase, __TestCase):
+     module = c_operator
+     module2 = py_operator
+ 
+ @unittest.skipUnless(c_operator, 'requires _operator')
+-class CCOperatorPickleTestCase(OperatorPickleTestCase, unittest.TestCase):
++class CCOperatorPickleTestCase(OperatorPickleTestCase, __TestCase):
+     module = c_operator
+     module2 = c_operator
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

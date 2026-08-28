@@ -1,6 +1,5 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
-#include <c10/core/DeviceType.h>
 #include <c10/core/alignment.h>
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/mobile/CPUCachingAllocator.h>
@@ -11,7 +10,7 @@
 C10_DEFINE_bool(
     caffe2_report_cpu_memory_usage,
     false,
-    "If set, print out detailed memory usage");
+    "If set, print out detailed memory usage")
 
 namespace c10 {
 
@@ -21,9 +20,9 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
     void* data = nullptr;
     try {
       data = c10::alloc_cpu(nbytes);
-    } catch (c10::Error& e) {
+    } catch (c10::Error&) {
       profiledCPUMemoryReporter().OutOfMemory(nbytes);
-      throw e;
+      throw;
     }
     profiledCPUMemoryReporter().New(data, nbytes);
     return {data, data, &ReportAndDelete, at::Device(at::DeviceType::CPU)};
@@ -121,9 +120,9 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     } else {
       try {
         data = c10::alloc_cpu(alloc_size);
-      } catch (c10::Error& e) {
+      } catch (c10::Error&) {
         profiledCPUMemoryReporter().OutOfMemory(alloc_size);
-        throw e;
+        throw;
       }
       auto allocation_planner = GetThreadLocalAllocationPlanner();
       if (allocation_planner != nullptr) {
@@ -154,7 +153,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
   }
 };
 
-void NoDelete(void*) {}
+void NoDelete(void* /*unused*/) {}
 
 at::Allocator* GetCPUAllocator() {
   return GetAllocator(DeviceType::CPU);
@@ -196,7 +195,7 @@ at::Allocator* GetDefaultCPUAllocator() {
   return &g_cpu_alloc;
 }
 
-REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc);
+REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc)
 
 #endif /* C10_Mobile */
 
@@ -289,7 +288,9 @@ void ProfiledCPUMemoryReporter::OutOfMemory(size_t nbytes) {
   }
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_API at::Allocator* cpu_caching_alloc = nullptr;
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_API uint8_t cpu_caching_alloc_priority = 0;
 
 void SetCPUCachingAllocator(Allocator* alloc, uint8_t priority) {

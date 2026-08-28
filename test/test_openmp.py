@@ -38,8 +38,8 @@ class TestOpenMP_ParallelFor(TestCase):
         p = psutil.Process()
         # warm up for 5 runs, then things should be stable for the last 5
         last_rss = collections.deque(maxlen=5)
-        for n in range(10):
-            for i in range(runs):
+        for _ in range(10):
+            for _ in range(runs):
                 self.model(self.x)
             last_rss.append(p.memory_info().rss)
         return last_rss
@@ -53,7 +53,8 @@ class TestOpenMP_ParallelFor(TestCase):
                 continue
             is_increasing = is_increasing and (last_rss[idx] > last_rss[idx - 1])
         self.assertTrue(
-            not is_increasing, msg=f"memory usage is increasing, {str(last_rss)}"
+            not is_increasing,
+            msg=lambda msg: f"{msg}\nmemory usage is increasing, {str(last_rss)}",
         )
 
     def test_one_thread(self):

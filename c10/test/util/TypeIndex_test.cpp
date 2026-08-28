@@ -2,9 +2,9 @@
 #include <c10/util/TypeIndex.h>
 #include <gtest/gtest.h>
 
-using c10::string_view;
 using c10::util::get_fully_qualified_type_name;
 using c10::util::get_type_index;
+using std::string_view;
 
 // NOLINTBEGIN(modernize-unary-static-assert)
 namespace {
@@ -137,7 +137,7 @@ static_assert(
     "");
 static_assert(
     string_view::npos !=
-        get_fully_qualified_type_name<typename Type<int>::type>().find("*"),
+        get_fully_qualified_type_name<typename Type<int>::type>().find('*'),
     "");
 
 // but with remove_pointer applied, there is no '*' in the type name anymore
@@ -145,7 +145,7 @@ static_assert(
     string_view::npos ==
         get_fully_qualified_type_name<
             std::remove_pointer_t<typename Type<int>::type>>()
-            .find("*"),
+            .find('*'),
     "");
 
 TEST(TypeIndex, TypeComputationsAreResolved) {
@@ -154,13 +154,13 @@ TEST(TypeIndex, TypeComputationsAreResolved) {
       get_fully_qualified_type_name<typename Type<int>::type>().find("int"));
   EXPECT_NE(
       string_view::npos,
-      get_fully_qualified_type_name<typename Type<int>::type>().find("*"));
+      get_fully_qualified_type_name<typename Type<int>::type>().find('*'));
   // but with remove_pointer applied, there is no '*' in the type name anymore
   EXPECT_EQ(
       string_view::npos,
       get_fully_qualified_type_name<
           std::remove_pointer_t<typename Type<int>::type>>()
-          .find("*"));
+          .find('*'));
 }
 
 struct Functor final {

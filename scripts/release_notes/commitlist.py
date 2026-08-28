@@ -4,6 +4,7 @@ import dataclasses
 import os
 import pprint
 import re
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import List
@@ -31,6 +32,11 @@ Update the existing commitlist to commit bfcb687b9c.
     python commitlist.py --update-to bfcb687b9c
 
 """
+
+# Increase the allowed size of a CSV field to 1mil bytes for long files changed
+csv.field_size_limit(1000000)
+
+verbose = False
 
 
 @dataclasses.dataclass(frozen=False)
@@ -145,8 +151,11 @@ class CommitList:
         if category in common.quantization.categories:
             category = common.quantization.name
             return category
-        if category in common.distributed.categories:
-            category = common.distributed.name
+        if category in common.optimizer.categories:
+            category = common.optimizer.name
+            return category
+        if category in common.aotdispatcher.categories:
+            category = common.aotdispatcher.name
             return category
         return category
 
@@ -173,7 +182,7 @@ class CommitList:
             ("[nn]", "nn_frontend"),
             ("[complex]", "complex_frontend"),
             ("[mps]", "mps"),
-            ("[optimizer]", "optimizer_frontend"),
+            ("[optimizer]", "optim"),
             ("[xla]", "xla"),
         ]
         title_lower = title.lower()
@@ -228,7 +237,6 @@ class CommitList:
                 file,
                 [
                     "docker/",
-                    ".circleci",
                     ".github",
                     ".jenkins",
                     ".ci",
@@ -385,7 +393,13 @@ class CommitList:
 
         log_lines = commits.split("\n")
         hashes, titles = zip(*[log_line.split(" ", 1) for log_line in log_lines])
-        return [CommitList.gen_commit(commit_hash) for commit_hash in hashes]
+        result = []
+        for i, commit_hash in enumerate(hashes):
+            if verbose and (i % 10 == 0):
+                timestamp = time.strftime("%H:%M:%S")
+                print(f"[{timestamp}] Processing {i + 1} out of {len(hashes)} commits")
+            result.append(CommitList.gen_commit(commit_hash))
+        return result
 
     def filter(self, *, category=None, topic=None):
         commits = self.commits
@@ -490,15 +504,18 @@ def get_markdown_header(category):
     header = f"""
 # Release Notes worksheet {category}
 
-The main goal of this process is to rephrase all the commit messages below to make them clear and easy to read by the end user. You should follow the following instructions to do so:
+You should:
 
-* **Please cleanup, and format commit titles to be readable by the general pytorch user.** [Detailed instructions here](https://docs.google.com/document/d/14OmgGBr1w6gl1VO47GGGdwrIaUNr92DFhQbY_NEk8mQ/edit)
+1. ensure commit categorization is correct
+2. write up major features, bc-breaking changes, deprecations in detail
+3. summarize the other sections
+
+## 1. Ensure commit categorization is correct
+
 * Please sort commits into the following categories (you should not rename the categories!), I tried to pre-sort these to ease your work, feel free to move commits around if the current categorization is not good.
-* Please drop any commits that are not user-facing.
-* If anything is from another domain, leave it in the UNTOPICED section at the end and I'll come and take care of it.
-* Please use markdown format
-* Please use #PR_NUM to link to the PR, instead of `[#PR_NUM](https://github.com/pytorch/pytorch/pull/#PR_NUM)` to reduce the length of the release notes
-* We place a lot of emphasis on the “BC-breaking” and “deprecation” sections. Those should be where the most effort goes in. The “improvements” and “bug fixes” for Python API should be nice as well. Everything else doesn’t matter too much so feel free to cut corners if time is short.
+* Anything that is not public facing needs to be removed.
+* If anything is miscategorized/belongs to another domain, move it to `miscategorized.md`.
+* Please scan through `miscategorized.md` and handle any commits that belong within your domain according to these instructions.
 
 The categories below are as follows:
 
@@ -510,6 +527,24 @@ The categories below are as follows:
 * performance: All commits that are added mainly for performance (we separate this from improvements above to make it easier for users to look for it)
 * documentation: All commits that add/update documentation
 * Developers: All commits that are not end-user facing but still impact people that compile from source, develop into pytorch, extend pytorch, etc
+* not user facing: All commits that are not public end-user facing and hence should be dropped from the release notes
+
+## 2. Major features, BC-breaking changes, deprecations
+
+The main goal of this process is to rephrase all the commit messages below to make them **clear and easy to read** by the end user. You should follow the following instructions to do so:
+
+* **Please clean up and format commit titles to be readable by the general PyTorch user.** Make sure you're [following the guidance here](https://docs.google.com/document/d/14OmgGBr1w6gl1VO47GGGdwrIaUNr92DFhQbY_NEk8mQ/edit)! Your resulting notes must be consistent and easy to read.
+* We place a lot of emphasis on the “BC-breaking” and “deprecation” sections. Those should be where the most effort goes in. The “improvements” and “bug fixes” for Python API should be nice as well.
+
+## 3. Summarize the other sections
+
+For the other sections (improvements, bug fixes, performance, documentation, developers, not user facing) - use your
+judgement to summarize the key PRs. You do not need to make every commit description perfect
+(changed in v2.10 to simplify the process).
+
+Once you are finished, move this very file from `todo/` to `done/` and submit a pull request.
+
+Feel free to use https://github.com/pytorch/pytorch/releases/tag/v2.10.0 as an example.
 """
 
     return [header]
@@ -534,7 +569,11 @@ def main():
         "--export-csv-categories", "--export_csv_categories", action="store_true"
     )
     parser.add_argument("--path", default="results/commitlist.csv")
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
+
+    global verbose
+    verbose = args.verbose
 
     if args.create_new:
         create_new(args.path, args.create_new[0], args.create_new[1])

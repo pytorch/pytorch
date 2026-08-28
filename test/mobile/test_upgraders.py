@@ -43,9 +43,9 @@ class TestLiteScriptModule(TestCase):
             / "upgrader_models"
             / "test_versioned_div_tensor_v2.ptl"
         )
-        mobile_module_v2 = _load_for_lite_interpreter(str(model_path))
+        _load_for_lite_interpreter(str(model_path))
         jit_module_v2 = torch.jit.load(str(model_path))
-        current_mobile_module = self._save_load_mobile_module(jit_module_v2)
+        self._save_load_mobile_module(jit_module_v2)
         vals = (2.0, 3.0, 2, 3)
         for val_a, val_b in product(vals, vals):
             a = torch.tensor((val_a,))

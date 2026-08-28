@@ -3,7 +3,7 @@ AutoHeuristic is a framework that allows one to use results from autotuning to l
 
 ## How to use AutoHeuristic
 In general, the following steps have to performed:
-- The AutoHeursitic constructor has to be called.
+- The AutoHeuristic constructor has to be called.
 - A script that runs benchmarks in order to collect training data has to be implemented.
 - The train_decision.py (if you want to learn a decision tree) or train_regression.py (if you want to learn a regression tree) script has to be run in order to learn the heuristic and generate it to code.
 
@@ -26,7 +26,7 @@ autoheuristic = AutoHeuristic(
 Here, `feedback` is a function that benchmarks a given choice and returns the execution time. For an example, see: https://github.com/pytorch/pytorch/blob/main/torch/_inductor/fx_passes/pad_mm.py.
 
 ### Use case 2: Kernel choice selection
-If you want to use AutoHeuristic for kernel choice selection, you have to call the AutoHeuristicSelectAlgorithm constructor. This is done e.g. for mixed_mm
+If you want to use AutoHeuristic for kernel choice selection, you have to call the AutoHeuristicSelectAlgorithm constructor.
 ```
 autoheuristic = AutoHeuristicSelectAlgorithm(
     fallback=fallback,
@@ -56,9 +56,8 @@ Replace "pad_mm" with the name you provided in the call to the AutoHeuristic con
 
 AutoHeuristic provides a `BenchmarkRunner` class (https://github.com/pytorch/pytorch/blob/main/torchgen/_autoheuristic/benchmark_runner.py) that simplifies the process of collecting data. To use it, create a new class that subclasses `BenchmarkRunner`, and implements the `run_benchmark()` and `create_input()` methods.
 
-These examples might be helpful:
+This example might be helpful:
 - https://github.com/pytorch/pytorch/blob/main/torchgen/_autoheuristic/pad_mm/gen_data_pad_mm.py
-- https://github.com/pytorch/pytorch/blob/main/torchgen/_autoheuristic/mixed_mm/gen_data_mixed_mm.py
 
 
 ## Step 3: Learning a heuristic and using it
@@ -74,8 +73,7 @@ TORCHINDUCTOR_AUTOHEURISTIC_USE="pad_mm" python run.py
 ```
 Here, you again have to replace "pad_mm" with the name you provided in the call to the AutoHeuristic constructor.
 
-Instead of just running the `train_decision.py` script, you probably want to customize the training process in some way. To do this, create a new class that subclasses `AHTrainDecision` and override methods you want to customize. Here are some examples:
-- https://github.com/pytorch/pytorch/blob/main/torchgen/_autoheuristic/mixed_mm/train_decision_mixedmm.py
+Instead of just running the `train_decision.py` script, you probably want to customize the training process in some way. To do this, create a new class that subclasses `AHTrainDecision` and override methods you want to customize. Here is an example:
 - https://github.com/pytorch/pytorch/blob/main/torchgen/_autoheuristic/pad_mm/train_decision_pad_mm.py
 
 ## Other
@@ -89,7 +87,7 @@ context = AHContext()
 context.add_feature("m", mat1.shape[0])
 context.add_feature("k", mat1.shape[1])
 
-# adding a categorical feture
+# adding a categorical feature
 context.add_feature("mat1_dtype", mat1.dtype, is_categorical=True)
 ```
 
@@ -109,8 +107,7 @@ ah_operations = [m_times_k_op]
 autoheuristic = AutoHeuristic(..., augment_context=ah_operations, ...)
 ```
 
-Note that you also have to specify these operations when you want to learn a heuristic. Look at the `add_new_features()` method in these examples, to see how it is done:
-- https://github.com/pytorch/pytorch/blob/main/torchgen/_autoheuristic/mixed_mm/train_decision_mixedmm.py
+Note that you also have to specify these operations when you want to learn a heuristic. Look at the `add_new_features()` method in this example, to see how it is done:
 - https://github.com/pytorch/pytorch/blob/main/torchgen/_autoheuristic/pad_mm/train_decision_pad_mm.py
 
 ### Where has AutoHeuristic already been used?

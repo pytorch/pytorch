@@ -18,7 +18,7 @@ namespace torch::throughput_benchmark {
 
 /**
  * The struct is used to provide results of a benchmark to the caller
- * In the future all additional statics should be added here.
+ * In the future all additional statistics should be added here.
  */
 struct BenchmarkExecutionStats {
   float latency_avg_ms{-1};
@@ -58,7 +58,7 @@ struct BenchmarkConfig {
   // If set autograd profiler will be enabled. I.e. this variable would be
   // created before the main benchmark loop (but after the warmup):
   // RecordProfile guard(profiler_output_path);
-  std::string profiler_output_path{""};
+  std::string profiler_output_path;
 };
 
 namespace detail {
@@ -91,7 +91,7 @@ class BenchmarkHelper {
   }
 
   // Destructor doesn't require the GIL because it is going to be executed on
-  // the PyThon thread
+  // the Python thread
   std::vector<Input> inputs_;
   Model model_;
   bool initialized_{false};
@@ -184,7 +184,7 @@ class C10_HIDDEN ThroughputBenchmark {
   // Equivalent to just running the model directly on the given input
   py::object runOnce(const py::args& args, const py::kwargs& kwargs);
 
-  // The main method of the class allows to perform a multi-threaded benchmark
+  // The main method of the class allows performing a multi-threaded benchmark
   // It returns BenchmarkExecutionStats object with a lot of useful statistics
   // about runtime execution. We can enhance this class in the future to provide
   // more information to the user

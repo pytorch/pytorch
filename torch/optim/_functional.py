@@ -1,7 +1,6 @@
-# mypy: allow-untyped-defs
 r"""Functional interface."""
+
 import math
-from typing import List
 
 from torch import Tensor
 
@@ -22,18 +21,18 @@ from .sgd import sgd  # type: ignore[attr-defined]  # noqa: F401
 
 
 def sparse_adam(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_avg_sqs: List[Tensor],
-    state_steps: List[int],
+    params: list[Tensor],
+    grads: list[Tensor],
+    exp_avgs: list[Tensor],
+    exp_avg_sqs: list[Tensor],
+    state_steps: list[int],
     *,
     eps: float,
     beta1: float,
     beta2: float,
     lr: float,
     maximize: bool,
-):
+) -> None:
     r"""Functional API that performs Sparse Adam algorithm computation.
 
     See :class:`~torch.optim.SparseAdam` for details.
@@ -53,7 +52,7 @@ def sparse_adam(
         exp_avg_sq = exp_avg_sqs[i]
         step = state_steps[i]
 
-        def make_sparse(values):
+        def make_sparse(values: Tensor) -> Tensor:
             constructor = grad.new
             if grad_indices.dim() == 0 or values.dim() == 0:
                 return constructor().resize_as_(grad)

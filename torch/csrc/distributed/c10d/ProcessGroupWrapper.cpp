@@ -2,15 +2,11 @@
 
 #ifdef USE_C10D_GLOO
 
-#include <c10/core/Allocator.h>
-#include <c10/core/DeviceType.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -163,8 +159,8 @@ struct CollectiveFingerPrint {
     backend->allgather(output_tensors, tensors_to_verify)->wait();
     // Verify equivalence
     for (const auto i : c10::irange(output_tensors.size())) {
-      const std::vector<at::Tensor> gathered_tensors = output_tensors[i];
-      const at::Tensor reference_tensor = tensors_to_verify[i];
+      const std::vector<at::Tensor>& gathered_tensors = output_tensors[i];
+      const at::Tensor& reference_tensor = tensors_to_verify[i];
       for (const auto rank : c10::irange(gathered_tensors.size())) {
         const auto& rank_tensor = gathered_tensors[rank];
         if (!rank_tensor.equal(reference_tensor)) {
@@ -174,13 +170,13 @@ struct CollectiveFingerPrint {
           ss << "Detected mismatch between collectives on ranks. Rank "
              << backend->getRank() << " is running collective: " << *this
              << ", but Rank " << rank
-             << " is running collective: " << rank_fingerprint << ".";
+             << " is running collective: " << rank_fingerprint << '.';
           auto diff_result = compute_collective_diff(rank_fingerprint);
           if (std::get<0>(diff_result)) {
             ss << std::get<1>(diff_result);
           }
 
-          TORCH_CHECK(false, ss.str());
+          TORCH_CHECK(false, std::move(ss).str());
         }
       }
     }
@@ -281,9 +277,9 @@ struct CollectiveFingerPrint {
 
     check("Tensor devices", other_devices, this_devices);
     if (!found_diff) {
-      return std::make_pair(false, ss.str());
+      return std::make_pair(false, std::move(ss).str());
     } else {
-      return std::make_pair(true, ss.str());
+      return std::make_pair(true, std::move(ss).str());
     }
   }
 
@@ -354,9 +350,9 @@ std::ostream& operator<<(
         ", TensorShape=[",
         c10::Join(", ", size_strs),
         "], TensorDtypes=",
-        (dtype_strs),
+        dtype_strs,
         ", TensorDeviceTypes=",
-        (device_type_strs),
+        device_type_strs,
         ")");
   } else {
     collectiveInfo = c10::str(
@@ -386,10 +382,7 @@ ProcessGroupWrapper::ProcessGroupWrapper(
     c10::intrusive_ptr<Backend> glooBackend)
     : Backend(backend->getRank(), backend->getSize()),
       backend_(backend),
-      glooBackend_(std::move(glooBackend)) {
-  // Set the sequence number for the underlying process group.
-  backend_->setSequenceNumberForGroup();
-}
+      glooBackend_(std::move(glooBackend)) {}
 
 const std::string ProcessGroupWrapper::getBackendName() const {
   return backend_->getBackendName();
@@ -420,6 +413,13 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::allreduce_coalesced(
   return backend_->allreduce_coalesced(tensors, opts);
 }
 
+c10::intrusive_ptr<Work> ProcessGroupWrapper::allreduce_sparse(
+    std::vector<at::Tensor>& tensors,
+    const AllreduceOptions& opts) {
+  runCollectiveChecks(OpType::_ALLREDUCE_SPARSE, tensors);
+  return backend_->allreduce_sparse(tensors, opts);
+}
+
 c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
@@ -439,13 +439,13 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather(
   return backend_->allgather(outputTensors, inputTensors, opts);
 }
 
-c10::intrusive_ptr<Work> ProcessGroupWrapper::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::all_gather_single(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const AllgatherOptions& opts) {
   std::vector<at::Tensor> inputTensors({inputBuffer});
   runCollectiveChecks(OpType::_ALLGATHER_BASE, inputTensors);
-  return backend_->_allgather_base(outputBuffer, inputBuffer, opts);
+  return backend_->all_gather_single(outputBuffer, inputBuffer, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather_coalesced(
@@ -458,6 +458,18 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather_coalesced(
   // details.
   runCollectiveChecks(OpType::ALLGATHER_COALESCED, {});
   return backend_->allgather_coalesced(outputTensorLists, inputTensors, opts);
+}
+
+c10::intrusive_ptr<Work> ProcessGroupWrapper::all_gather_single_coalesced(
+    std::vector<at::Tensor>& outputs,
+    std::vector<at::Tensor>& inputs,
+    const AllgatherOptions& opts) {
+  // NOTE: We don't enforce shape checking for allgather_into_tensor_coalesced
+  // because the implementation itself does not enforce it. We have tests that
+  // use inconsistent shapes, see python implementation in distributed_c10d for
+  // details.
+  runCollectiveChecks(OpType::ALLGATHER_INTO_TENSOR_COALESCED, {});
+  return backend_->all_gather_single_coalesced(outputs, inputs, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::gather(
@@ -488,7 +500,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter(
   return backend_->reduce_scatter(outputTensors, inputTensors, opts);
 }
 
-c10::intrusive_ptr<Work> ProcessGroupWrapper::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::all_to_all_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputSplitSizes,
@@ -496,7 +508,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::alltoall_base(
     const AllToAllOptions& opts) {
   // alltoall supports uneven split, so don't enforce shape checking.
   runCollectiveChecks(OpType::ALLTOALL_BASE, {});
-  return backend_->alltoall_base(
+  return backend_->all_to_all_single(
       outputTensor, inputTensor, outputSplitSizes, inputSplitSizes, opts);
 }
 
@@ -513,14 +525,6 @@ void ProcessGroupWrapper::monitoredBarrier(
     const BarrierOptions& opts,
     bool waitAllRanks) {
   return backend_->monitoredBarrier(opts, waitAllRanks);
-}
-
-void ProcessGroupWrapper::setSequenceNumberForGroup() {
-  // Set underlying pg's sequence number if it is not set.
-  if (backend_->getSequenceNumberForGroup() == 0) {
-    // Set the sequence number for the underlying process group.
-    backend_->setSequenceNumberForGroup();
-  }
 }
 
 uint64_t ProcessGroupWrapper::getSequenceNumberForGroup() {
@@ -553,13 +557,25 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::barrier(
   return backend_->barrier(opts);
 }
 
-c10::intrusive_ptr<Work> ProcessGroupWrapper::_reduce_scatter_base(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter_single(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ReduceScatterOptions& opts) {
   runCollectiveChecks(
       OpType::_REDUCE_SCATTER_BASE, {inputBuffer, outputBuffer});
-  return backend_->_reduce_scatter_base(outputBuffer, inputBuffer, opts);
+  return backend_->reduce_scatter_single(outputBuffer, inputBuffer, opts);
+}
+
+c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter_single_coalesced(
+    std::vector<at::Tensor>& outputs,
+    std::vector<at::Tensor>& inputs,
+    const ReduceScatterOptions& opts) {
+  // NOTE: We don't enforce shape checking for reduce_scatter_tensor_coalesced
+  // because the implementation itself does not enforce it we have tests that
+  // use inconsistent shapes, see python implementation in distributed_c10d for
+  // details.
+  runCollectiveChecks(OpType::REDUCE_SCATTER_TENSOR_COALESCED, {});
+  return backend_->reduce_scatter_single_coalesced(outputs, inputs, opts);
 }
 
 void ProcessGroupWrapper::startCoalescing() {
@@ -568,6 +584,124 @@ void ProcessGroupWrapper::startCoalescing() {
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::endCoalescing() {
   return backend_->endCoalescing();
+}
+
+bool ProcessGroupWrapper::supportsSplitting() const {
+  return backend_->supportsSplitting();
+}
+
+bool ProcessGroupWrapper::supportsCoalescing() const {
+  return backend_->supportsCoalescing();
+}
+
+bool ProcessGroupWrapper::supportsTimeEstimation() const {
+  return backend_->supportsTimeEstimation();
+}
+
+void ProcessGroupWrapper::startTimeEstimate() {
+  backend_->startTimeEstimate();
+}
+
+float ProcessGroupWrapper::endTimeEstimate() {
+  return backend_->endTimeEstimate();
+}
+
+bool ProcessGroupWrapper::supportsShrinking() const {
+  return backend_->supportsShrinking();
+}
+
+c10::intrusive_ptr<Backend> ProcessGroupWrapper::shrink(
+    const std::vector<int64_t>& ranks_to_exclude,
+    int shrink_flags,
+    const c10::intrusive_ptr<Options>& opts_override) {
+  return backend_->shrink(ranks_to_exclude, shrink_flags, opts_override);
+}
+
+void ProcessGroupWrapper::setTimeout(std::chrono::milliseconds timeout) {
+  backend_->setTimeout(timeout);
+}
+
+c10::intrusive_ptr<Backend::Options> ProcessGroupWrapper::getBackendOptions() {
+  return backend_->getBackendOptions();
+}
+
+std::shared_ptr<c10::Allocator> ProcessGroupWrapper::getMemAllocator() {
+  return backend_->getMemAllocator();
+}
+
+at::Tensor ProcessGroupWrapper::allocateTensor(
+    long size,
+    at::TensorOptions options) {
+  return backend_->allocateTensor(size, options);
+}
+
+bool ProcessGroupWrapper::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
+  return backend_->supportsTensorAlloc(deviceIdx);
+}
+
+void ProcessGroupWrapper::abort() {
+  backend_->abort();
+}
+
+void ProcessGroupWrapper::shutdown() {
+  backend_->shutdown();
+}
+
+void ProcessGroupWrapper::suspend() {
+  backend_->suspend();
+}
+
+void ProcessGroupWrapper::resume() {
+  backend_->resume();
+}
+
+std::unordered_map<std::string, uint64_t> ProcessGroupWrapper::
+    getMemoryStats() {
+  return backend_->getMemoryStats();
+}
+
+ErrorType ProcessGroupWrapper::getError() {
+  return backend_->getError();
+}
+
+std::optional<at::Device> ProcessGroupWrapper::getBoundDeviceId() const {
+  return backend_->getBoundDeviceId();
+}
+
+void ProcessGroupWrapper::setBoundDeviceId(std::optional<at::Device> device) {
+  backend_->setBoundDeviceId(device);
+}
+
+void ProcessGroupWrapper::eagerConnectSingleDevice(at::Device device) {
+  backend_->eagerConnectSingleDevice(device);
+}
+
+void ProcessGroupWrapper::registerOnCompletionHook(
+    std::function<void(std::shared_ptr<WorkInfo>)>&& hook) {
+  backend_->registerOnCompletionHook(std::move(hook));
+}
+
+void ProcessGroupWrapper::waitForPendingWorks() {
+  backend_->waitForPendingWorks();
+}
+
+void ProcessGroupWrapper::enableCollectivesTiming() {
+  backend_->enableCollectivesTiming();
+}
+
+c10::intrusive_ptr<Backend> ProcessGroupWrapper::split(
+    const c10::intrusive_ptr<Store>& store,
+    const std::vector<int>& ranks,
+    const c10::intrusive_ptr<Options>& opts) {
+  return backend_->split(store, ranks, opts);
+}
+
+c10::intrusive_ptr<Backend> ProcessGroupWrapper::merge(
+    const c10::intrusive_ptr<Store>& store,
+    const c10::intrusive_ptr<Options>& opts,
+    const int& rank,
+    const int& size) {
+  return backend_->merge(store, opts, rank, size);
 }
 
 c10::intrusive_ptr<Backend> ProcessGroupWrapper::getWrappedPg() const {
@@ -591,7 +725,7 @@ void ProcessGroupWrapper::runCollectiveChecks(
     // Attach collective info to the exception and re-raise.
     std::stringstream ss;
     ss << finger_print;
-    auto collective_info = ss.str();
+    auto collective_info = std::move(ss).str();
     auto err_msg = c10::str(
         "ProcessGroupWrapper: Monitored Barrier encountered error running collective: ",
         collective_info,

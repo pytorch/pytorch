@@ -1,6 +1,9 @@
-from typing import AnyStr, overload, Tuple
+from typing import AnyStr, overload
 
 from torch import Tensor
+
+class AccumulateGrad:
+    variable: Tensor
 
 class UndefinedGrad:
     def __init__(self) -> None: ...
@@ -16,4 +19,4 @@ class DelayedError:
     @overload
     def __call__(self, i0: Tensor) -> Tensor: ...
     @overload
-    def __call__(self, *args: Tensor) -> Tuple[Tensor, ...]: ...
+    def __call__(self, *args: Tensor) -> tuple[Tensor, ...]: ...

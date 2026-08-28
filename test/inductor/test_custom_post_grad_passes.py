@@ -8,12 +8,18 @@ import torch._inductor.pattern_matcher as pattern_matcher
 import torch.fx as fx
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.custom_graph_pass import CustomGraphPass, get_hash_for_files
+from torch._inductor.codegen.common import get_custom_backend_pass_for_device
+from torch._inductor.custom_graph_pass import (
+    CustomGraphModulePass,
+    CustomGraphPass,
+    CustomInferenceAwareGraphPass,
+    get_hash_for_files,
+)
 from torch._inductor.lowering import lowerings as L
 from torch._inductor.pattern_matcher import Arg, CallFunction, PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import HAS_CPU, patch_inductor_backend
 
 
 @config.patch({"freezing": True})
@@ -59,6 +65,30 @@ def change_cos_pass(graph):
     for node in graph.nodes:
         if node.op == "call_function" and node.target == aten.cos.default:
             node.target = aten.sin.default
+
+
+class ChangeCosCustomPass(CustomGraphPass):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def __call__(self, g: torch.fx.graph.Graph):
+        change_cos_pass(g)
+
+    def uuid(self) -> bytes:
+        return get_hash_for_files((__file__,))
+
+
+class RecordCustomPass(CustomGraphPass):
+    def __init__(self, name, calls) -> None:
+        super().__init__()
+        self.name = name
+        self.calls = calls
+
+    def __call__(self, g: torch.fx.graph.Graph):
+        self.calls.append(self.name)
+
+    def uuid(self) -> str:
+        return self.name
 
 
 class TestPostGradCustomPrePostPass(TestCustomPassBase):
@@ -129,7 +159,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             return x1.relu()
 
     def test_custom_joint_pass_pre(self):
-        with config.patch(joint_custom_pre_pass=change_cos_pass):
+        with config.patch(joint_custom_pre_pass=ChangeCosCustomPass()):
 
             def g(x):
                 return x.sin().sin().sin()
@@ -141,7 +171,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             torch.testing.assert_close(torch.compile(f)(x), g(x))
 
     def test_custom_joint_pass_post(self):
-        with config.patch(joint_custom_post_pass=change_cos_pass):
+        with config.patch(joint_custom_post_pass=ChangeCosCustomPass()):
 
             def g(x):
                 return x.sin().sin().sin()
@@ -151,6 +181,45 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
 
             x = torch.randn(8, dtype=torch.float32)
             torch.testing.assert_close(torch.compile(f)(x), g(x))
+
+    def test_custom_pass_list_runs_in_order(self):
+        def f(x):
+            return (x.sin() + 1).relu()
+
+        x = torch.randn(8, dtype=torch.float32)
+        for field in (
+            "post_grad_custom_pre_pass",
+            "post_grad_custom_post_pass",
+            "joint_custom_pre_pass",
+            "joint_custom_post_pass",
+            "pre_grad_custom_pass",
+        ):
+            with self.subTest(field=field):
+                calls = []
+                torch._dynamo.reset()
+                with config.patch(
+                    {
+                        field: [
+                            RecordCustomPass(f"{field}_first", calls),
+                            RecordCustomPass(f"{field}_second", calls),
+                        ]
+                    }
+                ):
+                    torch.compile(f)(x)
+                self.assertEqual(calls, [f"{field}_first", f"{field}_second"])
+
+        calls = []
+        torch._dynamo.reset()
+        with config.patch(
+            {
+                "post_grad_custom_post_pass": (
+                    RecordCustomPass("tuple_first", calls),
+                    RecordCustomPass("tuple_second", calls),
+                )
+            }
+        ):
+            torch.compile(f)(x)
+        self.assertEqual(calls, ["tuple_first", "tuple_second"])
 
     def test_custom_pre_pass(self):
         with config.patch(
@@ -219,9 +288,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             for m in matmuls:
                 rhs_vals[m.args[1]].add(m)
 
-            order = {}
-            for idx, n in enumerate(graph.nodes):
-                order[n] = idx
+            order = {n: idx for idx, n in enumerate(graph.nodes)}
 
             for rhs, matmuls in rhs_vals.items():
                 if len(matmuls) == 1:
@@ -247,7 +314,9 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
                     m.target = operator.getitem
                     m.args = (split_vals, idx)
 
-        @config.patch(pre_grad_custom_pass=merge_mm_shared_rhs)
+        @config.patch(
+            pre_grad_custom_pass=merge_mm_shared_rhs, pre_grad_pass_timing="early"
+        )
         def inner_test():
             @torch.compile
             def f(W, nested_seqs):
@@ -260,11 +329,67 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             ]
 
             f(W, nested_seqs)
-            assert saved_graph[0] is not None
+            if saved_graph[0] is None:
+                raise AssertionError("saved_graph[0] is None")
             matmuls = [n for n in saved_graph[0].nodes if n.target == torch.mm]
-            assert len(matmuls) == 1
+            if len(matmuls) != 1:
+                raise AssertionError(f"Expected 1 matmul, got {len(matmuls)}")
 
         inner_test()
+
+    def test_custom_backend_pass(self):
+        class CustomBackendPass(CustomGraphModulePass):
+            def __init__(self, existing_pass: CustomGraphModulePass = None):
+                super().__init__()
+                self.existing_pass = existing_pass
+
+            def __call__(self, gm: fx.GraphModule) -> None:
+                if self.existing_pass:
+                    self.existing_pass(gm)
+
+                change_cos_pass(gm.graph)
+
+            def uuid(self) -> bytes:
+                return get_hash_for_files((__file__,))
+
+        custom_backend_pass = CustomBackendPass(
+            get_custom_backend_pass_for_device("cpu")
+        )
+        with patch_inductor_backend("cpu", custom_pass=custom_backend_pass):
+
+            def g(x):
+                return x.sin().sin().sin()
+
+            def f(x):
+                return x.cos().cos().cos()
+
+            x = torch.randn(8, dtype=torch.float32)
+            torch.testing.assert_close(torch.compile(f)(x), g(x))
+
+    def test_custom_pass_inference_flag(self):
+        class CustomPass(CustomInferenceAwareGraphPass):
+            def __init__(self):
+                super().__init__()
+                self.is_infer = False
+
+            def __call__(self, g: torch.fx.graph.Graph, is_inference: bool):
+                self.is_infer = is_inference
+
+            def uuid(self) -> bytes:
+                return get_hash_for_files((__file__,))
+
+        custom_pass = CustomPass()
+        with config.patch(post_grad_custom_post_pass=custom_pass):
+
+            def f(x):
+                return x.abs()
+
+            x = torch.randn(8, dtype=torch.float32)
+            torch.testing.assert_close(torch.compile(f)(x), f(x))
+            self.assertTrue(custom_pass.is_infer)
+            x.requires_grad_()
+            torch.testing.assert_close(torch.compile(f)(x), f(x))
+            self.assertFalse(custom_pass.is_infer)
 
 
 if __name__ == "__main__":

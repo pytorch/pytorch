@@ -4,12 +4,8 @@ set -ex
 
 # Optionally install conda
 if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
-  BASE_URL="https://repo.anaconda.com/miniconda"
-  CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
-  if [[ $(uname -m) == "aarch64" ]] || [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
-    BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"
-    CONDA_FILE="Miniforge3-Linux-$(uname -m).sh"
-  fi
+  BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"  # @lint-ignore
+  CONDA_FILE="Miniforge3-Linux-$(uname -m).sh"
 
   MAJOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 1)
   MINOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 2)
@@ -21,7 +17,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
       exit 1
       ;;
   esac
-
   mkdir -p /opt/conda
   chown jenkins:jenkins /opt/conda
 
@@ -54,41 +49,45 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     export SYSROOT_DEP="sysroot_linux-64=2.17"
   fi
 
+  if [[ $PYTHON_FREETHREADED == "1" ]]
+  then
+    PYTHON_DEP="python-freethreading=${ANACONDA_PYTHON_VERSION}"
+  else
+    PYTHON_DEP="python=${ANACONDA_PYTHON_VERSION}"
+  fi
   # Install correct Python version
   # Also ensure sysroot is using a modern GLIBC to match system compilers
+  # NB: pip is no longer pulled in transitively by conda-forge's python
+  # package, so request it explicitly. Without it, `python3 -m pip` in the
+  # env fails and `conda run -n env pip` silently falls back to base.
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
-             python="$ANACONDA_PYTHON_VERSION" \
-             ${SYSROOT_DEP}
+             ${PYTHON_DEP} \
+             ${SYSROOT_DEP} \
+             pip \
+             "icu<78"
 
-  # libstdcxx from conda default channels are too old, we need GLIBCXX_3.4.30
-  # which is provided in libstdcxx 12 and up.
-  conda_install libstdcxx-ng=12.3.0 -c conda-forge
-
-  # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  if [[ $(uname -m) == "aarch64" ]]; then
-    conda_install "openblas==0.3.28=*openmp*"
-  else
-    conda_install "mkl=2021.4.0 mkl-include=2021.4.0"
+  # Miniforge installer doesn't install sqlite by default
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    conda_install sqlite
   fi
 
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
   # and libpython-static for torch deploy
   conda_install llvmdev=8.0.0 "libpython-static=${ANACONDA_PYTHON_VERSION}"
 
-  # Use conda cmake in some cases. Conda cmake will be newer than our supported
-  # min version (3.5 for xenial and 3.10 for bionic), so we only do it in those
-  # following builds that we know should use conda. Specifically, Ubuntu bionic
-  # and focal cannot find conda mkl with stock cmake, so we need a cmake from conda
-  if [ -n "${CONDA_CMAKE}" ]; then
-    conda_install cmake
-  fi
-
   # Magma package names are concatenation of CUDA major and minor ignoring revision
   # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
   # Magma is installed from a tarball in the ossci-linux bucket into the conda env
   if [ -n "$CUDA_VERSION" ]; then
-    ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<< ${CUDA_VERSION}) ${ANACONDA_PYTHON_VERSION}
+    env_run ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<< ${CUDA_VERSION})
   fi
+
+  if [[ "$UBUNTU_VERSION" == "24.04"* ]] ; then
+    conda_install_through_forge libstdcxx-ng=14
+  fi
+
+  # Needs to be installed here so pip can build 3.14t wheels
+  conda_install cmake=3.31.6
 
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
@@ -100,6 +99,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     # We are currently building docs with python 3.8 (min support version)
     pip_install -r /opt/conda/requirements-docs.txt
   fi
+
+  # Clean conda package cache
+  as_jenkins conda clean -ya
 
   popd
 fi

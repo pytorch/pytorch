@@ -118,16 +118,14 @@ struct TensorDataContainer {
         type_(TensorDataContainerType::InitList) {}
 #define TENSOR(T, S)                            \
   TensorDataContainer(T value)                  \
-      : sizes_(),                               \
-        scalar_type_(at::k##S),                 \
+      : scalar_type_(at::k##S),                 \
         type_(TensorDataContainerType::Scalar), \
         scalar_(value) {}
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
   AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
   TensorDataContainer(std::initializer_list<TensorDataContainer> init_list)
-      : sizes_(),
-        scalar_type_(init_list.begin()->scalar_type()),
+      : scalar_type_(init_list.begin()->scalar_type()),
         type_(TensorDataContainerType::InitList),
         init_list_(init_list) {
     const TensorDataContainer& first_elem = *(init_list.begin());
@@ -273,7 +271,7 @@ struct TensorDataContainer {
           "TensorDataContainer_pretty_print_scalar",
           [&] { stream << scalar_.to<scalar_t>(); });
     } else if (is_init_list()) {
-      stream << "{";
+      stream << '{';
       for (const TensorDataContainer* it = init_list_.begin();
            it != init_list_.end();
            it++) {
@@ -281,9 +279,9 @@ struct TensorDataContainer {
         if (std::next(it) != init_list_.end())
           stream << ", ";
       }
-      stream << "}";
+      stream << '}';
     } else if (is_tensor()) {
-      stream << "{";
+      stream << '{';
       for (const auto i : c10::irange(tensor_.sizes()[0])) {
         AT_DISPATCH_ALL_TYPES_AND3(
             at::kBool,
@@ -295,7 +293,7 @@ struct TensorDataContainer {
         if (i != tensor_.sizes()[0] - 1)
           stream << ", ";
       }
-      stream << "}";
+      stream << '}';
     } else {
       TORCH_INTERNAL_ASSERT(false, "Invalid TensorDataContainer type");
     }

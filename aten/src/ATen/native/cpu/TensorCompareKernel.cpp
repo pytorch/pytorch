@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorIterator.h>
@@ -24,12 +25,27 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/result_type.h>
+#include <ATen/ops/result_type_native.h>
 #endif
 
 namespace at::native { namespace {
 
+// gcc-13 ICEs auto-vectorizing the vec_base.h Vectorized<T> emulation under fixed-length SVE.
+// The barebones unsigned types have no SVE specialization, so they are the ones that land on that path.
+// Not every 13.x build is affected, so the bound covers the series rather than a point release.
+// Remove once the aarch64 wheels require gcc-14 or newer.
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ < 14 && \
+    (defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE128))
+template <typename scalar_t>
+constexpr bool use_vectorized_clamp =
+    !isBarebonesUnsignedType(c10::CppTypeToScalarType<scalar_t>::value);
+#else
+template <typename scalar_t>
+constexpr bool use_vectorized_clamp = true;
+#endif
+
 template <typename scalar_t, typename scalar_t_2 = int64_t, typename loop1d_t>
-static inline void compare_base_kernel_core(
+inline void compare_base_kernel_core(
     const Tensor& result1,
     const Tensor& result2,
     const Tensor& self,
@@ -71,7 +87,7 @@ static inline void compare_base_kernel_core(
 }
 
 template <typename scalar_t, typename scalar_t_2=int64_t, typename func_t>
-static inline void compare_base_kernel(const Tensor& result1, const Tensor& result2,
+inline void compare_base_kernel(const Tensor& result1, const Tensor& result2,
     const Tensor& self,
     int64_t dim,
     bool keepdim,
@@ -98,7 +114,7 @@ static inline void compare_base_kernel(const Tensor& result1, const Tensor& resu
       result1, result2, self, dim, keepdim, loop);
 }
 
-static void min_kernel_impl(
+void min_kernel_impl(
     const Tensor& result,
     const Tensor& indice,
     const Tensor& self,
@@ -131,7 +147,7 @@ static void min_kernel_impl(
   });
 }
 
-static void max_kernel_impl(
+void max_kernel_impl(
     const Tensor& result,
     const Tensor& indice,
     const Tensor& self,
@@ -164,7 +180,7 @@ static void max_kernel_impl(
   });
 }
 
-static void aminmax_kernel(
+void aminmax_kernel(
     const Tensor& self,
     int64_t dim,
     bool keepdim,
@@ -212,30 +228,30 @@ static void aminmax_kernel(
   });
 }
 
-static void where_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBFloat16, kBool,
-    iter.dtype(), "where_cpu", [&] {
-      cpu_kernel(
+void where_kernel_impl(TensorIterator &iter) {
+  AT_DISPATCH_V2(
+    opaqueScalarType(iter.dtype()), "where_cpu", [&] {
+      cpu_kernel_opaque(
         iter,
         [=](bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
           return cond_val ? self_val : other_val;
         });
-  });
+  }, AT_EXPAND(AT_OPAQUE_TYPES));
 }
 
-static void isposinf_kernel_impl(TensorIteratorBase& iter) {
+void isposinf_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isposinf_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a) -> bool { return a == std::numeric_limits<scalar_t>::infinity(); });
   });
 }
 
-static void isneginf_kernel_impl(TensorIteratorBase& iter) {
+void isneginf_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isneginf_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a) -> bool { return a == -std::numeric_limits<scalar_t>::infinity(); });
   });
 }
 
-static void mode_kernel_impl(
+void mode_kernel_impl(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
@@ -307,14 +323,14 @@ static void mode_kernel_impl(
 
 // Default brute force implementation of isin(). Used when the number of test elements is small.
 // Iterates through each element and checks it against each test element.
-static void isin_default_kernel_cpu(
+void isin_default_kernel_cpu(
     const Tensor& elements,
     const Tensor& test_elements,
     bool invert,
     const Tensor& out) {
   // Since test elements is not an input of the TensorIterator, type promotion
   // must be done manually.
-  ScalarType common_type = at::result_type(elements, test_elements);
+  ScalarType common_type = at::native::result_type(elements, test_elements);
   Tensor promoted_elements = elements.to(common_type);
   Tensor test_elements_flat = test_elements.to(common_type).view(-1);
   auto test_elements_stride = test_elements_flat.stride(0);
@@ -338,64 +354,84 @@ static void isin_default_kernel_cpu(
   });
 }
 
-static void clamp_kernel_impl(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_cpu", [&]() {
-    cpu_kernel_vec(iter,
-      [](scalar_t a, scalar_t min, scalar_t max) -> scalar_t {
-        if (min != min || max != max) {
-            return std::numeric_limits<scalar_t>::quiet_NaN();
-        } else {
-            return std::min(std::max(a, min), max);
-        }
-      },
-      [](Vectorized<scalar_t> a, Vectorized<scalar_t> min, Vectorized<scalar_t> max) {
-        return vec::minimum(vec::maximum(a, min), max);
-      });
-  });
+void clamp_kernel_impl(TensorIteratorBase& iter) {
+  AT_DISPATCH_V2(iter.common_dtype(), "clamp_cpu", AT_WRAP([&]() {
+    const auto clamp_op = [](scalar_t a, scalar_t min, scalar_t max) -> scalar_t {
+      if (min != min || max != max) {
+          return std::numeric_limits<scalar_t>::quiet_NaN();
+      } else {
+          return std::min(std::max(a, min), max);
+      }
+    };
+
+    if constexpr (use_vectorized_clamp<scalar_t>) {
+      cpu_kernel_vec(iter, clamp_op,
+        [](Vectorized<scalar_t> a, Vectorized<scalar_t> min, Vectorized<scalar_t> max) {
+          return vec::minimum(vec::maximum(a, min), max);
+        });
+    } else {
+      cpu_kernel(iter, clamp_op);
+    }
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf);
 }
 
-static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, const Scalar& max_) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_scalar_cpu", [&]() {
+void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, const Scalar& max_) {
+  AT_DISPATCH_V2(iter.common_dtype(), "clamp_scalar_cpu", AT_WRAP([&]() {
     const auto min = min_.to<scalar_t>();
     const auto max = max_.to<scalar_t>();
-    const Vectorized<scalar_t> min_vec(min);
-    const Vectorized<scalar_t> max_vec(max);
-      cpu_kernel_vec(iter,
-        [=](scalar_t a) -> scalar_t {
-          return std::min(std::max(a, min), max);
-        },
+    const auto clamp_op = [=](scalar_t a) -> scalar_t {
+      return std::min(std::max(a, min), max);
+    };
+
+    if constexpr (use_vectorized_clamp<scalar_t>) {
+      const Vectorized<scalar_t> min_vec(min);
+      const Vectorized<scalar_t> max_vec(max);
+      cpu_kernel_vec(iter, clamp_op,
         [=](Vectorized<scalar_t> a) {
           return vec::clamp(a, min_vec, max_vec);
         });
-  });
+    } else {
+      cpu_kernel(iter, clamp_op);
+    }
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf);
 }
 
-static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_max_scalar_cpu", [&]() {
+void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
+  AT_DISPATCH_V2(iter.common_dtype(), "clamp_max_scalar_cpu", AT_WRAP([&]() {
     const auto max = max_.to<scalar_t>();
-    const Vectorized<scalar_t> max_vec(max);
-    cpu_kernel_vec(iter,
-      [=](scalar_t a) -> scalar_t {
-        return std::min(a, max);
-      },
-      [=](Vectorized<scalar_t> a) {
-        return vec::clamp_max(a, max_vec);
-      });
-  });
+    const auto clamp_max_op = [=](scalar_t a) -> scalar_t {
+      return std::min(a, max);
+    };
+
+    if constexpr (use_vectorized_clamp<scalar_t>) {
+      const Vectorized<scalar_t> max_vec(max);
+      cpu_kernel_vec(iter, clamp_max_op,
+        [=](Vectorized<scalar_t> a) {
+          return vec::clamp_max(a, max_vec);
+        });
+    } else {
+      cpu_kernel(iter, clamp_max_op);
+    }
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf);
 }
 
-static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_min_scalar_cpu", [&]() {
+void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
+  AT_DISPATCH_V2(iter.common_dtype(), "clamp_min_scalar_cpu", AT_WRAP([&]() {
     const auto min = min_.to<scalar_t>();
-    const Vectorized<scalar_t> min_vec(min);
-    cpu_kernel_vec(iter,
-        [=](scalar_t a) -> scalar_t {
-          return std::max(a, min);
-        },
+    const auto clamp_min_op = [=](scalar_t a) -> scalar_t {
+      return std::max(a, min);
+    };
+
+    if constexpr (use_vectorized_clamp<scalar_t>) {
+      const Vectorized<scalar_t> min_vec(min);
+      cpu_kernel_vec(iter, clamp_min_op,
         [=](Vectorized<scalar_t> a) {
           return vec::clamp_min(a, min_vec);
         });
-  });
+    } else {
+      cpu_kernel(iter, clamp_min_op);
+    }
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf);
 }
 
 } // anonymous namespace

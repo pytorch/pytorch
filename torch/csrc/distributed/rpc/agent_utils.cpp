@@ -23,7 +23,8 @@ std::unordered_map<std::string, worker_id_t> collectNames(
     }
     std::vector<uint8_t> workerNameVector = store.get(std::to_string(workerId));
     std::string workerName(
-        (char*)workerNameVector.data(), workerNameVector.size());
+        reinterpret_cast<char*>(workerNameVector.data()),
+        workerNameVector.size());
 
     TORCH_CHECK(
         nameToId.find(workerName) == nameToId.end(),
@@ -91,7 +92,8 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
     // Get the current list of workers
     std::vector<uint8_t> allWorkerInfosKeyVector = store.get(allWorkerInfosKey);
     allWorkerInfos = std::string(
-        (char*)allWorkerInfosKeyVector.data(), allWorkerInfosKeyVector.size());
+        reinterpret_cast<const char*>(allWorkerInfosKeyVector.data()),
+        allWorkerInfosKeyVector.size());
     // workerInfos are comma separated with a comma at the end (e.g.
     // "Name1-Rank1,Name2-Rank2,Name3-Rank2,") parse list of workers.
     if (!allWorkerInfos.empty()) {
@@ -132,7 +134,8 @@ void removeCurrentName(
   // Get current list of names/ranks
   std::vector<uint8_t> allWorkerInfosKeyVector = store.get(allWorkerInfosKey);
   std::string allWorkerInfos = std::string(
-      (char*)allWorkerInfosKeyVector.data(), allWorkerInfosKeyVector.size());
+      reinterpret_cast<const char*>(allWorkerInfosKeyVector.data()),
+      allWorkerInfosKeyVector.size());
 
   // Remove the current name and rank
   std::string str_to_erase = fmt::format("{}-{},", selfName, selfId);
@@ -146,10 +149,10 @@ void removeCurrentName(
   store.set(allWorkerInfosKey, newAllWorkerInfosVector);
 }
 
-const string storeKeyBarrierId = "_ID_";
-const string storeKeyProcessCount = "PROCESS_COUNT";
-const string storeKeyActiveCallCount = "ACTIVE_CALLS";
-const string storeKeyReady = "READY";
+constexpr const auto storeKeyBarrierId = "_ID_";
+constexpr const auto storeKeyProcessCount = "PROCESS_COUNT";
+constexpr const auto storeKeyActiveCallCount = "ACTIVE_CALLS";
+constexpr const auto storeKeyReady = "READY";
 static std::atomic<int> barrierId(0);
 
 static std::tuple<std::string, std::string, std::string> getNextKeyIds() {

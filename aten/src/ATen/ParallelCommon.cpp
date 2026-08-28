@@ -41,7 +41,7 @@ size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
   } catch (const std::exception& e) {
     std::ostringstream oss;
     oss << "Invalid " << var_name << " variable value, " << e.what();
-    TORCH_WARN(oss.str());
+    TORCH_WARN(std::move(oss).str());
   }
   return def_value;
 }
@@ -62,7 +62,9 @@ std::string get_parallel_info() {
   ss << "\tomp_get_max_threads() : " << omp_get_max_threads() << '\n';
 #endif
 
+#if defined(__x86_64__) || defined(_M_X64)
   ss << at::get_mkl_version() << '\n';
+#endif
 #if AT_MKL_ENABLED()
   ss << "\tmkl_get_max_threads() : " << mkl_get_max_threads() << '\n';
 #endif
@@ -75,8 +77,10 @@ std::string get_parallel_info() {
   ss << "Environment variables:" << '\n';
   ss << "\tOMP_NUM_THREADS : "
      << get_env_var("OMP_NUM_THREADS", "[not set]") << '\n';
+#if defined(__x86_64__) || defined(_M_X64)
   ss << "\tMKL_NUM_THREADS : "
      << get_env_var("MKL_NUM_THREADS", "[not set]") << '\n';
+#endif
 
   ss << "ATen parallel backend: ";
   #if AT_PARALLEL_OPENMP
@@ -93,7 +97,7 @@ std::string get_parallel_info() {
   ss << "Experimental: single thread pool" << std::endl;
   #endif
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 int intraop_default_num_threads() {

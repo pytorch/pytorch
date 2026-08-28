@@ -2,11 +2,11 @@
 #include <torch/csrc/jit/passes/autocast.h>
 
 #include <ATen/autocast_mode.h>
-#include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
+#include <atomic>
 #include <optional>
 
 #include <stack>
@@ -17,7 +17,7 @@ namespace torch::jit {
 
 namespace {
 
-bool autocast_enabled = true;
+std::atomic<bool> autocast_enabled = true;
 
 struct AutocastContext {
   bool gpu_enabled = false;
@@ -133,8 +133,6 @@ std::optional<AutocastScope> parseAutocast(
     //
     TORCH_CHECK(false, "Unsupported autocast syntax");
   }
-
-  return std::nullopt;
 }
 
 void castTensorInputs(
@@ -260,9 +258,9 @@ void updateAutocastEnabledCheck(Node* node, bool is_jit_enabled) {
 // scalar_type in forward graph. So inputs with mismatched scalar_type would
 // get the different dgrad.
 // While in JIT, autodiff doesn't do this, so implicit cast is not visible to
-// autodiff and backward dgrad for mismatched inputs would ended up with dgrads
+// autodiff and backward dgrad for mismatched inputs would end up with dgrads
 // in the same scalar_type. This has caused downstream operations, which
-// expects dgrad to be the same scalar type to throw mismatch error.
+// expect dgrad to be the same scalar type to throw mismatch error.
 //
 // TODO: Use the list from AMP eager directly
 void handleBlock(Block* block, AutocastContext initial_state) {
@@ -509,9 +507,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
 } // namespace
 
 bool setAutocastMode(bool value) {
-  auto old_value = autocast_enabled;
-  autocast_enabled = value;
-  return old_value;
+  return autocast_enabled.exchange(value);
 }
 
 bool autocastEnabled() {

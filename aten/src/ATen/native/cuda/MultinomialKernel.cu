@@ -86,7 +86,7 @@ void renormRows(Tensor& t) {
   TORCH_CHECK(props != nullptr);
   int numSM = props->multiProcessorCount;
   const int64_t maxThreads = std::min(
-      props->maxThreadsPerBlock, cuda_utils::kCUDABlockReduceMaxThreads);
+      props->maxThreadsPerBlock, cuda_utils::kCUDABlockReduceMaxThreads());
 
   int warp_size = at::cuda::warp_size();
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
@@ -309,7 +309,7 @@ __global__ void sampleMultinomialOnce(
       } else {
         // This should address a rare bug where we don't select a valid index. This likely occurs when
         // due to floating point arithmetic rounding errors, our cumulative sum does not add up to 1, but
-        // and our uniform sample is greater than this value. In this case we likely have unitialized memory
+        // and our uniform sample is greater than this value. In this case we likely have uninitialized memory
         // in dest[curDist]. So basically we will loop through the distribution and pick the largest index
         // where the distribution is non-zero. This is obviously terribly inefficient, but due to the
         // rarity in which this occurs, this should not be an issue.
@@ -382,17 +382,6 @@ void multinomial_with_replacement_kernel_impl(
     } else {
       // Generic, slow implementation with memory allocations
 
-      // For sampling without replacement, we modify the distribution
-      // for subsequent samples in this space
-      Tensor origDist = native::empty_like(
-          self_v,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      origDist.copy_(self_v);
-
       Tensor normDist = native::empty_like(
           self_v,
           std::nullopt /* dtype */,
@@ -410,7 +399,7 @@ void multinomial_with_replacement_kernel_impl(
           LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
       // Renorm along rows
-      normDist.copy_(origDist);
+      normDist.copy_(self_v);
       renormRows(normDist);
 
       // Prefix sum along rows

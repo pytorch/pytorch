@@ -9,7 +9,7 @@
 
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue_inl.h>
-#include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/graph_utils.h>
@@ -29,6 +29,7 @@
 #include <ATen/ATen.h>
 #include <fmt/format.h>
 
+#include <atomic>
 #include <string>
 #include <utility>
 #include <vector>
@@ -65,30 +66,62 @@ static void postSetStateValidate(const IValue& v) {
   }
 }
 
+namespace {
+// Records, once per process, which type-tag recovery path the archives being
+// loaded took. Cheap, and it makes the version gate below observable in a
+// deployed binary instead of having to be inferred from timing.
+void logTypeTagPolicyOnce(uint64_t archive_version, bool restoring) {
+  // A plain atomic rather than a call-once primitive: logging can allocate,
+  // and so can throw, and the standard once-flag is not exception-resilient
+  // in practice (a throwing callable can deadlock it). Losing the line on the
+  // losing thread of a race is fine; deadlocking a model load is not.
+  static std::atomic<bool> logged{false};
+  if (logged.exchange(true, std::memory_order_relaxed)) {
+    return;
+  }
+  LOG(INFO) << "[jit] restoreAccurateTypeTags: archive_version="
+            << archive_version
+            << (restoring ? " -> restoring tags"
+                          : " -> skipped (see [type tag serialization])");
+}
+} // namespace
+
 // Decouple how to get obj from type. In this file it's dependent on
 // Method.run() and graph executor, etc.
 // For bytecode import we need to decouple these dependencies.
-c10::intrusive_ptr<c10::ivalue::Object> ObjLoaderFunc(
+c10::intrusive_ptr<c10::ivalue::Object> ObjLoaderFuncWithVersion(
     const at::StrongTypePtr& type,
-    IValue input) {
-  auto cls = type.type_->expect<at::ClassType>();
-  auto qn = cls->name();
-  size_t n = cls->numAttributes();
+    IValue input,
+    uint64_t archive_version) {
+  const auto& cls = type.type_->expectRef<at::ClassType>();
+  auto qn = cls.name();
+  size_t n = cls.numAttributes();
   if (checkHasValidSetGetState(cls)) {
     auto obj = c10::ivalue::Object::create(type, n);
     // XXX: Do not optimize __setstate__, so that we don't try to
     // specialize the class before it is initialized.
     GraphOptimizerEnabledGuard guard(false);
-    Function& set_state = cls->getMethod("__setstate__");
+    Function& set_state = cls.getMethod("__setstate__");
     // since we are in the middle of unpickling we might still have lists and
     // dicts that do not have accurate tags (e.g. they report they are
     // List[Any]). But we need to run __setstate__ which will check the input
     // type and may access the tags. Since setstate has a known input type, we
     // can correctly restore the tags now by apply the input type of set_state
     // to the state object being passed.
-    // TODO: Remove once [serialization type tags] is landed
-    restoreAccurateTypeTags(
-        input, set_state.getSchema().arguments().at(1).type());
+    //
+    // See [type tag serialization] in unpickler.h. Only archives at version 2
+    // or lower lack the serialized container type strings; from version 3 on
+    // the unpickler has already applied them through restore_type_tag ->
+    // restoreContainerTypeTags as each container was constructed, so this walk
+    // finds nothing to correct. It is not free: it traverses the whole object
+    // graph reachable from the state, which on a large model runs into
+    // hundreds of millions of nodes and tens of seconds per load.
+    const bool restore_tags = archive_version <= 2;
+    logTypeTagPolicyOnce(archive_version, restore_tags);
+    if (restore_tags) {
+      restoreAccurateTypeTags(
+          input, set_state.getSchema().arguments().at(1).type());
+    }
     set_state({obj, input});
     postSetStateValidate(obj);
     return obj;
@@ -96,10 +129,17 @@ c10::intrusive_ptr<c10::ivalue::Object> ObjLoaderFunc(
     auto dict = std::move(input).toGenericDict();
     auto obj = c10::ivalue::Object::create(type, n);
     for (const auto i : c10::irange(n)) {
-      obj->setSlot(i, dict.at(cls->getAttributeName(i)));
+      obj->setSlot(i, dict.at(cls.getAttributeName(i)));
     }
     return obj;
   }
+}
+
+c10::intrusive_ptr<c10::ivalue::Object> ObjLoaderFunc(
+    const at::StrongTypePtr& type,
+    IValue input) {
+  return ObjLoaderFuncWithVersion(
+      type, std::move(input), /*archive_version=*/0);
 }
 
 namespace {
@@ -117,8 +157,7 @@ class ScriptModuleDeserializer final {
       : compilation_unit_(std::move(cu)),
         reader_(std::move(reader)),
         code_prefix_("code/"),
-        pickle_dir_prefix_(""),
-        tensor_dir_prefix_(""),
+
         source_importer_(
             compilation_unit_,
             &constants_table_,
@@ -174,12 +213,20 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
     return c10::StrongTypePtr(compilation_unit_, std::move(cls));
   };
 
+  // See [type tag serialization]: the loader needs the archive version to know
+  // whether container type tags still have to be re-derived.
+  const uint64_t archive_version = reader_->version();
+  auto obj_loader = [archive_version](
+                        const at::StrongTypePtr& type, IValue input) {
+    return ObjLoaderFuncWithVersion(type, std::move(input), archive_version);
+  };
+
   return readArchiveAndTensors(
       /*archive_name=*/archive_name,
       /*pickle_prefix=*/pickle_dir_prefix_,
       /*tensor_prefix=*/tensor_dir_prefix_,
       type_resolver,
-      ObjLoaderFunc,
+      obj_loader,
       device_,
       *reader_,
       nullptr,
@@ -542,7 +589,7 @@ Module _load_jit_module_from_bytes(
 
 // Replace object with a newly created but equivalent object.
 // The goal is to replace object's methods. However, since object's
-// methods are attached to type; we need to replace it's type.
+// methods are attached to type; we need to replace its type.
 // Non-objects are unchanged; however, nested structures such as list, dict
 // are also reconstructed because they might contain an object.
 static IValue recreateObject(IValue ivalue, const TypeResolver& resolver) {

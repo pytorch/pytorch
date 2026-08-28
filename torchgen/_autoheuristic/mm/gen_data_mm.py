@@ -1,12 +1,11 @@
 import itertools
-import os
 import random
 import sys
-
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+from pathlib import Path
 from typing import Any
+
+
+sys.path.append(str(Path(__file__).absolute().parents[1]))
 
 from benchmark_runner import BenchmarkRunner  # type: ignore[import-not-found]
 from benchmark_utils import (  # type: ignore[import-not-found]
@@ -17,7 +16,7 @@ from benchmark_utils import (  # type: ignore[import-not-found]
 )
 
 import torch
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 
 
 class BenchmarkRunnerMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimported]
@@ -58,7 +57,7 @@ class BenchmarkRunnerMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimporte
                 dtype_right=dtype,
             )
 
-            with fresh_inductor_cache():
+            with fresh_cache():
 
                 def mixed_mm(A: Any, B: Any) -> Any:
                     return torch.mm(A, B)

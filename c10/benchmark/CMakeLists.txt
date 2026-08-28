@@ -1,6 +1,6 @@
 # ---[ Benchmark binaries.
 
-file(GLOB_RECURSE C10_ALL_BENCH_FILES *.cpp)
+file(GLOB_RECURSE C10_ALL_BENCH_FILES CONFIGURE_DEPENDS *.cpp)
 if(BUILD_TEST)
   foreach(bench_src ${C10_ALL_BENCH_FILES})
     get_filename_component(bench_file_name ${bench_src} NAME_WE)

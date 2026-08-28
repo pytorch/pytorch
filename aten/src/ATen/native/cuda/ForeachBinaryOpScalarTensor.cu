@@ -35,15 +35,14 @@ std::vector<Tensor> foreach_binary_op(
       tensors[0].device(),
       " but is on ",
       scalar.device());
-  std::vector<std::vector<at::Tensor>> tensor_lists;
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(tensors.size());
   for (const auto& t : tensors) {
     vec_res.emplace_back(at::native::empty_like(t));
   }
 
-  tensor_lists.emplace_back(tensors.vec());
-  tensor_lists.emplace_back(std::move(vec_res));
+  auto tensor_lists =
+      c10::make_nested<Tensor>(tensors.vec(), std::move(vec_res));
 
   using opmath_t = at::opmath_type<T>;
   multi_tensor_apply<2>(
@@ -56,7 +55,7 @@ std::vector<Tensor> foreach_binary_op(
       Op<opmath_t>(),
       scalar.data_ptr<T>(),
       alpha.to<opmath_t>());
-  return tensor_lists[1];
+  return std::move(tensor_lists[1]);
 }
 
 template <typename T, template <class> class Op>
@@ -77,8 +76,7 @@ void foreach_binary_op_(
       tensors[0].device(),
       " but is on ",
       scalar.device());
-  std::vector<std::vector<at::Tensor>> tensor_lists;
-  tensor_lists.emplace_back(tensors.vec());
+  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
 
   using opmath_t = at::opmath_type<T>;
   multi_tensor_apply<1>(

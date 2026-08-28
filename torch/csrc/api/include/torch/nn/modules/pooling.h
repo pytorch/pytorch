@@ -232,8 +232,8 @@ class TORCH_API AdaptiveMaxPoolImpl : public torch::nn::Cloneable<Derived> {
   /// Pretty prints the `AdaptiveMaxPool{1,2,3}d` module into the given
   /// `stream`.
   void pretty_print(std::ostream& stream) const override {
-    stream << "torch::nn::AdaptiveMaxPool" << D << "d"
-           << "(output_size=" << options.output_size() << ")";
+    stream << "torch::nn::AdaptiveMaxPool" << D << 'd'
+           << "(output_size=" << options.output_size() << ')';
   }
 
   /// The options with which this `Module` was constructed.
@@ -365,8 +365,8 @@ class TORCH_API AdaptiveAvgPoolImpl : public torch::nn::Cloneable<Derived> {
   /// Pretty prints the `AdaptiveAvgPool{1,2,3}d` module into the given
   /// `stream`.
   void pretty_print(std::ostream& stream) const override {
-    stream << "torch::nn::AdaptiveAvgPool" << D << "d"
-           << "(output_size=" << options.output_size() << ")";
+    stream << "torch::nn::AdaptiveAvgPool" << D << 'd'
+           << "(output_size=" << options.output_size() << ')';
   }
 
   /// The options with which this `Module` was constructed.

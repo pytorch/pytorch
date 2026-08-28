@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 from . import fft, linalg, random
 from ._dtypes import *  # noqa: F403
 from ._funcs import *  # noqa: F403
@@ -21,10 +19,10 @@ from ._util import AxisError, UFuncTypeError
 from math import pi, e  # usort: skip
 
 
-all = all
+all = all  # noqa: PLW0127
 alltrue = all
 
-any = any
+any = any  # noqa: PLW0127
 sometrue = any
 
 inf = float("inf")
