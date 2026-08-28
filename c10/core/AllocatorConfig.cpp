@@ -11,8 +11,10 @@ namespace c10::CachingAllocator {
 namespace {
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 constexpr size_t kMB = 1024 * 1024ul;
-constexpr size_t kRoundUpPowerOfTwoStart = 1 * kMB; // 1MB
-constexpr size_t kRoundUpPowerOfTwoEnd = 64 * 1024ul * kMB; // 64GB
+// uint64_t so these hold their true byte values (up to 64GB) even where
+// size_t is 32 bits; a size_t here would silently wrap the 64GB bound to 0.
+constexpr uint64_t kRoundUpPowerOfTwoStart = 1ull * kMB; // 1MB
+constexpr uint64_t kRoundUpPowerOfTwoEnd = 64ull * 1024 * kMB; // 64GB
 } // anonymous namespace
 
 std::unordered_set<std::string>& AcceleratorAllocatorConfig::getMutableKeys() {
@@ -72,14 +74,16 @@ size_t AcceleratorAllocatorConfig::roundup_power2_divisions(size_t size) {
   size_t log_size = std::bit_width(size) - 1;
 
   // Our intervals start at 1MB and end at 64GB
-  constexpr size_t interval_start = std::bit_width(kRoundUpPowerOfTwoStart) - 1;
-  constexpr size_t interval_end = std::bit_width(kRoundUpPowerOfTwoEnd) - 1;
+  constexpr uint64_t interval_start =
+      std::bit_width(kRoundUpPowerOfTwoStart) - 1;
+  constexpr uint64_t interval_end = std::bit_width(kRoundUpPowerOfTwoEnd) - 1;
   static_assert(
       interval_end - interval_start == kRoundUpPowerOfTwoIntervals,
       "kRoundUpPowerOfTwoIntervals mismatch");
 
-  size_t index =
-      (log_size > interval_start) ? (log_size - interval_start) : 0ul;
+  size_t index = (log_size > interval_start)
+      ? (log_size - static_cast<size_t>(interval_start))
+      : 0ul;
   index = std::min(index, kRoundUpPowerOfTwoIntervals - 1);
   return instance().roundup_power2_divisions_[index];
 }
