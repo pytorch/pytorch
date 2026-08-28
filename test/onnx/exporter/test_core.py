@@ -91,7 +91,7 @@ class TorchTensorTest(common_utils.TestCase):
 
 class TorchTensorToFileTest(common_utils.TestCase):
     hw_classification = HardwareClassification.GENERIC
-    
+
     def _roundtrip_file(self, tensor: _core.TorchTensor) -> bytes:
         expected = tensor.tobytes()
         # NamedTemporaryFile (binary)
