@@ -639,12 +639,27 @@ class UserDefinedClassVariable(UserDefinedVariable):
         metacls = type(self.value)
         if metacls is not type:
             meta_getattr = self.lookup_metaclass_attr("__getattr__")
-            if meta_getattr is not NO_SUCH_SUBOBJ and isinstance(
-                meta_getattr, types.FunctionType
-            ):
-                return variables.UserMethodVariable(meta_getattr, self).call_function(
-                    tx, [variables.ConstantVariable.create(name)], {}
-                )
+            if meta_getattr is not NO_SUCH_SUBOBJ:
+                name_arg = variables.ConstantVariable.create(name)
+                if isinstance(meta_getattr, torch._C._dynamo.eval_frame.DisableWrapper):
+                    # torch._dynamo.disable-d metaclass __getattr__: build the
+                    # unbound wrapper from the metaclass-MRO source and call it
+                    # (self prepended). It graph-breaks in
+                    # SkipFunctionVariable.call_function; _load_attr then catches
+                    # the break and constant-folds since the class is a constant.
+                    # Without this branch we would fall through to Step 7 and
+                    # raise a spurious AttributeError.
+                    getattr_source = (
+                        AttrSource(TypeSource(self.source), "__getattr__")
+                        if self.source
+                        else None
+                    )
+                    wrapper_vt = VariableTracker.build(tx, meta_getattr, getattr_source)
+                    return wrapper_vt.call_function(tx, [self, name_arg], {})
+                if isinstance(meta_getattr, types.FunctionType):
+                    return variables.UserMethodVariable(
+                        meta_getattr, self
+                    ).call_function(tx, [name_arg], {})
 
         # Step 7: AttributeError.
         raise_observed_exception(
@@ -1192,8 +1207,26 @@ class UserDefinedClassVariable(UserDefinedVariable):
             for klass in metaclass.__mro__:
                 if name in klass.__dict__:
                     method = klass.__dict__[name]
+                    source = self.source and AttrSource(self.source, name)
+                    if isinstance(method, torch._C._dynamo.eval_frame.DisableWrapper):
+                        # torch._dynamo.disable-d metaclass dunder: graph-break
+                        # in SkipFunctionVariable rather than falling through to
+                        # super().call_method (which re-dispatches the operator
+                        # and can recurse infinitely). Source the wrapper through
+                        # the metaclass MRO (type(cls).name) so it resolves to the
+                        # unbound wrapper in the class dict; AttrSource(cls, name)
+                        # would instead resolve to the BOUND metaclass method,
+                        # mismatching the built value. This mismatch is currently
+                        # masked by the disabled-fn CLOSURE_MATCH guard being a
+                        # no-op (functions.py make_guard without install_guard);
+                        # using the correct source keeps the guard right if that
+                        # no-op is ever fixed.
+                        meta_source = self.source and AttrSource(
+                            TypeSource(self.source), name
+                        )
+                        wrapper_vt = VariableTracker.build(tx, method, meta_source)
+                        return wrapper_vt.call_function(tx, [self, *args], kwargs)
                     if isinstance(method, types.FunctionType):
-                        source = self.source and AttrSource(self.source, name)
                         return variables.UserMethodVariable(
                             method, self, source=source
                         ).call_function(tx, args, kwargs)
@@ -1858,6 +1891,40 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return side_effects.is_modified(self._base_vt)
         return False
 
+    def _maybe_call_if_disabled(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        method: object,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # Shared DisableWrapper arm: route a disable-d callable through
+        # call_disabled_method, else return None so the caller falls through.
+        if isinstance(method, torch._C._dynamo.eval_frame.DisableWrapper):
+            return self.call_disabled_method(tx, name, method, args, kwargs)
+        return None
+
+    def call_disabled_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        method: object,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Route a torch._dynamo.disable-d method (a C-level DisableWrapper, not a
+        # types.FunctionType) to the disable graph-break path instead of the
+        # generic "unsupported method call" break. Build it from the class-dict
+        # source (the unbound wrapper) so guards/reconstruction stay correct, and
+        # call with self prepended so it graph-breaks in
+        # SkipFunctionVariable.call_function.
+        source = None
+        if self.source and self.cls_source is not None:
+            source = self.get_source_by_walking_mro(tx, name)
+        wrapper_vt = VariableTracker.build(tx, method, source)
+        return wrapper_vt.call_function(tx, [self, *args], kwargs)
+
     def reconstruct_pycode(self, codegen):
         if self.source:
             return self.source.reconstruct_pycode(codegen)
@@ -2239,6 +2306,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return variables.BoundBuiltinMethodVariable(
                     type_attr, self._base_vt, source=source
                 )
+
+        if isinstance(type_attr, torch._C._dynamo.eval_frame.DisableWrapper):
+            # torch._dynamo.disable-d method: resolve via the attribute source so
+            # the descriptor binds self on reconstruction; it then graph-breaks in
+            # SkipFunctionVariable.call_function. Single site for the disable arm
+            # that #190393 previously spread across the per-slot handlers.
+            attr_source = AttrSource(self.source, name) if self.source else None
+            return self.resolve_type_attr(tx, name, type_attr, attr_source)
 
         if is_cython_function(type_attr):
             raise AssertionError(
@@ -2784,6 +2859,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
+            # A torch._dynamo.disable-d method dispatched through call_method
+            # (e.g. __setattr__, __delattr__, __call__).
+            disabled = self._maybe_call_if_disabled(tx, name, method, args, kwargs)
+            if disabled is not None:
+                return disabled
+
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
 
@@ -3074,6 +3155,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 raise_readonly_attr()
             desc_var = VariableTracker.build(tx, descriptor, desc_source)
             if isinstance(value, variables.DeletedVariable):
+                if isinstance(deleter, torch._C._dynamo.eval_frame.DisableWrapper):
+                    del_source = (
+                        AttrSource(TypeSource(desc_source), "__delete__")
+                        if desc_source
+                        else None
+                    )
+                    del_var = VariableTracker.build(tx, deleter, del_source)
+                    return del_var.call_function(tx, [desc_var, self], {})
                 if isinstance(deleter, types.FunctionType):
                     del_source = (
                         AttrSource(TypeSource(desc_source), "__delete__")
@@ -3095,7 +3184,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
                 raise_readonly_attr()
-            if isinstance(setter, types.FunctionType):
+            if isinstance(
+                setter,
+                (types.FunctionType, torch._C._dynamo.eval_frame.DisableWrapper),
+            ):
                 set_source = (
                     AttrSource(TypeSource(desc_source), "__set__")
                     if desc_source
@@ -3567,8 +3659,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
 
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
-        if isinstance(get_fn, types.FunctionType):
-            # User-defined data descriptor with a Python __get__.
+        if isinstance(
+            get_fn,
+            (types.FunctionType, torch._C._dynamo.eval_frame.DisableWrapper),
+        ):
+            # User-defined data descriptor with a Python __get__ (possibly
+            # torch._dynamo.disable-d).
             return self.invoke_descriptor_get(tx, name, type_attr, source)
 
         # TODO - Check when are these called - and if we need to create new VTs.
@@ -3656,9 +3752,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 type_attr, self, source_fn=var_source, source=source
             )
-        # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
+        elif isinstance(type_attr, torch._C._dynamo.eval_frame.DisableWrapper):
+            # A torch._dynamo.disable-d callable found on the type MRO, accessed
+            # as a method. Build it from the attribute source (self.name) rather
+            # than the class __dict__ so it reconstructs through the descriptor
+            # (DisableWrapper's tp_descr_get binds self) and then graph-breaks in
+            # SkipFunctionVariable.call_function.
+            return VariableTracker.build(tx, type_attr, source)
+        # Check for a Python-level __get__ (non-data descriptor with traceable
+        # __get__), including a torch._dynamo.disable-d __get__.
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
-        if isinstance(get_fn, types.FunctionType):
+        if isinstance(
+            get_fn,
+            (types.FunctionType, torch._C._dynamo.eval_frame.DisableWrapper),
+        ):
             return self.invoke_descriptor_get(tx, name, type_attr, source)
 
         # TODO(tp_descr_get) - Investigate if we need a separate descriptor
@@ -3698,6 +3805,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             descriptor_var = UserDefinedObjectVariable(descriptor)
 
         owner_var = UserDefinedClassVariable(type(self.value))
+        get_fn = inspect.getattr_static(type(descriptor), "__get__", None)
+        if isinstance(get_fn, torch._C._dynamo.eval_frame.DisableWrapper):
+            # descriptor.__get__ was torch._dynamo.disable-d: build the unbound
+            # wrapper (descriptor as receiver) and call it so it graph-breaks in
+            # SkipFunctionVariable.call_function rather than tracing into it.
+            wrapper_vt = VariableTracker.build(tx, get_fn, descriptor_get_source)
+            return wrapper_vt.call_function(tx, [descriptor_var, self, owner_var], {})
         return variables.UserMethodVariable(
             descriptor.__get__.__func__,  # type: ignore[union-attr]
             descriptor_var,

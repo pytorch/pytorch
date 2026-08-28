@@ -347,6 +347,12 @@ def disable(fn=None, recursive=True, *, reason=None):
         fn (optional): The function to disable
         recursive (optional): A boolean value indicating whether the disabling should be recursive.
         reason (optional): A string value indicating the reason for disabling the function.
+
+    Note: the recursive form returns an opaque C-level wrapper
+    (torch._C._dynamo.eval_frame.DisableWrapper), not a types.FunctionType. Code
+    that needs the original callable should use
+    torch._dynamo.eval_frame.innermost_fn or read the _torchdynamo_orig_callable
+    attribute rather than assuming a Python function is returned.
     """
     import torch._dynamo
 

@@ -40,11 +40,20 @@ class Benchmark(BenchmarkBase):
 
 
 def _benchmarks():
+    # _disable_dynamo (used by custom_op/optim) wraps torch._dynamo.disable in a
+    # lazy-import closure, so it adds one frame over the C DisableWrapper.
+    from torch._compile import _disable_dynamo
+
     return [
         Benchmark(
             "disable_overhead",
             "per-call overhead of torch._dynamo.disable with a trivial callee",
             torch._dynamo.disable,
+        ),
+        Benchmark(
+            "disable_dynamo_overhead",
+            "per-call overhead of torch._compile._disable_dynamo",
+            _disable_dynamo,
         ),
     ]
 
