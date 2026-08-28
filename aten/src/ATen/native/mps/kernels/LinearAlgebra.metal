@@ -1338,7 +1338,7 @@ INSTANTIATE_SYRK_TRAILING(L, false, 32, 128, 4)
 // algebraic, so the complex path uses NO conjugation anywhere.
 template <typename T>
 inline float luPivotMag(T v) {
-  if constexpr (::metal::is_same_v<T, float2>) {
+  if IF_CONSTEXPR (::metal::is_same_v<T, float2>) {
     const float2 a = ::metal::precise::abs(v);
     return a.x + a.y;
   } else {
