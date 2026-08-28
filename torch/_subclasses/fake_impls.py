@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import functools
 import itertools
 import math
@@ -652,6 +653,46 @@ def _spdiags(
     )
 
 
+@register_op_impl(
+    [
+        aten.sparse_compressed_tensor.comp_plain_value_size,
+        aten.sparse_compressed_tensor.comp_plain_value,
+    ]
+)
+def sparse_compressed_constructors(
+    fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
+) -> FakeTensor:
+    _, new_kwargs = _normalize_function_or_error(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    if "size" not in new_kwargs:
+        # without an explicit size, it is inferred from plain_indices.max()
+        raise DataDependentOutputException(func)
+    out_device, _ = FakeTensor._find_common_device(func, list(new_kwargs.values()))
+    requested_device = new_kwargs.pop("device", None)
+    if requested_device is not None:
+        requested_device = torch.device(requested_device)
+        torch._check(
+            requested_device.type == out_device.type
+            and requested_device.index in (None, out_device.index),
+            lambda: "Values and compressed tensor instance need to be on the same device.",
+        )
+        out_device = requested_device
+    new_kwargs["device"] = torch.device("meta")
+    new_kwargs["pin_memory"] = False
+    # Invariant checks read index data, which meta tensors do not have.
+    suppress_invariants = (
+        torch.sparse.check_sparse_tensor_invariants(False)
+        if torch.sparse.check_sparse_tensor_invariants.is_enabled()
+        else contextlib.nullcontext()
+    )
+    with in_kernel_invocation_manager(fake_mode), suppress_invariants:
+        out = func(**new_kwargs)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, out_device
+    )
+
+
 @register_op_impl(aten._to_dense.default)
 def _to_dense(
     fake_mode: FakeTensorMode,
@@ -664,7 +705,7 @@ def _to_dense(
     if maybe_mkldnn_out is not NotImplemented:
         return typing_cast(FakeTensor, maybe_mkldnn_out)
 
-    if self.layout is torch.sparse_coo:
+    if self.layout in _TO_DENSE_SPARSE_LAYOUTS:
         if dtype is not None:
             raise RuntimeError("dtype argument is not supported by sparse_to_dense")
         with in_kernel_invocation_manager(fake_mode):
