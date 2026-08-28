@@ -25,6 +25,7 @@ from torchgen.api.types import (
     tensorT,
 )
 from torchgen.context import method_with_native_function, native_function_manager
+from torchgen.dest.native_functions import torch_api_key_word_prefix
 from torchgen.model import (
     Argument,
     BackendIndex,
@@ -446,9 +447,10 @@ class RegisterDispatchKey:
 
             # TODO: dedupe this with the structured codegen
             if self.target is Target.NAMESPACED_DECLARATION:
+                export = torch_api_key_word_prefix(self.backend_index)
                 result = ""
                 for cpp_sig in cpp_sig_group.signatures(symint=self.symint):
-                    result += f"TORCH_API {cpp_sig.decl()};\n"
+                    result += f"{export} {cpp_sig.decl()};\n"
                 return result
             elif self.target is Target.NAMESPACED_DEFINITION:
 
@@ -592,7 +594,7 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
         self, k: SchemaKind, parent_class: str, generate_super: bool
     ) -> str:
         if generate_super:
-            set_output_super = f"{parent_class}::set_output_raw_strided(output_idx, sizes, strides, options, names);"
+            set_output_super = f"{parent_class}::set_output_raw_strided(output_idx, sizes, strides, options);"
         else:
             set_output_super = ""
 
@@ -600,12 +602,9 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
             return f"""
 void set_output_{name}(
     int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
-    TensorOptions options, DimnameList names
+    TensorOptions options
 ) override {{
 {textwrap.indent(self.gen_class_set_output_body(k, maybe_create_proxy), "    ")}
-    if (!names.empty()) {{
-      namedinference::propagate_names(outputs_[output_idx], names);
-    }}
     // super must happen after, so that downstream can use maybe_get_output
     // to retrieve the output
 {textwrap.indent(set_output_super, "    ")}
@@ -805,9 +804,10 @@ resize_out(out, sizes, strides, options);
         )
 
         if self.target is Target.NAMESPACED_DECLARATION:
+            export = torch_api_key_word_prefix(self.backend_index)
             result = ""
             for cpp_sig in cpp_sig_group.signatures(symint=self.symint):
-                result += f"TORCH_API {cpp_sig.decl()};\n"
+                result += f"{export} {cpp_sig.decl()};\n"
             return result
 
         elif self.target is Target.NAMESPACED_DEFINITION:

@@ -282,7 +282,7 @@ def minimize(
       ``target_func(parameters: dict) -> float``
     initial_parameters (dict): a set of parameters used as an initial
       value to the minimization process.
-    reference_parameters (dict): a set of parameters used as an
+    reference_parameters (dict): a set of parameters used as a
       reference value with respect to which the speed up is computed.
     step_func (callable): a functional with the signature
       ``step_func(parameter_name:str, parameter_value:int, direction:int, parameters:dict) -> int``

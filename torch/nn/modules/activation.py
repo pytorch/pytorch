@@ -421,8 +421,9 @@ class Tanh(Module):
     Examples::
 
         >>> m = nn.Tanh()
-        >>> input = torch.randn(2)
-        >>> output = m(input)
+        >>> input = torch.tensor([-2.0, -0.5, 0.0, 0.5, 2.0])
+        >>> m(input)
+        tensor([-0.9640, -0.4621,  0.0000,  0.4621,  0.9640])
     """
 
     def forward(self, input: Tensor) -> Tensor:
@@ -1806,6 +1807,8 @@ class Softmax(Module):
     dim: int | None
 
     def __init__(self, dim: int | None = None) -> None:
+        if dim is not None and (not isinstance(dim, int) or isinstance(dim, bool)):
+            raise TypeError(f"dim must be an int or None, got {type(dim)}")
         super().__init__()
         self.dim = dim
 
@@ -1891,6 +1894,8 @@ class LogSoftmax(Module):
     dim: int | None
 
     def __init__(self, dim: int | None = None) -> None:
+        if dim is not None and (not isinstance(dim, int) or isinstance(dim, bool)):
+            raise TypeError(f"dim must be an int or None, got {type(dim)}")
         super().__init__()
         self.dim = dim
 

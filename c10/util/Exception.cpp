@@ -4,7 +4,6 @@
 #include <c10/util/Type.h>
 
 #include <atomic>
-#include <iostream>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -70,7 +69,7 @@ std::string Error::compute_what(bool include_backtrace) const {
     oss << '\n' << backtrace_->get();
   }
 
-  return oss.str();
+  return std::move(oss).str();
 }
 
 const Backtrace& Error::backtrace() const {

@@ -77,7 +77,7 @@ std::string GetFirstUserFrameInPython() {
     if (loc.file.find("site-packages") == std::string::npos) {
       std::stringstream ss;
       ss << loc.file << ' ' << loc.function << ' ' << loc.line;
-      return ss.str();
+      return std::move(ss).str();
     }
   }
   return empty;
@@ -144,7 +144,7 @@ std::string DebugUtil::GetTensorsGraphInfo(
     LOG(ERROR) << "Invalid graph format: " << format;
   }
   ss << "\n## BEGIN_GRAPH\n" << graph_str << "\n## END_GRAPH\n\n";
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void DebugUtil::SaveTensorsGraphInfo(
@@ -165,7 +165,7 @@ void DebugUtil::SaveTensorsGraphInfo(
 
 bool DebugUtil::ExperimentEnabled(const std::string& name) {
   static const std::unordered_set<std::string>* xset = LoadExperiments();
-  return xset->find(name) != xset->end();
+  return xset->contains(name);
 }
 
 } // namespace torch::lazy

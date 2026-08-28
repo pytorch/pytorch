@@ -667,7 +667,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::stringstream ss;
     ss << "Index out of bounds in check_bounds. Index: " << idx
        << "; bounds: [0, " << bound << ").";
-    throw malformed_input(ss.str(), buf);
+    throw malformed_input(std::move(ss).str(), buf);
   }
 
   void check_bounds(const BufPtr& buf, const std::vector<ExprPtr>& indices) {

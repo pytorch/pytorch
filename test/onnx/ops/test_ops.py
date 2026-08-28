@@ -10,6 +10,7 @@ import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.onnx.ops import _impl, _symbolic_impl
 from torch.testing._internal import common_utils
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 class SchemaTest(common_utils.TestCase):
@@ -190,6 +191,81 @@ class SymbolicOpsTest(common_utils.TestCase):
         outputs = node.outputs
         self.assertEqual(list(outputs[0].shape), [1, 2, 3])
         self.assertEqual(outputs[0].dtype, ir.DataType.INT64)
+
+    def test_symbolic_export_with_dispatch_mode_lifted_constants(self):
+        def qdq(x, scale, zero_point):
+            q = torch.onnx.ops.symbolic(
+                "QuantizeLinear",
+                (x, scale, zero_point),
+                attrs={},
+                dtype=zero_point.dtype,
+                shape=x.shape,
+            )
+            return torch.onnx.ops.symbolic(
+                "DequantizeLinear",
+                (q, scale, zero_point),
+                attrs={},
+                dtype=scale.dtype,
+                shape=x.shape,
+            )
+
+        class Quantizer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("scale", torch.tensor(0.1, dtype=torch.float32))
+                self.register_buffer("zero_point", torch.tensor(128, dtype=torch.uint8))
+
+            def forward(self, x):
+                return qdq(x, self.scale, self.zero_point)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quantizer = Quantizer()
+
+            def forward(self, x):
+                return torch.relu(x + x)
+
+        class QuantMode(TorchDispatchMode):
+            def __init__(self, model):
+                super().__init__()
+                self.model = model
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                args = [
+                    self.model.quantizer(arg)
+                    if isinstance(arg, torch.Tensor) and arg.dtype == torch.float32
+                    else arg
+                    for arg in args
+                ]
+                kwargs = {
+                    key: self.model.quantizer(value)
+                    if isinstance(value, torch.Tensor) and value.dtype == torch.float32
+                    else value
+                    for key, value in (kwargs or {}).items()
+                }
+                return func(*args, **kwargs)
+
+        model = Model().eval()
+        with QuantMode(model), torch.no_grad():
+            onnx_program = torch.onnx.export(
+                model, (torch.randn(2, 3),), dynamo=True, verbose=False
+            )
+
+        if onnx_program is None:
+            raise AssertionError("onnx_program is None")
+        lifted_constants = set(
+            onnx_program.exported_program.graph_signature.lifted_tensor_constants
+        )
+        self.assertGreaterEqual(len(lifted_constants), 2)
+        self.assertLessEqual(
+            lifted_constants,
+            set(onnx_program.exported_program.constants),
+        )
+        self.assertLessEqual(
+            lifted_constants,
+            set(onnx_program.model.graph.initializers.keys()),
+        )
 
     def test_symbolic_preserves_dynamic_shapes(self):
         class Model(torch.nn.Module):
