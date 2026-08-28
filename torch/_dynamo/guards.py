@@ -3854,6 +3854,14 @@ class GuardBuilder(GuardBuilderBase):
             #   _dynamo_weak_dynamic_indices is the user-facing attribute, set via
             #   maybe_mark_dynamic(), and guarded on like the other dimension marking
             #   attributes above.
+            #   _dynamo_dynamic_range holds the min/max declared through
+            #   mark_dynamic() or maybe_mark_dynamic(). It is compared by VALUE, as one
+            #   set, so declaring a different range for a dim recompiles instead of
+            #   silently reusing a graph built for another range. Comparing the set as a
+            #   whole also means a graph compiled from {dim 0: [2, 5], dim 1: [3, 7]} is
+            #   not reused by a tensor declaring only {dim 0: [2, 5]}, even though the
+            #   marking indices of that tensor would match. TODO we can optimize that
+            #   recompilation by comparing value per dim.
             #   _dynamo_propagated_dynamic_indices is a compiler-internal attribute set by
             #   AOTAutograd's mark_dynamo_propagated_dynamic_indices() to propagate dynamism across
             #   graph breaks. It is NOT guarded on. When AOTAutograd discovers that an
@@ -3884,11 +3892,19 @@ class GuardBuilder(GuardBuilderBase):
                     code_part = f"hasattr({tensor_name}, '{attr_name}') == False"
                     code.append(code_part)
 
-            # Dependent attributes: checked only when _dynamo_unbacked_indices is present.
-            dependent_attrs: dict[str, tuple[dict[int, Any] | None, str]] = {}
-            dep_attr_names = ("_dynamo_shape_ids", "_dynamo_unbacked_bounds")
-            gate_attr = "_dynamo_unbacked_indices"
-            if hasattr(value, gate_attr):
+            # Dependent attributes: compared by value, and only when their gate
+            # attribute is present.
+            dependent_attrs: dict[str, tuple[Any, str]] = {}
+            gated_attrs = (
+                (
+                    "_dynamo_unbacked_indices",
+                    ("_dynamo_shape_ids", "_dynamo_unbacked_bounds"),
+                ),
+                ("_has_dynamo_dim_marking", ("_dynamo_dynamic_range",)),
+            )
+            for gate_attr, dep_attr_names in gated_attrs:
+                if not hasattr(value, gate_attr):
+                    continue
                 for attr_name in dep_attr_names:
                     attr_value = getattr(value, attr_name, None)
                     dependent_attrs[attr_name] = (attr_value, gate_attr)
