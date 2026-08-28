@@ -516,13 +516,13 @@ static std::vector<Tensor> mkldnn_reorder_mkldnn_rnn_layer_weight(
     reverse);
 
   if (should_use_plain_format(w1_)) {
-    packed_w1 = weight0;
+    packed_w1 = std::move(weight0);
   } else {
     packed_w1 = new_with_itensor_mkldnn(std::move(w1_), optTypeMetaToScalarType(weight0.options().dtype_opt()), weight0.options().device_opt());
   }
 
   if (should_use_plain_format(w2_)) {
-    packed_w2 = weight1;
+    packed_w2 = std::move(weight1);
   } else {
     packed_w2 = new_with_itensor_mkldnn(std::move(w2_), optTypeMetaToScalarType(weight1.options().dtype_opt()), weight1.options().device_opt());
   }

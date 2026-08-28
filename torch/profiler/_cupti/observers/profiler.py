@@ -27,10 +27,13 @@ from torch.profiler._cupti.observers.observation_window import WindowFinalizerMi
 from torch.profiler._cupti.records import (
     Api,
     CudaEvent,
+    Environment,
     ExternalCorrelation,
     Field,
+    GraphHostNode,
     Kernel,
     Memcpy,
+    Memcpy2,
     Memset,
     Overhead,
     Sync,
@@ -38,7 +41,7 @@ from torch.profiler._cupti.records import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
 
 def _current_thread_resource_tuple() -> tuple[int, int, int]:
@@ -100,6 +103,31 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memcpy.SRC_KIND,
         Memcpy.DST_KIND,
         Memcpy.FLAGS,
+        # Copies run on their own channel (CUPTI_CHANNEL_TYPE_ASYNC_MEMCPY), distinct from the
+        # compute channel kernels use -- select it like the kernel path does.
+        Memcpy.CHANNEL_ID,
+        Memcpy.CHANNEL_TYPE,
+    },
+    # Peer-to-peer / cross-device copies (e.g. tensor.to(other_gpu), pipeline sends). CUPTI
+    # records these under MEMCPY2, NOT MEMCPY, so without this they never appear as GPU spans
+    # even though they drive NVLink. Folded into the same "gpu_memcpy" frame (see
+    # _memcpy2_columns) so they render as Memcpy spans on the issuing device's lane.
+    ActivityKind.MEMCPY2: {
+        Memcpy2.START,
+        Memcpy2.END,
+        Memcpy2.DEVICE_ID,
+        Memcpy2.CONTEXT_ID,
+        Memcpy2.STREAM_ID,
+        Memcpy2.CORRELATION_ID,
+        Memcpy2.GRAPH_NODE_ID,
+        Memcpy2.GRAPH_ID,
+        Memcpy2.BYTES,
+        Memcpy2.COPY_KIND,
+        Memcpy2.SRC_KIND,
+        Memcpy2.DST_KIND,
+        Memcpy2.FLAGS,
+        Memcpy2.CHANNEL_ID,
+        Memcpy2.CHANNEL_TYPE,
     },
     ActivityKind.MEMSET: {
         Memset.START,
@@ -114,6 +142,23 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
         Memset.VALUE,
         Memset.MEMORY_KIND,
         Memset.FLAGS,
+        Memset.CHANNEL_ID,
+        Memset.CHANNEL_TYPE,
+    },
+    # Graph host nodes run a CPU callback as a CUDA-graph node; CUPTI reports them with a
+    # graph_node_id + start/end on the stream that waits for them, so they render like the
+    # other graphed GPU ops (attributed via the graph annotation resolver).
+    ActivityKind.GRAPH_HOST_NODE: {
+        GraphHostNode.START,
+        GraphHostNode.END,
+        GraphHostNode.DEVICE_ID,
+        GraphHostNode.CONTEXT_ID,
+        GraphHostNode.STREAM_ID,
+        GraphHostNode.CORRELATION_ID,
+        GraphHostNode.GRAPH_NODE_ID,
+        GraphHostNode.GRAPH_ID,
+        GraphHostNode.PROCESS_ID,
+        GraphHostNode.THREAD_ID,
     },
     ActivityKind.RUNTIME: {
         Api.CBID,
@@ -145,9 +190,8 @@ PROFILER_FIELDS: dict[ActivityKind, set[Field]] = {
 }
 
 
-# CUDA sync + event fields, selected only under enable_cuda_sync_events (matching kineto).
-# SYNCHRONIZATION carries the sync spans; CUDA_EVENT records are the wait_on join inputs
-# (which cudaEventRecord a wait refers to) resolved in monitor_trace.
+# SYNCHRONIZATION carries kineto's cuda_sync spans; selected only under enable_cuda_sync_events.
+# The CUDA_EVENT records these spans join against (the wait_on inputs) live in EVENT_FIELDS.
 SYNC_FIELDS: dict[ActivityKind, set[Field]] = {
     ActivityKind.SYNCHRONIZATION: {
         Sync.TYPE,
@@ -159,6 +203,15 @@ SYNC_FIELDS: dict[ActivityKind, set[Field]] = {
         Sync.CUDA_EVENT_ID,
         Sync.CUDA_EVENT_SYNC_ID,
     },
+}
+
+
+# CUDA_EVENT records are the wait_on join inputs for cuda_sync spans and the device-timestamp
+# source for graph event-record node spans. CUPTI emits them for graph event-record nodes via
+# the graph-replay trace path without SYNCHRONIZATION co-enabled, so they are selected for both
+# enable_cuda_sync_events and enable_event_node_ids. (Eager cudaEventRecord records do require
+# SYNCHRONIZATION co-enabled, but those only matter under enable_cuda_sync_events, where it is.)
+EVENT_FIELDS: dict[ActivityKind, set[Field]] = {
     ActivityKind.CUDA_EVENT: {
         CudaEvent.CORRELATION_ID,
         CudaEvent.CONTEXT_ID,
@@ -166,6 +219,22 @@ SYNC_FIELDS: dict[ActivityKind, set[Field]] = {
         CudaEvent.EVENT_ID,
         CudaEvent.DEVICE_ID,
         CudaEvent.CUDA_EVENT_SYNC_ID,
+        # Device-side GPU timestamp of the event-record node, in the kernel START/END clock
+        # domain -- used to place graph event-record nodes as spans (see _cuda_event_columns).
+        CudaEvent.DEVICE_TIMESTAMP,
+    },
+}
+
+
+# Periodically-sampled GPU environment (power/clock/thermal/cooling), selected only under
+# enable_environment_counters. Rendered as counter tracks; DATA is the 20-byte metric union,
+# split by ENVIRONMENT_KIND. Opt-in: the sampling adds overhead, so it is off by default.
+ENVIRONMENT_FIELDS: dict[ActivityKind, set[Field]] = {
+    ActivityKind.ENVIRONMENT: {
+        Environment.DEVICE_ID,
+        Environment.TIMESTAMP,
+        Environment.ENVIRONMENT_KIND,
+        Environment.ENVIRONMENT_KIND_DATA,
     },
 }
 
@@ -180,9 +249,17 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         self,
         metadata_resolver: Callable[[int], str | None] | None = None,
         enable_cuda_sync: bool = False,
+        enable_environment_counters: bool = False,
         defer_export: bool = True,
+        enable_pm_sampling: bool = False,
+        pm_metrics: Iterable[str] | None = None,
+        enable_graph_dependencies: bool = False,
+        enable_event_node_ids: bool = False,
+        pftrace_compression_level: int = 1,
     ) -> None:
         self._lock = threading.Lock()
+        # gzip level for the native .pftrace encoder (0-9; 1 = fast, the default).
+        self._pftrace_compression_level = pftrace_compression_level
         # Decoded activity kept COLUMNAR (frames of named numpy columns, not per-record
         # dicts), so window bucketing is a mask and the build is vectorized. Timed frames
         # (with a start_ns column) bucket into windows by start time.
@@ -196,6 +273,14 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         # graph_node_id -> blob for graph-captured collectives (no external-correlation link
         # on replay); resolved like graph-node names. NOT reclaimed per graph, reset per run.
         self._metadata_resolver = metadata_resolver
+        # Passive CUDA_EVENT -> graph event-record node bridge (event_id -> graph_node_id),
+        # shared process-global recorder; None unless enabled. See _attach_event_node_ids.
+        self._event_node_recorder: Any = None
+        if enable_event_node_ids:
+            from torch.profiler._cupti._event_nodes import _EventNodeRecorder
+
+            self._event_node_recorder = _EventNodeRecorder()
+            self._event_node_recorder.arm()
         # pid -> {opaque_tid: system_tid}, for naming GPU/CPU lanes.
         self._thread_resource_map: dict[int, dict[int, int]] = {}
         self._open_start: int | None = None  # open window start (None when none open)
@@ -203,8 +288,15 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         # written + dropped once built AND paths are present.
         self._windows: dict[int, dict[str, Any]] = {}
         selection = {k: set(v) for k, v in PROFILER_FIELDS.items()}
+        # CUDA_EVENT records place graph event-record node spans and are the wait_on join inputs
+        # for cuda_sync spans, so either feature selects them. SYNCHRONIZATION carries the
+        # cuda_sync spans themselves and is selected only under enable_cuda_sync.
+        if enable_cuda_sync or enable_event_node_ids:
+            selection.update({k: set(v) for k, v in EVENT_FIELDS.items()})
         if enable_cuda_sync:
             selection.update({k: set(v) for k, v in SYNC_FIELDS.items()})
+        if enable_environment_counters:
+            selection.update({k: set(v) for k, v in ENVIRONMENT_FIELDS.items()})
         # Graph naming on via the default registry resolver (the profiler always wants graph
         # captures named -- it's free when there are none and a no-op for eager-only runs).
         # Eager naming stays off (the default): the full profiler already selects
@@ -214,6 +306,10 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             selection,
             annotations=ObserverAnnotationSettings(
                 graph_annotation_resolver=default_graph_annotation_resolver,
+                # Node->node dependency arrows are opt-in at the monitor level (extra work at
+                # graph instantiate + arrow rendering): the observer records the topology into
+                # its own map and draws the arrows only when this is set.
+                record_graph_dependencies=enable_graph_dependencies,
             ),
         )
         if self.available:
@@ -224,11 +320,37 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                 thread_name="cupti-profiler-export",
                 auto_start_poller=defer_export,
             )
+            # Purge learned event-node state when a graph is destroyed so the maps don't grow
+            # across a long run (mirrors the annotation/dependency destroy hooks).
+            if self._event_node_recorder is not None:
+                from torch.cuda.graphs import register_graph_destroy_hook
+
+                recorder = self._event_node_recorder
+                self._destroy_hook_handles.append(
+                    register_graph_destroy_hook(recorder.purge_exec_ids)
+                )
+        # Opt-in PM sampling (true SM-active % + DRAM-throughput %) is a feature of the CUPTI
+        # monitor: it registers us as a consumer (with our metrics) of the current device's shared
+        # session, delivering decoded frames to on_pm_samples (they render as GPU counter tracks).
+        # Off by default; also a no-op when no metrics are configured (pm_metrics).
+        self._pm_metrics = list(pm_metrics or [])
+        self._pm_enabled = (
+            enable_pm_sampling
+            and bool(self._pm_metrics)
+            and self.available
+            and torch.cuda.is_available()
+        )
+        # PM samples are timestamped, so they bucket into windows exactly like the activity
+        # records (via _timed_frames); no separate buffer. Per-device max start_ns delivered:
+        # a monotonic guard so each sample is enqueued at most once.
+        self._pm_last_ns: dict[int, int] = {}
+        if self._pm_enabled and self._monitor is not None:
+            self._monitor.request_pm_sampling(self.on_pm_samples, self._pm_metrics)
 
     def _boundary_clock_ns(self) -> int:
         # Stamp the boundary in the converted clock the events' start_ns use (convert_time
         # is monotonic, so the comparison stays order-equivalent).
-        return self.convert_time(self.now_native_ns())
+        return self.convert_time(self.now_record_ns())
 
     def _on_activities(self, columns: dict[Any, dict[int, Any]]) -> None:
         # Worker thread: build a named-column frame per kind (convert/demangle/resolve while
@@ -248,9 +370,25 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             if spec is None:
                 continue
             kind_str, builder, is_timed = spec
-            frame = builder(cols, convert, self._resolver)
+            frame = builder(cols, convert, self._annotation_resolver)
             if frame is None or _named_len(frame) == 0:
                 continue
+            # Pluggable graphed-op lane assignment: attach (logical_lane, lane_name) columns
+            # for work kinds so the trace builder can reassign graphed ops onto a dedicated
+            # lane. No-op when no resolver is installed.
+            if (
+                self._lane_resolver is not None
+                and "graph_node_id" in frame
+                and "stream_id" in frame
+            ):
+                frame["logical_lane"], frame["lane_name"] = _resolve_lane_columns(
+                    self._lane_resolver, frame
+                )
+            # Host nodes: attach the recorded callback name/address (see _resolve_host_fn_columns).
+            if kind_str == "graph_host_node" and self._graph_host_fns:
+                frame["host_fn"], frame["host_fn_addr"] = _resolve_host_fn_columns(
+                    self._graph_host_fns, frame
+                )
             (timed if is_timed else ext).append((kind_str, frame))
         if not timed and not ext:
             return
@@ -299,6 +437,28 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
 
     # --- async window API (the cupti_monitor profiler backend drives these) ----
 
+    def on_pm_samples(self, frame: dict[str, Any]) -> None:
+        # Monitor flush-thread hook: enqueue the frame as a timed frame so each finalized window
+        # slices its [start, boundary) samples (a frame spanning a boundary is split like any other
+        # timed frame -- see _finalize_window). Keep only samples newer than the last per device:
+        # decode drains (each delivered once, in increasing start_ns), so this is a cheap monotonic
+        # guard against any duplicate or out-of-order delivery.
+        ts = frame.get("start_ns")
+        if ts is None or not len(ts):
+            return
+        dev = frame["device_id"]
+        with self._lock:
+            keep = np.zeros(len(ts), dtype=bool)
+            for d in np.unique(dev):
+                keep |= (dev == d) & (ts > self._pm_last_ns.get(int(d), -1))
+            if not keep.any():
+                return
+            kept = _slice_frame(frame, keep)
+            kts, kdev = kept["start_ns"], kept["device_id"]
+            for d in np.unique(kdev):
+                self._pm_last_ns[int(d)] = int(kts[kdev == d].max())
+            self._timed_frames.append(("pm_sampling", kept))
+
     def open_window(self) -> None:
         """Start a trace window; records before this are excluded (no prepare-phase leak)."""
         # Capture the starting thread so its RUNTIME/DRIVER records map to the OS tid
@@ -344,7 +504,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             if w is None:
                 return
             w["cpu"] = os.fspath(cpu_trace_path)
-            # Monitor traces are always gzipped; the writer keys gzip off the .gz suffix.
+            # Monitor traces are always gzipped (chrome JSON or .pftrace alike); the writer
+            # keys gzip + format off the suffix.
             out = os.fspath(output_path)
             w["out"] = out if out.endswith(".gz") else out + ".gz"
         self._maybe_write(window_id)
@@ -354,6 +515,10 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         (default) sync-flushes the tail, for use on the training thread. ``force=False`` (an
         off-thread finalize) must NOT flush, so it waits up to ``timeout_s`` for the poller to
         cover the windows, force-draining only if it stalls."""
+        # Release PM sampling first: its final tail decode must land in _timed_frames BEFORE the
+        # windows finalize, so those samples can be sliced into the closing window.
+        if self._pm_enabled and self._monitor is not None:
+            self._monitor.release_pm_sampling(self.on_pm_samples)
         if getattr(self, "_boundaries", None) is not None:
             sync = force
             if not force:
@@ -420,6 +585,14 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         # Attach the per-collective blob as a "metadata" column on the GPU-op kinds (these
         # columns are this thread's now, no lock). No-op without comms metadata.
         _attach_metadata(columns, meta, self._metadata_resolver)
+        _attach_event_node_ids(
+            columns, self._event_node_recorder, self._annotation_resolver
+        )
+        if self._event_node_recorder is not None:
+            _add_graph_event_node_spans(
+                columns, start, boundary_ns, self._lane_resolver
+            )
+        graph_deps = _window_graph_deps(self._dependency_resolver, columns)
         with self._lock:
             w = self._windows.get(window_id)
             if w is None:
@@ -429,6 +602,11 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                 "user_annotations": w["annotations"],
                 "thread_resource_map": w["thread_map"],
                 "start_ns": start,
+                "graph_deps": graph_deps,
+                # event-record node graph_node_id -> cudaEvent_t handle, to tag EventRecord
+                # spans at render (the CUDA_EVENT record has no event field). Snapshot the
+                # shared recorder map so a later graph-destroy purge can't race the merge.
+                "graph_event_record_events": dict(self._graph_event_record_events),
             }
 
     def _maybe_write(self, window_id: int) -> None:
@@ -441,7 +619,13 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             built, cpu, out = w["built"], w["cpu"], w["out"]
             del self._windows[window_id]
         try:
-            merge_trace_window_into_chrome_trace(cpu, out, built, trace_name=out)
+            merge_trace_window_into_chrome_trace(
+                cpu,
+                out,
+                built,
+                trace_name=out,
+                pftrace_compression_level=self._pftrace_compression_level,
+            )
         finally:
             with contextlib.suppress(OSError):  # the CPU trace is a throwaway snapshot
                 os.remove(cpu)
@@ -451,9 +635,6 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
 # Turn the monitor's per-kind columns ({field_id: array}) into named numpy columns the merge
 # consumes directly. Owns column shape, demangling, clock conversion, and graph-annotation
 # resolution -- on the worker thread while the active-id chain is live.
-
-
-_ANNOTATION_MISS = object()
 
 
 def _named_len(frame: dict[str, Any]) -> int:
@@ -532,6 +713,141 @@ def _attach_metadata(
         c["metadata"] = meta
 
 
+def _attach_event_node_ids(
+    columns: dict[str, dict[str, Any]], recorder: Any, resolver: Any = None
+) -> None:
+    """Learn ``event_id -> graph_node_id`` from this window's launches and attach a
+    ``graph_node_id`` + ``annotation`` column to the ``cuda_event`` frame. Passive: reads only
+    records that already flow (never touches the events). Mutates ``columns`` in place; no-op
+    when the bridge is disabled or there are no CUDA_EVENT records.
+
+    Each graph launch's graphed kernel/memset records share the launch ``correlation_id`` and
+    carry the exec graph id in the upper 32 bits of ``graph_node_id``; the same-launch
+    CUDA_EVENT records execute in ``cuda_event_sync_id`` order. Matching the k-th event record
+    to the graph's k-th ordered event node (recorded at instantiate) yields the mapping."""
+    if recorder is None:
+        return
+    ce = columns.get("cuda_event")
+    if ce is None or not len(ce["event_id"]):
+        return
+    from torch.profiler._cupti._event_nodes import resolve_window
+
+    corr_exec_pairs: list[tuple[int, int]] = []
+    for kind_str in ("kernel", "gpu_memcpy", "gpu_memset"):
+        c = columns.get(kind_str)
+        if c is not None and "graph_node_id" in c:
+            corr_exec_pairs.extend(
+                zip(c["correlation_id"].tolist(), c["graph_node_id"].tolist())
+            )
+    event_rows = list(
+        zip(ce["correlation_id"].tolist(), ce["cuda_event_sync_id"].tolist())
+    )
+    resolved = resolve_window(recorder, corr_exec_pairs, event_rows)
+    gnid = np.array([n or 0 for n in resolved], dtype=np.int64)
+    ce["graph_node_id"] = gnid
+    # Same resolver the GPU-op column builders use, so an event node's annotation arrives in
+    # the shape the export expects (the default resolver reads torch.cuda._graph_annotations;
+    # an installed one may merge a node's annotation list into a single dict). Resolving it
+    # here rather than reading the store directly is what lets _annotation_to_args spread the
+    # fields into args -- a raw list is re-serialized to an opaque "annotation" string instead.
+    ce["annotation"] = _resolve_annotation_column(resolver, gnid)
+
+
+def _add_graph_event_node_spans(
+    columns: dict[str, dict[str, Any]],
+    start_ns: int,
+    boundary_ns: int,
+    lane_resolver: Any = None,
+) -> None:
+    """Derive a timed ``graph_event_node`` span frame from the resolved CUDA_EVENT records in
+    this window, so graph event-record nodes render as (point) spans and become dependency-arrow
+    endpoints. Keeps only rows resolved to a graph node (graph_node_id != 0) whose device
+    timestamp falls in ``[start_ns, boundary_ns)`` -- the cuda_event join frame is an unbucketed
+    superset, so the window bound is applied here. No-op when the bridge attached nothing."""
+    ce = columns.get("cuda_event")
+    if ce is None or "graph_node_id" not in ce or "start_ns" not in ce:
+        return
+    gnid = ce["graph_node_id"]
+    s = ce["start_ns"]
+    mask = (gnid != 0) & (s >= start_ns) & (s < boundary_ns)
+    if not mask.any():
+        return
+    g = gnid[mask]
+    frame = {
+        "start_ns": s[mask],
+        "end_ns": ce["end_ns"][mask],
+        "device_id": ce["device_id"][mask],
+        "context_id": ce["context_id"][mask],
+        "stream_id": ce["stream_id"][mask],
+        "correlation_id": ce["correlation_id"][mask],
+        "graph_node_id": g,
+        "graph_id": g >> 32,
+        "annotation": ce["annotation"][mask],
+    }
+    # This frame is synthesized after _on_activities has already run the lane resolver over the
+    # _COLUMN_BUILDERS frames, so it has to attach its own lane columns -- without them the
+    # export's reassignment is gated off and an event node strands on its capture stream while
+    # the collective's kernel moves to the process-group lane.
+    if lane_resolver is not None:
+        frame["logical_lane"], frame["lane_name"] = _resolve_lane_columns(
+            lane_resolver, frame
+        )
+    columns["graph_event_node"] = frame
+
+
+def _nearest_present_preds(resolver: Any, node: int, present: set[int]) -> list[int]:
+    """Predecessors of ``node`` collapsed to the nearest ones that render as spans.
+
+    Walks the recorded predecessor edges, stepping THROUGH nodes absent from ``present``
+    (event_record / wait_event / empty -- graph nodes CUPTI does not render as GPU-op spans, so
+    they can never be arrow endpoints) until it reaches present ancestors. This is what lets a
+    dependency arrow span a kernel -> event_record -> wait_event -> kernel chain (e.g. the nodes
+    NCCL inserts under NCCL_GRAPH_MIXING_SUPPORT) instead of vanishing at the non-rendered node.
+    """
+    out: list[int] = []
+    seen: set[int] = set()
+    stack = list(resolver(node) or ())
+    while stack:
+        p = stack.pop()
+        if p in seen:
+            continue
+        seen.add(p)
+        if p in present:
+            out.append(p)
+        else:
+            stack.extend(resolver(p) or ())
+    return out
+
+
+def _window_graph_deps(
+    resolver: Any, columns: dict[str, dict[str, Any]]
+) -> dict[int, list[int]]:
+    """Resolve the graph node->node dependency edges for the graph_node_ids present in this
+    window, so the export can draw node->node arrows. Predecessors are collapsed through
+    non-rendered nodes (see :func:`_nearest_present_preds`) so an arrow reaches the nearest node
+    that actually renders; for kernel-only graphs this is identical to the raw one-hop edges.
+    Empty when there is no resolver, no graphed ops, or no recorded dependencies."""
+    if resolver is None:
+        return {}
+    present: set[int] = set()
+    for kind_str in (
+        "kernel",
+        "gpu_memcpy",
+        "gpu_memset",
+        "graph_event_node",
+        "graph_host_node",
+    ):
+        c = columns.get(kind_str)
+        if c is not None and "graph_node_id" in c:
+            present.update(int(g) for g in np.unique(c["graph_node_id"]) if g)
+    deps: dict[int, list[int]] = {}
+    for g in present:
+        preds = _nearest_present_preds(resolver, g, present)
+        if preds:
+            deps[g] = preds
+    return deps
+
+
 def _demangle_column(names: Any) -> Any:
     out = np.empty(len(names), dtype=object)
     for i, raw in enumerate(names.tolist()):
@@ -540,20 +856,69 @@ def _demangle_column(names: Any) -> Any:
 
 
 def _resolve_annotation_column(resolver, gnid: Any) -> Any:
-    """Per-row graph annotation as an object column, memoized over distinct graph_node_ids.
-    None resolver -> all-None column, no calls."""
+    """Per-row graph annotation as an object column. None resolver -> all-None column, no
+    calls. The resolver is memoized per graph_node_id by the observer (see
+    CuptiMonitorObserver._annotation_resolver), so distinct nodes resolve once for its
+    lifetime."""
     n = len(gnid)
     out = np.empty(n, dtype=object)
     if resolver is None:
         out[:] = None
         return out
-    cache: dict[int, Any] = {}
     for i, g in enumerate(gnid.tolist()):
-        val = cache.get(g, _ANNOTATION_MISS)
-        if val is _ANNOTATION_MISS:
-            val = cache[g] = resolver(g)
-        out[i] = val
+        out[i] = resolver(g)
     return out
+
+
+def _resolve_host_fn_columns(host_fns: dict[int, Any], frame: dict[str, Any]) -> Any:
+    """Per-row (host_fn name, host_fn addr) for host-node rows, from the recorder's
+    graph_node_id -> (name, addr) map (recorded at graph instantiate; host nodes carry no
+    name in the CUPTI record). name is None and addr 0 for nodes not in the map."""
+    gnid = frame["graph_node_id"]
+    n = len(gnid)
+    names = np.full(n, None, dtype=object)
+    addrs = np.zeros(n, dtype=np.int64)
+    for i, g in enumerate(gnid.tolist()):
+        entry = host_fns.get(g)
+        if entry is not None:
+            names[i], addrs[i] = entry
+    return names, addrs
+
+
+# Where a resolver's lane ordinal lands (see LaneResolver). Above any CUDA stream id, so a lane
+# and a stream are never the same display lane, and a constant rather than "next free id in this
+# window" so one logical lane keeps one id across traces of a job -- consumers compare lanes
+# between traces. Readable on sight: 100008 is resolver lane 8.
+LOGICAL_LANE_BASE = 100_000
+
+
+def _resolve_lane_columns(lane_resolver, frame: dict[str, Any]) -> Any:
+    """Per-row (logical_lane, lane_name) for graphed ops. Graphed rows (graph_node_id != 0)
+    get the resolver's (lane, name), or keep their CUDA stream when it returns None; eager rows
+    keep their CUDA stream and no name (the monitor names those "stream N"). The resolver is
+    keyed and memoized on graph_node_id by the observer (see CuptiMonitorObserver._lane_resolver),
+    so distinct nodes resolve once for its lifetime.
+
+    A resolver returns an ordinal in its own space, which is placed in the reserved lane range
+    here (LOGICAL_LANE_BASE) -- lanes share the CUDA stream namespace, so an un-offset ordinal
+    would be indistinguishable from a stream id, and the two would render as one lane. This is
+    the only place lanes are assigned, so it is the only place that has to hold the invariant.
+    Returning the op's own stream number is therefore still a distinct logical lane; None is how
+    a resolver says "leave it on its CUDA stream"."""
+    gnid = frame["graph_node_id"]
+    n = len(gnid)
+    logical = np.array(
+        frame["stream_id"], dtype=np.int64
+    )  # default: the op's CUDA stream
+    names = np.full(n, None, dtype=object)
+    for i, g in enumerate(gnid.tolist()):
+        if not g:
+            continue
+        res = lane_resolver(g)
+        if res is not None:
+            lane, names[i] = res
+            logical[i] = lane + (0 if lane >= LOGICAL_LANE_BASE else LOGICAL_LANE_BASE)
+    return logical, names
 
 
 def _kernel_columns(cols, convert, resolver):
@@ -604,6 +969,35 @@ def _memcpy_columns(cols, convert, resolver):
         "src_kind": cols[Memcpy.SRC_KIND.id].astype(np.int64),
         "dst_kind": cols[Memcpy.DST_KIND.id].astype(np.int64),
         "flags": cols[Memcpy.FLAGS.id].astype(np.int64),
+        "channel": cols[Memcpy.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memcpy.CHANNEL_TYPE.id].astype(np.int64),
+    }
+
+
+def _memcpy2_columns(cols, convert, resolver):
+    # Peer-to-peer (MEMCPY2): same output columns as _memcpy_columns so the frames concatenate
+    # under one "gpu_memcpy" kind; reads the MEMCPY2 field ids (src/dst device fields shift
+    # correlation/graph ids). src/dst device aren't surfaced (the span on the issuing device's
+    # lane is what's wanted), but they're available on Memcpy2 if needed later.
+    gnid = cols[Memcpy2.GRAPH_NODE_ID.id].astype(np.int64)
+    corr = cols[Memcpy2.CORRELATION_ID.id].astype(np.int64)
+    return {
+        "start_ns": convert(cols[Memcpy2.START.id]),
+        "end_ns": convert(cols[Memcpy2.END.id]),
+        "device_id": cols[Memcpy2.DEVICE_ID.id].astype(np.int64),
+        "context_id": cols[Memcpy2.CONTEXT_ID.id].astype(np.int64),
+        "stream_id": cols[Memcpy2.STREAM_ID.id].astype(np.int64),
+        "correlation_id": corr,
+        "graph_node_id": gnid,
+        "graph_id": cols[Memcpy2.GRAPH_ID.id].astype(np.int64),
+        "annotation": _resolve_annotation_column(resolver, gnid),
+        "bytes": cols[Memcpy2.BYTES.id].astype(np.int64),
+        "copy_kind": cols[Memcpy2.COPY_KIND.id].astype(np.int64),
+        "src_kind": cols[Memcpy2.SRC_KIND.id].astype(np.int64),
+        "dst_kind": cols[Memcpy2.DST_KIND.id].astype(np.int64),
+        "flags": cols[Memcpy2.FLAGS.id].astype(np.int64),
+        "channel": cols[Memcpy2.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memcpy2.CHANNEL_TYPE.id].astype(np.int64),
     }
 
 
@@ -624,6 +1018,25 @@ def _memset_columns(cols, convert, resolver):
         "value": cols[Memset.VALUE.id].astype(np.int64),
         "memory_kind": cols[Memset.MEMORY_KIND.id].astype(np.int64),
         "flags": cols[Memset.FLAGS.id].astype(np.int64),
+        "channel": cols[Memset.CHANNEL_ID.id].astype(np.int64),
+        "channel_type": cols[Memset.CHANNEL_TYPE.id].astype(np.int64),
+    }
+
+
+def _graph_host_node_columns(cols, convert, resolver):
+    gnid = cols[GraphHostNode.GRAPH_NODE_ID.id].astype(np.int64)
+    return {
+        "start_ns": convert(cols[GraphHostNode.START.id]),
+        "end_ns": convert(cols[GraphHostNode.END.id]),
+        "device_id": cols[GraphHostNode.DEVICE_ID.id].astype(np.int64),
+        "context_id": cols[GraphHostNode.CONTEXT_ID.id].astype(np.int64),
+        "stream_id": cols[GraphHostNode.STREAM_ID.id].astype(np.int64),
+        "correlation_id": cols[GraphHostNode.CORRELATION_ID.id].astype(np.int64),
+        "graph_node_id": gnid,
+        "graph_id": cols[GraphHostNode.GRAPH_ID.id].astype(np.int64),
+        "annotation": _resolve_annotation_column(resolver, gnid),
+        "process_id": cols[GraphHostNode.PROCESS_ID.id].astype(np.int64),
+        "thread_id": cols[GraphHostNode.THREAD_ID.id].astype(np.int64),
     }
 
 
@@ -681,7 +1094,11 @@ def _sync_columns(cols, convert, resolver):
 
 
 def _cuda_event_columns(cols, convert, resolver):
-    del convert, resolver
+    del resolver
+    # start_ns is the event-record node's device timestamp (0 when device timestamps are off);
+    # a point span (end == start). The frame stays a join input (is_timed=False); the timed
+    # graph_event_node span frame is derived from it per window in _add_graph_event_node_spans.
+    start_ns = convert(cols[CudaEvent.DEVICE_TIMESTAMP.id])
     return {
         "cuda_event_sync_id": cols[CudaEvent.CUDA_EVENT_SYNC_ID.id].astype(np.int64),
         "correlation_id": cols[CudaEvent.CORRELATION_ID.id].astype(np.int64),
@@ -689,6 +1106,21 @@ def _cuda_event_columns(cols, convert, resolver):
         "context_id": cols[CudaEvent.CONTEXT_ID.id].astype(np.int64),
         "stream_id": cols[CudaEvent.STREAM_ID.id].astype(np.int64),
         "event_id": cols[CudaEvent.EVENT_ID.id].astype(np.int64),
+        "start_ns": start_ns,
+        "end_ns": start_ns,
+    }
+
+
+def _environment_columns(cols, convert, resolver):
+    del resolver
+    # DATA is the union's first 8 bytes (u64): the primary metric pair (e.g. POWER ->
+    # power | powerLimit<<32, SPEED -> smClock | memoryClock<<32). Split by environment_kind
+    # in the consumer (monitor_trace) into the counter tracks.
+    return {
+        "start_ns": convert(cols[Environment.TIMESTAMP.id]),
+        "device_id": cols[Environment.DEVICE_ID.id].astype(np.int64),
+        "environment_kind": cols[Environment.ENVIRONMENT_KIND.id].astype(np.int64),
+        "data": cols[Environment.ENVIRONMENT_KIND_DATA.id].astype(np.uint64),
     }
 
 
@@ -697,7 +1129,13 @@ def _cuda_event_columns(cols, convert, resolver):
 _COLUMN_BUILDERS: dict[int, tuple[str, Any, bool]] = {
     int(ActivityKind.CONCURRENT_KERNEL): ("kernel", _kernel_columns, True),
     int(ActivityKind.MEMCPY): ("gpu_memcpy", _memcpy_columns, True),
+    int(ActivityKind.MEMCPY2): ("gpu_memcpy", _memcpy2_columns, True),
     int(ActivityKind.MEMSET): ("gpu_memset", _memset_columns, True),
+    int(ActivityKind.GRAPH_HOST_NODE): (
+        "graph_host_node",
+        _graph_host_node_columns,
+        True,
+    ),
     int(ActivityKind.RUNTIME): ("cuda_runtime", _api_columns, True),
     int(ActivityKind.DRIVER): ("cuda_driver", _api_columns, True),
     int(ActivityKind.EXTERNAL_CORRELATION): (
@@ -708,4 +1146,5 @@ _COLUMN_BUILDERS: dict[int, tuple[str, Any, bool]] = {
     int(ActivityKind.OVERHEAD): ("overhead", _overhead_columns, True),
     int(ActivityKind.SYNCHRONIZATION): ("cuda_sync", _sync_columns, True),
     int(ActivityKind.CUDA_EVENT): ("cuda_event", _cuda_event_columns, False),
+    int(ActivityKind.ENVIRONMENT): ("environment", _environment_columns, True),
 }

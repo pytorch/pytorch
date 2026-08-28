@@ -17,21 +17,25 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/resize_native.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
 
 // BEGIN QUANTIZE HELPER FUNCTIONS
+// Get the bit field of [pos, pos+len) bits from val, i.e.
+// (val >> pos) & ((1u << len) - 1u), and return it as a float.
 __device__ __forceinline__ float bfe(uint32_t val, uint32_t pos, uint32_t len) {
-#ifdef USE_ROCM
-  return *reinterpret_cast<float*>((val >> pos) && ((1u << len) - 1u ));
-#else
   uint32_t ret;
-  // Get the bit field of [pos, pos+len) bits from val:
-  // (val >> pos) && ( (1u << len) - 1u )
+#ifdef USE_ROCM
+  // Bitwise-AND (`&`), not logical-AND (`&&`): the logical form yields a bool,
+  // which the previous implementation reinterpret_cast to float* and
+  // dereferenced, faulting on ROCm.
+  ret = (val >> pos) & ((1u << len) - 1u);
+#else
   asm("bfe.u32 %0, %1, %2, %3;" : "=r"(ret) : "r"(val), "r"(pos), "r"(len));
-  return __uint2float_rn(ret);
 #endif
+  return __uint2float_rn(ret);
 }
 
 // FMA with constant scale/bias for all 4 floats in fa
@@ -203,10 +207,6 @@ at::Tensor& embedding_bag_byte_impl(
   if (per_sample_weights_.has_value()) {
     TORCH_CHECK(per_sample_weights_.value().device() == weight.device());
   }
-  if (compressed_indices_mapping.has_value()) {
-    TORCH_CHECK(compressed_indices_mapping.value().device() == weight.device());
-  }
-
   TORCH_CHECK(weight.dtype() == at::kByte);
   TORCH_CHECK(weight.dim() == 2);
 
@@ -223,10 +223,6 @@ at::Tensor& embedding_bag_byte_impl(
               "Per sample weights expected scalar type ", at::kFloat, " but got ",
               per_sample_weights_.value().scalar_type());
   }
-  TORCH_CHECK(
-      !compressed_indices_mapping.has_value(),
-      "Compressed indices mapping not yet implemented for embedding_bag_byte_rowwise_offsets_cuda");
-
   const auto maxThreads = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
 
   int64_t output_size = include_last_offset ? M - 1 : M;
@@ -240,6 +236,9 @@ at::Tensor& embedding_bag_byte_impl(
 
   const std::vector<int64_t> shape = {output_size, D};
   at::native::resize_(output, shape, std::nullopt);
+  const at::Tensor offsets_k = offsets.scalar_type() == indices.scalar_type()
+      ? offsets
+      : offsets.to(indices.scalar_type());
   AT_DISPATCH_INDEX_TYPES(
       indices.scalar_type(), "embedding_bag_byte_rowwise_offsets_kernel", ([&] {
         embedding_bag_nbits_rowwise_offsets_kernel<index_t, 8><<<
@@ -249,7 +248,7 @@ at::Tensor& embedding_bag_byte_impl(
             at::cuda::getCurrentCUDAStream()>>>(
             weight.packed_accessor64<uint8_t, 2, RestrictPtrTraits>(),
             indices.packed_accessor32<index_t, 1, RestrictPtrTraits>(),
-            offsets.packed_accessor32<index_t, 1, RestrictPtrTraits>(),
+            offsets_k.packed_accessor32<index_t, 1, RestrictPtrTraits>(),
             false /* pruned_weights */,
             sample_weights.packed_accessor32<float, 1, RestrictPtrTraits>(),
             compressed_indices_mapping,
@@ -267,20 +266,134 @@ Tensor embedding_bag_byte_rowwise_offsets(
     const Tensor& weight,
     const Tensor& indices,
     const std::optional<Tensor>& offsets_in,
-    const bool /* scale_grad_by_freq */,
-    const int64_t /* mode */,
+    const bool scale_grad_by_freq,
+    const int64_t mode,
     bool pruned_weights,
     const std::optional<Tensor>& per_sample_weights_,
     const std::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
-  bool is_embedding_op = false;
-  auto output = create_empty_from(weight, at::kFloat);
-
-  c10::MaybeOwned<at::Tensor> offsets;
+  // Screen the caller's tensors before anything below can rewrite them. The
+  // pruned path re-enters this function with translated indices and synthesized
+  // per-sample weights, and returns early when every row was pruned, so a check
+  // placed further down would either inspect the rewritten tensors or be skipped
+  // altogether.
+  TORCH_CHECK(weight.is_cuda());
+  TORCH_CHECK(indices.is_cuda());
+  TORCH_CHECK(indices.device() == weight.device());
+  TORCH_CHECK(weight.dtype() == at::kByte);
+  TORCH_CHECK(weight.dim() == 2);
+  // NB: -8 to account for scale and bias. The lower bound is not implied by the
+  // remainder: (0 - 8) % 4 and (4 - 8) % 4 are both 0, and the negative D that
+  // follows only surfaces much later as an overflow or a negative dimension.
+  TORCH_CHECK(weight.size(1) >= 8 && (weight.size(1) - 8) % 4 == 0);
   TORCH_CHECK(
       indices.dim() == 1 || indices.dim() == 2,
       "qembedding/qembedding_bag operator supports 1 or 2d indices, got ",
       indices.dim());
+  TORCH_CHECK(
+      indices.scalar_type() == at::kInt || indices.scalar_type() == at::kLong,
+      "Expect 32 or 64 bit indices, but found ",
+      indices.scalar_type(),
+      " instead.");
+  if (offsets_in.has_value()) {
+    const auto& offsets_arg = offsets_in.value();
+    TORCH_CHECK(offsets_arg.is_cuda());
+    TORCH_CHECK(offsets_arg.device() == weight.device());
+    TORCH_CHECK(
+        offsets_arg.dim() == 1, "Expect 1D offsets, got ", offsets_arg.dim());
+    TORCH_CHECK(
+        offsets_arg.scalar_type() == at::kInt ||
+            offsets_arg.scalar_type() == at::kLong,
+        "Expect 32 or 64 bit offsets, but found ",
+        offsets_arg.scalar_type(),
+        " instead.");
+  }
+  TORCH_CHECK(
+      weight.is_contiguous() && indices.is_contiguous() &&
+          (!offsets_in.has_value() || offsets_in.value().is_contiguous()),
+      "Expect weight, indices, and offsets to be contiguous.");
+  if (per_sample_weights_.has_value()) {
+    TORCH_CHECK(per_sample_weights_.value().device() == weight.device());
+    TORCH_CHECK(
+        per_sample_weights_.value().scalar_type() == at::kFloat,
+        "Per sample weights expected scalar type ",
+        at::kFloat,
+        " but got ",
+        per_sample_weights_.value().scalar_type());
+  }
+
+  // The kernel takes compressed_indices_mapping but ignores it, so remap the
+  // indices here and re-enter as a dense lookup, mirroring the CPU op.
+  if (compressed_indices_mapping.has_value()) {
+    const auto& mapping = compressed_indices_mapping.value();
+    Tensor eff_indices = indices;
+    std::optional<Tensor> eff_per_sample_weights = per_sample_weights_;
+    // A single-entry mapping is the "not pruned" sentinel: {0} by CPU's
+    // spelling, {-1} by that of at least one out-of-tree producer. CPU honours
+    // only {0}; it reads any other single value as a real one-row mapping and
+    // indexes through it, rejecting ids >= 1 as out of bounds. Telling the two
+    // apart needs a device read, i.e. a sync on every call, so every
+    // single-entry mapping is taken as the sentinel and looked up densely.
+    if (pruned_weights && mapping.numel() != 1) {
+      TORCH_CHECK_TYPE(
+          mapping.scalar_type() == at::kInt,
+          "compressed_indices_mapping must have dtype Int, got ",
+          mapping.scalar_type());
+      TORCH_CHECK(
+          mapping.device() == weight.device(),
+          "compressed_indices_mapping must be on the same device as weight; got ",
+          mapping.device(),
+          " vs ",
+          weight.device());
+      // Not redundant: index_select would fault device-side, unrecoverably.
+      TORCH_CHECK_VALUE(
+          mapping.numel() > 0, "compressed_indices_mapping must not be empty");
+      // CPU accepts 2-D indices by synthesizing offsets for them; on CUDA that
+      // path is already dead (host-side at::arange), so reject rather than
+      // carry reshape logic for it.
+      TORCH_CHECK(
+          indices.dim() == 1,
+          "compressed_indices_mapping requires 1D indices, got ",
+          indices.dim());
+      // Out-of-range ids fault device-side (a bare abort() on ROCm) rather than
+      // raising CPU's clean error; screening on the host would sync every call.
+      const auto remapped = mapping.reshape({-1}).index_select(0, indices);
+      // Every row pruned away, so the result is all zeros, as on CPU; clamp_min
+      // below would instead read row 0 of an empty table. The caller's tensors
+      // were screened at the top of the function, so returning here skips none
+      // of the checks above.
+      if (weight.size(0) == 0) {
+        TORCH_CHECK(
+            offsets_in.has_value(),
+            "embedding_bag_byte expects offsets to be set for 1D indices.");
+        const auto num_bags = offsets_in.value().size(0);
+        return at::zeros(
+            {include_last_offset ? num_bags - 1 : num_bags, weight.size(1) - 8},
+            weight.options().dtype(at::kFloat));
+      }
+      // CPU skips pruned rows (-1); the dense kernel cannot, so cancel them with a
+      // zero per-sample weight. Exact for finite rows and weights: 0 * inf = NaN.
+      const auto keep = remapped.ge(0).to(at::kFloat);
+      eff_per_sample_weights = per_sample_weights_.has_value()
+          ? per_sample_weights_.value().mul(keep)
+          : keep;
+      eff_indices = remapped.clamp_min(0).to(indices.scalar_type());
+    }
+    return embedding_bag_byte_rowwise_offsets(
+        weight,
+        eff_indices,
+        offsets_in,
+        scale_grad_by_freq,
+        mode,
+        /*pruned_weights=*/false,
+        eff_per_sample_weights,
+        /*compressed_indices_mapping=*/std::nullopt,
+        include_last_offset);
+  }
+  bool is_embedding_op = false;
+  auto output = create_empty_from(weight, at::kFloat);
+
+  c10::MaybeOwned<at::Tensor> offsets;
   // For embedding_bag operator with 2D indices, we set the offsets explicitly
   // here.
   if (indices.dim() == 2 && !is_embedding_op) {
@@ -298,23 +411,14 @@ Tensor embedding_bag_byte_rowwise_offsets(
     offsets = c10::MaybeOwned<at::Tensor>::borrowed(offsets_in.value());
   }
 
-  TORCH_CHECK(
-      indices.scalar_type() == at::kInt || indices.scalar_type() == at::kLong,
-      "Expect 32 or 64 bit indices, but found ",
-      indices.scalar_type(),
-      " instead.");
-  TORCH_CHECK(
-      offsets->scalar_type() == at::kInt || offsets->scalar_type() == at::kLong,
-      "Expect 32 or 64 bit offsets, but found ",
-      offsets->scalar_type(),
-      " instead.");
-  TORCH_CHECK(
-      weight.is_contiguous() && indices.is_contiguous() &&
-          offsets->is_contiguous(),
-      "Expect weight, indices, and offsets to be contiguous.");
+  // Only the synthesized 2-D offsets are unchecked above; they are Int/Long and
+  // contiguous by construction, but at::arange builds them on the host, so the
+  // device check in embedding_bag_byte_impl is what catches that (pre-existing;
+  // the same device-less at::arange call sits in the 4-bit function).
 
-  // Using helper function to support different type combination without the
-  // need to cast, which can be additional performance overhead
+  // IndexType/OffsetType are unused in embedding_bag_byte_impl -- all four
+  // instantiations are identical, and the impl casts offsets to the index type
+  // before launching.
   if (indices.scalar_type() == at::kInt && offsets->scalar_type() == at::kInt) {
     return embedding_bag_byte_impl<int, int>(
         output,
@@ -407,7 +511,7 @@ at::Tensor& embedding_bag_4bit_impl(
   }
   TORCH_CHECK(
       !compressed_indices_mapping.has_value(),
-      "Compressed indices mapping not yet implemented for embedding_bag_byte_rowwise_offsets_cuda");
+      "Compressed indices mapping not yet implemented for embedding_bag_4bit_rowwise_offsets_cuda");
 
   const auto maxThreads = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
 
@@ -422,6 +526,9 @@ at::Tensor& embedding_bag_4bit_impl(
 
   const std::vector<int64_t> shape = {output_size, D};
   at::native::resize_(output, shape, std::nullopt);
+  const at::Tensor offsets_k = offsets.scalar_type() == indices.scalar_type()
+      ? offsets
+      : offsets.to(indices.scalar_type());
   AT_DISPATCH_INDEX_TYPES(
       indices.scalar_type(), "embedding_bag_4bit_rowwise_offsets_kernel", ([&] {
         embedding_bag_nbits_rowwise_offsets_kernel<index_t, 4><<<
@@ -431,7 +538,7 @@ at::Tensor& embedding_bag_4bit_impl(
             at::cuda::getCurrentCUDAStream()>>>(
             weight.packed_accessor64<uint8_t, 2, RestrictPtrTraits>(),
             indices.packed_accessor32<index_t, 1, RestrictPtrTraits>(),
-            offsets.packed_accessor32<index_t, 1, RestrictPtrTraits>(),
+            offsets_k.packed_accessor32<index_t, 1, RestrictPtrTraits>(),
             false /* pruned_weights */,
             sample_weights.packed_accessor32<float, 1, RestrictPtrTraits>(),
             compressed_indices_mapping,
