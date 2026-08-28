@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/DispatchStub.h>
 
-#include <c10/core/DeviceType.h>
 #include <array>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
@@ -10,8 +9,6 @@
 #include <cpuinfo.h>
 #endif
 #include <algorithm>
-#include <cstdlib>
-#include <cstring>
 
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
 #include <sys/auxv.h>
