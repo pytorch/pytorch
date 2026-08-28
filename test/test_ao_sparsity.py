@@ -26,7 +26,7 @@ from ao.sparsity.test_structured_sparsifier import (  # noqa: F401
     TestBaseStructuredSparsifierDevice,
     TestFPGMPrunerCPU,
     TestFPGMPrunerDevice,
-    TestSaliencyPruner,
+    TestSaliencyPrunerDevice,
 )
 
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -59,9 +59,11 @@ from ao.sparsity.test_data_sparsifier import (  # noqa: F401
 from ao.sparsity.test_sparsity_utils import TestSparsityUtilFunctions  # noqa: F401
 
 
-instantiate_device_type_tests(TestSaliencyPruner, globals())
-instantiate_device_type_tests(TestBaseStructuredSparsifierDevice, globals())
-instantiate_device_type_tests(TestFPGMPrunerDevice, globals())
+instantiate_device_type_tests(TestSaliencyPrunerDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestBaseStructuredSparsifierDevice, globals(), allow_xpu=True
+)
+instantiate_device_type_tests(TestFPGMPrunerDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
