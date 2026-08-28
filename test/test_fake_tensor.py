@@ -188,6 +188,8 @@ class FakeTensorTest(TestCase):
                 self.assertEqual(d.layout, torch.strided)
 
     def test_sparse_compressed_tensor_creation_pin_memory(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("real pin_memory needs an accelerator")
         with FakeTensorMode():
             crow = torch.tensor([0, 2, 4])
             col = torch.tensor([0, 1, 0, 1])
