@@ -594,7 +594,7 @@ op_db: list[OpInfo] = [
     BinaryUfuncInfo(
         "special.laguerre_polynomial_l",
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
-        dtypesIfMPS=all_types_and(torch.bool),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         promotes_int_to_float=True,
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
@@ -604,38 +604,6 @@ op_db: list[OpInfo] = [
             # Too slow
             DecorateInfo(
                 unittest.skip, "TestCommon", "test_compare_cpu", device_type="xpu"
-            ),
-            # NotImplementedError: The operator 'aten::special_laguerre_polynomial_l.out'
-            # is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_promotes_int_to_float",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
             ),
         ),
         supports_one_python_scalar=True,

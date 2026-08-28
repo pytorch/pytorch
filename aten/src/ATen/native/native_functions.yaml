@@ -15771,7 +15771,7 @@
 - func: special_laguerre_polynomial_l.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA, XPU: special_laguerre_polynomial_l_out
+    CPU, CUDA, MPS, XPU: special_laguerre_polynomial_l_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
