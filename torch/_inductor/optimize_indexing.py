@@ -13,7 +13,7 @@ from .loop_body import LoopBody
 from .utils import dominated_nodes
 
 
-def val_expressable_in_32_bits(val: Any) -> bool:
+def val_expressable_in_32_bits(val: object) -> bool:
     if getattr(val, "is_Boolean", False):
         return True
 
