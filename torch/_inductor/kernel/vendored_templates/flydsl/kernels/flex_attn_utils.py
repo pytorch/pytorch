@@ -28,26 +28,6 @@ def make_shared_view(pointer, shape, stride):
     return fx.make_view(pointer, fx.make_layout(shape, stride))
 
 
-def load_scalar(copy_atom, view, index, dtype):
-    fragment = fx.make_rmem_tensor(1, dtype)
-    source = fx.slice(
-        fx.logical_divide(view, fx.make_layout(1, 1)),
-        (None, index),
-    )
-    fx.copy(copy_atom, source, fragment)
-    return fx.Vector(fragment.load())[0]
-
-
-def store_scalar(copy_atom, view, index, value, dtype):
-    fragment = fx.make_rmem_tensor(1, dtype)
-    fragment.store(fx.Vector.from_elements([value], dtype).ir_value())
-    destination = fx.slice(
-        fx.logical_divide(view, fx.make_layout(1, 1)),
-        (None, index),
-    )
-    fx.copy(copy_atom, fragment, destination)
-
-
 def is_causal_document_mask_program(
     mask_program,
     mask_program_output,
@@ -226,17 +206,15 @@ def make_mfma32_ops(window_mask, vector_width):
     g128 = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.BFloat16)
     dma128 = fx.make_copy_atom(fx.rocdl.BufferCopyLDS128b(), 128)
     tr16 = fx.make_copy_atom(fx.rocdl.cdna4.LDSReadTrans(16, 64), fx.BFloat16)
-    f32atom = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Float32)
-    i32atom = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Int32)
     o64 = fx.make_copy_atom(fx.rocdl.BufferCopy64b(), fx.BFloat16)
     lds_pointer_type = fx.PointerType.get(fx.BFloat16.ir_type, 2, 16)
     atom = fx.make_mma_atom(fx.rocdl.MFMA(32, 32, 16, fx.BFloat16))
 
     def gload_f32(view, index):
-        return fx.Float32(load_scalar(f32atom, view, index, fx.Float32))
+        return fx.Float32(fx.get_iter(view)[index])
 
     def gload_i32(view, index):
-        return fx.Int32(load_scalar(i32atom, view, index, fx.Int32))
+        return fx.Int32(fx.get_iter(view)[index])
 
     def load_global_pack(view, row, column):
         fragment = fx.make_rmem_tensor(vector_width, fx.BFloat16)

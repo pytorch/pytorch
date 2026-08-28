@@ -44,9 +44,7 @@ from .flex_attn_bwd_q_owner import make_dq_mfma32_body
 from .flex_attn_utils import (
     fast_exp2,
     is_causal_document_mask_program,
-    load_scalar,
     make_global_view,
-    store_scalar,
 )
 
 _LOG2E = 1.4426950408889634
@@ -323,11 +321,8 @@ def _build_flex_attn_bwd_module(
                 acc = acc + _f32(prod[i])
         for sh in DSH:
             acc = acc + _f32(fx.gpu.shuffle_xor(acc, sh, 64))
-        satom = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Float32)
-        fs = fx.make_rmem_tensor(1, fx.Float32)
-        fs.store(fx.Vector.from_elements([acc], fx.Float32).ir_value())
         if chunk == fx.Int32(0):
-            fx.copy(satom, fs, fx.slice(fx.logical_divide(gDl, fx.make_layout(1, 1)), (None, row)))
+            fx.get_iter(gDl)[row] = acc
 
     FLAG_N = (NB * NB + 1 + NT - 1) // NT * NT
     FILL_IT = (NB * NB + NT - 1) // NT
@@ -372,13 +367,12 @@ def _build_flex_attn_bwd_module(
         gCFK = gview(CF_K, bh * fx.Int32(NC), NC, 1)
         gIPK = gview(IP_K, bh * fx.Int32(NC * MC), NC * MC, 1)
         gIFK = gview(IF_K, bh * fx.Int32(NC * MC), NC * MC, 1)
-        i32atom = fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Int32)
 
         def gload_i32(view, idx):
-            return fx.Int32(load_scalar(i32atom, view, idx, fx.Int32))
+            return fx.Int32(fx.get_iter(view)[idx])
 
         def gstore_i32(view, idx, val):
-            store_scalar(i32atom, view, idx, val, fx.Int32)
+            fx.get_iter(view)[idx] = val
 
         zero = fx.Int32(0)
         for l in fx.range_constexpr(FLAG_N // NT):
