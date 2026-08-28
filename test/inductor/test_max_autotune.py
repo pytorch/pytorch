@@ -6140,6 +6140,126 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
             test_aten_chosen()
 
 
+class TestAutotuneConfigLimits(TestCase):
+    @skipIfXpu
+    @skipIfRocm
+    def test_max_mm_configs_is_opt_in(self):
+        from torch._inductor.heuristics.registry import (
+            get_registered_heuristic_class,
+        )
+
+        template_uid = torch._inductor.kernel.mm.mm_template.uid
+        base_heuristic_class = get_registered_heuristic_class(
+            template_uid, GPU_TYPE, "mm"
+        )
+        self.assertIsNotNone(base_heuristic_class)
+
+        class RequiresLargeNTile(base_heuristic_class):
+            def __init__(self):
+                super().__init__()
+                self.should_scale_configs = False
+
+            def _get_template_configs_impl(self, kernel_inputs, op_name, **kwargs):
+                for template_kwargs in super()._get_template_configs_impl(
+                    kernel_inputs, op_name, **kwargs
+                ):
+                    if (
+                        template_kwargs["BLOCK_M"],
+                        template_kwargs["BLOCK_N"],
+                        template_kwargs["BLOCK_K"],
+                    ) == (128, 256, 64):
+                        yield template_kwargs
+
+        heuristic = RequiresLargeNTile()
+        args = (128, 256, 64)
+        with config.patch({"test_configs.max_mm_configs": None}):
+            all_configs = list(
+                heuristic.get_mm_configs()(*args, dtype_size=2, op_name="mm")
+            )
+        with config.patch({"test_configs.max_mm_configs": 2}):
+            limited_configs = list(
+                heuristic.get_mm_configs()(*args, dtype_size=2, op_name="mm")
+            )
+
+        self.assertGreater(len(all_configs), 2)
+        self.assertEqual(len(limited_configs), 2)
+        required_config = next(
+            candidate
+            for candidate in all_configs
+            if (
+                candidate.kwargs["BLOCK_M"],
+                candidate.kwargs["BLOCK_N"],
+                candidate.kwargs["BLOCK_K"],
+            )
+            == (128, 256, 64)
+        )
+        self.assertNotIn(required_config, limited_configs)
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(128, 64, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.float16)
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": False,
+                    "triton.native_matmul": False,
+                    "test_configs.autotune_choice_name_regex": r"^triton_mm_",
+                }
+            ),
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[(template_uid, "mm")],
+                override_heuristic_class=RequiresLargeNTile,
+            ),
+        ):
+            actual = torch.compile(mm)(a, b)
+
+        self.assertEqual(actual, mm(a, b))
+        self.assertIsNone(config.test_configs.max_mm_configs)
+
+    @config.patch(max_autotune=True)
+    def test_max_flex_configs_is_opt_in(self):
+        import torch._inductor.kernel.flex.flex_flash_attention as flex_flash_attention_module
+
+        with config.patch({"test_configs.max_flex_configs": None}):
+            all_configs = flex_flash_attention_module.get_flex_flash_fwd_configs(
+                True, False
+            )
+        with config.patch({"test_configs.max_flex_configs": 2}):
+            limited_configs = (
+                flex_flash_attention_module.get_flex_flash_fwd_configs(True, False)
+            )
+
+        self.assertEqual(len(all_configs), 8)
+        self.assertEqual(limited_configs, all_configs[:2])
+
+        with (
+            mock.patch.object(
+                flex_flash_attention_module,
+                "select_score_mod_vec_size",
+                return_value=8,
+            ),
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(
+                torch.cuda, "get_device_capability", return_value=(10, 0)
+            ),
+            config.patch({"test_configs.max_flex_configs": 2}),
+        ):
+            required_configs = (
+                flex_flash_attention_module.get_flex_flash_fwd_configs(True, True)
+            )
+
+        self.assertEqual(
+            required_configs,
+            [flex_flash_attention_module.FlexFlashConfig(score_mod_vec_size=8)],
+        )
+        self.assertIsNone(config.test_configs.max_flex_configs)
+
+
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
