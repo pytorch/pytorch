@@ -35,6 +35,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import (
     DEFAULT_WORLD_SIZE,
     MultiProcContinuousTest,
+    MultiProcessTestCase,
     requires_ucc,
     skip_if_lt_x_gpu,
     verify_ddp_error_logged,
@@ -150,17 +151,23 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
         self._test_default_store_timeout("ucc")
 
 
-class ProcessGroupUCCTest(MultiProcContinuousTest):
+class ProcessGroupUCCTest(MultiProcessTestCase):
     hw_classification = HardwareClassification.CPU
-    world_size = DEFAULT_WORLD_SIZE
-
-    @classmethod
-    def backend_str(cls) -> str:
-        return "ucc"
 
     def _create_process_group_ucc(self):
-        store = c10d.FileStore(self.rdvz_file, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         return c10d.ProcessGroupUCC(store, self.rank, self.world_size)
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
 
     @requires_ucc()
     def test_empty_tensors(self):
@@ -938,16 +945,22 @@ class DistributedDataParallelCUDATest(_DistributedDataParallelTestBase):
 
 
 
-class DistributedDataParallelUccCommHookValidationTest(MultiProcContinuousTest):
+class DistributedDataParallelUccCommHookValidationTest(MultiProcessTestCase):
     hw_classification = HardwareClassification.CPU
-    world_size = DEFAULT_WORLD_SIZE
 
-    @classmethod
-    def backend_str(cls) -> str:
-        return "ucc"
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
 
     def _get_process_group(self):
-        store = c10d.FileStore(self.rdvz_file, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             "ucc", store=store, rank=self.rank, world_size=self.world_size
         )
