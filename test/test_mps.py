@@ -16229,6 +16229,19 @@ class TestConsistency(TestCaseMPS):
                 self.assertEqual(values if keep_dim else values.squeeze(dim), mps_out[0])
                 continue
 
+            if op.name == "mode":
+                # Repeated values make the returned index non-unique (CPU picks
+                # whichever duplicate its unstable sort left last in the run),
+                # so validate the index by gathering through it instead.
+                self.assertEqual(cpu_out[0], mps_out[0], atol=atol, rtol=rtol)
+                dim = mps_sample.kwargs.get("dim", mps_sample.args[0] if mps_sample.args else -1)
+                keepdim = mps_sample.kwargs.get(
+                    "keepdim", mps_sample.args[1] if len(mps_sample.args) > 1 else False)
+                idx = mps_out[1] if keepdim else mps_out[1].unsqueeze(dim)
+                values = torch.gather(mps_sample.input, dim, idx)
+                self.assertEqual(values if keepdim else values.squeeze(dim), mps_out[0])
+                continue
+
             if op.name == "topk":
                 # Tied values give non-unique indices; gather-validate them instead of comparing.
                 self.assertEqual(cpu_out[0], mps_out[0], atol=atol, rtol=rtol)
