@@ -20,6 +20,7 @@ from torch.testing._internal.common_device_type import (
     Capability,
     requires_capabilities,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class_params = _parameterized_class_attrs_and_values(
@@ -31,7 +32,7 @@ class_params = _parameterized_class_attrs_and_values(
     class_name_func=onnx_test_common.parameterize_class_name,
 )
 class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
-    hw_classification = common_utils.HardwareClassification.CUDA
+    hw_classification = HardwareClassification.CUDA
     ort_backend = "CUDAExecutionProvider"
 
     @classmethod
