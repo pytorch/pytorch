@@ -319,7 +319,7 @@ static std::vector<Value*> linearGradientForNode(
   auto block = linear->addBlock();
   WithInsertPoint guard(block);
   auto results = GradientHelper(node).gradient(grad_values);
-  return fmap(results, [block, linear](Value* grad) -> Value* {
+  return fmap(std::move(results), [block, linear](Value* grad) -> Value* {
     if (!grad || grad->mustBeNone())
       return nullptr;
     block->registerOutput(grad);
@@ -837,7 +837,7 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   TORCH_CHECK(
       graph.use_count() == 1,
       "differentiate will mutate and destroy the graph, so it requires "
-      "graph.use_count() == 1, but found %d",
+      "graph.use_count() == 1, but found ",
       graph.use_count());
   std::swap(graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!
