@@ -3,10 +3,13 @@
 import torch
 import torch._dynamo.testing
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestGroupTensorsByDeviceAndDtype(TestCase):
     """Tests for the group_tensors_by_device_and_dtype polyfill."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_polyfill_matches_cpp_single_list(self):
         """Test that polyfill matches C++ implementation for a single list."""
