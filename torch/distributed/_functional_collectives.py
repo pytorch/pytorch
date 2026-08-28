@@ -2111,6 +2111,11 @@ def _remap_traceable_collective(
 
     mapped_func = traceable_collective_remaps[func]
     bound = dict(inspect.signature(func).bind(*args, **(kwargs or {})).arguments)
+    config = bound.pop("config", None)
+    if config is not None:
+        raise NotImplementedError(
+            "per-collective configuration is not supported while tracing"
+        )
     if func in (
         torch.distributed.all_reduce,
         torch.distributed.reduce_scatter,

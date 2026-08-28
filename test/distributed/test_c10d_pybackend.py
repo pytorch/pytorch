@@ -311,6 +311,32 @@ def create_process_group(backend):
 
 
 class TestPyBackend(TestCase):
+    def test_collective_config(self) -> None:
+        backend = RecordingBackend(0, 1)
+        group = create_process_group(backend)
+        config = object()
+
+        tensor = torch.zeros(2)
+        dist.all_reduce(tensor, dist.ReduceOp.SUM, group, False, config)
+        dist.all_reduce_coalesced([tensor], group=group, config=config)
+        dist.broadcast(tensor, group=group, group_src=0, config=config)
+        dist.reduce(tensor, group=group, group_dst=0, config=config)
+        dist.all_gather([torch.empty_like(tensor)], tensor, group=group, config=config)
+        dist.all_gather_single(
+            torch.empty_like(tensor), tensor, group=group, config=config
+        )
+        dist.reduce_scatter(
+            torch.empty_like(tensor), [tensor], group=group, config=config
+        )
+        dist.reduce_scatter_single(
+            torch.empty_like(tensor), tensor, group=group, config=config
+        )
+        dist.all_to_all_single(
+            torch.empty_like(tensor), tensor, group=group, config=config
+        )
+        for call in backend.calls:
+            self.assertIs(call[-1].config, config)
+
     def test_attr_overrides(self) -> None:
         backend = RecordingBackend(0, 1)
         group = create_process_group(backend)
