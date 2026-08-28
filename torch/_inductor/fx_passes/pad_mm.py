@@ -153,7 +153,7 @@ def can_pad(
 
         k_padded_length = get_padded_length(k, get_alignment_size(mat1))
         n_padded_length = get_padded_length(n, get_alignment_size(mat2))
-        m_padded_length = get_padded_length(m, get_alignment_size(mat1))
+        m_padded_length = get_m_padded_length(m, get_alignment_size(mat1))
 
         # No padding needed - can't pad if there's nothing to pad
         if m_padded_length == k_padded_length == n_padded_length == 0:
@@ -185,6 +185,12 @@ def get_padded_length(x: int | torch.SymInt, alignment_size: int) -> int:
         return 0
 
     return int((x // alignment_size + 1) * alignment_size) - x
+
+
+def get_m_padded_length(m: int | torch.SymInt, alignment_size: int) -> int:
+    if not torch._inductor.config.pad_m_dim:
+        return 0
+    return get_padded_length(m, alignment_size)
 
 
 def pad_dim(x: Tensor, padded_length: int, dim: int) -> Tensor:
@@ -274,7 +280,7 @@ def addmm_replace(
 ) -> Tensor:
     k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
     n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
-    m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
+    m_padded_length = get_m_padded_length(mat1.shape[0], get_alignment_size(mat1))
     return pad_addmm(
         input,
         mat1,
@@ -532,13 +538,13 @@ def _should_pad(
             n = mat2.shape[1]
             k_padded_length = get_padded_length(k, get_alignment_size(mat1))
             n_padded_length = get_padded_length(n, get_alignment_size(mat2))
-            m_padded_length = get_padded_length(m, get_alignment_size(mat1))
+            m_padded_length = get_m_padded_length(m, get_alignment_size(mat1))
         elif op is torch.ops.aten.bmm:
             m = mat1.shape[1]
             k = mat1.shape[2]
             n = mat2.shape[2]
             k_padded_length = get_padded_length(k, get_alignment_size(mat1))
-            m_padded_length = get_padded_length(m, get_alignment_size(mat1))
+            m_padded_length = get_m_padded_length(m, get_alignment_size(mat1))
             n_padded_length = get_padded_length(n, get_alignment_size(mat2))
         else:
             return False
@@ -884,7 +890,7 @@ def pad_mm(
 
 def mm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
     k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
-    m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
+    m_padded_length = get_m_padded_length(mat1.shape[0], get_alignment_size(mat1))
     n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
     return pad_mm(
         mat1,
@@ -938,7 +944,7 @@ def pad_bmm(
 def bmm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
     k_padded_length = get_padded_length(mat1.shape[2], get_alignment_size(mat1))
     n_padded_length = get_padded_length(mat2.shape[2], get_alignment_size(mat2))
-    m_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
+    m_padded_length = get_m_padded_length(mat1.shape[1], get_alignment_size(mat1))
     return pad_bmm(
         mat1,
         mat2,
