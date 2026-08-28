@@ -386,7 +386,7 @@ def _quantize_ondevice_dynamic_jit(
         - observe_<method_name> is added that observe the values to be quantized.
         - reset_observers_<method_name> to reset observers.
         - quantize_<method_name> is added to the model.
-          - This method extract scale, zero points.
+          - This method extracts scale, zero points.
           - Quantizes observed weights.
           - Creates packed params from it and update the attribute of the model with the new values
             for the packed params.
