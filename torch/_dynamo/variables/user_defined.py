@@ -2809,8 +2809,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
+            overloaded = (
+                self._base_methods is not None and method not in self._base_methods
+            )
             tp_method = self.lookup_tp_method(name)
-            if tp_method is not None:
+            if tp_method is not None and not overloaded:
                 result = tp_method(self, tx, name, args, kwargs)
                 if result is not None:
                     return result
@@ -4594,43 +4597,30 @@ class RemovableHandleVariable(VariableTracker):
         return RemovableHandleClass
 
 
-class UserDefinedDictVariable(UserDefinedObjectVariable):
+class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
     """
-    Represents user defined objects that are subclasses of dict/OrderedDict.
+    Represents user defined objects that are subclasses of dict.
 
-    Internally, it uses a ConstDictVariable to represent the dict part of the
-    variable tracker. For everything else, it falls back to
-    UserDefinedObjectVariable.
+    A UserDefinedDict is a dict with some extra fields: the object *is* the dict
+    storage (self.items) plus its instance __dict__.  Content mutations land on
+    self.items directly; the throwaway _base_vt view (which shares that storage
+    and the composite mutation_type) exists only for the delegation and
+    reconstruction paths that want a plain base dict VT.
     """
+
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *ConstDictVariable._nonvar_fields,
+    }
 
     def __init__(
         self,
         value: object,
-        dict_vt: ConstDictVariable | None = None,
+        items: dict[VariableTracker, VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(value, **kwargs)
-        if dict_vt is None:
-            if self.source is not None:
-                raise AssertionError(
-                    "dict_vt must be constructed by builder.py when source is present"
-                )
-            # OrderedDict subclasses need an OrderedDict-backed store so
-            # move_to_end / popitem(last=) delegate correctly.
-            base_cls = (
-                OrderedDictVariable
-                if isinstance(value, collections.OrderedDict)
-                else ConstDictVariable
-            )
-            self._base_vt = base_cls(
-                {},
-                mutation_type=ValueMutationNew(),
-            )
-        else:
-            self._base_vt = dict_vt
+        super().__init__(value, items=items if items is not None else {}, **kwargs)
         self._base_methods = dict_methods
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None after initialization")
 
     def len(self) -> int:
         # Used by nn_module.py to short-circuit the nn.Module forward method
@@ -4681,9 +4671,11 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             dict.__init__,
             collections.OrderedDict.__init__,
         ):
-            if self._base_vt is None:
-                raise AssertionError("_base_vt must not be None in tp_init_impl")
-            self._base_vt.call_method(tx, "update", args, kwargs)
+            # dict_init calls the real C-level update directly, bypassing any
+            # subclass override of update() -- self.call_method would
+            # dispatch to an override if the subclass defines one, which is
+            # wrong here (verified by CPython's test_override_update).
+            ConstDictVariable.call_method(self, tx, "update", args, kwargs)
             return variables.ConstantVariable.create(None)
         return super().tp_init_impl(tx, args, kwargs)
 
@@ -4741,6 +4733,22 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         return super().tp_repr_impl(tx)
 
 
+class UserDefinedOrderedDictVariable(UserDefinedDictVariable, OrderedDictVariable):
+    """
+    Represents user defined objects that are subclasses of collections.OrderedDict.
+
+    OrderedDict-backed storage (self.items is an OrderedDict, from
+    OrderedDictVariable._cpython_type) plus the OrderedDict-only methods
+    (move_to_end, popitem(last=)) come from OrderedDictVariable in the MRO; the
+    dict-subclass behaviour comes from UserDefinedDictVariable.
+    """
+
+    _nonvar_fields = {
+        *UserDefinedDictVariable._nonvar_fields,
+        *OrderedDictVariable._nonvar_fields,
+    }
+
+
 # TODO: move to dicts.py alongside ConstDictVariable.
 # Currently blocked by circular imports (dicts.py ↔ user_defined.py).
 class DefaultDictVariable(UserDefinedDictVariable):
@@ -4752,9 +4760,6 @@ class DefaultDictVariable(UserDefinedDictVariable):
 
     default_factory is a field on the C struct (defdictobject.default_factory),
     not a Python instance attribute, so we model it as a field on the VT.
-
-    Dict storage is delegated to _base_vt (a ConstDictVariable) via
-    UserDefinedDictVariable.
     """
 
     _cpython_type = collections.defaultdict
@@ -4763,17 +4768,10 @@ class DefaultDictVariable(UserDefinedDictVariable):
         self,
         value: object,
         default_factory: VariableTracker | None = None,
-        dict_vt: ConstDictVariable | None = None,
+        items: dict[VariableTracker, VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
-        if dict_vt is None:
-            from .dicts import ConstDictVariable
-
-            dict_vt = ConstDictVariable(
-                {},
-                mutation_type=ValueMutationNew(),
-            )
-        super().__init__(value, dict_vt=dict_vt, **kwargs)
+        super().__init__(value, items=items, **kwargs)
         if default_factory is None:
             from .constant import ConstantVariable
 
@@ -4803,22 +4801,19 @@ class DefaultDictVariable(UserDefinedDictVariable):
         )
 
     def is_python_constant(self) -> bool:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None for defaultdict const")
         if not self.default_factory.is_python_constant():
             return False
-        return self._base_vt.is_python_constant()
+        return ConstDictVariable.is_python_constant(self)
 
     def as_python_constant(self) -> Any:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None for defaultdict const")
         if not self.default_factory.is_python_constant():
             raise AsPythonConstantNotImplementedError(
                 self,
                 "defaultdict default_factory is not a Python constant",
             )
         factory = self.default_factory.as_python_constant()
-        return collections.defaultdict(factory, self._base_vt.as_python_constant())
+        # pyrefly: ignore[no-matching-overload]
+        return collections.defaultdict(factory, super().as_python_constant())
 
     def debug_repr(self) -> str:
         if self.default_factory is None:
@@ -4863,9 +4858,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
         ):
             raise_observed_exception(KeyError, tx, args=[key])
         default_var = self.default_factory.call_function(tx, [], {})
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in _missing_impl")
-        self._base_vt.call_method(tx, "__setitem__", [key, default_var], {})
+        self.call_method(tx, "__setitem__", [key, default_var], {})
         return default_var
 
     def mp_subscript_impl(
@@ -4874,10 +4867,8 @@ class DefaultDictVariable(UserDefinedDictVariable):
         key: "VariableTracker",
     ) -> "VariableTracker":
         """defaultdict.__getitem__: dict lookup with __missing__ fallback."""
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in mp_subscript_impl")
-        if key in self._base_vt:  # type: ignore[operator]
-            return self._base_vt.getitem_const(tx, key)  # type: ignore[union-attr]
+        if key in self:
+            return self.getitem_const(tx, key)
         return self._missing_impl(tx, key)
 
     def nb_or_impl(
@@ -4902,14 +4893,13 @@ class DefaultDictVariable(UserDefinedDictVariable):
         if not pydict_check(other_):
             return variables.ConstantVariable.create(NotImplemented)
 
-        if isinstance(left, ConstDictVariable):
-            items = left.items
-        else:
-            if not isinstance(left, UserDefinedDictVariable):
-                raise AssertionError(
-                    f"Expected UserDefinedDictVariable, got {type(left)}: {left}"
-                )
-            items = left._base_vt.items  # type: ignore[missing-attribute]
+        # A UserDefinedDictVariable is now itself a ConstDictVariable (MI), so
+        # `left.items` is the storage in both cases.
+        if not isinstance(left, ConstDictVariable):
+            raise AssertionError(
+                f"Expected ConstDictVariable, got {type(left)}: {left}"
+            )
+        items = left.items
 
         new = tx.output.side_effects.track_new_user_defined_object(
             VariableTracker.build(tx, dict),
@@ -4918,7 +4908,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
             tx=tx,
         )
         new.default_factory = self.default_factory  # type: ignore[missing-attribute]
-        new._base_vt = ConstDictVariable(items.copy(), mutation_type=ValueMutationNew())  # type: ignore[missing-attribute]
+        new.items.update(items)  # type: ignore[missing-attribute]
         default_factory = new.default_factory  # type: ignore[missing-attribute]
         tx.output.side_effects.store_attr(new, "default_factory", default_factory)
         new.call_method(tx, "update", [right], {})
@@ -4957,9 +4947,8 @@ class DefaultDictVariable(UserDefinedDictVariable):
                     tx,
                     args=["first argument must be callable or None"],
                 )
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in __init__")
-        return self._base_vt.call_method(tx, "__init__", args, kwargs)
+        # Remaining args go to dict.__init__ (== dict.update) on this object.
+        return ConstDictVariable.tp_init_impl(self, tx, args, kwargs)
 
     def _getitem(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
@@ -4982,8 +4971,6 @@ class DefaultDictVariable(UserDefinedDictVariable):
         # https://github.com/python/cpython/blob/6280bb547840b609feedb78887c6491af75548e8/Modules/_collectionsmodule.c#L2290-L2293
         from .builder import SourcelessBuilder
 
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in copy")
         new_dd = tx.output.side_effects.track_new_user_defined_object(
             SourcelessBuilder.create(tx, dict),
             SourcelessBuilder.create(tx, collections.defaultdict),
@@ -4993,10 +4980,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
         if not isinstance(new_dd, DefaultDictVariable):
             raise AssertionError(f"Expected DefaultDictVariable, got {type(new_dd)}")
         new_dd.default_factory = self.default_factory
-        new_dd._base_vt = self._base_vt.clone(
-            mutation_type=ValueMutationNew(),
-            source=None,
-        )
+        new_dd.items.update(self.items)
         tx.output.side_effects.store_attr(
             new_dd, "default_factory", new_dd.default_factory
         )
