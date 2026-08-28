@@ -60,8 +60,9 @@ def _idx_sentinel(idx_dtype):
 
 def _pos_id(acc):
     # "Largest" identity for a min-reduction's init / the value that loses every
-    # max. For floats this is +inf; integer accumulators (a later family) will
-    # override with their max representable value. Wrap in `acc(...)` so the result
+    # max. Floats only here: an integer accumulator has no .inf, so the commit that
+    # serves those dtypes extends this with explicit arms. Wrap in `acc(...)` so the
+    # result
     # carries the accumulator dtype -- `acc.inf` is a bare Python float, which the
     # DSL treats as Float32, breaking the ifexp type-match in `_pick` for fp64.
     return acc(acc.inf)
