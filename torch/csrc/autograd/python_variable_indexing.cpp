@@ -345,7 +345,7 @@ static bool treatSequenceAsTuple(PyObject* index) {
   if (!PySequence_Check(index)) {
     return false;
   }
-  // This uses a heuristics from NumPy for determining whether to treat
+  // This uses a heuristic from NumPy for determining whether to treat
   // non-tuple sequences as if they were a tuple. From the NumPy code comments:
   //
   // "At this point, we're left with a non-tuple, non-array, sequence:

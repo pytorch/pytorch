@@ -275,7 +275,7 @@ def create_hop_fw_bw(
             return False
         target_module = getattr(node.target, "__module__", "") or ""
         return target_module not in ("builtins", "operator", "_operator") and not (
-            target_module.startswith("torch")
+            target_module == "torch" or target_module.startswith("torch.")
         )
 
     run_fw_gm = torch.fx.Interpreter(fw_gm).run

@@ -1109,6 +1109,8 @@ class GraphModule(torch.nn.Module):
         def opaque_transform(value):
             return MyTransform.apply(value)
 
+        opaque_transform.__module__ = "torchao.fake"
+
         def mutation_body(w, x):
             y = torch.matmul(x, w.t())
             custom = opaque_transform(y)
