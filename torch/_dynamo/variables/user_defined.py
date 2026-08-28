@@ -2219,7 +2219,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         else:
             return self._vectorcall_method(tx, "__setitem__", [key, value], {})
 
-    sq_ass_item_impl = mp_ass_subscript_impl
+    def sq_ass_item_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/4833e1cc666375454e4f86aff11b6587968b3333/Objects/typeobject.c#L9373
+        is_delete = value is None
+        if self.inherits_base_slot("__delitem__" if is_delete else "__setitem__"):
+            return super().sq_ass_item_impl(tx, key, value)
+        if is_delete:
+            return self._vectorcall_method(tx, "__delitem__", [key], {})
+        else:
+            return self._vectorcall_method(tx, "__setitem__", [key, value], {})
 
     def _maybe_lookup_method(
         self, tx: "InstructionTranslatorBase", name: str
@@ -4397,9 +4410,9 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVar
         init_args = kwargs.get("init_args", [])
         super().__init__(value, exc_type=type(value), args=init_args, **kwargs)
         self._base_methods = (
-            base_exception_methods
-            if isinstance(value, BaseException)
-            else exception_methods
+            exception_methods
+            if isinstance(value, Exception)
+            else base_exception_methods
         )
 
     @property
@@ -5118,7 +5131,11 @@ class UserDefinedListVariable(UserDefinedObjectVariable, ListVariable):
         # ListVariable's, which populates this object's storage in place.
         return ListVariable.tp_init_impl(self, tx, args, {})
 
-    def _new_list(self, items: list[VariableTracker]) -> "ListVariable":
+    def _new_list(
+        self,
+        items: list[VariableTracker],
+        mutation_type: MutationType | None = None,
+    ) -> "ListVariable":
         # A slice of a list subclass is a plain list in CPython, not the
         # subclass. Also avoids BaseListVariable._new_list's type(self)(items),
         # which would misfire on this class's (value, items) constructor.
@@ -5201,7 +5218,11 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable, TupleVariable):
         self.tuple_cls = type(value)
         self._base_methods = tuple_methods
 
-    def _new_list(self, items: list[VariableTracker]) -> "TupleVariable":
+    def _new_list(
+        self,
+        items: list[VariableTracker],
+        mutation_type: MutationType | None = None,
+    ) -> "TupleVariable":
         # A slice of a tuple subclass (including namedtuple, structseq) is a
         # plain tuple in CPython, not the subclass. Also avoids
         # BaseListVariable._new_list's type(self)(items), which would misfire
