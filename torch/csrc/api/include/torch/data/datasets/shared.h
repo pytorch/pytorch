@@ -70,7 +70,7 @@ class SharedBatchDataset : public BatchDataset<
 };
 
 /// Constructs a new `SharedBatchDataset` by creating a
-/// `shared_ptr<UnderlyingDatase>`. All arguments are forwarded to
+/// `shared_ptr<UnderlyingDataset>`. All arguments are forwarded to
 /// `make_shared<UnderlyingDataset>`.
 template <typename UnderlyingDataset, typename... Args>
 SharedBatchDataset<UnderlyingDataset> make_shared_dataset(Args&&... args) {
