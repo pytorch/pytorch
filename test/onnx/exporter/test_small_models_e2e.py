@@ -36,7 +36,7 @@ class _WithExport:
 @common_utils.instantiate_parametrized_tests
 class DynamoExporterTest(common_utils.TestCase, _WithExport):
     hw_classification = HardwareClassification.GENERIC
-    
+
     def test_insert_contiguous_between_transpose_and_view(self):
         class Model(torch.nn.Module):
             def forward(self, query, key, value):
