@@ -1146,6 +1146,21 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         self.assertEqual(output[1], output[2])
         self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
 
+    @onlyOn(["cuda"])
+    def test_embedding_max_norm_zero_embedding_dim(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/195185
+        # embedding_renorm_ used to infer the row length from self.stride(0),
+        # which does not equal self.size(1) when the embedding dim is 0, causing
+        # renorm_kernel to read out of bounds through the tensor's null data
+        # pointer.
+        weight = torch.empty((20, 0), dtype=torch.float32, device=device)
+        indices = torch.tensor([0], dtype=torch.int64, device=device)
+        out = torch.nn.functional.embedding(
+            indices, weight, max_norm=1.0, norm_type=2.0
+        )
+        torch.accelerator.synchronize()
+        self.assertEqual(out.shape, (1, 0))
+
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_empty_input(self, device, dtypes):
         m = 4
