@@ -881,6 +881,11 @@ def _add_nv_gemm_choices_impl(
     log.debug("Added %d %s choices", num_added, variant.op_name)
 
 
+def _transposed_kernel_layout(layout: Layout) -> FixedLayout:
+    m, n = layout.size[0], layout.size[1]
+    return FixedLayout(layout.device, layout.dtype, [n, m], [1, n])
+
+
 def add_nv_universal_gemm_choices(
     choices: list[ChoiceCaller],
     layout: Layout,
@@ -916,8 +921,7 @@ def add_nv_universal_gemm_choices(
     # would be wrong, so skip it there.
     if not config.nvgemm_swap_ab or len(layout.size) != 2:
         return
-    m, n = layout.size[0], layout.size[1]
-    swap_kernel_layout = FixedLayout(layout.device, layout.dtype, [n, m])
+    swap_kernel_layout = _transposed_kernel_layout(layout)
     # Rank swap configs with the heuristic on the SWAPPED (N, M, K) problem:
     # new mat1 = mat_b.t() (N, K) row, new mat2 = mat_a.t() (K, M) col. Without
     # this, the swap variant would fall back to an unranked prefix and miss the
@@ -1118,8 +1122,7 @@ def add_nv_universal_scaled_gemm_choices(
         return
 
     # Kernel output shape is (N, M) — the transpose of the original (M, N)
-    m, n = layout.size[0], layout.size[1]
-    swap_kernel_layout = FixedLayout(layout.device, layout.dtype, [n, m])
+    swap_kernel_layout = _transposed_kernel_layout(layout)
 
     # Skip heuristic filtering for swap_ab: mm_inputs has original (M, N, K) but
     # the swapped kernel sees (N, M, K). Let the benchmark pick the best kernel.
