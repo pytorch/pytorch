@@ -2,7 +2,6 @@
 
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/FileSystem.h>
-#include <c10/util/error.h>
 #include <c10/util/string_view.h>
 #include <c10/util/tempfile.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
@@ -1005,7 +1004,7 @@ void AOTIModelPackageLoader::load_constants(
 
   std::unordered_map<std::string, at::Tensor> updated_constants_map;
   for (const auto& it : constants_map) {
-    if (fqn_to_constant_name.find(it.first) != fqn_to_constant_name.end()) {
+    if (fqn_to_constant_name.contains(it.first)) {
       updated_constants_map.emplace(fqn_to_constant_name[it.first], it.second);
     } else {
       TORCH_CHECK(false, "Constant not found: ", it.first);
