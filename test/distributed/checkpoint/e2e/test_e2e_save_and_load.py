@@ -356,6 +356,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         """
 
         world_size = self.world_size
+        device_type = self.device_type
 
         class Foo:
             def state_dict(self):
@@ -363,11 +364,11 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
             def load_state_dict(self, state_dict):
                 tl = [
-                    torch.ones(2, dtype=torch.int64, device=self.device_type)
+                    torch.ones(2, dtype=torch.int64, device=device_type)
                     for _ in range(world_size)
                 ]
                 t = (
-                    torch.arange(2, dtype=torch.int64, device=self.device_type)
+                    torch.arange(2, dtype=torch.int64, device=device_type)
                     + 1
                     + 2 * dist.get_rank()
                 )
@@ -379,7 +380,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
             def load_state_dict(self, state_dict):
                 tensor = (
-                    torch.arange(2, dtype=torch.int64, device=self.device_type)
+                    torch.arange(2, dtype=torch.int64, device=device_type)
                     + 1
                     + 2 * dist.get_rank()
                 )
@@ -442,11 +443,11 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
 
 class TestNoCPU(DTensorTestBase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def backend(self):
-        return "nccl"
+        return dist.get_default_backend_for_device(self.device_type)
 
     @with_comms
     def test_no_cpu(self):
@@ -576,6 +577,7 @@ class TestInitStateDict(DTensorTestBase):
 instantiate_device_type_tests(
     TestE2ESaveAndLoad,
     globals(),
+    except_for=("cpu",),
 )
 if __name__ == "__main__":
     run_tests()
