@@ -9,6 +9,8 @@
 #   tile           - the shared load/fold datapath the fast kernels are built from.
 #   kernel_rowtile - the vectorized one-shot row reduction: a contiguous last dim
 #                    whose row fits one CTA tile, dynamic in BOTH M and N.
+#   kernel_xcta    - fused two-stage cross-CTA row reduction for few-row / huge-N
+#                    and reduce-all.
 #
 # The remaining fast paths, and the aten op overrides that put torch.sum / mean /
 # var / ... on this package at all, arrive in later stages.

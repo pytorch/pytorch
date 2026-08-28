@@ -6,6 +6,7 @@
 # enters: it decodes the geometry and routes to the specialized kernels, each of which
 # wires its own branch in as it is introduced:
 #   contiguous last-dim, smem-fits   -> kernel_rowtile   (one-shot)
+#   contiguous last-dim, larger N    -> kernel_xcta      (fused cross-CTA split)
 #   every kept extent 1              -> reduce_all
 #   anything only K0 could serve     -> declined to aten by the cond
 #
@@ -566,20 +567,35 @@ def _oneshot_ok(x):
 def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
     # Fast path for reduction of the CONTIGUOUS last dim of a 2D problem. Sub-paths;
     # returns the result tuple, or None if not handled:
-    #   smem-safe N  -> one-shot kernel_rowtile (1 or 2 outputs)
-    # The two-output one-shot serves max.dim/min.dim (value + index): no split, so the
-    # projected index is the true per-row column. A row too wide for the one-shot tile
-    # returns None, so K0 serves it until the cross-CTA split lands.
+    #   smem-safe, load-bounded N -> one-shot (kernel_rowtile, 1 or 2 outputs)
+    #   larger N                  -> fused cross-CTA two-stage (reduce_xcta, 1 or 2)
+    # The one-shot needs no index remap (the projected index IS the per-row column), so it
+    # serves index traits directly. The cross-CTA split DECLINES them: its reshape makes a
+    # sub-row's chunk index row % C, and rebasing that to a global column is awkward, so an
+    # index trait at larger N falls to the ragged split / K0 instead (see kernel_xcta's
+    # has_index gate). A geometry neither accepts returns None -> K0.
     if x.dim() != 2 or x.stride(-1) != 1:
         return None
     N = x.shape[-1]
     if N < 1:
         return None
-    if nouts not in (1, 2) or not _oneshot_ok(x):
+    if nouts not in (1, 2):
         return None
     from . import kernel_rowtile as rt
 
-    return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
+    if _oneshot_ok(x):
+        return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
+    from . import kernel_xcta as xc
+
+    if nouts == 2:
+        # The same fused split as nouts==1, projecting both fields. Without it a
+        # few-row/huge-N 2-output reduction lands on K0's one-block-per-row (0.63x of
+        # ATen at N=65536, 0.20x at N=131072, for every M).
+        return xc.reduce_row_xcta_2out(trait, trait_key, x, out_dtypes)
+    res = xc.reduce_row_xcta(trait, trait_key, x, out_dtypes[0])
+    if res is None:
+        return None  # xcta declined (no divisor split for this N) -> K0 general kernel
+    return (res,)
 
 
 def _as_shape(out, out_shape):
@@ -680,26 +696,49 @@ def _grid_size(L, block, sm_count, grid_mult=4):
 def reduce_all(
     trait, trait_key, x, out_dtype, block=_K0_ALL_BLOCK, grid_mult=_K0_ALL_GRID_MULT
 ):
-    # Full-tensor reduce-all. A tensor that fits the one-shot's tile is served by the row
-    # kernel directly -- it is a single row of L elements, and the launch is ONE row, so the
-    # ladder's row-packing tpr would leave the whole device on a fraction of one CTA
-    # (see rt.single_row_config, which returns None when the ladder's pick already stands).
-    # Otherwise the two-stage split: stage 1 grid-strides the flat input into G chunks,
-    # stage 2 folds the G partials and projects once. That mirrors ATen's ctas_per_output
-    # structure and needs no reshape, so it serves ANY element count. Index traits are
-    # served too: with a single row the flat offset IS the column, so gidx_from="flat"
-    # gives the true global index with no remap.
+    return _reduce_all(trait, trait_key, x, [out_dtype], 1, block, grid_mult)[0]
+
+
+def _reduce_all(trait, trait_key, x, out_dtypes, nouts, block, grid_mult):
+    # Full-tensor reduce-all, in preference order: the one-shot row kernel (a single
+    # kernel, when the input fits its tile), then the fused cross-CTA two-stage
+    # (reduce_xcta, the M=1 case -- it mirrors ATen's ctas_per_output split), then the
+    # grid-striding two-stage K0. Index traits (argmax/min) are served throughout: a
+    # single row makes each sub-row's global column the flat index, and stage 1
+    # accumulates exactly that, so the winner's index needs no remap.
     assert x.is_cuda and x.is_contiguous()  # noqa: S101
     L = x.numel()
     xf = x.reshape(-1)
+    # Fits the one-shot tile -> no cross-CTA split is wanted at all. Left to xcta, such
+    # an input either lands on C == 1 (stage 2 folds a SINGLE partial in a kernel of its
+    # own: ~1.9us of pure launch, 45% of the small-input floor) or, below xcta's
+    # 256-element sub-row floor, is declined to the two-stage K0 -- one kernel too many
+    # either way. _try_fast_row applies this same gate BEFORE reaching for xcta; the
+    # reduce-all path calls xcta directly, so it has to apply it here. Measured 1.3-2.1x
+    # over the two-stage across the whole legal band, 1.2-2.1x over ATen.
     x2 = xf.view(1, -1)
     if _oneshot_ok(x2):
         from . import kernel_rowtile as rt
 
+        # The launch is ONE row, so the ladder's row-packing tpr would leave the whole
+        # device on a fraction of one CTA -- widen it (see rt.single_row_config, which
+        # returns None when the ladder's pick already stands).
         cfg = rt.single_row_config(L, x.element_size() * 8, trait.nfields)
         kw = {} if cfg is None else {"tpr": cfg.tpr, "nt": cfg.nt}
-        (out,) = rt.reduce_row_tile(trait, trait_key, x2, [out_dtype], **kw)
-        return _as_shape(out, ())
+        outs = rt.reduce_row_tile(trait, trait_key, x2, out_dtypes, nouts=nouts, **kw)
+        return tuple(_as_shape(o, ()) for o in outs)
+    from . import kernel_xcta as xc
+
+    if nouts == 1:
+        res = xc.reduce_row_xcta(trait, trait_key, xf, out_dtypes[0], flatten=True)
+        res = None if res is None else (res,)
+    else:
+        res = xc.reduce_row_xcta_2out(trait, trait_key, xf, out_dtypes, flatten=True)
+    if res is not None:
+        return res
+    # Too big for the one-shot and xcta declined (prime/poorly-factored L) -> two-stage
+    # K0, which grid-strides any L with no reshape (O(1) compile regardless of L) and so
+    # still fills the device for a single huge row.
     sm = torch.cuda.get_device_properties(x.device).multi_processor_count
     G = _grid_size(L, block, sm, grid_mult)
     chunk = (L + G - 1) // G
@@ -708,7 +747,7 @@ def reduce_all(
         torch.empty(G, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
         for f in range(trait.nfields)
     ]
-    out = torch.empty(1, device=x.device, dtype=out_dtype)
+    outs = [torch.empty(1, device=x.device, dtype=d) for d in out_dtypes]
 
     # Stage 1: 1D input split into G contiguous chunks. Modeled in the general
     # scheme as kept dim (G, chunk) and reduced dim (chunk, 1): obase = o*chunk,
@@ -741,9 +780,9 @@ def reduce_all(
         kept_pairs=[],
         from_partials=True,
         project_n=L,
-        nouts=1,
+        nouts=nouts,
         final=True,
         block=block,
     )
-    _launch(s2, ("all2", trait_key, out_dtype) + s2.cache_sig, parts, [out])
-    return out.reshape(())
+    _launch(s2, ("all2", trait_key, tuple(out_dtypes)) + s2.cache_sig, parts, outs)
+    return tuple(_as_shape(o, ()) for o in outs)
