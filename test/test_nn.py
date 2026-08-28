@@ -22,6 +22,7 @@ from unittest import mock, SkipTest
 
 import torch
 from torch import inf, nan
+from torch._subclasses.fake_tensor import FakeTensorMode
 import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
@@ -4329,6 +4330,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         if TEST_MPS:
             # a backend whose 5-D sampler implements bilinear and nearest only refuses bicubic
             with self.assertRaisesRegex(RuntimeError, "Unsupported Bicubic interpolation"):
+                F.grid_sample(torch.empty(1, 1, 2, 2, 2, device='mps'),
+                              torch.empty(1, 1, 1, 1, 3, device='mps'), mode='bicubic')
+
+        # The same call has to be refused in a trace, where the meta kernel answers rather
+        # than the backend, hence the other message. A fake tensor gets there with no MPS
+        # present, so this runs everywhere.
+        with FakeTensorMode():
+            with self.assertRaisesRegex(RuntimeError, "bicubic interpolation with 5D input"):
                 F.grid_sample(torch.empty(1, 1, 2, 2, 2, device='mps'),
                               torch.empty(1, 1, 1, 1, 3, device='mps'), mode='bicubic')
 
