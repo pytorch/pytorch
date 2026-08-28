@@ -283,7 +283,6 @@ if torch.backends.mps.is_available():
             "special.airy_ai": None,
             "special.legendre_polynomial_p": None,
             "special.log_ndtr": None,
-            "special.ndtri": None,
             "stft": [torch.float16, torch.bfloat16],
             "svd_lowrank": None,
             "to": None,

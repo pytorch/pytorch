@@ -8515,6 +8515,19 @@ class TestMPS(TestCaseMPS):
         rel = ((actual - expected) / expected).abs().max()
         self.assertLess(rel.item(), 5e-4)
 
+    def test_ndtri_branch_coverage(self):
+        # These inputs are in the OpInfo too, but gated on requires_grad being
+        # false: the derivative is inf at 0 and 1 and nan outside [0, 1].
+        # TestConsistency asks for samples with requires_grad=True on floating
+        # dtypes, so it never receives them, and test_compare_cpu is skipped on
+        # MPS. Without this the z = sqrt(-2 log y) >= 8 branch (y < exp(-32))
+        # and the boundary returns go untested on the backend.
+        y = torch.tensor([0.0, 1.0, -0.5, 1.5, float('nan'),
+                          1e-30, 1e-20, 1e-15, 1e-8, 0.134, 0.136, 0.5, 0.864, 0.866])
+        actual = torch.special.ndtri(y.to('mps')).cpu()
+        expected = torch.special.ndtri(y)
+        self.assertEqual(actual, expected, rtol=1e-5, atol=1e-5, equal_nan=True)
+
     # Test hardtanh
     def test_hardtanh(self):
         def helper(shape, min_val, max_val, inplace=False):
@@ -16731,6 +16744,10 @@ class TestConsistency(TestCaseMPS):
                 atol, rtol = 5e-5, 2.5e-2
             if op.name in ("special.bessel_y0", "special.bessel_y1", "special.modified_bessel_i1") and dtype == torch.float16:
                 atol, rtol = 5e-4, 2e-3
+            # d/dy ndtri(y) = sqrt(2pi) * exp(ndtri(y)^2 / 2), so the half-precision
+            # rounding of the forward result is amplified by |ndtri(y)| in the gradient.
+            if op.name == "special.ndtri" and dtype == torch.float16:
+                atol, rtol = 5e-4, 5e-3
             if op.name == "polar" and dtype == torch.float16:
                 # `d(real)/d(abs) = cos(angle)` near pi/2 collapses to ~0 in
                 # fp16; one unlucky seeded angle can produce ~0.1 absolute

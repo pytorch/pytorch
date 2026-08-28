@@ -26,6 +26,7 @@ from torch.testing._internal.opinfo.core import (
     NumericsFilter,
     OpInfo,
     S,
+    sample_inputs_elementwise_unary,
     SampleInput,
     UnaryUfuncInfo,
 )
@@ -123,6 +124,34 @@ def sample_inputs_erfcx(op_info, device, dtype, requires_grad, **kwargs):
 
 
 _unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
+
+
+def sample_inputs_special_ndtri(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_unary(
+        op_info, device, dtype, requires_grad, **kwargs
+    )
+    if requires_grad or not dtype.is_floating_point:
+        return
+    # domain=(0, 1) plus the _domain_eps clamp keeps the generated samples away
+    # from both ends, so the z = sqrt(-2 log y) >= 8 branch of the approximation
+    # (y < exp(-32)) and the +-inf / nan returns are never reached by them.
+    # Only generated without requires_grad: the derivative is inf at 0 and 1 and
+    # nan outside [0, 1].
+    extremes = [
+        0.0,
+        1.0,
+        -0.5,
+        1.5,
+        1e-30,
+        1e-20,
+        1e-15,
+        1e-8,
+        0.134,
+        0.136,
+        0.864,
+        0.866,
+    ]
+    yield SampleInput(torch.tensor(extremes, dtype=dtype, device=device))
 
 
 op_db: list[OpInfo] = [
@@ -325,12 +354,10 @@ op_db: list[OpInfo] = [
         domain=(0, 1),
         aten_name="special_ndtri",
         dtypes=all_types_and(torch.bool),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_special_ndtri,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        skips=(
-            # The operator 'aten::special_ndtri.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
-        ),
     ),
     UnaryUfuncInfo(
         "special.log_ndtr",
@@ -1013,10 +1040,6 @@ python_ref_db: list[OpInfo] = [
         "_refs.special.ndtri",
         torch_opinfo_name="special.ndtri",
         op_db=op_db,
-        skips=(
-            # The operator 'aten::special_ndtri.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.spherical_bessel_j0",
