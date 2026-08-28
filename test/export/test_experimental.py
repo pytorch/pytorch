@@ -231,140 +231,6 @@ def forward(self, args_0):
     return self._dynamo_bytecode_unflatten((out,), _fn_args)""",
         )
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_self_recursive(self):
-        from torch.nn.attention.flex_attention import create_block_mask
-
-        _register_blockmask_pytree()
-
-        def make_mask_fn():
-            # Self-referential: fn captures itself through the closure
-            def fn(b, h, q, k):
-                _ = fn  # self-reference
-                return q >= k + 4
-
-            return fn
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                mask_fn = make_mask_fn()
-                block_mask = create_block_mask(
-                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
-                )
-                return x, block_mask
-
-        x = torch.randn(2, 128, device="cuda")
-        module = Model()
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "nested function with non-constructible closure in output",
-        ):
-            _dynamo_graph_capture_for_export(module)(x)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_tensor(self):
-        from torch.nn.attention.flex_attention import create_block_mask
-
-        _register_blockmask_pytree()
-
-        def make_mask_fn():
-            tensor = torch.ones(2, 2)
-
-            def fn(b, h, q, k):
-                _ = fn
-                return q >= k + 4 + tensor.sum()
-
-            return fn
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                mask_fn = make_mask_fn()
-                block_mask = create_block_mask(
-                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
-                )
-                return x, block_mask
-
-        x = torch.randn(2, 128, device="cuda")
-        module = Model()
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "nested function with non-constructible closure in output",
-        ):
-            _dynamo_graph_capture_for_export(module)(x)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_unsupported_class_instance(self):
-        from torch.nn.attention.flex_attention import create_block_mask
-
-        _register_blockmask_pytree()
-
-        class MaskConfig:
-            def __init__(self, offset):
-                self.offset = offset
-
-        def make_mask_fn():
-            cfg = MaskConfig(offset=5)
-
-            def fn(b, h, q, k):
-                return q >= k + cfg.offset
-
-            return fn
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                mask_fn = make_mask_fn()
-                block_mask = create_block_mask(
-                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
-                )
-                return x, block_mask
-
-        x = torch.randn(2, 128, device="cuda")
-        module = Model()
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "nested function with non-constructible closure in output",
-        ):
-            _dynamo_graph_capture_for_export(module)(x)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_closure_mutually_recursive(self):
-        from torch.nn.attention.flex_attention import create_block_mask
-
-        _register_blockmask_pytree()
-
-        def make_mask_fn():
-            # Create mutually recursive closures: fn_a references fn_b, fn_b references fn_a
-            # This is non-constructible because we cannot serialize mutually recursive closures
-            def fn_a(b, h, q, k):
-                _ = fn_b  # reference to fn_b
-                return q >= k
-
-            def fn_b(b, h, q, k):
-                _ = fn_a  # reference to fn_a
-                return q >= k + 1
-
-            return fn_a
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                mask_fn = make_mask_fn()
-                block_mask = create_block_mask(
-                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
-                )
-                return x, block_mask
-
-        x = torch.randn(2, 128, device="cuda")
-        module = Model()
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "nested function with non-constructible closure in output",
-        ):
-            _dynamo_graph_capture_for_export(module)(x)
-
     @unittest.skipUnless(
         IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
         "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
@@ -1887,6 +1753,136 @@ class TestExperimentDevice(TestCase):
             return level1()
 
         self._test_export_blockmask_with_mask_fn(make_mask_fn, device)
+
+    def test_export_blockmask_closure_self_recursive(self, device):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn():
+            # Self-referential: fn captures itself through the closure
+            def fn(b, h, q, k):
+                _ = fn  # self-reference
+                return q >= k + 4
+
+            return fn
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device=device)
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
+
+    def test_export_blockmask_closure_tensor(self, device):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn():
+            tensor = torch.ones(2, 2)
+
+            def fn(b, h, q, k):
+                _ = fn
+                return q >= k + 4 + tensor.sum()
+
+            return fn
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device=device)
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
+
+    def test_export_blockmask_closure_unsupported_class_instance(self, device):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        class MaskConfig:
+            def __init__(self, offset):
+                self.offset = offset
+
+        def make_mask_fn():
+            cfg = MaskConfig(offset=5)
+
+            def fn(b, h, q, k):
+                return q >= k + cfg.offset
+
+            return fn
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device=device)
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
+
+    def test_export_blockmask_closure_mutually_recursive(self, device):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn():
+            # Create mutually recursive closures: fn_a references fn_b, fn_b references fn_a
+            # This is non-constructible because we cannot serialize mutually recursive closures
+            def fn_a(b, h, q, k):
+                _ = fn_b  # reference to fn_b
+                return q >= k
+
+            def fn_b(b, h, q, k):
+                _ = fn_a  # reference to fn_a
+                return q >= k + 1
+
+            return fn_a
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device=device)
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
 
 
 instantiate_device_type_tests(TestExperimentDevice, globals(), except_for="cpu")
