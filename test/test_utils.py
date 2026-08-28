@@ -14,12 +14,13 @@ import types
 import unittest
 import warnings
 from typing import Any, cast
+from unittest import mock
 
 import torch
 import torch.nn as nn
 import torch.utils.cpp_extension
 import torch.utils.data
-from torch._utils import try_import
+from torch._utils import _get_available_device_type, try_import
 from torch._utils_internal import deprecated
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -958,6 +959,49 @@ class TestDeviceUtils(TestCase):
 
 
 instantiate_device_type_tests(TestDeviceUtils, globals())
+
+
+class TestGetAvailableDeviceType(TestCase):
+    # current_accelerator() always prefers a *registered* PrivateUse1 backend
+    # over a compiled-in one, even when that PrivateUse1 backend isn't itself
+    # available, which can otherwise mask a different, real accelerator that
+    # is available. See torch/_utils.py::_get_available_device_type.
+    def test_privateuse1_unavailable_falls_back_to_real_accelerator(self):
+        fake_npu = types.ModuleType("torch.npu")
+        setattr(fake_npu, "is_available", lambda: False)  # noqa: B010
+        with (
+            mock.patch.object(torch, "npu", fake_npu, create=True),
+            mock.patch.object(
+                torch._C, "_get_privateuse1_backend_name", return_value="npu"
+            ),
+            mock.patch("torch.accelerator.current_accelerator", return_value=None),
+            mock.patch.object(torch.mps, "is_available", return_value=True),
+        ):
+            self.assertEqual(_get_available_device_type(), "mps")
+
+    def test_privateuse1_unavailable_and_no_real_accelerator_returns_none(self):
+        fake_npu = types.ModuleType("torch.npu")
+        setattr(fake_npu, "is_available", lambda: False)  # noqa: B010
+        with (
+            mock.patch.object(torch, "npu", fake_npu, create=True),
+            mock.patch.object(
+                torch._C, "_get_privateuse1_backend_name", return_value="npu"
+            ),
+            mock.patch("torch.accelerator.current_accelerator", return_value=None),
+            mock.patch.object(torch.mps, "is_available", return_value=False),
+        ):
+            self.assertIsNone(_get_available_device_type())
+
+    def test_no_privateuse1_backend_registered_returns_none_directly(self):
+        with (
+            mock.patch.object(
+                torch._C,
+                "_get_privateuse1_backend_name",
+                return_value="privateuseone",
+            ),
+            mock.patch("torch.accelerator.current_accelerator", return_value=None),
+        ):
+            self.assertIsNone(_get_available_device_type())
 
 
 class TestCppExtensionUtils(TestCase):

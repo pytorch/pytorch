@@ -819,6 +819,20 @@ def cpu_count() -> int | None:
 def _get_available_device_type():
     if (acc := torch.accelerator.current_accelerator(check_available=True)) is not None:
         return acc.type
+    # current_accelerator() always prefers a *registered* PrivateUse1 backend over a
+    # compiled-in one, even when that PrivateUse1 backend isn't actually available
+    # (deliberate, to support test builds that register a PrivateUse1 test backend
+    # alongside a real accelerator -- see aten/src/ATen/DeviceAccelerator.cpp). That
+    # can mask a different, real accelerator that IS available. Retry, checking only
+    # the fixed, PyTorch-core-maintained set of compiled-in accelerators directly:
+    # unlike PrivateUse1, new hardware vendors never extend this list, they register
+    # as PrivateUse1 instead, so this doesn't reintroduce the per-vendor maintenance
+    # burden the generic current_accelerator() call above already eliminates.
+    if torch._C._get_privateuse1_backend_name() != "privateuseone":
+        for device_type in ("cuda", "xpu", "mps", "mtia"):
+            module = getattr(torch, device_type, None)
+            if module is not None and module.is_available():
+                return device_type
     return None
 
 
