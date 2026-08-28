@@ -32,7 +32,7 @@ if(USE_CUDA)
     # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
     set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS )
-    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::curand caffe2::cufft caffe2::cublas)
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::cufft caffe2::cublas)
     if(CAFFE2_USE_CUDNN)
       if(NOT CAFFE2_USE_NVRTC)
         message(FATAL_ERROR
