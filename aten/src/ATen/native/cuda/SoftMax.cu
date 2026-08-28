@@ -326,6 +326,10 @@ __global__ void cunn_SpatialSoftMaxForward(
         for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
           output[data_offset + d * dim_stride] = epilogue(input[data_offset + d * dim_stride]);
       } else {
+        // blockDim.x == 1 here, so threadIdx.x is necessarily 0 and the loops
+        // below can walk the dim with a literal stride, which lets the compiler
+        // unroll them. cunn_SpatialSoftMaxBackward's matching branch does the same.
+        CUDA_KERNEL_ASSERT(threadIdx.x == 0);
         accscalar_t max_input = std::numeric_limits<accscalar_t>::lowest();
         for (index_t d = 0; d < dim_size; ++d) {
           const accscalar_t value = static_cast<accscalar_t>(input[data_offset + d * dim_stride]);
