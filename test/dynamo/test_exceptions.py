@@ -4,6 +4,7 @@ import contextlib
 import dataclasses
 import operator
 import sys
+import unittest
 
 import torch
 import torch._dynamo.config
@@ -207,6 +208,60 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise ValueError("v") from dict
             except TypeError as e:
                 return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_skiptest_propagates_as_genuine_skip(self):
+        # A unittest.SkipTest raised inside a fullgraph-compiled function and
+        # left uncaught must propagate as a real SkipTest -- it is test-infra
+        # control flow (e.g. @slowTest / skipIf bodies that CPythonTestCase
+        # compiles), not an internal error to wrap as InternalTorchDynamoError.
+        def fn(x):
+            torch.sin(x)
+            raise unittest.SkipTest("skip me")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(unittest.SkipTest, "skip me"):
+            opt_fn(torch.randn(4))
+
+    def test_skiptest_subclass_propagates(self):
+        class MySkip(unittest.SkipTest):
+            pass
+
+        def fn(x):
+            torch.sin(x)
+            raise MySkip("nope")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(MySkip):
+            opt_fn(torch.randn(4))
+
+    def test_skiptest_default_mode_preserves_side_effects(self):
+        # Under default torch.compile (fullgraph=False), a SkipTest must still
+        # propagate, but via the normal graph-break -> eager-fallback path so
+        # pre-raise side effects are preserved. The nopython re-raise must not
+        # fire here (that would drop the side effect).
+        log = []
+
+        def fn(x):
+            log.append(1)
+            raise unittest.SkipTest("default mode")
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(unittest.SkipTest, "default mode"):
+            opt_fn(torch.randn(4))
+        self.assertEqual(log, [1])
+
+    def test_skiptest_caught_in_traced_frame(self):
+        # A SkipTest caught by a handler inside the traced frame is handled by
+        # the normal observed-exception path and must not escape.
+        def fn(x):
+            try:
+                raise unittest.SkipTest("inner")
+            except unittest.SkipTest:
+                return torch.sin(x)
 
         x = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -1244,6 +1299,34 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         assert exc2.__context__ is None  # noqa: S101
 
+    @make_dynamo_test
+    def test_exception_identity_compare(self):
+        exc1 = Exception(1)
+        exc2 = Exception(2)
+        # Same object: `is` is True. Distinct objects of the same type: False.
+        same_self = exc1 is exc1
+        same_other = exc1 is exc2
+        assert same_self  # noqa: S101
+        assert not same_other  # noqa: S101
+        assert exc1 is not exc2  # noqa: S101
+
+        # Distinct exception types are never identical either.
+        val = ValueError(1)
+        assert exc1 is not val  # noqa: S101
+        assert not (ValueError(1) is TypeError(1))  # noqa: S101, E714
+
+        # Subclass VTs (StopIteration) follow the same rule.
+        stop1 = StopIteration()
+        stop2 = StopIteration()
+        assert stop1 is not stop2  # noqa: S101
+        assert not (stop1 is stop2)  # noqa: S101, E714
+
+        # Distinct same-type exceptions read back out of a container.
+        exc_list = [Exception(1), Exception(2)]
+        a, b = exc_list[0], exc_list[1]
+        assert not (a is b)  # noqa: S101, E714
+        assert a is a  # noqa: S101
+
     def test_exception_kwargs(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn():
@@ -1500,6 +1583,14 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager")
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+        torch._dynamo.reset()
+        with self.assertRaises(Unsupported) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        msg = str(cm.exception)
+        self.assertIn("traceback.tb_lasti not supported", msg)
+        # tb_lasti is a known-unsupportable attribute, not a Dynamo bug
+        self.assertNotIn("Dynamo bug", msg)
 
     def test_exception_set_tb_next(self):
         # Test setting tb_next on a traceback

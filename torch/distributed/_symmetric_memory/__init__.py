@@ -8,7 +8,6 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
-from functools import partial
 from typing import Any, Literal
 from typing_extensions import deprecated
 
@@ -16,8 +15,13 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
-from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
+from torch._C._distributed_c10d import (
+    _is_process_group_registered,
+    _SymmetricMemory,
+    Work as _Work,
+)
 from torch._prims_common import make_contiguous_strides_for
+from torch.utils._triton import has_triton
 
 
 _group_name_to_store: dict[str, c10d.Store] = {}
@@ -81,14 +85,22 @@ def _test_mode(group_names: set[str] | None = None) -> Generator[None, None, Non
 
 def is_symm_mem_enabled_for_group(group_name: c10d.GroupName) -> bool:
     """
-    Check if symmetric memory is enabled for a process group.
+    Check if symmetric memory can be used with a process group.
+
+    Symmetric memory no longer requires explicit enablement via
+    ``enable_symm_mem_for_group``. This returns ``True`` if the group is
+    resolvable and a symmetric memory allocator is registered for the current
+    accelerator.
 
     Args:
         group_name (str): the name of the process group.
     """
     if _is_test_mode:
         return _mocked_group_names is None or group_name in _mocked_group_names
-    return group_name in _group_name_to_store
+    device = torch.accelerator.current_accelerator(check_available=True)
+    if device is None or _SymmetricMemory.get_backend(device) is None:
+        return False
+    return _is_process_group_registered(group_name)
 
 
 _group_name_to_workspace_tensor: dict[str, torch.Tensor | None] = {}
@@ -442,6 +454,78 @@ def _pipelined_produce_and_all2all(
     chunk_producer(rank, out_chunks[rank])
     torch.accelerator.current_stream().wait_stream(backend_stream)
     symm_mem.barrier(channel=0)
+
+
+def reduce_partials(
+    partials: torch.Tensor,
+    *,
+    dim: int,
+    reduce_op: str,
+    output_dtype: torch.dtype,
+    group_size: int,
+) -> torch.Tensor:
+    if output_dtype in (torch.float16, torch.bfloat16):
+        normalized_dim = dim if dim >= 0 else dim + partials.dim()
+        # The common RS layout is [rank, local_M, N]. Fuse the final rank
+        # reduction into one kernel so low-precision partials accumulate in fp32
+        # and round only once when written to the output dtype.
+        if normalized_dim == 0:
+            reduced = triton_reduce_partials_first_dim(
+                partials,
+                reduce_op=reduce_op,
+                output_dtype=output_dtype,
+                group_size=group_size,
+            )
+            if reduced is not None:
+                return reduced
+        if reduce_op == "sum":
+            return torch.sum(partials, dim=dim)
+        if reduce_op == "avg":
+            return torch.mean(partials, dim=dim)
+    if reduce_op == "sum":
+        return torch.sum(partials, dim=dim)
+    if reduce_op == "avg":
+        return torch.mean(partials, dim=dim)
+    raise ValueError("reduce_op must be sum or avg")
+
+
+def triton_reduce_partials_first_dim(
+    partials: torch.Tensor,
+    *,
+    reduce_op: str,
+    output_dtype: torch.dtype,
+    group_size: int,
+) -> torch.Tensor | None:
+    if (
+        partials.device.type != "cuda"
+        or not has_triton()
+        or not partials.is_contiguous()
+        or partials.dim() < 2
+        or partials.shape[0] != group_size
+        or output_dtype not in (torch.float16, torch.bfloat16)
+        or partials.dtype not in (torch.float16, torch.bfloat16)
+    ):
+        return None
+
+    out = partials.new_empty(partials.shape[1:], dtype=output_dtype)
+    shard_elems = out.numel()
+    block = 1024
+    import triton
+
+    from torch.distributed._symmetric_memory._triton_kernels import (
+        reduce_partials_first_dim_kernel,
+    )
+
+    grid = (triton.cdiv(shard_elems, block),)
+    reduce_partials_first_dim_kernel[grid](
+        partials,
+        out,
+        shard_elems,
+        group_size,
+        reduce_op == "avg",
+        BLOCK=block,
+    )
+    return out
 
 
 lib = torch.library.Library("symm_mem", "DEF")
@@ -1286,15 +1370,12 @@ def _fused_matmul_reduce_scatter_impl(
         raise ValueError("Invalid gather_dim")
     if B.dim() != 2:
         raise ValueError("B must be a matrix")
-    if reduce_op == "sum":
-        reduce_fn = partial(torch.sum, dim=0)
-    elif reduce_op == "avg":
-        reduce_fn = partial(torch.mean, dim=0)
-    else:
+    if reduce_op not in ("sum", "avg"):
         raise ValueError("reduce_op must be sum or avg")
     group = c10d._resolve_process_group(group_name)
     out_shape = [*A.shape[:-1], B.shape[1]]
     out_shape[scatter_dim] //= group.size()
+    output_dtype = out_dtype or A.dtype
 
     if scatter_dim == A.ndim - 1:
         B_shards = B.chunk(group.size(), dim=B.ndim - 1)
@@ -1321,9 +1402,12 @@ def _fused_matmul_reduce_scatter_impl(
         stacked_partials_view = stacked_partials.reshape(
             *leading_dims, group.size(), -1
         )
-        return reduce_fn(
+        return reduce_partials(
             stacked_partials_view,
             dim=-2,
+            reduce_op=reduce_op,
+            output_dtype=output_dtype,
+            group_size=group.size(),
         )
 
     # Move the scatter_dim to the front and flatten the tensor into a 2D matrix
@@ -1337,7 +1421,7 @@ def _fused_matmul_reduce_scatter_impl(
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
         mm_out_op(A_shards[rank], B, **kwargs, out=out)
 
-    stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=out_dtype or A.dtype)
+    stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=output_dtype)
 
     _pipelined_produce_and_all2all(
         chunk_producer,
@@ -1347,11 +1431,14 @@ def _fused_matmul_reduce_scatter_impl(
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
-    return reduce_fn(
+    return reduce_partials(
         stacked_partials.view(*leading_dims, -1)
         .movedim(1, scatter_dim + 1)
         .movedim(0, scatter_dim),
         dim=scatter_dim,
+        reduce_op=reduce_op,
+        output_dtype=output_dtype,
+        group_size=group.size(),
     )
 
 
@@ -1485,12 +1572,9 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         raise ValueError("Invalid scatter dim for 3D+ output tensor")
     if B.dim() != 2:
         raise ValueError("B must be a matrix")
-    if reduce_op == "sum":
-        reduce_fn = partial(torch.sum, dim=0)
-    elif reduce_op == "avg":
-        reduce_fn = partial(torch.mean, dim=0)
-    else:
+    if reduce_op not in ("sum", "avg"):
         raise ValueError("reduce_op must be sum or avg")
+    output_dtype = out_dtype or A.dtype
 
     group = c10d._resolve_process_group(group_name)
 
@@ -1545,7 +1629,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # have the shape (A_with_scatter_dim_0_tensor.shape[0], B.shape[1]) to align with the formula:
     # (a*b,c) @ (c,d) = (a*b,d)
     stacked_partials = A_with_scatter_dim_0.new_empty(
-        A_2D_with_scatter_dim_0.shape[0], B.shape[1], dtype=out_dtype or A.dtype
+        A_2D_with_scatter_dim_0.shape[0], B.shape[1], dtype=output_dtype
     )
 
     # Execute the pipelined mm/scaled_mm.
@@ -1577,7 +1661,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
 
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
-    reduced_out = reduce_fn(
+    reduced_out = reduce_partials(
         # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
         stacked_partials.view(*stacked_partials_3D_leading_dims, -1)
         # We originally swapped 0<=>scatter_dim_after_maybe_reshape. Now after
@@ -1586,6 +1670,9 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         .movedim(1, scatter_dim_after_maybe_reshape + 1),
         # Reduce along the `group_size` dim (0).
         dim=0,
+        reduce_op=reduce_op,
+        output_dtype=output_dtype,
+        group_size=group.size(),
     )
 
     # Output shape must be scattered along original scatter dim as well.
@@ -2105,6 +2192,12 @@ def empty(  # type: ignore[misc]
     :func:`torch._distributed._symmetric_memory.rendezvous()` to establish a
     symmetric memory tensor among participating processes.
 
+    .. note::
+        This is a host-synchronous allocation. Together with
+        :func:`rendezvous`, it is intended as an initialization-time
+        operation: allocate a symmetric memory tensor once and reuse it,
+        rather than allocating in hot code paths.
+
     Args:
         size (int...): a sequence of integers defining the shape of the output tensor.
             Can be a variable number of arguments or a collection like a list or tuple.
@@ -2115,7 +2208,8 @@ def empty(  # type: ignore[misc]
         device (:class:`torch.device`, optional): the desired device of returned tensor.
             Default: if ``None``, uses the current device for the default tensor type
             (see :func:`torch.set_default_device`). :attr:`device` will be the CPU
-            for CPU tensor types and the current CUDA device for CUDA tensor types.
+            for CPU tensor types, the current CUDA device for CUDA tensor types,
+            and the current XPU device for XPU tensor types.
     """
     if len(size) == 1 and isinstance(size[0], Sequence):
         size = tuple(size[0])
@@ -2161,6 +2255,14 @@ def rendezvous(
 
     Establish a symmetric memory tensor among participating processes. This is
     a collective operation.
+
+    .. note::
+        This is a host-blocking initialization operation: the first rendezvous
+        of a tensor performs handle exchange and mapping across processes, and
+        synchronizes the host with the device. It cannot be ordered onto a
+        CUDA stream or captured in a CUDA graph. Rendezvous a buffer once and
+        reuse the returned handle rather than calling this in hot code paths;
+        subsequent calls on the same tensor return the cached handle.
 
     Args:
         tensor (:class:`torch.Tensor`): the local tensor used to establish the symmetric memory tensor.
