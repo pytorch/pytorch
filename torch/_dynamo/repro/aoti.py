@@ -558,7 +558,7 @@ p-value, which we leave for future work.
             default=accuracy,
             help="""\
 by default, when doing accuracy minification we will reject reductions which
-change the divergence from a floating point divergence to a integral/boolean
+change the divergence from a floating point divergence to an integral/boolean
 divergence.  This is because some operations like ReLU involve temporarily
 sharp boundaries that smooth out again afterwards; without requiring
 divergence on floating point, the minifier will often fixate on divergent
