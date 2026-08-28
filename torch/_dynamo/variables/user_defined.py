@@ -3669,6 +3669,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             return variables.GetAttrVariable(self, name, type(type_attr), source=source)
 
+        if inspect.ismethoddescriptor(type_attr):
+            return variables.GetAttrVariable(self, name, source=source)
+
         # Plain class variable (or MethodType, C-level non-data descriptor
         # without __get__, etc.).
         if can_use_mro_source:
