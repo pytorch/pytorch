@@ -24,6 +24,7 @@ from greenlight_ledger import (
     STATUS_FAILED,
     STATUS_LAND,
     STATUS_NO_LAND,
+    STATUS_REVERTED,
 )
 from greenlight_messages import GREENLIGHT_JOB_URL
 from greenlight_preflight import REVIEW_WINDOW, STALE_LABEL
@@ -242,6 +243,16 @@ class TestDecisionTable(TestCase):
                 self.assertIn("NEGATIVE_VERDICT", result.message)
                 self.assertIn(status, result.message)
                 self.assertIn(MERGE_SHA, result.message)
+
+    def test_reverted_at_head_sha_denies_as_a_negative_verdict(self) -> None:
+        result = evaluate([make_pr()], {1: make_state(status=STATUS_REVERTED)})
+        self.assertEqual(result.verdict, GuardVerdict.DENY)
+        self.assertIn("NEGATIVE_VERDICT", result.message)
+
+    def test_reverted_at_head_sha_does_not_advise_pushing_a_commit(self) -> None:
+        result = evaluate([make_pr()], {1: make_state(status=STATUS_REVERTED)})
+        self.assertIn("after it has been reverted", result.message)
+        self.assertNotIn("push a commit", result.message)
 
     def test_in_flight_at_head_sha_waits(self) -> None:
         for status in (STATUS_AI_REVIEW_STARTED, STATUS_AI_REVIEW_DISPATCHED):
@@ -516,6 +527,13 @@ class TestPreflight(TestCase):
         pr = make_pr(changes_requested_by=("some-reviewer",), labels=(STALE_LABEL,))
         result = evaluate([pr], {1: make_state(status=STATUS_AI_REVIEW_STARTED)})
         self.assertEqual(result.verdict, GuardVerdict.WAIT)
+
+    def test_a_revert_denies_instead_of_waiting_out_the_budget(self) -> None:
+        result = evaluate(
+            [make_pr()], {1: make_state(status=STATUS_REVERTED, head_sha=OTHER_SHA)}
+        )
+        self.assertEqual(result.verdict, GuardVerdict.DENY)
+        self.assertNotIn("push a commit", result.message)
 
     def test_preflight_applies_when_the_ledger_row_is_for_another_commit(self) -> None:
         pr = make_pr(labels=(STALE_LABEL,))
