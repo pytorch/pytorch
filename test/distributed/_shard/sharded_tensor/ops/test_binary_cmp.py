@@ -24,11 +24,6 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 )
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
-backend = torch.distributed.get_default_backend_for_device(device_type)
-
 if TEST_WITH_DEV_DBG_ASAN:
     print(
         "Skip dev-asan as torch + multiprocessing spawn have known issues",
@@ -134,13 +129,13 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         ):
             cmp_op(st1, st2)
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms()
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(Capability.distributed.backend)
     def test_torch_equal_tensor_specs(self, device):
         self._test_common_failures(torch.equal, device)
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms()
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(Capability.distributed.backend)
     def test_torch_equal(self, device):
@@ -150,13 +145,13 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10)
         self.assertTrue(torch.equal(st1, st2))
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms()
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(Capability.distributed.backend)
     def test_torch_allclose_tensor_specs(self, device):
         self._test_common_failures(torch.allclose, device)
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms()
     @skip_if_lt_x_gpu(4)
     @requires_capabilities(Capability.distributed.backend)
     def test_torch_allclose(self, device):
@@ -175,7 +170,9 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         self.assertTrue(torch.allclose(st1, st2, atol=1))
 
 
-instantiate_device_type_tests(TestShardedTensorBinaryOps, globals(), except_for=["cpu"])
+instantiate_device_type_tests(
+    TestShardedTensorBinaryOps, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
