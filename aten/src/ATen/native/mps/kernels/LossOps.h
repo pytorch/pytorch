@@ -35,3 +35,13 @@ struct CTCLossBackwardCollectParams {
   index_t grad_out_batch_stride;
   bool zero_infinity;
 };
+
+struct MultiMarginParams {
+  long nframe;
+  long dim;
+  int p;
+  float margin;
+  // Scale applied in the backward pass: 1/dim, or 1/(nframe*dim) for `mean`.
+  float g;
+  bool has_weight;
+};

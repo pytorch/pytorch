@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/CanUse32BitIndexMath.h>
+#include <ATen/native/LossMulti.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LossOps.h>
 
@@ -17,6 +18,8 @@
 #include <ATen/ops/huber_loss_native.h>
 #include <ATen/ops/mse_loss_backward_native.h>
 #include <ATen/ops/mse_loss_native.h>
+#include <ATen/ops/multi_margin_loss_backward_native.h>
+#include <ATen/ops/multi_margin_loss_native.h>
 #include <ATen/ops/nll_loss2d_backward_native.h>
 #include <ATen/ops/nll_loss2d_forward_native.h>
 #include <ATen/ops/nll_loss_backward_native.h>
@@ -1646,6 +1649,149 @@ Tensor ctc_loss_backward_mps(const Tensor& grad_out,
   }
 
   return grad;
+}
+
+namespace mps {
+
+static void multi_margin_loss_launch(const std::string& kernel,
+                                     const std::initializer_list<Tensor>& buffers,
+                                     const std::optional<Tensor>& weight,
+                                     const MultiMarginParams& params) {
+  auto stream = getCurrentMPSStream();
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc(kernel);
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto compute_encoder = stream->commandEncoder();
+        [compute_encoder setComputePipelineState:pso];
+        unsigned idx = 0;
+        for (const auto& t : buffers) {
+          mtl_setBuffer(compute_encoder, t, idx++);
+        }
+        detail::mtl_setArg(compute_encoder, weight, idx++);
+        mtl_setBytes(compute_encoder, params, idx++);
+        [compute_encoder setBuffer:stream->getErrorBuffer() offset:0 atIndex:idx];
+        mtl_dispatch1DJob(compute_encoder, pso, static_cast<uint32_t>(params.nframe));
+      }
+    });
+  }
+}
+
+} // namespace mps
+
+Tensor& multi_margin_loss_mps_out(const Tensor& input,
+                                  const Tensor& target,
+                                  const Scalar& p,
+                                  const Scalar& margin,
+                                  const std::optional<Tensor>& weight,
+                                  int64_t reduction,
+                                  Tensor& output) {
+  int64_t nframe = 0, dim = 0;
+  TORCH_CHECK(p.toLong() == 1 || p.toLong() == 2, "only p == 1 and p == 2 supported");
+  multi_margin_loss_shape_check(nframe, dim, input.dim(), input, target, weight);
+  TORCH_CHECK(target.scalar_type() == kLong, "expected scalar type Long but found ", target.scalar_type());
+
+  // A 1-D input produces a scalar output, as on CPU.
+  if (reduction == Reduction::None && target.dim() > 0) {
+    output.resize_({nframe});
+  } else {
+    output.resize_({});
+  }
+  if (input.numel() == 0) {
+    return output;
+  }
+
+  const auto input_c = input.contiguous().reshape({nframe, dim});
+  const auto target_c = target.contiguous();
+  const auto weight_c = (weight && weight->defined()) ? std::optional<Tensor>(weight->contiguous()) : std::nullopt;
+  auto per_sample = at::empty({nframe}, input.options());
+
+  const MultiMarginParams params{
+      .nframe = nframe,
+      .dim = dim,
+      .p = static_cast<int>(p.toLong()),
+      .margin = margin.to<float>(),
+      .g = 0.0f,
+      .has_weight = weight_c.has_value(),
+  };
+  mps::multi_margin_loss_launch(
+      "multi_margin_loss_" + mps::scalarToMetalTypeString(input), {input_c, target_c, per_sample}, weight_c, params);
+
+  if (reduction == Reduction::None && target.dim() > 0) {
+    output.copy_(per_sample);
+  } else if (reduction == Reduction::Mean) {
+    output.copy_(per_sample.sum().div(nframe));
+  } else {
+    output.copy_(per_sample.sum());
+  }
+  return output;
+}
+
+Tensor multi_margin_loss_mps(const Tensor& input,
+                             const Tensor& target,
+                             const Scalar& p,
+                             const Scalar& margin,
+                             const std::optional<Tensor>& weight,
+                             int64_t reduction) {
+  auto output = at::empty({0}, input.options());
+  multi_margin_loss_mps_out(input, target, p, margin, weight, reduction, output);
+  return output;
+}
+
+Tensor& multi_margin_loss_mps_backward_out(const Tensor& grad_output,
+                                           const Tensor& input,
+                                           const Tensor& target,
+                                           const Scalar& p,
+                                           const Scalar& margin,
+                                           const std::optional<Tensor>& weight,
+                                           int64_t reduction,
+                                           Tensor& grad_input) {
+  int64_t nframe = 0, dim = 0;
+  TORCH_CHECK(p.toLong() == 1 || p.toLong() == 2, "only p == 1 and p == 2 supported");
+  multi_margin_loss_shape_check(nframe, dim, input.dim(), input, target, weight);
+  TORCH_CHECK(target.scalar_type() == kLong, "expected scalar type Long but found ", target.scalar_type());
+  grad_input.resize_as_(input);
+  if (input.numel() == 0) {
+    return grad_input;
+  }
+
+  const auto input_c = input.contiguous().reshape({nframe, dim});
+  const auto target_c = target.contiguous();
+  const auto weight_c = (weight && weight->defined()) ? std::optional<Tensor>(weight->contiguous()) : std::nullopt;
+  auto grad = at::empty({nframe, dim}, input.options());
+
+  const MultiMarginParams params{
+      .nframe = nframe,
+      .dim = dim,
+      .p = static_cast<int>(p.toLong()),
+      .margin = margin.to<float>(),
+      .g = static_cast<float>(reduction == Reduction::Mean ? 1.0 / (nframe * dim) : 1.0 / dim),
+      .has_weight = weight_c.has_value(),
+  };
+  mps::multi_margin_loss_launch(
+      "multi_margin_loss_backward_" + mps::scalarToMetalTypeString(input), {grad, input_c, target_c}, weight_c, params);
+
+  // Reduced losses carry a scalar grad_output; the unreduced case has one per
+  // sample and broadcasts along the class dimension.
+  if (reduction != Reduction::None || grad_output.dim() == 0) {
+    grad.mul_(grad_output.reshape({}));
+  } else {
+    grad.mul_(grad_output.reshape({nframe, 1}));
+  }
+  grad_input.copy_(grad.reshape(input.sizes()));
+  return grad_input;
+}
+
+Tensor multi_margin_loss_mps_backward(const Tensor& grad_output,
+                                      const Tensor& input,
+                                      const Tensor& target,
+                                      const Scalar& p,
+                                      const Scalar& margin,
+                                      const std::optional<Tensor>& weight,
+                                      int64_t reduction) {
+  auto grad_input = at::empty({0}, input.options());
+  multi_margin_loss_mps_backward_out(grad_output, input, target, p, margin, weight, reduction, grad_input);
+  return grad_input;
 }
 
 } // namespace at::native

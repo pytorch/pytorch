@@ -1,4 +1,5 @@
 #include <ATen/native/mps/kernels/LossOps.h>
+#include <c10/metal/error.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
 
@@ -395,3 +396,110 @@ kernel void ctc_loss_backward_collect(
 INSTANTIATE_CTC_LOSS_TARGET_TYPES(float);
 INSTANTIATE_CTC_LOSS_TARGET_TYPES(bfloat);
 INSTANTIATE_CTC_LOSS_TARGET_TYPES(half);
+
+// One thread per sample. `weight` may be null, in which case `has_weight` is
+// false and the per-class weighting is skipped.
+template <typename T>
+kernel void multi_margin_loss(
+    constant T* input [[buffer(0)]],
+    constant long* target [[buffer(1)]],
+    device T* output [[buffer(2)]],
+    constant T* weight [[buffer(3)]],
+    constant MultiMarginParams& params [[buffer(4)]],
+    device ::c10::metal::ErrorMessages* error_buf [[buffer(5)]],
+    uint tid [[thread_position_in_grid]]) {
+  const long dim = params.dim;
+  const long t = static_cast<long>(tid);
+  const long target_idx = target[t];
+
+  if (target_idx < 0 || target_idx >= dim) {
+    TORCH_REPORT_ERROR(error_buf, "target out of range");
+    return;
+  }
+
+  constant T* row = input + t * dim;
+  const float input_target = static_cast<float>(row[target_idx]);
+  const float w =
+      params.has_weight ? static_cast<float>(weight[target_idx]) : 1.0;
+
+  float sum = 0.0;
+  for (long d = 0; d < dim; ++d) {
+    if (d == target_idx) {
+      continue;
+    }
+    const float z = params.margin - input_target + static_cast<float>(row[d]);
+    if (z > 0.0) {
+      sum += ((params.p == 1) ? z : z * z) * w;
+    }
+  }
+
+  output[t] = static_cast<T>(sum / static_cast<float>(dim));
+}
+
+// One thread per sample. The result is not yet scaled by grad_output; the host
+// applies that afterwards, since it broadcasts differently for the reduced and
+// unreduced cases.
+template <typename T>
+kernel void multi_margin_loss_backward(
+    device T* grad_input [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant long* target [[buffer(2)]],
+    constant T* weight [[buffer(3)]],
+    constant MultiMarginParams& params [[buffer(4)]],
+    device ::c10::metal::ErrorMessages* error_buf [[buffer(5)]],
+    uint tid [[thread_position_in_grid]]) {
+  const long dim = params.dim;
+  const long t = static_cast<long>(tid);
+  const long target_idx = target[t];
+
+  if (target_idx < 0 || target_idx >= dim) {
+    TORCH_REPORT_ERROR(error_buf, "target out of range");
+    return;
+  }
+
+  constant T* row = input + t * dim;
+  device T* grad_row = grad_input + t * dim;
+  const float input_target = static_cast<float>(row[target_idx]);
+  const float w =
+      params.has_weight ? static_cast<float>(weight[target_idx]) : 1.0;
+
+  float grad_target = 0.0;
+  for (long d = 0; d < dim; ++d) {
+    if (d == target_idx) {
+      continue;
+    }
+    const float z = params.margin - input_target + static_cast<float>(row[d]);
+    if (z > 0.0) {
+      const float h = ((params.p == 1) ? params.g : 2 * params.g * z) * w;
+      grad_target -= h;
+      grad_row[d] = static_cast<T>(h);
+    } else {
+      grad_row[d] = static_cast<T>(0.0);
+    }
+  }
+  grad_row[target_idx] = static_cast<T>(grad_target);
+}
+
+#define REGISTER_MULTI_MARGIN_LOSS(T)                                  \
+  template [[host_name("multi_margin_loss_" #T)]] kernel void          \
+  multi_margin_loss<T>(                                                \
+      constant T * input [[buffer(0)]],                                \
+      constant long* target [[buffer(1)]],                             \
+      device T* output [[buffer(2)]],                                  \
+      constant T* weight [[buffer(3)]],                                \
+      constant MultiMarginParams& params [[buffer(4)]],                \
+      device ::c10::metal::ErrorMessages* error_buf [[buffer(5)]],     \
+      uint tid [[thread_position_in_grid]]);                           \
+  template [[host_name("multi_margin_loss_backward_" #T)]] kernel void \
+  multi_margin_loss_backward<T>(                                       \
+      device T * grad_input [[buffer(0)]],                             \
+      constant T * input [[buffer(1)]],                                \
+      constant long* target [[buffer(2)]],                             \
+      constant T* weight [[buffer(3)]],                                \
+      constant MultiMarginParams& params [[buffer(4)]],                \
+      device ::c10::metal::ErrorMessages* error_buf [[buffer(5)]],     \
+      uint tid [[thread_position_in_grid]]);
+
+REGISTER_MULTI_MARGIN_LOSS(float);
+REGISTER_MULTI_MARGIN_LOSS(half);
+REGISTER_MULTI_MARGIN_LOSS(bfloat);
