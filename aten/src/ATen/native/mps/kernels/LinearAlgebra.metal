@@ -1396,7 +1396,7 @@ kernel void factorPanelLU(
     const uint lr = tid + uint(r) * G;
     if (lr < H) {
       device const T* src = Ab + ulong(d0 + lr) * N + d0;
-      if constexpr (::metal::is_same_v<T, float2>) {
+      if IF_CONSTEXPR (::metal::is_same_v<T, float2>) {
 #pragma unroll
         for (short c = 0; c < W; c++) {
           row[r][c] = (uint(c) < nb) ? src[c] : T(0.0f);
