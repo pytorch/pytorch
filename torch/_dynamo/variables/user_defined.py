@@ -48,7 +48,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 from torch.utils._pytree import GetAttrKey, is_structseq_class
 
 from .. import config, graph_break_hints, polyfills, variables
-from ..bytecode_transformation import create_call_function
+from ..bytecode_transformation import create_build_tuple, create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..device_interface import get_registered_device_interfaces
 from ..exc import (
@@ -5194,7 +5194,9 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable, TupleVariable):
                 codegen.create_load_const_unchecked(create_fn)
             )
         )
-        codegen(self._base_vt)
+        # Build the iterable arg for Type._make(iterable) / Type(iterable).
+        codegen.foreach(self.items)
+        codegen.append_output(create_build_tuple(len(self.items)))
         codegen.extend_output(create_call_function(1, False))
 
     def get_construct_fn(self) -> Callable[..., Any]:
@@ -5329,6 +5331,13 @@ class NamedTupleVariable(UserDefinedTupleVariable):
     def as_proxy(self) -> Any:
         items = [x.as_proxy() for x in self.items]
         return self.tuple_cls(*items)  # type: ignore[arg-type]
+
+    def debug_repr(self) -> str:
+        fields = namedtuple_fields(self.tuple_cls)
+        items = ", ".join(
+            f"{name}={item.debug_repr()}" for name, item in zip(fields, self.items)
+        )
+        return f"{self.tuple_cls.__name__}({items})"
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         fields = namedtuple_fields(self.tuple_cls)
