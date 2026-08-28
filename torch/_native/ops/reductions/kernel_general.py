@@ -698,12 +698,6 @@ def reduce_all(
     return _reduce_all(trait, trait_key, x, [out_dtype], 1, block, grid_mult)[0]
 
 
-def reduce_all2(
-    trait, trait_key, x, out_dtypes, block=_K0_ALL_BLOCK, grid_mult=_K0_ALL_GRID_MULT
-):
-    return _reduce_all(trait, trait_key, x, list(out_dtypes), 2, block, grid_mult)
-
-
 def _reduce_all(trait, trait_key, x, out_dtypes, nouts, block, grid_mult):
     # Full-tensor reduce-all, in preference order: the one-shot row kernel (a single
     # kernel, when the input fits its tile), then the fused cross-CTA two-stage
